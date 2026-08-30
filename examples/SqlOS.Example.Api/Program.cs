@@ -12,6 +12,7 @@ using SqlOS.Example.Api.Middleware;
 using SqlOS.Example.Api.Services;
 using Microsoft.AspNetCore.WebUtilities;
 using SqlOS.Configuration;
+using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.Extensions;
 using SqlOS.Example.Api.Models;
@@ -34,7 +35,9 @@ builder.AddSqlOS<ExampleAppDbContext>(
     {
         options.DashboardBasePath = "/sqlos";
         var exampleClientId = builder.Configuration["ExampleFrontend:ClientId"] ?? "example-web";
-        var exampleCallbackUrl = builder.Configuration["ExampleFrontend:CallbackUrl"] ?? "http://localhost:3000/auth/callback";
+        var exampleOrigin = (builder.Configuration["ExampleFrontend:Origin"] ?? "http://localhost:3000").TrimEnd('/');
+        var exampleCallbackUrl = builder.Configuration["ExampleFrontend:CallbackUrl"] ?? $"{exampleOrigin}/auth/callback";
+        var exampleAuthJsCallbackUrl = $"{exampleOrigin}/api/auth/callback/sqlos";
         var emailConnectionString = builder.Configuration["SqlOS:Email:AzureCommunicationServicesConnectionString"]
             ?? builder.Configuration["SqlOS:EmailOtp:AzureCommunicationServicesConnectionString"]
             ?? builder.Configuration["AZURE_EMAIL_CONNECTION_STRING"];
@@ -142,17 +145,25 @@ builder.AddSqlOS<ExampleAppDbContext>(
             email.AccentColor = "#0f172a";
             email.BackgroundColor = "#f8fafc";
         });
-        auth.SeedBrowserClient(
+        SeedExamplePublicClient(
+            auth,
             exampleClientId,
             "Example Web Client",
             exampleCallbackUrl,
+            exampleAuthJsCallbackUrl,
+            "http://localhost:3000/auth/callback",
+            "http://localhost:3000/api/auth/callback/sqlos",
+            "http://localhost:3010/auth/callback",
+            "http://localhost:3010/api/auth/callback/sqlos",
             "https://client.example.local/callback",
             "sqlos-expo://auth-callback");
-        auth.SeedBrowserClient(
+        SeedExamplePublicClient(
+            auth,
             "example-angular",
             "Example Angular Client",
             "http://localhost:4200/auth/callback");
-        auth.SeedBrowserClient(
+        SeedExamplePublicClient(
+            auth,
             "example-expo",
             "Example Expo Client",
             "sqlos-expo://auth-callback");
@@ -444,6 +455,28 @@ static async Task EnsureLegacyEnsureCreatedDatabasesCanMigrateAsync(ExampleAppDb
 
     if (openedConnection)
         await connection.CloseAsync();
+}
+
+static void SeedExamplePublicClient(
+    SqlOSAuthServerOptions auth,
+    string clientId,
+    string name,
+    params string[] redirectUris)
+{
+    auth.SeedClient(client =>
+    {
+        client.ClientId = clientId;
+        client.Name = name;
+        client.RedirectUris = redirectUris
+            .Where(static uri => !string.IsNullOrWhiteSpace(uri))
+            .Select(static uri => uri.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        client.ClientType = "public_pkce";
+        client.RequirePkce = true;
+        client.IsFirstParty = true;
+        client.AllowedScopes = ["openid", "profile", "email", "offline_access"];
+    });
 }
 
 public partial class Program { }

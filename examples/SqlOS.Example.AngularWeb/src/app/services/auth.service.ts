@@ -1,7 +1,8 @@
 import { Injectable, signal, computed, inject } from '@angular/core';
-import { Router } from '@angular/router';
+import { OAuthService } from 'angular-oauth2-oidc';
 import { jwtDecode } from 'jwt-decode';
 import { environment } from '../environments/environment';
+import { persistNextPath } from '../auth.config';
 import { AuthOverride, DecodedToken, SessionData } from '../models';
 
 const SESSION_KEY = 'sqlos_angular_session';
@@ -9,12 +10,12 @@ const AUTH_OVERRIDE_KEY = 'demo_auth_override';
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
-  private router = inject(Router);
+  private oauth = inject(OAuthService);
   private sessionSignal = signal<SessionData | null>(this.loadSession());
 
   readonly session = this.sessionSignal.asReadonly();
-  readonly isAuthenticated = computed(() => !!this.sessionSignal()?.accessToken);
-  readonly accessToken = computed(() => this.sessionSignal()?.accessToken ?? null);
+  readonly isAuthenticated = computed(() => !!this.sessionSignal()?.accessToken || this.oauth.hasValidAccessToken());
+  readonly accessToken = computed(() => this.sessionSignal()?.accessToken ?? this.oauth.getAccessToken() ?? null);
   readonly user = computed(() => {
     const s = this.sessionSignal();
     if (!s) return null;
@@ -26,11 +27,50 @@ export class AuthService {
   private loadSession(): SessionData | null {
     try {
       const stored = sessionStorage.getItem(SESSION_KEY);
-      if (!stored) return null;
-      return JSON.parse(stored) as SessionData;
+      if (stored) {
+        return JSON.parse(stored) as SessionData;
+      }
     } catch {
+      /* ignore */
+    }
+
+    return this.sessionFromOidc();
+  }
+
+  sessionFromOidc(): SessionData | null {
+    const accessToken = this.oauth.getAccessToken();
+    const refreshToken = this.oauth.getRefreshToken();
+    if (!accessToken || !refreshToken) {
       return null;
     }
+
+    const decoded = jwtDecode<DecodedToken>(accessToken);
+    const claims = this.oauth.getIdentityClaims() as { sub?: string; email?: string; name?: string } | null;
+    return {
+      accessToken,
+      refreshToken,
+      userId: claims?.sub ?? decoded.sub ?? '',
+      email: claims?.email ?? decoded.email ?? '',
+      displayName: claims?.name ?? decoded.name ?? decoded.email ?? decoded.sub ?? 'SqlOS user',
+      organizationId: decoded.org_id ?? null,
+      sessionId: decoded.sid ?? '',
+      exp: decoded.exp,
+      source: 'oidc',
+    };
+  }
+
+  syncFromOidc(): boolean {
+    const session = this.sessionFromOidc();
+    if (!session) {
+      return false;
+    }
+    this.setSession(session);
+    return true;
+  }
+
+  startHostedSignIn(view: 'login' | 'signup', nextPath?: string | null): void {
+    persistNextPath(nextPath);
+    this.oauth.initCodeFlow(undefined, view === 'signup' ? { view: 'signup' } : { prompt: 'login' });
   }
 
   setSession(data: SessionData): void {
@@ -41,6 +81,7 @@ export class AuthService {
   clearSession(): void {
     sessionStorage.removeItem(SESSION_KEY);
     sessionStorage.removeItem(AUTH_OVERRIDE_KEY);
+    this.oauth.logOut(true);
     this.sessionSignal.set(null);
   }
 
@@ -67,20 +108,20 @@ export class AuthService {
   }
 
   async ensureValidToken(): Promise<string | null> {
-    const session = this.sessionSignal();
-    if (!session?.accessToken) return null;
+    if (this.oauth.hasValidAccessToken()) {
+      const token = this.oauth.getAccessToken();
+      this.syncFromOidc();
+      return token;
+    }
 
-    try {
-      const decoded = jwtDecode<DecodedToken>(session.accessToken);
-      const now = Math.floor(Date.now() / 1000);
-      if (decoded.exp && now < decoded.exp) {
-        return session.accessToken;
-      }
-    } catch { /* token is invalid, try refresh */ }
+    const session = this.sessionSignal();
+    if (!session?.accessToken && !session?.refreshToken && !this.oauth.getRefreshToken()) {
+      return null;
+    }
 
     if (this.refreshPromise) {
       await this.refreshPromise;
-      return this.sessionSignal()?.accessToken ?? null;
+      return this.sessionSignal()?.accessToken ?? this.oauth.getAccessToken() ?? null;
     }
 
     this.refreshPromise = this.refreshAccessToken();
@@ -89,41 +130,41 @@ export class AuthService {
     } finally {
       this.refreshPromise = null;
     }
-    return this.sessionSignal()?.accessToken ?? null;
+    return this.sessionSignal()?.accessToken ?? this.oauth.getAccessToken() ?? null;
   }
 
   private async refreshAccessToken(): Promise<void> {
     const session = this.sessionSignal();
+    if (session?.source !== 'demo' && this.oauth.getRefreshToken()) {
+      try {
+        await this.oauth.refreshToken();
+        this.syncFromOidc();
+        return;
+      } catch (error) {
+        console.error('[Auth] OIDC refresh failed.', error);
+        await this.signOut('/');
+        return;
+      }
+    }
+
     if (!session?.refreshToken) {
       this.clearSession();
       return;
     }
 
     try {
-      const decoded = jwtDecode<DecodedToken>(session.accessToken);
-      const usesHostedSqlOS = decoded?.iss?.includes('/sqlos/auth') ?? false;
-
-      const response = usesHostedSqlOS
-        ? await fetch(`${environment.apiUrl}/sqlos/auth/token`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({
-              grant_type: 'refresh_token',
-              refresh_token: session.refreshToken,
-            }),
-          })
-        : await fetch(`${environment.apiUrl}/api/v1/auth/refresh`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              refreshToken: session.refreshToken,
-              organizationId: session.organizationId,
-            }),
-          });
+      const response = await fetch(`${environment.apiUrl}/api/v1/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          refreshToken: session.refreshToken,
+          organizationId: session.organizationId,
+        }),
+      });
 
       const data = await response.json();
       if (!response.ok) {
-        console.warn('[Auth] Refresh failed.', data);
+        console.warn('[Auth] Demo refresh failed.', data);
         await this.signOut('/');
         return;
       }
@@ -142,6 +183,7 @@ export class AuthService {
         sessionId: data.sessionId ?? refreshedDecoded.sid ?? session.sessionId,
         organizationId: data.organizationId ?? refreshedDecoded.org_id ?? session.organizationId ?? null,
         exp: refreshedDecoded.exp,
+        source: 'demo',
       });
     } catch (error) {
       console.error('[Auth] Refresh threw unexpectedly.', error);
@@ -149,7 +191,6 @@ export class AuthService {
     }
   }
 
-  // Auth override for demo agents/service accounts
   setAuthOverride(override: AuthOverride | null): void {
     if (override) {
       sessionStorage.setItem(AUTH_OVERRIDE_KEY, JSON.stringify(override));
@@ -173,7 +214,7 @@ export class AuthService {
     if (override) {
       return { [override.header]: override.value };
     }
-    const token = this.sessionSignal()?.accessToken;
+    const token = this.sessionSignal()?.accessToken ?? this.oauth.getAccessToken();
     return token ? { Authorization: `Bearer ${token}` } : {};
   }
 }

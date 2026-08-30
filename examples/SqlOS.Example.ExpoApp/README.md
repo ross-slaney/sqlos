@@ -6,8 +6,8 @@ It is a separate client. The full .NET Aspire AppHost starts the backend but doe
 
 ## What it demonstrates
 
-- native OAuth browser handoff with `expo-web-browser`
-- authorization code + PKCE and state validation
+- native OAuth browser handoff with `expo-auth-session` (`AuthRequest`, discovery, `exchangeCodeAsync`)
+- library-owned S256 PKCE and state
 - a custom `sqlos-expo://` callback scheme
 - access and refresh token storage with `expo-secure-store`
 - automatic refresh before protected API calls
@@ -96,13 +96,12 @@ Both are public PKCE clients. A mobile application cannot safely hold an OAuth c
 
 ## Authentication flow
 
-1. The login or signup route generates a verifier, S256 challenge, and random state.
-2. `expo-web-browser` opens `/sqlos/auth/authorize`.
+1. `AuthRequest` + discovery start hosted authorize with library-owned PKCE.
+2. `promptAsync` opens the system browser to `/sqlos/auth/authorize`.
 3. SqlOS renders hosted sign-in/sign-up and redirects to the app's custom scheme.
-4. The callback route compares state and requires the stored verifier.
-5. The app exchanges the code at `/sqlos/auth/token`.
-6. It decodes display/session metadata and stores the access and refresh tokens in SecureStore.
-7. Authenticated API requests refresh an expired token before sending it.
+4. `exchangeCodeAsync` finishes `/token`.
+5. The app decodes display/session metadata and stores the access and refresh tokens in SecureStore.
+6. Authenticated API requests refresh an expired token with `refreshAsync` before sending it.
 
 Relevant code:
 
@@ -110,10 +109,10 @@ Relevant code:
 | --- | --- |
 | [`app.json`](app.json) | Registers the `sqlos-expo` scheme and Expo plugins |
 | [`services/config.ts`](services/config.ts) | Platform API origin and public client ID |
-| [`services/sqlos-auth.ts`](services/sqlos-auth.ts) | PKCE/state generation, callback URI, authorize URL |
+| [`services/sqlos-auth.ts`](services/sqlos-auth.ts) | Issuer, client ID, redirect URI, `AuthRequest` / `exchangeCodeAsync` / `refreshAsync` |
 | `app/(auth)/login.tsx` | Opens the hosted login browser session |
 | `app/(auth)/signup.tsx` | Opens the hosted signup browser session |
-| `app/(auth)/callback.tsx` | Validates state and exchanges the code |
+| `app/(auth)/callback.tsx` | Deep-link fallback back to login |
 | [`services/auth.ts`](services/auth.ts) | SecureStore session, refresh, local logout, demo override |
 | [`services/AuthContext.tsx`](services/AuthContext.tsx) | React authentication state |
 | [`services/api.ts`](services/api.ts) | Authenticated retail API calls |
@@ -148,7 +147,7 @@ There is no checked-in simulator/device automation for this app, so complete one
 
 ## Reset and troubleshooting
 
-- Use Settings sign-out to clear SecureStore session, PKCE state, and demo overrides.
+- Use Settings sign-out to clear SecureStore session and demo overrides.
 - The current mobile sign-out is local only; it does not call the API's refresh-token/session revocation endpoint.
 - If SqlOS reports an invalid redirect, log `getRedirectUri()` for the current runtime and compare it byte-for-byte with a seeded client redirect URI.
 - If Android cannot reach the API, confirm you are using the Android emulator and `10.0.2.2`. A physical Android device needs a reachable host address.

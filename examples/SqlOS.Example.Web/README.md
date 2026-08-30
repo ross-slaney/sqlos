@@ -1,14 +1,14 @@
 # Next.js example client
 
-This Next.js 15 application is the most complete browser client in the repository. It demonstrates two ways to use SqlOS authentication, hands the resulting tokens to a NextAuth session, and uses the access token against FGA-protected retail APIs.
+This Next.js 15 application is the most complete browser client in the repository. Hosted sign-in uses Auth.js as a standard OpenID Connect provider against SqlOS discovery — the same shape as Sign in with X App Y, plus `offline_access` for retail API tokens. Headless AuthPage still owns the custom UI state machine; Auth.js finishes the authorization code.
 
 ## What you can learn here
 
-- OAuth authorization code flow with PKCE and state validation
-- SqlOS-hosted sign-in and sign-up pages
+- Auth.js / NextAuth as an OIDC public client (`wellKnown`, S256 PKCE, `token_endpoint_auth_method: "none"`)
+- SqlOS-hosted sign-in and sign-up pages (`prompt=login`, `view=signup` as authorization parameters)
 - SqlOS headless auth when your product owns the full UI
 - password, email OTP, phone OTP, provider, organization-selection, password-reset, and MFA states in one headless flow
-- refresh-token handling inside a NextAuth JWT-backed session
+- refresh-token handling through `POST /sqlos/auth/token`
 - bearer calls to application APIs
 - FGA-filtered chains, stores, and inventory
 - TOTP enrollment and recovery-code display
@@ -29,7 +29,7 @@ dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 
 Open `http://localhost:3010`.
 
-The AppHost starts the API and SQL Server, supplies `NEXT_PUBLIC_API_URL`, sets `NEXTAUTH_URL` to the `3010` origin, provides a local-only NextAuth secret, and seeds `http://localhost:3010/auth/callback` for `example-web`.
+The AppHost starts the API and SQL Server, supplies `NEXT_PUBLIC_API_URL`, sets `NEXTAUTH_URL` to the `3010` origin, provides a local-only NextAuth secret, and seeds both `http://localhost:3010/auth/callback` (legacy/headless bookmarks) and `http://localhost:3010/api/auth/callback/sqlos` (Auth.js).
 
 ## Try both auth models
 
@@ -37,17 +37,16 @@ The AppHost starts the API and SQL Server, supplies `NEXT_PUBLIC_API_URL`, sets 
 
 Use **Sign in** or **Sign up** from the landing page.
 
-1. The browser creates a PKCE verifier/challenge and random state.
-2. It redirects to `/sqlos/auth/authorize` on the .NET API.
-3. SqlOS owns the authentication UI and protocol.
-4. SqlOS redirects back to `/auth/callback` with an authorization code.
-5. The client verifies state, exchanges the code with the PKCE verifier, and establishes its NextAuth session.
+1. Auth.js starts `/sqlos/auth/authorize` with library-owned PKCE and state.
+2. SqlOS owns the authentication UI (or redirects to `/auth/authorize` when headless is enabled).
+3. SqlOS redirects to `/api/auth/callback/sqlos`.
+4. Auth.js exchanges the code and establishes the JWT session.
 
-This path is the smallest browser integration and keeps authentication UI inside SqlOS.
+This path is the smallest browser integration and keeps authentication UI inside SqlOS when headless is off.
 
 ### Headless AuthPage
 
-Choose the headless/custom UI entry point on the landing page. SqlOS still owns the authorization request and its server-side state, but redirects the interaction to `/auth/authorize` in this application.
+Choose the headless/custom UI entry point on `/auth/authorize`. Auth.js still starts `/authorize`. SqlOS redirects interaction to this application's custom page, then the library finishes `/token`.
 
 The docs walkthrough is [Build your own login and signup UI](https://sqlos.dev/docs/guides/custom-login-ui).
 
@@ -65,7 +64,7 @@ After sign-in:
 - `/retail/sso` requests a delegated SSO setup link for an organization;
 - the identity switcher changes between seeded user, service-account, and agent subjects for demonstration.
 
-The switcher exists to make authorization differences visible. It is not a production impersonation design.
+The switcher exists to make authorization differences visible. It is not a production impersonation design. It uses an **example-API** credentials provider (`example-api`), not the OIDC integration.
 
 ## Run the client standalone
 
@@ -81,12 +80,12 @@ npm run dev --prefix examples/SqlOS.Example.Web
 
 Open `http://localhost:3000`.
 
-Standalone Next.js defaults to port `3000`, while the AppHost runs it on `3010`. The API configuration must use the matching origin and exact callback:
+Standalone Next.js defaults to port `3000`, while the AppHost runs it on `3010`. The API configuration must use the matching origin and exact Auth.js callback:
 
-| Mode | Browser origin | Registered callback |
+| Mode | Browser origin | Auth.js callback |
 | --- | --- | --- |
-| AppHost | `http://localhost:3010` | `http://localhost:3010/auth/callback` |
-| Standalone defaults | `http://localhost:3000` | `http://localhost:3000/auth/callback` |
+| AppHost | `http://localhost:3010` | `http://localhost:3010/api/auth/callback/sqlos` |
+| Standalone defaults | `http://localhost:3000` | `http://localhost:3000/api/auth/callback/sqlos` |
 
 Do not start a `3000` client against an API configured only for the `3010` callback; SqlOS will correctly reject the redirect URI.
 
@@ -105,13 +104,12 @@ Variables prefixed with `NEXT_PUBLIC_` are exposed to browser code. Never put cl
 
 | File | Responsibility |
 | --- | --- |
-| [`lib/sqlos-auth.ts`](lib/sqlos-auth.ts) | PKCE/state generation, callback URI, browser flow storage |
-| [`components/sqlos-auth-redirect.tsx`](components/sqlos-auth-redirect.tsx) | Starts hosted authorization |
-| [`components/sqlos-auth-callback-panel.tsx`](components/sqlos-auth-callback-panel.tsx) | Validates state, exchanges the code, creates the app session |
+| [`lib/auth.ts`](lib/auth.ts) | Auth.js OIDC provider, JWT/session callbacks, token refresh |
+| [`lib/sqlos-config.ts`](lib/sqlos-config.ts) | Issuer, client ID, and post-login path helpers (no PKCE) |
+| [`components/sqlos-hosted-sign-in.tsx`](components/sqlos-hosted-sign-in.tsx) | Starts `signIn("sqlos")` with `prompt` / `view` |
 | [`lib/sqlos-headless.ts`](lib/sqlos-headless.ts) | Typed calls to the SqlOS headless AuthPage API |
 | [`components/sqlos-headless-auth-panel.tsx`](components/sqlos-headless-auth-panel.tsx) | Complete custom authentication UI state machine |
-| [`lib/auth.ts`](lib/auth.ts) | NextAuth provider, JWT/session callbacks, token refresh |
-| [`app/api/auth/[...nextauth]/route.ts`](app/api/auth/[...nextauth]/route.ts) | NextAuth route |
+| [`app/api/auth/[...nextauth]/route.ts`](app/api/auth/[...nextauth]/route.ts) | Auth.js route, including `/api/auth/callback/sqlos` |
 | [`middleware.ts`](middleware.ts) | Protects retail routes |
 | [`lib/api.ts`](lib/api.ts) | Authenticated example API requests |
 | [`lib/sqlos-signout.ts`](lib/sqlos-signout.ts) | SqlOS session/token sign-out integration |
@@ -120,9 +118,7 @@ Variables prefixed with `NEXT_PUBLIC_` are exposed to browser code. Never put cl
 
 ## Token and session flow
 
-The OAuth verifier, state, requested view, and post-login path live temporarily in browser `sessionStorage` so a callback in the same tab can complete the PKCE flow. After code exchange, the app gives the token response to a NextAuth credentials provider and uses NextAuth's JWT-backed session callbacks.
-
-Before protected API calls, session logic refreshes an expired access token with its refresh token. Concurrent refreshes for the same token are coalesced. A failed refresh clears usable token data so the UI can return the user to sign-in.
+Auth.js owns PKCE, state, the authorization-code exchange, and in-flight refresh coalescing in the JWT callback. Refresh calls `POST /sqlos/auth/token` with `grant_type=refresh_token`. The demo identity switcher uses a separately labeled `example-api` credentials provider and is not the OIDC path.
 
 These choices make the flow easy to inspect. Review your own threat model, cookie policy, server-side session requirements, and token-retention policy before adopting them.
 
@@ -141,9 +137,9 @@ dotnet test examples/SqlOS.Example.IntegrationTests/SqlOS.Example.IntegrationTes
 
 ## Reset and troubleshooting
 
-- To clear only the client session, sign out. If a flow was interrupted, clear site data for the Next.js origin to remove its temporary PKCE state and NextAuth cookies.
+- To clear only the client session, sign out. If a flow was interrupted, clear site data for the Next.js origin to remove NextAuth cookies.
 - To clear users, grants, or retail data, follow the [AppHost database reset guidance](../SqlOS.Example.AppHost/README.md#persistent-data-and-reset-behavior).
-- If callback validation fails, confirm that the browser origin, `NEXTAUTH_URL`, and seeded redirect URI all use the same port.
+- If callback validation fails, confirm that the browser origin, `NEXTAUTH_URL`, and seeded Auth.js redirect URI all use the same port.
 - If the headless page cannot call the API, confirm `NEXT_PUBLIC_API_URL` and the API's `ExampleFrontend:Origin` agree.
 - If email or phone OTP is visible but delivery fails, configure the required provider on the .NET AppHost.
 
@@ -151,6 +147,5 @@ dotnet test examples/SqlOS.Example.IntegrationTests/SqlOS.Example.IntegrationTes
 
 - The AppHost's `NEXTAUTH_SECRET` is committed orchestration code for localhost only. Use a strong secret from a secure store in deployed environments.
 - The sample uses HTTP on localhost. Use HTTPS for deployed issuer, callback, and cookie origins.
-- OAuth flow state is scoped to the initiating browser tab through `sessionStorage`.
 - Seeded demo identity switching and inspectable service/agent credentials are for authorization exploration only.
 - Provider-backed features require real external credentials.

@@ -4,14 +4,7 @@ import { Suspense, useState } from "react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import {
-  getExampleAuthServerUrl,
-  getExampleClientId,
-  getExampleRedirectUri,
-  createOpaqueToken,
-  createCodeChallenge,
-  persistSqlOSAuthFlow,
-} from "@/lib/sqlos-auth";
+import { startHostedSqlOSSignIn } from "@/components/sqlos-hosted-sign-in";
 
 export default function LandingPage() {
   return (
@@ -30,19 +23,7 @@ function LandingContent() {
   async function startAuth(view: "login" | "signup") {
     setStarting(view);
     try {
-      const verifier = createOpaqueToken(48);
-      const state = createOpaqueToken(24);
-      const challenge = await createCodeChallenge(verifier);
-      persistSqlOSAuthFlow(view, state, verifier, next);
-      const url = new URL(`${getExampleAuthServerUrl()}/authorize`);
-      url.searchParams.set("response_type", "code");
-      url.searchParams.set("client_id", getExampleClientId());
-      url.searchParams.set("redirect_uri", getExampleRedirectUri());
-      url.searchParams.set("state", state);
-      url.searchParams.set("code_challenge", challenge);
-      url.searchParams.set("code_challenge_method", "S256");
-      if (view === "signup") url.searchParams.set("view", "signup");
-      window.location.replace(url.toString());
+      await startHostedSqlOSSignIn(view, next);
     } catch {
       setStarting(null);
     }

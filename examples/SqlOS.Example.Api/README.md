@@ -128,8 +128,8 @@ Email OTP is offered by the seeded auth-page configuration, but real code delive
 
 | Client ID | Redirect URI | Consumer |
 | --- | --- | --- |
-| `example-web` | `http://localhost:3010/auth/callback` under AppHost; `http://localhost:3000/auth/callback` standalone | Next.js; the current Expo config also uses this client because it includes the custom-scheme callback |
-| `example-angular` | `http://localhost:4200/auth/callback` | Angular |
+| `example-web` | Auth.js `/api/auth/callback/sqlos` (3010 under AppHost, 3000 standalone), plus the legacy `/auth/callback` URIs and `sqlos-expo://auth-callback` | Next.js Auth.js; Expo also uses this client because the custom-scheme callback is registered here |
+| `example-angular` | `http://localhost:4200/auth/callback` | Angular `angular-oauth2-oidc` |
 | `example-expo` | `sqlos-expo://auth-callback` | Separately seeded native-client registration |
 
 The `example-web` seed also includes `sqlos-expo://auth-callback`, which is why the current Expo sample's [`CLIENT_ID`](../SqlOS.Example.ExpoApp/services/config.ts) value works. If you switch Expo to `example-expo`, keep its callback registration aligned.

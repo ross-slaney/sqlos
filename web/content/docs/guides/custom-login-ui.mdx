@@ -23,12 +23,12 @@ This guide builds **RelayDesk**, a fictional support application. RelayDesk rend
 The browser completes this flow:
 
 ```text
-/authorize + state + S256 PKCE
+OIDC library starts /authorize (S256 PKCE + state)
   -> RelayDesk identify form
   -> password, SSO, or another server-selected step
   -> organization, MFA, or consent when required
-  -> registered callback + authorization code
-  -> /token + original PKCE verifier
+  -> library callback + authorization code
+  -> library /token exchange
 ```
 
 Your UI draws the current view and submits user input. SqlOS still owns the saved authorization request, redirect validation, credentials, HRD, SAML/OIDC callbacks, invitations, organization membership, MFA policy, authorization code, session, and tokens.
@@ -119,64 +119,49 @@ An app and identity host on unrelated sites are cross-site. `AllowCredentials()`
   Allow only exact product origins. Never combine `AllowAnyOrigin()` with credentials. Use HTTPS in production, configure trusted forwarded headers at the proxy, and keep the configured public origin, issuer, browser URL, and registered callback exact.
 </Callout>
 
-## 3. Start normal OAuth with state and S256 PKCE
+## 3. Start `/authorize` with your OIDC library
 
-The custom page begins at `/authorize`, not at a password endpoint. Generate the verifier and state with Web Crypto and keep them only for the current tab's callback:
+The custom page begins at `/authorize`, not at a password endpoint. Use the OIDC client your stack already ships — Auth.js, `angular-oauth2-oidc`, `expo-auth-session`, or ASP.NET Core `AddOpenIdConnect`. Those libraries own S256 PKCE, `state`, discovery, and the later `/token` call. Do not paste Web Crypto helpers into product code, and do not add a SqlOS OAuth client package.
+
+Auth.js (the same provider block as [Sign in with X](/docs/guides/sign-in-with-x), plus `offline_access` when the app calls a SqlOS-protected API):
 
 ```ts
-const IDENTITY_ORIGIN = "https://identity.relaydesk.example";
-const AUTH = `${IDENTITY_ORIGIN}/sqlos/auth`;
-const HEADLESS = `${AUTH}/headless`;
-const CLIENT_ID = "relaydesk-web";
-const REDIRECT_URI = "https://app.relaydesk.example/auth/callback";
+const issuer = "https://identity.relaydesk.example/sqlos/auth";
 
-function base64Url(bytes: Uint8Array): string {
-  let binary = "";
-  bytes.forEach((value) => { binary += String.fromCharCode(value); });
-  return btoa(binary)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
-}
-
-function randomToken(bytes: number): string {
-  const value = new Uint8Array(bytes);
-  crypto.getRandomValues(value);
-  return base64Url(value);
-}
-
-async function sha256Challenge(verifier: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(verifier),
-  );
-  return base64Url(new Uint8Array(digest));
-}
-
-async function startSignIn(): Promise<void> {
-  const verifier = randomToken(48);
-  const state = randomToken(32);
-  const challenge = await sha256Challenge(verifier);
-
-  sessionStorage.setItem("relaydesk.oauth.verifier", verifier);
-  sessionStorage.setItem("relaydesk.oauth.state", state);
-
-  const authorize = new URL(`${AUTH}/authorize`);
-  authorize.searchParams.set("response_type", "code");
-  authorize.searchParams.set("client_id", CLIENT_ID);
-  authorize.searchParams.set("redirect_uri", REDIRECT_URI);
-  authorize.searchParams.set("scope", "openid profile email offline_access");
-  authorize.searchParams.set("state", state);
-  authorize.searchParams.set("code_challenge", challenge);
-  authorize.searchParams.set("code_challenge_method", "S256");
-
-  window.location.replace(authorize.toString());
+{
+  id: "sqlos",
+  name: "SqlOS",
+  type: "oauth",
+  wellKnown: `${issuer}/.well-known/openid-configuration`,
+  clientId: "relaydesk-web",
+  client: { token_endpoint_auth_method: "none" },
+  authorization: {
+    params: { scope: "openid profile email offline_access" }
+  },
+  idToken: true,
+  checks: ["pkce", "state"],
+  profile(profile) {
+    return {
+      id: profile.sub,
+      name: profile.name ?? profile.sub,
+      email: profile.email ?? null
+    };
+  }
 }
 ```
 
+Start the library, then pass first-party SqlOS presentation hints as authorization parameters — not a custom protocol:
+
+```ts
+signIn("sqlos", { callbackUrl: "/app" }, { prompt: "login" });
+signIn("sqlos", { callbackUrl: "/app" }, { view: "signup" });
+```
+
+Register the library's exact callback. Auth.js defaults to `/api/auth/callback/sqlos`. `angular-oauth2-oidc` can keep `/auth/callback`. The seeded redirect URI and the library callback must match byte-for-byte.
+
 That `scope` value must also appear on the client's `AllowedScopes`. An empty allowlist does not mean "any scope." Omit `scope` on `/authorize` and the grant is empty even when the rest of headless login succeeds. The headless view model includes that granted string as `scope` so the custom UI can show it. That remains valid OAuth. When the client allowlists `openid` and the grant omits it, the view model's `info` and `omittedOpenId` fields warn that no ID token will be issued for the session; with [OpenID Provider mode](/docs/authserver/openid-provider) on by default, the granted `openid` is what mints one. `openid` is never always-allowed. User access tokens still authorize APIs by audience and session, not by this string.
 
-The 48 random bytes become a verifier within the RFC 7636 length range. SqlOS accepts `S256`, not `plain`. Do not put the verifier in the URL or durable storage, and do not add a client secret to browser code.
+Headless interaction after `/authorize` is a view-model state machine. First-party UI actions belong in `@sqlos/headless` when that package is available; until then, post to `/sqlos/auth/headless` as shown below. The OIDC library still finishes the code.
 
 ## 4. Load the server-owned view
 
@@ -189,6 +174,8 @@ https://app.relaydesk.example/auth/authorize?request=req_...&view=login
 Read `request`, then load the authoritative model:
 
 ```ts
+const HEADLESS = "https://identity.relaydesk.example/sqlos/auth/headless";
+
 type OrganizationOption = {
   id: string;
   name: string;
@@ -359,52 +346,13 @@ function applyResult(
 
 A redirect may go to an external OIDC/SAML provider or to RelayDesk's exact registered callback with a code. Never replace it with a URL constructed from user input. A view means SqlOS requires another interaction; render it instead of issuing tokens or declaring the user signed in.
 
-## 7. Validate state and exchange the code
+## 7. Let the OIDC library finish the code
 
-At `/auth/callback`, reject provider errors, missing local state, and state mismatch before exchanging the code:
+When headless login completes, SqlOS redirects to the exact registered callback with an authorization code. Follow that URL. Do not exchange the code in application helpers.
 
-```ts
-async function completeCallback(): Promise<unknown> {
-  const query = new URLSearchParams(window.location.search);
-  const error = query.get("error");
-  if (error) throw new Error(query.get("error_description") || error);
+Auth.js finishes at `/api/auth/callback/<id>`. `angular-oauth2-oidc` finishes with `tryLoginCodeFlow()`. `expo-auth-session` finishes with `exchangeCodeAsync`. Refresh uses `POST /sqlos/auth/token` with `grant_type=refresh_token` through the same library.
 
-  const code = query.get("code");
-  const returnedState = query.get("state");
-  const expectedState = sessionStorage.getItem("relaydesk.oauth.state");
-  const verifier = sessionStorage.getItem("relaydesk.oauth.verifier");
-
-  if (!code || !returnedState || !expectedState || !verifier) {
-    throw new Error("OAuth callback state is missing or expired.");
-  }
-  if (returnedState !== expectedState) {
-    throw new Error("OAuth state validation failed.");
-  }
-
-  const response = await fetch(`${AUTH}/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      client_id: CLIENT_ID,
-      redirect_uri: REDIRECT_URI,
-      code,
-      code_verifier: verifier,
-    }),
-  });
-
-  sessionStorage.removeItem("relaydesk.oauth.state");
-  sessionStorage.removeItem("relaydesk.oauth.verifier");
-
-  const result = await response.json();
-  if (!response.ok) {
-    throw new Error(result.error_description || result.error || "Code exchange failed.");
-  }
-  return result;
-}
-```
-
-Connect the token response to your application's reviewed session design. The checked-in Next.js example gives it to NextAuth; a backend-for-frontend can exchange server-side and issue an encrypted application cookie. Do not persist refresh tokens in `localStorage`, and do not confuse the SqlOS AuthPage cookie with your application's authenticated session.
+Connect the library session to your application's reviewed storage design. Do not persist refresh tokens in `localStorage`, and do not confuse the SqlOS AuthPage cookie with your application's authenticated session.
 
 ## 8. Add product-owned signup fields
 
@@ -471,16 +419,16 @@ npm ci --prefix examples/SqlOS.Example.AngularWeb
 dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 ```
 
-Open `http://localhost:3010`, choose the headless/custom UI entry point, and complete password signup or login. The custom page is `/auth/authorize`; the callback is `/auth/callback`. The Angular client at `http://localhost:4200` exercises the same API without React.
+Open `http://localhost:3010`, choose the headless/custom UI entry point, and complete password signup or login. The custom page is `/auth/authorize`; Auth.js finishes at `/api/auth/callback/sqlos`. The Angular client at `http://localhost:4200` uses `angular-oauth2-oidc` with `/auth/callback`.
 
 Compare these source files before adapting the pattern:
 
 - `examples/SqlOS.Example.Api/Program.cs` — host configuration, CORS, and signup hook
-- `examples/SqlOS.Example.Web/lib/sqlos-auth.ts` — state and PKCE
-- `examples/SqlOS.Example.Web/lib/sqlos-headless.ts` — typed API calls
+- `examples/SqlOS.Example.Web/lib/auth.ts` — Auth.js OIDC provider
+- `examples/SqlOS.Example.Web/lib/sqlos-headless.ts` — typed headless API calls
 - `examples/SqlOS.Example.Web/components/sqlos-headless-auth-panel.tsx` — state rendering
-- `examples/SqlOS.Example.Web/components/sqlos-auth-callback-panel.tsx` — callback validation and exchange
-- `examples/SqlOS.Example.AngularWeb/src/app/services/sqlos-headless.service.ts` — Angular client
+- `examples/SqlOS.Example.AngularWeb/src/app/auth.config.ts` — angular-oauth2-oidc discovery
+- `examples/SqlOS.Example.AngularWeb/src/app/services/sqlos-headless.service.ts` — Angular headless client
 
 ## Troubleshooting
 
@@ -490,7 +438,7 @@ Compare these source files before adapting the pattern:
 | Browser reports a CORS failure | Match the exact frontend origin, allow credentials, and send `credentials: "include"`. Do not use a wildcard. |
 | Reusable auth state disappears | Keep the UI and identity host same-site; credentialed CORS cannot defeat `SameSite=Lax` or third-party-cookie blocking. |
 | SqlOS rejects the authorize request | Match the seeded client ID and callback exactly, including scheme, host, port, path, and path case. |
-| Callback says state or verifier is missing | Finish in the same tab and avoid clearing `sessionStorage` before exchange. Start a new request rather than weakening validation. |
+| Callback says state or verifier is missing | Finish in the same tab so the OIDC library still has its PKCE verifier and state. Start a new request rather than weakening validation. |
 | Login succeeds but the UI stops | Render the returned `organization`, `mfa`, or `mfa-enroll` view. Primary credentials do not bypass later policy. |
 | SSO domain still shows password | Always call `/identify`; do not choose password locally before HRD runs. |
 | Invitation loses its organization | Preserve the invitation-bound request and token; do not restart ordinary signup from an invite tab. |
@@ -501,8 +449,8 @@ Compare these source files before adapting the pattern:
 - [ ] Exact public origin, issuer, client, callback, and CORS origin
 - [ ] HTTPS and trusted forwarded-header configuration
 - [ ] Same-site identity/UI topology or reviewed first-party proxy
-- [ ] S256 PKCE and state generated with Web Crypto
-- [ ] State checked before code exchange
+- [ ] S256 PKCE and state owned by the stack OIDC library
+- [ ] Library callback URI registered exactly on the SqlOS client
 - [ ] No browser client secret and no durable refresh token in `localStorage`
 - [ ] Sign out calls `GET /sqlos/auth/logout`; explicit Sign in / Sign up send `prompt=login`
 - [ ] Every enabled server-returned view rendered

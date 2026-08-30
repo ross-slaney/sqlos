@@ -12,12 +12,13 @@
       <p class="eyebrow">SqlOS Todo Sample</p>
       <h1>Demo SqlOS AuthPage with passwordless codes.</h1>
       <p class="lede">
-        The Todo app only starts OAuth. SqlOS AuthPage owns sign in, sign up,
-        one-time-code verification, and the redirect back with a resource-bound token.
+        This page is a protocol playground. Hosted browser login belongs in a
+        stack-standard OIDC client — the Razor Pages sample or the Next.js Auth.js
+        example — not another hand-rolled PKCE helper.
       </p>
       <div class="button-row">
-        <button id="hosted-login-button" type="button">Hosted sign in</button>
-        <button id="hosted-signup-button" class="secondary" type="button">Hosted sign up</button>
+        <a class="link-button" href="http://localhost:5090">Hosted sign in (.NET)</a>
+        <a class="link-button secondary-link" href="http://localhost:3010">Hosted sign in (Next.js)</a>
         <a class="link-button" href="/app.html">Open the Todo UI</a>
       </div>
     </section>

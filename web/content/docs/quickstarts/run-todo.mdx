@@ -60,7 +60,7 @@ That proves the complete chain: ASP.NET Core challenge and PKCE, SqlOS hosted lo
 
 ## Explore Todo authorization
 
-Open `http://localhost:5080` for the companion browser client. Sign in, create two Todo items, mark one complete, and refresh. The API stores each Todo as an FGA resource and filters the EF Core list query for the current subject.
+Open `http://localhost:5080` for the companion protocol playground (CIMD, DCR, headless, and resource metadata). Hosted browser login belongs in the Razor Pages client at `http://localhost:5090` or the Next.js Auth.js example at `http://localhost:3010`, not another hand-rolled PKCE helper. After you have an access token, the Todo UI stores each item as an FGA resource and filters the EF Core list query for the current subject.
 
 Open `http://localhost:5080/sqlos/admin/fga/resources` to inspect the tenant and Todo resource tree. The same dashboard exposes grants, roles, permissions, sessions, applications, and the Access Tester.
 
@@ -70,7 +70,7 @@ Open `http://localhost:5080/sqlos/admin/fga/resources` to inspect the tenant and
 | --- | --- |
 | Authenticated URL printed by Aspire (`https://localhost:18890`) | Aspire health, endpoints, logs, and traces for the Todo stack |
 | `http://localhost:5090` | Razor Pages client with framework-owned PKCE and cookie session |
-| `http://localhost:5080` | Todo browser UI and hosted-auth entry point |
+| `http://localhost:5080` | Todo API, dashboard, and protocol playground |
 | `http://localhost:5080/sample/config` | Issuer, audience, clients, scopes, and optional feature flags |
 | `http://localhost:5080/sqlos/auth/.well-known/oauth-authorization-server` | OAuth server metadata |
 | `http://localhost:5080/.well-known/oauth-protected-resource` | Protected-resource metadata |
@@ -84,7 +84,7 @@ The stack contains two first-party browser clients for different learning goals:
 | Client | Callback | Purpose |
 | --- | --- | --- |
 | `example-aspnet` | `http://localhost:5090/signin-sqlos` | Server-rendered .NET login, application cookie, `/api/me`, and revocation |
-| `todo-web` | `http://localhost:5080/callback.html` | Todo CRUD and FGA-filtered EF Core queries |
+| `todo-web` | `http://localhost:5080/callback.html` (seeded; vanilla JS no longer exchanges the code) | Protocol playground and FGA-filtered Todo API |
 
 Both clients are public, require PKCE, and receive access tokens for `http://localhost:5080/api/todos`.
 

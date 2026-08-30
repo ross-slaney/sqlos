@@ -1,6 +1,6 @@
 "use client";
 
-import { getExampleAuthServerUrl } from "./sqlos-auth";
+import { getExampleAuthServerUrl } from "./sqlos-config";
 
 const headlessBase = () => `${getExampleAuthServerUrl()}/headless`;
 

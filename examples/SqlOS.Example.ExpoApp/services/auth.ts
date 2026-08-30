@@ -1,7 +1,7 @@
 import * as SecureStore from "expo-secure-store";
 import { jwtDecode } from "jwt-decode";
 import { API_URL } from "./config";
-import { clearPKCE } from "./sqlos-auth";
+import { refreshHostedAuth } from "./sqlos-auth";
 import type { SessionData, DecodedToken } from "./types";
 
 const SESSION_KEY = "sqlos_session";
@@ -39,7 +39,6 @@ export async function clearSession(): Promise<void> {
   refreshPromise = null;
   await SecureStore.deleteItemAsync(SESSION_KEY);
   await SecureStore.deleteItemAsync(OVERRIDE_KEY);
-  await clearPKCE();
 }
 
 export async function isAuthenticated(): Promise<boolean> {
@@ -85,54 +84,54 @@ async function refreshAccessToken(): Promise<void> {
   }
 
   try {
-    const decoded = jwtDecode<DecodedToken>(session.accessToken);
-    const usesHostedSqlOS = decoded?.iss?.includes("/sqlos/auth") ?? false;
-
-    const response = usesHostedSqlOS
-      ? await fetch(`${API_URL}/sqlos/auth/token`, {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({
-            grant_type: "refresh_token",
-            refresh_token: session.refreshToken,
-          }).toString(),
-        })
-      : await fetch(`${API_URL}/api/v1/auth/refresh`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            refreshToken: session.refreshToken,
-            organizationId: session.organizationId,
-          }),
-        });
-
-    const data = await response.json();
-    if (!response.ok) {
-      await clearSession();
-      return;
-    }
-
-    const nextAccessToken = data.accessToken ?? data.access_token;
-    const nextRefreshToken = data.refreshToken ?? data.refresh_token;
-    if (!nextAccessToken || !nextRefreshToken) {
-      throw new Error("Refresh response did not include new tokens.");
-    }
-
-    const refreshedDecoded = jwtDecode<DecodedToken>(nextAccessToken);
+    const tokens = await refreshHostedAuth(session.refreshToken);
+    const refreshedDecoded = jwtDecode<DecodedToken>(tokens.accessToken);
     await setSession({
       ...session,
-      accessToken: nextAccessToken,
-      refreshToken: nextRefreshToken,
-      sessionId: data.sessionId ?? refreshedDecoded.sid ?? session.sessionId,
-      organizationId:
-        data.organizationId ??
-        refreshedDecoded.org_id ??
-        session.organizationId ??
-        null,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      sessionId: refreshedDecoded.sid ?? session.sessionId,
+      organizationId: refreshedDecoded.org_id ?? session.organizationId ?? null,
       exp: refreshedDecoded.exp,
     });
   } catch {
-    await clearSession();
+    try {
+      const response = await fetch(`${API_URL}/api/v1/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          refreshToken: session.refreshToken,
+          organizationId: session.organizationId,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        await clearSession();
+        return;
+      }
+
+      const nextAccessToken = data.accessToken ?? data.access_token;
+      const nextRefreshToken = data.refreshToken ?? data.refresh_token;
+      if (!nextAccessToken || !nextRefreshToken) {
+        throw new Error("Refresh response did not include new tokens.");
+      }
+
+      const refreshedDecoded = jwtDecode<DecodedToken>(nextAccessToken);
+      await setSession({
+        ...session,
+        accessToken: nextAccessToken,
+        refreshToken: nextRefreshToken,
+        sessionId: data.sessionId ?? refreshedDecoded.sid ?? session.sessionId,
+        organizationId:
+          data.organizationId ??
+          refreshedDecoded.org_id ??
+          session.organizationId ??
+          null,
+        exp: refreshedDecoded.exp,
+      });
+    } catch {
+      await clearSession();
+    }
   }
 }
 
@@ -140,7 +139,6 @@ export async function signOut(): Promise<void> {
   await clearSession();
 }
 
-// Auth override for demo
 export async function setAuthOverride(
   override: AuthOverride | null,
 ): Promise<void> {

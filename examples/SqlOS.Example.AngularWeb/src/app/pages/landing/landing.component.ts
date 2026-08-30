@@ -1,7 +1,6 @@
 import { Component, inject, signal } from '@angular/core';
 import { RouterLink, ActivatedRoute } from '@angular/router';
 import { AuthService } from '../../services/auth.service';
-import { SqlosAuthService } from '../../services/sqlos-auth.service';
 
 @Component({
   selector: 'app-landing',
@@ -242,31 +241,15 @@ import { SqlosAuthService } from '../../services/sqlos-auth.service';
 })
 export class LandingComponent {
   private auth = inject(AuthService);
-  private sqlosAuth = inject(SqlosAuthService);
   private route = inject(ActivatedRoute);
 
   isAuthenticated = this.auth.isAuthenticated;
   starting = signal<'login' | 'signup' | null>(null);
 
-  async startAuth(view: 'login' | 'signup') {
+  startAuth(view: 'login' | 'signup') {
     this.starting.set(view);
     try {
-      const next = this.route.snapshot.queryParamMap.get('next') || '/retail';
-      const verifier = this.sqlosAuth.createOpaqueToken(48);
-      const state = this.sqlosAuth.createOpaqueToken(24);
-      const challenge = await this.sqlosAuth.createCodeChallenge(verifier);
-      this.sqlosAuth.persistAuthFlow(view, state, verifier, next);
-
-      const url = new URL(`${this.sqlosAuth.getAuthServerUrl()}/authorize`);
-      url.searchParams.set('response_type', 'code');
-      url.searchParams.set('client_id', this.sqlosAuth.getClientId());
-      url.searchParams.set('redirect_uri', this.sqlosAuth.getRedirectUri());
-      url.searchParams.set('state', state);
-      url.searchParams.set('code_challenge', challenge);
-      url.searchParams.set('code_challenge_method', 'S256');
-      if (view === 'signup') url.searchParams.set('view', 'signup');
-
-      window.location.replace(url.toString());
+      this.auth.startHostedSignIn(view, this.route.snapshot.queryParamMap.get('next') || '/retail');
     } catch {
       this.starting.set(null);
     }

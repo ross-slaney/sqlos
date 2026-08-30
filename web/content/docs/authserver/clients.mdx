@@ -252,10 +252,43 @@ SqlOS keeps this path intentionally narrow in v1:
 Register separate clients for each frontend. The example stack seeds three:
 
 ```csharp
-auth.SeedOwnedWebApp("example-web", "Example Web", "http://localhost:3010/auth/callback");
-auth.SeedOwnedWebApp("example-angular", "Example Angular", "http://localhost:4200/auth/callback");
-auth.SeedOwnedNativeApp("example-expo", "Example Expo", "sqlos-expo://auth-callback");
+auth.SeedClient(client =>
+{
+    client.ClientId = "example-web";
+    client.Name = "Example Web";
+    client.ClientType = "public_pkce";
+    client.RequirePkce = true;
+    client.IsFirstParty = true;
+    client.AllowedScopes = ["openid", "profile", "email", "offline_access"];
+    client.RedirectUris =
+    [
+        "http://localhost:3010/auth/callback",
+        "http://localhost:3010/api/auth/callback/sqlos"
+    ];
+});
+auth.SeedClient(client =>
+{
+    client.ClientId = "example-angular";
+    client.Name = "Example Angular";
+    client.ClientType = "public_pkce";
+    client.RequirePkce = true;
+    client.IsFirstParty = true;
+    client.AllowedScopes = ["openid", "profile", "email", "offline_access"];
+    client.RedirectUris = ["http://localhost:4200/auth/callback"];
+});
+auth.SeedClient(client =>
+{
+    client.ClientId = "example-expo";
+    client.Name = "Example Expo";
+    client.ClientType = "public_pkce";
+    client.RequirePkce = true;
+    client.IsFirstParty = true;
+    client.AllowedScopes = ["openid", "profile", "email", "offline_access"];
+    client.RedirectUris = ["sqlos-expo://auth-callback"];
+});
 ```
+
+First-party JS clients that request `openid` (Auth.js `idToken: true`, `angular-oauth2-oidc`, `expo-auth-session`) must set `AllowedScopes`. `SeedOwnedWebApp` and `SeedOwnedNativeApp` still register only the redirect URI and leave the allowlist empty.
 
 ## Disable and enable
 

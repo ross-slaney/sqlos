@@ -14,11 +14,11 @@ declare module "next-auth" {
   }
 
   interface User extends DefaultUser {
-    accessToken: string;
-    refreshToken: string;
-    organizationId: string | null;
-    sessionId: string;
-    exp: number;
+    accessToken?: string;
+    refreshToken?: string;
+    organizationId?: string | null;
+    sessionId?: string;
+    exp?: number;
   }
 }
 
@@ -30,5 +30,6 @@ declare module "next-auth/jwt" {
     sessionId?: string | null;
     exp?: number;
     error?: string;
+    provider?: string;
   }
 }
