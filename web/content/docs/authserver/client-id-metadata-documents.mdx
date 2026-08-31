@@ -65,6 +65,7 @@ SqlOS expects:
 SqlOS also:
 
 - validates redirect URIs from the document, not the dashboard
+- matches loopback IP-literal redirects (`http://127.0.0.1/...`, `http://[::1]/...`) port-insensitively per RFC 8252 §7.3, so native clients like Codex can register a portless loopback redirect and bind an ephemeral port at login; scheme, address, path, and query must still match exactly, and `localhost` or HTTPS redirects always require an exact match
 - accepts the document's self-declared `scope` as registered metadata (there is no separate CIMD ceiling; later grants still intersect requested scopes with that stored allow-list)
 - treats a republished document that changes `scope` as a security-sensitive metadata change, the same as a redirect, grant-type, response-type, or token-endpoint auth-method change: active sessions are revoked and SqlOS records `client.cimd.metadata-changed`
 - respects HTTP cache headers when possible

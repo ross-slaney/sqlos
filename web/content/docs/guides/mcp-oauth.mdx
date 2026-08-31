@@ -133,6 +133,8 @@ The document URL and `client_id` value must match exactly. SqlOS also requires H
 
 Serve the file as JSON with conservative caching. Changing redirect URIs, auth method, grant types, or response types causes SqlOS to revoke active sessions when it refreshes the cached metadata.
 
+Desktop and CLI clients (ChatGPT desktop / Codex, for example) register a **portless loopback** redirect such as `http://127.0.0.1/callback/<id>` and bind an ephemeral port at login. Per RFC 8252 §7.3, SqlOS accepts any port on a loopback IP-literal redirect (`127.0.0.1` or `[::1]`) while still requiring the scheme, address, path, and query to match the registered URI exactly. This applies only to loopback IP literals — `localhost`, HTTPS, and every other redirect URI require an exact match — and only while `ClientRegistration.Dcr.AllowLoopbackRedirectUris` is enabled (the `EnablePortableMcpClients` default).
+
 ## 4. Start authorization with state and PKCE
 
 The client generates a cryptographically random `state` and PKCE verifier, then hashes the verifier with `S256`:

@@ -79,7 +79,7 @@ public sealed class SqlOSClientResolutionService
         => await TryResolveClientAsync(clientId, redirectUri, httpContext, cancellationToken)
             ?? throw new InvalidOperationException($"Unknown client '{clientId}'.");
 
-    private static void ValidateResolvedClient(SqlOSClientApplication client, string? redirectUri)
+    private void ValidateResolvedClient(SqlOSClientApplication client, string? redirectUri)
     {
         if (!client.IsActive || client.DisabledAt != null)
         {
@@ -92,7 +92,10 @@ public sealed class SqlOSClientResolutionService
         }
 
         var allowedRedirects = SqlOSAdminService.DeserializeJsonList(client.RedirectUrisJson);
-        if (!allowedRedirects.Contains(redirectUri, StringComparer.Ordinal))
+        if (!SqlOSRedirectUriPolicy.IsRegisteredMatch(
+                allowedRedirects,
+                redirectUri,
+                _options.ClientRegistration.Dcr.AllowLoopbackRedirectUris))
         {
             throw new InvalidOperationException($"Redirect URI '{redirectUri}' is not allowed for client '{client.ClientId}'.");
         }

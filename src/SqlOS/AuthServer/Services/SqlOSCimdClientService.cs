@@ -391,7 +391,10 @@ public sealed class SqlOSCimdClientService
             var redirectUris = SqlOSAdminService.DeserializeJsonList(redirectUrisJson);
             ValidateRedirectUriPolicy(redirectUris, clientId);
             if (!string.IsNullOrWhiteSpace(redirectUri)
-                && !redirectUris.Contains(redirectUri, StringComparer.Ordinal))
+                && !SqlOSRedirectUriPolicy.IsRegisteredMatch(
+                    redirectUris,
+                    redirectUri,
+                    _options.ClientRegistration.Dcr.AllowLoopbackRedirectUris))
             {
                 throw new InvalidOperationException($"Redirect URI '{redirectUri}' is not allowed for client '{clientId}'.");
             }
@@ -548,7 +551,10 @@ public sealed class SqlOSCimdClientService
         ValidateRedirectUriPolicy(redirectUris, clientId);
 
         if (!string.IsNullOrWhiteSpace(redirectUri)
-            && !redirectUris.Contains(redirectUri, StringComparer.Ordinal))
+            && !SqlOSRedirectUriPolicy.IsRegisteredMatch(
+                redirectUris,
+                redirectUri,
+                _options.ClientRegistration.Dcr.AllowLoopbackRedirectUris))
         {
             throw new InvalidOperationException($"Redirect URI '{redirectUri}' is not allowed for client '{clientId}'.");
         }
