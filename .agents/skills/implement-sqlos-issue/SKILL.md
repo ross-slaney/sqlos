@@ -18,6 +18,7 @@ Take ownership of the issue through a validated pull request. Treat the issue as
 - Do not weaken assertions, remove coverage, or change CI merely to make a failure disappear.
 - Do not merge, release, close issues manually, or delete the worktree unless the user asks.
 - Never claim completion without listing the checks actually run and their outcomes.
+- Post visual proof on the PR with `gh pr comment --attach` (GitHub `user-attachments`). Do not host screenshots via orphan branches, gist binaries, or `raw.githubusercontent.com` links.
 
 ## 1. Establish the contract
 
@@ -118,6 +119,40 @@ The build must precede the test scripts because they run with `--no-build`. If t
 
 Also perform direct runtime or operator-path proof when the change cannot be established adequately by static and automated tests—for example, a dashboard workflow, hosted auth flow, migration, or example application. Record what was exercised and the observed outcome without exposing secrets.
 
+### Runtime screenshots on the PR
+
+Classify the change, then capture and upload screenshots before calling the PR ready. Prefer real example AppHost / dashboard / marketing routes over mocks. Redact secrets; never capture tokens, passwords, or one-time credential reveals.
+
+**Authentication-related changes** — for every applicable example app, show (1) the auth UI for that path and (2) the signed-in app surface after a successful create-account or sign-in:
+
+| Change scope | Capture |
+| --- | --- |
+| Hosted AuthPage only | AuthPage examples only (for example ASP.NET / Todo Razor hosted login, Expo hosted browser session). Skip headless-only surfaces. |
+| Headless / custom login UI only | Headless examples only (for example Next.js and Angular `/auth/authorize` custom UI). Skip hosted-AuthPage-only surfaces. |
+| Cross-cutting authentication | **Both** AuthPage and headless example paths. |
+
+Exercise create-account and sign-in when the changed surface supports them. If an example is environment-blocked (for example Expo native build toolchain), say so precisely and still cover every runnable applicable example.
+
+**Non-authentication changes** — screenshot the relevant product surface touched by the issue, for example:
+
+- Admin / dashboard operator workflow
+- Web / marketing site page or docs UI
+- FGA authorization in use (retail example app showing filtered data / grants in action)
+
+Do not post unrelated full-app tours. Match screenshots to the changed behavior.
+
+**Upload (required):** use GitHub CLI attachment upload so images land on `user-attachments`:
+
+```bash
+# Needs gh with `pr comment --attach` (install/upgrade if your bottle lacks the flag).
+gh pr comment <number> --repo ross-slaney/sqlos \
+  --body-file <comment.md> \
+  --attach './authpage-signup.png#AuthPage signup' \
+  --attach './dashboard-signed-in.png#Signed-in dashboard'
+```
+
+If the comment body already references local paths such as `![alt](./file.png)`, `--attach` rewrites them to uploaded asset URLs. Repeat `--attach` for each image (alt text after `#`). Do not push screenshot-only branches to host images.
+
 Before committing, review:
 
 ```bash
@@ -138,6 +173,8 @@ Commit only intended files with an issue-focused message, push the `codex/` bran
 - Documentation or examples changed.
 - `Closes #<number>` when the PR fully resolves the issue; otherwise use a non-closing reference and explain the remaining scope.
 
+After the PR exists, post the runtime screenshots required above as a PR comment via `gh pr comment --attach`. Link that comment from the handoff.
+
 Do not describe a PR as ready while known required checks are failing. Watch the PR checks, inspect failures, and fix failures caused by the change. Distinguish product failures from infrastructure or permission failures using concrete evidence.
 
 ## Definition of done
@@ -150,4 +187,5 @@ The task is complete only when:
 - Required local validation passes, or any external blocker is reported precisely.
 - The branch is pushed and the PR exists when the user requested implementation or a PR.
 - Required CI is green before calling the PR ready, unless the user explicitly accepts a documented external blocker.
-- The handoff includes the PR URL, concise change summary, exact validation results, and any remaining risk.
+- Required runtime screenshots are posted on the PR with `gh pr comment --attach` (AuthPage / headless / both for auth work; otherwise the relevant admin, marketing, or FGA surface).
+- The handoff includes the PR URL, screenshot comment URL, concise change summary, exact validation results, and any remaining risk.
