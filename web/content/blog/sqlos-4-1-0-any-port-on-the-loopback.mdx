@@ -1,0 +1,38 @@
+---
+title: "SqlOS 4.1: Any Port on the Loopback"
+description: "SqlOS now matches loopback redirect URIs per RFC 8252 §7.3, so Codex, ChatGPT desktop, and other native MCP clients complete OAuth against your server without registering a port in advance."
+date: "2026-08-30"
+author: "Ross Slaney"
+tags: ["AuthServer", "OAuth", "MCP", "SqlOS"]
+---
+
+SqlOS 4.1 fixes the last gap between `EnablePortableMcpClients()` and a real desktop MCP client. Native clients such as Codex and ChatGPT desktop publish a Client ID Metadata Document that registers a **portless** loopback redirect like `http://127.0.0.1/callback/<id>`, then bind whatever ephemeral port the OS hands them at login. RFC 8252 §7.3 requires the authorization server to accept that port. SqlOS previously required an exact string match, so the authorize request failed with `Redirect URI not allowed` before the user ever saw a sign-in page.
+
+## What changed
+
+Redirect URI matching now follows the spec for native clients. When the requested redirect URI is HTTP with a loopback IP-literal host — `127.0.0.1` or `[::1]` — SqlOS ignores the port on both sides while still requiring the scheme, address, path, and query to match the registered URI exactly. The same rule applies everywhere clients are resolved:
+
+- seeded and dashboard-registered clients,
+- CIMD clients on a fresh metadata fetch,
+- CIMD clients validated from cached metadata,
+- DCR-registered clients.
+
+Everything else keeps exact matching. `localhost` is deliberately excluded because the hostname can resolve to non-loopback addresses; HTTPS redirects are never port-relaxed; `[::1]` and `127.0.0.1` never match each other; and path or query differences are still rejected. If you have turned off `ClientRegistration.Dcr.AllowLoopbackRedirectUris`, nothing changes — loopback redirects stay rejected outright.
+
+## Why it matters for MCP
+
+This is the flow a SqlOS-protected MCP server sees when someone adds it to ChatGPT desktop or runs `codex mcp login`: the client identifies itself with a stable CIMD URL, SqlOS fetches and validates the document, and the browser bounces back to `http://127.0.0.1:<ephemeral-port>/callback/<id>`. With 4.1, that round trip completes. No pre-registration, no pasted tokens, no per-machine port configuration.
+
+## Upgrade notes
+
+Upgrade the package normally:
+
+```bash
+dotnet add package SqlOS --version 4.1.0
+```
+
+There are no configuration or schema changes. If portable MCP clients previously failed at the authorize step with a redirect URI error, retry after upgrading — the client's existing CIMD registration works as-is.
+
+See [OAuth for MCP clients](/docs/guides/mcp-oauth) and [Client ID Metadata Documents](/docs/authserver/client-id-metadata-documents) for the documented matching rules.
+
+This release is backed by new unit coverage for the matching policy, Codex-shaped CIMD resolution tests on both the fresh-fetch and cached paths, and the repository's complete build, documentation, unit, integration, example-application, and coverage gates.
