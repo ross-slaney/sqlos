@@ -137,6 +137,136 @@ public sealed class SqlOSCimdClientServiceTests
     }
 
     [TestMethod]
+    public async Task ResolveRequiredClientAsync_AllowsEphemeralLoopbackPortForPortlessRegistration()
+    {
+        // Codex CIMD documents register a portless loopback redirect and bind an
+        // ephemeral port at authorization time (RFC 8252 §7.3).
+        using var context = CreateContext();
+        const string clientId = "https://client.example.test/oauth/codex/abc123/client.json";
+        var httpFactory = new FakeHttpClientFactory(_ => JsonResponse(
+            $$"""
+            {
+              "client_id": "{{clientId}}",
+              "client_name": "Codex-Shaped Client",
+              "redirect_uris": ["http://127.0.0.1/callback/abc123"],
+              "token_endpoint_auth_method": "none"
+            }
+            """));
+        var resolver = CreateResolver(context, CreateOptions(), httpFactory);
+
+        var resolved = await resolver.ResolveRequiredClientAsync(clientId, "http://127.0.0.1:49152/callback/abc123");
+
+        resolved.ResolutionKind.Should().Be("cimd");
+        resolved.Client.RedirectUrisJson.Should().Contain("http://127.0.0.1/callback/abc123");
+    }
+
+    [DataTestMethod]
+    [DataRow("http://127.0.0.1:49152/callback/other")]
+    [DataRow("http://127.0.0.1:49152/callback/abc123?extra=1")]
+    [DataRow("http://[::1]:49152/callback/abc123")]
+    public async Task ResolveRequiredClientAsync_RejectsLoopbackPathHostOrQueryMismatch(string redirectUri)
+    {
+        using var context = CreateContext();
+        const string clientId = "https://client.example.test/oauth/codex/abc123/client.json";
+        var httpFactory = new FakeHttpClientFactory(_ => JsonResponse(
+            $$"""
+            {
+              "client_id": "{{clientId}}",
+              "client_name": "Codex-Shaped Client",
+              "redirect_uris": ["http://127.0.0.1/callback/abc123"],
+              "token_endpoint_auth_method": "none"
+            }
+            """));
+        var resolver = CreateResolver(context, CreateOptions(), httpFactory);
+
+        var act = async () => await resolver.ResolveRequiredClientAsync(clientId, redirectUri);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Client metadata document validation failed.");
+    }
+
+    [TestMethod]
+    public async Task ResolveRequiredClientAsync_DoesNotRelaxPortsForLocalhostHostname()
+    {
+        using var context = CreateContext();
+        const string clientId = "https://client.example.test/oauth/client.json";
+        var httpFactory = new FakeHttpClientFactory(_ => JsonResponse(
+            $$"""
+            {
+              "client_id": "{{clientId}}",
+              "client_name": "Localhost Client",
+              "redirect_uris": ["http://localhost/callback"],
+              "token_endpoint_auth_method": "none"
+            }
+            """));
+        var resolver = CreateResolver(context, CreateOptions(), httpFactory);
+
+        var act = async () => await resolver.ResolveRequiredClientAsync(clientId, "http://localhost:49152/callback");
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Client metadata document validation failed.");
+    }
+
+    [TestMethod]
+    public async Task ResolveRequiredClientAsync_AllowsEphemeralLoopbackPortFromFreshCache()
+    {
+        using var context = CreateContext();
+        var existing = new SqlOSClientApplication
+        {
+            Id = "cli_cached_loopback",
+            ClientId = "https://client.example.test/oauth/codex/abc123/client.json",
+            Name = "Cached Codex-Shaped Client",
+            Audience = "sqlos",
+            ClientType = "public_pkce",
+            RegistrationSource = "cimd",
+            TokenEndpointAuthMethod = "none",
+            GrantTypesJson = "[\"authorization_code\",\"refresh_token\"]",
+            ResponseTypesJson = "[\"code\"]",
+            RedirectUrisJson = "[\"http://127.0.0.1/callback/abc123\"]",
+            MetadataDocumentUrl = "https://client.example.test/oauth/codex/abc123/client.json",
+            MetadataFetchedAt = DateTime.UtcNow.AddMinutes(-1),
+            MetadataExpiresAt = DateTime.UtcNow.AddMinutes(10),
+            CreatedAt = DateTime.UtcNow,
+            IsActive = true
+        };
+        context.Set<SqlOSClientApplication>().Add(existing);
+        await context.SaveChangesAsync();
+
+        var httpFactory = new FakeHttpClientFactory(_ => throw new InvalidOperationException("CIMD metadata should not be fetched while cache is fresh."));
+        var resolver = CreateResolver(context, CreateOptions(), httpFactory);
+
+        var resolved = await resolver.ResolveRequiredClientAsync(existing.ClientId, "http://127.0.0.1:60001/callback/abc123");
+
+        resolved.Client.Id.Should().Be(existing.Id);
+        resolved.ResolutionKind.Should().Be("cimd");
+        httpFactory.RequestCount.Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task ResolveRequiredClientAsync_RejectsEphemeralLoopbackPortWhenLoopbackDisabled()
+    {
+        using var context = CreateContext();
+        const string clientId = "https://client.example.test/oauth/codex/abc123/client.json";
+        var options = CreateOptions();
+        options.ClientRegistration.Dcr.AllowLoopbackRedirectUris = false;
+        var httpFactory = new FakeHttpClientFactory(_ => JsonResponse(
+            $$"""
+            {
+              "client_id": "{{clientId}}",
+              "client_name": "Codex-Shaped Client",
+              "redirect_uris": ["http://127.0.0.1/callback/abc123"],
+              "token_endpoint_auth_method": "none"
+            }
+            """));
+        var resolver = CreateResolver(context, options, httpFactory);
+
+        var act = async () => await resolver.ResolveRequiredClientAsync(clientId, "http://127.0.0.1:49152/callback/abc123");
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Client metadata document validation failed.");
+    }
+
+    [TestMethod]
     public async Task ResolveRequiredClientAsync_RejectsLoopbackWhenDisabledForDcrAndCimd()
     {
         using var context = CreateContext();

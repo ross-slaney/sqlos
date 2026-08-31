@@ -89,6 +89,55 @@ public sealed class SqlOSClientResolutionTests
     }
 
     [TestMethod]
+    public async Task ResolveRequiredClientAsync_AllowsEphemeralLoopbackPortForStoredClient()
+    {
+        using var context = CreateContext();
+        context.Set<SqlOSClientApplication>().Add(new SqlOSClientApplication
+        {
+            Id = "cli_loopback",
+            ClientId = "native-cli-client",
+            Name = "Native CLI Client",
+            Audience = "sqlos",
+            RedirectUrisJson = "[\"http://127.0.0.1/callback\"]",
+            CreatedAt = DateTime.UtcNow,
+            IsActive = true
+        });
+        await context.SaveChangesAsync();
+
+        var resolver = CreateResolver(context);
+        var resolved = await resolver.ResolveRequiredClientAsync(
+            "native-cli-client",
+            "http://127.0.0.1:53211/callback");
+
+        resolved.ResolutionKind.Should().Be("stored");
+    }
+
+    [TestMethod]
+    public async Task ResolveRequiredClientAsync_DoesNotRelaxLocalhostPortsForStoredClient()
+    {
+        using var context = CreateContext();
+        context.Set<SqlOSClientApplication>().Add(new SqlOSClientApplication
+        {
+            Id = "cli_localhost",
+            ClientId = "localhost-client",
+            Name = "Localhost Client",
+            Audience = "sqlos",
+            RedirectUrisJson = "[\"http://localhost:5000/callback\"]",
+            CreatedAt = DateTime.UtcNow,
+            IsActive = true
+        });
+        await context.SaveChangesAsync();
+
+        var resolver = CreateResolver(context);
+        var act = async () => await resolver.ResolveRequiredClientAsync(
+            "localhost-client",
+            "http://localhost:49152/callback");
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*Redirect URI*not allowed*");
+    }
+
+    [TestMethod]
     public async Task ResolveRequiredClientAsync_Throws_ForInactiveClients()
     {
         using var context = CreateContext();
