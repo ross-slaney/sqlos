@@ -151,7 +151,7 @@ gh pr comment <number> --repo ross-slaney/sqlos \
   --attach './dashboard-signed-in.png#Signed-in dashboard'
 ```
 
-If the comment body already references local paths such as `![alt](./file.png)`, `--attach` rewrites them to uploaded asset URLs. Repeat `--attach` for each image (alt text after `#`). Do not push screenshot-only branches to host images.
+If the comment body already references an attached local image path, `--attach` rewrites that reference to the uploaded asset URL. Repeat `--attach` for each image (alt text after `#`). Do not push screenshot-only branches to host images.
 
 Before committing, review:
 
