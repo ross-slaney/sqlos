@@ -105,7 +105,7 @@ Then open `http://localhost:5090/`. The Aspire AppHost starts SQL Server, the To
 You'll need **.NET 9**, **EF Core 9**, and a **SQL Server** database your application can reach.
 
 ```bash
-dotnet add package SqlOS --version 4.0.0
+dotnet add package SqlOS --version 4.1.0
 ```
 
 Derive your `DbContext` from `SqlOSDbContext<TContext>` so SqlOS can register its EF Core model, then declare your application:
