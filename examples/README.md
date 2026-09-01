@@ -9,8 +9,8 @@ These samples are working reference applications, not isolated snippets. They sh
 | Evaluate SqlOS in one focused application | [Todo API](SqlOS.Todo.Api/README.md) + `SqlOS.Todo.AppHost` | One .NET API, hosted sign-in, a protected Todo resource, FGA, and Swagger |
 | See the broadest feature set | [Full example AppHost](SqlOS.Example.AppHost/README.md) | Runs the example API, Todo API, SQL Server, and three web clients together |
 | Integrate a server-rendered .NET app | [ASP.NET Core client](SqlOS.Example.AspNetCoreWeb/README.md) | Razor Pages, ASP.NET Core OAuth middleware, PKCE, encrypted cookies, and a protected API call |
-| Integrate a JavaScript browser app | [Next.js client](SqlOS.Example.Web/README.md) or [Angular client](SqlOS.Example.AngularWeb/README.md) | Hosted and headless auth, browser PKCE, token refresh, and FGA-filtered retail screens |
-| Integrate a native mobile app | [Expo client](SqlOS.Example.ExpoApp/README.md) | Custom-scheme callback, PKCE, SecureStore, refresh tokens, and protected APIs |
+| Integrate a JavaScript browser app | [Next.js client](SqlOS.Example.Web/README.md) or [Angular client](SqlOS.Example.AngularWeb/README.md) | Hosted and headless auth via Auth.js / angular-oauth2-oidc, token refresh, and FGA-filtered retail screens |
+| Integrate a native mobile app | [Expo client](SqlOS.Example.ExpoApp/README.md) | Custom-scheme callback, expo-auth-session, SecureStore, refresh tokens, and protected APIs |
 | Build a terminal sign-in flow | [Todo CLI](SqlOS.Todo.Cli/README.md) | OAuth device authorization, browser handoff, polling, token refresh, and CLI API calls |
 | Offer "Sign in with your app" to other apps | [Sign in with X](SqlOS.SignInWithX.AppHost/README.md) | SqlOS as an OpenID Provider: a Next.js + Auth.js relying party federates via pure OIDC discovery, with the consent screen and remembered grants |
 
@@ -140,5 +140,5 @@ The frontend samples do not currently have checked-in browser automation. Their 
 
 - Start with [the API composition root](SqlOS.Example.Api/Program.cs) and [application DbContext](SqlOS.Example.Api/Data/ExampleAppDbContext.cs) to see the .NET integration boundary.
 - Use the [ASP.NET Core client](SqlOS.Example.AspNetCoreWeb/Program.cs) for a server-rendered .NET OAuth integration.
-- Use the [Next.js PKCE helper](SqlOS.Example.Web/lib/sqlos-auth.ts), [Angular auth service](SqlOS.Example.AngularWeb/src/app/services/sqlos-auth.service.ts), or [Expo auth helper](SqlOS.Example.ExpoApp/services/sqlos-auth.ts) for client-specific reference flows.
+- Use the [Next.js Auth.js provider](SqlOS.Example.Web/lib/auth.ts), [Angular OIDC config](SqlOS.Example.AngularWeb/src/app/auth.config.ts), or [Expo auth-session helper](SqlOS.Example.ExpoApp/services/sqlos-auth.ts) for client-specific reference flows. Do not copy a hand-rolled PKCE helper.
 - Read the relevant sample README before copying security or storage choices. Several conveniences are intentionally local-demo defaults, and each guide calls them out.

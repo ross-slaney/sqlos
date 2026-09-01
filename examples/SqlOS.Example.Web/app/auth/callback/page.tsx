@@ -1,5 +1,4 @@
-import { Suspense } from "react";
-import { SqlOSAuthCallbackPanel } from "@/components/sqlos-auth-callback-panel";
+import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
@@ -7,10 +6,15 @@ export default function AuthCallbackPage() {
   return (
     <div className="callback-page">
       <div className="callback-card">
-        <h2>Completing sign in...</h2>
-        <Suspense fallback={<p className="muted">Processing...</p>}>
-          <SqlOSAuthCallbackPanel />
-        </Suspense>
+        <h2>This callback moved</h2>
+        <p>
+          Hosted sign-in now finishes at the Auth.js route{" "}
+          <code>/api/auth/callback/sqlos</code>. Start again from Sign in so the
+          library can own PKCE, the code exchange, and the session.
+        </p>
+        <p>
+          <Link href="/">Return to Sign in</Link>
+        </p>
       </div>
     </div>
   );

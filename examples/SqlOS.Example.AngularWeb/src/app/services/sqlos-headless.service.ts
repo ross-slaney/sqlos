@@ -1,13 +1,11 @@
-import { Injectable, inject } from '@angular/core';
-import { SqlosAuthService } from './sqlos-auth.service';
+import { Injectable } from '@angular/core';
+import { environment } from '../environments/environment';
 import { HeadlessActionResult, HeadlessViewModel } from '../models';
 
 @Injectable({ providedIn: 'root' })
 export class SqlosHeadlessService {
-  private sqlosAuth = inject(SqlosAuthService);
-
   private get headlessBase(): string {
-    return `${this.sqlosAuth.getAuthServerUrl()}/headless`;
+    return `${environment.apiUrl}/sqlos/auth/headless`;
   }
 
   private async headlessPost(path: string, body: unknown): Promise<HeadlessActionResult> {

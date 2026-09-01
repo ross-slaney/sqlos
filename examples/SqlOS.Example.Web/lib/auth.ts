@@ -2,6 +2,7 @@ import type { AuthOptions, User } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import type { JWT } from "next-auth/jwt";
 import { jwtDecode } from "jwt-decode";
+import { getExampleApiUrl, getExampleAuthServerUrl, getExampleClientId } from "@/lib/sqlos-config";
 
 interface DecodedToken {
   exp: number;
@@ -27,7 +28,9 @@ type TokenResponse = {
   organizationId?: string | null;
 };
 
-const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5062";
+const apiUrl = getExampleApiUrl();
+const issuer = getExampleAuthServerUrl();
+const clientId = getExampleClientId();
 const pendingRefreshes = new Map<string, Promise<JWT>>();
 
 function normalizeOrganizationId(value: unknown): string | null {
@@ -52,11 +55,25 @@ function normalizeOrganizationId(value: unknown): string | null {
   return normalized;
 }
 
-async function refreshAccessToken(token: JWT): Promise<JWT> {
+function applyAccessToken(token: JWT, accessToken: string, refreshToken: string, extras?: {
+  sessionId?: string | null;
+  organizationId?: string | null;
+}): JWT {
+  const decoded = jwtDecode<DecodedToken>(accessToken);
+  return {
+    ...token,
+    accessToken,
+    refreshToken,
+    sessionId: extras?.sessionId ?? decoded.sid ?? token.sessionId ?? null,
+    organizationId: normalizeOrganizationId(extras?.organizationId ?? decoded.org_id ?? token.organizationId ?? null),
+    exp: decoded.exp,
+    error: undefined
+  };
+}
+
+async function refreshOidcAccessToken(token: JWT): Promise<JWT> {
   const currentRefreshToken = typeof token.refreshToken === "string" ? token.refreshToken : "";
-  const organizationId = normalizeOrganizationId(token.organizationId);
   if (!currentRefreshToken) {
-    console.warn("[Auth] Refresh requested without a refresh token.");
     return {
       ...token,
       error: "RefreshAccessTokenError",
@@ -67,51 +84,23 @@ async function refreshAccessToken(token: JWT): Promise<JWT> {
 
   const inFlight = pendingRefreshes.get(currentRefreshToken);
   if (inFlight) {
-    console.info("[Auth] Reusing in-flight refresh request.", {
-      sessionId: token.sessionId ?? null
-    });
     return await inFlight;
   }
 
   const refreshPromise = (async () => {
     try {
-      const decoded = typeof token.accessToken === "string"
-        ? jwtDecode<DecodedToken>(token.accessToken)
-        : null;
-      const usesHostedSqlOS = decoded?.iss?.includes("/sqlos/auth") ?? false;
-
-      console.info("[Auth] Refreshing access token.", {
-        sessionId: token.sessionId ?? null,
-        organizationId,
-        usesHostedSqlOS
+      const response = await fetch(`${issuer}/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          refresh_token: currentRefreshToken,
+          client_id: clientId
+        })
       });
-
-      const response = usesHostedSqlOS
-        ? await fetch(`${apiUrl}/sqlos/auth/token`, {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: new URLSearchParams({
-              grant_type: "refresh_token",
-              refresh_token: currentRefreshToken
-            })
-          })
-        : await fetch(`${apiUrl}/api/v1/auth/refresh`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              refreshToken: currentRefreshToken,
-              organizationId
-            })
-          });
 
       const data = await response.json();
       if (!response.ok) {
-        console.warn("[Auth] Refresh failed.", {
-          status: response.status,
-          message: data?.message ?? null,
-          sessionId: token.sessionId ?? null
-        });
-
         return {
           ...token,
           error: "RefreshAccessTokenError",
@@ -120,33 +109,17 @@ async function refreshAccessToken(token: JWT): Promise<JWT> {
         };
       }
 
-      const nextAccessToken = data.accessToken ?? data.access_token;
-      const nextRefreshToken = data.refreshToken ?? data.refresh_token;
+      const nextAccessToken = data.access_token ?? data.accessToken;
+      const nextRefreshToken = data.refresh_token ?? data.refreshToken;
       if (!nextAccessToken || !nextRefreshToken) {
         throw new Error("Refresh response did not include new tokens.");
       }
 
-      const refreshedDecoded = jwtDecode<DecodedToken>(nextAccessToken);
-      console.info("[Auth] Refresh succeeded.", {
-        sessionId: data.sessionId ?? token.sessionId ?? null,
-        accessTokenExpiresAt: new Date(refreshedDecoded.exp * 1000).toISOString()
+      return applyAccessToken(token, nextAccessToken, nextRefreshToken, {
+        sessionId: data.sessionId ?? token.sessionId,
+        organizationId: data.organizationId ?? token.organizationId
       });
-
-      return {
-        ...token,
-        accessToken: nextAccessToken,
-        refreshToken: nextRefreshToken,
-        sessionId: data.sessionId ?? refreshedDecoded.sid ?? token.sessionId ?? null,
-        organizationId: normalizeOrganizationId(data.organizationId ?? refreshedDecoded.org_id ?? token.organizationId ?? null),
-        exp: refreshedDecoded.exp,
-        error: undefined
-      };
-    } catch (error) {
-      console.error("[Auth] Refresh threw unexpectedly.", {
-        sessionId: token.sessionId ?? null,
-        error
-      });
-
+    } catch {
       return {
         ...token,
         error: "RefreshAccessTokenError",
@@ -170,8 +143,37 @@ export const authOptions: AuthOptions = {
     error: "/"
   },
   providers: [
+    {
+      id: "sqlos",
+      name: "SqlOS",
+      type: "oauth",
+      wellKnown: `${issuer}/.well-known/openid-configuration`,
+      clientId,
+      // Public PKCE client: example-web is registered with
+      // token_endpoint_auth_method "none", so there is no client secret.
+      // This is the same Auth.js shape as Sign in with X App Y.
+      client: { token_endpoint_auth_method: "none" },
+      authorization: {
+        params: { scope: "openid profile email offline_access" }
+      },
+      idToken: true,
+      userinfo: {
+        async request({ client, tokens }) {
+          return await client.userinfo(tokens.access_token!);
+        }
+      },
+      checks: ["pkce", "state"],
+      profile(profile) {
+        return {
+          id: profile.sub,
+          name: profile.name ?? profile.preferred_username ?? profile.sub,
+          email: profile.email ?? null
+        };
+      }
+    },
     CredentialsProvider({
-      name: "SqlOS credentials",
+      id: "example-api",
+      name: "Example API demo",
       credentials: {
         email: { label: "Email", type: "text" },
         password: { label: "Password", type: "password" },
@@ -241,7 +243,21 @@ export const authOptions: AuthOptions = {
   },
   secret: process.env.NEXTAUTH_SECRET,
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user, account, profile }) {
+      if (account?.provider === "sqlos" && account.access_token && account.refresh_token) {
+        const decoded = jwtDecode<DecodedToken>(account.access_token);
+        token.id = typeof profile?.sub === "string" ? profile.sub : decoded.sub ?? token.id;
+        token.email = typeof profile?.email === "string" ? profile.email : decoded.email ?? token.email;
+        token.name = typeof profile?.name === "string"
+          ? profile.name
+          : decoded.name ?? decoded.email ?? decoded.sub ?? token.name;
+        token.provider = "sqlos";
+        return applyAccessToken(token, account.access_token, account.refresh_token, {
+          sessionId: decoded.sid,
+          organizationId: decoded.org_id
+        });
+      }
+
       if (user) {
         token.id = user.id;
         token.email = user.email;
@@ -251,6 +267,7 @@ export const authOptions: AuthOptions = {
         token.organizationId = normalizeOrganizationId(user.organizationId);
         token.sessionId = user.sessionId;
         token.exp = user.exp;
+        token.provider = "example-api";
       }
 
       if (!token.accessToken) {
@@ -261,10 +278,10 @@ export const authOptions: AuthOptions = {
         const decoded = jwtDecode<DecodedToken>(token.accessToken as string);
         const currentTimeSeconds = Math.floor(Date.now() / 1000);
         if (decoded.exp && currentTimeSeconds >= decoded.exp) {
-          return await refreshAccessToken(token);
+          return await refreshOidcAccessToken(token);
         }
       } catch {
-        return await refreshAccessToken(token);
+        return await refreshOidcAccessToken(token);
       }
 
       return token;

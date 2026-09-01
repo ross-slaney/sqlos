@@ -175,4 +175,5 @@ export interface SessionData {
   organizationId: string | null;
   sessionId: string;
   exp: number;
+  source?: 'oidc' | 'demo';
 }

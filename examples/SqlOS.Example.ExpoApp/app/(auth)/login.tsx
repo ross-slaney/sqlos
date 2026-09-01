@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from "react";
 import {
-  View,
   Text,
   StyleSheet,
   ActivityIndicator,
@@ -9,22 +8,17 @@ import {
 } from "react-native";
 import * as WebBrowser from "expo-web-browser";
 import { useRouter } from "expo-router";
+import { jwtDecode } from "jwt-decode";
 import { useAuth } from "../../services/AuthContext";
-import {
-  generateCodeVerifier,
-  generateCodeChallenge,
-  generateState,
-  persistPKCE,
-  getRedirectUri,
-  buildAuthorizeUrl,
-} from "../../services/sqlos-auth";
+import { startHostedAuth } from "../../services/sqlos-auth";
 import { Colors } from "../../services/theme";
+import type { DecodedToken } from "../../services/types";
 
 WebBrowser.maybeCompleteAuthSession();
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, login } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const startedRef = useRef(false);
@@ -36,7 +30,7 @@ export default function LoginScreen() {
     }
     if (startedRef.current) return;
     startedRef.current = true;
-    handleSignIn();
+    void handleSignIn();
   }, []);
 
   async function handleSignIn() {
@@ -44,28 +38,26 @@ export default function LoginScreen() {
     setError(null);
 
     try {
-      const verifier = generateCodeVerifier();
-      const challenge = await generateCodeChallenge(verifier);
-      const state = generateState();
-      const redirectUri = getRedirectUri();
-
-      await persistPKCE(state, verifier);
-
-      const authUrl = await buildAuthorizeUrl("login", redirectUri, state, challenge);
-
-      const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUri);
-
-      if (result.type === "success") {
-        router.replace({
-          pathname: "/(auth)/callback",
-          params: { url: result.url },
-        });
-      } else {
-        // User cancelled
+      const tokens = await startHostedAuth("login");
+      const decoded = jwtDecode<DecodedToken>(tokens.accessToken);
+      await login({
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        userId: decoded.sub ?? "",
+        email: decoded.email ?? "",
+        displayName: decoded.name ?? decoded.email ?? "User",
+        organizationId: decoded.org_id ?? null,
+        sessionId: decoded.sid ?? "",
+        exp: decoded.exp,
+      });
+      router.replace("/(app)");
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Sign in failed";
+      if (message.includes("cancelled")) {
         router.back();
+        return;
       }
-    } catch (e: any) {
-      setError(e.message);
+      setError(message);
     } finally {
       setIsLoading(false);
     }

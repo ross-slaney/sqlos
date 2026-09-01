@@ -1,14 +1,14 @@
 import { Suspense } from "react";
-import { SqlOSAuthRedirect } from "@/components/sqlos-auth-redirect";
+import { SqlOSHostedSignIn } from "@/components/sqlos-hosted-sign-in";
 
 export default function SignupPage() {
   return (
     <div className="callback-page">
       <div className="callback-card">
         <h2>Redirecting to sign up...</h2>
-        <p>Taking you to the SqlOS hosted auth page.</p>
+        <p>Auth.js is starting the standard OpenID Connect authorization-code flow.</p>
         <Suspense fallback={<p className="muted">Preparing...</p>}>
-          <SqlOSAuthRedirect view="signup" />
+          <SqlOSHostedSignIn view="signup" />
         </Suspense>
       </div>
     </div>

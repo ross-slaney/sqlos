@@ -1,14 +1,14 @@
 # Angular example client
 
-This Angular 19 application shows how a single-page app can integrate directly with SqlOS as a public OAuth client. It implements authorization code + PKCE in browser code, supports both hosted and headless authentication, refreshes access tokens, and calls FGA-protected retail APIs.
+This Angular 19 application shows how a single-page app integrates with SqlOS through `angular-oauth2-oidc`: discovery, authorization code + PKCE, refresh, and FGA-protected retail APIs. It also demonstrates headless AuthPage, where the OIDC library still starts `/authorize` and finishes `/token`.
 
 ## What it demonstrates
 
 - standalone Angular components and route guards
-- hosted SqlOS sign-in and sign-up
+- hosted SqlOS sign-in and sign-up via `angular-oauth2-oidc`
 - headless password, email OTP, signup, provider, and organization-selection states
-- OAuth state validation and PKCE code exchange
-- bearer API requests and refresh-token rotation
+- library-owned PKCE, discovery, and refresh
+- bearer API requests
 - FGA-filtered retail navigation and CRUD screens
 - local demo switching between user, service-account, and agent identities
 
@@ -34,15 +34,15 @@ The AppHost starts the example API at `http://localhost:5062` and waits for it b
 
 Use the hosted sign-in or sign-up action.
 
-1. [`SqlosAuthService`](src/app/services/sqlos-auth.service.ts) creates a random verifier, S256 challenge, and state.
+1. `angular-oauth2-oidc` loads discovery and starts the code + PKCE flow.
 2. The browser redirects to `http://localhost:5062/sqlos/auth/authorize`.
-3. SqlOS renders and processes the auth page.
+3. SqlOS renders and processes the auth page (or the custom `/auth/authorize` UI when headless is enabled).
 4. The browser returns to `/auth/callback`.
-5. The callback validates state, exchanges the code, and stores the resulting application session.
+5. The library exchanges the code; `AuthService` copies the tokens into the sample session.
 
 ### Headless AuthPage
 
-Start the custom/headless path. SqlOS creates the authorization request, then directs the interaction to Angular's `/auth/authorize` route.
+Start the custom/headless path. The same OIDC library starts `/authorize`. SqlOS directs interaction to Angular's `/auth/authorize` route, then the library finishes the code at `/auth/callback`.
 
 [`SqlosHeadlessService`](src/app/services/sqlos-headless.service.ts) retrieves the server-owned view model and posts actions back with credentialed requests. [`AuthAuthorizeComponent`](src/app/pages/auth-authorize/auth-authorize.component.ts) renders password, email-code, signup, organization-selection, and provider states.
 
@@ -100,9 +100,10 @@ The API allows credentialed CORS requests from `http://localhost:4200` in additi
 | --- | --- |
 | [`src/app/app.routes.ts`](src/app/app.routes.ts) | Public auth routes and guarded retail routes |
 | [`src/app/environments/environment.ts`](src/app/environments/environment.ts) | API origin and public client ID |
-| [`src/app/services/sqlos-auth.service.ts`](src/app/services/sqlos-auth.service.ts) | PKCE/state generation and temporary flow storage |
+| [`src/app/auth.config.ts`](src/app/auth.config.ts) | `angular-oauth2-oidc` issuer, redirect URI, and scopes |
+| [`src/app/app.config.ts`](src/app/app.config.ts) | Discovery + `tryLogin` on startup |
 | [`src/app/services/sqlos-headless.service.ts`](src/app/services/sqlos-headless.service.ts) | Calls to the SqlOS headless AuthPage endpoints |
-| [`src/app/services/auth.service.ts`](src/app/services/auth.service.ts) | Session storage, token refresh, sign-out, demo overrides |
+| [`src/app/services/auth.service.ts`](src/app/services/auth.service.ts) | OIDC session sync, library refresh, sign-out, demo overrides |
 | [`src/app/services/api.service.ts`](src/app/services/api.service.ts) | Protected API requests |
 | [`src/app/guards/auth.guard.ts`](src/app/guards/auth.guard.ts) | Retail route protection |
 | [`src/app/pages/auth-callback/auth-callback.component.ts`](src/app/pages/auth-callback/auth-callback.component.ts) | Hosted OAuth callback completion |
@@ -112,7 +113,7 @@ The API allows credentialed CORS requests from `http://localhost:4200` in additi
 
 ## Session behavior
 
-Temporary PKCE state and the resulting sample session are stored in browser `sessionStorage`. [`AuthService`](src/app/services/auth.service.ts) checks JWT expiry before API use, refreshes with the refresh token, and coalesces concurrent refresh work. Sign-out asks the example API to revoke the refresh/session identifiers, clears local state, and visits the SqlOS logout endpoint.
+`angular-oauth2-oidc` stores the OIDC tokens. [`AuthService`](src/app/services/auth.service.ts) copies them into a sample session for the retail UI, refreshes through the library, and coalesces concurrent refresh work. Demo identity switching is labeled separately and is not the OIDC path. Sign-out asks the example API to revoke the refresh/session identifiers, clears local state, and visits the SqlOS logout endpoint.
 
 This makes protocol behavior easy to inspect, but it is still sample storage. Choose browser or server-side session handling based on your application's XSS model, cookie strategy, and token-retention requirements.
 

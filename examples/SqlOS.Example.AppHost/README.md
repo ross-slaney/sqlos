@@ -149,7 +149,7 @@ Confirm Docker is running, port `1434` is free, and your runtime can run or emul
 
 ### OAuth returns an invalid redirect URI
 
-Use the AppHost URLs exactly: Next.js `3010` and Angular `4200` are registered by the example API; ASP.NET Core `5090/signin-sqlos` is registered by the Todo API. A standalone Next.js process defaults to `3000` and therefore needs the example API's standalone callback configuration instead of the AppHost's `3010` callback.
+Use the AppHost URLs exactly: Next.js Auth.js finishes at `http://localhost:3010/api/auth/callback/sqlos`, Angular at `http://localhost:4200/auth/callback`, and ASP.NET Core at `5090/signin-sqlos` (Todo API). A standalone Next.js process defaults to `3000` and therefore needs the example API's standalone Auth.js callback (`http://localhost:3000/api/auth/callback/sqlos`) instead of the AppHost's `3010` callback.
 
 ### The dashboard password is rejected
 

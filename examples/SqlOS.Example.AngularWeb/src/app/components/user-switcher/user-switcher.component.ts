@@ -148,6 +148,7 @@ export class UserSwitcherComponent implements OnInit {
           organizationId: data.organizationId ?? decoded.org_id ?? null,
           sessionId: data.sessionId,
           exp: decoded.exp,
+          source: 'demo',
         });
         window.location.reload();
       }

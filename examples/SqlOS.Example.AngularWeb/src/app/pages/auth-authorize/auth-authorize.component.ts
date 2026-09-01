@@ -1,11 +1,9 @@
 import { Component, inject, OnInit, signal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { jwtDecode } from 'jwt-decode';
-import { SqlosAuthService } from '../../services/sqlos-auth.service';
 import { SqlosHeadlessService } from '../../services/sqlos-headless.service';
 import { AuthService } from '../../services/auth.service';
-import { HeadlessViewModel, HeadlessActionResult, DecodedToken } from '../../models';
+import { HeadlessViewModel, HeadlessActionResult } from '../../models';
 
 interface ReferralOption { value: string; label: string; }
 
@@ -294,7 +292,6 @@ const IMAGE_SIGNUP = 'https://images.unsplash.com/photo-1556740758-90de374c12ad?
   `,
 })
 export class AuthAuthorizeComponent implements OnInit {
-  private sqlosAuth = inject(SqlosAuthService);
   private headless = inject(SqlosHeadlessService);
   private authService = inject(AuthService);
   private route = inject(ActivatedRoute);
@@ -412,39 +409,7 @@ export class AuthAuthorizeComponent implements OnInit {
       const code = url.searchParams.get('code');
 
       if (code) {
-        const flow = this.sqlosAuth.readAuthFlow();
-        const tokenRes = await fetch(`${this.sqlosAuth.getAuthServerUrl()}/token`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            grant_type: 'authorization_code',
-            code,
-            client_id: this.sqlosAuth.getClientId(),
-            redirect_uri: this.sqlosAuth.getRedirectUri(),
-            code_verifier: flow.verifier || '',
-          }),
-        });
-
-        const tokenData = await tokenRes.json();
-        if (!tokenRes.ok || !tokenData.access_token) {
-          this.error.set(tokenData.error_description || tokenData.error || 'Token exchange failed.');
-          return;
-        }
-
-        const decoded = jwtDecode<DecodedToken>(tokenData.access_token);
-        this.authService.setSession({
-          accessToken: tokenData.access_token,
-          refreshToken: tokenData.refresh_token,
-          userId: decoded.sub ?? '',
-          email: decoded.email ?? '',
-          displayName: decoded.name ?? decoded.email ?? 'User',
-          organizationId: decoded.org_id ?? null,
-          sessionId: decoded.sid ?? '',
-          exp: decoded.exp,
-        });
-
-        this.sqlosAuth.clearAuthFlow();
-        window.location.replace(flow.nextPath || '/retail');
+        window.location.assign(result.redirectUrl);
         return;
       }
 
@@ -533,27 +498,12 @@ export class AuthAuthorizeComponent implements OnInit {
     finally { this.loading.set(false); }
   }
 
-  async startFlow(flowView: 'login' | 'signup') {
+  startFlow(flowView: 'login' | 'signup') {
     this.starterView.set(flowView);
     this.flowStarting.set(true);
     this.starterError.set(null);
     try {
-      const nextPath = this.route.snapshot.queryParamMap.get('next') || '/retail';
-      const verifier = this.sqlosAuth.createOpaqueToken(48);
-      const state = this.sqlosAuth.createOpaqueToken(24);
-      const challenge = await this.sqlosAuth.createCodeChallenge(verifier);
-      this.sqlosAuth.persistAuthFlow(flowView, state, verifier, nextPath);
-
-      const url = new URL(`${this.sqlosAuth.getAuthServerUrl()}/authorize`);
-      url.searchParams.set('response_type', 'code');
-      url.searchParams.set('client_id', this.sqlosAuth.getClientId());
-      url.searchParams.set('redirect_uri', this.sqlosAuth.getRedirectUri());
-      url.searchParams.set('state', state);
-      url.searchParams.set('code_challenge', challenge);
-      url.searchParams.set('code_challenge_method', 'S256');
-      if (flowView === 'signup') url.searchParams.set('view', 'signup');
-
-      window.location.replace(url.toString());
+      this.authService.startHostedSignIn(flowView, this.route.snapshot.queryParamMap.get('next') || '/retail');
     } catch (err) {
       this.starterError.set(err instanceof Error ? err.message : 'Failed to start.');
       this.flowStarting.set(false);

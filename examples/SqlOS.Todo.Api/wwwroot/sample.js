@@ -1,4 +1,3 @@
-const oauthStorageKey = "sqlos.todo.oauth";
 const tokenStorageKey = "sqlos.todo.tokens";
 
 document.addEventListener("DOMContentLoaded", async () => {
@@ -47,97 +46,18 @@ async function initIndexPage() {
     );
   }
 
-  const hostedLoginButton = document.getElementById("hosted-login-button");
-  const hostedSignupButton = document.getElementById("hosted-signup-button");
-
-  if (config.phoneOtpEnabled) {
-    if (hostedLoginButton) {
-      hostedLoginButton.textContent = config.emailOtpEnabled ? "Code sign in" : "SMS code sign in";
-    }
-    if (hostedSignupButton) {
-      hostedSignupButton.textContent = config.emailOtpEnabled ? "Code sign up" : "SMS code sign up";
-    }
-  } else if (config.emailOtpEnabled) {
-    if (hostedLoginButton) {
-      hostedLoginButton.textContent = "Email code sign in";
-    }
-    if (hostedSignupButton) {
-      hostedSignupButton.textContent = "Email code sign up";
-    }
-  }
-
-  hostedLoginButton?.addEventListener("click", async () => {
-    await startAuthorization(config.emailOtpEnabled ? "email-otp" : config.phoneOtpEnabled ? "phone-otp" : "login");
-  });
-
-  hostedSignupButton?.addEventListener("click", async () => {
-    await startAuthorization("signup");
-  });
 }
 
 async function handleCallbackPage() {
-  const params = new URLSearchParams(window.location.search);
   const status = document.getElementById("callback-status");
   const debug = document.getElementById("callback-debug");
-  const stored = readOAuthState();
-  if (!stored) {
-    throw new Error("The PKCE state is missing. Start the flow again from the sample home page.");
+  if (status) {
+    status.textContent =
+      "This vanilla page no longer exchanges authorization codes. Use the ASP.NET Core client at http://localhost:5090 or the Next.js Auth.js example at http://localhost:3010.";
   }
-
-  if (params.get("error")) {
-    throw new Error(params.get("error"));
+  if (debug) {
+    debug.textContent = "Hosted JS login is owned by a stack-standard OIDC library, not sample.js.";
   }
-
-  const state = params.get("state");
-  const code = params.get("code");
-  if (!code || !state) {
-    throw new Error("The authorization response is missing its code or state.");
-  }
-
-  if (state !== stored.state) {
-    throw new Error("The OAuth state did not match the stored PKCE state.");
-  }
-
-  status.textContent = "Exchanging your authorization code for tokens...";
-
-  const body = new URLSearchParams({
-    grant_type: "authorization_code",
-    code,
-    client_id: stored.clientId,
-    redirect_uri: stored.redirectUri,
-    code_verifier: stored.codeVerifier,
-    resource: stored.resource
-  });
-
-  const response = await fetch("/sqlos/auth/token", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded"
-    },
-    body
-  });
-
-  const payload = await response.json();
-  if (!response.ok) {
-    debug.textContent = JSON.stringify(payload, null, 2);
-    throw new Error(payload.error_description || payload.message || "Token exchange failed.");
-  }
-
-  writeTokens(payload);
-  sessionStorage.removeItem(oauthStorageKey);
-  status.textContent = "Success. Redirecting to the Todo UI...";
-  debug.textContent = JSON.stringify(
-    {
-      token_type: payload.token_type,
-      expires_in: payload.expires_in,
-      scope: payload.scope,
-      aud: parseJwt(payload.access_token)?.aud
-    },
-    null,
-    2
-  );
-
-  window.location.replace("/app.html");
 }
 
 async function initAppPage() {
@@ -148,8 +68,8 @@ async function initAppPage() {
   const tokens = readTokens();
 
   if (!tokens?.access_token) {
-    sessionInfo.textContent = "No local access token was found. Start from the hosted sign-in flow.";
-    todoList.innerHTML = `<div class="empty-state">Sign in from the sample home page to read and write todos.</div>`;
+    sessionInfo.textContent = "No local access token was found. Use the ASP.NET Core or Next.js hosted client.";
+    todoList.innerHTML = `<div class="empty-state">Sign in from the ASP.NET Core client at http://localhost:5090 or the Next.js example at http://localhost:3010.</div>`;
     todoForm?.setAttribute("hidden", "hidden");
     return;
   }
@@ -283,43 +203,6 @@ async function refreshTodos(todoListElement, sessionInfoElement) {
   });
 }
 
-async function startAuthorization(view) {
-  const config = await getSampleConfig();
-  const codeVerifier = generateRandomString();
-  const state = generateRandomString();
-  const redirectUri = config.hostedClient.redirectUri;
-  const challenge = await createCodeChallenge(codeVerifier);
-
-  sessionStorage.setItem(
-    oauthStorageKey,
-    JSON.stringify({
-      clientId: config.hostedClient.clientId,
-      redirectUri,
-      codeVerifier,
-      resource: config.resource,
-      state
-    })
-  );
-
-  const params = new URLSearchParams({
-    response_type: "code",
-    client_id: config.hostedClient.clientId,
-    redirect_uri: redirectUri,
-    state,
-    scope: (config.allowedScopes || []).join(" "),
-    code_challenge: challenge,
-    code_challenge_method: "S256",
-    resource: config.resource,
-    view
-  });
-
-  if (view === "signup" || view === "email-otp" || view === "phone-otp") {
-    params.set("prompt", "login");
-  }
-
-  window.location.assign(`/sqlos/auth/authorize?${params.toString()}`);
-}
-
 async function getSampleConfig() {
   const response = await fetch("/sample/config");
   if (!response.ok) {
@@ -355,44 +238,9 @@ async function readApiError(response) {
   }
 }
 
-async function createCodeChallenge(verifier) {
-  const data = new TextEncoder().encode(verifier);
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  return base64UrlEncode(new Uint8Array(digest));
-}
-
-function generateRandomString() {
-  const buffer = new Uint8Array(32);
-  crypto.getRandomValues(buffer);
-  return base64UrlEncode(buffer);
-}
-
-function base64UrlEncode(bytes) {
-  const base64 = btoa(String.fromCharCode(...bytes));
-  return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
-
-function readOAuthState() {
-  const raw = sessionStorage.getItem(oauthStorageKey);
-  return raw ? JSON.parse(raw) : null;
-}
-
-function writeTokens(tokens) {
-  localStorage.setItem(tokenStorageKey, JSON.stringify(tokens));
-}
-
 function readTokens() {
   const raw = localStorage.getItem(tokenStorageKey);
   return raw ? JSON.parse(raw) : null;
-}
-
-function parseJwt(token) {
-  try {
-    const [, payload] = token.split(".");
-    return JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
-  } catch {
-    return null;
-  }
 }
 
 function escapeHtml(value) {

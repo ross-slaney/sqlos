@@ -58,16 +58,9 @@ See [Sign in an ASP.NET Core app](/docs/quickstarts/aspnet-core-login) for the a
 
 ## Hosted Todo client
 
-The Todo CRUD path uses the seeded browser client `todo-web` and callback `http://localhost:5080/callback.html`.
+Hosted browser login for this stack is the Razor Pages client at `http://localhost:5090` (`AddOpenIdConnect`) or the Next.js example at `http://localhost:3010` (Auth.js). The Todo API still seeds `todo-web` and `http://localhost:5080/callback.html` for protocol demos; the vanilla `sample.js` page no longer implements PKCE or `/token`.
 
-Use the landing page to:
-
-- start password sign-in or signup;
-- return through the PKCE callback;
-- create, read, update, and delete Todo items;
-- compare the API result with resources and grants in the embedded dashboard.
-
-The browser only starts the OAuth request. SqlOS AuthPage owns credential collection, user creation, organization selection, and the redirect with an authorization code.
+Use the landing page to inspect issuer, audience, CIMD/DCR flags, and headless request state. Use the ASP.NET Core or Next.js client to complete hosted sign-in, then compare Todo resources and grants in the embedded dashboard.
 
 ## Simple FGA
 

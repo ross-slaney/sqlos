@@ -1363,6 +1363,24 @@ public sealed class SqlOSExampleApiIntegrationTests
         revokeJson.RootElement.TryGetProperty("revokedSessions", out _).Should().BeTrue();
     }
 
+    [TestMethod]
+    public async Task ExampleWebClient_RegistersAuthJsCallbackRedirectUri()
+    {
+        var detailResponse = await ExampleApiFixture.Client.GetAsync("/sqlos/admin/auth/api/clients/example-web");
+        detailResponse.EnsureSuccessStatusCode();
+        var exampleWeb = JsonDocument.Parse(await detailResponse.Content.ReadAsStringAsync()).RootElement;
+
+        var redirectUris = exampleWeb.GetProperty("redirectUris").EnumerateArray()
+            .Select(uri => uri.GetString())
+            .ToList();
+
+        redirectUris.Should().Contain("http://localhost:3000/auth/callback");
+        redirectUris.Should().Contain("http://localhost:3000/api/auth/callback/sqlos");
+        exampleWeb.GetProperty("allowedScopes").EnumerateArray()
+            .Select(scope => scope.GetString())
+            .Should().BeEquivalentTo("openid", "profile", "email", "offline_access");
+    }
+
     private static async Task<HttpResponseMessage> AdminPostAsync(string path, object body)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, path)

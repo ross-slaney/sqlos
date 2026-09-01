@@ -2,9 +2,8 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
-import { signIn } from "next-auth/react";
-import { jwtDecode } from "jwt-decode";
 import Link from "next/link";
+import { startHostedSqlOSSignIn } from "@/components/sqlos-hosted-sign-in";
 import {
   getHeadlessRequest,
   headlessIdentify,
@@ -30,25 +29,6 @@ import {
   type HeadlessActionResult,
   type HeadlessProvider,
 } from "@/lib/sqlos-headless";
-import {
-  getExampleAuthServerUrl,
-  getExampleClientId,
-  getExampleRedirectUri,
-  createOpaqueToken,
-  createCodeChallenge,
-  persistSqlOSAuthFlow,
-  readSqlOSAuthFlow,
-  clearSqlOSAuthFlow,
-} from "@/lib/sqlos-auth";
-
-type DecodedToken = {
-  exp: number;
-  sub?: string;
-  email?: string;
-  name?: string;
-  org_id?: string;
-  sid?: string;
-};
 
 type ReferralOption = {
   value: string;
@@ -174,44 +154,9 @@ export function SqlOSHeadlessAuthPanel() {
       }
 
       if (code) {
-        const flow = readSqlOSAuthFlow();
-        const tokenRes = await fetch(`${getExampleAuthServerUrl()}/token`, {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({
-            grant_type: "authorization_code",
-            code,
-            client_id: getExampleClientId(),
-            redirect_uri: getExampleRedirectUri(),
-            code_verifier: flow.verifier || "",
-          }),
-        });
-
-        const tokenData = await tokenRes.json();
-        if (!tokenRes.ok || !tokenData.access_token) {
-          setError(tokenData.error_description || tokenData.error || "Token exchange failed.");
-          return;
-        }
-
-        const decoded = jwtDecode<DecodedToken>(tokenData.access_token);
-        const signInResult = await signIn("credentials", {
-          redirect: false,
-          accessToken: tokenData.access_token,
-          refreshToken: tokenData.refresh_token,
-          userId: decoded.sub ?? "",
-          email: decoded.email ?? "",
-          displayName: decoded.name ?? decoded.email ?? "User",
-          organizationId: decoded.org_id ?? null,
-          sessionId: decoded.sid ?? "",
-        });
-
-        if (!signInResult || signInResult.error) {
-          setError(signInResult?.error || "Session creation failed.");
-          return;
-        }
-
-        clearSqlOSAuthFlow();
-        window.location.replace(flow.nextPath || "/retail");
+        // Headless ends at a code. Auth.js owns PKCE and finishes /token at
+        // /api/auth/callback/sqlos.
+        window.location.assign(result.redirectUrl);
         return;
       }
 
@@ -1056,19 +1001,7 @@ function HeadlessFlowStarter({ initialView, nextPath }: { initialView: "login" |
     setStarting(true);
     setErr(null);
     try {
-      const verifier = createOpaqueToken(48);
-      const state = createOpaqueToken(24);
-      const challenge = await createCodeChallenge(verifier);
-      persistSqlOSAuthFlow(flowView, state, verifier, nextPath);
-      const url = new URL(`${getExampleAuthServerUrl()}/authorize`);
-      url.searchParams.set("response_type", "code");
-      url.searchParams.set("client_id", getExampleClientId());
-      url.searchParams.set("redirect_uri", getExampleRedirectUri());
-      url.searchParams.set("state", state);
-      url.searchParams.set("code_challenge", challenge);
-      url.searchParams.set("code_challenge_method", "S256");
-      if (flowView === "signup") url.searchParams.set("view", "signup");
-      window.location.replace(url.toString());
+      await startHostedSqlOSSignIn(flowView, nextPath);
     } catch (error) {
       setErr(error instanceof Error ? error.message : "Failed to start.");
       setStarting(false);

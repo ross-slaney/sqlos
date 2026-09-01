@@ -114,7 +114,7 @@ export function UserSwitcher() {
         }
         const decoded = jwtDecode<{ sub?: string; exp: number; org_id?: string }>(data.accessToken);
 
-        await signIn("credentials", {
+        await signIn("example-api", {
           redirect: false,
           accessToken: data.accessToken,
           refreshToken: data.refreshToken,
