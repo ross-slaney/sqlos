@@ -162,11 +162,17 @@ builder.AddSqlOS<ExampleAppDbContext>(
             "example-angular",
             "Example Angular Client",
             "http://localhost:4200/auth/callback");
-        SeedExamplePublicClient(
-            auth,
-            "example-expo",
-            "Example Expo Client",
-            "sqlos-expo://auth-callback");
+        auth.SeedClient(client =>
+        {
+            client.ClientId = "example-expo";
+            client.Name = "Example Expo Client";
+            client.RedirectUris = ["sqlos-expo://auth-callback"];
+            client.ClientType = "public_pkce";
+            client.RequirePkce = true;
+            client.IsFirstParty = true;
+            client.AllowNativeHeadlessAuth = true;
+            client.AllowedScopes = ["openid", "profile", "email", "offline_access"];
+        });
 
         // Seed the Microsoft social connection only when credentials are supplied so a fresh checkout
         // without Azure configured still boots cleanly (the button simply does not appear).

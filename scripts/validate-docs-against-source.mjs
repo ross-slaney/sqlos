@@ -67,9 +67,34 @@ if (packageVersion && !repositoryReadme.includes(`--version ${packageVersion}`))
   );
 }
 
+if (packageVersion && !repositoryReadme.includes(`npm install @sqlos/headless@${packageVersion}`)) {
+  errors.push(
+    `README.md: expected npm install command for @sqlos/headless@${packageVersion}.`,
+  );
+}
+
+if (packageVersion) {
+  const headlessPackage = JSON.parse(read("packages/headless/package.json"));
+  if (headlessPackage.name !== "@sqlos/headless") {
+    errors.push("packages/headless/package.json: name must be @sqlos/headless.");
+  }
+  if (headlessPackage.version !== packageVersion) {
+    errors.push(
+      `packages/headless/package.json: version ${headlessPackage.version} must match SqlOS ${packageVersion}.`,
+    );
+  }
+}
+
 if (packageVersion && !addToAppQuickstart.includes(`--version ${packageVersion}`)) {
   errors.push(
     `web/content/docs/quickstarts/add-to-app.mdx: expected package install command for SqlOS ${packageVersion}.`,
+  );
+}
+
+const headlessJsReference = read("web/content/docs/reference/headless-js.mdx");
+if (packageVersion && !headlessJsReference.includes(`@sqlos/headless@${packageVersion}`)) {
+  errors.push(
+    `web/content/docs/reference/headless-js.mdx: expected npm install for @sqlos/headless@${packageVersion}.`,
   );
 }
 

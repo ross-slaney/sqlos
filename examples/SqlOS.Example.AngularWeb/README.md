@@ -19,6 +19,7 @@ The Angular client is intentionally independent of the Next.js implementation so
 From the repository root:
 
 ```bash
+npm ci --prefix packages/headless && npm run build --prefix packages/headless
 npm ci --prefix examples/SqlOS.Example.Web
 npm ci --prefix examples/SqlOS.Example.AngularWeb
 dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
@@ -44,7 +45,7 @@ Use the hosted sign-in or sign-up action.
 
 Start the custom/headless path. The same OIDC library starts `/authorize`. SqlOS directs interaction to Angular's `/auth/authorize` route, then the library finishes the code at `/auth/callback`.
 
-[`SqlosHeadlessService`](src/app/services/sqlos-headless.service.ts) retrieves the server-owned view model and posts actions back with credentialed requests. [`AuthAuthorizeComponent`](src/app/pages/auth-authorize/auth-authorize.component.ts) renders password, email-code, signup, organization-selection, and provider states.
+[`AuthAuthorizeComponent`](src/app/pages/auth-authorize/auth-authorize.component.ts) uses `createHeadlessFlow` from `@sqlos/headless` and renders password, email-code, signup, organization-selection, and provider states.
 
 Headless signup sends first name, last name, and a required referral source to the API's application hook.
 
@@ -71,6 +72,7 @@ Unlike the Next.js sample, Angular does not currently include the delegated SSO 
 Start [`SqlOS.Example.Api`](../SqlOS.Example.Api/README.md) at `http://localhost:5062`, then:
 
 ```bash
+npm ci --prefix packages/headless && npm run build --prefix packages/headless
 npm ci --prefix examples/SqlOS.Example.AngularWeb
 npm run dev --prefix examples/SqlOS.Example.AngularWeb
 ```
@@ -102,12 +104,11 @@ The API allows credentialed CORS requests from `http://localhost:4200` in additi
 | [`src/app/environments/environment.ts`](src/app/environments/environment.ts) | API origin and public client ID |
 | [`src/app/auth.config.ts`](src/app/auth.config.ts) | `angular-oauth2-oidc` issuer, redirect URI, and scopes |
 | [`src/app/app.config.ts`](src/app/app.config.ts) | Discovery + `tryLogin` on startup |
-| [`src/app/services/sqlos-headless.service.ts`](src/app/services/sqlos-headless.service.ts) | Calls to the SqlOS headless AuthPage endpoints |
 | [`src/app/services/auth.service.ts`](src/app/services/auth.service.ts) | OIDC session sync, library refresh, sign-out, demo overrides |
 | [`src/app/services/api.service.ts`](src/app/services/api.service.ts) | Protected API requests |
 | [`src/app/guards/auth.guard.ts`](src/app/guards/auth.guard.ts) | Retail route protection |
 | [`src/app/pages/auth-callback/auth-callback.component.ts`](src/app/pages/auth-callback/auth-callback.component.ts) | Hosted OAuth callback completion |
-| [`src/app/pages/auth-authorize/auth-authorize.component.ts`](src/app/pages/auth-authorize/auth-authorize.component.ts) | Custom headless auth UI |
+| [`src/app/pages/auth-authorize/auth-authorize.component.ts`](src/app/pages/auth-authorize/auth-authorize.component.ts) | Custom headless auth UI via `createHeadlessFlow` |
 | [`src/app/pages/retail/dashboard/dashboard.component.ts`](src/app/pages/retail/dashboard/dashboard.component.ts) | Representative protected retail page |
 | [`src/app/components/user-switcher/user-switcher.component.ts`](src/app/components/user-switcher/user-switcher.component.ts) | Local demo identity selection |
 
@@ -120,6 +121,7 @@ This makes protocol behavior easy to inspect, but it is still sample storage. Ch
 ## Build and test
 
 ```bash
+npm ci --prefix packages/headless && npm run build --prefix packages/headless
 npm ci --prefix examples/SqlOS.Example.AngularWeb
 npm run build --prefix examples/SqlOS.Example.AngularWeb
 ```

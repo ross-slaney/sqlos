@@ -1,13 +1,14 @@
 # Expo mobile example
 
-This Expo Router application demonstrates SqlOS from a native public client: it opens the hosted AuthPage in a secure browser session, completes authorization code + PKCE through a custom URL scheme, stores tokens with Expo SecureStore, refreshes access tokens, and calls FGA-protected retail APIs.
+This Expo Router application demonstrates SqlOS from a native public client: it can complete hosted AuthPage in a secure browser session, or native headless auth in-app via `@sqlos/headless`. Both paths finish authorization code + PKCE through a custom URL scheme, store tokens with Expo SecureStore, refresh access tokens, and call FGA-protected retail APIs.
 
 It is a separate client. The full .NET Aspire AppHost starts the backend but does **not** launch Expo.
 
 ## What it demonstrates
 
 - native OAuth browser handoff with `expo-auth-session` (`AuthRequest`, discovery, `exchangeCodeAsync`)
-- library-owned S256 PKCE and state
+- native headless auth with `createHeadlessFlow` + `flow.start()` from `@sqlos/headless`
+- library-owned S256 PKCE (hosted) and start-input PKCE (headless)
 - a custom `sqlos-expo://` callback scheme
 - access and refresh token storage with `expo-secure-store`
 - automatic refresh before protected API calls
@@ -15,7 +16,7 @@ It is a separate client. The full .NET Aspire AppHost starts the backend but doe
 - FGA-filtered chains, stores, and inventory
 - local demo switching between user, service-account, and agent subjects
 
-The app uses the SqlOS-hosted authentication UI. It does not implement the browser samples' headless/custom auth UI.
+Login and signup screens default to in-app headless identify/password/org/MFA. Hosted AuthPage remains available through `startHostedAuth` for the companion hosted-OIDC path.
 
 ## Start the backend
 
@@ -28,6 +29,7 @@ Prerequisites for the backend:
 From the repository root:
 
 ```bash
+npm ci --prefix packages/headless && npm run build --prefix packages/headless
 npm ci --prefix examples/SqlOS.Example.Web
 npm ci --prefix examples/SqlOS.Example.AngularWeb
 dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
@@ -42,6 +44,7 @@ You can instead run the [example API standalone](../SqlOS.Example.Api/README.md#
 Install dependencies:
 
 ```bash
+npm ci --prefix packages/headless && npm run build --prefix packages/headless
 npm ci --prefix examples/SqlOS.Example.ExpoApp
 ```
 
@@ -72,7 +75,7 @@ const localhost =
   Platform.OS === "android" ? "10.0.2.2" : "localhost";
 
 export const API_URL = `http://${localhost}:5062`;
-export const CLIENT_ID = "example-web";
+export const CLIENT_ID = "example-expo";
 ```
 
 | Runtime | API origin | Why |
@@ -83,35 +86,43 @@ export const CLIENT_ID = "example-web";
 
 For a physical device, make the API listen on a network-reachable, development-safe address, update `API_URL`, and keep firewall, issuer/provider callback, and redirect configuration aligned. Do not expose the sample dashboard or HTTP development endpoints to an untrusted network.
 
-## Why the client ID is `example-web`
+## Why the client ID is `example-expo`
 
-The API seeds both:
+The API seeds:
 
-- `example-web` with browser callbacks **and** `sqlos-expo://auth-callback`;
-- `example-expo` with `sqlos-expo://auth-callback`.
+- `example-web` with browser callbacks **and** `sqlos-expo://auth-callback` (hosted AuthPage);
+- `example-expo` with `sqlos-expo://auth-callback` and `AllowNativeHeadlessAuth = true`.
 
-The current Expo source uses `example-web`, so the flow is valid even though a dedicated registration also exists. To use `example-expo`, change [`CLIENT_ID`](services/config.ts); keep the callback URI registered exactly.
+The Expo source uses `example-expo` so native `POST /headless/start` is allowed. Keep the callback URI registered exactly (`sqlos-expo://auth-callback`).
 
 Both are public PKCE clients. A mobile application cannot safely hold an OAuth client secret.
 
 ## Authentication flow
 
+Headless (default login/signup screens):
+
+1. `flow.start({ codeChallenge, codeChallengeMethod: "S256" })` posts `POST /sqlos/auth/headless/start`.
+2. In-app screens collect identify/password (and org/MFA when returned).
+3. When `status === "redirect"` and the URL has `code`, `exchangeHeadlessAuthorization` uses `expo-auth-session` `exchangeCodeAsync`.
+4. The app stores access and refresh tokens in SecureStore.
+
+Hosted AuthPage (`startHostedAuth`):
+
 1. `AuthRequest` + discovery start hosted authorize with library-owned PKCE.
 2. `promptAsync` opens the system browser to `/sqlos/auth/authorize`.
 3. SqlOS renders hosted sign-in/sign-up and redirects to the app's custom scheme.
 4. `exchangeCodeAsync` finishes `/token`.
-5. The app decodes display/session metadata and stores the access and refresh tokens in SecureStore.
-6. Authenticated API requests refresh an expired token with `refreshAsync` before sending it.
 
 Relevant code:
 
 | File | Responsibility |
 | --- | --- |
 | [`app.json`](app.json) | Registers the `sqlos-expo` scheme and Expo plugins |
-| [`services/config.ts`](services/config.ts) | Platform API origin and public client ID |
-| [`services/sqlos-auth.ts`](services/sqlos-auth.ts) | Issuer, client ID, redirect URI, `AuthRequest` / `exchangeCodeAsync` / `refreshAsync` |
-| `app/(auth)/login.tsx` | Opens the hosted login browser session |
-| `app/(auth)/signup.tsx` | Opens the hosted signup browser session |
+| [`services/config.ts`](services/config.ts) | Platform API origin and public client ID (`example-expo`) |
+| [`services/sqlos-auth.ts`](services/sqlos-auth.ts) | Issuer, PKCE, redirect URI, hosted `AuthRequest`, and `exchangeCodeAsync` |
+| [`components/HeadlessAuthForm.tsx`](components/HeadlessAuthForm.tsx) | Native `createHeadlessFlow` + in-app screens |
+| `app/(auth)/login.tsx` | Headless login (hosted remains in `sqlos-auth.ts`) |
+| `app/(auth)/signup.tsx` | Headless signup |
 | `app/(auth)/callback.tsx` | Deep-link fallback back to login |
 | [`services/auth.ts`](services/auth.ts) | SecureStore session, refresh, local logout, demo override |
 | [`services/AuthContext.tsx`](services/AuthContext.tsx) | React authentication state |
@@ -134,6 +145,8 @@ Switching to a seeded service account or agent replaces the bearer header with t
 The Expo package has no dedicated build or test script. Type-check it from the repository root:
 
 ```bash
+npm ci --prefix packages/headless && npm run build --prefix packages/headless
+npm ci --prefix examples/SqlOS.Example.ExpoApp
 npm exec --prefix examples/SqlOS.Example.ExpoApp -- tsc --noEmit -p examples/SqlOS.Example.ExpoApp/tsconfig.json
 ```
 

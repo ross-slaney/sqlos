@@ -98,57 +98,6 @@ export interface StoreInventory {
   items: InventoryItemDto[];
 }
 
-export interface HeadlessViewModel {
-  requestId: string;
-  view: string;
-  clientId: string;
-  headlessApiBasePath: string;
-  error?: string | null;
-  info?: string | null;
-  challengeToken?: string | null;
-  pendingToken?: string | null;
-  email?: string | null;
-  displayName?: string | null;
-  uiContext?: Record<string, unknown> | null;
-  providers?: HeadlessProvider[];
-  organizationSelection?: HeadlessOrganizationOption[];
-  settings?: HeadlessSettings | null;
-  fieldErrors?: Record<string, string>;
-  scope?: string | null;
-}
-
-export interface HeadlessProvider {
-  connectionId: string;
-  providerType: string;
-  displayName: string;
-  logoDataUrl?: string | null;
-}
-
-export interface HeadlessOrganizationOption {
-  id: string;
-  name: string;
-  primaryDomain?: string | null;
-  role: string;
-}
-
-export interface HeadlessSettings {
-  pageTitle?: string;
-  pageSubtitle?: string;
-  primaryColor?: string;
-  accentColor?: string;
-  backgroundColor?: string;
-  enablePasswordSignup?: boolean;
-  enabledCredentialTypes?: string[];
-  localPasswordRuntimeEnabled?: boolean;
-  emailOtpRuntimeConfigured?: boolean;
-}
-
-export interface HeadlessActionResult {
-  type: 'redirect' | 'view';
-  redirectUrl?: string;
-  viewModel?: HeadlessViewModel;
-}
-
 export interface DecodedToken {
   exp: number;
   iss?: string;

@@ -8,6 +8,7 @@
     "start": "next start --hostname 0.0.0.0 --port ${PORT:-3000}"
   },
   "dependencies": {
+    "@sqlos/headless": "file:../../packages/headless",
     "jwt-decode": "^4.0.0",
     "next": "^15.2.0",
     "next-auth": "^4.24.11",

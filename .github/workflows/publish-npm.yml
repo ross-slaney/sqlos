@@ -1,0 +1,118 @@
+name: Publish @sqlos/headless preview
+
+on:
+  pull_request:
+    branches: [main]
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+      - closed
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+jobs:
+  publish-preview:
+    name: Publish PR preview
+    if: >
+      github.event.action != 'closed' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: packages/headless/package-lock.json
+      - name: Update npm for trusted publishing
+        run: npm install -g npm@11
+      - run: npm ci
+        working-directory: packages/headless
+      - name: Prepare preview version
+        id: meta
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        working-directory: packages/headless
+        run: |
+          node <<'NODE' >> "$GITHUB_OUTPUT"
+          const fs = require("node:fs");
+          const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+          const baseVersion = String(pkg.version).split("-")[0];
+          const shortSha = process.env.GITHUB_SHA.slice(0, 12).replace(/[^0-9A-Za-z-]/g, "");
+          pkg.version = `${baseVersion}-pr.${process.env.PR_NUMBER}.${shortSha}.${process.env.GITHUB_RUN_NUMBER}.${process.env.GITHUB_RUN_ATTEMPT}`;
+          fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
+          const tag = `pr-${process.env.PR_NUMBER}`;
+          console.log(`package_name=${pkg.name}`);
+          console.log(`version=${pkg.version}`);
+          console.log(`tag=${tag}`);
+          console.log(`package_ref=${pkg.name}@${pkg.version}`);
+          console.log(`tag_ref=${pkg.name}@${tag}`);
+          console.log(`package_url=https://www.npmjs.com/package/${pkg.name}/v/${pkg.version}`);
+          NODE
+      - run: npm test
+        working-directory: packages/headless
+      - run: npm run build
+        working-directory: packages/headless
+      - name: Publish preview
+        working-directory: packages/headless
+        run: npm publish --provenance --access public --tag "${{ steps.meta.outputs.tag }}"
+      - name: Comment package preview
+        uses: actions/github-script@v7
+        env:
+          PACKAGE_NAME: ${{ steps.meta.outputs.package_name }}
+          PACKAGE_REF: ${{ steps.meta.outputs.package_ref }}
+          TAG_REF: ${{ steps.meta.outputs.tag_ref }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          PACKAGE_URL: ${{ steps.meta.outputs.package_url }}
+        with:
+          script: |
+            const marker = `<!-- sqlos-preview-package:${process.env.PACKAGE_NAME} -->`;
+            const body = [
+              marker,
+              "Preview package published.",
+              "",
+              `- Package: [${process.env.PACKAGE_REF}](${process.env.PACKAGE_URL})`,
+              `- Dist tag: \`${process.env.TAG}\``,
+              `- Install: \`npm i ${process.env.TAG_REF}\``,
+              "",
+              "In-repo examples keep using the local `file:` path. Do not point CI at this preview tag.",
+            ].join("\n");
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+            const existing = comments.find((comment) => comment.body?.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+  remove-preview-tag:
+    name: Remove PR preview dist-tag
+    if: github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - name: Remove dist-tag
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        working-directory: packages/headless
+        run: |
+          PACKAGE_NAME="$(node -p "require('./package.json').name")"
+          TAG="pr-${PR_NUMBER}"
+          npm dist-tag rm "$PACKAGE_NAME" "$TAG" || true

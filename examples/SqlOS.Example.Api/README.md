@@ -14,6 +14,7 @@ The full AppHost is the normal development path because it supplies SQL Server, 
 From the repository root:
 
 ```bash
+npm ci --prefix packages/headless && npm run build --prefix packages/headless
 npm ci --prefix examples/SqlOS.Example.Web
 npm ci --prefix examples/SqlOS.Example.AngularWeb
 dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
@@ -128,11 +129,11 @@ Email OTP is offered by the seeded auth-page configuration, but real code delive
 
 | Client ID | Redirect URI | Consumer |
 | --- | --- | --- |
-| `example-web` | Auth.js `/api/auth/callback/sqlos` (3010 under AppHost, 3000 standalone), plus the legacy `/auth/callback` URIs and `sqlos-expo://auth-callback` | Next.js Auth.js; Expo also uses this client because the custom-scheme callback is registered here |
+| `example-web` | Auth.js `/api/auth/callback/sqlos` (3010 under AppHost, 3000 standalone), plus the legacy `/auth/callback` URIs and `sqlos-expo://auth-callback` | Next.js Auth.js |
 | `example-angular` | `http://localhost:4200/auth/callback` | Angular `angular-oauth2-oidc` |
-| `example-expo` | `sqlos-expo://auth-callback` | Separately seeded native-client registration |
+| `example-expo` | `sqlos-expo://auth-callback` | Expo native client; `AllowNativeHeadlessAuth = true` for `POST /headless/start` |
 
-The `example-web` seed also includes `sqlos-expo://auth-callback`, which is why the current Expo sample's [`CLIENT_ID`](../SqlOS.Example.ExpoApp/services/config.ts) value works. If you switch Expo to `example-expo`, keep its callback registration aligned.
+The Expo sample uses `example-expo`. Keep `sqlos-expo://auth-callback` registered exactly. `example-web` still includes that scheme for hosted-browser fallback, but native headless start requires the dedicated Expo client.
 
 Redirect URIs are exact security boundaries. Changing a client port or callback path requires changing both the client and seed configuration.
 
@@ -186,6 +187,7 @@ Use a SQL login with permission to create/update the sample schema. Do not point
 To run the Next.js client alongside standalone API mode:
 
 ```bash
+npm ci --prefix packages/headless && npm run build --prefix packages/headless
 npm ci --prefix examples/SqlOS.Example.Web
 NEXT_PUBLIC_API_URL=http://localhost:5062 \
 NEXTAUTH_URL=http://localhost:3000 \

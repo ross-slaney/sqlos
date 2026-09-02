@@ -3,32 +3,10 @@
 import { useEffect, useState, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { useHeadlessAuth } from "@sqlos/headless/react";
 import { startHostedSqlOSSignIn } from "@/components/sqlos-hosted-sign-in";
-import {
-  getHeadlessRequest,
-  headlessIdentify,
-  headlessPasswordLogin,
-  headlessRequestPasswordResetEmail,
-  headlessRequestEmailOtp,
-  headlessRequestMagicLink,
-  headlessRequestPhoneOtp,
-  headlessRequestPhoneOtpSignup,
-  headlessResetPassword,
-  headlessSelectOrganization,
-  headlessSignup,
-  headlessApproveConsent,
-  headlessDenyConsent,
-  headlessStartProvider,
-  headlessStartMfaTotpEnrollment,
-  headlessVerifyEmailOtp,
-  headlessVerifyMfa,
-  headlessVerifyMfaTotpEnrollment,
-  headlessVerifyPhoneOtp,
-  headlessVerifyPhoneOtpSignup,
-  type HeadlessViewModel,
-  type HeadlessActionResult,
-  type HeadlessProvider,
-} from "@/lib/sqlos-headless";
+import { getExampleAuthServerUrl, getExampleClientId } from "@/lib/sqlos-config";
+import type { HeadlessProvider, HeadlessViewModel } from "@sqlos/headless";
 
 type ReferralOption = {
   value: string;
@@ -70,11 +48,18 @@ export function SqlOSHeadlessAuthPanel() {
   const initialView = searchParams.get("view") || "login";
   const initialError = searchParams.get("error");
   const initialEmail = searchParams.get("email") || "";
-  const pendingToken = searchParams.get("pendingToken");
-  const initialMfaToken = searchParams.get("mfaToken");
   const initialDisplayName = searchParams.get("displayName") || "";
   const initialResetToken = searchParams.get("token") || "";
   const nextPath = searchParams.get("next") || "/retail";
+
+  const flow = useHeadlessAuth({
+    issuer: getExampleAuthServerUrl(),
+    clientId: getExampleClientId(),
+    redirectUri: typeof window === "undefined"
+      ? "http://localhost:3010/api/auth/callback/sqlos"
+      : `${window.location.origin}/api/auth/callback/sqlos`,
+    credentials: "include",
+  });
 
   const [view, setView] = useState(initialView);
   const [loading, setLoading] = useState(false);
@@ -99,76 +84,25 @@ export function SqlOSHeadlessAuthPanel() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
 
-  useEffect(() => {
-    if (!requestId) return;
-
-    const load = async () => {
-      try {
-        const vm = await getHeadlessRequest(
-          requestId,
-          initialView,
-          initialError,
-          pendingToken,
-          initialEmail,
-          initialDisplayName,
-          initialMfaToken,
-        );
-        setViewModel(vm);
-        if (vm.view) setView(vm.view);
-        if (vm.error) setError(vm.error);
-        if (vm.email) setEmail(vm.email);
-        if (vm.email) setResetEmail(vm.email);
-        if (vm.phoneNumber) setPhoneNumber(vm.phoneNumber);
-        if (vm.displayName && !firstName && !lastName && initialDisplayName) {
-          const [first = "", ...rest] = vm.displayName.split(" ");
-          setFirstName(first);
-          setLastName(rest.join(" "));
-        }
-        if (vm.fieldErrors) setFieldErrors(vm.fieldErrors);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load authorization request.");
-      }
-    };
-
-    void load();
-  }, [requestId, initialView, initialError, pendingToken, initialEmail, initialDisplayName, initialMfaToken]);
-
-  useEffect(() => {
-    if (initialResetToken) {
-      setResetToken(initialResetToken);
-      setView("password-reset");
-    }
-  }, [initialResetToken]);
-
-  const handleResult = useCallback(async (result: HeadlessActionResult) => {
+  const applyFlow = useCallback(() => {
     setNotice(null);
-    if (result.type === "redirect" && result.redirectUrl) {
-      const url = new URL(result.redirectUrl);
+    if (flow.status === "redirect" && flow.redirectUrl) {
+      const url = new URL(flow.redirectUrl);
       const code = url.searchParams.get("code");
-
-      // If the redirect is to a custom scheme (e.g. mobile app), don't exchange
-      // the code here — let the native app handle the token exchange itself.
       if (code && !url.protocol.startsWith("http")) {
-        window.location.href = result.redirectUrl;
+        window.location.href = flow.redirectUrl;
         return;
       }
-
       if (code) {
-        // Headless ends at a code. Auth.js owns PKCE and finishes /token at
-        // /api/auth/callback/sqlos.
-        window.location.assign(result.redirectUrl);
+        window.location.assign(flow.redirectUrl);
         return;
       }
-
-      window.location.href = result.redirectUrl;
+      window.location.href = flow.redirectUrl;
       return;
     }
 
-    if (result.viewModel) {
-      const nextViewModel =
-        result.viewModel.view === "mfa-enroll" && !result.viewModel.totpEnrollment && viewModel?.totpEnrollment
-          ? { ...result.viewModel, totpEnrollment: viewModel.totpEnrollment }
-          : result.viewModel;
+    const nextViewModel = flow.viewModel;
+    if (nextViewModel) {
       setViewModel(nextViewModel);
       if (nextViewModel.view) setView(nextViewModel.view);
       if (nextViewModel.error) setError(nextViewModel.error);
@@ -182,51 +116,74 @@ export function SqlOSHeadlessAuthPanel() {
       if (nextViewModel.totpEnrollment) setMfaEnrollmentCode("");
       setFieldErrors(nextViewModel.fieldErrors ?? {});
     }
-  }, [viewModel?.totpEnrollment]);
+    if (flow.error) setError(flow.error);
+    if (Object.keys(flow.fieldErrors).length > 0) setFieldErrors(flow.fieldErrors);
+  }, [flow]);
 
-  const onStartMfaEnrollment = useCallback(async () => {
-    if (!requestId || !viewModel?.mfaToken) return;
+  useEffect(() => {
+    if (!requestId) return;
+    void (async () => {
+      try {
+        await flow.resume(window.location);
+        applyFlow();
+        const vm = flow.viewModel;
+        if (vm?.displayName && !firstName && !lastName && initialDisplayName) {
+          const [first = "", ...rest] = vm.displayName.split(" ");
+          setFirstName(first);
+          setLastName(rest.join(" "));
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load authorization request.");
+      }
+    })();
+  }, [requestId]);
+
+  useEffect(() => {
+    if (initialResetToken) {
+      setResetToken(initialResetToken);
+      setView("password-reset");
+    }
+  }, [initialResetToken]);
+
+  const runAction = useCallback(async (action: () => Promise<unknown>, fallback: string) => {
     setLoading(true); setError(null); setFieldErrors({});
     try {
-      await handleResult(await headlessStartMfaTotpEnrollment(requestId, viewModel.mfaToken, "Authenticator app"));
+      await action();
+      applyFlow();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "We could not start authenticator enrollment.");
+      setError(err instanceof Error ? err.message : fallback);
     } finally {
       setLoading(false);
     }
-  }, [handleResult, requestId, viewModel?.mfaToken]);
+  }, [applyFlow]);
+
+  const onStartMfaEnrollment = useCallback(async () => {
+    if (flow.status === "idle") return;
+    await runAction(() => flow.mfa.totp.enrollStart({ displayName: "Authenticator app" }), "We could not start authenticator enrollment.");
+  }, [flow, runAction]);
 
   useEffect(() => {
-    if (view !== "mfa-enroll" || !requestId || !viewModel?.mfaToken || viewModel.totpEnrollment) return;
+    if (view !== "mfa-enroll" || !viewModel?.mfaToken || viewModel.totpEnrollment) return;
     if (startedMfaEnrollmentToken === viewModel.mfaToken) return;
     setStartedMfaEnrollmentToken(viewModel.mfaToken);
     void onStartMfaEnrollment();
-  }, [onStartMfaEnrollment, requestId, startedMfaEnrollmentToken, view, viewModel?.mfaToken, viewModel?.totpEnrollment]);
+  }, [onStartMfaEnrollment, startedMfaEnrollmentToken, view, viewModel?.mfaToken, viewModel?.totpEnrollment]);
 
   const onIdentify = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!requestId) return;
-    setLoading(true); setError(null); setFieldErrors({});
-    try { await handleResult(await headlessIdentify(requestId, email)); }
-    catch (err) { setError(err instanceof Error ? err.message : "We could not start sign in."); }
-    finally { setLoading(false); }
+    await runAction(() => flow.identify({ email }), "We could not start sign in.");
   };
 
   const onLogin = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!requestId) return;
-    setLoading(true); setError(null); setFieldErrors({});
-    try { await handleResult(await headlessPasswordLogin(requestId, email, password)); }
-    catch (err) { setError(err instanceof Error ? err.message : "Login failed."); }
-    finally { setLoading(false); }
+    await runAction(() => flow.password.login({ email, password }), "Login failed.");
   };
 
   const onRequestPasswordReset = async (event: React.FormEvent) => {
     event.preventDefault();
     setLoading(true); setError(null); setNotice(null); setFieldErrors({});
     try {
-      const targetEmail = (resetEmail || email).trim();
-      const result = await headlessRequestPasswordResetEmail(targetEmail, requestId);
+      const result = await flow.password.forgot({ email: (resetEmail || email).trim() });
       setNotice(result.message || "If the account can be reset, a reset email is on the way.");
       setView("forgot-password-sent");
     } catch (err) {
@@ -247,7 +204,7 @@ export function SqlOSHeadlessAuthPanel() {
         setFieldErrors({ confirmNewPassword: "Passwords do not match." });
         return;
       }
-      await headlessResetPassword(resetToken, newPassword);
+      await flow.password.reset({ token: resetToken, newPassword });
       setPassword("");
       setNewPassword("");
       setConfirmNewPassword("");
@@ -262,165 +219,87 @@ export function SqlOSHeadlessAuthPanel() {
 
   const onRequestEmailOtp = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!requestId) return;
-    setLoading(true); setError(null); setFieldErrors({});
-    try { await handleResult(await headlessRequestEmailOtp(requestId, email)); }
-    catch (err) { setError(err instanceof Error ? err.message : "We could not send a sign-in code."); }
-    finally { setLoading(false); }
+    await runAction(() => flow.emailOtp.start({ email }), "We could not send a sign-in code.");
   };
 
   const onRequestMagicLink = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!requestId) return;
-    setLoading(true); setError(null); setFieldErrors({});
-    try { await handleResult(await headlessRequestMagicLink(requestId, email)); }
-    catch (err) { setError(err instanceof Error ? err.message : "We could not send a sign-in link."); }
-    finally { setLoading(false); }
+    await runAction(() => flow.magicLink.start({ email }), "We could not send a sign-in link.");
   };
 
   const onVerifyEmailOtp = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!requestId) return;
-    const challengeToken = viewModel?.challengeToken;
-    if (!challengeToken) {
-      setError("Request a new sign-in code first.");
-      return;
-    }
-
-    setLoading(true); setError(null); setFieldErrors({});
-    try { await handleResult(await headlessVerifyEmailOtp(requestId, challengeToken, otpCode)); }
-    catch (err) { setError(err instanceof Error ? err.message : "The sign-in code was rejected."); }
-    finally { setLoading(false); }
+    await runAction(() => flow.emailOtp.verify({ code: otpCode }), "The sign-in code was rejected.");
   };
 
   const onRequestPhoneOtp = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!requestId) return;
-    setLoading(true); setError(null); setFieldErrors({});
-    try { await handleResult(await headlessRequestPhoneOtp(requestId, phoneNumber)); }
-    catch (err) { setError(err instanceof Error ? err.message : "We could not send a sign-in code."); }
-    finally { setLoading(false); }
+    await runAction(() => flow.phoneOtp.start({ phoneNumber }), "We could not send a sign-in code.");
   };
 
   const onVerifyPhoneOtp = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!requestId) return;
-    const challengeToken = viewModel?.challengeToken;
-    if (!challengeToken) {
-      setError("Request a new sign-in code first.");
-      return;
-    }
-
-    setLoading(true); setError(null); setFieldErrors({});
-    try { await handleResult(await headlessVerifyPhoneOtp(requestId, challengeToken, otpCode)); }
-    catch (err) { setError(err instanceof Error ? err.message : "The sign-in code was rejected."); }
-    finally { setLoading(false); }
+    await runAction(() => flow.phoneOtp.verify({ code: otpCode }), "The sign-in code was rejected.");
   };
 
   const onSignup = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!requestId) return;
-    setLoading(true); setError(null); setFieldErrors({});
-    try {
-      await handleResult(await headlessSignup(requestId, buildDisplayName(firstName, lastName, email), email, password, organizationName, { referralSource, firstName, lastName }));
-    } catch (err) { setError(err instanceof Error ? err.message : "Signup failed."); }
-    finally { setLoading(false); }
+    await runAction(
+      () => flow.signup({
+        displayName: buildDisplayName(firstName, lastName, email),
+        email,
+        password,
+        organizationName,
+        customFields: { referralSource, firstName, lastName },
+      }),
+      "Signup failed.",
+    );
   };
 
   const onRequestPhoneOtpSignup = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!requestId) return;
-    setLoading(true); setError(null); setFieldErrors({});
-    try {
-      await handleResult(await headlessRequestPhoneOtpSignup(
-        requestId,
-        buildDisplayName(firstName, lastName, phoneNumber),
+    await runAction(
+      () => flow.phoneOtp.signupStart({
+        displayName: buildDisplayName(firstName, lastName, phoneNumber),
         phoneNumber,
         organizationName,
-        { referralSource, firstName, lastName },
-      ));
-    } catch (err) { setError(err instanceof Error ? err.message : "Signup failed."); }
-    finally { setLoading(false); }
+        customFields: { referralSource, firstName, lastName },
+      }),
+      "Signup failed.",
+    );
   };
 
   const onVerifyPhoneOtpSignup = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!requestId) return;
-    const challengeToken = viewModel?.challengeToken;
-    const signupToken = viewModel?.signupToken;
-    if (!challengeToken || !signupToken) {
-      setError("Request a new sign-up code first.");
-      return;
-    }
-
-    setLoading(true); setError(null); setFieldErrors({});
-    try { await handleResult(await headlessVerifyPhoneOtpSignup(requestId, signupToken, challengeToken, otpCode)); }
-    catch (err) { setError(err instanceof Error ? err.message : "The sign-up code was rejected."); }
-    finally { setLoading(false); }
+    await runAction(() => flow.phoneOtp.signupVerify({ code: otpCode }), "The sign-up code was rejected.");
   };
 
   const onProviderStart = async (connectionId: string) => {
-    if (!requestId) return;
-    setLoading(true); setError(null);
-    try { await handleResult(await headlessStartProvider(requestId, connectionId, email || undefined)); }
-    catch (err) { setError(err instanceof Error ? err.message : "Provider auth failed."); }
-    finally { setLoading(false); }
+    await runAction(
+      () => flow.provider.start({ connectionId, email: email || undefined }),
+      "Provider auth failed.",
+    );
   };
 
   const onSelectOrganization = async (organizationId: string) => {
-    const activePendingToken = viewModel?.pendingToken ?? pendingToken;
-    if (!activePendingToken) return;
-    setLoading(true); setError(null);
-    try { await handleResult(await headlessSelectOrganization(activePendingToken, organizationId)); }
-    catch (err) { setError(err instanceof Error ? err.message : "Organization selection failed."); }
-    finally { setLoading(false); }
+    await runAction(() => flow.organization.select({ organizationId }), "Organization selection failed.");
   };
 
   const onDecideConsent = async (approve: boolean) => {
-    // The consent view state carries a one-time consent token; approve issues
-    // the code redirect, deny redirects back to the client with access_denied.
-    if (!requestId || !viewModel?.consentToken) return;
-    setLoading(true); setError(null);
-    try {
-      await handleResult(approve
-        ? await headlessApproveConsent(requestId, viewModel.consentToken)
-        : await headlessDenyConsent(requestId, viewModel.consentToken));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "The consent decision could not be recorded.");
-    } finally {
-      setLoading(false);
-    }
+    await runAction(
+      () => (approve ? flow.consent.approve() : flow.consent.deny()),
+      "The consent decision could not be recorded.",
+    );
   };
 
   const onVerifyMfa = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!requestId || !viewModel?.mfaToken) return;
-    setLoading(true); setError(null); setFieldErrors({});
-    try {
-      await handleResult(await headlessVerifyMfa(requestId, viewModel.mfaToken, mfaCode));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "The second-factor code was rejected.");
-    } finally {
-      setLoading(false);
-    }
+    await runAction(() => flow.mfa.verify({ code: mfaCode }), "The second-factor code was rejected.");
   };
 
   const onVerifyMfaEnrollment = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!requestId || !viewModel?.mfaToken || !viewModel.totpEnrollment) return;
-    setLoading(true); setError(null); setFieldErrors({});
-    try {
-      await handleResult(await headlessVerifyMfaTotpEnrollment(
-        requestId,
-        viewModel.mfaToken,
-        viewModel.totpEnrollment.enrollmentToken,
-        mfaEnrollmentCode,
-      ));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Authenticator enrollment failed.");
-    } finally {
-      setLoading(false);
-    }
+    await runAction(() => flow.mfa.totp.enrollVerify({ code: mfaEnrollmentCode }), "Authenticator enrollment failed.");
   };
 
   const isSignup = view === "signup" || view === "phone-otp-signup" || view === "phone-otp-signup-verify";

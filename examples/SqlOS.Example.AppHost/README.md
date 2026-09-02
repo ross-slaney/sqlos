@@ -31,6 +31,7 @@ The SQL image is started with the `linux/amd64` platform argument. Docker may em
 Install the two JavaScript applications once, then start Aspire from the repository root:
 
 ```bash
+npm ci --prefix packages/headless && npm run build --prefix packages/headless
 npm ci --prefix examples/SqlOS.Example.Web
 npm ci --prefix examples/SqlOS.Example.AngularWeb
 dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj

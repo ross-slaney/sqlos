@@ -22,6 +22,7 @@ This is a reference client for the [example API](../SqlOS.Example.Api/README.md)
 From the repository root:
 
 ```bash
+npm ci --prefix packages/headless && npm run build --prefix packages/headless
 npm ci --prefix examples/SqlOS.Example.Web
 npm ci --prefix examples/SqlOS.Example.AngularWeb
 dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
@@ -50,7 +51,7 @@ Choose the headless/custom UI entry point on `/auth/authorize`. Auth.js still st
 
 The docs walkthrough is [Build your own login and signup UI](https://sqlos.dev/docs/guides/custom-login-ui).
 
-[`sqlos-headless-auth-panel.tsx`](components/sqlos-headless-auth-panel.tsx) renders the returned view model and posts user actions to the SqlOS headless endpoints. It covers identification, password login/signup/reset, email and phone OTP, provider redirects, organization selection, MFA verification, and first-login TOTP enrollment.
+[`sqlos-headless-auth-panel.tsx`](components/sqlos-headless-auth-panel.tsx) uses `useHeadlessAuth` from `@sqlos/headless/react` and renders the returned view. It covers identification, password login/signup/reset, email and phone OTP, provider redirects, organization selection, MFA verification, and first-login TOTP enrollment. On redirect it follows the callback URL; Auth.js finishes `/token`.
 
 The headless signup UI sends `firstName`, `lastName`, and a required `referralSource` custom field. The API's `OnHeadlessSignupAsync` hook validates and persists that application profile data.
 
@@ -71,6 +72,7 @@ The switcher exists to make authorization differences visible. It is not a produ
 First start [`SqlOS.Example.Api`](../SqlOS.Example.Api/README.md) at `http://localhost:5062` with its standalone frontend settings. Then:
 
 ```bash
+npm ci --prefix packages/headless && npm run build --prefix packages/headless
 npm ci --prefix examples/SqlOS.Example.Web
 NEXT_PUBLIC_API_URL=http://localhost:5062 \
 NEXTAUTH_URL=http://localhost:3000 \
@@ -107,8 +109,7 @@ Variables prefixed with `NEXT_PUBLIC_` are exposed to browser code. Never put cl
 | [`lib/auth.ts`](lib/auth.ts) | Auth.js OIDC provider, JWT/session callbacks, token refresh |
 | [`lib/sqlos-config.ts`](lib/sqlos-config.ts) | Issuer, client ID, and post-login path helpers (no PKCE) |
 | [`components/sqlos-hosted-sign-in.tsx`](components/sqlos-hosted-sign-in.tsx) | Starts `signIn("sqlos")` with `prompt` / `view` |
-| [`lib/sqlos-headless.ts`](lib/sqlos-headless.ts) | Typed calls to the SqlOS headless AuthPage API |
-| [`components/sqlos-headless-auth-panel.tsx`](components/sqlos-headless-auth-panel.tsx) | Complete custom authentication UI state machine |
+| [`components/sqlos-headless-auth-panel.tsx`](components/sqlos-headless-auth-panel.tsx) | Custom UI on `useHeadlessAuth` from `@sqlos/headless/react` |
 | [`app/api/auth/[...nextauth]/route.ts`](app/api/auth/[...nextauth]/route.ts) | Auth.js route, including `/api/auth/callback/sqlos` |
 | [`middleware.ts`](middleware.ts) | Protects retail routes |
 | [`lib/api.ts`](lib/api.ts) | Authenticated example API requests |
@@ -125,6 +126,7 @@ These choices make the flow easy to inspect. Review your own threat model, cooki
 ## Build and validation
 
 ```bash
+npm ci --prefix packages/headless && npm run build --prefix packages/headless
 npm ci --prefix examples/SqlOS.Example.Web
 npm run build --prefix examples/SqlOS.Example.Web
 ```

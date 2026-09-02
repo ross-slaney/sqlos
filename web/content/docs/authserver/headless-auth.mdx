@@ -149,17 +149,18 @@ options.AuthServer.UseHeadlessAuthPage(headless =>
 
 ## Frontend implementation
 
-The example repository has complete Next.js and Angular clients. Use [Build your own login and signup UI](/docs/guides/custom-login-ui) for the source-aligned implementation flow, including state and S256 PKCE, credentialed CORS, server-owned view transitions, callback validation, and code exchange.
+The example repository has complete Next.js, Angular, and Expo clients on `@sqlos/headless`. Use [Build your own login and signup UI](/docs/guides/custom-login-ui) and the [`@sqlos/headless` reference](/docs/reference/headless-js).
 
 The headless routes are JSON integration endpoints, not SqlOS-hosted HTML forms, so they do not expect the hosted `__RequestVerificationToken` field. Native clients do not have browser cookie-CSRF exposure. For browser frontends, use an exact credentialed CORS allowlist or a same-origin/backend-for-frontend boundary; never combine credentialed requests with a reflected or wildcard origin. If your own UI host accepts cookie-authenticated form actions, protect those actions with that host's antiforgery mechanism. OAuth `state`, PKCE, and SqlOS request binding remain required but solve different substitution problems.
 
 The core files are:
 
 ```text
+packages/headless
 examples/SqlOS.Example.Web/app/auth/authorize/page.tsx
 examples/SqlOS.Example.Web/components/sqlos-headless-auth-panel.tsx
-examples/SqlOS.Example.Web/lib/sqlos-headless.ts
-examples/SqlOS.Example.AngularWeb/src/app/services/sqlos-headless.service.ts
+examples/SqlOS.Example.AngularWeb/src/app/pages/auth-authorize/auth-authorize.component.ts
+examples/SqlOS.Example.ExpoApp/components/HeadlessAuthForm.tsx
 ```
 
 ## MFA views
@@ -189,21 +190,19 @@ Post `requestId` and the view model's `consentToken` to `/headless/consent/appro
 Headless invitation links should use the invitation endpoints instead of pretending the invite is a normal signup.
 
 ```typescript
-// Resolve token shown in the emailed link.
-const invite = await headlessResolveInvitation(invitationToken);
+await flow.invitation.resolve({ invitationToken });
 
-// Start OAuth and include invitationToken in the authorize request.
-// SqlOS binds the invitation to the saved auth request.
+// Start OAuth (browser resume or native start) and keep the invitation token
+// on the same flow. SqlOS binds the invitation to the saved auth request.
 
 // Existing user: continue through identify, SSO, password, or email OTP.
 // New invited user in passwordless mode:
-await headlessSignupWithInvitation(
-  requestId,
+await flow.invitation.signup({
   displayName,
-  invite.email,
+  email: flow.viewModel?.invitation?.email ?? flow.viewModel?.email ?? "",
   customFields,
   invitationToken,
-);
+});
 ```
 
 Calling `/signup/email-otp/start` for a new invited user is the wrong shape: the invite link has already proven mailbox possession. Use `/invitations/signup` so SqlOS creates the verified user, accepts the invitation, and issues the redirect in one transaction. If HRD requires SSO for the invited email domain, SqlOS returns the SSO redirect instead of creating a local account.

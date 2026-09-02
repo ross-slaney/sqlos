@@ -48,3 +48,36 @@ jobs:
       - run: chmod +x scripts/*.sh && ./scripts/docs-check.sh
       - run: dotnet pack src/SqlOS/SqlOS.csproj -c Release -o ./nupkg
       - run: dotnet nuget push ./nupkg/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
+
+  publish-npm:
+    name: Publish @sqlos/headless
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: packages/headless/package-lock.json
+      - name: Update npm for trusted publishing
+        run: npm install -g npm@11
+      - name: Verify npm version matches SqlOS
+        run: |
+          CS_VERSION="$(sed -n 's/.*<Version>\([^<]*\)<\/Version>.*/\1/p' src/SqlOS/SqlOS.csproj | head -n 1)"
+          NPM_VERSION="$(node -p "require('./packages/headless/package.json').version")"
+          if [ "$CS_VERSION" != "$NPM_VERSION" ]; then
+            echo "SqlOS $CS_VERSION does not match @sqlos/headless $NPM_VERSION"
+            exit 1
+          fi
+      - run: npm ci
+        working-directory: packages/headless
+      - run: npm test
+        working-directory: packages/headless
+      - run: npm run build
+        working-directory: packages/headless
+      - name: Publish to npm
+        working-directory: packages/headless
+        run: npm publish --provenance --access public --tag latest

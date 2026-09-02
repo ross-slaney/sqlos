@@ -28,6 +28,7 @@ Prerequisites:
 From the repository root:
 
 ```bash
+npm ci --prefix packages/headless && npm run build --prefix packages/headless
 npm ci --prefix examples/SqlOS.Example.Web
 npm ci --prefix examples/SqlOS.Example.AngularWeb
 dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
@@ -121,9 +122,9 @@ Build the clients:
 dotnet build examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 dotnet build examples/SqlOS.Todo.Cli/SqlOS.Todo.Cli.csproj
 dotnet test examples/SqlOS.Example.Tests/SqlOS.Example.Tests.csproj
+./scripts/setup-js-examples.sh --expo
 npm run build --prefix examples/SqlOS.Example.Web
 npm run build --prefix examples/SqlOS.Example.AngularWeb
-npm ci --prefix examples/SqlOS.Example.ExpoApp
 npm exec --prefix examples/SqlOS.Example.ExpoApp -- tsc --noEmit -p examples/SqlOS.Example.ExpoApp/tsconfig.json
 ```
 

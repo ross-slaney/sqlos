@@ -1,9 +1,9 @@
-import { Component, inject, OnInit, signal } from '@angular/core';
+import { Component, inject, OnDestroy, OnInit, signal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { SqlosHeadlessService } from '../../services/sqlos-headless.service';
+import { createHeadlessFlow, type HeadlessFlow, type HeadlessViewModel } from '@sqlos/headless';
 import { AuthService } from '../../services/auth.service';
-import { HeadlessViewModel, HeadlessActionResult } from '../../models';
+import { environment } from '../../environments/environment';
 
 interface ReferralOption { value: string; label: string; }
 
@@ -291,10 +291,11 @@ const IMAGE_SIGNUP = 'https://images.unsplash.com/photo-1556740758-90de374c12ad?
     </div>
   `,
 })
-export class AuthAuthorizeComponent implements OnInit {
-  private headless = inject(SqlosHeadlessService);
+export class AuthAuthorizeComponent implements OnInit, OnDestroy {
   private authService = inject(AuthService);
   private route = inject(ActivatedRoute);
+  private flow: HeadlessFlow | null = null;
+  private unsubscribe: (() => void) | null = null;
 
   IMAGE_LOGIN = IMAGE_LOGIN;
   IMAGE_SIGNUP = IMAGE_SIGNUP;
@@ -370,132 +371,117 @@ export class AuthAuthorizeComponent implements OnInit {
     this.view.set(initialView);
     this.error.set(params.get('error'));
     this.email = params.get('email') || '';
-
-    const pendingToken = params.get('pendingToken');
-    const mfaToken = params.get('mfaToken');
     const initialDisplayName = params.get('displayName') || '';
-    const nextPath = params.get('next') || '/retail';
+
+    this.flow = createHeadlessFlow({
+      issuer: `${environment.apiUrl}/sqlos/auth`,
+      clientId: environment.clientId,
+      redirectUri: `${window.location.origin}/auth/callback`,
+      credentials: 'include',
+    });
+    this.unsubscribe = this.flow.subscribe(() => this.applyFlow());
 
     if (!this.requestId) return;
 
     try {
-      const vm = await this.headless.getHeadlessRequest(
-        this.requestId,
-        initialView,
-        params.get('error'),
-        pendingToken,
-        this.email || null,
-        initialDisplayName || null,
-        mfaToken,
-      );
-      this.viewModel.set(vm);
-      if (vm.view) this.view.set(vm.view);
-      if (vm.error) this.error.set(vm.error);
-      if (vm.email) this.email = vm.email;
-      if (vm.displayName && !this.firstName && !this.lastName && initialDisplayName) {
+      await this.flow.resume(window.location);
+      this.applyFlow();
+      const vm = this.viewModel();
+      if (vm?.displayName && !this.firstName && !this.lastName && initialDisplayName) {
         const [first = '', ...rest] = vm.displayName.split(' ');
         this.firstName = first;
         this.lastName = rest.join(' ');
       }
-      if (vm.fieldErrors) this.fieldErrors.set(vm.fieldErrors);
     } catch (err) {
       this.error.set(err instanceof Error ? err.message : 'Failed to load authorization request.');
     }
   }
 
-  private async handleResult(result: HeadlessActionResult) {
-    if (result.type === 'redirect' && result.redirectUrl) {
-      const url = new URL(result.redirectUrl);
-      const code = url.searchParams.get('code');
+  ngOnDestroy() {
+    this.unsubscribe?.();
+  }
 
+  private applyFlow() {
+    const flow = this.flow;
+    if (!flow) return;
+    if (flow.status === 'redirect' && flow.redirectUrl) {
+      const url = new URL(flow.redirectUrl);
+      const code = url.searchParams.get('code');
       if (code) {
-        window.location.assign(result.redirectUrl);
+        window.location.assign(flow.redirectUrl);
         return;
       }
-
-      window.location.href = result.redirectUrl;
+      window.location.href = flow.redirectUrl;
       return;
     }
+    if (flow.viewModel) {
+      this.viewModel.set(flow.viewModel);
+      if (flow.viewModel.view) this.view.set(flow.viewModel.view);
+      if (flow.viewModel.error) this.error.set(flow.viewModel.error);
+      if (flow.viewModel.email) this.email = flow.viewModel.email;
+      if (flow.viewModel.challengeToken) this.otpCode = '';
+      this.fieldErrors.set(flow.viewModel.fieldErrors ?? {});
+    }
+    if (flow.error) this.error.set(flow.error);
+  }
 
-    if (result.viewModel) {
-      this.viewModel.set(result.viewModel);
-      if (result.viewModel.view) this.view.set(result.viewModel.view);
-      if (result.viewModel.error) this.error.set(result.viewModel.error);
-      if (result.viewModel.email) this.email = result.viewModel.email;
-      if (result.viewModel.challengeToken) this.otpCode = '';
-      this.fieldErrors.set(result.viewModel.fieldErrors ?? {});
+  private async runAction(action: () => Promise<unknown>, fallback: string) {
+    this.loading.set(true); this.error.set(null); this.fieldErrors.set({});
+    try {
+      await action();
+      this.applyFlow();
+    } catch (err) {
+      this.error.set(err instanceof Error ? err.message : fallback);
+    } finally {
+      this.loading.set(false);
     }
   }
 
   async onIdentify() {
-    if (!this.requestId) return;
-    this.loading.set(true); this.error.set(null); this.fieldErrors.set({});
-    try { await this.handleResult(await this.headless.identify(this.requestId, this.email)); }
-    catch (err) { this.error.set(err instanceof Error ? err.message : 'We could not start sign in.'); }
-    finally { this.loading.set(false); }
+    if (!this.flow) return;
+    await this.runAction(() => this.flow!.identify({ email: this.email }), 'We could not start sign in.');
   }
 
   async onLogin() {
-    if (!this.requestId) return;
-    this.loading.set(true); this.error.set(null); this.fieldErrors.set({});
-    try { await this.handleResult(await this.headless.passwordLogin(this.requestId, this.email, this.password)); }
-    catch (err) { this.error.set(err instanceof Error ? err.message : 'Login failed.'); }
-    finally { this.loading.set(false); }
+    if (!this.flow) return;
+    await this.runAction(() => this.flow!.password.login({ email: this.email, password: this.password }), 'Login failed.');
   }
 
   async onRequestEmailOtp() {
-    if (!this.requestId) return;
-    this.loading.set(true); this.error.set(null); this.fieldErrors.set({});
-    try { await this.handleResult(await this.headless.requestEmailOtp(this.requestId, this.email)); }
-    catch (err) { this.error.set(err instanceof Error ? err.message : 'We could not send a sign-in code.'); }
-    finally { this.loading.set(false); }
+    if (!this.flow) return;
+    await this.runAction(() => this.flow!.emailOtp.start({ email: this.email }), 'We could not send a sign-in code.');
   }
 
   async onVerifyEmailOtp() {
-    if (!this.requestId) return;
-    const challengeToken = this.viewModel()?.challengeToken;
-    if (!challengeToken) {
-      this.error.set('Request a new sign-in code first.');
-      return;
-    }
-
-    this.loading.set(true); this.error.set(null); this.fieldErrors.set({});
-    try { await this.handleResult(await this.headless.verifyEmailOtp(this.requestId, challengeToken, this.otpCode)); }
-    catch (err) { this.error.set(err instanceof Error ? err.message : 'The sign-in code was rejected.'); }
-    finally { this.loading.set(false); }
+    if (!this.flow) return;
+    await this.runAction(() => this.flow!.emailOtp.verify({ code: this.otpCode }), 'The sign-in code was rejected.');
   }
 
   async onSignup() {
-    if (!this.requestId) return;
-    this.loading.set(true); this.error.set(null); this.fieldErrors.set({});
-    try {
-      await this.handleResult(await this.headless.signup(
-        this.requestId,
-        buildDisplayName(this.firstName, this.lastName, this.email),
-        this.email,
-        this.password,
-        this.organizationName,
-        { referralSource: this.referralSource, firstName: this.firstName, lastName: this.lastName },
-      ));
-    } catch (err) { this.error.set(err instanceof Error ? err.message : 'Signup failed.'); }
-    finally { this.loading.set(false); }
+    if (!this.flow) return;
+    await this.runAction(() => this.flow!.signup({
+      displayName: buildDisplayName(this.firstName, this.lastName, this.email),
+      email: this.email,
+      password: this.password,
+      organizationName: this.organizationName,
+      customFields: { referralSource: this.referralSource, firstName: this.firstName, lastName: this.lastName },
+    }), 'Signup failed.');
   }
 
   async onProviderStart(connectionId: string) {
-    if (!this.requestId) return;
-    this.loading.set(true); this.error.set(null);
-    try { await this.handleResult(await this.headless.startProvider(this.requestId, connectionId, this.email || undefined)); }
-    catch (err) { this.error.set(err instanceof Error ? err.message : 'Provider auth failed.'); }
-    finally { this.loading.set(false); }
+    if (!this.flow) return;
+    await this.runAction(
+      () => this.flow!.provider.start({ connectionId, email: this.email || undefined }),
+      'Provider auth failed.',
+    );
   }
 
   async onSelectOrganization(organizationId: string) {
-    const activePendingToken = this.viewModel()?.pendingToken ?? this.route.snapshot.queryParamMap.get('pendingToken');
-    if (!activePendingToken) return;
-    this.loading.set(true); this.error.set(null);
-    try { await this.handleResult(await this.headless.selectOrganization(activePendingToken, organizationId)); }
-    catch (err) { this.error.set(err instanceof Error ? err.message : 'Organization selection failed.'); }
-    finally { this.loading.set(false); }
+    if (!this.flow) return;
+    await this.runAction(
+      () => this.flow!.organization.select({ organizationId }),
+      'Organization selection failed.',
+    );
   }
 
   startFlow(flowView: 'login' | 'signup') {

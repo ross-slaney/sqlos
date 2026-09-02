@@ -1,0 +1,105 @@
+---
+title: "@sqlos/headless"
+description: "Public TypeScript API for the SqlOS headless AuthPage state machine. Completes at an authorization code; it is not an OAuth client."
+order: 13
+section: reference
+---
+
+<Banner
+  eyebrow="Reference"
+  title="@sqlos/headless"
+  href="/docs/guides/custom-login-ui"
+  actionLabel="Custom login UI guide"
+>
+  Drive identify, password, OTP, MFA, consent, and native `/headless/start` from one flow object. Hand the authorization code to Auth.js, `angular-oauth2-oidc`, `expo-auth-session`, or `AddOpenIdConnect`.
+</Banner>
+
+Install at the same version as the SqlOS NuGet package:
+
+```bash
+npm install @sqlos/headless@4.1.0
+```
+
+In this repository, examples use `"@sqlos/headless": "file:../../packages/headless"` so local and CI installs never need npmjs.com. Build the package first (`./scripts/setup-js-examples.sh`).
+
+## What it is
+
+`createHeadlessFlow` holds the current view model and opaque tokens (`requestId`, challenge, pending, MFA, consent, enrollment). Actions take user input only. Completion is `status === "redirect"` with either:
+
+- `authorization` — `{ code, redirectUri, state, codeVerifier }` when the redirect includes a code
+- `redirectUrl` without `authorization` — an external IdP URL; follow it, do not treat it as a code
+
+The package never calls `/sqlos/auth/token`, never stores refresh tokens, and never writes to `localStorage`.
+
+## Browser resume
+
+```ts
+import { createHeadlessFlow } from "@sqlos/headless";
+import { useHeadlessAuth } from "@sqlos/headless/react";
+
+const flow = createHeadlessFlow({
+  issuer: "https://id.example.com/sqlos/auth",
+  clientId: "acme-app",
+  redirectUri: "https://app.example.com/api/auth/callback/sqlos",
+  credentials: "include",
+});
+
+await flow.resume(window.location);
+await flow.identify({ email });
+await flow.password.login({ password });
+await flow.organization.select({ organizationId });
+await flow.mfa.verify({ code });
+await flow.consent.approve();
+
+if (flow.status === "redirect" && flow.redirectUrl) {
+  window.location.assign(flow.redirectUrl);
+}
+```
+
+`credentials: "include"` is required so the AuthPage session cookie is sent. Omit it on native.
+
+## Native start
+
+```ts
+await flow.start({
+  scope: "openid profile email offline_access",
+  view: "login",
+});
+```
+
+PKCE is generated (or accepted) as start input because SqlOS requires it on `POST /sqlos/auth/headless/start`. Pass `generatePkce` when Web Crypto `subtle` is unavailable (for example Expo). After `flow.authorization`, the host OIDC library exchanges the code.
+
+React Native:
+
+```ts
+import { useHeadlessAuth } from "@sqlos/headless/react-native";
+```
+
+## Actions
+
+| Call | Headless route |
+| --- | --- |
+| `resume(location)` | `GET /requests/{requestId}` |
+| `start(input)` | `POST /start` |
+| `identify({ email })` | `POST /identify` |
+| `password.login({ password })` | `POST /password/login` |
+| `password.forgot({ email })` | `POST /password/forgot` |
+| `password.reset({ token, newPassword })` | `POST /password/reset` |
+| `emailOtp.start` / `verify` | `/email-otp/*` |
+| `magicLink.start` / `complete` | `/magic-link/*` |
+| `phoneOtp.*` | `/phone-otp/*` and `/signup/phone-otp/*` |
+| `signup({ displayName, password, ... })` | `POST /signup` |
+| `organization.select` | `POST /organization/select` |
+| `mfa.verify` / `mfa.totp.enrollStart` / `enrollVerify` | `/mfa/*` |
+| `consent.approve` / `deny` | `/consent/*` |
+| `invitation.resolve` / `signup` | `/invitations/*` |
+| `device.resolve` / `approve` / `deny` | `/device/*` |
+| `provider.start` | `POST /provider/start` |
+
+If the host moved `HeadlessApiBasePath`, set `headlessApiBasePath` to that exact path. A mismatch with the returned view model fails closed.
+
+## Control planes
+
+Dashboard and admin APIs are not applicable. This is a client SDK over the public headless HTTP contract, not an operator-managed setting.
+
+Publishing: [NPM publishing](https://github.com/ross-slaney/sqlos/blob/main/docs/NPM_PUBLISHING.md).

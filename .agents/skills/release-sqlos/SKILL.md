@@ -14,7 +14,7 @@ Asking to release, ship, cut a version, or publish to NuGet authorizes commit, p
 - Work on a branch in the main checkout. Do not create a worktree.
 - Release only what is already on `origin/main` plus the version/docs/blog bump. Do not bundle leftover feature work.
 - Do not create the GitHub release, tag, or NuGet push until the version PR is merged to `main`.
-- Do not `dotnet nuget push` locally. `.github/workflows/publish.yml` publishes on `release: published`.
+- Do not `dotnet nuget push` locally. `.github/workflows/publish.yml` publishes on `release: published`. The `publish-npm` job on that workflow publishes `@sqlos/headless` via trusted publishing. See `docs/NPM_PUBLISHING.md`.
 - Use tag `vX.Y.Z` and release title `SqlOS X.Y.Z`. The last releases are `v3.24.1`, `v3.24.0`, `v3.23.0`.
 - Squash-merge. Recent release commits on `main` look like `Release SqlOS 3.24.1 (#257)`.
 - The GitHub release body must include the five checked compatibility lines exactly, or publish CI fails in `scripts/check-release-checklist.sh`.
@@ -64,11 +64,15 @@ Reuse `release-<version>` if it already exists and is this release. Do not reset
 
 Canonical version: `src/SqlOS/SqlOS.csproj` `<Version>`.
 
+Bump `packages/headless/package.json` `version` to the same value in this PR. `@sqlos/headless` publishes from the same GitHub release as NuGet; see `docs/NPM_PUBLISHING.md`.
+
 `scripts/validate-docs-against-source.mjs` fails the PR unless these also contain the new version:
 
-- `README.md` — `dotnet add package SqlOS --version <version>`
+- `README.md` — `dotnet add package SqlOS --version <version>` and `npm install @sqlos/headless@<version>`
+- `packages/headless/package.json` — `"version": "<version>"`
 - `web/content/docs/quickstarts/add-to-app.mdx` — same install command
 - `web/content/docs/reference/index.mdx` — `SqlOS <version>` in the banner/title
+- `web/content/docs/reference/headless-js.mdx` — `npm install @sqlos/headless@<version>`
 
 Also update every **current** public version-contract string. Search the old version and replace current-contract mentions:
 
@@ -79,7 +83,9 @@ rg -n --glob '!**/bin/**' --glob '!**/obj/**' --glob '!**/package-lock.json' \
 
 Typical current-contract files from recent releases:
 
-- `README.md` (install command and the “If NuGet doesn't list …” note)
+- `README.md` (install commands, including `npm install @sqlos/headless@<version>`)
+- `packages/headless/package.json`
+- `web/content/docs/reference/headless-js.mdx`
 - `web/content/docs/docs-index.mdx`
 - `web/content/docs/getting-started.mdx`
 - `web/content/docs/quickstarts/add-to-app.mdx`

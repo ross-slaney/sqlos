@@ -51,6 +51,7 @@ Read the [ASP.NET Core sample guide on GitHub](https://github.com/ross-slaney/sq
 The full stack adds the broader example API, Next.js, and Angular:
 
 ```bash
+npm ci --prefix packages/headless && npm run build --prefix packages/headless
 npm ci --prefix examples/SqlOS.Example.Web
 npm ci --prefix examples/SqlOS.Example.AngularWeb
 dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
