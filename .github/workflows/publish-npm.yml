@@ -19,7 +19,6 @@ on:
       - synchronize
       - reopened
       - ready_for_review
-      - closed
 
 permissions:
   contents: read
@@ -145,26 +144,3 @@ jobs:
             } else {
               await github.rest.issues.createComment({ owner, repo, issue_number, body });
             }
-
-  remove-preview-tag:
-    name: Remove PR preview dist-tag
-    if: >
-      github.event_name == 'pull_request' &&
-      github.event.action == 'closed' &&
-      github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          registry-url: "https://registry.npmjs.org"
-      - name: Remove dist-tag
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        working-directory: packages/headless
-        run: |
-          PACKAGE_NAME="$(node -p "require('./package.json').name")"
-          TAG="pr-${PR_NUMBER}"
-          npm dist-tag rm "$PACKAGE_NAME" "$TAG" || true

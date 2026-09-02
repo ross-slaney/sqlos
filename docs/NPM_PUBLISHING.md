@@ -46,15 +46,7 @@ In-repo examples **must not** use the preview tag; they keep `"@sqlos/headless":
 
 To rotate the binding: remove the trusted publisher on npmjs.com, add a new one pointing at `publish-npm.yml`, and confirm the next PR preview or `v*` release publishes. Do not add a classic npm automation token to restore `latest`.
 
-## Preview-tag cleanup
-
-Trusted publishing cannot run `npm dist-tag rm`. On PR close, `publish-npm.yml` job `remove-preview-tag` uses repository secret `NPM_TOKEN` only to:
-
-```bash
-npm dist-tag rm @sqlos/headless pr-<n>
-```
-
-Granular token permissions: `dist-tag` on `@sqlos/headless`. Rotate it if it leaks. This is the only remaining token on the npm path.
+Preview dist-tags (`pr-<n>`) are left in place when a PR closes. Trusted publishing covers `npm publish` only, and SqlOS does not keep a long-lived npm token for `dist-tag rm`. In-repo examples never install from those tags.
 
 ## Local and CI installs never use the registry
 
