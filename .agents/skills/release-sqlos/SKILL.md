@@ -14,7 +14,7 @@ Asking to release, ship, cut a version, or publish to NuGet authorizes commit, p
 - Work on a branch in the main checkout. Do not create a worktree.
 - Release only what is already on `origin/main` plus the version/docs/blog bump. Do not bundle leftover feature work.
 - Do not create the GitHub release, tag, or NuGet push until the version PR is merged to `main`.
-- Do not `dotnet nuget push` locally. `.github/workflows/publish.yml` publishes on `release: published`. The `publish-npm` job on that workflow publishes `@sqlos/headless` via trusted publishing. See `docs/NPM_PUBLISHING.md`.
+- Do not `dotnet nuget push` locally. `.github/workflows/publish.yml` publishes NuGet on `release: published`. The same GitHub release also runs `.github/workflows/publish-npm.yml` for `@sqlos/headless@latest` via trusted publishing. npm allows only one trusted-publisher workflow filename, so do not add a second npm publish job elsewhere. See `docs/NPM_PUBLISHING.md`.
 - Use tag `vX.Y.Z` and release title `SqlOS X.Y.Z`. The last releases are `v3.24.1`, `v3.24.0`, `v3.23.0`.
 - Squash-merge. Recent release commits on `main` look like `Release SqlOS 3.24.1 (#257)`.
 - The GitHub release body must include the five checked compatibility lines exactly, or publish CI fails in `scripts/check-release-checklist.sh`.
