@@ -19,6 +19,13 @@ on:
       - synchronize
       - reopened
       - ready_for_review
+    # Preview publish is rare — most PRs are backend-only. Gate on the package
+    # (and this workflow) so unrelated PRs do not spam immutable -pr.* versions.
+    # Do NOT path-gate the headless-package job in pull-request.yml: that job
+    # runs the contract drift check against the .NET headless service.
+    paths:
+      - "packages/headless/**"
+      - ".github/workflows/publish-npm.yml"
 
 permissions:
   contents: read
@@ -65,9 +72,16 @@ jobs:
           const isPreview = Boolean(process.env.PR_NUMBER);
 
           if (isPreview) {
-            const baseVersion = String(pkg.version).split("-")[0];
+            // Prereleases sort below their base (4.1.0-pr.* < 4.1.0). Bump to the
+            // next patch so unreleased previews sort above the current latest.
+            const current = String(pkg.version).split("-")[0];
+            const parts = current.split(".").map((part) => Number.parseInt(part, 10));
+            if (parts.length !== 3 || parts.some((part) => Number.isNaN(part))) {
+              throw new Error(`packages/headless version is not semver X.Y.Z: ${pkg.version}`);
+            }
+            const previewBase = `${parts[0]}.${parts[1]}.${parts[2] + 1}`;
             const shortSha = process.env.GITHUB_SHA.slice(0, 12).replace(/[^0-9A-Za-z-]/g, "");
-            pkg.version = `${baseVersion}-pr.${process.env.PR_NUMBER}.${shortSha}.${process.env.GITHUB_RUN_NUMBER}.${process.env.GITHUB_RUN_ATTEMPT}`;
+            pkg.version = `${previewBase}-pr.${process.env.PR_NUMBER}.${shortSha}.${process.env.GITHUB_RUN_NUMBER}.${process.env.GITHUB_RUN_ATTEMPT}`;
             fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
           }
 

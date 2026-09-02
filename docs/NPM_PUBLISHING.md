@@ -39,14 +39,18 @@ If a previous attempt bound `publish.yml`, delete that publisher and add `publis
 
 | Trigger | Dist-tag | Version |
 | --- | --- | --- |
-| Pull request against `main` | `pr-<n>` | `<base>-pr.<n>.<sha>.<run>.<attempt>` |
+| Pull request against `main` that touches `packages/headless/**` or `.github/workflows/publish-npm.yml` | `pr-<n>` | `<next-patch>-pr.<n>.<sha>.<run>.<attempt>` |
 | GitHub release `vX.Y.Z` (`release: published`) | `latest` | exact `packages/headless/package.json` version (must match NuGet) |
+
+PR preview publish is **path-filtered** in `publish-npm.yml`. Backend-only or docs-only PRs do not publish a preview and do not need dist-tag cleanup. The `Headless JS Package` job in `pull-request.yml` is **not** path-filtered — it still runs the contract drift check on every PR.
+
+Preview versions use the **next patch** of `packages/headless/package.json` as the base (for example package `4.1.0` → preview `4.1.1-pr.<n>…`). Semver sorts a prerelease of `4.1.0` below the released `4.1.0`, so previews of unreleased code must not use `<current>-pr.*`. Release `latest` stays lockstep with NuGet and does not use the next-patch bump.
 
 In-repo examples **must not** use the preview tag; they keep `"@sqlos/headless": "file:../../packages/headless"`.
 
-To rotate the binding: remove the trusted publisher on npmjs.com, add a new one pointing at `publish-npm.yml`, and confirm the next PR preview or `v*` release publishes. Do not add a classic npm automation token to restore `latest`.
+To rotate the binding: remove the trusted publisher on npmjs.com, add a new one pointing at `publish-npm.yml`, and confirm the next package-touching PR preview or `v*` release publishes. Do not add a classic npm automation token to restore `latest`.
 
-Preview dist-tags (`pr-<n>`) are left in place when a PR closes. Trusted publishing covers `npm publish` only, and SqlOS does not keep a long-lived npm token for `dist-tag rm`. In-repo examples never install from those tags.
+Preview dist-tags (`pr-<n>`) are left in place when a PR closes. Trusted publishing covers `npm publish` only, and SqlOS does not keep a long-lived npm token for `dist-tag rm`. In-repo examples never install from those tags. There is no PR-close cleanup lane — path filtering is what keeps the versions page from filling with unrelated previews.
 
 ## Local and CI installs never use the registry
 
