@@ -45,7 +45,7 @@ Use the hosted sign-in or sign-up action.
 
 Start the custom/headless path. The same OIDC library starts `/authorize`. SqlOS directs interaction to Angular's `/auth/authorize` route, then the library finishes the code at `/auth/callback`.
 
-[`AuthAuthorizeComponent`](src/app/pages/auth-authorize/auth-authorize.component.ts) uses `createHeadlessFlow` from `@sqlos/headless` and renders password, email-code, signup, organization-selection, and provider states.
+[`AuthAuthorizeComponent`](src/app/pages/auth-authorize/auth-authorize.component.ts) uses `createHeadlessFlow` from `@sqlos/headless`, subscribes to flow state (`status`, `view`, `viewModel`, `error`, `fieldErrors`), and renders login, password, email-code, signup, organization-selection, and provider states. Actions resolve with status; the component does not catch those rejections. On redirect it calls `window.location.assign(flow.redirectUrl)`.
 
 Headless signup sends first name, last name, and a required referral source to the API's application hook.
 

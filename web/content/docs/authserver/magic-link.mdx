@@ -53,14 +53,27 @@ The `GET /complete` route is intentionally passive. It renders a form that posts
 
 ## Headless flow
 
-Headless UIs call SqlOS for auth state transitions:
+Drive magic-link sign-in with [`@sqlos/headless`](/docs/reference/headless-js) (`flow.magicLink.start` / `flow.magicLink.complete`). The routes below are the HTTP wire contract; client code should use the package. See [Build your own login and signup UI](/docs/guides/custom-login-ui).
+
+Headless views are `magic-link` and `magic-link-sent`. The hosted AuthPage confirm screen is not a headless view — after the user opens the emailed link, complete with `flow.magicLink.complete({ token })`.
 
 | Endpoint | Purpose |
 | --- | --- |
 | `POST /sqlos/auth/headless/magic-link/start` | Start a magic-link sign-in for an authorization request |
 | `POST /sqlos/auth/headless/magic-link/complete` | Consume the emailed token and complete the authorization request |
 
-Start with the active authorization request id and email:
+```ts
+await flow.magicLink.start({ email });
+// view becomes magic-link-sent
+
+await flow.magicLink.complete({ token });
+
+if (flow.status === "redirect" && flow.redirectUrl) {
+  window.location.assign(flow.redirectUrl);
+}
+```
+
+The flow holds `requestId`. Wire request shapes:
 
 ```json
 {
@@ -69,8 +82,6 @@ Start with the active authorization request id and email:
 }
 ```
 
-Complete with the token from the email link:
-
 ```json
 {
   "requestId": "sar_...",
@@ -78,7 +89,7 @@ Complete with the token from the email link:
 }
 ```
 
-SqlOS runs home realm discovery before creating the link. If the email must use SSO, the start response redirects to the identity provider instead of sending a local link.
+SqlOS runs home realm discovery before creating the link. If the email must use SSO, start sets `status === "redirect"` to the identity provider instead of sending a local link. Always leave with `window.location.assign(redirectUrl)`.
 
 ## SDK flow
 

@@ -11,7 +11,7 @@ section: reference
   href="/docs/guides/custom-login-ui"
   actionLabel="Custom login UI guide"
 >
-  Drive identify, password, OTP, MFA, consent, and native `/headless/start` from one flow object. Hand the authorization code to Auth.js, `angular-oauth2-oidc`, `expo-auth-session`, or `AddOpenIdConnect`.
+  Drive login, password, OTP, MFA, consent, and native start from one flow object. Hand the authorization code to Auth.js, `angular-oauth2-oidc`, `expo-auth-session`, or `AddOpenIdConnect`.
 </Banner>
 
 Install at the same version as the SqlOS NuGet package:
@@ -31,7 +31,25 @@ In this repository, examples use `"@sqlos/headless": "file:../../packages/headle
 
 The package never calls `/sqlos/auth/token`, never stores refresh tokens, and never writes to `localStorage`.
 
-## Browser resume
+`HeadlessViewModel.view` is typed as `HeadlessView` (the same union as the server contract). Dead branches such as `"identify"` fail at compile time — the initial email screen is `"login"`.
+
+## Errors and status
+
+| `status` | Meaning |
+| --- | --- |
+| `idle` | No request loaded |
+| `loading` | An action is in flight |
+| `view` | Render `viewModel.view` |
+| `redirect` | Leave via `redirectUrl` |
+| `error` | Read `error` and `fieldErrors` |
+
+Server and validation failures **resolve**. Actions return the new `HeadlessFlowStatus` and update `error` / `fieldErrors`. You do not need try/catch for the normal path.
+
+Programmer mistakes still throw: `HeadlessFlowBusyError`, `HeadlessFlowNotLoadedError`, missing-token preconditions, and the `/token` guard.
+
+## Web app with a custom login page
+
+Your OIDC library starts `/authorize`. SqlOS redirects to your page with `?request=`. Resume, then render a loop over `view`:
 
 ```ts
 import { createHeadlessFlow } from "@sqlos/headless";
@@ -45,20 +63,31 @@ const flow = createHeadlessFlow({
 });
 
 await flow.resume(window.location);
+
+// Render switch (flow.viewModel.view) → collect input → one action
 await flow.identify({ email });
 await flow.password.login({ password });
-await flow.organization.select({ organizationId });
-await flow.mfa.verify({ code });
-await flow.consent.approve();
 
 if (flow.status === "redirect" && flow.redirectUrl) {
   window.location.assign(flow.redirectUrl);
 }
 ```
 
-`credentials: "include"` is required so the AuthPage session cookie is sent. Omit it on native.
+React snapshots (same shape from `@sqlos/headless/react-native`):
 
-## Native start
+```ts
+const { flow, status, view, viewModel, error, fieldErrors, redirectUrl } =
+  useHeadlessAuth({
+    issuer,
+    clientId,
+    redirectUri,
+    credentials: "include",
+  });
+```
+
+`credentials: "include"` is required in the browser so the AuthPage session cookie is sent. Omit it on native. Always leave with `window.location.assign(redirectUrl)` — do not hand-parse the URL.
+
+## Native app
 
 ```ts
 await flow.start({
@@ -67,9 +96,7 @@ await flow.start({
 });
 ```
 
-PKCE is generated (or accepted) as start input because SqlOS requires it on `POST /sqlos/auth/headless/start`. Pass `generatePkce` when Web Crypto `subtle` is unavailable (for example Expo). After `flow.authorization`, the host OIDC library exchanges the code.
-
-React Native:
+PKCE is generated (or accepted) as start input because SqlOS requires it. Pass `generatePkce` when Web Crypto `subtle` is unavailable (for example Expo). After `flow.authorization`, the host OIDC library exchanges the code.
 
 ```ts
 import { useHeadlessAuth } from "@sqlos/headless/react-native";
@@ -86,6 +113,7 @@ import { useHeadlessAuth } from "@sqlos/headless/react-native";
 | `password.forgot({ email })` | `POST /password/forgot` |
 | `password.reset({ token, newPassword })` | `POST /password/reset` |
 | `emailOtp.start` / `verify` | `/email-otp/*` |
+| `emailOtp.signupStart` / `signupVerify` | `/signup/email-otp/*` |
 | `magicLink.start` / `complete` | `/magic-link/*` |
 | `phoneOtp.*` | `/phone-otp/*` and `/signup/phone-otp/*` |
 | `signup({ displayName, password, ... })` | `POST /signup` |
@@ -102,4 +130,4 @@ If the host moved `HeadlessApiBasePath`, set `headlessApiBasePath` to that exact
 
 Dashboard and admin APIs are not applicable. This is a client SDK over the public headless HTTP contract, not an operator-managed setting.
 
-Publishing: [NPM publishing](https://github.com/ross-slaney/sqlos/blob/main/docs/NPM_PUBLISHING.md).
+Publishing: [NPM publishing](https://github.com/ross-slaney/sqlos/blob/main/docs/NPM_PUBLISHING.md). Guide: [Build your own login UI](/docs/guides/custom-login-ui). Wire protocol: [Headless Auth](/docs/authserver/headless-auth).

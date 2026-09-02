@@ -96,59 +96,57 @@ Configure the iOS associated domain and Android App Link for `app.trailnote.test
 
 ## 3. Start the outer OAuth transaction
 
-Generate an RFC 7636 verifier, its `S256` challenge, and a cryptographically random `state`. Keep the verifier and state in Keychain/Keystore-backed temporary storage until the callback finishes.
+Drive the native flow with [`@sqlos/headless`](/docs/reference/headless-js). Pass PKCE into `flow.start` so the app still holds the verifier for the later `/token` exchange. Do not call `/sqlos/auth/headless` from application `fetch` helpers.
 
 ```ts
-type Provider = {
-  connectionId: string;
-  providerType: string;
-  displayName: string;
-  logoDataUrl?: string | null;
-};
+import { createHeadlessFlow, generatePkce, randomState } from "@sqlos/headless";
+import { useHeadlessAuth } from "@sqlos/headless/react-native";
+import { exchangeCodeAsync } from "expo-auth-session";
 
-type HeadlessResult = {
-  type: "view" | "redirect";
-  redirectUrl?: string | null;
-  viewModel?: {
-    requestId?: string | null;
-    providers?: Provider[];
-    error?: string | null;
-  } | null;
-};
+const issuer = "https://identity.trailnote.test/sqlos/auth";
+const clientId = "trailnote-mobile";
+const redirectUri = "https://app.trailnote.test/auth/callback";
 
-const AUTH = "https://identity.trailnote.test/sqlos/auth";
-const CLIENT_ID = "trailnote-mobile";
-const REDIRECT_URI = "https://app.trailnote.test/auth/callback";
+const pkce = await generatePkce(); // wrap with expo-crypto when subtle is unavailable
+const state = randomState();
 
-async function postHeadless(path: string, body: unknown): Promise<HeadlessResult> {
-  const response = await fetch(`${AUTH}/headless${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) throw new Error("Sign-in could not continue.");
-  return response.json();
-}
-
-const started = await postHeadless("/start", {
-  responseType: "code",
-  clientId: CLIENT_ID,
-  redirectUri: REDIRECT_URI,
-  state,
-  scope: "openid profile email offline_access",
-  codeChallenge,
-  codeChallengeMethod: "S256",
-  resource: "https://api.trailnote.test",
-  view: "login",
+const flow = createHeadlessFlow({
+  issuer,
+  clientId,
+  redirectUri,
+  generatePkce,
 });
 
-const requestId = started.viewModel?.requestId;
-const providers = started.viewModel?.providers ?? [];
-if (!requestId) throw new Error(started.viewModel?.error ?? "Sign-in could not start.");
+await flow.start({
+  scope: "openid profile email offline_access",
+  resource: "https://api.trailnote.test",
+  view: "login",
+  state,
+  codeVerifier: pkce.codeVerifier,
+  codeChallenge: pkce.codeChallenge,
+  codeChallengeMethod: "S256",
+});
+
+if (flow.status === "error") {
+  showError(flow.error, flow.fieldErrors);
+}
+
+const providers = flow.viewModel?.providers ?? [];
 ```
 
-Render provider buttons from `viewModel.providers`; do not hard-code database connection IDs into the app. Display name and optional logo come from the server configuration.
+React Native snapshots:
+
+```ts
+const { flow, status, view, viewModel, error, fieldErrors, redirectUrl } =
+  useHeadlessAuth({
+    issuer,
+    clientId,
+    redirectUri,
+    generatePkce,
+  });
+```
+
+Omit `credentials` on native. Render provider buttons from `viewModel.providers`; do not hard-code database connection IDs into the app. Display name and optional logo come from the server configuration. See [Build your own login and signup UI](/docs/guides/custom-login-ui).
 
 ## 4. Open the provider in a system session
 
@@ -156,25 +154,30 @@ When the user chooses a provider, pass the returned `connectionId` back to SqlOS
 
 ```ts
 const google = providers.find((provider) => provider.providerType === "google");
-if (!google) throw new Error("Google sign-in is not available.");
+if (!google) {
+  showError("Google sign-in is not available.");
+  return;
+}
 
-const providerStart = await postHeadless("/provider/start", {
-  requestId,
-  connectionId: google.connectionId,
-  email: null,
-});
+await flow.provider.start({ connectionId: google.connectionId });
 
-if (providerStart.type !== "redirect" || !providerStart.redirectUrl) {
-  throw new Error(providerStart.viewModel?.error ?? "Provider sign-in could not start.");
+if (flow.status === "error") {
+  showError(flow.error, flow.fieldErrors);
+  return;
+}
+
+if (flow.status !== "redirect" || !flow.redirectUrl || flow.authorization) {
+  render(flow.viewModel);
+  return;
 }
 
 const callbackUrl = await openSystemAuthenticationSession(
-  providerStart.redirectUrl,
-  REDIRECT_URI,
+  flow.redirectUrl,
+  redirectUri,
 );
 ```
 
-`openSystemAuthenticationSession` represents the platform API or framework wrapper around a system browser auth session. Do not render provider credentials in an embedded WebView.
+`status === "redirect"` with a null `authorization` is an external IdP URL — follow it; do not treat it as a code callback. `openSystemAuthenticationSession` represents the platform API or framework wrapper around a system browser auth session. Do not render provider credentials in an embedded WebView.
 
 The browser sequence is:
 
@@ -186,6 +189,8 @@ The browser sequence is:
 SqlOS validates a separate provider state, nonce, and internal PKCE transaction before step 4. The app still must validate its original outer `state`.
 
 ## 5. Validate the app callback and exchange the code
+
+The system session returns the registered app callback. Validate it, then let `expo-auth-session` call `/token`. The package never calls `/token`.
 
 ```ts
 const callback = new URL(callbackUrl);
@@ -205,21 +210,18 @@ if (!code) {
   throw new Error(callback.searchParams.get("error") ?? "No authorization code returned.");
 }
 
-const tokenResponse = await fetch(`${AUTH}/token`, {
-  method: "POST",
-  headers: { "Content-Type": "application/x-www-form-urlencoded" },
-  body: new URLSearchParams({
-    grant_type: "authorization_code",
-    client_id: CLIENT_ID,
-    redirect_uri: REDIRECT_URI,
+const tokens = await exchangeCodeAsync(
+  {
+    clientId,
     code,
-    code_verifier: verifier,
-    resource: "https://api.trailnote.test",
-  }).toString(),
-});
-
-if (!tokenResponse.ok) throw new Error("The authorization code could not be exchanged.");
-const tokens = await tokenResponse.json();
+    redirectUri,
+    extraParams: {
+      code_verifier: pkce.codeVerifier,
+      resource: "https://api.trailnote.test",
+    },
+  },
+  { tokenEndpoint: `${issuer}/token` },
+);
 ```
 
 The app receives SqlOS access and refresh tokens, not the provider's tokens or an ID token. Store the refresh token in Keychain/Keystore-backed storage. Clear the verifier, state, request ID, callback URL, and authorization code after exchange.
@@ -251,6 +253,7 @@ Trailnote presents native provider buttons, hands credential entry to a trusted 
 
 ## Next steps
 
+- [`@sqlos/headless`](/docs/reference/headless-js)
 - [Build a custom login UI](/docs/guides/custom-login-ui)
 - [Social sign-in](/docs/guides/social-oidc)
 - [Google OIDC](/docs/authserver/google-oidc)

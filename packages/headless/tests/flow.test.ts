@@ -194,17 +194,36 @@ describe("createHeadlessFlow", () => {
     expect(flow.error).toBe("Fix the highlighted fields.");
   });
 
-  it("maps HTTP error JSON onto the flow", async () => {
+  it("maps HTTP error JSON onto the flow without rejecting", async () => {
     const fetch = createFetch(() =>
       jsonResponse({ error: "invalid_request", message: "The authorization request expired." }, 400),
     );
     const flow = createHeadlessFlow({ issuer, clientId, redirectUri, fetch });
-    await expect(flow.resume("https://app.example.com/auth/authorize?request=expired")).rejects.toMatchObject({
-      message: "The authorization request expired.",
-      status: 400,
-    });
+    await expect(flow.resume("https://app.example.com/auth/authorize?request=expired")).resolves.toBe("error");
     expect(flow.status).toBe("error");
     expect(flow.error).toBe("The authorization request expired.");
+  });
+
+  it("resolves a 400 with fieldErrors into status error", async () => {
+    const fetch = createFetch((url) => {
+      if (url.includes("/requests/")) {
+        return viewModel({ view: "password", email: "ada@example.com" });
+      }
+      return jsonResponse(
+        {
+          error: "validation_failed",
+          message: "Fix the highlighted fields.",
+          fieldErrors: { password: "Password is incorrect." },
+        },
+        400,
+      );
+    });
+    const flow = createHeadlessFlow({ issuer, clientId, redirectUri, fetch });
+    await flow.resume("https://app.example.com/auth/authorize?request=req_1");
+    await expect(flow.password.login({ password: "wrong" })).resolves.toBe("error");
+    expect(flow.status).toBe("error");
+    expect(flow.error).toBe("Fix the highlighted fields.");
+    expect(flow.fieldErrors.password).toBe("Password is incorrect.");
   });
 
   it("rejects a concurrent action", async () => {

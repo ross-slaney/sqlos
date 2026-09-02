@@ -6,6 +6,7 @@ import {
 } from "./errors.js";
 import { createHeadlessHttp, joinUrl, pathnameOf } from "./http.js";
 import { generatePkce as defaultGeneratePkce, randomState } from "./pkce.js";
+import type { HeadlessView } from "./contract.js";
 import type {
   CreateHeadlessFlowOptions,
   HeadlessActionResult,
@@ -22,6 +23,17 @@ import type {
   JsonObject,
   LocationLike,
 } from "./types.js";
+
+const TOKEN_GUARD_MESSAGE = "The headless package never calls /token.";
+
+function shouldRethrow(error: unknown): boolean {
+  return (
+    error instanceof HeadlessFlowBusyError ||
+    error instanceof HeadlessFlowNotLoadedError ||
+    error instanceof HeadlessApiPathMismatchError ||
+    (error instanceof HeadlessError && error.message === TOKEN_GUARD_MESSAGE)
+  );
+}
 
 type TokenBag = {
   requestId: string | null;
@@ -158,7 +170,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
     };
   }
 
-  async resume(location: LocationLike | string): Promise<void> {
+  async resume(location: LocationLike | string): Promise<HeadlessFlowStatus> {
     return this.run(async () => {
       const params = searchParamsFrom(location);
       const requestId = params.get("request")?.trim() || null;
@@ -184,7 +196,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
     });
   }
 
-  async start(input: HeadlessStartInput = {}): Promise<void> {
+  async start(input: HeadlessStartInput = {}): Promise<HeadlessFlowStatus> {
     return this.run(async () => {
       const pkce = input.codeVerifier && input.codeChallenge
         ? {
@@ -226,7 +238,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
     });
   }
 
-  async identify(input: HeadlessIdentifyInput): Promise<void> {
+  async identify(input: HeadlessIdentifyInput): Promise<HeadlessFlowStatus> {
     return this.run(async () => {
       this.email = input.email;
       this.applyActionResult(
@@ -240,7 +252,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
   }
 
   readonly password = {
-    login: async (input: HeadlessPasswordLoginInput): Promise<void> => {
+    login: async (input: HeadlessPasswordLoginInput): Promise<HeadlessFlowStatus> => {
       return this.run(async () => {
         const email = input.email ?? this.email ?? this.viewModel?.email;
         if (!email) {
@@ -257,7 +269,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
         );
       });
     },
-    forgot: async (input?: { email?: string }): Promise<HeadlessPasswordResetRequestResult> => {
+    forgot: async (input?: { email?: string }): Promise<HeadlessFlowStatus> => {
       return this.run(async () => {
         const email = input?.email ?? this.email ?? this.viewModel?.email;
         if (!email) {
@@ -278,22 +290,24 @@ class HeadlessFlowImpl implements HeadlessFlow {
           error: null,
           fieldErrors: {},
         };
-        return result;
       });
     },
-    reset: async (input: { token: string; newPassword: string }): Promise<void> => {
+    reset: async (input: { token: string; newPassword: string }): Promise<HeadlessFlowStatus> => {
       return this.run(async () => {
         await this.request(joinUrl(this.headlessBase, "/password/reset"), {
           method: "POST",
           body: JSON.stringify({ token: input.token, newPassword: input.newPassword }),
           parse: "void",
         });
+        this.status = "view";
+        this.error = null;
+        this.fieldErrors = {};
       });
     },
   };
 
   readonly emailOtp = {
-    start: async (input?: { email?: string; invitationToken?: string }): Promise<void> => {
+    start: async (input?: { email?: string; invitationToken?: string }): Promise<HeadlessFlowStatus> => {
       return this.run(async () => {
         const email = input?.email ?? this.email ?? this.viewModel?.email;
         if (!email) {
@@ -309,7 +323,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
         );
       });
     },
-    verify: async (input: { code: string; invitationToken?: string }): Promise<void> => {
+    verify: async (input: { code: string; invitationToken?: string }): Promise<HeadlessFlowStatus> => {
       return this.run(async () => {
         this.applyActionResult(
           await this.post("/email-otp/verify", {
@@ -327,7 +341,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
       organizationName?: string;
       customFields?: JsonObject;
       invitationToken?: string;
-    }): Promise<void> => {
+    }): Promise<HeadlessFlowStatus> => {
       return this.run(async () => {
         const email = input.email ?? this.email ?? this.viewModel?.email;
         if (!email) {
@@ -346,7 +360,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
         );
       });
     },
-    signupVerify: async (input: { code: string; invitationToken?: string }): Promise<void> => {
+    signupVerify: async (input: { code: string; invitationToken?: string }): Promise<HeadlessFlowStatus> => {
       return this.run(async () => {
         this.applyActionResult(
           await this.post("/signup/email-otp/verify", {
@@ -362,7 +376,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
   };
 
   readonly magicLink = {
-    start: async (input?: { email?: string; invitationToken?: string }): Promise<void> => {
+    start: async (input?: { email?: string; invitationToken?: string }): Promise<HeadlessFlowStatus> => {
       return this.run(async () => {
         const email = input?.email ?? this.email ?? this.viewModel?.email;
         if (!email) {
@@ -378,7 +392,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
         );
       });
     },
-    complete: async (input: { token: string; invitationToken?: string }): Promise<void> => {
+    complete: async (input: { token: string; invitationToken?: string }): Promise<HeadlessFlowStatus> => {
       return this.run(async () => {
         this.applyActionResult(
           await this.post("/magic-link/complete", {
@@ -392,7 +406,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
   };
 
   readonly phoneOtp = {
-    start: async (input: { phoneNumber: string; invitationToken?: string }): Promise<void> => {
+    start: async (input: { phoneNumber: string; invitationToken?: string }): Promise<HeadlessFlowStatus> => {
       return this.run(async () => {
         this.phoneNumber = input.phoneNumber;
         this.applyActionResult(
@@ -404,7 +418,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
         );
       });
     },
-    verify: async (input: { code: string; invitationToken?: string }): Promise<void> => {
+    verify: async (input: { code: string; invitationToken?: string }): Promise<HeadlessFlowStatus> => {
       return this.run(async () => {
         this.applyActionResult(
           await this.post("/phone-otp/verify", {
@@ -422,7 +436,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
       organizationName?: string;
       customFields?: JsonObject;
       invitationToken?: string;
-    }): Promise<void> => {
+    }): Promise<HeadlessFlowStatus> => {
       return this.run(async () => {
         this.phoneNumber = input.phoneNumber;
         this.applyActionResult(
@@ -437,7 +451,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
         );
       });
     },
-    signupVerify: async (input: { code: string }): Promise<void> => {
+    signupVerify: async (input: { code: string }): Promise<HeadlessFlowStatus> => {
       return this.run(async () => {
         this.applyActionResult(
           await this.post("/signup/phone-otp/verify", {
@@ -451,7 +465,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
     },
   };
 
-  async signup(input: HeadlessSignupInput): Promise<void> {
+  async signup(input: HeadlessSignupInput): Promise<HeadlessFlowStatus> {
     return this.run(async () => {
       const email = input.email ?? this.email ?? this.viewModel?.email;
       if (!email) {
@@ -473,7 +487,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
   }
 
   readonly organization = {
-    select: async (input: { organizationId: string }): Promise<void> => {
+    select: async (input: { organizationId: string }): Promise<HeadlessFlowStatus> => {
       return this.run(async () => {
         this.applyActionResult(
           await this.post("/organization/select", {
@@ -486,7 +500,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
   };
 
   readonly mfa = {
-    verify: async (input: { code: string }): Promise<void> => {
+    verify: async (input: { code: string }): Promise<HeadlessFlowStatus> => {
       return this.run(async () => {
         this.applyActionResult(
           await this.post("/mfa/verify", {
@@ -498,7 +512,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
       });
     },
     totp: {
-      enrollStart: async (input?: { displayName?: string }): Promise<void> => {
+      enrollStart: async (input?: { displayName?: string }): Promise<HeadlessFlowStatus> => {
         return this.run(async () => {
           this.applyActionResult(
             await this.post("/mfa/totp/enroll/start", {
@@ -509,7 +523,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
           );
         });
       },
-      enrollVerify: async (input: { code: string }): Promise<void> => {
+      enrollVerify: async (input: { code: string }): Promise<HeadlessFlowStatus> => {
         return this.run(async () => {
           this.applyActionResult(
             await this.post("/mfa/totp/enroll/verify", {
@@ -525,7 +539,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
   };
 
   readonly consent = {
-    approve: async (): Promise<void> => {
+    approve: async (): Promise<HeadlessFlowStatus> => {
       return this.run(async () => {
         this.applyActionResult(
           await this.post("/consent/approve", {
@@ -535,7 +549,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
         );
       });
     },
-    deny: async (): Promise<void> => {
+    deny: async (): Promise<HeadlessFlowStatus> => {
       return this.run(async () => {
         this.applyActionResult(
           await this.post("/consent/deny", {
@@ -548,7 +562,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
   };
 
   readonly invitation = {
-    resolve: async (input: { invitationToken: string }): Promise<void> => {
+    resolve: async (input: { invitationToken: string }): Promise<HeadlessFlowStatus> => {
       return this.run(async () => {
         this.tokens.invitationToken = input.invitationToken;
         const model = normalizeViewModel(
@@ -564,7 +578,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
       email?: string;
       customFields?: JsonObject;
       invitationToken: string;
-    }): Promise<void> => {
+    }): Promise<HeadlessFlowStatus> => {
       return this.run(async () => {
         this.tokens.invitationToken = input.invitationToken;
         const email = input.email ?? this.email ?? this.viewModel?.email;
@@ -585,7 +599,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
   };
 
   readonly device = {
-    resolve: async (input?: { userCode?: string }): Promise<void> => {
+    resolve: async (input?: { userCode?: string }): Promise<HeadlessFlowStatus> => {
       return this.run(async () => {
         const model = normalizeViewModel(
           await this.post<HeadlessViewModel>("/device/resolve", {
@@ -596,7 +610,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
         this.applyViewModel(model);
       });
     },
-    approve: async (input?: { userCode?: string; organizationId?: string }): Promise<void> => {
+    approve: async (input?: { userCode?: string; organizationId?: string }): Promise<HeadlessFlowStatus> => {
       return this.run(async () => {
         this.applyActionResult(
           await this.post("/device/approve", {
@@ -607,7 +621,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
         );
       });
     },
-    deny: async (input?: { userCode?: string }): Promise<void> => {
+    deny: async (input?: { userCode?: string }): Promise<HeadlessFlowStatus> => {
       return this.run(async () => {
         this.applyActionResult(
           await this.post("/device/deny", {
@@ -624,7 +638,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
       connectionId: string;
       email?: string;
       invitationToken?: string;
-    }): Promise<void> => {
+    }): Promise<HeadlessFlowStatus> => {
       return this.run(async () => {
         this.applyActionResult(
           await this.post("/provider/start", {
@@ -645,7 +659,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
     });
   }
 
-  private async run<T>(work: () => Promise<T>): Promise<T> {
+  private async run(work: () => Promise<void>): Promise<HeadlessFlowStatus> {
     if (this.busy) {
       throw new HeadlessFlowBusyError();
     }
@@ -654,13 +668,26 @@ class HeadlessFlowImpl implements HeadlessFlow {
     this.error = null;
     this.notify();
     try {
-      const result = await work();
+      await work();
       if (this.status === "loading") {
         this.status = this.viewModel ? "view" : "idle";
       }
       this.notify();
-      return result;
+      return this.status;
     } catch (error) {
+      if (shouldRethrow(error)) {
+        if (!(error instanceof HeadlessFlowBusyError)) {
+          const mapped = error as HeadlessError;
+          this.status = "error";
+          this.error = mapped.message;
+          if (mapped.fieldErrors && Object.keys(mapped.fieldErrors).length > 0) {
+            this.fieldErrors = mapped.fieldErrors;
+          }
+          this.notify();
+        }
+        throw error;
+      }
+
       const mapped = error instanceof HeadlessError
         ? error
         : new HeadlessError(error instanceof Error ? error.message : "Headless request failed.", {
@@ -668,11 +695,9 @@ class HeadlessFlowImpl implements HeadlessFlow {
           });
       this.status = "error";
       this.error = mapped.message;
-      if (mapped.fieldErrors && Object.keys(mapped.fieldErrors).length > 0) {
-        this.fieldErrors = mapped.fieldErrors;
-      }
+      this.fieldErrors = mapped.fieldErrors ?? {};
       this.notify();
-      throw mapped;
+      return this.status;
     } finally {
       this.busy = false;
     }
@@ -759,7 +784,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
   }
 }
 
-function emptyView(view: string, headlessApiBasePath: string): HeadlessViewModel {
+function emptyView(view: HeadlessView, headlessApiBasePath: string): HeadlessViewModel {
   return {
     view,
     authBasePath: "",

@@ -251,6 +251,123 @@ if (/^## Auth API \(Example\)/m.test(httpReference)) {
   );
 }
 
+// Headless view names cited in docs must exist in packages/headless HEADLESS_VIEWS.
+const headlessContract = read("packages/headless/src/contract.ts");
+const headlessViewsMatch = headlessContract.match(
+  /export const HEADLESS_VIEWS = \[([\s\S]*?)\] as const/,
+);
+const headlessViews = new Set(
+  [...(headlessViewsMatch?.[1].matchAll(/"([^"]+)"/g) ?? [])].map((match) => match[1]),
+);
+if (headlessViews.size === 0) {
+  errors.push("packages/headless/src/contract.ts: could not parse HEADLESS_VIEWS.");
+} else {
+  const headlessDocRoots = [
+    path.join(repoRoot, "web", "content", "docs", "guides"),
+    path.join(repoRoot, "web", "content", "docs", "authserver"),
+    path.join(repoRoot, "web", "content", "docs", "reference"),
+  ];
+  const singleTokenViews = new Set([
+    "login",
+    "signup",
+    "password",
+    "device",
+    "mfa",
+    "consent",
+    "invite",
+    "organization",
+  ]);
+  const notViews = new Set([
+    "sqlos",
+    "headless",
+    "openid",
+    "offline-access",
+    "field-errors",
+    "request-id",
+    "challenge-token",
+    "pending-token",
+    "consent-token",
+    "mfa-token",
+    "signup-token",
+    "enrollment-token",
+    "invitation-token",
+    "access-token",
+    "refresh-token",
+    "id-token",
+    "redirect-uri",
+    "client-id",
+    "code-challenge",
+    "code-verifier",
+    "response-type",
+    "login-hint",
+    "ui-context",
+    "auth-base-path",
+    "base-path",
+    "totp-enrollment",
+    "custom-fields",
+    "display-name",
+    "phone-number",
+    "organization-name",
+    "organization-id",
+    "user-code",
+    "qr-code",
+    "data-url",
+    "use-client",
+    "react-native",
+    "well-known",
+    "openid-configuration",
+    "auth-page",
+    "first-party",
+    "same-site",
+    "http-only",
+    "sign-in",
+    "sign-up",
+    "build-ui-url",
+    "public-pkce",
+    "grant-type",
+    "token-endpoint",
+    "authorization-code",
+    "home-realm",
+  ]);
+
+  function walkMdx(dir, files = []) {
+    if (!fs.existsSync(dir)) return files;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walkMdx(full, files);
+      else if (entry.name.endsWith(".mdx")) files.push(full);
+    }
+    return files;
+  }
+
+  for (const root of headlessDocRoots) {
+    for (const file of walkMdx(root)) {
+      const content = fs.readFileSync(file, "utf8");
+      if (!/headless|@sqlos\/headless|HEADLESS_VIEWS/i.test(content)) continue;
+      const relative = path.relative(repoRoot, file);
+      for (const match of content.matchAll(/`([a-z][a-z0-9-]*)`/g)) {
+        const name = match[1];
+        if (notViews.has(name) || headlessViews.has(name)) continue;
+        const looksLikeView = name.includes("-") || singleTokenViews.has(name);
+        if (!looksLikeView) continue;
+        // Hyphenated auth-ish tokens that are not views still appear in prose;
+        // only fail names that share a prefix with a known view or are hosted-only.
+        const hostedOnly = new Set(["magic-link-confirm", "identify", "verify-email"]);
+        const sharesPrefix = [...headlessViews].some(
+          (view) =>
+            view !== name &&
+            (name.startsWith(`${view}-`) || view.startsWith(`${name}-`) || name.split("-")[0] === view.split("-")[0]),
+        );
+        if (hostedOnly.has(name) || sharesPrefix) {
+          errors.push(
+            `${relative}: headless docs cite view \`${name}\` which is not in HEADLESS_VIEWS.`,
+          );
+        }
+      }
+    }
+  }
+}
+
 if (errors.length > 0) {
   console.error("Documentation/source drift check failed:\n");
   for (const error of errors) {

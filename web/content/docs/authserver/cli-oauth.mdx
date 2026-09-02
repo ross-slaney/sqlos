@@ -126,7 +126,7 @@ If the user is not already signed in, SqlOS renders the configured credential fl
 
 If `UseHeadlessAuthPage(...)` is configured, `/sqlos/auth/device?user_code=...` creates a normal headless authorization request bound to the device request, then redirects to your `BuildUiUrl` with `request` and `view=device`. From there, the same headless auth pipeline handles HRD, SSO, password, email OTP, signup, invitation context, and organization selection.
 
-Headless UIs can call:
+Drive device verification with [`@sqlos/headless`](/docs/reference/headless-js) (`flow.resume` / `flow.device.resolve` / `approve` / `deny`). The routes below are the HTTP wire contract; client code should use the package. See [Build your own login and signup UI](/docs/guides/custom-login-ui).
 
 | Endpoint | Purpose |
 | --- | --- |
@@ -135,7 +135,17 @@ Headless UIs can call:
 | `POST /sqlos/auth/headless/device/approve` | Approve after sign-in. Prefer passing `requestId`; `userCode` is supported for manual entry. |
 | `POST /sqlos/auth/headless/device/deny` | Deny the request. Prefer passing `requestId`; `userCode` is supported for manual entry. |
 
-Do not implement a separate sign-in page for device flow. Treat device verification as a normal SqlOS auth interaction with an extra final approval step. After the existing auth handlers complete, SqlOS returns `device-approve`; approve it and tokens are released to the polling CLI.
+```ts
+await flow.resume(window.location);
+await flow.device.approve();
+// or flow.device.deny()
+
+if (flow.status === "redirect" && flow.redirectUrl) {
+  window.location.assign(flow.redirectUrl);
+}
+```
+
+Do not implement a separate sign-in page for device flow. Treat device verification as a normal SqlOS auth interaction with an extra final approval step. After the existing auth actions complete, the view is `device-approve`; approve it and tokens are released to the polling CLI.
 
 ## SDK flow
 

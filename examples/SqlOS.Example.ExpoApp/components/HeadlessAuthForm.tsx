@@ -31,7 +31,16 @@ type HeadlessAuthFormProps = {
 export function HeadlessAuthForm({ view: initialView }: HeadlessAuthFormProps) {
   const router = useRouter();
   const { isAuthenticated, login } = useAuth();
-  const flow = useHeadlessAuth({
+  const {
+    flow,
+    status,
+    view: flowView,
+    viewModel,
+    error,
+    fieldErrors,
+    authorization,
+    redirectUrl,
+  } = useHeadlessAuth({
     issuer: getAuthServerUrl(),
     clientId: getClientId(),
     redirectUri: getNativeHeadlessRedirectUri(),
@@ -43,13 +52,16 @@ export function HeadlessAuthForm({ view: initialView }: HeadlessAuthFormProps) {
   const [displayName, setDisplayName] = useState("");
   const [organizationName, setOrganizationName] = useState("");
   const [mfaCode, setMfaCode] = useState("");
-  const [localError, setLocalError] = useState<string | null>(null);
+  const [exchangeError, setExchangeError] = useState<string | null>(null);
   const [started, setStarted] = useState(false);
 
-  const view = flow.viewModel?.view ?? initialView;
-  const error = localError || flow.error || flow.viewModel?.error;
-  const fieldErrors = flow.fieldErrors;
-  const loading = flow.status === "loading";
+  const view = flowView ?? initialView;
+  const loading = status === "loading";
+  const providerRedirectNotice =
+    status === "redirect" && redirectUrl && !authorization
+      ? "This example uses in-app login and password. Follow provider redirects in a browser client."
+      : null;
+  const displayError = error || exchangeError || providerRedirectNotice;
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -60,29 +72,20 @@ export function HeadlessAuthForm({ view: initialView }: HeadlessAuthFormProps) {
   useEffect(() => {
     if (started) return;
     setStarted(true);
-    void (async () => {
-      try {
-        await flow.start({
-          scope: "openid profile email offline_access",
-          view: initialView,
-        });
-      } catch (err) {
-        setLocalError(err instanceof Error ? err.message : "Could not start sign-in.");
-      }
-    })();
+    void flow.start({
+      scope: "openid profile email offline_access",
+      view: initialView,
+    });
   }, [flow, initialView, started]);
 
   useEffect(() => {
-    if (flow.status !== "redirect" || !flow.authorization) {
-      if (flow.status === "redirect" && flow.redirectUrl && !flow.authorization) {
-        setLocalError("This example uses in-app identify/password. Follow provider redirects in a browser client.");
-      }
+    if (status !== "redirect" || !authorization) {
       return;
     }
 
     void (async () => {
       try {
-        const tokens = await exchangeHeadlessAuthorization(flow.authorization!);
+        const tokens = await exchangeHeadlessAuthorization(authorization);
         const decoded = jwtDecode<DecodedToken>(tokens.accessToken);
         await login({
           accessToken: tokens.accessToken,
@@ -96,19 +99,10 @@ export function HeadlessAuthForm({ view: initialView }: HeadlessAuthFormProps) {
         });
         router.replace("/(app)");
       } catch (err) {
-        setLocalError(err instanceof Error ? err.message : "Token exchange failed.");
+        setExchangeError(err instanceof Error ? err.message : "Token exchange failed.");
       }
     })();
-  }, [flow.authorization, flow.redirectUrl, flow.status, login, router]);
-
-  async function run(action: () => Promise<void>, fallback: string) {
-    setLocalError(null);
-    try {
-      await action();
-    } catch (err) {
-      setLocalError(err instanceof Error ? err.message : fallback);
-    }
-  }
+  }, [authorization, login, router, status]);
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -117,9 +111,9 @@ export function HeadlessAuthForm({ view: initialView }: HeadlessAuthFormProps) {
           <Text style={styles.title}>{initialView === "signup" ? "Create account" : "Sign in"}</Text>
           <Text style={styles.subtitle}>Native headless AuthPage — SqlOS owns the request; this screen draws the view.</Text>
 
-          {error ? <Text style={styles.error}>{error}</Text> : null}
+          {displayError ? <Text style={styles.error}>{displayError}</Text> : null}
 
-          {(view === "login" || view === "identify") && (
+          {view === "login" && (
             <>
               <Text style={styles.label}>Email</Text>
               <TextInput
@@ -134,7 +128,7 @@ export function HeadlessAuthForm({ view: initialView }: HeadlessAuthFormProps) {
               <Pressable
                 style={styles.button}
                 disabled={loading}
-                onPress={() => void run(() => flow.identify({ email }), "We could not start sign in.")}
+                onPress={() => void flow.identify({ email })}
               >
                 <Text style={styles.buttonText}>{loading ? "Checking..." : "Continue"}</Text>
               </Pressable>
@@ -154,7 +148,7 @@ export function HeadlessAuthForm({ view: initialView }: HeadlessAuthFormProps) {
               <Pressable
                 style={styles.button}
                 disabled={loading}
-                onPress={() => void run(() => flow.password.login({ email, password }), "Login failed.")}
+                onPress={() => void flow.password.login({ email, password })}
               >
                 <Text style={styles.buttonText}>{loading ? "Signing in..." : "Sign in"}</Text>
               </Pressable>
@@ -181,16 +175,12 @@ export function HeadlessAuthForm({ view: initialView }: HeadlessAuthFormProps) {
                 style={styles.button}
                 disabled={loading}
                 onPress={() =>
-                  void run(
-                    () =>
-                      flow.signup({
-                        displayName: displayName.trim() || email,
-                        email,
-                        password,
-                        organizationName,
-                      }),
-                    "Signup failed.",
-                  )
+                  void flow.signup({
+                    displayName: displayName.trim() || email,
+                    email,
+                    password,
+                    organizationName,
+                  })
                 }
               >
                 <Text style={styles.buttonText}>{loading ? "Creating account..." : "Create account"}</Text>
@@ -200,12 +190,12 @@ export function HeadlessAuthForm({ view: initialView }: HeadlessAuthFormProps) {
 
           {view === "organization" && (
             <>
-              {(flow.viewModel?.organizationSelection ?? []).map((org) => (
+              {(viewModel?.organizationSelection ?? []).map((org) => (
                 <Pressable
                   key={org.id}
                   style={styles.org}
                   disabled={loading}
-                  onPress={() => void run(() => flow.organization.select({ organizationId: org.id }), "Organization selection failed.")}
+                  onPress={() => void flow.organization.select({ organizationId: org.id })}
                 >
                   <Text style={styles.orgName}>{org.name}</Text>
                   <Text style={styles.orgRole}>{org.role}</Text>
@@ -216,17 +206,17 @@ export function HeadlessAuthForm({ view: initialView }: HeadlessAuthFormProps) {
 
           {(view === "mfa" || view === "mfa-enroll") && (
             <>
-              {view === "mfa-enroll" && !flow.viewModel?.totpEnrollment ? (
+              {view === "mfa-enroll" && !viewModel?.totpEnrollment ? (
                 <Pressable
                   style={styles.button}
                   disabled={loading}
-                  onPress={() => void run(() => flow.mfa.totp.enrollStart({ displayName: "Authenticator app" }), "Could not start enrollment.")}
+                  onPress={() => void flow.mfa.totp.enrollStart({ displayName: "Authenticator app" })}
                 >
                   <Text style={styles.buttonText}>Start authenticator setup</Text>
                 </Pressable>
               ) : null}
-              {flow.viewModel?.totpEnrollment?.secret ? (
-                <Text style={styles.secret}>Secret: {flow.viewModel.totpEnrollment.secret}</Text>
+              {viewModel?.totpEnrollment?.secret ? (
+                <Text style={styles.secret}>Secret: {viewModel.totpEnrollment.secret}</Text>
               ) : null}
               <Text style={styles.label}>Authenticator or recovery code</Text>
               <TextInput
@@ -239,13 +229,9 @@ export function HeadlessAuthForm({ view: initialView }: HeadlessAuthFormProps) {
                 style={styles.button}
                 disabled={loading}
                 onPress={() =>
-                  void run(
-                    () =>
-                      view === "mfa-enroll"
-                        ? flow.mfa.totp.enrollVerify({ code: mfaCode })
-                        : flow.mfa.verify({ code: mfaCode }),
-                    "The second-factor code was rejected.",
-                  )
+                  void (view === "mfa-enroll"
+                    ? flow.mfa.totp.enrollVerify({ code: mfaCode })
+                    : flow.mfa.verify({ code: mfaCode }))
                 }
               >
                 <Text style={styles.buttonText}>{loading ? "Verifying..." : "Verify"}</Text>
@@ -253,7 +239,7 @@ export function HeadlessAuthForm({ view: initialView }: HeadlessAuthFormProps) {
             </>
           )}
 
-          {loading && view === "login" && !flow.viewModel ? (
+          {loading && view === "login" && !viewModel ? (
             <ActivityIndicator color={Colors.primary} />
           ) : null}
 

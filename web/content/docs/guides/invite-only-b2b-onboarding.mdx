@@ -272,7 +272,7 @@ With JIT off, an unknown person cannot acquire membership merely by authenticati
 
 ## Headless alternative
 
-A custom invitation UI uses the same server-owned state machine:
+A custom invitation UI uses the same server-owned state machine. Drive it with [`@sqlos/headless`](/docs/reference/headless-js) (`flow.invitation.resolve` / `flow.start` or `flow.resume` / `flow.invitation.signup`). The routes below are the HTTP wire contract; client code should use the package. See [Build your own login and signup UI](/docs/guides/custom-login-ui).
 
 | Endpoint | Purpose |
 | --- | --- |
@@ -281,7 +281,22 @@ A custom invitation UI uses the same server-owned state machine:
 | `GET /sqlos/auth/headless/requests/{requestId}` | Reload the bound request and invitation view |
 | `POST /sqlos/auth/headless/invitations/signup` | Create a passwordless invited account and complete acceptance |
 
-Keep the invited email read-only. Once SqlOS binds the invitation to an authorization request, preserve the request id through subsequent sign-in steps. Do not replace the invitation flow with ordinary Email OTP signup; that creates an unnecessary second proof and can lose the bound membership context.
+```ts
+await flow.invitation.resolve({ invitationToken });
+await flow.start({ invitationToken, view: "login" });
+// or, after the OIDC library starts /authorize: await flow.resume(window.location);
+
+await flow.invitation.signup({
+  displayName,
+  invitationToken,
+});
+
+if (flow.status === "redirect" && flow.redirectUrl) {
+  window.location.assign(flow.redirectUrl);
+}
+```
+
+Keep the invited email read-only. Once SqlOS binds the invitation to an authorization request, keep one flow object for that request. Do not replace the invitation flow with `flow.emailOtp.signupStart`; that creates an unnecessary second proof and can lose the bound membership context.
 
 ## Production checklist
 
@@ -302,6 +317,8 @@ Atlas owners can invite a teammate without granting the browser authority over t
 ## Next steps
 
 - [Email Invitations](/docs/authserver/invitations)
+- [`@sqlos/headless`](/docs/reference/headless-js)
+- [Build a custom login UI](/docs/guides/custom-login-ui)
 - [Memberships](/docs/authserver/memberships)
 - [Transactional Email](/docs/authserver/transactional-email)
 - [Email Branding](/docs/authserver/email-branding)

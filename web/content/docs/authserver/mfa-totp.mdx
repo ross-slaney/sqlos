@@ -212,9 +212,27 @@ builder.AddSqlOS<AppDbContext>(options =>
 
 ## Headless auth behavior
 
-Headless auth uses the same state machine. Your UI must render the new views.
+Headless auth uses the same state machine. Drive it with [`@sqlos/headless`](/docs/reference/headless-js) (`flow.mfa.verify` / `flow.mfa.totp.enrollStart` / `enrollVerify`). The HTTP bodies below are the wire contract; client code should use the package. See [Build your own login and signup UI](/docs/guides/custom-login-ui).
 
-When a headless action returns a view model with `view: "mfa"`, render a code input and post:
+When `view` is `mfa`, render a code input and call `flow.mfa.verify({ code })`. When `view` is `mfa-enroll`, render the QR code and enrollment fields. Forced enrollment view models include `totpEnrollment` with:
+
+- `enrollmentToken`
+- `authenticatorId`
+- `secret`
+- `provisioningUri`
+- `qrCodeDataUrl`
+- `expiresAt`
+
+```ts
+await flow.mfa.verify({ code });
+await flow.mfa.totp.enrollVerify({ code });
+
+if (flow.status === "redirect" && flow.redirectUrl) {
+  window.location.assign(flow.redirectUrl);
+}
+```
+
+The flow holds `requestId`, `mfaToken`, and `enrollmentToken`. Wire reference:
 
 ```http
 POST /sqlos/auth/headless/mfa/verify
@@ -224,17 +242,6 @@ POST /sqlos/auth/headless/mfa/verify
   "code": "123456"
 }
 ```
-
-When it returns `view: "mfa-enroll"`, render the QR code and enrollment fields. Forced enrollment view models include `totpEnrollment` with:
-
-- `enrollmentToken`
-- `authenticatorId`
-- `secret`
-- `provisioningUri`
-- `qrCodeDataUrl`
-- `expiresAt`
-
-Verify enrollment:
 
 ```http
 POST /sqlos/auth/headless/mfa/totp/enroll/verify
@@ -246,12 +253,13 @@ POST /sqlos/auth/headless/mfa/totp/enroll/verify
 }
 ```
 
-On success SqlOS returns the same redirect result shape used by the rest of headless auth.
+On success the flow status is `redirect`. Always leave with `window.location.assign(redirectUrl)`.
 
-Send the `requestId`, `mfaToken`, and `enrollmentToken` from the same returned
+The flow holds `requestId`, `mfaToken`, and `enrollmentToken` from the same
 view model. SqlOS binds all three to the user, organization, client, flow, and
-authorization request. Mixing values from parallel tabs or separate sign-in
-attempts is rejected before recovery codes or login artifacts change.
+authorization request. Do not share one flow object across tabs or parallel
+sign-in attempts. Mixing values is rejected before recovery codes or login
+artifacts change.
 
 ## Direct API login behavior
 
@@ -355,6 +363,7 @@ Production deployments should configure a durable Data Protection key ring outsi
 ## Next reading
 
 - [Headless Auth](/docs/authserver/headless-auth)
+- [`@sqlos/headless`](/docs/reference/headless-js)
 - [Build a custom login UI](/docs/guides/custom-login-ui)
 - [Security Settings](/docs/authserver/security-settings)
 - [AuthServer API Reference](/docs/reference/authserver-api)

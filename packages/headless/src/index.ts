@@ -14,6 +14,7 @@ export {
   HEADLESS_VIEWS,
   HEADLESS_VIEW_MODEL_FIELDS,
 } from "./contract.js";
+export type { HeadlessView } from "./contract.js";
 export type {
   CreateHeadlessFlowOptions,
   HeadlessActionResult,
@@ -32,4 +33,5 @@ export type {
   HeadlessTotpEnrollment,
   HeadlessViewModel,
   LocationLike,
+  UseHeadlessAuthResult,
 } from "./types.js";

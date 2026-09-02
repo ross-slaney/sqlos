@@ -1,7 +1,7 @@
 import { Component, inject, OnDestroy, OnInit, signal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { createHeadlessFlow, type HeadlessFlow, type HeadlessViewModel } from '@sqlos/headless';
+import { createHeadlessFlow, type HeadlessFlow, type HeadlessFlowStatus, type HeadlessViewModel } from '@sqlos/headless';
 import { AuthService } from '../../services/auth.service';
 import { environment } from '../../environments/environment';
 
@@ -101,7 +101,7 @@ const IMAGE_SIGNUP = 'https://images.unsplash.com/photo-1556740758-90de374c12ad?
             </div>
           } @else {
             <!-- Identify / Login view -->
-            @if (view() === 'login' || view() === 'identify') {
+            @if (view() === 'login') {
               <form class="ha-form" (ngSubmit)="onIdentify()">
                 <div class="ha-field">
                   <label for="ha-email">Email address</label>
@@ -115,7 +115,7 @@ const IMAGE_SIGNUP = 'https://images.unsplash.com/photo-1556740758-90de374c12ad?
                 </button>
                 <div class="ha-alt">
                   Don't have an account?
-                  <button type="button" class="ha-link-btn" (click)="view.set('signup')">Sign up</button>
+                  <button type="button" class="ha-link-btn" (click)="formView.set('signup')">Sign up</button>
                 </div>
               </form>
             }
@@ -138,9 +138,9 @@ const IMAGE_SIGNUP = 'https://images.unsplash.com/photo-1556740758-90de374c12ad?
                   {{ loading() ? 'Signing in...' : 'Sign in' }}
                 </button>
                 <div class="ha-alt">
-                  <button type="button" class="ha-link-btn" (click)="view.set('login')">Use a different email</button>
+                  <button type="button" class="ha-link-btn" (click)="formView.set('login')">Use a different email</button>
                   @if (supportsEmailOtp()) {
-                    <button type="button" class="ha-link-btn" (click)="view.set('email-otp')">Email me a code instead</button>
+                    <button type="button" class="ha-link-btn" (click)="formView.set('email-otp')">Email me a code instead</button>
                   }
                 </div>
               </form>
@@ -157,9 +157,9 @@ const IMAGE_SIGNUP = 'https://images.unsplash.com/photo-1556740758-90de374c12ad?
                 </button>
                 <div class="ha-alt">
                   @if (supportsPassword()) {
-                    <button type="button" class="ha-link-btn" (click)="view.set('password')">Use password instead</button>
+                    <button type="button" class="ha-link-btn" (click)="formView.set('password')">Use password instead</button>
                   }
-                  <button type="button" class="ha-link-btn" (click)="view.set('login')">Use a different email</button>
+                  <button type="button" class="ha-link-btn" (click)="formView.set('login')">Use a different email</button>
                 </div>
               </form>
             }
@@ -174,9 +174,9 @@ const IMAGE_SIGNUP = 'https://images.unsplash.com/photo-1556740758-90de374c12ad?
                   {{ loading() ? 'Verifying...' : 'Verify code' }}
                 </button>
                 <div class="ha-alt">
-                  <button type="button" class="ha-link-btn" (click)="view.set('email-otp')">Send a new code</button>
+                  <button type="button" class="ha-link-btn" (click)="formView.set('email-otp')">Send a new code</button>
                   @if (supportsPassword()) {
-                    <button type="button" class="ha-link-btn" (click)="view.set('password')">Use password instead</button>
+                    <button type="button" class="ha-link-btn" (click)="formView.set('password')">Use password instead</button>
                   }
                 </div>
               </form>
@@ -239,7 +239,7 @@ const IMAGE_SIGNUP = 'https://images.unsplash.com/photo-1556740758-90de374c12ad?
                 </button>
                 <div class="ha-alt">
                   Already have an account?
-                  <button type="button" class="ha-link-btn" (click)="view.set('login')">Sign in</button>
+                  <button type="button" class="ha-link-btn" (click)="formView.set('login')">Sign in</button>
                 </div>
               </form>
             }
@@ -303,12 +303,18 @@ export class AuthAuthorizeComponent implements OnInit, OnDestroy {
 
   requestId: string | null = null;
   initialIsSignup = false;
+  initialView = 'login';
+  private lastFlowView: string | null = null;
 
-  view = signal('login');
-  loading = signal(false);
+  flowStatus = signal<HeadlessFlowStatus>('idle');
+  flowView = signal<string | null>(null);
+  formView = signal<string | null>(null);
   error = signal<string | null>(null);
   fieldErrors = signal<Record<string, string>>({});
   viewModel = signal<HeadlessViewModel | null>(null);
+
+  view = () => this.formView() ?? this.flowView() ?? this.initialView;
+  loading = () => this.flowStatus() === 'loading';
 
   email = '';
   password = '';
@@ -346,7 +352,7 @@ export class AuthAuthorizeComponent implements OnInit, OnDestroy {
 
   showProviderButtons = () => {
     const v = this.view();
-    return (v === 'login' || v === 'identify' || v === 'signup') && (this.viewModel()?.providers?.length ?? 0) > 0;
+    return (v === 'login' || v === 'signup') && (this.viewModel()?.providers?.length ?? 0) > 0;
   };
 
   supportsPassword = () => {
@@ -366,10 +372,8 @@ export class AuthAuthorizeComponent implements OnInit, OnDestroy {
   async ngOnInit() {
     const params = this.route.snapshot.queryParamMap;
     this.requestId = params.get('request');
-    const initialView = params.get('view') || 'login';
-    this.initialIsSignup = initialView === 'signup';
-    this.view.set(initialView);
-    this.error.set(params.get('error'));
+    this.initialView = params.get('view') || 'login';
+    this.initialIsSignup = this.initialView === 'signup';
     this.email = params.get('email') || '';
     const initialDisplayName = params.get('displayName') || '';
 
@@ -383,17 +387,12 @@ export class AuthAuthorizeComponent implements OnInit, OnDestroy {
 
     if (!this.requestId) return;
 
-    try {
-      await this.flow.resume(window.location);
-      this.applyFlow();
-      const vm = this.viewModel();
-      if (vm?.displayName && !this.firstName && !this.lastName && initialDisplayName) {
-        const [first = '', ...rest] = vm.displayName.split(' ');
-        this.firstName = first;
-        this.lastName = rest.join(' ');
-      }
-    } catch (err) {
-      this.error.set(err instanceof Error ? err.message : 'Failed to load authorization request.');
+    await this.flow.resume(window.location);
+    const vm = this.viewModel();
+    if (vm?.displayName && !this.firstName && !this.lastName && initialDisplayName) {
+      const [first = '', ...rest] = vm.displayName.split(' ');
+      this.firstName = first;
+      this.lastName = rest.join(' ');
     }
   }
 
@@ -405,83 +404,62 @@ export class AuthAuthorizeComponent implements OnInit, OnDestroy {
     const flow = this.flow;
     if (!flow) return;
     if (flow.status === 'redirect' && flow.redirectUrl) {
-      const url = new URL(flow.redirectUrl);
-      const code = url.searchParams.get('code');
-      if (code) {
-        window.location.assign(flow.redirectUrl);
-        return;
-      }
-      window.location.href = flow.redirectUrl;
+      window.location.assign(flow.redirectUrl);
       return;
     }
-    if (flow.viewModel) {
-      this.viewModel.set(flow.viewModel);
-      if (flow.viewModel.view) this.view.set(flow.viewModel.view);
-      if (flow.viewModel.error) this.error.set(flow.viewModel.error);
-      if (flow.viewModel.email) this.email = flow.viewModel.email;
-      if (flow.viewModel.challengeToken) this.otpCode = '';
-      this.fieldErrors.set(flow.viewModel.fieldErrors ?? {});
+    this.flowStatus.set(flow.status);
+    this.error.set(flow.error);
+    this.fieldErrors.set(flow.fieldErrors);
+    this.viewModel.set(flow.viewModel);
+    const nextView = flow.viewModel?.view ?? null;
+    if (nextView && nextView !== this.lastFlowView) {
+      this.formView.set(null);
     }
-    if (flow.error) this.error.set(flow.error);
+    this.lastFlowView = nextView;
+    this.flowView.set(nextView);
+    if (flow.viewModel?.email) this.email = flow.viewModel.email;
+    if (flow.viewModel?.challengeToken) this.otpCode = '';
   }
 
-  private async runAction(action: () => Promise<unknown>, fallback: string) {
-    this.loading.set(true); this.error.set(null); this.fieldErrors.set({});
-    try {
-      await action();
-      this.applyFlow();
-    } catch (err) {
-      this.error.set(err instanceof Error ? err.message : fallback);
-    } finally {
-      this.loading.set(false);
-    }
-  }
-
-  async onIdentify() {
+  onIdentify() {
     if (!this.flow) return;
-    await this.runAction(() => this.flow!.identify({ email: this.email }), 'We could not start sign in.');
+    void this.flow.identify({ email: this.email });
   }
 
-  async onLogin() {
+  onLogin() {
     if (!this.flow) return;
-    await this.runAction(() => this.flow!.password.login({ email: this.email, password: this.password }), 'Login failed.');
+    void this.flow.password.login({ email: this.email, password: this.password });
   }
 
-  async onRequestEmailOtp() {
+  onRequestEmailOtp() {
     if (!this.flow) return;
-    await this.runAction(() => this.flow!.emailOtp.start({ email: this.email }), 'We could not send a sign-in code.');
+    void this.flow.emailOtp.start({ email: this.email });
   }
 
-  async onVerifyEmailOtp() {
+  onVerifyEmailOtp() {
     if (!this.flow) return;
-    await this.runAction(() => this.flow!.emailOtp.verify({ code: this.otpCode }), 'The sign-in code was rejected.');
+    void this.flow.emailOtp.verify({ code: this.otpCode });
   }
 
-  async onSignup() {
+  onSignup() {
     if (!this.flow) return;
-    await this.runAction(() => this.flow!.signup({
+    void this.flow.signup({
       displayName: buildDisplayName(this.firstName, this.lastName, this.email),
       email: this.email,
       password: this.password,
       organizationName: this.organizationName,
       customFields: { referralSource: this.referralSource, firstName: this.firstName, lastName: this.lastName },
-    }), 'Signup failed.');
+    });
   }
 
-  async onProviderStart(connectionId: string) {
+  onProviderStart(connectionId: string) {
     if (!this.flow) return;
-    await this.runAction(
-      () => this.flow!.provider.start({ connectionId, email: this.email || undefined }),
-      'Provider auth failed.',
-    );
+    void this.flow.provider.start({ connectionId, email: this.email || undefined });
   }
 
-  async onSelectOrganization(organizationId: string) {
+  onSelectOrganization(organizationId: string) {
     if (!this.flow) return;
-    await this.runAction(
-      () => this.flow!.organization.select({ organizationId }),
-      'Organization selection failed.',
-    );
+    void this.flow.organization.select({ organizationId });
   }
 
   startFlow(flowView: 'login' | 'signup') {

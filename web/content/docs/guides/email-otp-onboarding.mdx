@@ -162,24 +162,10 @@ Do not combine `AllowAnyOrigin` with credentials. A same-origin backend-for-fron
 
 ## 3. Start a normal OAuth signup request
 
-Generate `state`, a PKCE verifier, and its `S256` challenge, save the verifier and state in `sessionStorage`, then navigate the browser to SqlOS:
+Start `/authorize` with the OIDC library your stack already ships — Auth.js, `angular-oauth2-oidc`, or ASP.NET Core `AddOpenIdConnect`. Those libraries own S256 PKCE, `state`, and the later `/token` call. Pass `view=signup` as an authorization parameter:
 
 ```ts
-const authorize = new URL("https://identity.parcelpilot.test/sqlos/auth/authorize");
-authorize.searchParams.set("response_type", "code");
-authorize.searchParams.set("client_id", "parcelpilot-web");
-authorize.searchParams.set(
-  "redirect_uri",
-  "https://app.parcelpilot.test/auth/callback",
-);
-authorize.searchParams.set("scope", "openid profile email offline_access");
-authorize.searchParams.set("state", state);
-authorize.searchParams.set("code_challenge", codeChallenge);
-authorize.searchParams.set("code_challenge_method", "S256");
-authorize.searchParams.set("resource", "https://api.parcelpilot.test");
-authorize.searchParams.set("view", "signup");
-
-window.location.replace(authorize.toString());
+signIn("sqlos", { callbackUrl: "/app" }, { view: "signup" });
 ```
 
 SqlOS saves the authorization request and redirects to `BuildUiUrl`, for example:
@@ -188,29 +174,42 @@ SqlOS saves the authorization request and redirects to `BuildUiUrl`, for example
 https://app.parcelpilot.test/join?request=req_...&view=signup
 ```
 
-Load `/sqlos/auth/headless/requests/{requestId}` with `credentials: "include"` and render the returned view instead of treating the query string as authoritative auth state.
+Resume that request with [`@sqlos/headless`](/docs/reference/headless-js). Do not call `/sqlos/auth/headless` from application `fetch` helpers, and do not treat the query string as authoritative auth state.
+
+```ts
+import { createHeadlessFlow } from "@sqlos/headless";
+import { useHeadlessAuth } from "@sqlos/headless/react";
+
+const flow = createHeadlessFlow({
+  issuer: "https://identity.parcelpilot.test/sqlos/auth",
+  clientId: "parcelpilot-web",
+  redirectUri: "https://app.parcelpilot.test/auth/callback",
+  credentials: "include",
+});
+
+await flow.resume(window.location);
+```
+
+React snapshots:
+
+```ts
+const { flow, status, view, viewModel, error, fieldErrors, redirectUrl } =
+  useHeadlessAuth({
+    issuer: "https://identity.parcelpilot.test/sqlos/auth",
+    clientId: "parcelpilot-web",
+    redirectUri: "https://app.parcelpilot.test/auth/callback",
+    credentials: "include",
+  });
+```
+
+`credentials: "include"` is required in the browser so the AuthPage session cookie is sent. See [Build your own login and signup UI](/docs/guides/custom-login-ui) for the full view loop.
 
 ## 4. Send the signup code
 
-Post the visible fields and app-owned data to the signup-specific endpoint:
+Actions take user input only. The flow keeps `requestId`, challenge, and signup tokens internally. Server and validation failures resolve — read `flow.error` and `flow.fieldErrors` instead of try/catch:
 
 ```ts
-const AUTH = "https://identity.parcelpilot.test/sqlos/auth";
-
-async function postAction(path: string, body: unknown) {
-  const response = await fetch(`${AUTH}/headless${path}`, {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) throw new Error("Onboarding could not continue.");
-  return response.json();
-}
-
-const started = await postAction("/signup/email-otp/start", {
-  requestId,
+await flow.emailOtp.signupStart({
   displayName: "Avery Chen",
   email: "avery@northwind.test",
   organizationName: "Northwind Dispatch",
@@ -220,49 +219,47 @@ const started = await postAction("/signup/email-otp/start", {
   },
 });
 
-const challengeToken = started.viewModel?.challengeToken;
-const signupToken = started.viewModel?.signupToken;
-if (!challengeToken || !signupToken) {
-  throw new Error(started.viewModel?.error ?? "The code could not be sent.");
+if (flow.status === "error") {
+  showError(flow.error, flow.fieldErrors);
+  return;
 }
 ```
 
-Keep both tokens in component state or `sessionStorage` only. Never place them in a URL, analytics event, durable browser storage, or log.
+Do not copy challenge or signup tokens into component state, URLs, analytics, durable browser storage, or logs.
 
-The actual headless view model includes values like:
+The returned view model includes values like:
 
 ```json
 {
   "view": "email-otp-signup-verify",
   "email": "avery@northwind.test",
-  "info": "Check av***@northwind.test for a sign-up code.",
-  "challengeToken": "...",
-  "signupToken": "..."
+  "info": "Check av***@northwind.test for a sign-up code."
 }
 ```
 
 <Callout type="warning" title="Do not read timers that are not in the response">
-  The headless action result does not currently expose `expiresAt`, `nextAllowedSendAt`, or a separate `maskedEmail`. The masked address is embedded in `info`. Configure the same 30-second cooldown in the UI, but keep the server rate limit authoritative. The direct backend SDK result does expose timestamps.
+  The headless view model does not currently expose `expiresAt`, `nextAllowedSendAt`, or a separate `maskedEmail`. The masked address is embedded in `info`. Configure the same 30-second cooldown in the UI, but keep the server rate limit authoritative. The direct backend SDK result does expose timestamps.
 </Callout>
 
 ## 5. Verify and follow the returned view
 
 ```ts
-const verified = await postAction("/signup/email-otp/verify", {
-  requestId,
-  signupToken,
-  challengeToken,
-  code,
-});
+await flow.emailOtp.signupVerify({ code });
 
-if (verified.type === "redirect" && verified.redirectUrl) {
-  window.location.replace(verified.redirectUrl);
-} else {
-  renderHeadlessView(verified.viewModel);
+if (flow.status === "redirect" && flow.redirectUrl) {
+  window.location.assign(flow.redirectUrl);
+  return;
 }
+
+if (flow.status === "error") {
+  showError(flow.error, flow.fieldErrors);
+  return;
+}
+
+render(flow.viewModel);
 ```
 
-Do not assume verification always goes straight to the app callback. SqlOS may return another view for organization selection, MFA, or validation errors. Render the returned state machine.
+Always leave with `window.location.assign(flow.redirectUrl)`. Do not assume verification always goes straight to the app callback. SqlOS may return another view for organization selection, MFA, or validation errors. Render the returned state machine.
 
 On success, SqlOS transactionally:
 
@@ -274,26 +271,24 @@ On success, SqlOS transactionally:
 - records `user.signup.email_otp`;
 - issues the final authorization-code redirect.
 
-At `/auth/callback`, verify the original `state`, read the code, and exchange it at `/sqlos/auth/token` using the original PKCE verifier, exact redirect URI, and `resource=https://api.parcelpilot.test`. Because the authorization request was resource-bound, omitting or changing `resource` at the token exchange fails the request.
+Follow `redirectUrl` so the OIDC library finishes at its registered callback and exchanges the code at `/token`. If you bound `resource` on `/authorize`, the library must send the same value at token exchange — omitting or changing it fails the request.
 
 ## 6. Implement resend as replacement
 
-Disable resend locally for the configured cooldown. When the user requests another code, call `/signup/email-otp/start` again with the same signup fields and replace **both** returned tokens:
+Disable resend locally for the configured cooldown. When the user requests another code, call `flow.emailOtp.signupStart` again with the same signup fields. The flow replaces both tokens:
 
 ```ts
-const resent = await postAction("/signup/email-otp/start", signupDraft);
-setChallengeToken(resent.viewModel.challengeToken);
-setSignupToken(resent.viewModel.signupToken);
+await flow.emailOtp.signupStart(signupDraft);
 ```
 
 A new challenge supersedes the previous active challenge in that signup context. A code from the older email must fail even if it has not reached its nominal expiry.
 
 ## Routing edge cases
 
-- Existing accounts are rejected from signup with an explicit “account already exists” error; send legitimate users to `/headless/email-otp/start` and `/verify` instead.
-- An SSO-governed email domain redirects to its identity provider before SqlOS creates an OTP challenge.
+- Existing accounts are rejected from signup with an explicit “account already exists” error; send legitimate users to `flow.emailOtp.start` and `flow.emailOtp.verify` instead.
+- An SSO-governed email domain redirects to its identity provider before SqlOS creates an OTP challenge. Follow `flow.redirectUrl` with `window.location.assign`.
 - Self-service signup cannot join an existing organization by supplying `organizationId`; use an invitation.
-- A new invited user uses `/headless/invitations/signup`, not a second signup OTP challenge.
+- A new invited user uses `flow.invitation.signup`, not a second signup OTP challenge.
 - Built-in OTP message bodies are intentionally suppressed from delivery-history previews because they contain codes.
 
 <Callout type="warning" title="Public signup reveals an existing account">
@@ -304,11 +299,11 @@ A new challenge supersedes the previous active challenge in that signup context.
 
 - Open **Auth Server > Security > OTP communications readiness**, confirm Email OTP is ready, and perform one explicit test delivery to an operator-controlled inbox. The readiness read is local-only; the test is the provider proof.
 - Use HTTPS, PKCE S256, high-entropy state, and an exact redirect URI.
-- Keep signup and challenge tokens in ephemeral state and clear them after completion.
+- Let `@sqlos/headless` hold signup and challenge tokens; do not copy them into app state, URLs, or logs.
 - Treat existing-account disclosure as an explicit threat-model decision: the current signup endpoint is not account-enumeration resistant, so add bot controls, rate limits, and monitoring rather than claiming a generic response.
 - Tune per-email, IP, and client limits; alert on abuse and delivery failure rates.
 - Support paste and one-time-code autofill without auto-submitting an incomplete code.
-- Replace both flow tokens on resend and test that the old code fails.
+- Call `signupStart` again on resend and test that the old code fails.
 - Test wrong codes, max attempts, expiry, replay, superseded codes, existing accounts, SSO domains, and signup-hook rollback.
 - Make the callback idempotent and store refresh tokens according to the client platform's security model.
 - Add Authenticator MFA or step-up for privileged actions after onboarding.
@@ -320,6 +315,7 @@ ParcelPilot gets a polished two-step onboarding experience without storing a pas
 ## Next steps
 
 - [Email OTP](/docs/authserver/email-otp)
+- [`@sqlos/headless`](/docs/reference/headless-js)
 - [Build a custom login UI](/docs/guides/custom-login-ui)
 - [Email branding](/docs/authserver/email-branding)
 - [Transactional email](/docs/authserver/transactional-email)

@@ -71,7 +71,7 @@ Implementation guide: [Build your own login and signup UI](/docs/guides/custom-l
 
 ## Headless endpoints
 
-Your UI calls these SqlOS endpoints:
+Client code should drive these transitions with [`@sqlos/headless`](/docs/reference/headless-js) (`createHeadlessFlow` / `useHeadlessAuth`). The table is the HTTP wire contract, not the integration path. See [Build your own login and signup UI](/docs/guides/custom-login-ui).
 
 | Endpoint | Purpose |
 | --- | --- |
@@ -110,10 +110,10 @@ When a CLI sends the user to `/sqlos/auth/device?user_code=...`, SqlOS resolves 
 
 The lowest-friction pattern is:
 
-1. Load `/headless/requests/{requestId}` and render your normal auth UI. The view may be `device`, `login`, `email-otp`, `phone-otp`, `password`, `organization`, or `device-approve`.
-2. Let the existing headless login/signup/OTP/SSO handlers complete the request. Do not carry the user code through your credential forms.
-3. When the returned view is `device-approve`, show the CLI client/resource/scope from `deviceAuthorization`.
-4. Approve or deny with `/headless/device/approve` or `/headless/device/deny`, passing the `requestId`. You may pass `userCode` instead for manual-entry UIs, but request-bound approval is preferred.
+1. `flow.resume(window.location)` and render your normal auth UI. The view may be `device`, `login`, `email-otp`, `phone-otp`, `password`, `organization`, or `device-approve`.
+2. Let the existing headless login/signup/OTP/SSO actions complete the request. Do not carry the user code through your credential forms.
+3. When the returned view is `device-approve`, show the CLI client/resource/scope from `viewModel.deviceAuthorization`.
+4. Approve or deny with `flow.device.approve()` or `flow.device.deny()`. You may pass `userCode` instead for manual-entry UIs, but request-bound approval is preferred.
 
 SqlOS releases tokens to the polling CLI only after approval. See [CLI OAuth](/docs/authserver/cli-oauth).
 
@@ -167,9 +167,9 @@ examples/SqlOS.Example.ExpoApp/components/HeadlessAuthForm.tsx
 
 Headless MFA uses the same result contract as every other step.
 
-When `viewModel.view` is `mfa`, render an input for a 6-digit authenticator code or a recovery code. Post it to `/headless/mfa/verify` with `requestId`, `mfaToken`, and `code`.
+When `view` is `mfa`, render an input for a 6-digit authenticator code or a recovery code and call `flow.mfa.verify({ code })`.
 
-When `viewModel.view` is `mfa-enroll`, render authenticator setup. The view model includes `totpEnrollment` with `qrCodeDataUrl`, `secret`, `provisioningUri`, `enrollmentToken`, and `expiresAt`. Post the verification code to `/headless/mfa/totp/enroll/verify`.
+When `view` is `mfa-enroll`, render authenticator setup. The view model includes `totpEnrollment` with `qrCodeDataUrl`, `secret`, `provisioningUri`, `enrollmentToken`, and `expiresAt`. Call `flow.mfa.totp.enrollVerify({ code })`. The flow holds `requestId`, `mfaToken`, and `enrollmentToken`.
 
 Keep `requestId`, `mfaToken`, and `enrollmentToken` from the same view model
 together. They are transaction-bound and cannot be substituted across users,
@@ -183,11 +183,11 @@ If your headless app does not render these views, required-MFA users will authen
 
 When `viewModel.view` is `consent`, a non-first-party client needs the user's approval before SqlOS issues its authorization code. Render the client name (`clientName`) and the `consentScopes` list — each entry carries `scope`, `displayName`, and an optional `description`; the display name falls back to the raw scope string when no [scope display name](/docs/authserver/consent) is configured.
 
-Post `requestId` and the view model's `consentToken` to `/headless/consent/approve` or `/headless/consent/deny`. Approval returns the normal action result, so organization selection or MFA can still follow; denial returns a `redirect` result carrying the `access_denied` error redirect. Like the MFA tokens, `consentToken` is transaction-bound and cannot be substituted across users, clients, or parallel authorization requests. First-party clients never produce this view.
+Call `flow.consent.approve()` or `flow.consent.deny()`. The flow holds `requestId` and `consentToken`. Approval can still continue to organization selection or MFA; denial sets `status === "redirect"` with the `access_denied` error URL — leave with `window.location.assign(redirectUrl)`. Like the MFA tokens, `consentToken` is transaction-bound and cannot be substituted across users, clients, or parallel authorization requests. First-party clients never produce this view.
 
 ## Invitations
 
-Headless invitation links should use the invitation endpoints instead of pretending the invite is a normal signup.
+Headless invitation links should use `flow.invitation.resolve` and `flow.invitation.signup` instead of pretending the invite is a normal signup.
 
 ```typescript
 await flow.invitation.resolve({ invitationToken });
@@ -205,7 +205,7 @@ await flow.invitation.signup({
 });
 ```
 
-Calling `/signup/email-otp/start` for a new invited user is the wrong shape: the invite link has already proven mailbox possession. Use `/invitations/signup` so SqlOS creates the verified user, accepts the invitation, and issues the redirect in one transaction. If HRD requires SSO for the invited email domain, SqlOS returns the SSO redirect instead of creating a local account.
+Calling `flow.emailOtp.signupStart` for a new invited user is the wrong shape: the invite link has already proven mailbox possession. Use `flow.invitation.signup` so SqlOS creates the verified user, accepts the invitation, and issues the redirect in one transaction. If HRD requires SSO for the invited email domain, SqlOS returns the SSO redirect instead of creating a local account.
 
 ## What doesn't change
 

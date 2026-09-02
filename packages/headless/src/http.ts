@@ -15,6 +15,7 @@ export function assertNotTokenUrl(url: string): void {
     /* keep raw */
   }
   if (TOKEN_PATH_PATTERN.test(pathname) || TOKEN_PATH_PATTERN.test(url)) {
+    // Message must stay stable — flow.ts rethrows this as a programmer error.
     throw new HeadlessError("The headless package never calls /token.");
   }
 }

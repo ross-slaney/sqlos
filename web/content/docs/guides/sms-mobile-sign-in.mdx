@@ -114,70 +114,63 @@ Configure the same scheme in the mobile app. For an Expo app:
 
 ## 3. Start a PKCE authorization request
 
-Generate an RFC 7636 verifier, its `S256` challenge, and a random `state` using a platform-supported cryptography library. Keep the verifier and state in secure temporary storage until the callback completes.
+On native there is no browser redirect into your page. Drive the flow with [`@sqlos/headless`](/docs/reference/headless-js). `flow.start` creates the authorization request and generates PKCE. Pass `generatePkce` when Web Crypto `subtle` is unavailable (for example Expo). Do not call `/sqlos/auth/headless` from application `fetch` helpers.
 
 ```ts
-type HeadlessResult = {
-  type: "view" | "redirect";
-  redirectUrl?: string;
-  viewModel?: {
-    requestId?: string;
-    challengeToken?: string;
-    signupToken?: string;
-    error?: string;
-  };
-};
+import { createHeadlessFlow, generatePkce } from "@sqlos/headless";
+import { useHeadlessAuth } from "@sqlos/headless/react-native";
+import { exchangeCodeAsync } from "expo-auth-session";
 
-const AUTH = "https://api.example.com/sqlos/auth";
-const CLIENT_ID = "trailnote-mobile";
-const REDIRECT_URI = "trailnote://auth/callback";
+const issuer = "https://api.example.com/sqlos/auth";
+const clientId = "trailnote-mobile";
+const redirectUri = "trailnote://auth/callback";
 
-async function post(path: string, body: unknown): Promise<HeadlessResult> {
-  const response = await fetch(`${AUTH}/headless${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+const flow = createHeadlessFlow({
+  issuer,
+  clientId,
+  redirectUri,
+  generatePkce, // wrap with expo-crypto when Web Crypto subtle is unavailable
+});
 
-  if (!response.ok) throw new Error(await response.text());
-  return response.json();
-}
-
-const started = await post("/start", {
-  responseType: "code",
-  clientId: CLIENT_ID,
-  redirectUri: REDIRECT_URI,
-  state,
+await flow.start({
   scope: "openid profile offline_access",
-  codeChallenge,
-  codeChallengeMethod: "S256",
   resource: "https://api.example.com",
   view: "login",
 });
 
-const requestId = started.viewModel?.requestId;
-if (!requestId) throw new Error(started.viewModel?.error ?? "Could not start sign in.");
+if (flow.status === "error") {
+  showError(flow.error, flow.fieldErrors);
+}
 ```
 
-Do not replace PKCE or `state` with a client secret. Native apps are public clients and cannot safely hold one.
+React Native snapshots:
+
+```ts
+const { flow, status, view, viewModel, error, fieldErrors, redirectUrl } =
+  useHeadlessAuth({
+    issuer,
+    clientId,
+    redirectUri,
+    generatePkce,
+  });
+```
+
+Omit `credentials` on native. Do not replace PKCE or `state` with a client secret. Native apps are public clients and cannot safely hold one. See [Build your own login and signup UI](/docs/guides/custom-login-ui).
 
 ## 4. Send the code
 
 Use E.164 at the API boundary. A phone input may display `(202) 555-0148`, but submit `+12025550148`.
 
 ```ts
-const sent = await post("/phone-otp/start", {
-  requestId,
-  phoneNumber: "+12025550148",
-});
+await flow.phoneOtp.start({ phoneNumber: "+12025550148" });
 
-const challengeToken = sent.viewModel?.challengeToken;
-if (!challengeToken) {
-  throw new Error(sent.viewModel?.error ?? "The code could not be sent.");
+if (flow.status === "error") {
+  showError(flow.error, flow.fieldErrors);
+  return;
 }
 ```
 
-Keep `challengeToken` in component state or secure temporary storage. SqlOS intentionally cannot reconstruct and return the raw token after a request reload.
+The flow holds the challenge token. Do not copy it into app state, analytics, or logs. SqlOS intentionally cannot reconstruct and return the raw token after a request reload.
 
 For a React Native input, let the OS offer phone and SMS-code affordances:
 
@@ -200,57 +193,60 @@ For a React Native input, let the OS offer phone and SMS-code affordances:
 ## 5. Verify and exchange the authorization code
 
 ```ts
-const verified = await post("/phone-otp/verify", {
-  requestId,
-  challengeToken,
-  code,
-});
+await flow.phoneOtp.verify({ code });
 
-if (verified.type !== "redirect" || !verified.redirectUrl) {
-  throw new Error(verified.viewModel?.error ?? "The code was not accepted.");
+if (flow.status === "error") {
+  showError(flow.error, flow.fieldErrors);
+  return;
 }
 
-const callback = new URL(verified.redirectUrl);
-if (callback.searchParams.get("state") !== state) {
-  throw new Error("The sign-in state did not match.");
+if (flow.status === "redirect" && flow.authorization) {
+  const tokens = await exchangeCodeAsync(
+    {
+      clientId,
+      code: flow.authorization.code,
+      redirectUri: flow.authorization.redirectUri,
+      extraParams: {
+        code_verifier: flow.authorization.codeVerifier ?? "",
+        resource: "https://api.example.com",
+      },
+    },
+    { tokenEndpoint: `${issuer}/token` },
+  );
+  // Store tokens in your app session — not in this package.
+  return;
 }
 
-const authorizationCode = callback.searchParams.get("code");
-if (!authorizationCode) throw new Error("No authorization code was returned.");
+if (flow.status === "redirect" && flow.redirectUrl && !flow.authorization) {
+  // External provider URL — open it; do not treat it as a code callback.
+  return;
+}
 
-const tokenResponse = await fetch(`${AUTH}/token`, {
-  method: "POST",
-  headers: { "Content-Type": "application/x-www-form-urlencoded" },
-  body: new URLSearchParams({
-    grant_type: "authorization_code",
-    client_id: CLIENT_ID,
-    redirect_uri: REDIRECT_URI,
-    code: authorizationCode,
-    code_verifier: verifier,
-    resource: "https://api.example.com",
-  }).toString(),
-});
+render(flow.viewModel);
 ```
 
-Store the resulting refresh token in Keychain/Keystore-backed storage, not `AsyncStorage`. Clear the verifier, state, request id, and challenge token after the exchange.
+The package never calls `/token`. Hand the authorization code to `expo-auth-session`. Store the resulting refresh token in Keychain/Keystore-backed storage, not `AsyncStorage`.
 
 ## 6. Add passwordless signup
 
-New users use the parallel signup endpoints:
+New users use the parallel signup actions. The flow holds `signupToken` and `challengeToken`:
 
-```text
-POST /sqlos/auth/headless/signup/phone-otp/start
-POST /sqlos/auth/headless/signup/phone-otp/verify
+```ts
+await flow.phoneOtp.signupStart({
+  displayName: "Alex Rivera",
+  phoneNumber: "+12025550148",
+  organizationName: "Trailnote",
+});
+
+await flow.phoneOtp.signupVerify({ code });
 ```
-
-Signup start accepts `requestId`, `displayName`, `phoneNumber`, optional `organizationName`, and optional `customFields`. Preserve both the returned `signupToken` and `challengeToken` until verification.
 
 ## Production checklist
 
 - Use HTTPS for the SqlOS host and exact registered deep links or universal/app links.
 - Keep Twilio credentials on the server only.
 - Enforce a country allow list and tune phone, account, IP, and client send limits.
-- Disable resend until `NextAllowedSendAt`; do not create parallel challenges from repeated taps.
+- Disable resend for the configured cooldown; do not create parallel challenges from repeated taps.
 - Use generic public errors so unknown and known phone numbers are not distinguishable.
 - Mask phone numbers in UI, logs, analytics, and support tools.
 - Store refresh tokens in Keychain/Keystore-backed secure storage.
@@ -264,6 +260,7 @@ The mobile app presents its own phone and code screens while SqlOS owns the comp
 ## Next steps
 
 - [Authenticator MFA](/docs/guides/mfa-totp)
+- [`@sqlos/headless`](/docs/reference/headless-js)
 - [Build a custom login UI](/docs/guides/custom-login-ui)
 - [Phone OTP API reference](/docs/reference/authserver-api#phone-otp-sign-in-and-signup)
 - [Sessions and tokens](/docs/authserver/sessions-and-tokens)

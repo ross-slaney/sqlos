@@ -24,7 +24,7 @@ The browser completes this flow:
 
 ```text
 OIDC library starts /authorize (S256 PKCE + state)
-  -> RelayDesk identify form
+  -> RelayDesk login form
   -> password, SSO, or another server-selected step
   -> organization, MFA, or consent when required
   -> library callback + authorization code
@@ -194,6 +194,7 @@ Treat URL values as presentation and flow context, not proof of identity. Render
 Actions take user input only. The flow keeps `requestId`, challenge, pending, MFA, consent, and enrollment tokens internally.
 
 ```ts
+// No try/catch for normal failures — actions resolve and update error / fieldErrors.
 await flow.identify({ email });
 await flow.password.login({ password });
 await flow.organization.select({ organizationId });
@@ -201,7 +202,14 @@ await flow.mfa.verify({ code });
 await flow.consent.approve();
 ```
 
-`/identify` runs home realm discovery. Follow a returned redirect instead of showing a password form; the email may belong to an organization that requires SAML SSO.
+React:
+
+```ts
+const { flow, status, view, viewModel, error, fieldErrors, redirectUrl } =
+  useHeadlessAuth({ issuer, clientId, redirectUri, credentials: "include" });
+```
+
+`identify` runs home realm discovery. Follow a returned redirect instead of showing a password form; the email may belong to an organization that requires SAML SSO. The initial email screen is the `login` view — there is no `identify` view.
 
 Non-first-party clients surface the `consent` view before their first code is issued (see [Consent](/docs/authserver/consent)). Render `clientName` and `consentScopes`, then call `flow.consent.approve()` or `flow.consent.deny()`.
 
@@ -217,10 +225,15 @@ if (flow.status === "redirect" && flow.redirectUrl) {
   return;
 }
 
+if (flow.status === "error") {
+  showError(flow.error, flow.fieldErrors);
+  return;
+}
+
 render(flow.viewModel);
 ```
 
-A redirect may go to an external OIDC/SAML provider (`flow.authorization` is null) or to RelayDesk's exact registered callback with a code (`flow.authorization`). Never replace it with a URL constructed from user input. A view means SqlOS requires another interaction; render it instead of issuing tokens or declaring the user signed in.
+Always leave with `window.location.assign(flow.redirectUrl)`. A redirect may go to an external OIDC/SAML provider (`flow.authorization` is null) or to RelayDesk's exact registered callback with a code (`flow.authorization`). Never replace it with a URL constructed from user input. A view means SqlOS requires another interaction; render it instead of issuing tokens or declaring the user signed in.
 
 ## 7. Let the OIDC library finish the code
 
@@ -273,7 +286,7 @@ The core transition rule stays the same. Add only the views your enabled policy 
 | Returned view or branch | What the UI must do | Focused documentation |
 | --- | --- | --- |
 | `email-otp`, `email-otp-verify`, `email-otp-signup-verify` | Start or verify an inbox code while retaining challenge/signup tokens | [Email-code onboarding](/docs/guides/email-otp-onboarding) |
-| `magic-link`, `magic-link-confirm` | Send or consume an opt-in sign-in link, then continue any returned organization or MFA branch | [Magic-link login](/docs/authserver/magic-link) |
+| `magic-link`, `magic-link-sent` | Send an opt-in sign-in link (`flow.magicLink.start`); consume the emailed token with `flow.magicLink.complete({ token })` — there is no headless confirm view | [Magic-link login](/docs/authserver/magic-link) |
 | `phone-otp`, `phone-otp-verify`, `phone-otp-signup`, `phone-otp-signup-verify` | Start or verify a Twilio code | [SMS mobile sign-in](/docs/guides/sms-mobile-sign-in) |
 | `signup` | Submit display name, email, password, organization name, and optional custom fields | [Password login](/docs/guides/password-login) |
 | `invite`, `invite-login`, `invite-email-otp-verify`, `invite-accepted` | Resolve and preserve the invitation-bound request instead of starting unrelated signup | [Invite teammates](/docs/guides/invite-only-b2b-onboarding) |

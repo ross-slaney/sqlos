@@ -1,3 +1,7 @@
+import type { HeadlessView } from "./contract.js";
+
+export type { HeadlessView };
+
 export type JsonObject = Record<string, unknown>;
 
 export type HeadlessProvider = {
@@ -78,7 +82,7 @@ export type HeadlessSettings = {
 };
 
 export type HeadlessViewModel = {
-  view: string;
+  view: HeadlessView;
   authBasePath: string;
   headlessApiBasePath: string;
   settings?: HeadlessSettings | null;
@@ -204,73 +208,89 @@ export interface HeadlessFlow {
 
   subscribe(listener: () => void): () => void;
 
-  resume(location: LocationLike | string): Promise<void>;
-  start(input?: HeadlessStartInput): Promise<void>;
+  resume(location: LocationLike | string): Promise<HeadlessFlowStatus>;
+  start(input?: HeadlessStartInput): Promise<HeadlessFlowStatus>;
 
-  identify(input: HeadlessIdentifyInput): Promise<void>;
+  identify(input: HeadlessIdentifyInput): Promise<HeadlessFlowStatus>;
   password: {
-    login(input: HeadlessPasswordLoginInput): Promise<void>;
-    forgot(input?: { email?: string }): Promise<HeadlessPasswordResetRequestResult>;
-    reset(input: { token: string; newPassword: string }): Promise<void>;
+    login(input: HeadlessPasswordLoginInput): Promise<HeadlessFlowStatus>;
+    forgot(input?: { email?: string }): Promise<HeadlessFlowStatus>;
+    reset(input: { token: string; newPassword: string }): Promise<HeadlessFlowStatus>;
   };
   emailOtp: {
-    start(input?: { email?: string; invitationToken?: string }): Promise<void>;
-    verify(input: { code: string; invitationToken?: string }): Promise<void>;
+    start(input?: { email?: string; invitationToken?: string }): Promise<HeadlessFlowStatus>;
+    verify(input: { code: string; invitationToken?: string }): Promise<HeadlessFlowStatus>;
     signupStart(input: {
       displayName: string;
       email?: string;
       organizationName?: string;
       customFields?: JsonObject;
       invitationToken?: string;
-    }): Promise<void>;
-    signupVerify(input: { code: string; invitationToken?: string }): Promise<void>;
+    }): Promise<HeadlessFlowStatus>;
+    signupVerify(input: { code: string; invitationToken?: string }): Promise<HeadlessFlowStatus>;
   };
   magicLink: {
-    start(input?: { email?: string; invitationToken?: string }): Promise<void>;
-    complete(input: { token: string; invitationToken?: string }): Promise<void>;
+    start(input?: { email?: string; invitationToken?: string }): Promise<HeadlessFlowStatus>;
+    complete(input: { token: string; invitationToken?: string }): Promise<HeadlessFlowStatus>;
   };
   phoneOtp: {
-    start(input: { phoneNumber: string; invitationToken?: string }): Promise<void>;
-    verify(input: { code: string; invitationToken?: string }): Promise<void>;
+    start(input: { phoneNumber: string; invitationToken?: string }): Promise<HeadlessFlowStatus>;
+    verify(input: { code: string; invitationToken?: string }): Promise<HeadlessFlowStatus>;
     signupStart(input: {
       displayName: string;
       phoneNumber: string;
       organizationName?: string;
       customFields?: JsonObject;
       invitationToken?: string;
-    }): Promise<void>;
-    signupVerify(input: { code: string }): Promise<void>;
+    }): Promise<HeadlessFlowStatus>;
+    signupVerify(input: { code: string }): Promise<HeadlessFlowStatus>;
   };
-  signup(input: HeadlessSignupInput): Promise<void>;
+  signup(input: HeadlessSignupInput): Promise<HeadlessFlowStatus>;
   organization: {
-    select(input: { organizationId: string }): Promise<void>;
+    select(input: { organizationId: string }): Promise<HeadlessFlowStatus>;
   };
   mfa: {
-    verify(input: { code: string }): Promise<void>;
+    verify(input: { code: string }): Promise<HeadlessFlowStatus>;
     totp: {
-      enrollStart(input?: { displayName?: string }): Promise<void>;
-      enrollVerify(input: { code: string }): Promise<void>;
+      enrollStart(input?: { displayName?: string }): Promise<HeadlessFlowStatus>;
+      enrollVerify(input: { code: string }): Promise<HeadlessFlowStatus>;
     };
   };
   consent: {
-    approve(): Promise<void>;
-    deny(): Promise<void>;
+    approve(): Promise<HeadlessFlowStatus>;
+    deny(): Promise<HeadlessFlowStatus>;
   };
   invitation: {
-    resolve(input: { invitationToken: string }): Promise<void>;
+    resolve(input: { invitationToken: string }): Promise<HeadlessFlowStatus>;
     signup(input: {
       displayName: string;
       email?: string;
       customFields?: JsonObject;
       invitationToken: string;
-    }): Promise<void>;
+    }): Promise<HeadlessFlowStatus>;
   };
   device: {
-    resolve(input?: { userCode?: string }): Promise<void>;
-    approve(input?: { userCode?: string; organizationId?: string }): Promise<void>;
-    deny(input?: { userCode?: string }): Promise<void>;
+    resolve(input?: { userCode?: string }): Promise<HeadlessFlowStatus>;
+    approve(input?: { userCode?: string; organizationId?: string }): Promise<HeadlessFlowStatus>;
+    deny(input?: { userCode?: string }): Promise<HeadlessFlowStatus>;
   };
   provider: {
-    start(input: { connectionId: string; email?: string; invitationToken?: string }): Promise<void>;
+    start(input: {
+      connectionId: string;
+      email?: string;
+      invitationToken?: string;
+    }): Promise<HeadlessFlowStatus>;
   };
 }
+
+/** Snapshot values returned by `useHeadlessAuth` for referentially-updating UI. */
+export type UseHeadlessAuthResult = {
+  flow: HeadlessFlow;
+  status: HeadlessFlowStatus;
+  view: HeadlessView | null;
+  viewModel: HeadlessViewModel | null;
+  error: string | null;
+  fieldErrors: Record<string, string>;
+  authorization: HeadlessAuthorization | null;
+  redirectUrl: string | null;
+};

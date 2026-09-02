@@ -64,7 +64,7 @@ With hosted AuthPage, SqlOS owns the full flow: email collection, home realm dis
 
 ## Headless flow
 
-Headless apps still let SqlOS run the auth state machine. Your UI posts actions and renders the returned view model.
+Drive Email OTP with [`@sqlos/headless`](/docs/reference/headless-js) (`flow.emailOtp.start` / `verify` / `signupStart` / `signupVerify`). The routes below are the HTTP wire contract; client code should use the package. See [Build your own login and signup UI](/docs/guides/custom-login-ui) and [Passwordless email-code onboarding](/docs/guides/email-otp-onboarding).
 
 | Endpoint | Purpose |
 | --- | --- |
@@ -73,10 +73,19 @@ Headless apps still let SqlOS run the auth state machine. Your UI posts actions 
 | `POST /sqlos/auth/headless/signup/email-otp/start` | Start a new-user OTP signup |
 | `POST /sqlos/auth/headless/signup/email-otp/verify` | Verify OTP signup and issue the redirect |
 
-The headless start view includes `challengeToken`, `email`, and an `info` message containing the masked address. Signup start also includes `signupToken`. It does not currently expose expiry or resend timestamps; use your configured cooldown for the local button state and keep the server rate limit authoritative. Store both raw tokens only long enough to verify the code, and replace both after a signup resend. The direct SDK start results do include `MaskedEmail`, `ExpiresAt`, and `NextAllowedSendAt`.
+```ts
+await flow.emailOtp.start({ email });
+await flow.emailOtp.verify({ code });
+
+if (flow.status === "redirect" && flow.redirectUrl) {
+  window.location.assign(flow.redirectUrl);
+}
+```
+
+The flow holds `challengeToken` and, for signup, `signupToken`. The start view includes `email` and an `info` message containing the masked address. It does not currently expose expiry or resend timestamps; use your configured cooldown for the local button state and keep the server rate limit authoritative. Call `signupStart` again on resend so the flow replaces both tokens. The direct SDK start results do include `MaskedEmail`, `ExpiresAt`, and `NextAllowedSendAt`.
 
 <Callout type="warning" title="Keep HRD in front of OTP">
-  If the email belongs to an organization with required SSO, SqlOS redirects to SSO before creating an OTP challenge. Do not bypass `identify` or the OTP start response handling in a headless UI.
+  If the email belongs to an organization with required SSO, SqlOS redirects to SSO before creating an OTP challenge. Always call `flow.identify({ email })` first; the initial email screen is the `login` view. Follow `redirectUrl` with `window.location.assign`.
 </Callout>
 
 ## SDK flow

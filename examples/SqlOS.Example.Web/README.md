@@ -51,7 +51,7 @@ Choose the headless/custom UI entry point on `/auth/authorize`. Auth.js still st
 
 The docs walkthrough is [Build your own login and signup UI](https://sqlos.dev/docs/guides/custom-login-ui).
 
-[`sqlos-headless-auth-panel.tsx`](components/sqlos-headless-auth-panel.tsx) uses `useHeadlessAuth` from `@sqlos/headless/react` and renders the returned view. It covers identification, password login/signup/reset, email and phone OTP, provider redirects, organization selection, MFA verification, and first-login TOTP enrollment. On redirect it follows the callback URL; Auth.js finishes `/token`.
+[`sqlos-headless-auth-panel.tsx`](components/sqlos-headless-auth-panel.tsx) uses `useHeadlessAuth` from `@sqlos/headless/react` and reads `{ flow, status, view, viewModel, error, fieldErrors, redirectUrl }` from `useSyncExternalStore`. It renders the current view (login, password, signup, reset, email/phone OTP, providers, organization, MFA, TOTP enrollment) and calls one action per submit. Server and validation failures resolve on the flow — the panel does not try/catch them or copy them into `useState`. On `status === "redirect"` it calls `window.location.assign(redirectUrl)`; Auth.js finishes `/token`.
 
 The headless signup UI sends `firstName`, `lastName`, and a required `referralSource` custom field. The API's `OnHeadlessSignupAsync` hook validates and persists that application profile data.
 
@@ -109,7 +109,7 @@ Variables prefixed with `NEXT_PUBLIC_` are exposed to browser code. Never put cl
 | [`lib/auth.ts`](lib/auth.ts) | Auth.js OIDC provider, JWT/session callbacks, token refresh |
 | [`lib/sqlos-config.ts`](lib/sqlos-config.ts) | Issuer, client ID, and post-login path helpers (no PKCE) |
 | [`components/sqlos-hosted-sign-in.tsx`](components/sqlos-hosted-sign-in.tsx) | Starts `signIn("sqlos")` with `prompt` / `view` |
-| [`components/sqlos-headless-auth-panel.tsx`](components/sqlos-headless-auth-panel.tsx) | Custom UI on `useHeadlessAuth` from `@sqlos/headless/react` |
+| [`components/sqlos-headless-auth-panel.tsx`](components/sqlos-headless-auth-panel.tsx) | Custom UI on `useHeadlessAuth` snapshots (`status`, `view`, `error`, `fieldErrors`, `redirectUrl`) |
 | [`app/api/auth/[...nextauth]/route.ts`](app/api/auth/[...nextauth]/route.ts) | Auth.js route, including `/api/auth/callback/sqlos` |
 | [`middleware.ts`](middleware.ts) | Protects retail routes |
 | [`lib/api.ts`](lib/api.ts) | Authenticated example API requests |
