@@ -64,6 +64,10 @@ jobs:
         id: meta
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          # pull_request GITHUB_SHA is the temporary merge commit, which GitHub can
+          # reuse across pushes. Fingerprint the PR head so each synchronize gets a
+          # unique immutable version.
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         working-directory: packages/headless
         run: |
           node <<'NODE' >> "$GITHUB_OUTPUT"
@@ -80,7 +84,9 @@ jobs:
               throw new Error(`packages/headless version is not semver X.Y.Z: ${pkg.version}`);
             }
             const previewBase = `${parts[0]}.${parts[1]}.${parts[2] + 1}`;
-            const shortSha = process.env.GITHUB_SHA.slice(0, 12).replace(/[^0-9A-Za-z-]/g, "");
+            const shortSha = String(process.env.PR_HEAD_SHA || process.env.GITHUB_SHA)
+              .slice(0, 12)
+              .replace(/[^0-9A-Za-z-]/g, "");
             pkg.version = `${previewBase}-pr.${process.env.PR_NUMBER}.${shortSha}.${process.env.GITHUB_RUN_NUMBER}.${process.env.GITHUB_RUN_ATTEMPT}`;
             fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
           }

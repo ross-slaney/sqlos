@@ -44,7 +44,7 @@ If a previous attempt bound `publish.yml`, delete that publisher and add `publis
 
 PR preview publish is **path-filtered** in `publish-npm.yml`. Backend-only or docs-only PRs do not publish a preview and do not need dist-tag cleanup. The `Headless JS Package` job in `pull-request.yml` is **not** path-filtered — it still runs the contract drift check on every PR.
 
-Preview versions use the **next patch** of `packages/headless/package.json` as the base (for example package `4.1.0` → preview `4.1.1-pr.<n>…`). Semver sorts a prerelease of `4.1.0` below the released `4.1.0`, so previews of unreleased code must not use `<current>-pr.*`. Release `latest` stays lockstep with NuGet and does not use the next-patch bump.
+Preview versions use the **next patch** of `packages/headless/package.json` as the base (for example package `4.1.0` → preview `4.1.1-pr.<n>…`). Semver sorts a prerelease of `4.1.0` below the released `4.1.0`, so previews of unreleased code must not use `<current>-pr.*`. The SHA segment is the **PR head** commit (not the temporary `pull_request` merge commit), plus the workflow run number/attempt, so each synchronize publishes a unique immutable version. Release `latest` stays lockstep with NuGet and does not use the next-patch bump.
 
 In-repo examples **must not** use the preview tag; they keep `"@sqlos/headless": "file:../../packages/headless"`.
 
