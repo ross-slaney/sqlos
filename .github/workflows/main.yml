@@ -182,6 +182,38 @@ jobs:
             tests/SqlOS.Conformance/export
             tests/SqlOS.Conformance/logs
 
+  headless-e2e:
+    name: Headless Examples E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            packages/headless/package-lock.json
+            examples/SqlOS.Example.Web/package-lock.json
+            examples/SqlOS.Example.AngularWeb/package-lock.json
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+      - run: chmod +x scripts/*.sh && ./scripts/headless-e2e.sh
+      - name: Upload headless e2e failure screenshots
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: headless-e2e-failure-screenshots
+          path: examples/SqlOS.Example.E2eTests/bin/Release/net9.0/TestResults/**
+
   e2e:
     name: Sign in with X E2E
     runs-on: ubuntu-latest

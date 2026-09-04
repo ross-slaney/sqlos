@@ -38,6 +38,7 @@ builder.AddSqlOS<ExampleAppDbContext>(
         var exampleOrigin = (builder.Configuration["ExampleFrontend:Origin"] ?? "http://localhost:3000").TrimEnd('/');
         var exampleCallbackUrl = builder.Configuration["ExampleFrontend:CallbackUrl"] ?? $"{exampleOrigin}/auth/callback";
         var exampleAuthJsCallbackUrl = $"{exampleOrigin}/api/auth/callback/sqlos";
+        var angularOrigin = (builder.Configuration["ExampleFrontend:AngularOrigin"] ?? "http://localhost:4200").TrimEnd('/');
         var emailConnectionString = builder.Configuration["SqlOS:Email:AzureCommunicationServicesConnectionString"]
             ?? builder.Configuration["SqlOS:EmailOtp:AzureCommunicationServicesConnectionString"]
             ?? builder.Configuration["AZURE_EMAIL_CONNECTION_STRING"];
@@ -161,7 +162,7 @@ builder.AddSqlOS<ExampleAppDbContext>(
             auth,
             "example-angular",
             "Example Angular Client",
-            "http://localhost:4200/auth/callback");
+            $"{angularOrigin}/auth/callback");
         auth.SeedClient(client =>
         {
             client.ClientId = "example-expo";
@@ -310,7 +311,8 @@ builder.Services.AddCors(options =>
     options.AddPolicy("example-frontend", policy =>
     {
         var origin = builder.Configuration["ExampleFrontend:Origin"] ?? "http://localhost:3000";
-        policy.WithOrigins(origin, "http://localhost:4200")
+        var angularOrigin = builder.Configuration["ExampleFrontend:AngularOrigin"] ?? "http://localhost:4200";
+        policy.WithOrigins(origin, angularOrigin)
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();

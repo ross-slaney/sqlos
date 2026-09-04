@@ -79,20 +79,22 @@ npm run dev --prefix examples/SqlOS.Example.AngularWeb
 
 Open `http://localhost:4200`.
 
-The development script binds to `0.0.0.0` and uses port `4200` unless `PORT` is supplied. The OAuth registration is fixed to `http://localhost:4200/auth/callback`, so changing `PORT` also requires changing the seeded redirect URI.
+The development script binds to `0.0.0.0` and uses port `4200` unless `PORT` is supplied. The OAuth registration defaults to `http://localhost:4200/auth/callback`; the API reads `ExampleFrontend:AngularOrigin` to seed another origin, which the AppHost sets from `Example:AngularPort`.
 
 ## Configuration
 
-The client configuration is checked into [`src/app/environments/environment.ts`](src/app/environments/environment.ts):
+The API origin is runtime configuration. `scripts/write-env.mjs` runs before `dev`, `start`, and `build` and writes `public/env.js` (git-ignored) from `SQLOS_API_URL`, defaulting to `http://localhost:5062`; `index.html` loads it before the bundle and [`src/app/environments/environment.ts`](src/app/environments/environment.ts) reads it:
 
 ```typescript
 export const environment = {
-  apiUrl: 'http://localhost:5062',
+  apiUrl: runtime.SQLOS_API_URL ?? 'http://localhost:5062',
   clientId: 'example-angular',
 };
 ```
 
-The current build does not read an AppHost-provided API URL. To target another host, replace these values through your Angular environment/build configuration and update the SqlOS client's exact redirect URI. Never add a client secret: this browser application is a public PKCE client.
+The Aspire AppHost sets `SQLOS_API_URL` so a second copy of this app (the browser e2e tests on port `4300`) can target an API on another port. Never add a client secret: this browser application is a public PKCE client.
+
+`angular.json` excludes `@sqlos/headless` from the dev server's Vite prebundle. The package is a `file:` link, and Vite's dependency cache does not notice a rebuilt `dist` when the version is unchanged, so without the exclusion `ng serve` can keep serving a stale copy of the package.
 
 The API allows credentialed CORS requests from `http://localhost:4200` in addition to its configured primary frontend origin. Those credentials are used by the headless AuthPage session; application API requests use bearer or example demo headers.
 
