@@ -26,10 +26,10 @@ In this repository, examples use `"@sqlos/headless": "file:../../packages/headle
 
 `createHeadlessFlow` holds the current view model and opaque tokens (`requestId`, challenge, pending, MFA, consent, enrollment). Actions take user input only. Completion is `status === "redirect"` with either:
 
-- `authorization` — `{ code, redirectUri, state, codeVerifier }` when the redirect includes a code
+- `authorization` — `{ code, redirectUri, state, codeVerifier }` when the redirect includes a code. `redirectUri` is the exact registered value, including any registered query string, so it can be posted to `/token` as-is.
 - `redirectUrl` without `authorization` — an external IdP URL; follow it, do not treat it as a code
 
-The package never calls `/sqlos/auth/token`, never stores refresh tokens, and never writes to `localStorage`.
+The package never calls `/sqlos/auth/token` (any such URL throws `HeadlessTokenEndpointError`), never stores refresh tokens, and never writes to `localStorage`.
 
 `HeadlessViewModel.view` is typed as `HeadlessView` (the same union as the server contract). Dead branches such as `"identify"` fail at compile time — the initial email screen is `"login"`.
 
@@ -45,7 +45,16 @@ The package never calls `/sqlos/auth/token`, never stores refresh tokens, and ne
 
 Server and validation failures **resolve**. Actions return the new `HeadlessFlowStatus` and update `error` / `fieldErrors`. You do not need try/catch for the normal path.
 
-Programmer mistakes still throw: `HeadlessFlowBusyError`, `HeadlessFlowNotLoadedError`, missing-token preconditions, and the `/token` guard.
+Programmer mistakes **reject** with a `HeadlessProgrammerError` subclass and also set `status === "error"` so the UI shows something:
+
+| Error | Cause |
+| --- | --- |
+| `HeadlessFlowBusyError` | A second action was called while one was in flight. Disable inputs while `status === "loading"`. |
+| `HeadlessFlowNotLoadedError` | An action ran before `resume` / `start`, or the current view lacks the token it needs (for example `mfa.verify` outside the `mfa` view). |
+| `HeadlessApiPathMismatchError` | The server's `headlessApiBasePath` differs from the configured one. |
+| `HeadlessTokenEndpointError` | A request targeted `/token`. |
+
+`resume` and `start` are the exception to the busy rule: an identical call while the same load is in flight returns the in-flight promise. React StrictMode's double-invoked effect therefore needs no guard.
 
 ## Web app with a custom login page
 
@@ -85,6 +94,8 @@ const { flow, status, view, viewModel, error, fieldErrors, redirectUrl } =
   });
 ```
 
+The hook keeps one flow per authorization request. It rebuilds the flow only when `issuer`, `clientId`, `redirectUri`, `headlessApiBasePath`, or `credentials` change; `fetch` and `generatePkce` may be inline functions.
+
 `credentials: "include"` is required in the browser so the AuthPage session cookie is sent. Omit it on native. Always leave with `window.location.assign(redirectUrl)` — do not hand-parse the URL.
 
 ## Native app
@@ -96,11 +107,63 @@ await flow.start({
 });
 ```
 
-PKCE is generated (or accepted) as start input because SqlOS requires it. Pass `generatePkce` when Web Crypto `subtle` is unavailable (for example Expo). After `flow.authorization`, the host OIDC library exchanges the code.
+PKCE is generated (or accepted) as start input because SqlOS requires it. The built-in generator produces a 43-character base64url verifier (the RFC 7636 minimum SqlOS enforces at `/token`) and an S256 challenge with Web Crypto. Where Web Crypto `subtle` is unavailable (React Native / Expo), inject the primitives instead of forking the generator:
+
+```ts
+import * as Crypto from "expo-crypto";
+import { createPkceGenerator } from "@sqlos/headless";
+
+const generatePkce = createPkceGenerator({
+  randomBytes: (size) => Crypto.getRandomBytesAsync(size),
+  sha256: async (data) =>
+    new Uint8Array(await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, data)),
+});
+
+const flow = createHeadlessFlow({ issuer, clientId, redirectUri, generatePkce });
+```
+
+After `flow.authorization`, the host OIDC library exchanges the code.
 
 ```ts
 import { useHeadlessAuth } from "@sqlos/headless/react-native";
 ```
+
+## Views
+
+`HEADLESS_VIEWS` is the complete list a view model can carry. The contract check in CI fails when the server adds or removes one.
+
+| View | Meaning | Typical next action |
+| --- | --- | --- |
+| `login` | Collect the email (home realm discovery) | `identify` |
+| `password` | Password for a known email | `password.login`, `password.forgot` |
+| `signup` | Password signup form | `signup` |
+| `forgot-password` | Ask for the account email | `password.forgot` |
+| `forgot-password-sent` | Reset email sent; read `flow.passwordReset` for `maskedEmail`, `expiresAt`, `nextAllowedSendAt` | — |
+| `password-reset` | Choose a new password from an emailed token | `password.reset` |
+| `email-otp` | Send a one-time code to the email | `emailOtp.start` |
+| `email-otp-verify` | Enter the emailed code | `emailOtp.verify` |
+| `email-otp-signup-verify` | Verify the code for an OTP signup | `emailOtp.signupVerify` |
+| `magic-link` | Send a sign-in link | `magicLink.start` |
+| `magic-link-sent` | Link sent; wait for the click | `magicLink.complete` (from the link) |
+| `phone-otp` | Send an SMS code | `phoneOtp.start` |
+| `phone-otp-verify` | Enter the SMS code | `phoneOtp.verify` |
+| `phone-otp-signup` | Phone signup form | `phoneOtp.signupStart` |
+| `phone-otp-signup-verify` | Verify the SMS code for a phone signup | `phoneOtp.signupVerify` |
+| `invite` | Invitation resolved; show organization and email | `invitation.signup` or `identify` |
+| `invite-login` | Invited email already has an account | `password.login` / OTP |
+| `invite-email-otp-verify` | Verify the code for an invitation signup | `emailOtp.signupVerify` |
+| `invite-accepted` | Invitation bound to the signed-in account | — |
+| `device` | Device-flow user code entry | `device.resolve` |
+| `device-approve` | Confirm the device request | `device.approve`, `device.deny` |
+| `device-approved` | Device approved; the device polls `/token` | — |
+| `device-denied` | Device request denied | — |
+| `mfa` | Second-factor challenge | `mfa.verify` |
+| `mfa-enroll` | Authenticator enrollment required | `mfa.totp.enrollStart`, `mfa.totp.enrollVerify` |
+| `organization` | Choose an organization | `organization.select` |
+| `consent` | Third-party client consent | `consent.approve`, `consent.deny` |
+| `logged-out` | Session ended; nothing more to do on this request | — |
+
+Render a fallback branch for views your UI does not draw (the in-repo examples send those users to hosted AuthPage). A typed `switch` over `HeadlessView` with a `never` check turns a new server view into a compile error.
 
 ## Actions
 
@@ -123,6 +186,29 @@ import { useHeadlessAuth } from "@sqlos/headless/react-native";
 | `invitation.resolve` / `signup` | `/invitations/*` |
 | `device.resolve` / `approve` / `deny` | `/device/*` |
 | `provider.start` | `POST /provider/start` |
+| `submit(path, body?)` | Any headless route |
+
+`submit` is the escape hatch for a server step the SDK does not name yet. It posts through the same status and token bookkeeping as the typed actions, fills in `requestId` from the loaded request, and applies the response whether it is an action result (`type: "view" | "redirect"`), a bare view model, or a `204`:
+
+```ts
+await flow.submit("/passkey/start", { credentialId });
+// flow.viewModel now reflects the server's next step, and its tokens feed
+// the typed actions that follow.
+```
+
+Every typed action posts exactly the fields of the server request record for its route (`HEADLESS_REQUEST_FIELDS`); the package's test suite and the contract check in CI enforce that against the .NET source.
+
+## Credential availability
+
+`viewModel.settings` lists `enabledCredentialTypes`, but a type is usable only when its runtime is also configured. `credentialEnabled` applies the same rule hosted AuthPage uses, so a custom UI does not copy it:
+
+```ts
+import { credentialEnabled } from "@sqlos/headless";
+
+const showPassword = credentialEnabled(viewModel?.settings, "password");
+const showEmailCode = credentialEnabled(viewModel?.settings, "email_otp");
+// also "magic_link" and "phone_otp" — see HEADLESS_CREDENTIAL_TYPES
+```
 
 If the host moved `HeadlessApiBasePath`, set `headlessApiBasePath` to that exact path. A mismatch with the returned view model fails closed.
 

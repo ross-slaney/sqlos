@@ -16,7 +16,9 @@ It is a separate client. The full .NET Aspire AppHost starts the backend but doe
 - FGA-filtered chains, stores, and inventory
 - local demo switching between user, service-account, and agent subjects
 
-Login and signup screens default to in-app headless login/password/org/MFA via `useHeadlessAuth`. Hosted AuthPage remains available through `startHostedAuth` for the companion hosted-OIDC path.
+Login and signup screens default to in-app headless login/password/email-code/org/MFA via `useHeadlessAuth`. Any other view SqlOS returns falls back to hosted AuthPage through `startHostedAuth`, which also remains the companion hosted-OIDC path.
+
+[`metro.config.js`](metro.config.js) watches the `file:`-linked package and resolves its `react` / `react-native` peers from this app, so the package's own devDependencies never introduce a second React copy.
 
 ## Start the backend
 
@@ -101,7 +103,7 @@ Both are public PKCE clients. A mobile application cannot safely hold an OAuth c
 
 Headless (default login/signup screens):
 
-1. `flow.start({ codeChallenge, codeChallengeMethod: "S256" })` posts `POST /sqlos/auth/headless/start`.
+1. `flow.start(...)` posts `POST /sqlos/auth/headless/start`. PKCE comes from `createPkceGenerator` with expo-crypto primitives (`services/sqlos-auth.ts`); the package owns the verifier format.
 2. In-app screens collect login/password (and org/MFA when returned). Flow errors come from the hook; try/catch is only used around token exchange.
 3. When `status === "redirect"` and `authorization` is present, `exchangeHeadlessAuthorization` uses `expo-auth-session` `exchangeCodeAsync`.
 4. The app stores access and refresh tokens in SecureStore.
@@ -119,7 +121,8 @@ Relevant code:
 | --- | --- |
 | [`app.json`](app.json) | Registers the `sqlos-expo` scheme and Expo plugins |
 | [`services/config.ts`](services/config.ts) | Platform API origin and public client ID (`example-expo`) |
-| [`services/sqlos-auth.ts`](services/sqlos-auth.ts) | Issuer, PKCE, redirect URI, hosted `AuthRequest`, and `exchangeCodeAsync` |
+| [`metro.config.js`](metro.config.js) | Watches the linked `@sqlos/headless` and pins its React peers to this app |
+| [`services/sqlos-auth.ts`](services/sqlos-auth.ts) | Issuer, expo-crypto PKCE primitives, redirect URI, hosted `AuthRequest`, and `exchangeCodeAsync` |
 | [`components/HeadlessAuthForm.tsx`](components/HeadlessAuthForm.tsx) | Native `useHeadlessAuth` snapshots + in-app screens |
 | `app/(auth)/login.tsx` | Headless login (hosted remains in `sqlos-auth.ts`) |
 | `app/(auth)/signup.tsx` | Headless signup |

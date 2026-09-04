@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useHeadlessAuth } from "@sqlos/headless/react";
 import { startHostedSqlOSSignIn } from "@/components/sqlos-hosted-sign-in";
 import { getExampleAuthServerUrl, getExampleClientId } from "@/lib/sqlos-config";
-import type { HeadlessProvider, HeadlessView } from "@sqlos/headless";
+import { credentialEnabled, type HeadlessProvider, type HeadlessView } from "@sqlos/headless";
 
 type ReferralOption = {
   value: string;
@@ -42,6 +42,32 @@ function getProviderMonogram(displayName: string) {
 const IMAGE_LOGIN = "https://images.unsplash.com/photo-1604719312566-8912e9227c6a?w=1200&q=80&auto=format";
 const IMAGE_SIGNUP = "https://images.unsplash.com/photo-1556740758-90de374c12ad?w=1200&q=80&auto=format";
 
+/**
+ * Views this panel draws. Any other view the server returns (invitations,
+ * device approval, ...) falls back to hosted AuthPage instead of rendering a
+ * headline with no form.
+ */
+const HANDLED_VIEWS: ReadonlySet<string> = new Set<HeadlessView>([
+  "login",
+  "password",
+  "forgot-password",
+  "forgot-password-sent",
+  "password-reset",
+  "email-otp",
+  "email-otp-verify",
+  "magic-link",
+  "magic-link-sent",
+  "phone-otp",
+  "phone-otp-verify",
+  "signup",
+  "phone-otp-signup",
+  "phone-otp-signup-verify",
+  "organization",
+  "consent",
+  "mfa",
+  "mfa-enroll",
+]);
+
 export function SqlOSHeadlessAuthPanel() {
   const searchParams = useSearchParams();
   const requestId = searchParams.get("request");
@@ -50,6 +76,8 @@ export function SqlOSHeadlessAuthPanel() {
   const initialDisplayName = searchParams.get("displayName") || "";
   const initialResetToken = searchParams.get("token") || "";
   const nextPath = searchParams.get("next") || "/retail";
+  // An error-only bounce (request id already dropped) still needs surfacing.
+  const initialError = searchParams.get("error");
 
   const {
     flow,
@@ -93,6 +121,7 @@ export function SqlOSHeadlessAuthPanel() {
 
   const loading = status === "loading";
   const view = formView ?? flowView ?? initialView;
+  const displayError = error ?? (!requestId ? initialError : null);
 
   useEffect(() => {
     if (status === "redirect" && redirectUrl) {
@@ -111,10 +140,14 @@ export function SqlOSHeadlessAuthPanel() {
     }
   }, [initialResetToken]);
 
+  const serverView = viewModel?.view ?? null;
   useEffect(() => {
     // Drop client-only form switches only when the server advances the view.
+    // Not on mount: with no request loaded, formView holds the ?token=
+    // password-reset deep link and must survive.
+    if (!serverView) return;
     setFormView(null);
-  }, [viewModel?.view]);
+  }, [serverView]);
 
   useEffect(() => {
     if (viewModel?.email) {
@@ -294,14 +327,10 @@ export function SqlOSHeadlessAuthPanel() {
   const isMfa = view === "mfa" || view === "mfa-enroll";
   const isRecovery = view === "forgot-password" || view === "forgot-password-sent" || view === "password-reset";
   const showProviderButtons = (view === "login" || view === "signup") && (viewModel?.providers?.length ?? 0) > 0;
-  const supportsPassword = !!viewModel?.settings?.localPasswordRuntimeEnabled
-    && (viewModel?.settings?.enabledCredentialTypes ?? []).includes("password");
-  const supportsEmailOtp = !!viewModel?.settings?.emailOtpRuntimeConfigured
-    && (viewModel?.settings?.enabledCredentialTypes ?? []).includes("email_otp");
-  const supportsMagicLink = !!viewModel?.settings?.magicLinkRuntimeConfigured
-    && (viewModel?.settings?.enabledCredentialTypes ?? []).includes("magic_link");
-  const supportsPhoneOtp = !!viewModel?.settings?.phoneOtpRuntimeConfigured
-    && (viewModel?.settings?.enabledCredentialTypes ?? []).includes("phone_otp");
+  const supportsPassword = credentialEnabled(viewModel?.settings, "password");
+  const supportsEmailOtp = credentialEnabled(viewModel?.settings, "email_otp");
+  const supportsMagicLink = credentialEnabled(viewModel?.settings, "magic_link");
+  const supportsPhoneOtp = credentialEnabled(viewModel?.settings, "phone_otp");
 
   const headline = isSignup
     ? "Start your free trial"
@@ -382,7 +411,7 @@ export function SqlOSHeadlessAuthPanel() {
             <p>{subtitle}</p>
           </div>
 
-          {error && <div className="ha-error">{error}</div>}
+          {displayError && <div className="ha-error">{displayError}</div>}
           {(notice || viewModel?.info) && <div className="ha-success">{notice || viewModel?.info}</div>}
 
           {!requestId && view === "password-reset" ? (
@@ -816,6 +845,17 @@ export function SqlOSHeadlessAuthPanel() {
                       </button>
                     </>
                   )}
+                </div>
+              )}
+
+              {!HANDLED_VIEWS.has(view) && (
+                <div className="ha-form">
+                  <p className="ha-helper-text">
+                    SqlOS needs the &ldquo;{view}&rdquo; step, which this page does not draw. Continue with hosted sign-in to finish.
+                  </p>
+                  <button type="button" className="ha-submit" onClick={() => void startHostedSqlOSSignIn("login", nextPath)}>
+                    Continue with hosted sign-in
+                  </button>
                 </div>
               )}
 

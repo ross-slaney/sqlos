@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { readHeadlessContract } from "../packages/headless/scripts/contract-source.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), "..");
@@ -251,84 +252,21 @@ if (/^## Auth API \(Example\)/m.test(httpReference)) {
   );
 }
 
-// Headless view names cited in docs must exist in packages/headless HEADLESS_VIEWS.
-const headlessContract = read("packages/headless/src/contract.ts");
-const headlessViewsMatch = headlessContract.match(
-  /export const HEADLESS_VIEWS = \[([\s\S]*?)\] as const/,
-);
-const headlessViews = new Set(
-  [...(headlessViewsMatch?.[1].matchAll(/"([^"]+)"/g) ?? [])].map((match) => match[1]),
-);
-if (headlessViews.size === 0) {
-  errors.push("packages/headless/src/contract.ts: could not parse HEADLESS_VIEWS.");
-} else {
+// Headless view names in docs must exist in packages/headless HEADLESS_VIEWS,
+// and every HEADLESS_VIEWS entry must be documented. The contract file is read
+// through the package's own parser so there is one source of truth.
+{
+  const headlessErrors = [];
+  const headlessContract = readHeadlessContract(headlessErrors);
+  for (const message of headlessErrors) {
+    errors.push(`packages/headless/src/contract.ts: ${message}`);
+  }
+  const headlessViews = new Set(headlessContract.views);
   const headlessDocRoots = [
     path.join(repoRoot, "web", "content", "docs", "guides"),
     path.join(repoRoot, "web", "content", "docs", "authserver"),
     path.join(repoRoot, "web", "content", "docs", "reference"),
   ];
-  const singleTokenViews = new Set([
-    "login",
-    "signup",
-    "password",
-    "device",
-    "mfa",
-    "consent",
-    "invite",
-    "organization",
-  ]);
-  const notViews = new Set([
-    "sqlos",
-    "headless",
-    "openid",
-    "offline-access",
-    "field-errors",
-    "request-id",
-    "challenge-token",
-    "pending-token",
-    "consent-token",
-    "mfa-token",
-    "signup-token",
-    "enrollment-token",
-    "invitation-token",
-    "access-token",
-    "refresh-token",
-    "id-token",
-    "redirect-uri",
-    "client-id",
-    "code-challenge",
-    "code-verifier",
-    "response-type",
-    "login-hint",
-    "ui-context",
-    "auth-base-path",
-    "base-path",
-    "totp-enrollment",
-    "custom-fields",
-    "display-name",
-    "phone-number",
-    "organization-name",
-    "organization-id",
-    "user-code",
-    "qr-code",
-    "data-url",
-    "use-client",
-    "react-native",
-    "well-known",
-    "openid-configuration",
-    "auth-page",
-    "first-party",
-    "same-site",
-    "http-only",
-    "sign-in",
-    "sign-up",
-    "build-ui-url",
-    "public-pkce",
-    "grant-type",
-    "token-endpoint",
-    "authorization-code",
-    "home-realm",
-  ]);
 
   function walkMdx(dir, files = []) {
     if (!fs.existsSync(dir)) return files;
@@ -340,30 +278,39 @@ if (headlessViews.size === 0) {
     return files;
   }
 
+  // A view name counts as cited only in an explicit view position, so ordinary
+  // hyphenated prose (`device-code`, `redirect-uri`) never needs a denylist:
+  //   view === "x" | view: "x" | case "x": | ?view=x / &view=x
+  const viewCitation =
+    /(?:\bview\s*(?:===|==|!==|!=|:)\s*["'`]([a-z][a-z0-9-]*)["'`])|(?:\bcase\s+["'`]([a-z][a-z0-9-]*)["'`]\s*:)|(?:[?&]view=([a-z][a-z0-9-]*))/g;
+
+  const documented = new Set();
   for (const root of headlessDocRoots) {
     for (const file of walkMdx(root)) {
       const content = fs.readFileSync(file, "utf8");
       if (!/headless|@sqlos\/headless|HEADLESS_VIEWS/i.test(content)) continue;
       const relative = path.relative(repoRoot, file);
-      for (const match of content.matchAll(/`([a-z][a-z0-9-]*)`/g)) {
-        const name = match[1];
-        if (notViews.has(name) || headlessViews.has(name)) continue;
-        const looksLikeView = name.includes("-") || singleTokenViews.has(name);
-        if (!looksLikeView) continue;
-        // Hyphenated auth-ish tokens that are not views still appear in prose;
-        // only fail names that share a prefix with a known view or are hosted-only.
-        const hostedOnly = new Set(["magic-link-confirm", "identify", "verify-email"]);
-        const sharesPrefix = [...headlessViews].some(
-          (view) =>
-            view !== name &&
-            (name.startsWith(`${view}-`) || view.startsWith(`${name}-`) || name.split("-")[0] === view.split("-")[0]),
-        );
-        if (hostedOnly.has(name) || sharesPrefix) {
-          errors.push(
-            `${relative}: headless docs cite view \`${name}\` which is not in HEADLESS_VIEWS.`,
-          );
+      for (const match of content.matchAll(viewCitation)) {
+        const name = match[1] ?? match[2] ?? match[3];
+        if (headlessViews.has(name)) {
+          documented.add(name);
+          continue;
         }
+        errors.push(
+          `${relative}: headless docs cite view \`${name}\` which is not in HEADLESS_VIEWS.`,
+        );
       }
+      // Backticked exact matches (for example a views table) also count as documentation.
+      for (const match of content.matchAll(/`([a-z][a-z0-9-]*)`/g)) {
+        if (headlessViews.has(match[1])) documented.add(match[1]);
+      }
+    }
+  }
+  for (const view of headlessViews) {
+    if (!documented.has(view)) {
+      errors.push(
+        `web/content/docs: HEADLESS_VIEWS entry \`${view}\` is not documented in any headless guide, authserver, or reference page.`,
+      );
     }
   }
 }

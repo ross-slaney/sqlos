@@ -1,4 +1,4 @@
-import { HeadlessError } from "./errors.js";
+import { HeadlessError, HeadlessTokenEndpointError } from "./errors.js";
 
 export type HeadlessHttpOptions = {
   fetch?: typeof fetch;
@@ -15,35 +15,44 @@ export function assertNotTokenUrl(url: string): void {
     /* keep raw */
   }
   if (TOKEN_PATH_PATTERN.test(pathname) || TOKEN_PATH_PATTERN.test(url)) {
-    // Message must stay stable — flow.ts rethrows this as a programmer error.
-    throw new HeadlessError("The headless package never calls /token.");
+    throw new HeadlessTokenEndpointError(url);
   }
 }
 
-export function createHeadlessHttp(options: HeadlessHttpOptions) {
-  const fetchImpl = options.fetch ?? globalThis.fetch;
-  if (typeof fetchImpl !== "function") {
-    throw new HeadlessError("fetch is not available.");
-  }
+export type HeadlessRequest = <T>(
+  url: string,
+  init?: RequestInit & { parse?: "json" | "void" },
+) => Promise<T>;
 
+/**
+ * `options` is read at call time, not construction time, so callers (for
+ * example the React hook) can swap `fetch` without rebuilding the flow.
+ */
+export function createHeadlessHttp(options: HeadlessHttpOptions): HeadlessRequest {
   return async function request<T>(
     url: string,
     init?: RequestInit & { parse?: "json" | "void" },
   ): Promise<T> {
     assertNotTokenUrl(url);
 
+    const fetchImpl = options.fetch ?? globalThis.fetch;
+    if (typeof fetchImpl !== "function") {
+      throw new HeadlessError("fetch is not available. Pass `fetch` to createHeadlessFlow.");
+    }
+
+    const { parse, ...requestInit } = init ?? {};
     const response = await fetchImpl(url, {
-      ...init,
-      credentials: options.credentials ?? init?.credentials,
+      ...requestInit,
+      credentials: options.credentials ?? requestInit.credentials,
       cache: "no-store",
       headers: {
         Accept: "application/json",
-        ...(init?.body ? { "Content-Type": "application/json" } : {}),
-        ...init?.headers,
+        ...(requestInit.body ? { "Content-Type": "application/json" } : {}),
+        ...requestInit.headers,
       },
     });
 
-    if (response.status === 204 || init?.parse === "void") {
+    if (response.status === 204 || parse === "void") {
       if (!response.ok) {
         throw await readError(response);
       }

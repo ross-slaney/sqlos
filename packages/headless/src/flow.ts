@@ -3,8 +3,9 @@ import {
   HeadlessError,
   HeadlessFlowBusyError,
   HeadlessFlowNotLoadedError,
+  HeadlessProgrammerError,
 } from "./errors.js";
-import { createHeadlessHttp, joinUrl, pathnameOf } from "./http.js";
+import { createHeadlessHttp, joinUrl, pathnameOf, type HeadlessRequest } from "./http.js";
 import { generatePkce as defaultGeneratePkce, randomState } from "./pkce.js";
 import type { HeadlessView } from "./contract.js";
 import type {
@@ -19,21 +20,11 @@ import type {
   HeadlessPkcePair,
   HeadlessSignupInput,
   HeadlessStartInput,
+  HeadlessSubmitOptions,
   HeadlessViewModel,
   JsonObject,
   LocationLike,
 } from "./types.js";
-
-const TOKEN_GUARD_MESSAGE = "The headless package never calls /token.";
-
-function shouldRethrow(error: unknown): boolean {
-  return (
-    error instanceof HeadlessFlowBusyError ||
-    error instanceof HeadlessFlowNotLoadedError ||
-    error instanceof HeadlessApiPathMismatchError ||
-    (error instanceof HeadlessError && error.message === TOKEN_GUARD_MESSAGE)
-  );
-}
 
 type TokenBag = {
   requestId: string | null;
@@ -91,9 +82,34 @@ function searchParamsFrom(location: LocationLike | string): URLSearchParams {
   return new URLSearchParams();
 }
 
+/** Parameters SqlOS appends to the registered redirect URI when issuing a code. */
+const AUTHORIZATION_RESPONSE_PARAMS = ["code", "state", "scope", "iss", "session_state"];
+
+/**
+ * Recover the exact registered redirect URI from the code redirect. Registered
+ * URIs may carry a query string (`/token` matches by ordinal equality), so the
+ * configured value wins when the redirect was built from it; otherwise only
+ * the authorization-response parameters are stripped.
+ */
+function registeredRedirectUri(url: URL, redirectUrl: string, configuredRedirectUri: string): string {
+  const separator = configuredRedirectUri.includes("?") ? "&" : "?";
+  if (redirectUrl === configuredRedirectUri || redirectUrl.startsWith(`${configuredRedirectUri}${separator}`)) {
+    return configuredRedirectUri;
+  }
+  const stripped = new URL(url.toString());
+  for (const name of AUTHORIZATION_RESPONSE_PARAMS) {
+    stripped.searchParams.delete(name);
+  }
+  if ([...stripped.searchParams.keys()].length === 0) {
+    stripped.search = "";
+  }
+  stripped.hash = "";
+  return stripped.toString();
+}
+
 function parseAuthorization(
   redirectUrl: string,
-  fallbackRedirectUri: string,
+  configuredRedirectUri: string,
   state: string | null,
   codeVerifier: string | null,
 ): HeadlessAuthorization | null {
@@ -105,22 +121,30 @@ function parseAuthorization(
     }
     return {
       code,
-      redirectUri: redirectUrl.split("?")[0] || fallbackRedirectUri,
+      redirectUri: registeredRedirectUri(url, redirectUrl, configuredRedirectUri),
       state: url.searchParams.get("state") ?? state,
       codeVerifier,
     };
   } catch {
-    const match = /[?&]code=([^&]+)/.exec(redirectUrl);
+    const match = /[?&]code=([^&#]+)/.exec(redirectUrl);
     if (!match?.[1]) {
       return null;
     }
     return {
       code: decodeURIComponent(match[1]),
-      redirectUri: fallbackRedirectUri,
+      redirectUri: configuredRedirectUri,
       state,
       codeVerifier,
     };
   }
+}
+
+function isActionResult(value: unknown): value is HeadlessActionResult {
+  return typeof value === "object" && value !== null && typeof (value as HeadlessActionResult).type === "string";
+}
+
+function isViewModel(value: unknown): value is HeadlessViewModel {
+  return typeof value === "object" && value !== null && typeof (value as HeadlessViewModel).view === "string";
 }
 
 class HeadlessFlowImpl implements HeadlessFlow {
@@ -130,9 +154,10 @@ class HeadlessFlowImpl implements HeadlessFlow {
   fieldErrors: Record<string, string> = {};
   authorization: HeadlessAuthorization | null = null;
   redirectUrl: string | null = null;
+  passwordReset: HeadlessPasswordResetRequestResult | null = null;
 
   private readonly listeners = new Set<() => void>();
-  private readonly request: ReturnType<typeof createHeadlessHttp>;
+  private readonly request: HeadlessRequest;
   private readonly generatePkce: () => Promise<HeadlessPkcePair>;
   private readonly clientId: string;
   private readonly redirectUri: string;
@@ -143,7 +168,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
   private phoneNumber: string | null = null;
   private codeVerifier: string | null = null;
   private oauthState: string | null = null;
-  private busy = false;
+  private inflight: { key: string | null; promise: Promise<HeadlessFlowStatus> } | null = null;
   private lastTotpEnrollment: HeadlessViewModel["totpEnrollment"] = null;
 
   constructor(options: CreateHeadlessFlowOptions) {
@@ -156,7 +181,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
         : joinUrl(new URL(issuer).origin, options.headlessApiBasePath)
       : `${issuer}/headless`;
     this.configuredHeadlessPath = pathnameOf(this.headlessBase);
-    this.generatePkce = options.generatePkce ?? defaultGeneratePkce;
+    this.generatePkce = options.generatePkce ?? (() => defaultGeneratePkce());
     this.request = createHeadlessHttp({
       fetch: options.fetch,
       credentials: options.credentials,
@@ -170,10 +195,10 @@ class HeadlessFlowImpl implements HeadlessFlow {
     };
   }
 
-  async resume(location: LocationLike | string): Promise<HeadlessFlowStatus> {
+  resume(location: LocationLike | string): Promise<HeadlessFlowStatus> {
+    const params = searchParamsFrom(location);
+    const requestId = params.get("request")?.trim() || null;
     return this.run(async () => {
-      const params = searchParamsFrom(location);
-      const requestId = params.get("request")?.trim() || null;
       if (!requestId) {
         throw new HeadlessFlowNotLoadedError("The authorization request ID is missing.");
       }
@@ -193,10 +218,10 @@ class HeadlessFlowImpl implements HeadlessFlow {
 
       const model = normalizeViewModel(await this.request<HeadlessViewModel>(url.toString()));
       this.applyViewModel(model);
-    });
+    }, `resume:${requestId ?? ""}`);
   }
 
-  async start(input: HeadlessStartInput = {}): Promise<HeadlessFlowStatus> {
+  start(input: HeadlessStartInput = {}): Promise<HeadlessFlowStatus> {
     return this.run(async () => {
       const pkce = input.codeVerifier && input.codeChallenge
         ? {
@@ -214,27 +239,48 @@ class HeadlessFlowImpl implements HeadlessFlow {
         this.email = input.loginHint;
       }
 
-      const result = await this.request<HeadlessActionResult>(joinUrl(this.headlessBase, "/start"), {
-        method: "POST",
-        body: JSON.stringify({
-          responseType: input.responseType ?? "code",
-          clientId: this.clientId,
-          redirectUri: this.redirectUri,
-          state: this.oauthState,
-          scope: input.scope,
-          codeChallenge: pkce.codeChallenge,
-          codeChallengeMethod: pkce.codeChallengeMethod,
-          resource: input.resource,
-          loginHint: input.loginHint,
-          prompt: input.prompt,
-          nonce: input.nonce,
-          view: input.view,
-          uiContext: input.uiContext,
-          invitationToken: input.invitationToken ?? this.tokens.invitationToken,
-          maxAge: input.maxAge,
-        }),
+      const result = await this.post<HeadlessActionResult>("/start", {
+        responseType: input.responseType ?? "code",
+        clientId: this.clientId,
+        redirectUri: this.redirectUri,
+        state: this.oauthState,
+        scope: input.scope,
+        codeChallenge: pkce.codeChallenge,
+        codeChallengeMethod: pkce.codeChallengeMethod,
+        resource: input.resource,
+        loginHint: input.loginHint,
+        prompt: input.prompt,
+        nonce: input.nonce,
+        view: input.view,
+        uiContext: input.uiContext,
+        invitationToken: input.invitationToken ?? this.tokens.invitationToken,
+        maxAge: input.maxAge,
       });
       this.applyActionResult(result);
+    }, `start:${JSON.stringify(input)}`);
+  }
+
+  async submit(path: string, body: JsonObject = {}, options: HeadlessSubmitOptions = {}): Promise<HeadlessFlowStatus> {
+    return this.run(async () => {
+      const requestId = this.tokens.requestId ?? this.viewModel?.requestId ?? undefined;
+      const result = await this.post<unknown>(path, { requestId, ...body });
+      const parse = options.parse ?? "auto";
+      if (parse === "view" || (parse === "auto" && isViewModel(result))) {
+        this.applyViewModel(normalizeViewModel(result as HeadlessViewModel));
+        return;
+      }
+      if (parse === "action" || isActionResult(result)) {
+        this.applyActionResult(result as HeadlessActionResult);
+        return;
+      }
+      if (result === undefined) {
+        // 204 / empty body: the server accepted the action without changing the view.
+        this.status = this.viewModel ? "view" : "idle";
+        this.error = null;
+        this.fieldErrors = {};
+        return;
+      }
+      throw new HeadlessError(`SqlOS returned an unrecognized response from ${path}.`);
     });
   }
 
@@ -254,11 +300,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
   readonly password = {
     login: async (input: HeadlessPasswordLoginInput): Promise<HeadlessFlowStatus> => {
       return this.run(async () => {
-        const email = input.email ?? this.email ?? this.viewModel?.email;
-        if (!email) {
-          throw new HeadlessFlowNotLoadedError("Email is required before password login.");
-        }
-        this.email = email;
+        const email = this.requireEmail(input.email, "password login");
         this.applyActionResult(
           await this.post("/password/login", {
             requestId: this.requireRequestId(),
@@ -271,10 +313,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
     },
     forgot: async (input?: { email?: string }): Promise<HeadlessFlowStatus> => {
       return this.run(async () => {
-        const email = input?.email ?? this.email ?? this.viewModel?.email;
-        if (!email) {
-          throw new HeadlessFlowNotLoadedError("Email is required to request a password reset.");
-        }
+        const email = this.requireEmail(input?.email, "a password reset");
         const result = await this.post<HeadlessPasswordResetRequestResult>("/password/forgot", {
           email,
           requestId: this.tokens.requestId,
@@ -282,6 +321,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
         this.status = "view";
         this.error = null;
         this.fieldErrors = {};
+        this.passwordReset = result;
         this.viewModel = {
           ...(this.viewModel ?? emptyView("forgot-password-sent", this.configuredHeadlessPath)),
           view: "forgot-password-sent",
@@ -309,11 +349,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
   readonly emailOtp = {
     start: async (input?: { email?: string; invitationToken?: string }): Promise<HeadlessFlowStatus> => {
       return this.run(async () => {
-        const email = input?.email ?? this.email ?? this.viewModel?.email;
-        if (!email) {
-          throw new HeadlessFlowNotLoadedError("Email is required to start email OTP.");
-        }
-        this.email = email;
+        const email = this.requireEmail(input?.email, "email OTP");
         this.applyActionResult(
           await this.post("/email-otp/start", {
             requestId: this.requireRequestId(),
@@ -343,11 +379,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
       invitationToken?: string;
     }): Promise<HeadlessFlowStatus> => {
       return this.run(async () => {
-        const email = input.email ?? this.email ?? this.viewModel?.email;
-        if (!email) {
-          throw new HeadlessFlowNotLoadedError("Email is required to start email OTP signup.");
-        }
-        this.email = email;
+        const email = this.requireEmail(input.email, "email OTP signup");
         this.applyActionResult(
           await this.post("/signup/email-otp/start", {
             requestId: this.requireRequestId(),
@@ -378,11 +410,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
   readonly magicLink = {
     start: async (input?: { email?: string; invitationToken?: string }): Promise<HeadlessFlowStatus> => {
       return this.run(async () => {
-        const email = input?.email ?? this.email ?? this.viewModel?.email;
-        if (!email) {
-          throw new HeadlessFlowNotLoadedError("Email is required to start a magic link.");
-        }
-        this.email = email;
+        const email = this.requireEmail(input?.email, "a magic link");
         this.applyActionResult(
           await this.post("/magic-link/start", {
             requestId: this.requireRequestId(),
@@ -451,7 +479,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
         );
       });
     },
-    signupVerify: async (input: { code: string }): Promise<HeadlessFlowStatus> => {
+    signupVerify: async (input: { code: string; invitationToken?: string }): Promise<HeadlessFlowStatus> => {
       return this.run(async () => {
         this.applyActionResult(
           await this.post("/signup/phone-otp/verify", {
@@ -459,6 +487,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
             signupToken: this.requireToken("signupToken"),
             challengeToken: this.requireToken("challengeToken"),
             code: input.code,
+            invitationToken: input.invitationToken ?? this.tokens.invitationToken,
           }),
         );
       });
@@ -467,11 +496,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
 
   async signup(input: HeadlessSignupInput): Promise<HeadlessFlowStatus> {
     return this.run(async () => {
-      const email = input.email ?? this.email ?? this.viewModel?.email;
-      if (!email) {
-        throw new HeadlessFlowNotLoadedError("Email is required to sign up.");
-      }
-      this.email = email;
+      const email = this.requireEmail(input.email, "signup");
       this.applyActionResult(
         await this.post("/signup", {
           requestId: this.requireRequestId(),
@@ -581,10 +606,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
     }): Promise<HeadlessFlowStatus> => {
       return this.run(async () => {
         this.tokens.invitationToken = input.invitationToken;
-        const email = input.email ?? this.email ?? this.viewModel?.email;
-        if (!email) {
-          throw new HeadlessFlowNotLoadedError("Email is required for invitation signup.");
-        }
+        const email = this.requireEmail(input.email, "invitation signup");
         this.applyActionResult(
           await this.post("/invitations/signup", {
             requestId: this.requireRequestId(),
@@ -659,11 +681,26 @@ class HeadlessFlowImpl implements HeadlessFlow {
     });
   }
 
-  private async run(work: () => Promise<void>): Promise<HeadlessFlowStatus> {
-    if (this.busy) {
-      throw new HeadlessFlowBusyError();
+  /**
+   * Serialize actions. A second user action while one is in flight is a
+   * programmer error (disable the form while `status === "loading"`). Loads
+   * (`resume`, `start`) pass a key so an identical concurrent call — React
+   * StrictMode's double effect, for example — joins the in-flight promise
+   * instead of rejecting.
+   */
+  private run(work: () => Promise<void>, coalesceKey: string | null = null): Promise<HeadlessFlowStatus> {
+    if (this.inflight) {
+      if (coalesceKey !== null && this.inflight.key === coalesceKey) {
+        return this.inflight.promise;
+      }
+      return Promise.reject(new HeadlessFlowBusyError());
     }
-    this.busy = true;
+    const promise = this.execute(work);
+    this.inflight = { key: coalesceKey, promise };
+    return promise;
+  }
+
+  private async execute(work: () => Promise<void>): Promise<HeadlessFlowStatus> {
     this.status = "loading";
     this.error = null;
     this.notify();
@@ -675,19 +712,6 @@ class HeadlessFlowImpl implements HeadlessFlow {
       this.notify();
       return this.status;
     } catch (error) {
-      if (shouldRethrow(error)) {
-        if (!(error instanceof HeadlessFlowBusyError)) {
-          const mapped = error as HeadlessError;
-          this.status = "error";
-          this.error = mapped.message;
-          if (mapped.fieldErrors && Object.keys(mapped.fieldErrors).length > 0) {
-            this.fieldErrors = mapped.fieldErrors;
-          }
-          this.notify();
-        }
-        throw error;
-      }
-
       const mapped = error instanceof HeadlessError
         ? error
         : new HeadlessError(error instanceof Error ? error.message : "Headless request failed.", {
@@ -695,11 +719,19 @@ class HeadlessFlowImpl implements HeadlessFlow {
           });
       this.status = "error";
       this.error = mapped.message;
-      this.fieldErrors = mapped.fieldErrors ?? {};
+      if (mapped instanceof HeadlessProgrammerError) {
+        // Surface it in state for the UI, then rethrow: the fix is in the integration.
+        if (Object.keys(mapped.fieldErrors).length > 0) {
+          this.fieldErrors = mapped.fieldErrors;
+        }
+        this.notify();
+        throw mapped;
+      }
+      this.fieldErrors = mapped.fieldErrors;
       this.notify();
       return this.status;
     } finally {
-      this.busy = false;
+      this.inflight = null;
     }
   }
 
@@ -712,6 +744,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
         this.oauthState,
         this.codeVerifier,
       );
+      this.passwordReset = null;
       this.status = "redirect";
       this.error = null;
       this.fieldErrors = {};
@@ -731,9 +764,13 @@ class HeadlessFlowImpl implements HeadlessFlow {
       throw new HeadlessError("SqlOS returned an empty headless view model.");
     }
 
-    const actualPath = (model.headlessApiBasePath ?? "").replace(/\/+$/, "") || "/";
-    if (actualPath && actualPath !== this.configuredHeadlessPath) {
-      throw new HeadlessApiPathMismatchError(this.configuredHeadlessPath, actualPath);
+    // The server always sends headlessApiBasePath; when it does, fail closed
+    // on a mismatch so actions never post to a path the host has moved.
+    if (model.headlessApiBasePath) {
+      const actualPath = pathnameOf(model.headlessApiBasePath);
+      if (actualPath !== this.configuredHeadlessPath) {
+        throw new HeadlessApiPathMismatchError(this.configuredHeadlessPath, actualPath);
+      }
     }
 
     const totpEnrollment =
@@ -758,6 +795,7 @@ class HeadlessFlowImpl implements HeadlessFlow {
     this.error = model.error ?? null;
     this.redirectUrl = null;
     this.authorization = null;
+    this.passwordReset = null;
     this.status = "view";
   }
 
@@ -767,6 +805,15 @@ class HeadlessFlowImpl implements HeadlessFlow {
       throw new HeadlessFlowNotLoadedError();
     }
     return requestId;
+  }
+
+  private requireEmail(explicit: string | undefined, purpose: string): string {
+    const email = explicit ?? this.email ?? this.viewModel?.email;
+    if (!email) {
+      throw new HeadlessFlowNotLoadedError(`Email is required for ${purpose}. Pass it or call identify first.`);
+    }
+    this.email = email;
+    return email;
   }
 
   private requireToken(name: keyof TokenBag): string {
@@ -797,13 +844,13 @@ function emptyView(view: HeadlessView, headlessApiBasePath: string): HeadlessVie
 
 export function createHeadlessFlow(options: CreateHeadlessFlowOptions): HeadlessFlow {
   if (!options.issuer?.trim()) {
-    throw new HeadlessError("issuer is required.");
+    throw new HeadlessProgrammerError("issuer is required.");
   }
   if (!options.clientId?.trim()) {
-    throw new HeadlessError("clientId is required.");
+    throw new HeadlessProgrammerError("clientId is required.");
   }
   if (!options.redirectUri?.trim()) {
-    throw new HeadlessError("redirectUri is required.");
+    throw new HeadlessProgrammerError("redirectUri is required.");
   }
   return new HeadlessFlowImpl(options);
 }

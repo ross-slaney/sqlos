@@ -1,11 +1,14 @@
 import { useCallback, useMemo, useRef, useSyncExternalStore } from "react";
+import { HeadlessError } from "./errors.js";
 import { createHeadlessFlow } from "./flow.js";
+import { generatePkce as defaultGeneratePkce } from "./pkce.js";
 import type { HeadlessView } from "./contract.js";
 import type {
   CreateHeadlessFlowOptions,
   HeadlessAuthorization,
   HeadlessFlow,
   HeadlessFlowStatus,
+  HeadlessPasswordResetRequestResult,
   HeadlessViewModel,
   UseHeadlessAuthResult,
 } from "./types.js";
@@ -18,6 +21,7 @@ type Snapshot = {
   fieldErrors: Record<string, string>;
   authorization: HeadlessAuthorization | null;
   redirectUrl: string | null;
+  passwordReset: HeadlessPasswordResetRequestResult | null;
 };
 
 const idleSnapshot: Snapshot = {
@@ -28,6 +32,7 @@ const idleSnapshot: Snapshot = {
   fieldErrors: {},
   authorization: null,
   redirectUrl: null,
+  passwordReset: null,
 };
 
 function readSnapshot(flow: HeadlessFlow): Snapshot {
@@ -39,6 +44,7 @@ function readSnapshot(flow: HeadlessFlow): Snapshot {
     fieldErrors: flow.fieldErrors,
     authorization: flow.authorization,
     redirectUrl: flow.redirectUrl,
+    passwordReset: flow.passwordReset,
   };
 }
 
@@ -50,31 +56,40 @@ function sameSnapshot(left: Snapshot, right: Snapshot): boolean {
     left.error === right.error &&
     left.fieldErrors === right.fieldErrors &&
     left.authorization === right.authorization &&
-    left.redirectUrl === right.redirectUrl
+    left.redirectUrl === right.redirectUrl &&
+    left.passwordReset === right.passwordReset
   );
 }
 
+/**
+ * One flow per authorization request. The flow is rebuilt only when an
+ * identity option (issuer, clientId, redirectUri, headlessApiBasePath,
+ * credentials) changes; `fetch` and `generatePkce` may be inline functions —
+ * the latest values are read at call time.
+ */
 export function useHeadlessAuth(options: CreateHeadlessFlowOptions): UseHeadlessAuthResult {
+  const latest = useRef(options);
+  latest.current = options;
+
+  const { issuer, clientId, redirectUri, headlessApiBasePath, credentials } = options;
   const flow = useMemo(
     () =>
       createHeadlessFlow({
-        issuer: options.issuer,
-        clientId: options.clientId,
-        redirectUri: options.redirectUri,
-        credentials: options.credentials,
-        fetch: options.fetch,
-        generatePkce: options.generatePkce,
-        headlessApiBasePath: options.headlessApiBasePath,
+        issuer,
+        clientId,
+        redirectUri,
+        headlessApiBasePath,
+        credentials,
+        fetch: (input, init) => {
+          const impl = latest.current.fetch ?? globalThis.fetch;
+          if (typeof impl !== "function") {
+            throw new HeadlessError("fetch is not available. Pass `fetch` to useHeadlessAuth.");
+          }
+          return impl(input, init);
+        },
+        generatePkce: () => (latest.current.generatePkce ?? defaultGeneratePkce)(),
       }),
-    [
-      options.issuer,
-      options.clientId,
-      options.redirectUri,
-      options.credentials,
-      options.fetch,
-      options.generatePkce,
-      options.headlessApiBasePath,
-    ],
+    [issuer, clientId, redirectUri, headlessApiBasePath, credentials],
   );
 
   const cacheRef = useRef<Snapshot>(idleSnapshot);
@@ -106,5 +121,6 @@ export function useHeadlessAuth(options: CreateHeadlessFlowOptions): UseHeadless
     fieldErrors: snapshot.fieldErrors,
     authorization: snapshot.authorization,
     redirectUrl: snapshot.redirectUrl,
+    passwordReset: snapshot.passwordReset,
   };
 }

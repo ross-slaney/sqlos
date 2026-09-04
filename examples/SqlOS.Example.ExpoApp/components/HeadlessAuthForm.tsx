@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { jwtDecode } from "jwt-decode";
+import { credentialEnabled, type HeadlessView } from "@sqlos/headless";
 import { useHeadlessAuth } from "@sqlos/headless/react-native";
 import { useAuth } from "../services/AuthContext";
 import { Colors } from "../services/theme";
@@ -22,11 +23,29 @@ import {
   getAuthServerUrl,
   getClientId,
   getNativeHeadlessRedirectUri,
+  startHostedAuth,
+  type HostedTokenResult,
 } from "../services/sqlos-auth";
 
 type HeadlessAuthFormProps = {
   view: "login" | "signup";
 };
+
+/**
+ * Views this screen draws. Anything else the server returns (phone OTP, magic
+ * link, consent, device approval, invitations, ...) falls through to hosted
+ * AuthPage in the system browser instead of dead-ending the user.
+ */
+const HANDLED_VIEWS: ReadonlySet<HeadlessView> = new Set<HeadlessView>([
+  "login",
+  "password",
+  "email-otp",
+  "email-otp-verify",
+  "signup",
+  "organization",
+  "mfa",
+  "mfa-enroll",
+]);
 
 export function HeadlessAuthForm({ view: initialView }: HeadlessAuthFormProps) {
   const router = useRouter();
@@ -49,19 +68,40 @@ export function HeadlessAuthForm({ view: initialView }: HeadlessAuthFormProps) {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [otpCode, setOtpCode] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [organizationName, setOrganizationName] = useState("");
   const [mfaCode, setMfaCode] = useState("");
-  const [exchangeError, setExchangeError] = useState<string | null>(null);
-  const [started, setStarted] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [hostedBusy, setHostedBusy] = useState(false);
 
-  const view = flowView ?? initialView;
-  const loading = status === "loading";
+  const view: HeadlessView = flowView ?? initialView;
+  const loading = status === "loading" || hostedBusy;
+  const supportsPassword = credentialEnabled(viewModel?.settings, "password");
+  const supportsEmailOtp = credentialEnabled(viewModel?.settings, "email_otp");
   const providerRedirectNotice =
     status === "redirect" && redirectUrl && !authorization
       ? "This example uses in-app login and password. Follow provider redirects in a browser client."
       : null;
-  const displayError = error || exchangeError || providerRedirectNotice;
+  const displayError = error || localError || providerRedirectNotice;
+
+  const completeWithTokens = useCallback(
+    async (tokens: HostedTokenResult) => {
+      const decoded = jwtDecode<DecodedToken>(tokens.accessToken);
+      await login({
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        userId: decoded.sub ?? "",
+        email: decoded.email ?? "",
+        displayName: decoded.name ?? decoded.email ?? "User",
+        organizationId: decoded.org_id ?? null,
+        sessionId: decoded.sid ?? "",
+        exp: decoded.exp,
+      });
+      router.replace("/(app)");
+    },
+    [login, router],
+  );
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -69,14 +109,22 @@ export function HeadlessAuthForm({ view: initialView }: HeadlessAuthFormProps) {
     }
   }, [isAuthenticated, router]);
 
+  // `flow.start` coalesces an identical in-flight call, so React StrictMode's
+  // double effect does not need a guard here.
   useEffect(() => {
-    if (started) return;
-    setStarted(true);
     void flow.start({
       scope: "openid profile email offline_access",
       view: initialView,
     });
-  }, [flow, initialView, started]);
+  }, [flow, initialView]);
+
+  useEffect(() => {
+    if (viewModel?.email) setEmail(viewModel.email);
+  }, [viewModel?.email]);
+
+  useEffect(() => {
+    if (viewModel?.challengeToken) setOtpCode("");
+  }, [viewModel?.challengeToken]);
 
   useEffect(() => {
     if (status !== "redirect" || !authorization) {
@@ -85,24 +133,25 @@ export function HeadlessAuthForm({ view: initialView }: HeadlessAuthFormProps) {
 
     void (async () => {
       try {
-        const tokens = await exchangeHeadlessAuthorization(authorization);
-        const decoded = jwtDecode<DecodedToken>(tokens.accessToken);
-        await login({
-          accessToken: tokens.accessToken,
-          refreshToken: tokens.refreshToken,
-          userId: decoded.sub ?? "",
-          email: decoded.email ?? "",
-          displayName: decoded.name ?? decoded.email ?? "User",
-          organizationId: decoded.org_id ?? null,
-          sessionId: decoded.sid ?? "",
-          exp: decoded.exp,
-        });
-        router.replace("/(app)");
+        // The package stops at the code; expo-auth-session finishes /token.
+        await completeWithTokens(await exchangeHeadlessAuthorization(authorization));
       } catch (err) {
-        setExchangeError(err instanceof Error ? err.message : "Token exchange failed.");
+        setLocalError(err instanceof Error ? err.message : "Token exchange failed.");
       }
     })();
-  }, [authorization, login, router, status]);
+  }, [authorization, completeWithTokens, status]);
+
+  const continueInBrowser = async () => {
+    setHostedBusy(true);
+    setLocalError(null);
+    try {
+      await completeWithTokens(await startHostedAuth(initialView));
+    } catch (err) {
+      setLocalError(err instanceof Error ? err.message : "Hosted sign-in failed.");
+    } finally {
+      setHostedBusy(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -112,6 +161,7 @@ export function HeadlessAuthForm({ view: initialView }: HeadlessAuthFormProps) {
           <Text style={styles.subtitle}>Native headless AuthPage — SqlOS owns the request; this screen draws the view.</Text>
 
           {displayError ? <Text style={styles.error}>{displayError}</Text> : null}
+          {viewModel?.info ? <Text style={styles.info}>{viewModel.info}</Text> : null}
 
           {view === "login" && (
             <>
@@ -152,6 +202,61 @@ export function HeadlessAuthForm({ view: initialView }: HeadlessAuthFormProps) {
               >
                 <Text style={styles.buttonText}>{loading ? "Signing in..." : "Sign in"}</Text>
               </Pressable>
+              {supportsEmailOtp ? (
+                <Pressable disabled={loading} onPress={() => void flow.emailOtp.start({ email })}>
+                  <Text style={styles.link}>Email me a code instead</Text>
+                </Pressable>
+              ) : null}
+            </>
+          )}
+
+          {view === "email-otp" && (
+            <>
+              <Text style={styles.label}>Email</Text>
+              <TextInput
+                autoCapitalize="none"
+                keyboardType="email-address"
+                style={styles.input}
+                value={email}
+                onChangeText={setEmail}
+              />
+              {fieldErrors.email ? <Text style={styles.fieldError}>{fieldErrors.email}</Text> : null}
+              <Pressable
+                style={styles.button}
+                disabled={loading}
+                onPress={() => void flow.emailOtp.start({ email })}
+              >
+                <Text style={styles.buttonText}>{loading ? "Sending code..." : "Email me a code"}</Text>
+              </Pressable>
+              {supportsPassword ? (
+                <Pressable disabled={loading} onPress={() => void flow.identify({ email })}>
+                  <Text style={styles.link}>Use a password instead</Text>
+                </Pressable>
+              ) : null}
+            </>
+          )}
+
+          {view === "email-otp-verify" && (
+            <>
+              <Text style={styles.label}>Code from your email</Text>
+              <TextInput
+                keyboardType="number-pad"
+                autoComplete="one-time-code"
+                style={styles.input}
+                value={otpCode}
+                onChangeText={setOtpCode}
+              />
+              {fieldErrors.code ? <Text style={styles.fieldError}>{fieldErrors.code}</Text> : null}
+              <Pressable
+                style={styles.button}
+                disabled={loading}
+                onPress={() => void flow.emailOtp.verify({ code: otpCode })}
+              >
+                <Text style={styles.buttonText}>{loading ? "Verifying..." : "Verify code"}</Text>
+              </Pressable>
+              <Pressable disabled={loading} onPress={() => void flow.emailOtp.start({ email })}>
+                <Text style={styles.link}>Send a new code</Text>
+              </Pressable>
             </>
           )}
 
@@ -169,8 +274,10 @@ export function HeadlessAuthForm({ view: initialView }: HeadlessAuthFormProps) {
                 value={email}
                 onChangeText={setEmail}
               />
+              {fieldErrors.email ? <Text style={styles.fieldError}>{fieldErrors.email}</Text> : null}
               <Text style={styles.label}>Password</Text>
               <TextInput secureTextEntry style={styles.input} value={password} onChangeText={setPassword} />
+              {fieldErrors.password ? <Text style={styles.fieldError}>{fieldErrors.password}</Text> : null}
               <Pressable
                 style={styles.button}
                 disabled={loading}
@@ -225,6 +332,7 @@ export function HeadlessAuthForm({ view: initialView }: HeadlessAuthFormProps) {
                 value={mfaCode}
                 onChangeText={setMfaCode}
               />
+              {fieldErrors.code ? <Text style={styles.fieldError}>{fieldErrors.code}</Text> : null}
               <Pressable
                 style={styles.button}
                 disabled={loading}
@@ -235,6 +343,18 @@ export function HeadlessAuthForm({ view: initialView }: HeadlessAuthFormProps) {
                 }
               >
                 <Text style={styles.buttonText}>{loading ? "Verifying..." : "Verify"}</Text>
+              </Pressable>
+            </>
+          )}
+
+          {!HANDLED_VIEWS.has(view) && (
+            <>
+              <Text style={styles.notice}>
+                SqlOS needs the &ldquo;{view}&rdquo; step, which this screen does not draw. Continue in the browser to
+                finish with hosted AuthPage.
+              </Text>
+              <Pressable style={styles.button} disabled={loading} onPress={() => void continueInBrowser()}>
+                <Text style={styles.buttonText}>{hostedBusy ? "Opening browser..." : "Continue in browser"}</Text>
               </Pressable>
             </>
           )}
@@ -276,7 +396,10 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   buttonText: { color: "#fff", fontWeight: "600", fontSize: 15 },
+  link: { color: Colors.primary, textAlign: "center", marginTop: 12, fontWeight: "600" },
   error: { color: Colors.danger, marginVertical: 8 },
+  info: { color: Colors.textSecondary, marginVertical: 8 },
+  notice: { color: Colors.text, marginVertical: 8, lineHeight: 20 },
   fieldError: { color: Colors.danger, fontSize: 12 },
   org: {
     borderWidth: 1,

@@ -376,3 +376,207 @@ describe("createHeadlessFlow", () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe("review follow-ups", () => {
+  it("generates an RFC 7636 verifier of at least 43 characters by default", async () => {
+    const { generatePkce } = await import("../src/index.js");
+    const pkce = await generatePkce();
+    expect(pkce.codeVerifier.length).toBeGreaterThanOrEqual(43);
+    expect(pkce.codeVerifier.length).toBeLessThanOrEqual(128);
+    expect(pkce.codeVerifier).toMatch(/^[A-Za-z0-9\-._~]+$/);
+    expect(pkce.codeChallenge).toHaveLength(43);
+    expect(pkce.codeChallengeMethod).toBe("S256");
+  });
+
+  it("accepts injected crypto primitives instead of a forked generator", async () => {
+    const { createPkceGenerator, generatePkce } = await import("../src/index.js");
+    const { createHash } = await import("node:crypto");
+    const randomBytes = vi.fn(async (size: number) => new Uint8Array(size).fill(7));
+    const sha256 = vi.fn(async (data: Uint8Array) => new Uint8Array(createHash("sha256").update(data).digest()));
+    const injected = await generatePkce({ randomBytes, sha256 });
+    const reference = await generatePkce();
+    expect(randomBytes).toHaveBeenCalledWith(32);
+    expect(sha256).toHaveBeenCalledOnce();
+    expect(injected.codeVerifier).toHaveLength(reference.codeVerifier.length);
+    // Same verifier through Web Crypto must yield the same challenge.
+    const viaWebCrypto = await generatePkce({ randomBytes });
+    expect(viaWebCrypto.codeChallenge).toBe(injected.codeChallenge);
+
+    const bound = createPkceGenerator({ randomBytes, sha256 });
+    expect((await bound()).codeVerifier).toBe(injected.codeVerifier);
+  });
+
+  it("keeps a registered redirect URI query string in authorization.redirectUri", async () => {
+    const registered = "https://app.example.com/callback?tenant=acme";
+    const fetch = createFetch((url) => {
+      if (url.includes("/requests/")) {
+        return viewModel({ view: "password", email: "ada@example.com" });
+      }
+      return {
+        type: "redirect",
+        redirectUrl: `${registered}&code=abc&state=xyz&scope=openid`,
+      };
+    });
+    const flow = createHeadlessFlow({ issuer, clientId, redirectUri: registered, fetch });
+    await flow.resume("https://app.example.com/auth/authorize?request=req_1");
+    await flow.password.login({ password: "secret" });
+    expect(flow.authorization).toEqual({
+      code: "abc",
+      redirectUri: registered,
+      state: "xyz",
+      codeVerifier: null,
+    });
+  });
+
+  it("strips only authorization-response params when the redirect does not match the configured URI", async () => {
+    const fetch = createFetch((url) => {
+      if (url.includes("/requests/")) {
+        return viewModel({ view: "password", email: "ada@example.com" });
+      }
+      return {
+        type: "redirect",
+        redirectUrl: "https://other.example.com/cb?tenant=acme&code=abc&state=xyz&scope=openid&iss=https%3A%2F%2Fid",
+      };
+    });
+    const flow = createHeadlessFlow({ issuer, clientId, redirectUri, fetch });
+    await flow.resume("https://app.example.com/auth/authorize?request=req_1");
+    await flow.password.login({ password: "secret" });
+    expect(flow.authorization?.redirectUri).toBe("https://other.example.com/cb?tenant=acme");
+  });
+
+  it("joins an identical in-flight resume instead of rejecting (StrictMode double effect)", async () => {
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fetch = createFetch(async () => {
+      await gate;
+      return viewModel();
+    });
+    const flow = createHeadlessFlow({ issuer, clientId, redirectUri, fetch });
+    const location = "https://app.example.com/auth/authorize?request=req_1";
+    const first = flow.resume(location);
+    const second = flow.resume(location);
+    expect(second).toBe(first);
+    release?.();
+    await expect(second).resolves.toBe("view");
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("still rejects a different action while a load is in flight", async () => {
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fetch = createFetch(async () => {
+      await gate;
+      return viewModel();
+    });
+    const flow = createHeadlessFlow({ issuer, clientId, redirectUri, fetch });
+    const pending = flow.resume("https://app.example.com/auth/authorize?request=req_1");
+    await expect(flow.identify({ email: "ada@example.com" })).rejects.toBeInstanceOf(HeadlessFlowBusyError);
+    release?.();
+    await pending;
+  });
+
+  it("exposes the password reset result instead of discarding it", async () => {
+    const fetch = createFetch((url, init) => {
+      if (url.includes("/requests/")) {
+        return viewModel({ view: "forgot-password", email: "ada@example.com" });
+      }
+      expect(url.endsWith("/password/forgot")).toBe(true);
+      expect(readBody(init)).toEqual({ email: "ada@example.com", requestId: "req_1" });
+      return {
+        email: "ada@example.com",
+        maskedEmail: "a***@example.com",
+        message: "Check your inbox.",
+        expiresAt: "2030-01-01T00:15:00Z",
+        nextAllowedSendAt: "2030-01-01T00:01:00Z",
+      };
+    });
+    const flow = createHeadlessFlow({ issuer, clientId, redirectUri, fetch });
+    await flow.resume("https://app.example.com/auth/authorize?request=req_1");
+    await expect(flow.password.forgot()).resolves.toBe("view");
+    expect(flow.viewModel?.view).toBe("forgot-password-sent");
+    expect(flow.viewModel?.info).toBe("Check your inbox.");
+    expect(flow.passwordReset).toEqual({
+      email: "ada@example.com",
+      maskedEmail: "a***@example.com",
+      message: "Check your inbox.",
+      expiresAt: "2030-01-01T00:15:00Z",
+      nextAllowedSendAt: "2030-01-01T00:01:00Z",
+    });
+  });
+
+  it("submit() drives an unnamed route through the same bookkeeping", async () => {
+    const fetch = createFetch((url, init) => {
+      if (url.includes("/requests/")) {
+        return viewModel();
+      }
+      if (url.endsWith("/passkey/start")) {
+        expect(readBody(init)).toEqual({ requestId: "req_1", credentialId: "pk_1" });
+        return { type: "view", viewModel: viewModel({ view: "mfa", mfaToken: "mfa_from_passkey" }) };
+      }
+      if (url.endsWith("/mfa/verify")) {
+        expect(readBody(init)).toMatchObject({ mfaToken: "mfa_from_passkey" });
+        return { type: "redirect", redirectUrl: `${redirectUri}?code=ok` };
+      }
+      throw new Error(`unexpected ${url}`);
+    });
+    const flow = createHeadlessFlow({ issuer, clientId, redirectUri, fetch });
+    await flow.resume("https://app.example.com/auth/authorize?request=req_1");
+    await expect(flow.submit("/passkey/start", { credentialId: "pk_1" })).resolves.toBe("view");
+    expect(flow.viewModel?.view).toBe("mfa");
+    // The token the unnamed route returned feeds the typed action that follows.
+    await flow.mfa.verify({ code: "123456" });
+    expect(flow.authorization?.code).toBe("ok");
+  });
+
+  it("submit() accepts a bare view model and a 204", async () => {
+    const fetch = createFetch((url) => {
+      if (url.includes("/requests/")) {
+        return viewModel();
+      }
+      if (url.endsWith("/custom/view")) {
+        return viewModel({ view: "organization" });
+      }
+      return new Response(null, { status: 204 });
+    });
+    const flow = createHeadlessFlow({ issuer, clientId, redirectUri, fetch });
+    await flow.resume("https://app.example.com/auth/authorize?request=req_1");
+    await flow.submit("/custom/view");
+    expect(flow.viewModel?.view).toBe("organization");
+    await expect(flow.submit("/custom/noop", {})).resolves.toBe("view");
+  });
+
+  it("refuses the token endpoint with a dedicated error class", async () => {
+    const { HeadlessTokenEndpointError, HeadlessProgrammerError } = await import("../src/index.js");
+    const fetch = createFetch(() => viewModel());
+    const flow = createHeadlessFlow({ issuer, clientId, redirectUri, fetch });
+    await flow.resume("https://app.example.com/auth/authorize?request=req_1");
+    const rejection = flow.submit("https://id.example.com/sqlos/auth/token", { grant_type: "authorization_code" });
+    await expect(rejection).rejects.toBeInstanceOf(HeadlessTokenEndpointError);
+    await expect(rejection).rejects.toBeInstanceOf(HeadlessProgrammerError);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips the path check when the view model omits headlessApiBasePath", async () => {
+    const fetch = createFetch(() => ({ ...viewModel(), headlessApiBasePath: "" }));
+    const flow = createHeadlessFlow({ issuer, clientId, redirectUri, fetch });
+    await expect(flow.resume("https://app.example.com/auth/authorize?request=req_1")).resolves.toBe("view");
+  });
+
+  it("credentialEnabled applies the runtime flag and the enabled list", async () => {
+    const { credentialEnabled } = await import("../src/index.js");
+    const settings = {
+      enabledCredentialTypes: ["password", "EMAIL_OTP"],
+      localPasswordRuntimeEnabled: true,
+      emailOtpRuntimeConfigured: false,
+      magicLinkRuntimeConfigured: true,
+    };
+    expect(credentialEnabled(settings, "password")).toBe(true);
+    expect(credentialEnabled(settings, "email_otp")).toBe(false);
+    expect(credentialEnabled(settings, "magic_link")).toBe(false);
+    expect(credentialEnabled(null, "password")).toBe(false);
+  });
+});

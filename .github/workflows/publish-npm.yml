@@ -45,6 +45,9 @@ jobs:
       - uses: actions/checkout@v4
       # Do not set registry-url here. setup-node would write an empty
       # _authToken into .npmrc and npm would skip OIDC (ENEEDAUTH).
+      # Node 24 here, unlike NODE_VERSION 20 in pull-request.yml / main.yml:
+      # npm Trusted Publishing (OIDC provenance) needs npm 11+, which ships
+      # with Node 24. The package itself still supports Node >= 20.
       - uses: actions/setup-node@v4
         with:
           node-version: "24"

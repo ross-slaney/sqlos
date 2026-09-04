@@ -121,3 +121,54 @@ describe("useHeadlessAuth", () => {
     expect(beforeIdentify).toBeGreaterThan(0);
   });
 });
+
+describe("useHeadlessAuth flow identity", () => {
+  it("keeps one flow across renders with inline fetch and generatePkce options", async () => {
+    const calls: string[] = [];
+    let renders = 0;
+    const { result, rerender } = renderHook(() => {
+      renders += 1;
+      const renderIndex = renders;
+      return useHeadlessAuth({
+        issuer: "https://id.example.com/sqlos/auth",
+        clientId: "acme-app",
+        redirectUri: "https://app.example.com/auth/callback",
+        // Inline on purpose: new function identities every render.
+        fetch: async (input) => {
+          calls.push(`${renderIndex}:${String(input)}`);
+          return loginResponse("login");
+        },
+        generatePkce: async () => ({ codeVerifier: "v".repeat(43), codeChallenge: "c", codeChallengeMethod: "S256" }),
+      });
+    });
+    const first = result.current.flow;
+    rerender();
+    rerender();
+    expect(result.current.flow).toBe(first);
+
+    await act(async () => {
+      await result.current.flow.resume("https://app.example.com/auth/authorize?request=req_1");
+    });
+    // A later render's fetch ran, not the closure captured when the flow was created.
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.startsWith("1:")).toBe(false);
+    expect(result.current.view).toBe("login");
+  });
+
+  it("rebuilds the flow only when an identity option changes", () => {
+    const { result, rerender } = renderHook(
+      ({ clientId }: { clientId: string }) =>
+        useHeadlessAuth({
+          issuer: "https://id.example.com/sqlos/auth",
+          clientId,
+          redirectUri: "https://app.example.com/auth/callback",
+        }),
+      { initialProps: { clientId: "acme-app" } },
+    );
+    const first = result.current.flow;
+    rerender({ clientId: "acme-app" });
+    expect(result.current.flow).toBe(first);
+    rerender({ clientId: "other-app" });
+    expect(result.current.flow).not.toBe(first);
+  });
+});

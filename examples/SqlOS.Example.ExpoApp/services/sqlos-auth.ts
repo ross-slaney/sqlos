@@ -1,6 +1,6 @@
 import * as AuthSession from "expo-auth-session";
 import * as Crypto from "expo-crypto";
-import type { HeadlessAuthorization, HeadlessPkcePair } from "@sqlos/headless";
+import { createPkceGenerator, type HeadlessAuthorization } from "@sqlos/headless";
 import { API_URL, CLIENT_ID } from "./config";
 
 export type HostedAuthView = "login" | "signup";
@@ -32,24 +32,16 @@ export function getNativeHeadlessRedirectUri(): string {
   return "sqlos-expo://auth-callback";
 }
 
-export async function generateNativePkce(): Promise<HeadlessPkcePair> {
-  const bytes = await Crypto.getRandomBytesAsync(32);
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
-  let codeVerifier = "";
-  for (const byte of bytes) {
-    codeVerifier += alphabet[byte % alphabet.length]!;
-  }
-  const digest = await Crypto.digestStringAsync(
-    Crypto.CryptoDigestAlgorithm.SHA256,
-    codeVerifier,
-    { encoding: Crypto.CryptoEncoding.BASE64 },
-  );
-  return {
-    codeVerifier,
-    codeChallenge: digest.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, ""),
-    codeChallengeMethod: "S256",
-  };
-}
+/**
+ * Hermes does not ship Web Crypto `subtle`, so hand `@sqlos/headless` the
+ * expo-crypto primitives. The package owns the verifier format (43-char
+ * base64url) and the S256 challenge; nothing is re-implemented here.
+ */
+export const generateNativePkce = createPkceGenerator({
+  randomBytes: (size) => Crypto.getRandomBytesAsync(size),
+  sha256: async (data) =>
+    new Uint8Array(await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, data as BufferSource)),
+});
 
 export async function exchangeHeadlessAuthorization(
   authorization: HeadlessAuthorization,

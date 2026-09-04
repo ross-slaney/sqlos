@@ -202,6 +202,10 @@ await flow.mfa.verify({ code });
 await flow.consent.approve();
 ```
 
+Two things still reject, because they are integration bugs rather than user input: a second action while one is in flight (`HeadlessFlowBusyError` — disable the form while `status === "loading"`), and an action whose view does not carry the token it needs (`HeadlessFlowNotLoadedError`). Both also set `status === "error"`. See the [error table](/docs/reference/headless-js#errors-and-status).
+
+Show only the sign-in methods the server can serve. `credentialEnabled(viewModel.settings, "email_otp")` applies the same enabled-and-configured rule as hosted AuthPage. Render a fallback for any `HeadlessView` your screens do not draw — the examples send those users to hosted AuthPage instead of a headline with no form.
+
 React:
 
 ```ts

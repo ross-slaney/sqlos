@@ -6,7 +6,7 @@ This Angular 19 application shows how a single-page app integrates with SqlOS th
 
 - standalone Angular components and route guards
 - hosted SqlOS sign-in and sign-up via `angular-oauth2-oidc`
-- headless password, email OTP, signup, provider, and organization-selection states
+- headless password, email OTP, signup, provider, organization-selection, and MFA states
 - library-owned PKCE, discovery, and refresh
 - bearer API requests
 - FGA-filtered retail navigation and CRUD screens
@@ -45,11 +45,11 @@ Use the hosted sign-in or sign-up action.
 
 Start the custom/headless path. The same OIDC library starts `/authorize`. SqlOS directs interaction to Angular's `/auth/authorize` route, then the library finishes the code at `/auth/callback`.
 
-[`AuthAuthorizeComponent`](src/app/pages/auth-authorize/auth-authorize.component.ts) uses `createHeadlessFlow` from `@sqlos/headless`, subscribes to flow state (`status`, `view`, `viewModel`, `error`, `fieldErrors`), and renders login, password, email-code, signup, organization-selection, and provider states. Actions resolve with status; the component does not catch those rejections. On redirect it calls `window.location.assign(flow.redirectUrl)`.
+[`AuthAuthorizeComponent`](src/app/pages/auth-authorize/auth-authorize.component.ts) uses `createHeadlessFlow` from `@sqlos/headless`, subscribes to flow state (`status`, `view`, `viewModel`, `error`, `fieldErrors`), and renders login, password, email-code, signup, organization-selection, MFA, and provider states; any other view falls back to hosted sign-in. Actions resolve with status; the component does not catch those rejections. On redirect it calls `window.location.assign(flow.redirectUrl)`.
 
 Headless signup sends first name, last name, and a required referral source to the API's application hook.
 
-The Angular headless UI is deliberately smaller than the Next.js reference: it does not currently implement phone OTP, password reset, or MFA screens.
+The Angular headless UI is deliberately smaller than the Next.js reference: it does not implement phone OTP, magic link, or password reset screens. When SqlOS returns one of those views the page offers hosted sign-in instead of dead-ending.
 
 ## Explore authorization
 

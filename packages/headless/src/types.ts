@@ -1,6 +1,6 @@
-import type { HeadlessView } from "./contract.js";
+import type { HeadlessActionPath, HeadlessCredentialType, HeadlessView } from "./contract.js";
 
-export type { HeadlessView };
+export type { HeadlessActionPath, HeadlessCredentialType, HeadlessView };
 
 export type JsonObject = Record<string, unknown>;
 
@@ -62,6 +62,16 @@ export type HeadlessInvitation = {
   customFields?: JsonObject | null;
 };
 
+export type HeadlessConfigurationOwnership = {
+  owner: string;
+  sourceKey?: string | null;
+  lastReconciledAt?: string | null;
+  configurationFingerprint?: string | null;
+  isEditable: boolean;
+  canEmergencyDisable: boolean;
+  isOrphaned: boolean;
+};
+
 export type HeadlessSettings = {
   logoBase64?: string | null;
   primaryColor?: string;
@@ -79,6 +89,7 @@ export type HeadlessSettings = {
   emailOtpRuntimeConfigured?: boolean;
   magicLinkRuntimeConfigured?: boolean;
   phoneOtpRuntimeConfigured?: boolean;
+  ownership?: HeadlessConfigurationOwnership | null;
 };
 
 export type HeadlessViewModel = {
@@ -121,6 +132,7 @@ export type HeadlessActionResult = {
   viewModel?: HeadlessViewModel | null;
 };
 
+/** Response of `password.forgot()`; exposed as `flow.passwordReset`. */
 export type HeadlessPasswordResetRequestResult = {
   email: string;
   maskedEmail: string;
@@ -133,6 +145,7 @@ export type HeadlessFlowStatus = "idle" | "loading" | "view" | "redirect" | "err
 
 export type HeadlessAuthorization = {
   code: string;
+  /** The exact registered redirect URI, including any registered query string. */
   redirectUri: string;
   state: string | null;
   codeVerifier: string | null;
@@ -142,6 +155,12 @@ export type HeadlessPkcePair = {
   codeVerifier: string;
   codeChallenge: string;
   codeChallengeMethod: "S256";
+};
+
+/** Crypto primitives for `generatePkce` on runtimes without Web Crypto. */
+export type HeadlessPkcePrimitives = {
+  randomBytes?: (size: number) => Uint8Array | Promise<Uint8Array>;
+  sha256?: (data: Uint8Array) => Uint8Array | Promise<Uint8Array>;
 };
 
 export type LocationLike = {
@@ -198,6 +217,14 @@ export type HeadlessSignupInput = {
   invitationToken?: string;
 };
 
+export type HeadlessSubmitOptions = {
+  /**
+   * How to interpret the response body. `"auto"` (default) treats a body with
+   * `type` as an action result and a body with `view` as a view model.
+   */
+  parse?: "auto" | "action" | "view";
+};
+
 export interface HeadlessFlow {
   readonly status: HeadlessFlowStatus;
   readonly viewModel: HeadlessViewModel | null;
@@ -205,11 +232,24 @@ export interface HeadlessFlow {
   readonly fieldErrors: Record<string, string>;
   readonly authorization: HeadlessAuthorization | null;
   readonly redirectUrl: string | null;
+  /** Result of the last successful `password.forgot()` on this flow. */
+  readonly passwordReset: HeadlessPasswordResetRequestResult | null;
 
   subscribe(listener: () => void): () => void;
 
   resume(location: LocationLike | string): Promise<HeadlessFlowStatus>;
   start(input?: HeadlessStartInput): Promise<HeadlessFlowStatus>;
+
+  /**
+   * Escape hatch: post to a headless route the SDK does not name yet, through
+   * the same status / token bookkeeping as the typed actions. `requestId` is
+   * filled in from the loaded request unless `body` provides it.
+   */
+  submit(
+    path: HeadlessActionPath | (string & {}),
+    body?: JsonObject,
+    options?: HeadlessSubmitOptions,
+  ): Promise<HeadlessFlowStatus>;
 
   identify(input: HeadlessIdentifyInput): Promise<HeadlessFlowStatus>;
   password: {
@@ -243,7 +283,7 @@ export interface HeadlessFlow {
       customFields?: JsonObject;
       invitationToken?: string;
     }): Promise<HeadlessFlowStatus>;
-    signupVerify(input: { code: string }): Promise<HeadlessFlowStatus>;
+    signupVerify(input: { code: string; invitationToken?: string }): Promise<HeadlessFlowStatus>;
   };
   signup(input: HeadlessSignupInput): Promise<HeadlessFlowStatus>;
   organization: {
@@ -293,4 +333,5 @@ export type UseHeadlessAuthResult = {
   fieldErrors: Record<string, string>;
   authorization: HeadlessAuthorization | null;
   redirectUrl: string | null;
+  passwordReset: HeadlessPasswordResetRequestResult | null;
 };

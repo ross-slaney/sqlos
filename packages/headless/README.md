@@ -78,18 +78,22 @@ On native there is no browser redirect into your page. Call `flow.start()` so Sq
 
 ```ts
 import { exchangeCodeAsync } from "expo-auth-session";
-import { createHeadlessFlow, generatePkce } from "@sqlos/headless";
+import * as Crypto from "expo-crypto";
+import { createHeadlessFlow, createPkceGenerator } from "@sqlos/headless";
 
-// Expo: wrap expo-crypto the same way examples/SqlOS.Example.ExpoApp does.
-async function generateNativePkce() {
-  return generatePkce();
-}
+// Hermes has no Web Crypto `subtle`: inject expo-crypto primitives. The
+// package still owns the verifier format (43-char base64url) and S256.
+const generatePkce = createPkceGenerator({
+  randomBytes: (size) => Crypto.getRandomBytesAsync(size),
+  sha256: async (data) =>
+    new Uint8Array(await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, data)),
+});
 
 const flow = createHeadlessFlow({
   issuer: "https://id.example.com/sqlos/auth",
   clientId: "example-expo",
   redirectUri: "sqlos-expo://auth-callback",
-  generatePkce: generateNativePkce,
+  generatePkce,
 });
 
 await flow.start({
@@ -129,9 +133,16 @@ If `status === "redirect"` and `authorization` is null, SqlOS returned an extern
 
 Server and validation failures **do not reject**. Actions resolve with the new status, and `error` / `fieldErrors` update on the flow. You do not need try/catch or local error state for the normal path.
 
-Programmer mistakes still throw: `HeadlessFlowBusyError`, `HeadlessFlowNotLoadedError`, missing-token preconditions, and the `/token` guard. Fix the integration when those appear.
+Programmer mistakes reject with a `HeadlessProgrammerError` subclass and also set `status === "error"`: `HeadlessFlowBusyError` (a second action while one is in flight — disable inputs while `status === "loading"`), `HeadlessFlowNotLoadedError` (action before `resume`/`start`, or a view without the token the action needs), `HeadlessApiPathMismatchError`, and `HeadlessTokenEndpointError`. Fix the integration when those appear. `resume` and `start` coalesce an identical in-flight call, so React StrictMode's double effect needs no guard.
 
-Subscribe with `flow.subscribe(listener)` outside React, or use `useHeadlessAuth` inside React.
+Subscribe with `flow.subscribe(listener)` outside React, or use `useHeadlessAuth` inside React. Inline `fetch` / `generatePkce` options do not rebuild the hook's flow; only the identity options (issuer, client, redirect URI, base path, credentials) do.
+
+## Beyond the named actions
+
+- `credentialEnabled(viewModel.settings, "email_otp")` applies the hosted AuthPage rule (enabled type **and** runtime configured) so every custom UI shows the same sign-in methods.
+- `flow.submit(path, body)` posts to a headless route the SDK does not name yet, through the same status and token bookkeeping, and applies the returned view model or action result.
+- `flow.passwordReset` carries the `password.forgot()` result (`maskedEmail`, `expiresAt`, `nextAllowedSendAt`) for resend-cooldown UX.
+- Render a fallback for `HeadlessView` values your UI does not draw; the examples send those users to hosted AuthPage.
 
 ## Docs
 

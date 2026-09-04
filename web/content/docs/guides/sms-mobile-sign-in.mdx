@@ -114,7 +114,7 @@ Configure the same scheme in the mobile app. For an Expo app:
 
 ## 3. Start a PKCE authorization request
 
-On native there is no browser redirect into your page. Drive the flow with [`@sqlos/headless`](/docs/reference/headless-js). `flow.start` creates the authorization request and generates PKCE. Pass `generatePkce` when Web Crypto `subtle` is unavailable (for example Expo). Do not call `/sqlos/auth/headless` from application `fetch` helpers.
+On native there is no browser redirect into your page. Drive the flow with [`@sqlos/headless`](/docs/reference/headless-js). `flow.start` creates the authorization request and generates PKCE. Where Web Crypto `subtle` is unavailable (for example Expo), pass `createPkceGenerator({ randomBytes, sha256 })` built from expo-crypto primitives — see the [package reference](/docs/reference/headless-js#native-app). Do not call `/sqlos/auth/headless` from application `fetch` helpers.
 
 ```ts
 import { createHeadlessFlow, generatePkce } from "@sqlos/headless";
@@ -129,7 +129,7 @@ const flow = createHeadlessFlow({
   issuer,
   clientId,
   redirectUri,
-  generatePkce, // wrap with expo-crypto when Web Crypto subtle is unavailable
+  generatePkce, // on Expo: createPkceGenerator({ randomBytes, sha256 }) from expo-crypto
 });
 
 await flow.start({

@@ -58,7 +58,7 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run && node scripts/verify-headless-contract.mjs",
+    "test": "tsc --noEmit && vitest run && node scripts/verify-headless-contract.mjs",
     "test:watch": "vitest"
   },
   "peerDependencies": {

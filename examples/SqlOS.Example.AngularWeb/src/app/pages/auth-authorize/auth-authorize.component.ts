@@ -1,7 +1,7 @@
 import { Component, inject, OnDestroy, OnInit, signal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { createHeadlessFlow, type HeadlessFlow, type HeadlessFlowStatus, type HeadlessViewModel } from '@sqlos/headless';
+import { createHeadlessFlow, credentialEnabled, type HeadlessFlow, type HeadlessFlowStatus, type HeadlessView, type HeadlessViewModel } from '@sqlos/headless';
 import { AuthService } from '../../services/auth.service';
 import { environment } from '../../environments/environment';
 
@@ -35,6 +35,22 @@ function getProviderMonogram(displayName: string) {
 
 const IMAGE_LOGIN = 'https://images.unsplash.com/photo-1604719312566-8912e9227c6a?w=1200&q=80&auto=format';
 const IMAGE_SIGNUP = 'https://images.unsplash.com/photo-1556740758-90de374c12ad?w=1200&q=80&auto=format';
+
+/**
+ * Views this component draws. Anything else SqlOS returns (phone OTP, magic
+ * link, consent, invitations, device approval, ...) falls back to hosted
+ * sign-in instead of showing a headline with no form.
+ */
+const HANDLED_VIEWS: ReadonlySet<string> = new Set<HeadlessView>([
+  'login',
+  'password',
+  'email-otp',
+  'email-otp-verify',
+  'signup',
+  'organization',
+  'mfa',
+  'mfa-enroll',
+]);
 
 @Component({
   selector: 'app-auth-authorize',
@@ -261,6 +277,63 @@ const IMAGE_SIGNUP = 'https://images.unsplash.com/photo-1556740758-90de374c12ad?
               </div>
             }
 
+            <!-- MFA challenge -->
+            @if (view() === 'mfa') {
+              <form class="ha-form" (ngSubmit)="onVerifyMfa()">
+                <div class="ha-field">
+                  <label for="ha-mfa-code">Authenticator or recovery code</label>
+                  <input id="ha-mfa-code" type="text" [(ngModel)]="mfaCode" name="mfaCode" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" required autofocus>
+                  @if (fieldErrors()['code']) {
+                    <p class="ha-field-error">{{ fieldErrors()['code'] }}</p>
+                  }
+                </div>
+                <button type="submit" class="ha-submit" [disabled]="loading()">
+                  {{ loading() ? 'Verifying...' : 'Verify' }}
+                </button>
+              </form>
+            }
+
+            <!-- MFA enrollment -->
+            @if (view() === 'mfa-enroll') {
+              @if (viewModel()?.totpEnrollment; as enrollment) {
+                <form class="ha-form" (ngSubmit)="onVerifyMfaEnrollment()">
+                  <div class="ha-mfa-setup">
+                    <img [src]="enrollment.qrCodeDataUrl" alt="Authenticator setup QR code" width="160" height="160">
+                    <p>Scan with an authenticator app, or enter the secret manually: <code>{{ enrollment.secret }}</code></p>
+                  </div>
+                  <div class="ha-field">
+                    <label for="ha-mfa-enroll-code">Verification code</label>
+                    <input id="ha-mfa-enroll-code" type="text" [(ngModel)]="mfaCode" name="mfaCode" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" required autofocus>
+                    @if (fieldErrors()['code']) {
+                      <p class="ha-field-error">{{ fieldErrors()['code'] }}</p>
+                    }
+                  </div>
+                  <button type="submit" class="ha-submit" [disabled]="loading()">
+                    {{ loading() ? 'Verifying...' : 'Verify and continue' }}
+                  </button>
+                </form>
+              } @else {
+                <div class="ha-form">
+                  <p class="muted">This organization requires an authenticator app before you can continue.</p>
+                  <button type="button" class="ha-submit" [disabled]="loading()" (click)="onStartMfaEnrollment()">
+                    {{ loading() ? 'Starting...' : 'Add authenticator app' }}
+                  </button>
+                </div>
+              }
+            }
+
+            <!-- Steps this component does not draw -->
+            @if (!isHandledView()) {
+              <div class="ha-form">
+                <p class="muted">
+                  SqlOS needs the &ldquo;{{ view() }}&rdquo; step, which this page does not draw. Continue with hosted sign-in to finish.
+                </p>
+                <button type="button" class="ha-submit" [disabled]="flowStarting()" (click)="startFlow('login')">
+                  Continue with hosted sign-in
+                </button>
+              </div>
+            }
+
             <!-- Provider buttons -->
             @if (showProviderButtons()) {
               <div class="ha-providers">
@@ -319,6 +392,7 @@ export class AuthAuthorizeComponent implements OnInit, OnDestroy {
   email = '';
   password = '';
   otpCode = '';
+  mfaCode = '';
   organizationName = '';
   firstName = '';
   lastName = '';
@@ -330,16 +404,21 @@ export class AuthAuthorizeComponent implements OnInit, OnDestroy {
   starterView = signal<'login' | 'signup'>('login');
 
   isSignup = () => this.view() === 'signup';
+  isHandledView = () => HANDLED_VIEWS.has(this.view());
 
   headline = () => {
     if (this.isSignup()) return 'Start your free trial';
     if (this.view() === 'organization') return 'Choose workspace';
+    if (this.view() === 'mfa') return 'Two-step verification';
+    if (this.view() === 'mfa-enroll') return 'Add authenticator app';
     return 'Welcome back';
   };
 
   subtitle = () => {
     if (this.isSignup()) return 'Create your account and start managing retail operations in minutes.';
     if (this.view() === 'organization') return "Select the organization you'd like to sign in to.";
+    if (this.view() === 'mfa') return 'Enter an authenticator code or one of your recovery codes.';
+    if (this.view() === 'mfa-enroll') return 'Set up an authenticator app before continuing.';
     return 'Sign in to your Northwind Retail account.';
   };
 
@@ -355,15 +434,8 @@ export class AuthAuthorizeComponent implements OnInit, OnDestroy {
     return (v === 'login' || v === 'signup') && (this.viewModel()?.providers?.length ?? 0) > 0;
   };
 
-  supportsPassword = () => {
-    const settings = this.viewModel()?.settings;
-    return !!settings?.localPasswordRuntimeEnabled && (settings.enabledCredentialTypes ?? []).includes('password');
-  };
-
-  supportsEmailOtp = () => {
-    const settings = this.viewModel()?.settings;
-    return !!settings?.emailOtpRuntimeConfigured && (settings.enabledCredentialTypes ?? []).includes('email_otp');
-  };
+  supportsPassword = () => credentialEnabled(this.viewModel()?.settings, 'password');
+  supportsEmailOtp = () => credentialEnabled(this.viewModel()?.settings, 'email_otp');
 
   providerMonogram(displayName: string): string {
     return getProviderMonogram(displayName);
@@ -385,7 +457,12 @@ export class AuthAuthorizeComponent implements OnInit, OnDestroy {
     });
     this.unsubscribe = this.flow.subscribe(() => this.applyFlow());
 
-    if (!this.requestId) return;
+    if (!this.requestId) {
+      // Error-only bounce: SqlOS dropped the request id but still reports why.
+      const initialError = params.get('error');
+      if (initialError) this.error.set(initialError);
+      return;
+    }
 
     await this.flow.resume(window.location);
     const vm = this.viewModel();
@@ -419,6 +496,7 @@ export class AuthAuthorizeComponent implements OnInit, OnDestroy {
     this.flowView.set(nextView);
     if (flow.viewModel?.email) this.email = flow.viewModel.email;
     if (flow.viewModel?.challengeToken) this.otpCode = '';
+    if (flow.viewModel?.mfaToken || flow.viewModel?.totpEnrollment) this.mfaCode = '';
   }
 
   onIdentify() {
@@ -460,6 +538,21 @@ export class AuthAuthorizeComponent implements OnInit, OnDestroy {
   onSelectOrganization(organizationId: string) {
     if (!this.flow) return;
     void this.flow.organization.select({ organizationId });
+  }
+
+  onVerifyMfa() {
+    if (!this.flow) return;
+    void this.flow.mfa.verify({ code: this.mfaCode });
+  }
+
+  onStartMfaEnrollment() {
+    if (!this.flow) return;
+    void this.flow.mfa.totp.enrollStart({ displayName: 'Authenticator app' });
+  }
+
+  onVerifyMfaEnrollment() {
+    if (!this.flow) return;
+    void this.flow.mfa.totp.enrollVerify({ code: this.mfaCode });
   }
 
   startFlow(flowView: 'login' | 'signup') {

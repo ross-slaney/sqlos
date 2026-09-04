@@ -107,7 +107,9 @@ const issuer = "https://identity.trailnote.test/sqlos/auth";
 const clientId = "trailnote-mobile";
 const redirectUri = "https://app.trailnote.test/auth/callback";
 
-const pkce = await generatePkce(); // wrap with expo-crypto when subtle is unavailable
+// Expo: createPkceGenerator({ randomBytes, sha256 }) with expo-crypto primitives
+// when Web Crypto subtle is unavailable — see the package reference.
+const pkce = await generatePkce();
 const state = randomState();
 
 const flow = createHeadlessFlow({
