@@ -1,0 +1,39 @@
+---
+title: "SqlOS 4.2: Headless for Custom AuthPage Clients"
+description: "Ship a product-owned login UI with @sqlos/headless — the typed AuthPage state machine that stops at an authorization code."
+date: "2026-09-05"
+author: "Ross Slaney"
+tags: ["AuthServer", "OAuth", "SqlOS"]
+---
+
+SqlOS 4.2 publishes `@sqlos/headless`, the typed client for a product-owned AuthPage. You draw identify, password, OTP, MFA, organization, and consent screens in your own Next.js, Angular, or Expo UI. SqlOS still owns the authorization request, credentials, and tokens. The package stops when it has an authorization code — Auth.js, `angular-oauth2-oidc`, or `expo-auth-session` finishes `/token`.
+
+## What shipped
+
+`createHeadlessFlow` and `useHeadlessAuth` talk to the existing headless HTTP contract. Actions take user input only. Opaque tokens stay inside the flow. Completion is `status === "redirect"` with either:
+
+- `authorization` — `{ code, redirectUri, state, codeVerifier }` when the redirect includes a code. `redirectUri` is the registered value, including any registered query string, so it can be posted to `/token` as-is.
+- a provider URL without `authorization` — follow it; do not treat it as a code.
+
+The package never calls `/token`, never stores refresh tokens, and never writes `localStorage`. Server and validation failures resolve into `status`, `error`, and `fieldErrors`, so the normal path does not need `try`/`catch`. `credentialEnabled` owns the enabled-and-configured rule that used to be copied per example.
+
+The retail Next.js, Angular, and Expo examples now depend on `"@sqlos/headless": "file:../../packages/headless"`. Hosted JS examples start `/authorize` and finish `/token` through the same stack OIDC libraries, instead of repo-owned PKCE helpers.
+
+## Why it matters
+
+Headless AuthPage has been a server contract for a while. Integrators still had to hand-write fetch helpers, PKCE, and view branching — and those copies drifted. `@sqlos/headless` is the first-party state machine for that contract, versioned with the SqlOS NuGet package. If you already render a custom login UI against `/sqlos/auth/headless`, switch the client to the package and keep your screens.
+
+## Upgrade notes
+
+Upgrade both packages to the same version:
+
+```bash
+dotnet add package SqlOS --version 4.2.0
+npm install @sqlos/headless@4.2.0
+```
+
+There is no schema migration. Hosted AuthPage, first-party login, and token issuance are unchanged. New custom-UI work should start from `@sqlos/headless` and a stack OIDC library; do not call `/token` from the headless package.
+
+See [Build your own login and signup UI](/docs/guides/custom-login-ui), [Headless authentication](/docs/authserver/headless-auth), and [@sqlos/headless](/docs/reference/headless-js).
+
+This release passed the repository's complete gate: build, documentation, unit, integration, and example-application tests, coverage thresholds, the `@sqlos/headless` contract suite, and browser journeys through the Next.js and Angular headless examples.

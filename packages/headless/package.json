@@ -1,6 +1,6 @@
 {
   "name": "@sqlos/headless",
-  "version": "4.1.0",
+  "version": "4.2.0",
   "description": "SqlOS headless AuthPage state machine. Drives identify, password, OTP, MFA, and consent until an authorization code; it is not an OAuth/OIDC client.",
   "license": "MIT",
   "author": "Ross Slaney",
