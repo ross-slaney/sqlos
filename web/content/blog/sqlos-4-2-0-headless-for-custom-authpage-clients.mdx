@@ -1,39 +1,113 @@
 ---
-title: "SqlOS 4.2: Headless for Custom AuthPage Clients"
-description: "Ship a product-owned login UI with @sqlos/headless — the typed AuthPage state machine that stops at an authorization code."
+title: "SqlOS 4.2: Your Login Screens, Our State Machine"
+description: "@sqlos/headless is a typed client for SqlOS's headless AuthPage. Draw sign-in, signup, MFA, and consent in Next.js, Angular, or Expo; SqlOS keeps every security decision and stops at an authorization code."
 date: "2026-09-05"
 author: "Ross Slaney"
-tags: ["AuthServer", "OAuth", "SqlOS"]
+tags: ["AuthServer", "OAuth", "Headless", "SqlOS"]
 ---
 
-SqlOS 4.2 publishes `@sqlos/headless`, the typed client for a product-owned AuthPage. You draw identify, password, OTP, MFA, organization, and consent screens in your own Next.js, Angular, or Expo UI. SqlOS still owns the authorization request, credentials, and tokens. The package stops when it has an authorization code — Auth.js, `angular-oauth2-oidc`, or `expo-auth-session` finishes `/token`.
+Most teams that adopt SqlOS start with hosted AuthPage. It is one line of configuration, and the screens are good. Then a designer asks why the login page does not match the product, or a signup form needs a field the hosted page does not know about, and someone opens the headless docs.
 
-## What shipped
+SqlOS has exposed a headless AuthPage contract for a while: a set of HTTP routes that walk a saved authorization request through identify, password, one-time codes, MFA, organization selection, and consent, returning a view model after every step. It works. But every integrator who used it wrote the same client: a fetch wrapper, a place to hold the opaque `requestId` and challenge tokens, a switch over view names, a PKCE helper, and an error mapper. Our own examples had three of them, and they did not agree with each other.
 
-`createHeadlessFlow` and `useHeadlessAuth` talk to the existing headless HTTP contract. Actions take user input only. Opaque tokens stay inside the flow. Completion is `status === "redirect"` with either:
+SqlOS 4.2 replaces all of that with one package.
 
-- `authorization` — `{ code, redirectUri, state, codeVerifier }` when the redirect includes a code. `redirectUri` is the registered value, including any registered query string, so it can be posted to `/token` as-is.
-- a provider URL without `authorization` — follow it; do not treat it as a code.
+```bash
+npm install @sqlos/headless@4.2.0
+```
 
-The package never calls `/token`, never stores refresh tokens, and never writes `localStorage`. Server and validation failures resolve into `status`, `error`, and `fieldErrors`, so the normal path does not need `try`/`catch`. `credentialEnabled` owns the enabled-and-configured rule that used to be copied per example.
+## What it is
 
-The retail Next.js, Angular, and Expo examples now depend on `"@sqlos/headless": "file:../../packages/headless"`. Hosted JS examples start `/authorize` and finish `/token` through the same stack OIDC libraries, instead of repo-owned PKCE helpers.
+`@sqlos/headless` is a state machine over the headless contract. You give it your issuer, client ID, and redirect URI. It resumes the authorization request SqlOS redirected to your page, holds the view model and every opaque token, and exposes one method per user action: `identify`, `password.login`, `signup`, `emailOtp.verify`, `mfa.verify`, `organization.select`, `consent.approve`, and so on. Each action takes user input only. After each call the flow tells you what to draw next.
 
-## Why it matters
+```ts
+import { createHeadlessFlow } from "@sqlos/headless";
 
-Headless AuthPage has been a server contract for a while. Integrators still had to hand-write fetch helpers, PKCE, and view branching — and those copies drifted. `@sqlos/headless` is the first-party state machine for that contract, versioned with the SqlOS NuGet package. If you already render a custom login UI against `/sqlos/auth/headless`, switch the client to the package and keep your screens.
+const flow = createHeadlessFlow({
+  issuer: "https://id.example.com/sqlos/auth",
+  clientId: "acme-app",
+  redirectUri: "https://app.example.com/api/auth/callback/sqlos",
+  credentials: "include",
+});
 
-## Upgrade notes
+await flow.resume(window.location);
 
-Upgrade both packages to the same version:
+flow.subscribe(() => {
+  if (flow.status === "redirect" && flow.redirectUrl) {
+    window.location.assign(flow.redirectUrl);
+    return;
+  }
+
+  switch (flow.viewModel?.view) {
+    case "login":     /* email form → flow.identify({ email }) */ break;
+    case "password":  /* password form → flow.password.login({ password }) */ break;
+    case "mfa":       /* code form → flow.mfa.verify({ code }) */ break;
+    case "consent":   /* scopes → flow.consent.approve() */ break;
+    default:          /* send the user to hosted AuthPage */ break;
+  }
+});
+```
+
+React and React Native get the same thing as a hook built on `useSyncExternalStore`, so memoized children re-render on flow changes without mirroring state into `useState`:
+
+```ts
+import { useHeadlessAuth } from "@sqlos/headless/react";
+
+const { status, view, viewModel, error, fieldErrors, redirectUrl, flow } =
+  useHeadlessAuth({ issuer, clientId, redirectUri, credentials: "include" });
+```
+
+`view` is a typed union of the 28 views the server can return. If you write `view === "identify"`, TypeScript tells you there is no such view; the first screen is `"login"`.
+
+## What it deliberately is not
+
+The package stops when SqlOS issues an authorization code. It never calls `/token`. It never stores a refresh token. It never touches `localStorage`. Passing a token endpoint URL to any of its actions throws `HeadlessTokenEndpointError`.
+
+That boundary is the point. Auth.js, `angular-oauth2-oidc`, `expo-auth-session`, and ASP.NET Core's `AddOpenIdConnect` already do PKCE startup, callback handling, token exchange, and session storage well, and they are audited by a lot more people than any single vendor SDK. `@sqlos/headless` owns exactly the part those libraries cannot: the screens between `/authorize` and the callback. When the flow reaches `status === "redirect"`, you hand the browser to the library callback and it finishes the login the same way it would after hosted AuthPage.
+
+On native, where there is no browser redirect into your page, `flow.start()` asks SqlOS to create the authorization request and you render the same view loop in-app. The result is still just a code:
+
+```ts
+if (flow.status === "redirect" && flow.authorization) {
+  const tokens = await exchangeCodeAsync(
+    {
+      clientId: "example-expo",
+      code: flow.authorization.code,
+      redirectUri: flow.authorization.redirectUri,
+      extraParams: { code_verifier: flow.authorization.codeVerifier ?? "" },
+    },
+    { tokenEndpoint: `${issuer}/token` },
+  );
+}
+```
+
+Hermes has no Web Crypto `subtle`, so `createPkceGenerator` accepts `expo-crypto` primitives. The package still owns the verifier format, and it is a 43-character base64url string, which is the RFC 7636 minimum SqlOS enforces at `/token`. We found that one by testing: a 32-character verifier sails through every screen and fails at the very last request.
+
+## Errors are data, not exceptions
+
+A wrong password is not an exceptional event in a login form. Server and validation failures resolve the action with `status === "error"` and populate `flow.error` and `flow.fieldErrors`. The normal path needs no `try`/`catch` and no local error state. The Next.js and Angular examples render a failed password attempt with one line of template.
+
+Programmer mistakes are different. Calling an action before `resume`, firing a second action while one is in flight, or pointing the flow at the wrong API base path rejects with a `HeadlessProgrammerError` subclass. Those should fail loudly during development, and they do. `resume` and `start` coalesce an identical in-flight call, so React StrictMode's double effect needs no guard.
+
+## The contract cannot drift
+
+The package is versioned in lockstep with the SqlOS NuGet package and publishes from the same GitHub release. That is not ceremony. The repository carries a contract check that parses every headless endpoint in the .NET source, every request record it binds, every response DTO, every view name, and the credential-type rule the hosted page uses, and compares them to what the TypeScript ships. Rename a property on a C# record and CI fails before the package can publish. We mutation-tested the check both ways.
+
+Two things from the package that used to be copy-pasted are now exported so every custom UI agrees with hosted AuthPage: `credentialEnabled(settings, "email_otp")` applies the enabled-and-configured rule for showing a sign-in method, and `flow.submit(path, body)` reaches a headless route the SDK does not name yet, through the same token bookkeeping.
+
+## Examples that run in a browser
+
+The retail example ships three custom UIs, all on `@sqlos/headless`: a Next.js page finished by Auth.js, an Angular page finished by `angular-oauth2-oidc`, and an Expo app that runs the flow natively and finishes with `expo-auth-session`. The hosted examples in the same repo were also moved onto those stack libraries in this release, so there is no repo-owned PKCE code left anywhere.
+
+A new Playwright suite boots the real example stack and drives Chromium through signup, a wrong password, MFA enrollment with a TOTP computed from the displayed secret, and the code exchange, in both Next.js and Angular. It caught two things unit tests did not: a stale Vite prebundle of the linked package, and the fact that the example server routes identify to the email-code view first, so the password path goes through "Use password instead." Both are documented.
+
+## Upgrade
+
+Take both packages to the same version:
 
 ```bash
 dotnet add package SqlOS --version 4.2.0
 npm install @sqlos/headless@4.2.0
 ```
 
-There is no schema migration. Hosted AuthPage, first-party login, and token issuance are unchanged. New custom-UI work should start from `@sqlos/headless` and a stack OIDC library; do not call `/token` from the headless package.
-
-See [Build your own login and signup UI](/docs/guides/custom-login-ui), [Headless authentication](/docs/authserver/headless-auth), and [@sqlos/headless](/docs/reference/headless-js).
-
-This release passed the repository's complete gate: build, documentation, unit, integration, and example-application tests, coverage thresholds, the `@sqlos/headless` contract suite, and browser journeys through the Next.js and Angular headless examples.
+There is no schema migration and no change to hosted AuthPage, first-party login, or token issuance. If you already render a custom UI against `/sqlos/auth/headless`, keep your screens and swap the hand-written client for the package. If you are starting a custom UI now, start from the [Build your own login and signup UI](/docs/guides/custom-login-ui) guide, then the [@sqlos/headless reference](/docs/reference/headless-js). The wire protocol is unchanged and still documented under [Headless Auth](/docs/authserver/headless-auth).
