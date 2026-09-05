@@ -185,7 +185,7 @@ Store the normalized number returned by SqlOS in application state rather than r
 
 ## Headless AuthPage flow
 
-Headless mode still starts with a normal OAuth authorization request. After SqlOS redirects to your UI with a `requestId`, post the phone actions to the default headless base path:
+Headless mode still starts with a normal OAuth authorization request. Drive the UI with [`@sqlos/headless`](/docs/reference/headless-js) (`createHeadlessFlow` / `useHeadlessAuth`). The routes below are the HTTP wire contract; client code should use the package.
 
 | Endpoint | Request | Next state |
 | --- | --- | --- |
@@ -194,48 +194,45 @@ Headless mode still starts with a normal OAuth authorization request. After SqlO
 | `POST /sqlos/auth/headless/signup/phone-otp/start` | `requestId`, `displayName`, `phoneNumber`, optional `organizationName` and `customFields` | `phone-otp-signup-verify` with `signupToken` and `challengeToken` |
 | `POST /sqlos/auth/headless/signup/phone-otp/verify` | `requestId`, `signupToken`, `challengeToken`, `code` | redirect, organization selection, MFA, or validation view |
 
-Example sign-in actions:
+Example sign-in actions. The flow keeps `requestId` and challenge tokens; actions resolve on validation errors — read `error` and `fieldErrors` instead of try/catch:
 
 ```ts
-const started = await postSqlOS("/sqlos/auth/headless/phone-otp/start", {
-  requestId: model.requestId,
-  phoneNumber,
+import { createHeadlessFlow } from "@sqlos/headless";
+import { useHeadlessAuth } from "@sqlos/headless/react";
+
+const flow = createHeadlessFlow({
+  issuer: "https://identity.example.com/sqlos/auth",
+  clientId: "my-app",
+  redirectUri: "https://app.example.com/auth/callback",
+  credentials: "include",
 });
 
-// Render started.viewModel.phoneNumber and keep this opaque token in page state.
-const challengeToken = started.viewModel.challengeToken;
+await flow.resume(window.location);
+await flow.phoneOtp.start({ phoneNumber });
 
-const completed = await postSqlOS("/sqlos/auth/headless/phone-otp/verify", {
-  requestId: model.requestId,
-  challengeToken,
-  code,
-});
-
-if (completed.type === "redirect") {
-  window.location.assign(completed.redirectUrl);
-} else {
-  renderSqlOSView(completed.viewModel); // Includes org and MFA continuation states.
+if (flow.status === "error") {
+  showError(flow.error, flow.fieldErrors);
+  return;
 }
+
+await flow.phoneOtp.verify({ code });
+
+if (flow.status === "redirect" && flow.redirectUrl) {
+  window.location.assign(flow.redirectUrl);
+  return;
+}
+
+render(flow.viewModel);
 ```
+
+React snapshots:
 
 ```ts
-async function postSqlOS(path: string, body: unknown) {
-  const response = await fetch(path, {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    throw new Error(await response.text());
-  }
-
-  return response.json();
-}
+const { flow, status, view, viewModel, error, fieldErrors, redirectUrl } =
+  useHeadlessAuth({ issuer, clientId, redirectUri, credentials: "include" });
 ```
 
-Do not mint a session, authorization code, or application cookie in this UI. Render the `SqlOSHeadlessActionResult` until SqlOS returns the final redirect. Keep `requestId`, `challengeToken`, and `signupToken` only for the active interaction; do not put them in analytics, logs, or durable browser storage.
+Signup uses `flow.phoneOtp.signupStart` and `flow.phoneOtp.signupVerify`. Do not mint a session, authorization code, or application cookie in this UI. Always leave with `window.location.assign(redirectUrl)`.
 
 See [Build your own login and signup UI](/docs/guides/custom-login-ui) for the initial PKCE authorization request and the shared organization/MFA views.
 
@@ -448,6 +445,8 @@ The repository's [hosted Todo phone-signup test](https://github.com/ross-slaney/
 
 ## Related
 
+- [`@sqlos/headless`](/docs/reference/headless-js)
+- [Build a custom login UI](/docs/guides/custom-login-ui)
 - [AuthServer API: Phone OTP](/docs/reference/authserver-api#phone-otp-sign-in-and-signup)
 - [.NET SDK Map](/docs/reference/sdk-reference#phone-otp)
 - [Hosted vs Headless](/docs/authserver/hosted-vs-headless)

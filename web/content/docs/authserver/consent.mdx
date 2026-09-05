@@ -29,7 +29,18 @@ This preserves the protection the first-party boundary exists for: a client-cont
 
 The hosted AuthPage renders the `consent` view with Allow access and Deny request forms posting to `POST /sqlos/auth/consent/approve` and `POST /sqlos/auth/consent/deny`. These are hosted form handlers with the standard antiforgery requirement; see the [HTTP API Reference](/docs/reference/api-reference).
 
-Headless UIs receive a view model with `view: "consent"`, a short-lived `consentToken`, and `consentScopes` (each entry has `scope`, `displayName`, and optional `description`). Post `{ requestId, consentToken }` to `POST /sqlos/auth/headless/consent/approve` or `/consent/deny`. Approval returns the normal `SqlOSHeadlessActionResult` — organization selection or MFA can still follow; denial returns a redirect result carrying the `access_denied` error redirect. The consent token is transaction-bound: it cannot be substituted across users, clients, or authorization requests, and it expires after ten minutes.
+Headless UIs receive a view model with `view: "consent"` and `consentScopes` (each entry has `scope`, `displayName`, and optional `description`). Drive it with [`@sqlos/headless`](/docs/reference/headless-js) (`flow.consent.approve` / `flow.consent.deny`). The routes `POST /sqlos/auth/headless/consent/approve` and `/consent/deny` are the HTTP wire contract; client code should use the package. See [Build your own login and signup UI](/docs/guides/custom-login-ui).
+
+```ts
+await flow.consent.approve();
+// or flow.consent.deny()
+
+if (flow.status === "redirect" && flow.redirectUrl) {
+  window.location.assign(flow.redirectUrl);
+}
+```
+
+The flow holds `requestId` and `consentToken`. Approval can still continue to organization selection or MFA; denial sets `status === "redirect"` with the `access_denied` error URL. The consent token is transaction-bound: it cannot be substituted across users, clients, or authorization requests, and it expires after ten minutes.
 
 ## Scope display names
 
@@ -66,6 +77,8 @@ Revocation does not end existing sessions or tokens; it forces the consent scree
 
 ## See also
 
+- [`@sqlos/headless`](/docs/reference/headless-js)
+- [Build a custom login UI](/docs/guides/custom-login-ui)
 - [Clients](/docs/authserver/clients) — the first-party boundary and browser SSO reuse
 - [OpenID Provider mode](/docs/authserver/openid-provider) — `id_token` issuance for the granted `openid` scope
 - [Scopes and Permissions](/docs/authserver/scopes-and-permissions) — scope grants are not API authorization

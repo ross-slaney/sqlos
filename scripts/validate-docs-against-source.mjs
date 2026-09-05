@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { readHeadlessContract } from "../packages/headless/scripts/contract-source.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), "..");
@@ -67,9 +68,34 @@ if (packageVersion && !repositoryReadme.includes(`--version ${packageVersion}`))
   );
 }
 
+if (packageVersion && !repositoryReadme.includes(`npm install @sqlos/headless@${packageVersion}`)) {
+  errors.push(
+    `README.md: expected npm install command for @sqlos/headless@${packageVersion}.`,
+  );
+}
+
+if (packageVersion) {
+  const headlessPackage = JSON.parse(read("packages/headless/package.json"));
+  if (headlessPackage.name !== "@sqlos/headless") {
+    errors.push("packages/headless/package.json: name must be @sqlos/headless.");
+  }
+  if (headlessPackage.version !== packageVersion) {
+    errors.push(
+      `packages/headless/package.json: version ${headlessPackage.version} must match SqlOS ${packageVersion}.`,
+    );
+  }
+}
+
 if (packageVersion && !addToAppQuickstart.includes(`--version ${packageVersion}`)) {
   errors.push(
     `web/content/docs/quickstarts/add-to-app.mdx: expected package install command for SqlOS ${packageVersion}.`,
+  );
+}
+
+const headlessJsReference = read("web/content/docs/reference/headless-js.mdx");
+if (packageVersion && !headlessJsReference.includes(`@sqlos/headless@${packageVersion}`)) {
+  errors.push(
+    `web/content/docs/reference/headless-js.mdx: expected npm install for @sqlos/headless@${packageVersion}.`,
   );
 }
 
@@ -224,6 +250,69 @@ if (/^## Auth API \(Example\)/m.test(httpReference)) {
   errors.push(
     "web/content/docs/reference/api-reference.mdx: example-app routes must not be presented as SqlOS library endpoints.",
   );
+}
+
+// Headless view names in docs must exist in packages/headless HEADLESS_VIEWS,
+// and every HEADLESS_VIEWS entry must be documented. The contract file is read
+// through the package's own parser so there is one source of truth.
+{
+  const headlessErrors = [];
+  const headlessContract = readHeadlessContract(headlessErrors);
+  for (const message of headlessErrors) {
+    errors.push(`packages/headless/src/contract.ts: ${message}`);
+  }
+  const headlessViews = new Set(headlessContract.views);
+  const headlessDocRoots = [
+    path.join(repoRoot, "web", "content", "docs", "guides"),
+    path.join(repoRoot, "web", "content", "docs", "authserver"),
+    path.join(repoRoot, "web", "content", "docs", "reference"),
+  ];
+
+  function walkMdx(dir, files = []) {
+    if (!fs.existsSync(dir)) return files;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walkMdx(full, files);
+      else if (entry.name.endsWith(".mdx")) files.push(full);
+    }
+    return files;
+  }
+
+  // A view name counts as cited only in an explicit view position, so ordinary
+  // hyphenated prose (`device-code`, `redirect-uri`) never needs a denylist:
+  //   view === "x" | view: "x" | case "x": | ?view=x / &view=x
+  const viewCitation =
+    /(?:\bview\s*(?:===|==|!==|!=|:)\s*["'`]([a-z][a-z0-9-]*)["'`])|(?:\bcase\s+["'`]([a-z][a-z0-9-]*)["'`]\s*:)|(?:[?&]view=([a-z][a-z0-9-]*))/g;
+
+  const documented = new Set();
+  for (const root of headlessDocRoots) {
+    for (const file of walkMdx(root)) {
+      const content = fs.readFileSync(file, "utf8");
+      if (!/headless|@sqlos\/headless|HEADLESS_VIEWS/i.test(content)) continue;
+      const relative = path.relative(repoRoot, file);
+      for (const match of content.matchAll(viewCitation)) {
+        const name = match[1] ?? match[2] ?? match[3];
+        if (headlessViews.has(name)) {
+          documented.add(name);
+          continue;
+        }
+        errors.push(
+          `${relative}: headless docs cite view \`${name}\` which is not in HEADLESS_VIEWS.`,
+        );
+      }
+      // Backticked exact matches (for example a views table) also count as documentation.
+      for (const match of content.matchAll(/`([a-z][a-z0-9-]*)`/g)) {
+        if (headlessViews.has(match[1])) documented.add(match[1]);
+      }
+    }
+  }
+  for (const view of headlessViews) {
+    if (!documented.has(view)) {
+      errors.push(
+        `web/content/docs: HEADLESS_VIEWS entry \`${view}\` is not documented in any headless guide, authserver, or reference page.`,
+      );
+    }
+  }
 }
 
 if (errors.length > 0) {

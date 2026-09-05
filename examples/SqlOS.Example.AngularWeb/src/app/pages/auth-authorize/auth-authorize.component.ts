@@ -1,9 +1,9 @@
-import { Component, inject, OnInit, signal } from '@angular/core';
+import { Component, inject, OnDestroy, OnInit, signal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { SqlosHeadlessService } from '../../services/sqlos-headless.service';
+import { createHeadlessFlow, credentialEnabled, type HeadlessFlow, type HeadlessFlowStatus, type HeadlessView, type HeadlessViewModel } from '@sqlos/headless';
 import { AuthService } from '../../services/auth.service';
-import { HeadlessViewModel, HeadlessActionResult } from '../../models';
+import { environment } from '../../environments/environment';
 
 interface ReferralOption { value: string; label: string; }
 
@@ -35,6 +35,22 @@ function getProviderMonogram(displayName: string) {
 
 const IMAGE_LOGIN = 'https://images.unsplash.com/photo-1604719312566-8912e9227c6a?w=1200&q=80&auto=format';
 const IMAGE_SIGNUP = 'https://images.unsplash.com/photo-1556740758-90de374c12ad?w=1200&q=80&auto=format';
+
+/**
+ * Views this component draws. Anything else SqlOS returns (phone OTP, magic
+ * link, consent, invitations, device approval, ...) falls back to hosted
+ * sign-in instead of showing a headline with no form.
+ */
+const HANDLED_VIEWS: ReadonlySet<string> = new Set<HeadlessView>([
+  'login',
+  'password',
+  'email-otp',
+  'email-otp-verify',
+  'signup',
+  'organization',
+  'mfa',
+  'mfa-enroll',
+]);
 
 @Component({
   selector: 'app-auth-authorize',
@@ -101,7 +117,7 @@ const IMAGE_SIGNUP = 'https://images.unsplash.com/photo-1556740758-90de374c12ad?
             </div>
           } @else {
             <!-- Identify / Login view -->
-            @if (view() === 'login' || view() === 'identify') {
+            @if (view() === 'login') {
               <form class="ha-form" (ngSubmit)="onIdentify()">
                 <div class="ha-field">
                   <label for="ha-email">Email address</label>
@@ -115,7 +131,7 @@ const IMAGE_SIGNUP = 'https://images.unsplash.com/photo-1556740758-90de374c12ad?
                 </button>
                 <div class="ha-alt">
                   Don't have an account?
-                  <button type="button" class="ha-link-btn" (click)="view.set('signup')">Sign up</button>
+                  <button type="button" class="ha-link-btn" (click)="formView.set('signup')">Sign up</button>
                 </div>
               </form>
             }
@@ -138,9 +154,9 @@ const IMAGE_SIGNUP = 'https://images.unsplash.com/photo-1556740758-90de374c12ad?
                   {{ loading() ? 'Signing in...' : 'Sign in' }}
                 </button>
                 <div class="ha-alt">
-                  <button type="button" class="ha-link-btn" (click)="view.set('login')">Use a different email</button>
+                  <button type="button" class="ha-link-btn" (click)="formView.set('login')">Use a different email</button>
                   @if (supportsEmailOtp()) {
-                    <button type="button" class="ha-link-btn" (click)="view.set('email-otp')">Email me a code instead</button>
+                    <button type="button" class="ha-link-btn" (click)="formView.set('email-otp')">Email me a code instead</button>
                   }
                 </div>
               </form>
@@ -157,9 +173,9 @@ const IMAGE_SIGNUP = 'https://images.unsplash.com/photo-1556740758-90de374c12ad?
                 </button>
                 <div class="ha-alt">
                   @if (supportsPassword()) {
-                    <button type="button" class="ha-link-btn" (click)="view.set('password')">Use password instead</button>
+                    <button type="button" class="ha-link-btn" (click)="formView.set('password')">Use password instead</button>
                   }
-                  <button type="button" class="ha-link-btn" (click)="view.set('login')">Use a different email</button>
+                  <button type="button" class="ha-link-btn" (click)="formView.set('login')">Use a different email</button>
                 </div>
               </form>
             }
@@ -174,9 +190,9 @@ const IMAGE_SIGNUP = 'https://images.unsplash.com/photo-1556740758-90de374c12ad?
                   {{ loading() ? 'Verifying...' : 'Verify code' }}
                 </button>
                 <div class="ha-alt">
-                  <button type="button" class="ha-link-btn" (click)="view.set('email-otp')">Send a new code</button>
+                  <button type="button" class="ha-link-btn" (click)="formView.set('email-otp')">Send a new code</button>
                   @if (supportsPassword()) {
-                    <button type="button" class="ha-link-btn" (click)="view.set('password')">Use password instead</button>
+                    <button type="button" class="ha-link-btn" (click)="formView.set('password')">Use password instead</button>
                   }
                 </div>
               </form>
@@ -239,7 +255,7 @@ const IMAGE_SIGNUP = 'https://images.unsplash.com/photo-1556740758-90de374c12ad?
                 </button>
                 <div class="ha-alt">
                   Already have an account?
-                  <button type="button" class="ha-link-btn" (click)="view.set('login')">Sign in</button>
+                  <button type="button" class="ha-link-btn" (click)="formView.set('login')">Sign in</button>
                 </div>
               </form>
             }
@@ -258,6 +274,63 @@ const IMAGE_SIGNUP = 'https://images.unsplash.com/photo-1556740758-90de374c12ad?
                     </button>
                   }
                 </div>
+              </div>
+            }
+
+            <!-- MFA challenge -->
+            @if (view() === 'mfa') {
+              <form class="ha-form" (ngSubmit)="onVerifyMfa()">
+                <div class="ha-field">
+                  <label for="ha-mfa-code">Authenticator or recovery code</label>
+                  <input id="ha-mfa-code" type="text" [(ngModel)]="mfaCode" name="mfaCode" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" required autofocus>
+                  @if (fieldErrors()['code']) {
+                    <p class="ha-field-error">{{ fieldErrors()['code'] }}</p>
+                  }
+                </div>
+                <button type="submit" class="ha-submit" [disabled]="loading()">
+                  {{ loading() ? 'Verifying...' : 'Verify' }}
+                </button>
+              </form>
+            }
+
+            <!-- MFA enrollment -->
+            @if (view() === 'mfa-enroll') {
+              @if (viewModel()?.totpEnrollment; as enrollment) {
+                <form class="ha-form" (ngSubmit)="onVerifyMfaEnrollment()">
+                  <div class="ha-mfa-setup">
+                    <img [src]="enrollment.qrCodeDataUrl" alt="Authenticator setup QR code" width="160" height="160">
+                    <p>Scan with an authenticator app, or enter the secret manually: <code>{{ enrollment.secret }}</code></p>
+                  </div>
+                  <div class="ha-field">
+                    <label for="ha-mfa-enroll-code">Verification code</label>
+                    <input id="ha-mfa-enroll-code" type="text" [(ngModel)]="mfaCode" name="mfaCode" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" required autofocus>
+                    @if (fieldErrors()['code']) {
+                      <p class="ha-field-error">{{ fieldErrors()['code'] }}</p>
+                    }
+                  </div>
+                  <button type="submit" class="ha-submit" [disabled]="loading()">
+                    {{ loading() ? 'Verifying...' : 'Verify and continue' }}
+                  </button>
+                </form>
+              } @else {
+                <div class="ha-form">
+                  <p class="muted">This organization requires an authenticator app before you can continue.</p>
+                  <button type="button" class="ha-submit" [disabled]="loading()" (click)="onStartMfaEnrollment()">
+                    {{ loading() ? 'Starting...' : 'Add authenticator app' }}
+                  </button>
+                </div>
+              }
+            }
+
+            <!-- Steps this component does not draw -->
+            @if (!isHandledView()) {
+              <div class="ha-form">
+                <p class="muted">
+                  SqlOS needs the &ldquo;{{ view() }}&rdquo; step, which this page does not draw. Continue with hosted sign-in to finish.
+                </p>
+                <button type="button" class="ha-submit" [disabled]="flowStarting()" (click)="startFlow('login')">
+                  Continue with hosted sign-in
+                </button>
               </div>
             }
 
@@ -291,10 +364,11 @@ const IMAGE_SIGNUP = 'https://images.unsplash.com/photo-1556740758-90de374c12ad?
     </div>
   `,
 })
-export class AuthAuthorizeComponent implements OnInit {
-  private headless = inject(SqlosHeadlessService);
+export class AuthAuthorizeComponent implements OnInit, OnDestroy {
   private authService = inject(AuthService);
   private route = inject(ActivatedRoute);
+  private flow: HeadlessFlow | null = null;
+  private unsubscribe: (() => void) | null = null;
 
   IMAGE_LOGIN = IMAGE_LOGIN;
   IMAGE_SIGNUP = IMAGE_SIGNUP;
@@ -302,16 +376,23 @@ export class AuthAuthorizeComponent implements OnInit {
 
   requestId: string | null = null;
   initialIsSignup = false;
+  initialView = 'login';
+  private lastFlowView: string | null = null;
 
-  view = signal('login');
-  loading = signal(false);
+  flowStatus = signal<HeadlessFlowStatus>('idle');
+  flowView = signal<string | null>(null);
+  formView = signal<string | null>(null);
   error = signal<string | null>(null);
   fieldErrors = signal<Record<string, string>>({});
   viewModel = signal<HeadlessViewModel | null>(null);
 
+  view = () => this.formView() ?? this.flowView() ?? this.initialView;
+  loading = () => this.flowStatus() === 'loading';
+
   email = '';
   password = '';
   otpCode = '';
+  mfaCode = '';
   organizationName = '';
   firstName = '';
   lastName = '';
@@ -323,16 +404,21 @@ export class AuthAuthorizeComponent implements OnInit {
   starterView = signal<'login' | 'signup'>('login');
 
   isSignup = () => this.view() === 'signup';
+  isHandledView = () => HANDLED_VIEWS.has(this.view());
 
   headline = () => {
     if (this.isSignup()) return 'Start your free trial';
     if (this.view() === 'organization') return 'Choose workspace';
+    if (this.view() === 'mfa') return 'Two-step verification';
+    if (this.view() === 'mfa-enroll') return 'Add authenticator app';
     return 'Welcome back';
   };
 
   subtitle = () => {
     if (this.isSignup()) return 'Create your account and start managing retail operations in minutes.';
     if (this.view() === 'organization') return "Select the organization you'd like to sign in to.";
+    if (this.view() === 'mfa') return 'Enter an authenticator code or one of your recovery codes.';
+    if (this.view() === 'mfa-enroll') return 'Set up an authenticator app before continuing.';
     return 'Sign in to your Northwind Retail account.';
   };
 
@@ -345,18 +431,11 @@ export class AuthAuthorizeComponent implements OnInit {
 
   showProviderButtons = () => {
     const v = this.view();
-    return (v === 'login' || v === 'identify' || v === 'signup') && (this.viewModel()?.providers?.length ?? 0) > 0;
+    return (v === 'login' || v === 'signup') && (this.viewModel()?.providers?.length ?? 0) > 0;
   };
 
-  supportsPassword = () => {
-    const settings = this.viewModel()?.settings;
-    return !!settings?.localPasswordRuntimeEnabled && (settings.enabledCredentialTypes ?? []).includes('password');
-  };
-
-  supportsEmailOtp = () => {
-    const settings = this.viewModel()?.settings;
-    return !!settings?.emailOtpRuntimeConfigured && (settings.enabledCredentialTypes ?? []).includes('email_otp');
-  };
+  supportsPassword = () => credentialEnabled(this.viewModel()?.settings, 'password');
+  supportsEmailOtp = () => credentialEnabled(this.viewModel()?.settings, 'email_otp');
 
   providerMonogram(displayName: string): string {
     return getProviderMonogram(displayName);
@@ -365,137 +444,115 @@ export class AuthAuthorizeComponent implements OnInit {
   async ngOnInit() {
     const params = this.route.snapshot.queryParamMap;
     this.requestId = params.get('request');
-    const initialView = params.get('view') || 'login';
-    this.initialIsSignup = initialView === 'signup';
-    this.view.set(initialView);
-    this.error.set(params.get('error'));
+    this.initialView = params.get('view') || 'login';
+    this.initialIsSignup = this.initialView === 'signup';
     this.email = params.get('email') || '';
-
-    const pendingToken = params.get('pendingToken');
-    const mfaToken = params.get('mfaToken');
     const initialDisplayName = params.get('displayName') || '';
-    const nextPath = params.get('next') || '/retail';
 
-    if (!this.requestId) return;
+    this.flow = createHeadlessFlow({
+      issuer: `${environment.apiUrl}/sqlos/auth`,
+      clientId: environment.clientId,
+      redirectUri: `${window.location.origin}/auth/callback`,
+      credentials: 'include',
+    });
+    this.unsubscribe = this.flow.subscribe(() => this.applyFlow());
 
-    try {
-      const vm = await this.headless.getHeadlessRequest(
-        this.requestId,
-        initialView,
-        params.get('error'),
-        pendingToken,
-        this.email || null,
-        initialDisplayName || null,
-        mfaToken,
-      );
-      this.viewModel.set(vm);
-      if (vm.view) this.view.set(vm.view);
-      if (vm.error) this.error.set(vm.error);
-      if (vm.email) this.email = vm.email;
-      if (vm.displayName && !this.firstName && !this.lastName && initialDisplayName) {
-        const [first = '', ...rest] = vm.displayName.split(' ');
-        this.firstName = first;
-        this.lastName = rest.join(' ');
-      }
-      if (vm.fieldErrors) this.fieldErrors.set(vm.fieldErrors);
-    } catch (err) {
-      this.error.set(err instanceof Error ? err.message : 'Failed to load authorization request.');
-    }
-  }
-
-  private async handleResult(result: HeadlessActionResult) {
-    if (result.type === 'redirect' && result.redirectUrl) {
-      const url = new URL(result.redirectUrl);
-      const code = url.searchParams.get('code');
-
-      if (code) {
-        window.location.assign(result.redirectUrl);
-        return;
-      }
-
-      window.location.href = result.redirectUrl;
+    if (!this.requestId) {
+      // Error-only bounce: SqlOS dropped the request id but still reports why.
+      const initialError = params.get('error');
+      if (initialError) this.error.set(initialError);
       return;
     }
 
-    if (result.viewModel) {
-      this.viewModel.set(result.viewModel);
-      if (result.viewModel.view) this.view.set(result.viewModel.view);
-      if (result.viewModel.error) this.error.set(result.viewModel.error);
-      if (result.viewModel.email) this.email = result.viewModel.email;
-      if (result.viewModel.challengeToken) this.otpCode = '';
-      this.fieldErrors.set(result.viewModel.fieldErrors ?? {});
+    await this.flow.resume(window.location);
+    const vm = this.viewModel();
+    if (vm?.displayName && !this.firstName && !this.lastName && initialDisplayName) {
+      const [first = '', ...rest] = vm.displayName.split(' ');
+      this.firstName = first;
+      this.lastName = rest.join(' ');
     }
   }
 
-  async onIdentify() {
-    if (!this.requestId) return;
-    this.loading.set(true); this.error.set(null); this.fieldErrors.set({});
-    try { await this.handleResult(await this.headless.identify(this.requestId, this.email)); }
-    catch (err) { this.error.set(err instanceof Error ? err.message : 'We could not start sign in.'); }
-    finally { this.loading.set(false); }
+  ngOnDestroy() {
+    this.unsubscribe?.();
   }
 
-  async onLogin() {
-    if (!this.requestId) return;
-    this.loading.set(true); this.error.set(null); this.fieldErrors.set({});
-    try { await this.handleResult(await this.headless.passwordLogin(this.requestId, this.email, this.password)); }
-    catch (err) { this.error.set(err instanceof Error ? err.message : 'Login failed.'); }
-    finally { this.loading.set(false); }
-  }
-
-  async onRequestEmailOtp() {
-    if (!this.requestId) return;
-    this.loading.set(true); this.error.set(null); this.fieldErrors.set({});
-    try { await this.handleResult(await this.headless.requestEmailOtp(this.requestId, this.email)); }
-    catch (err) { this.error.set(err instanceof Error ? err.message : 'We could not send a sign-in code.'); }
-    finally { this.loading.set(false); }
-  }
-
-  async onVerifyEmailOtp() {
-    if (!this.requestId) return;
-    const challengeToken = this.viewModel()?.challengeToken;
-    if (!challengeToken) {
-      this.error.set('Request a new sign-in code first.');
+  private applyFlow() {
+    const flow = this.flow;
+    if (!flow) return;
+    if (flow.status === 'redirect' && flow.redirectUrl) {
+      window.location.assign(flow.redirectUrl);
       return;
     }
-
-    this.loading.set(true); this.error.set(null); this.fieldErrors.set({});
-    try { await this.handleResult(await this.headless.verifyEmailOtp(this.requestId, challengeToken, this.otpCode)); }
-    catch (err) { this.error.set(err instanceof Error ? err.message : 'The sign-in code was rejected.'); }
-    finally { this.loading.set(false); }
+    this.flowStatus.set(flow.status);
+    this.error.set(flow.error);
+    this.fieldErrors.set(flow.fieldErrors);
+    this.viewModel.set(flow.viewModel);
+    const nextView = flow.viewModel?.view ?? null;
+    if (nextView && nextView !== this.lastFlowView) {
+      this.formView.set(null);
+    }
+    this.lastFlowView = nextView;
+    this.flowView.set(nextView);
+    if (flow.viewModel?.email) this.email = flow.viewModel.email;
+    if (flow.viewModel?.challengeToken) this.otpCode = '';
+    if (flow.viewModel?.mfaToken || flow.viewModel?.totpEnrollment) this.mfaCode = '';
   }
 
-  async onSignup() {
-    if (!this.requestId) return;
-    this.loading.set(true); this.error.set(null); this.fieldErrors.set({});
-    try {
-      await this.handleResult(await this.headless.signup(
-        this.requestId,
-        buildDisplayName(this.firstName, this.lastName, this.email),
-        this.email,
-        this.password,
-        this.organizationName,
-        { referralSource: this.referralSource, firstName: this.firstName, lastName: this.lastName },
-      ));
-    } catch (err) { this.error.set(err instanceof Error ? err.message : 'Signup failed.'); }
-    finally { this.loading.set(false); }
+  onIdentify() {
+    if (!this.flow) return;
+    void this.flow.identify({ email: this.email });
   }
 
-  async onProviderStart(connectionId: string) {
-    if (!this.requestId) return;
-    this.loading.set(true); this.error.set(null);
-    try { await this.handleResult(await this.headless.startProvider(this.requestId, connectionId, this.email || undefined)); }
-    catch (err) { this.error.set(err instanceof Error ? err.message : 'Provider auth failed.'); }
-    finally { this.loading.set(false); }
+  onLogin() {
+    if (!this.flow) return;
+    void this.flow.password.login({ email: this.email, password: this.password });
   }
 
-  async onSelectOrganization(organizationId: string) {
-    const activePendingToken = this.viewModel()?.pendingToken ?? this.route.snapshot.queryParamMap.get('pendingToken');
-    if (!activePendingToken) return;
-    this.loading.set(true); this.error.set(null);
-    try { await this.handleResult(await this.headless.selectOrganization(activePendingToken, organizationId)); }
-    catch (err) { this.error.set(err instanceof Error ? err.message : 'Organization selection failed.'); }
-    finally { this.loading.set(false); }
+  onRequestEmailOtp() {
+    if (!this.flow) return;
+    void this.flow.emailOtp.start({ email: this.email });
+  }
+
+  onVerifyEmailOtp() {
+    if (!this.flow) return;
+    void this.flow.emailOtp.verify({ code: this.otpCode });
+  }
+
+  onSignup() {
+    if (!this.flow) return;
+    void this.flow.signup({
+      displayName: buildDisplayName(this.firstName, this.lastName, this.email),
+      email: this.email,
+      password: this.password,
+      organizationName: this.organizationName,
+      customFields: { referralSource: this.referralSource, firstName: this.firstName, lastName: this.lastName },
+    });
+  }
+
+  onProviderStart(connectionId: string) {
+    if (!this.flow) return;
+    void this.flow.provider.start({ connectionId, email: this.email || undefined });
+  }
+
+  onSelectOrganization(organizationId: string) {
+    if (!this.flow) return;
+    void this.flow.organization.select({ organizationId });
+  }
+
+  onVerifyMfa() {
+    if (!this.flow) return;
+    void this.flow.mfa.verify({ code: this.mfaCode });
+  }
+
+  onStartMfaEnrollment() {
+    if (!this.flow) return;
+    void this.flow.mfa.totp.enrollStart({ displayName: 'Authenticator app' });
+  }
+
+  onVerifyMfaEnrollment() {
+    if (!this.flow) return;
+    void this.flow.mfa.totp.enrollVerify({ code: this.mfaCode });
   }
 
   startFlow(flowView: 'login' | 'signup') {

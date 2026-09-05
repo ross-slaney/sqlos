@@ -24,7 +24,7 @@ The browser completes this flow:
 
 ```text
 OIDC library starts /authorize (S256 PKCE + state)
-  -> RelayDesk identify form
+  -> RelayDesk login form
   -> password, SSO, or another server-selected step
   -> organization, MFA, or consent when required
   -> library callback + authorization code
@@ -161,7 +161,7 @@ Register the library's exact callback. Auth.js defaults to `/api/auth/callback/s
 
 That `scope` value must also appear on the client's `AllowedScopes`. An empty allowlist does not mean "any scope." Omit `scope` on `/authorize` and the grant is empty even when the rest of headless login succeeds. The headless view model includes that granted string as `scope` so the custom UI can show it. That remains valid OAuth. When the client allowlists `openid` and the grant omits it, the view model's `info` and `omittedOpenId` fields warn that no ID token will be issued for the session; with [OpenID Provider mode](/docs/authserver/openid-provider) on by default, the granted `openid` is what mints one. `openid` is never always-allowed. User access tokens still authorize APIs by audience and session, not by this string.
 
-Headless interaction after `/authorize` is a view-model state machine. First-party UI actions belong in `@sqlos/headless` when that package is available; until then, post to `/sqlos/auth/headless` as shown below. The OIDC library still finishes the code.
+Headless interaction after `/authorize` is a view-model state machine. Drive it with `@sqlos/headless`. The OIDC library still finishes the code.
 
 ## 4. Load the server-owned view
 
@@ -171,180 +171,73 @@ SqlOS redirects to a URL such as:
 https://app.relaydesk.example/auth/authorize?request=req_...&view=login
 ```
 
-Read `request`, then load the authoritative model:
-
 ```ts
-const HEADLESS = "https://identity.relaydesk.example/sqlos/auth/headless";
+import { createHeadlessFlow } from "@sqlos/headless";
+import { useHeadlessAuth } from "@sqlos/headless/react";
 
-type OrganizationOption = {
-  id: string;
-  name: string;
-  primaryDomain?: string | null;
-  role: string;
-};
+const flow = createHeadlessFlow({
+  issuer: "https://identity.relaydesk.example/sqlos/auth",
+  clientId: "relaydesk-web",
+  redirectUri: "https://app.relaydesk.example/api/auth/callback/sqlos",
+  credentials: "include",
+});
 
-type ConsentScopeDisplay = {
-  scope: string;
-  displayName: string;
-  description?: string | null;
-};
-
-type HeadlessViewModel = {
-  view: string;
-  requestId?: string | null;
-  headlessApiBasePath: string;
-  clientName?: string | null;
-  email?: string | null;
-  error?: string | null;
-  info?: string | null;
-  fieldErrors: Record<string, string>;
-  pendingToken?: string | null;
-  mfaToken?: string | null;
-  consentToken?: string | null;
-  consentScopes?: ConsentScopeDisplay[] | null;
-  organizationSelection: OrganizationOption[];
-  providers: Array<{
-    connectionId: string;
-    providerType: string;
-    displayName: string;
-    logoDataUrl?: string | null;
-  }>;
-};
-
-type HeadlessActionResult = {
-  type: "view" | "redirect";
-  redirectUrl?: string | null;
-  viewModel?: HeadlessViewModel | null;
-};
-
-async function loadRequest(route: URLSearchParams): Promise<HeadlessViewModel> {
-  const requestId = route.get("request");
-  if (!requestId) throw new Error("The authorization request ID is missing.");
-
-  const url = new URL(`${HEADLESS}/requests/${requestId}`);
-  for (const name of ["view", "error", "pendingToken", "email", "displayName"]) {
-    const value = route.get(name);
-    if (value) url.searchParams.set(name, value);
-  }
-
-  const response = await fetch(url, {
-    credentials: "include",
-    cache: "no-store",
-  });
-
-  if (!response.ok) throw new Error("The authorization request expired or is invalid.");
-
-  const model = await response.json() as HeadlessViewModel;
-  if (model.headlessApiBasePath !== new URL(HEADLESS).pathname) {
-    throw new Error("The configured headless API path does not match the server.");
-  }
-  return model;
-}
+await flow.resume(window.location);
 ```
 
-Pass the context emitted by `BuildUiUrl` back to the request loader. This matters after a provider callback when the next view can carry pending organization or MFA state. SqlOS still loads the saved request and validates the flow; the query is not an identity assertion.
+`resume` reads `request` and the presentation query, then loads the authoritative model. If the host moved `HeadlessApiBasePath`, pass that exact path as `headlessApiBasePath` and stop when it does not match the returned model.
 
-Render `model.view`; do not infer the next security step from the form you just submitted. A password can correctly produce `organization`, `mfa`, `mfa-enroll`, or `consent` instead of completing authorization.
+Treat URL values as presentation and flow context, not proof of identity. Render `flow.viewModel.view`; do not infer the next security step from the form you just submitted.
 
 ## 5. Submit identify, password, organization, MFA, and consent
 
-Use one credentialed action helper:
+Actions take user input only. The flow keeps `requestId`, challenge, pending, MFA, consent, and enrollment tokens internally.
 
 ```ts
-async function postAction(
-  path: string,
-  body: unknown,
-): Promise<HeadlessActionResult> {
-  const response = await fetch(`${HEADLESS}${path}`, {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    throw new Error((await response.text()) || "Authentication could not continue.");
-  }
-
-  return response.json() as Promise<HeadlessActionResult>;
-}
-
-const identified = await postAction("/identify", {
-  requestId: model.requestId,
-  email,
-});
-
-const authenticated = await postAction("/password/login", {
-  requestId: model.requestId,
-  email,
-  password,
-});
+// No try/catch for normal failures — actions resolve and update error / fieldErrors.
+await flow.identify({ email });
+await flow.password.login({ password });
+await flow.organization.select({ organizationId });
+await flow.mfa.verify({ code });
+await flow.consent.approve();
 ```
 
-`/identify` runs home realm discovery. Follow a returned redirect instead of showing a password form; the email may belong to an organization that requires SAML SSO. Otherwise replace the current model with the returned view.
+Two things still reject, because they are integration bugs rather than user input: a second action while one is in flight (`HeadlessFlowBusyError` — disable the form while `status === "loading"`), and an action whose view does not carry the token it needs (`HeadlessFlowNotLoadedError`). Both also set `status === "error"`. See the [error table](/docs/reference/headless-js#errors-and-status).
 
-Organization selection deliberately uses the returned pending token:
+Show only the sign-in methods the server can serve. `credentialEnabled(viewModel.settings, "email_otp")` applies the same enabled-and-configured rule as hosted AuthPage. Render a fallback for any `HeadlessView` your screens do not draw — the examples send those users to hosted AuthPage instead of a headline with no form.
+
+React:
 
 ```ts
-const selected = await postAction("/organization/select", {
-  pendingToken: model.pendingToken,
-  organizationId,
-});
+const { flow, status, view, viewModel, error, fieldErrors, redirectUrl } =
+  useHeadlessAuth({ issuer, clientId, redirectUri, credentials: "include" });
 ```
 
-MFA verification stays bound to the authorization request and challenge:
+`identify` runs home realm discovery. Follow a returned redirect instead of showing a password form; the email may belong to an organization that requires SAML SSO. The initial email screen is the `login` view — there is no `identify` view.
 
-```ts
-const verified = await postAction("/mfa/verify", {
-  requestId: model.requestId,
-  mfaToken: model.mfaToken,
-  code,
-});
-```
+Non-first-party clients surface the `consent` view before their first code is issued (see [Consent](/docs/authserver/consent)). Render `clientName` and `consentScopes`, then call `flow.consent.approve()` or `flow.consent.deny()`.
 
-Non-first-party clients surface the `consent` view before their first code is issued (see [Consent](/docs/authserver/consent)). The view model carries `clientName`, a one-time `consentToken`, and `consentScopes` — each requested scope with its catalog display name and description, falling back to the raw scope string when no catalog entry exists. Render the list, then submit the user's decision:
-
-```ts
-const decided = await postAction("/consent/approve", {
-  requestId: model.requestId,
-  consentToken: model.consentToken,
-});
-
-// or, when the user declines:
-const declined = await postAction("/consent/deny", {
-  requestId: model.requestId,
-  consentToken: model.consentToken,
-});
-```
-
-Approval issues the code redirect (a remembered grant skips this view on later logins); denial redirects back to the client with `access_denied` and cancels the request. Reloading the page is safe — `GET /requests/{id}` re-mints the consent token from the flow's continuation cookie.
-
-Keep `requestId`, `pendingToken`, `mfaToken`, `consentToken`, enrollment tokens, and challenge tokens with the view model that returned them. Do not substitute values across tabs, users, clients, organizations, or parallel requests.
+Keep one flow object per authorization request. Do not share it across tabs, users, or parallel requests.
 
 ## 6. Apply every action result the same way
 
-Centralize the transition rule:
+The flow applies the server result. After each action:
 
 ```ts
-function applyResult(
-  result: HeadlessActionResult,
-  render: (next: HeadlessViewModel) => void,
-): void {
-  if (result.type === "redirect" && result.redirectUrl) {
-    window.location.assign(result.redirectUrl);
-    return;
-  }
-
-  if (result.type === "view" && result.viewModel) {
-    render(result.viewModel);
-    return;
-  }
-
-  throw new Error("SqlOS returned an incomplete headless action result.");
+if (flow.status === "redirect" && flow.redirectUrl) {
+  window.location.assign(flow.redirectUrl);
+  return;
 }
+
+if (flow.status === "error") {
+  showError(flow.error, flow.fieldErrors);
+  return;
+}
+
+render(flow.viewModel);
 ```
 
-A redirect may go to an external OIDC/SAML provider or to RelayDesk's exact registered callback with a code. Never replace it with a URL constructed from user input. A view means SqlOS requires another interaction; render it instead of issuing tokens or declaring the user signed in.
+Always leave with `window.location.assign(flow.redirectUrl)`. A redirect may go to an external OIDC/SAML provider (`flow.authorization` is null) or to RelayDesk's exact registered callback with a code (`flow.authorization`). Never replace it with a URL constructed from user input. A view means SqlOS requires another interaction; render it instead of issuing tokens or declaring the user signed in.
 
 ## 7. Let the OIDC library finish the code
 
@@ -397,38 +290,45 @@ The core transition rule stays the same. Add only the views your enabled policy 
 | Returned view or branch | What the UI must do | Focused documentation |
 | --- | --- | --- |
 | `email-otp`, `email-otp-verify`, `email-otp-signup-verify` | Start or verify an inbox code while retaining challenge/signup tokens | [Email-code onboarding](/docs/guides/email-otp-onboarding) |
-| `magic-link`, `magic-link-confirm` | Send or consume an opt-in sign-in link, then continue any returned organization or MFA branch | [Magic-link login](/docs/authserver/magic-link) |
+| `magic-link`, `magic-link-sent` | Send an opt-in sign-in link (`flow.magicLink.start`); consume the emailed token with `flow.magicLink.complete({ token })` — there is no headless confirm view | [Magic-link login](/docs/authserver/magic-link) |
 | `phone-otp`, `phone-otp-verify`, `phone-otp-signup`, `phone-otp-signup-verify` | Start or verify a Twilio code | [SMS mobile sign-in](/docs/guides/sms-mobile-sign-in) |
 | `signup` | Submit display name, email, password, organization name, and optional custom fields | [Password login](/docs/guides/password-login) |
 | `invite`, `invite-login`, `invite-email-otp-verify`, `invite-accepted` | Resolve and preserve the invitation-bound request instead of starting unrelated signup | [Invite teammates](/docs/guides/invite-only-b2b-onboarding) |
 | Provider redirect | Follow the exact returned OIDC/SAML URL; SqlOS owns callback validation | [Social sign-in](/docs/guides/social-oidc) · [SAML SSO](/docs/guides/saml-sso) |
 | `mfa`, `mfa-enroll` | Verify an existing factor or render forced enrollment with its returned token and QR data | [Authenticator MFA](/docs/guides/mfa-totp) |
-| `consent` | Show the client name and `consentScopes`, then approve or deny with the view model's `consentToken` | [Consent](/docs/authserver/consent) |
+| `consent` | Show the client name and `consentScopes`, then call `flow.consent.approve()` or `flow.consent.deny()` | [Consent](/docs/authserver/consent) |
 | `forgot-password`, `forgot-password-sent`, `password-reset` | Keep recovery enumeration-safe and use the configured reset destination | [Account recovery](/docs/guides/account-recovery-sessions) |
 | `device`, `device-approve`, `device-approved`, `device-denied` | Keep the device request bound to its request ID and require explicit approval | [CLI OAuth](/docs/authserver/cli-oauth) |
 
-Use the [Headless AuthPage API reference](/docs/reference/api-reference#headless-authpage-api) for exact request records and routes. Do not guess a response field: route validation errors are not yet one universal JSON envelope.
+Use [`@sqlos/headless`](/docs/reference/headless-js) for the flow object, then the [Headless AuthPage HTTP reference](/docs/reference/api-reference#headless-authpage-api) for exact server records. Do not guess a response field: route validation errors are not yet one universal JSON envelope.
 
 ## 10. Run the checked-in implementation
 
-The broad example contains complete Next.js and Angular headless clients:
+The broad example contains complete Next.js, Angular, and Expo headless clients:
 
 ```bash
-npm ci --prefix examples/SqlOS.Example.Web
-npm ci --prefix examples/SqlOS.Example.AngularWeb
+./scripts/setup-js-examples.sh
 dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 ```
 
-Open `http://localhost:3010`, choose the headless/custom UI entry point, and complete password signup or login. The custom page is `/auth/authorize`; Auth.js finishes at `/api/auth/callback/sqlos`. The Angular client at `http://localhost:4200` uses `angular-oauth2-oidc` with `/auth/callback`.
+Equivalent install order:
+
+```bash
+npm ci --prefix packages/headless && npm run build --prefix packages/headless
+npm ci --prefix examples/SqlOS.Example.Web
+npm ci --prefix examples/SqlOS.Example.AngularWeb
+```
+
+Open `http://localhost:3010`, choose the headless/custom UI entry point, and complete password signup or login. The custom page is `/auth/authorize`; Auth.js finishes at `/api/auth/callback/sqlos`. The Angular client at `http://localhost:4200` uses `angular-oauth2-oidc` with `/auth/callback`. Expo uses `flow.start()` and in-app screens; `expo-auth-session` finishes `/token`.
 
 Compare these source files before adapting the pattern:
 
 - `examples/SqlOS.Example.Api/Program.cs` — host configuration, CORS, and signup hook
 - `examples/SqlOS.Example.Web/lib/auth.ts` — Auth.js OIDC provider
-- `examples/SqlOS.Example.Web/lib/sqlos-headless.ts` — typed headless API calls
-- `examples/SqlOS.Example.Web/components/sqlos-headless-auth-panel.tsx` — state rendering
+- `examples/SqlOS.Example.Web/components/sqlos-headless-auth-panel.tsx` — `useHeadlessAuth` + screen rendering
 - `examples/SqlOS.Example.AngularWeb/src/app/auth.config.ts` — angular-oauth2-oidc discovery
-- `examples/SqlOS.Example.AngularWeb/src/app/services/sqlos-headless.service.ts` — Angular headless client
+- `examples/SqlOS.Example.AngularWeb/src/app/pages/auth-authorize/auth-authorize.component.ts` — `createHeadlessFlow` in Angular
+- `examples/SqlOS.Example.ExpoApp/components/HeadlessAuthForm.tsx` — native `start()` + in-app screens
 
 ## Troubleshooting
 

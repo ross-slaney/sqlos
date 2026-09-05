@@ -108,6 +108,12 @@ You'll need **.NET 9**, **EF Core 9**, and a **SQL Server** database your applic
 dotnet add package SqlOS --version 4.1.0
 ```
 
+For a product-owned login UI (not a general OAuth client):
+
+```bash
+npm install @sqlos/headless@4.1.0
+```
+
 Derive your `DbContext` from `SqlOSDbContext<TContext>` so SqlOS can register its EF Core model, then declare your application:
 
 ```csharp

@@ -161,14 +161,23 @@ Render `qrCodeDataUrl` as an image, keep `secret` available for manual setup, an
 
 Hosted auth handles this automatically for password login, OIDC and SAML callbacks, signup, silent SSO, and device approval. Primary authentication cannot issue a code, session, token, or device approval while MFA is required.
 
-For headless auth, render these view names:
+For headless auth, render these view names with [`@sqlos/headless`](/docs/reference/headless-js) (`flow.mfa.verify` / `flow.mfa.totp.enrollStart` / `enrollVerify`). The HTTP bodies below are the wire contract; client code should use the package. See [Build your own login and signup UI](/docs/guides/custom-login-ui).
 
 | View | UI |
 | --- | --- |
 | `mfa` | Code input for authenticator code or recovery code |
 | `mfa-enroll` | QR code, manual setup secret, and TOTP verification input |
 
-Post the challenge code:
+```ts
+await flow.mfa.verify({ code });
+await flow.mfa.totp.enrollVerify({ code });
+
+if (flow.status === "redirect" && flow.redirectUrl) {
+  window.location.assign(flow.redirectUrl);
+}
+```
+
+The flow holds `requestId`, `mfaToken`, and `enrollmentToken`. Wire reference:
 
 ```http
 POST /sqlos/auth/headless/mfa/verify
@@ -178,8 +187,6 @@ POST /sqlos/auth/headless/mfa/verify
   "code": "123456"
 }
 ```
-
-Post forced enrollment verification:
 
 ```http
 POST /sqlos/auth/headless/mfa/totp/enroll/verify
@@ -210,7 +217,7 @@ Then:
 
 ## Common mistakes
 
-- In headless/direct API flows, treat `requiresMfa` or `requiresMfaEnrollment` as the next auth state and post the MFA step back to SqlOS. Tokens are intentionally absent until SqlOS completes the second factor.
+- In headless flows, render `mfa` / `mfa-enroll` and call `flow.mfa.verify` or `flow.mfa.totp.enrollVerify`. In direct API flows, treat `requiresMfa` or `requiresMfaEnrollment` as the next auth state. Tokens are intentionally absent until SqlOS completes the second factor.
 - Do not re-display confirmed TOTP secrets to solve device changes.
 - Do not forget to render `mfa` and `mfa-enroll` in headless UIs.
 - Do not treat recovery codes as reusable backup passwords; each code is single-use.
@@ -218,5 +225,6 @@ Then:
 ## Next reading
 
 - [MFA and TOTP](/docs/authserver/mfa-totp)
+- [`@sqlos/headless`](/docs/reference/headless-js)
 - [Build a custom login UI](/docs/guides/custom-login-ui)
 - [Dashboard](/docs/authserver/dashboard-overview)

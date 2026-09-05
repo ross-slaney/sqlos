@@ -10,23 +10,17 @@
   <main class="shell">
     <section class="hero compact">
       <p class="eyebrow">SqlOS Todo Sample</p>
-      <h1>Use the hosted AuthPage for this demo.</h1>
+      <h1>Custom login UI lives in the Next.js example.</h1>
       <p class="lede">
-        This Todo sample keeps credential collection inside SqlOS AuthPage. It
-        does not implement password or OTP forms in the client app.
+        This page is only the redirect target SqlOS uses when headless AuthPage
+        is enabled on the Todo sample. It does not implement a headless client.
+        Draw screens with <code>@sqlos/headless</code> in the Next.js retail
+        example at <a href="http://localhost:3010/auth/authorize">http://localhost:3010/auth/authorize</a>.
       </p>
       <div class="button-row">
         <a class="link-button" href="/">Back to hosted AuthPage flow</a>
       </div>
     </section>
-
-    <section class="panel-grid">
-      <article class="panel">
-        <h2>Request</h2>
-        <pre id="headless-request-info">Open this page from a headless authorization redirect to inspect the request.</pre>
-      </article>
-    </section>
   </main>
-  <script src="/sample.js" defer></script>
 </body>
 </html>

@@ -28,6 +28,7 @@ Prerequisites:
 From the repository root:
 
 ```bash
+npm ci --prefix packages/headless && npm run build --prefix packages/headless
 npm ci --prefix examples/SqlOS.Example.Web
 npm ci --prefix examples/SqlOS.Example.AngularWeb
 dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
@@ -76,12 +77,13 @@ It does **not** start the Expo app or Todo CLI. Those are separate clients that 
 | [`SqlOS.Example.ExpoApp`](SqlOS.Example.ExpoApp/README.md) | You, separately | Simulator/device | Expo Router, native OAuth callback, SecureStore, protected retail UI |
 | [`SqlOS.Example.Tests`](SqlOS.Example.Tests/SqlOS.Example.Tests.csproj) | Test runner | n/a | ASP.NET Core access-token refresh, ticket renewal, and logout fallback |
 | [`SqlOS.Example.IntegrationTests`](SqlOS.Example.IntegrationTests/SqlOS.Example.IntegrationTests.csproj) | Test runner | n/a | Real-SQL tests for example auth, OIDC, email OTP, dashboard, workspaces, and retail FGA |
+| [`SqlOS.Example.E2eTests`](SqlOS.Example.E2eTests/SqlOS.Example.E2eTests.csproj) | Test runner | Boots the full AppHost on `5162`/`3110`/`4300`/`1439` | Playwright journeys through the Next.js and Angular headless UIs: `@sqlos/headless` in a real browser, MFA enrollment, and the host OIDC library finishing `/token` |
 | [`SqlOS.Todo.AppHost`](SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj) | You | Aspire dashboard on HTTPS port `18890` | Focused SQL + Todo API + Razor client stack |
 | [`SqlOS.Todo.Api`](SqlOS.Todo.Api/README.md) | Either AppHost | `http://localhost:5080` | Hosted auth, resource metadata, audience validation, Todo FGA, CIMD and optional DCR |
 | [`SqlOS.Todo.Cli`](SqlOS.Todo.Cli/README.md) | You, separately | Terminal | Device authorization grant and Todo API calls |
 | [`SqlOS.Todo.IntegrationTests`](SqlOS.Todo.IntegrationTests/SqlOS.Todo.IntegrationTests.csproj) | Test runner | n/a | Real-SQL tests for Todo auth, FGA, device flow, CIMD, and DCR |
 
-`SqlOS.Example.Tests` provides fast application-session coverage; the two integration-test projects provide executable real-SQL protocol and authorization coverage.
+`SqlOS.Example.Tests` provides fast application-session coverage; the two integration-test projects provide executable real-SQL protocol and authorization coverage; `SqlOS.Example.E2eTests` proves the browser clients end to end.
 
 ## Ports and local state
 
@@ -121,9 +123,9 @@ Build the clients:
 dotnet build examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 dotnet build examples/SqlOS.Todo.Cli/SqlOS.Todo.Cli.csproj
 dotnet test examples/SqlOS.Example.Tests/SqlOS.Example.Tests.csproj
+./scripts/setup-js-examples.sh --expo
 npm run build --prefix examples/SqlOS.Example.Web
 npm run build --prefix examples/SqlOS.Example.AngularWeb
-npm ci --prefix examples/SqlOS.Example.ExpoApp
 npm exec --prefix examples/SqlOS.Example.ExpoApp -- tsc --noEmit -p examples/SqlOS.Example.ExpoApp/tsconfig.json
 ```
 
@@ -134,7 +136,13 @@ dotnet test examples/SqlOS.Example.IntegrationTests/SqlOS.Example.IntegrationTes
 dotnet test examples/SqlOS.Todo.IntegrationTests/SqlOS.Todo.IntegrationTests.csproj
 ```
 
-The frontend samples do not currently have checked-in browser automation. Their build commands catch compilation and bundling failures; the backend protocol and authorization behavior is covered by the integration suites.
+Run the browser end-to-end tests for the headless Next.js and Angular UIs (Docker, Node, and Chromium; the tests install Chromium on first run):
+
+```bash
+./scripts/headless-e2e.sh
+```
+
+They boot the full AppHost on alternate ports (`5162` API, `3110` Next.js, `4300` Angular, `1439` SQL) with an ephemeral database, so a demo already running on the default ports is not disturbed. CI runs the same script as the `Headless Examples E2E` job.
 
 ## What to copy into your application
 

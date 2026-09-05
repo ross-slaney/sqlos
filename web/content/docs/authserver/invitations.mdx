@@ -62,7 +62,7 @@ For passwordless invitation signup, SqlOS creates the user and accepts the invit
 
 ## Headless accept flow
 
-Headless apps should treat invitations as a first-class view, not as a generic signup detour.
+Headless apps should treat invitations as a first-class view, not as a generic signup detour. Drive it with [`@sqlos/headless`](/docs/reference/headless-js) (`flow.invitation.resolve` / `flow.invitation.signup`). The routes below are the HTTP wire contract; client code should use the package. See [Build your own login and signup UI](/docs/guides/custom-login-ui).
 
 | Endpoint | Purpose |
 | --- | --- |
@@ -73,15 +73,15 @@ Headless apps should treat invitations as a first-class view, not as a generic s
 Recommended headless lifecycle:
 
 1. User opens the invite link.
-2. Your authorize page resolves the token with `/invitations/resolve`.
-3. Your page starts a normal `/sqlos/auth/authorize` request with `invitationToken`.
-4. Render the returned invite view.
-5. Existing users continue through `identify`, SSO, password, or OTP sign-in.
-6. New invited users with Email OTP enabled call `/invitations/signup` directly.
-7. Follow the redirect result from SqlOS. This may be an IdP redirect when the invited email is governed by SSO.
+2. Your authorize page resolves the token with `flow.invitation.resolve({ invitationToken })`.
+3. Start a normal `/sqlos/auth/authorize` request with `invitationToken` (OIDC library), then `flow.resume(window.location)` — or native `flow.start({ invitationToken })`.
+4. Render the returned invite view (`invite`, `invite-login`, `invite-email-otp-verify`, or `invite-accepted`).
+5. Existing users continue through `flow.identify`, SSO, password, or OTP sign-in.
+6. New invited users with Email OTP enabled call `flow.invitation.signup` directly.
+7. When `status === "redirect"`, leave with `window.location.assign(redirectUrl)`. This may be an IdP URL when the invited email is governed by SSO.
 
 <Callout type="warning" title="Do not start OTP signup for invite-created accounts">
-  For a new invited user, call `/sqlos/auth/headless/invitations/signup`. Calling `/signup/email-otp/start` creates a second proof step and can strand the invite flow behind an unnecessary code challenge.
+  For a new invited user, call `flow.invitation.signup`. Calling `flow.emailOtp.signupStart` creates a second proof step and can strand the invite flow behind an unnecessary code challenge.
 </Callout>
 
 ## SDK-only acceptance

@@ -123,3 +123,8 @@ $RECYCLE.BIN/
 TestResults/
 [Tt]est[Rr]esult*/
 *.trx
+
+## JS package
+packages/headless/dist/
+packages/headless/coverage/
+*.tsbuildinfo

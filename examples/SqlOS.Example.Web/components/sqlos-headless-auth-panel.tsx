@@ -1,34 +1,12 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { useHeadlessAuth } from "@sqlos/headless/react";
 import { startHostedSqlOSSignIn } from "@/components/sqlos-hosted-sign-in";
-import {
-  getHeadlessRequest,
-  headlessIdentify,
-  headlessPasswordLogin,
-  headlessRequestPasswordResetEmail,
-  headlessRequestEmailOtp,
-  headlessRequestMagicLink,
-  headlessRequestPhoneOtp,
-  headlessRequestPhoneOtpSignup,
-  headlessResetPassword,
-  headlessSelectOrganization,
-  headlessSignup,
-  headlessApproveConsent,
-  headlessDenyConsent,
-  headlessStartProvider,
-  headlessStartMfaTotpEnrollment,
-  headlessVerifyEmailOtp,
-  headlessVerifyMfa,
-  headlessVerifyMfaTotpEnrollment,
-  headlessVerifyPhoneOtp,
-  headlessVerifyPhoneOtpSignup,
-  type HeadlessViewModel,
-  type HeadlessActionResult,
-  type HeadlessProvider,
-} from "@/lib/sqlos-headless";
+import { getExampleAuthServerUrl, getExampleClientId } from "@/lib/sqlos-config";
+import { credentialEnabled, type HeadlessProvider, type HeadlessView } from "@sqlos/headless";
 
 type ReferralOption = {
   value: string;
@@ -64,24 +42,66 @@ function getProviderMonogram(displayName: string) {
 const IMAGE_LOGIN = "https://images.unsplash.com/photo-1604719312566-8912e9227c6a?w=1200&q=80&auto=format";
 const IMAGE_SIGNUP = "https://images.unsplash.com/photo-1556740758-90de374c12ad?w=1200&q=80&auto=format";
 
+/**
+ * Views this panel draws. Any other view the server returns (invitations,
+ * device approval, ...) falls back to hosted AuthPage instead of rendering a
+ * headline with no form.
+ */
+const HANDLED_VIEWS: ReadonlySet<string> = new Set<HeadlessView>([
+  "login",
+  "password",
+  "forgot-password",
+  "forgot-password-sent",
+  "password-reset",
+  "email-otp",
+  "email-otp-verify",
+  "magic-link",
+  "magic-link-sent",
+  "phone-otp",
+  "phone-otp-verify",
+  "signup",
+  "phone-otp-signup",
+  "phone-otp-signup-verify",
+  "organization",
+  "consent",
+  "mfa",
+  "mfa-enroll",
+]);
+
 export function SqlOSHeadlessAuthPanel() {
   const searchParams = useSearchParams();
   const requestId = searchParams.get("request");
   const initialView = searchParams.get("view") || "login";
-  const initialError = searchParams.get("error");
   const initialEmail = searchParams.get("email") || "";
-  const pendingToken = searchParams.get("pendingToken");
-  const initialMfaToken = searchParams.get("mfaToken");
   const initialDisplayName = searchParams.get("displayName") || "";
   const initialResetToken = searchParams.get("token") || "";
   const nextPath = searchParams.get("next") || "/retail";
+  // An error-only bounce (request id already dropped) still needs surfacing.
+  const initialError = searchParams.get("error");
 
-  const [view, setView] = useState(initialView);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(initialError);
+  const {
+    flow,
+    status,
+    view: flowView,
+    viewModel,
+    error,
+    fieldErrors,
+    authorization,
+    redirectUrl,
+  } = useHeadlessAuth({
+    issuer: getExampleAuthServerUrl(),
+    clientId: getExampleClientId(),
+    redirectUri: typeof window === "undefined"
+      ? "http://localhost:3010/api/auth/callback/sqlos"
+      : `${window.location.origin}/api/auth/callback/sqlos`,
+    credentials: "include",
+  });
+
+  const [formView, setFormView] = useState<HeadlessView | null>(
+    initialResetToken ? "password-reset" : null,
+  );
   const [notice, setNotice] = useState<string | null>(null);
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [viewModel, setViewModel] = useState<HeadlessViewModel | null>(null);
+  const [confirmMismatch, setConfirmMismatch] = useState<string | null>(null);
 
   const [email, setEmail] = useState(initialEmail);
   const [phoneNumber, setPhoneNumber] = useState("");
@@ -99,342 +119,218 @@ export function SqlOSHeadlessAuthPanel() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
 
+  const loading = status === "loading";
+  const view = formView ?? flowView ?? initialView;
+  const displayError = error ?? (!requestId ? initialError : null);
+
+  useEffect(() => {
+    if (status === "redirect" && redirectUrl) {
+      window.location.assign(redirectUrl);
+    }
+  }, [status, redirectUrl]);
+
   useEffect(() => {
     if (!requestId) return;
-
-    const load = async () => {
-      try {
-        const vm = await getHeadlessRequest(
-          requestId,
-          initialView,
-          initialError,
-          pendingToken,
-          initialEmail,
-          initialDisplayName,
-          initialMfaToken,
-        );
-        setViewModel(vm);
-        if (vm.view) setView(vm.view);
-        if (vm.error) setError(vm.error);
-        if (vm.email) setEmail(vm.email);
-        if (vm.email) setResetEmail(vm.email);
-        if (vm.phoneNumber) setPhoneNumber(vm.phoneNumber);
-        if (vm.displayName && !firstName && !lastName && initialDisplayName) {
-          const [first = "", ...rest] = vm.displayName.split(" ");
-          setFirstName(first);
-          setLastName(rest.join(" "));
-        }
-        if (vm.fieldErrors) setFieldErrors(vm.fieldErrors);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load authorization request.");
-      }
-    };
-
-    void load();
-  }, [requestId, initialView, initialError, pendingToken, initialEmail, initialDisplayName, initialMfaToken]);
+    void flow.resume(window.location);
+  }, [flow, requestId]);
 
   useEffect(() => {
     if (initialResetToken) {
       setResetToken(initialResetToken);
-      setView("password-reset");
     }
   }, [initialResetToken]);
 
-  const handleResult = useCallback(async (result: HeadlessActionResult) => {
-    setNotice(null);
-    if (result.type === "redirect" && result.redirectUrl) {
-      const url = new URL(result.redirectUrl);
-      const code = url.searchParams.get("code");
+  const serverView = viewModel?.view ?? null;
+  useEffect(() => {
+    // Drop client-only form switches only when the server advances the view.
+    // Not on mount: with no request loaded, formView holds the ?token=
+    // password-reset deep link and must survive.
+    if (!serverView) return;
+    setFormView(null);
+  }, [serverView]);
 
-      // If the redirect is to a custom scheme (e.g. mobile app), don't exchange
-      // the code here — let the native app handle the token exchange itself.
-      if (code && !url.protocol.startsWith("http")) {
-        window.location.href = result.redirectUrl;
-        return;
-      }
-
-      if (code) {
-        // Headless ends at a code. Auth.js owns PKCE and finishes /token at
-        // /api/auth/callback/sqlos.
-        window.location.assign(result.redirectUrl);
-        return;
-      }
-
-      window.location.href = result.redirectUrl;
-      return;
+  useEffect(() => {
+    if (viewModel?.email) {
+      setEmail(viewModel.email);
+      setResetEmail(viewModel.email);
     }
+  }, [viewModel?.email]);
 
-    if (result.viewModel) {
-      const nextViewModel =
-        result.viewModel.view === "mfa-enroll" && !result.viewModel.totpEnrollment && viewModel?.totpEnrollment
-          ? { ...result.viewModel, totpEnrollment: viewModel.totpEnrollment }
-          : result.viewModel;
-      setViewModel(nextViewModel);
-      if (nextViewModel.view) setView(nextViewModel.view);
-      if (nextViewModel.error) setError(nextViewModel.error);
-      if (nextViewModel.email) {
-        setEmail(nextViewModel.email);
-        setResetEmail(nextViewModel.email);
-      }
-      if (nextViewModel.phoneNumber) setPhoneNumber(nextViewModel.phoneNumber);
-      if (nextViewModel.challengeToken) setOtpCode("");
-      if (nextViewModel.mfaToken) setMfaCode("");
-      if (nextViewModel.totpEnrollment) setMfaEnrollmentCode("");
-      setFieldErrors(nextViewModel.fieldErrors ?? {});
+  useEffect(() => {
+    if (viewModel?.phoneNumber) {
+      setPhoneNumber(viewModel.phoneNumber);
+    }
+  }, [viewModel?.phoneNumber]);
+
+  useEffect(() => {
+    if (viewModel?.challengeToken) {
+      setOtpCode("");
+    }
+  }, [viewModel?.challengeToken]);
+
+  useEffect(() => {
+    if (viewModel?.mfaToken) {
+      setMfaCode("");
+    }
+  }, [viewModel?.mfaToken]);
+
+  useEffect(() => {
+    if (viewModel?.totpEnrollment) {
+      setMfaEnrollmentCode("");
     }
   }, [viewModel?.totpEnrollment]);
 
-  const onStartMfaEnrollment = useCallback(async () => {
-    if (!requestId || !viewModel?.mfaToken) return;
-    setLoading(true); setError(null); setFieldErrors({});
-    try {
-      await handleResult(await headlessStartMfaTotpEnrollment(requestId, viewModel.mfaToken, "Authenticator app"));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "We could not start authenticator enrollment.");
-    } finally {
-      setLoading(false);
+  useEffect(() => {
+    if (viewModel?.displayName && !firstName && !lastName && initialDisplayName) {
+      const [first = "", ...rest] = viewModel.displayName.split(" ");
+      setFirstName(first);
+      setLastName(rest.join(" "));
     }
-  }, [handleResult, requestId, viewModel?.mfaToken]);
+  }, [firstName, initialDisplayName, lastName, viewModel?.displayName]);
 
   useEffect(() => {
-    if (view !== "mfa-enroll" || !requestId || !viewModel?.mfaToken || viewModel.totpEnrollment) return;
+    if (view !== "mfa-enroll" || !viewModel?.mfaToken || viewModel.totpEnrollment) return;
     if (startedMfaEnrollmentToken === viewModel.mfaToken) return;
     setStartedMfaEnrollmentToken(viewModel.mfaToken);
-    void onStartMfaEnrollment();
-  }, [onStartMfaEnrollment, requestId, startedMfaEnrollmentToken, view, viewModel?.mfaToken, viewModel?.totpEnrollment]);
+    if (status === "idle") return;
+    void flow.mfa.totp.enrollStart({ displayName: "Authenticator app" });
+  }, [flow, startedMfaEnrollmentToken, status, view, viewModel?.mfaToken, viewModel?.totpEnrollment]);
 
-  const onIdentify = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!requestId) return;
-    setLoading(true); setError(null); setFieldErrors({});
-    try { await handleResult(await headlessIdentify(requestId, email)); }
-    catch (err) { setError(err instanceof Error ? err.message : "We could not start sign in."); }
-    finally { setLoading(false); }
+  const onStartMfaEnrollment = () => {
+    if (status === "idle") return;
+    void flow.mfa.totp.enrollStart({ displayName: "Authenticator app" });
   };
 
-  const onLogin = async (event: React.FormEvent) => {
+  const onIdentify = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!requestId) return;
-    setLoading(true); setError(null); setFieldErrors({});
-    try { await handleResult(await headlessPasswordLogin(requestId, email, password)); }
-    catch (err) { setError(err instanceof Error ? err.message : "Login failed."); }
-    finally { setLoading(false); }
+    setNotice(null);
+    void flow.identify({ email });
   };
 
-  const onRequestPasswordReset = async (event: React.FormEvent) => {
+  const onLogin = (event: React.FormEvent) => {
     event.preventDefault();
-    setLoading(true); setError(null); setNotice(null); setFieldErrors({});
-    try {
-      const targetEmail = (resetEmail || email).trim();
-      const result = await headlessRequestPasswordResetEmail(targetEmail, requestId);
-      setNotice(result.message || "If the account can be reset, a reset email is on the way.");
-      setView("forgot-password-sent");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "We could not request password recovery.");
-    } finally {
-      setLoading(false);
+    setNotice(null);
+    void flow.password.login({ email, password });
+  };
+
+  const onRequestPasswordReset = (event: React.FormEvent) => {
+    event.preventDefault();
+    setNotice(null);
+    void flow.password.forgot({ email: (resetEmail || email).trim() });
+  };
+
+  const onResetPassword = (event: React.FormEvent) => {
+    event.preventDefault();
+    setNotice(null);
+    if (newPassword !== confirmNewPassword) {
+      setConfirmMismatch("Passwords do not match.");
+      return;
     }
-  };
-
-  const onResetPassword = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setLoading(true); setError(null); setNotice(null); setFieldErrors({});
-    try {
-      if (!resetToken.trim()) {
-        throw new Error("Password reset token is missing.");
-      }
-      if (newPassword !== confirmNewPassword) {
-        setFieldErrors({ confirmNewPassword: "Passwords do not match." });
-        return;
-      }
-      await headlessResetPassword(resetToken, newPassword);
+    setConfirmMismatch(null);
+    void flow.password.reset({ token: resetToken, newPassword }).then((next) => {
+      if (next === "error") return;
       setPassword("");
       setNewPassword("");
       setConfirmNewPassword("");
       setNotice("Your password has been reset. Sign in with your new password.");
-      setView("login");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "We could not reset your password.");
-    } finally {
-      setLoading(false);
-    }
+      setFormView("login");
+    });
   };
 
-  const onRequestEmailOtp = async (event: React.FormEvent) => {
+  const onRequestEmailOtp = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!requestId) return;
-    setLoading(true); setError(null); setFieldErrors({});
-    try { await handleResult(await headlessRequestEmailOtp(requestId, email)); }
-    catch (err) { setError(err instanceof Error ? err.message : "We could not send a sign-in code."); }
-    finally { setLoading(false); }
+    setNotice(null);
+    void flow.emailOtp.start({ email });
   };
 
-  const onRequestMagicLink = async (event: React.FormEvent) => {
+  const onRequestMagicLink = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!requestId) return;
-    setLoading(true); setError(null); setFieldErrors({});
-    try { await handleResult(await headlessRequestMagicLink(requestId, email)); }
-    catch (err) { setError(err instanceof Error ? err.message : "We could not send a sign-in link."); }
-    finally { setLoading(false); }
+    setNotice(null);
+    void flow.magicLink.start({ email });
   };
 
-  const onVerifyEmailOtp = async (event: React.FormEvent) => {
+  const onVerifyEmailOtp = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!requestId) return;
-    const challengeToken = viewModel?.challengeToken;
-    if (!challengeToken) {
-      setError("Request a new sign-in code first.");
-      return;
-    }
-
-    setLoading(true); setError(null); setFieldErrors({});
-    try { await handleResult(await headlessVerifyEmailOtp(requestId, challengeToken, otpCode)); }
-    catch (err) { setError(err instanceof Error ? err.message : "The sign-in code was rejected."); }
-    finally { setLoading(false); }
+    setNotice(null);
+    void flow.emailOtp.verify({ code: otpCode });
   };
 
-  const onRequestPhoneOtp = async (event: React.FormEvent) => {
+  const onRequestPhoneOtp = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!requestId) return;
-    setLoading(true); setError(null); setFieldErrors({});
-    try { await handleResult(await headlessRequestPhoneOtp(requestId, phoneNumber)); }
-    catch (err) { setError(err instanceof Error ? err.message : "We could not send a sign-in code."); }
-    finally { setLoading(false); }
+    setNotice(null);
+    void flow.phoneOtp.start({ phoneNumber });
   };
 
-  const onVerifyPhoneOtp = async (event: React.FormEvent) => {
+  const onVerifyPhoneOtp = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!requestId) return;
-    const challengeToken = viewModel?.challengeToken;
-    if (!challengeToken) {
-      setError("Request a new sign-in code first.");
-      return;
-    }
-
-    setLoading(true); setError(null); setFieldErrors({});
-    try { await handleResult(await headlessVerifyPhoneOtp(requestId, challengeToken, otpCode)); }
-    catch (err) { setError(err instanceof Error ? err.message : "The sign-in code was rejected."); }
-    finally { setLoading(false); }
+    setNotice(null);
+    void flow.phoneOtp.verify({ code: otpCode });
   };
 
-  const onSignup = async (event: React.FormEvent) => {
+  const onSignup = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!requestId) return;
-    setLoading(true); setError(null); setFieldErrors({});
-    try {
-      await handleResult(await headlessSignup(requestId, buildDisplayName(firstName, lastName, email), email, password, organizationName, { referralSource, firstName, lastName }));
-    } catch (err) { setError(err instanceof Error ? err.message : "Signup failed."); }
-    finally { setLoading(false); }
+    setNotice(null);
+    void flow.signup({
+      displayName: buildDisplayName(firstName, lastName, email),
+      email,
+      password,
+      organizationName,
+      customFields: { referralSource, firstName, lastName },
+    });
   };
 
-  const onRequestPhoneOtpSignup = async (event: React.FormEvent) => {
+  const onRequestPhoneOtpSignup = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!requestId) return;
-    setLoading(true); setError(null); setFieldErrors({});
-    try {
-      await handleResult(await headlessRequestPhoneOtpSignup(
-        requestId,
-        buildDisplayName(firstName, lastName, phoneNumber),
-        phoneNumber,
-        organizationName,
-        { referralSource, firstName, lastName },
-      ));
-    } catch (err) { setError(err instanceof Error ? err.message : "Signup failed."); }
-    finally { setLoading(false); }
+    setNotice(null);
+    void flow.phoneOtp.signupStart({
+      displayName: buildDisplayName(firstName, lastName, phoneNumber),
+      phoneNumber,
+      organizationName,
+      customFields: { referralSource, firstName, lastName },
+    });
   };
 
-  const onVerifyPhoneOtpSignup = async (event: React.FormEvent) => {
+  const onVerifyPhoneOtpSignup = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!requestId) return;
-    const challengeToken = viewModel?.challengeToken;
-    const signupToken = viewModel?.signupToken;
-    if (!challengeToken || !signupToken) {
-      setError("Request a new sign-up code first.");
-      return;
-    }
-
-    setLoading(true); setError(null); setFieldErrors({});
-    try { await handleResult(await headlessVerifyPhoneOtpSignup(requestId, signupToken, challengeToken, otpCode)); }
-    catch (err) { setError(err instanceof Error ? err.message : "The sign-up code was rejected."); }
-    finally { setLoading(false); }
+    setNotice(null);
+    void flow.phoneOtp.signupVerify({ code: otpCode });
   };
 
-  const onProviderStart = async (connectionId: string) => {
-    if (!requestId) return;
-    setLoading(true); setError(null);
-    try { await handleResult(await headlessStartProvider(requestId, connectionId, email || undefined)); }
-    catch (err) { setError(err instanceof Error ? err.message : "Provider auth failed."); }
-    finally { setLoading(false); }
+  const onProviderStart = (connectionId: string) => {
+    setNotice(null);
+    void flow.provider.start({ connectionId, email: email || undefined });
   };
 
-  const onSelectOrganization = async (organizationId: string) => {
-    const activePendingToken = viewModel?.pendingToken ?? pendingToken;
-    if (!activePendingToken) return;
-    setLoading(true); setError(null);
-    try { await handleResult(await headlessSelectOrganization(activePendingToken, organizationId)); }
-    catch (err) { setError(err instanceof Error ? err.message : "Organization selection failed."); }
-    finally { setLoading(false); }
+  const onSelectOrganization = (organizationId: string) => {
+    setNotice(null);
+    void flow.organization.select({ organizationId });
   };
 
-  const onDecideConsent = async (approve: boolean) => {
-    // The consent view state carries a one-time consent token; approve issues
-    // the code redirect, deny redirects back to the client with access_denied.
-    if (!requestId || !viewModel?.consentToken) return;
-    setLoading(true); setError(null);
-    try {
-      await handleResult(approve
-        ? await headlessApproveConsent(requestId, viewModel.consentToken)
-        : await headlessDenyConsent(requestId, viewModel.consentToken));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "The consent decision could not be recorded.");
-    } finally {
-      setLoading(false);
-    }
+  const onDecideConsent = (approve: boolean) => {
+    setNotice(null);
+    void (approve ? flow.consent.approve() : flow.consent.deny());
   };
 
-  const onVerifyMfa = async (event: React.FormEvent) => {
+  const onVerifyMfa = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!requestId || !viewModel?.mfaToken) return;
-    setLoading(true); setError(null); setFieldErrors({});
-    try {
-      await handleResult(await headlessVerifyMfa(requestId, viewModel.mfaToken, mfaCode));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "The second-factor code was rejected.");
-    } finally {
-      setLoading(false);
-    }
+    setNotice(null);
+    void flow.mfa.verify({ code: mfaCode });
   };
 
-  const onVerifyMfaEnrollment = async (event: React.FormEvent) => {
+  const onVerifyMfaEnrollment = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!requestId || !viewModel?.mfaToken || !viewModel.totpEnrollment) return;
-    setLoading(true); setError(null); setFieldErrors({});
-    try {
-      await handleResult(await headlessVerifyMfaTotpEnrollment(
-        requestId,
-        viewModel.mfaToken,
-        viewModel.totpEnrollment.enrollmentToken,
-        mfaEnrollmentCode,
-      ));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Authenticator enrollment failed.");
-    } finally {
-      setLoading(false);
-    }
+    setNotice(null);
+    void flow.mfa.totp.enrollVerify({ code: mfaEnrollmentCode });
   };
 
   const isSignup = view === "signup" || view === "phone-otp-signup" || view === "phone-otp-signup-verify";
   const isMfa = view === "mfa" || view === "mfa-enroll";
   const isRecovery = view === "forgot-password" || view === "forgot-password-sent" || view === "password-reset";
-  const showProviderButtons = (view === "login" || view === "identify" || view === "signup") && (viewModel?.providers?.length ?? 0) > 0;
-  const supportsPassword = !!viewModel?.settings?.localPasswordRuntimeEnabled
-    && (viewModel?.settings?.enabledCredentialTypes ?? []).includes("password");
-  const supportsEmailOtp = !!viewModel?.settings?.emailOtpRuntimeConfigured
-    && (viewModel?.settings?.enabledCredentialTypes ?? []).includes("email_otp");
-  const supportsMagicLink = !!viewModel?.settings?.magicLinkRuntimeConfigured
-    && (viewModel?.settings?.enabledCredentialTypes ?? []).includes("magic_link");
-  const supportsPhoneOtp = !!viewModel?.settings?.phoneOtpRuntimeConfigured
-    && (viewModel?.settings?.enabledCredentialTypes ?? []).includes("phone_otp");
+  const showProviderButtons = (view === "login" || view === "signup") && (viewModel?.providers?.length ?? 0) > 0;
+  const supportsPassword = credentialEnabled(viewModel?.settings, "password");
+  const supportsEmailOtp = credentialEnabled(viewModel?.settings, "email_otp");
+  const supportsMagicLink = credentialEnabled(viewModel?.settings, "magic_link");
+  const supportsPhoneOtp = credentialEnabled(viewModel?.settings, "phone_otp");
 
   const headline = isSignup
     ? "Start your free trial"
@@ -515,7 +411,7 @@ export function SqlOSHeadlessAuthPanel() {
             <p>{subtitle}</p>
           </div>
 
-          {error && <div className="ha-error">{error}</div>}
+          {displayError && <div className="ha-error">{displayError}</div>}
           {(notice || viewModel?.info) && <div className="ha-success">{notice || viewModel?.info}</div>}
 
           {!requestId && view === "password-reset" ? (
@@ -531,7 +427,7 @@ export function SqlOSHeadlessAuthPanel() {
               <div className="ha-field">
                 <label htmlFor="ha-confirm-password">Confirm password</label>
                 <input id="ha-confirm-password" type="password" value={confirmNewPassword} onChange={(e) => setConfirmNewPassword(e.target.value)} autoComplete="new-password" required />
-                {fieldErrors.confirmNewPassword && <p className="ha-field-error">{fieldErrors.confirmNewPassword}</p>}
+                {confirmMismatch && <p className="ha-field-error">{confirmMismatch}</p>}
               </div>
               <button type="submit" className="ha-submit" disabled={loading}>
                 {loading ? "Resetting..." : "Reset password"}
@@ -551,7 +447,7 @@ export function SqlOSHeadlessAuthPanel() {
             <HeadlessFlowStarter initialView={isSignup ? "signup" : "login"} nextPath={nextPath} />
           ) : (
             <>
-              {(view === "login" || view === "identify") && (
+              {view === "login" && (
                 <form className="ha-form" onSubmit={onIdentify}>
                   <div className="ha-field">
                     <label htmlFor="ha-email">Email address</label>
@@ -563,9 +459,9 @@ export function SqlOSHeadlessAuthPanel() {
                   </button>
                   <div className="ha-alt">
                     Don&apos;t have an account?{" "}
-                    <button type="button" className="ha-link-btn" onClick={() => setView("signup")}>Sign up</button>
-                    {supportsMagicLink && <button type="button" className="ha-link-btn" onClick={() => setView("magic-link")}>Email me a link</button>}
-                    {supportsPhoneOtp && <button type="button" className="ha-link-btn" onClick={() => setView("phone-otp")}>Use phone instead</button>}
+                    <button type="button" className="ha-link-btn" onClick={() => setFormView("signup")}>Sign up</button>
+                    {supportsMagicLink && <button type="button" className="ha-link-btn" onClick={() => setFormView("magic-link")}>Email me a link</button>}
+                    {supportsPhoneOtp && <button type="button" className="ha-link-btn" onClick={() => setFormView("phone-otp")}>Use phone instead</button>}
                   </div>
                 </form>
               )}
@@ -585,11 +481,11 @@ export function SqlOSHeadlessAuthPanel() {
                     {loading ? "Signing in..." : "Sign in"}
                   </button>
                   <div className="ha-alt">
-                    <button type="button" className="ha-link-btn" onClick={() => setView("login")}>Use a different email</button>
-                    <button type="button" className="ha-link-btn" onClick={() => { setResetEmail(email); setView("forgot-password"); }}>Forgot password?</button>
-                    {supportsEmailOtp && <button type="button" className="ha-link-btn" onClick={() => setView("email-otp")}>Email me a code instead</button>}
-                    {supportsMagicLink && <button type="button" className="ha-link-btn" onClick={() => setView("magic-link")}>Email me a link instead</button>}
-                    {supportsPhoneOtp && <button type="button" className="ha-link-btn" onClick={() => setView("phone-otp")}>Text me a code instead</button>}
+                    <button type="button" className="ha-link-btn" onClick={() => setFormView("login")}>Use a different email</button>
+                    <button type="button" className="ha-link-btn" onClick={() => { setResetEmail(email); setFormView("forgot-password"); }}>Forgot password?</button>
+                    {supportsEmailOtp && <button type="button" className="ha-link-btn" onClick={() => setFormView("email-otp")}>Email me a code instead</button>}
+                    {supportsMagicLink && <button type="button" className="ha-link-btn" onClick={() => setFormView("magic-link")}>Email me a link instead</button>}
+                    {supportsPhoneOtp && <button type="button" className="ha-link-btn" onClick={() => setFormView("phone-otp")}>Text me a code instead</button>}
                   </div>
                 </form>
               )}
@@ -604,14 +500,14 @@ export function SqlOSHeadlessAuthPanel() {
                     {loading ? "Sending..." : "Send recovery email"}
                   </button>
                   <div className="ha-alt">
-                    <button type="button" className="ha-link-btn" onClick={() => setView(email ? "password" : "login")}>Back to sign in</button>
+                    <button type="button" className="ha-link-btn" onClick={() => setFormView(email ? "password" : "login")}>Back to sign in</button>
                   </div>
                 </form>
               )}
 
               {view === "forgot-password-sent" && (
                 <div className="ha-form">
-                  <button type="button" className="ha-submit" onClick={() => setView("login")}>
+                  <button type="button" className="ha-submit" onClick={() => setFormView("login")}>
                     Back to sign in
                   </button>
                 </div>
@@ -630,7 +526,7 @@ export function SqlOSHeadlessAuthPanel() {
                   <div className="ha-field">
                     <label htmlFor="ha-confirm-password-flow">Confirm password</label>
                     <input id="ha-confirm-password-flow" type="password" value={confirmNewPassword} onChange={(e) => setConfirmNewPassword(e.target.value)} autoComplete="new-password" required />
-                    {fieldErrors.confirmNewPassword && <p className="ha-field-error">{fieldErrors.confirmNewPassword}</p>}
+                    {confirmMismatch && <p className="ha-field-error">{confirmMismatch}</p>}
                   </div>
                   <button type="submit" className="ha-submit" disabled={loading}>
                     {loading ? "Resetting..." : "Reset password"}
@@ -648,10 +544,10 @@ export function SqlOSHeadlessAuthPanel() {
                     {loading ? "Sending code..." : "Email me a code"}
                   </button>
                   <div className="ha-alt">
-                    {supportsPassword && <button type="button" className="ha-link-btn" onClick={() => setView("password")}>Use password instead</button>}
-                    {supportsMagicLink && <button type="button" className="ha-link-btn" onClick={() => setView("magic-link")}>Email me a link instead</button>}
-                    {supportsPhoneOtp && <button type="button" className="ha-link-btn" onClick={() => setView("phone-otp")}>Text me a code instead</button>}
-                    <button type="button" className="ha-link-btn" onClick={() => setView("login")}>Use a different email</button>
+                    {supportsPassword && <button type="button" className="ha-link-btn" onClick={() => setFormView("password")}>Use password instead</button>}
+                    {supportsMagicLink && <button type="button" className="ha-link-btn" onClick={() => setFormView("magic-link")}>Email me a link instead</button>}
+                    {supportsPhoneOtp && <button type="button" className="ha-link-btn" onClick={() => setFormView("phone-otp")}>Text me a code instead</button>}
+                    <button type="button" className="ha-link-btn" onClick={() => setFormView("login")}>Use a different email</button>
                   </div>
                 </form>
               )}
@@ -666,10 +562,10 @@ export function SqlOSHeadlessAuthPanel() {
                     {loading ? "Verifying..." : "Verify code"}
                   </button>
                   <div className="ha-alt">
-                    <button type="button" className="ha-link-btn" onClick={() => setView("email-otp")}>Send a new code</button>
-                    {supportsPassword && <button type="button" className="ha-link-btn" onClick={() => setView("password")}>Use password instead</button>}
-                    {supportsMagicLink && <button type="button" className="ha-link-btn" onClick={() => setView("magic-link")}>Email me a link instead</button>}
-                    {supportsPhoneOtp && <button type="button" className="ha-link-btn" onClick={() => setView("phone-otp")}>Use phone instead</button>}
+                    <button type="button" className="ha-link-btn" onClick={() => setFormView("email-otp")}>Send a new code</button>
+                    {supportsPassword && <button type="button" className="ha-link-btn" onClick={() => setFormView("password")}>Use password instead</button>}
+                    {supportsMagicLink && <button type="button" className="ha-link-btn" onClick={() => setFormView("magic-link")}>Email me a link instead</button>}
+                    {supportsPhoneOtp && <button type="button" className="ha-link-btn" onClick={() => setFormView("phone-otp")}>Use phone instead</button>}
                   </div>
                 </form>
               )}
@@ -684,10 +580,10 @@ export function SqlOSHeadlessAuthPanel() {
                     {loading ? "Sending link..." : "Email me a link"}
                   </button>
                   <div className="ha-alt">
-                    {supportsEmailOtp && <button type="button" className="ha-link-btn" onClick={() => setView("email-otp")}>Use an email code instead</button>}
-                    {supportsPassword && <button type="button" className="ha-link-btn" onClick={() => setView("password")}>Use password instead</button>}
-                    {supportsPhoneOtp && <button type="button" className="ha-link-btn" onClick={() => setView("phone-otp")}>Text me a code instead</button>}
-                    <button type="button" className="ha-link-btn" onClick={() => setView("login")}>Use a different email</button>
+                    {supportsEmailOtp && <button type="button" className="ha-link-btn" onClick={() => setFormView("email-otp")}>Use an email code instead</button>}
+                    {supportsPassword && <button type="button" className="ha-link-btn" onClick={() => setFormView("password")}>Use password instead</button>}
+                    {supportsPhoneOtp && <button type="button" className="ha-link-btn" onClick={() => setFormView("phone-otp")}>Text me a code instead</button>}
+                    <button type="button" className="ha-link-btn" onClick={() => setFormView("login")}>Use a different email</button>
                   </div>
                 </form>
               )}
@@ -695,12 +591,12 @@ export function SqlOSHeadlessAuthPanel() {
               {view === "magic-link-sent" && (
                 <div className="ha-form">
                   <div className="ha-success">If the account exists, a sign-in link is on the way.</div>
-                  <button type="button" className="ha-submit" disabled={loading} onClick={() => setView("magic-link")}>
+                  <button type="button" className="ha-submit" disabled={loading} onClick={() => setFormView("magic-link")}>
                     Request another link
                   </button>
                   <div className="ha-alt">
-                    {supportsEmailOtp && <button type="button" className="ha-link-btn" onClick={() => setView("email-otp")}>Use an email code instead</button>}
-                    {supportsPassword && <button type="button" className="ha-link-btn" onClick={() => setView("password")}>Use password instead</button>}
+                    {supportsEmailOtp && <button type="button" className="ha-link-btn" onClick={() => setFormView("email-otp")}>Use an email code instead</button>}
+                    {supportsPassword && <button type="button" className="ha-link-btn" onClick={() => setFormView("password")}>Use password instead</button>}
                   </div>
                 </div>
               )}
@@ -715,9 +611,9 @@ export function SqlOSHeadlessAuthPanel() {
                     {loading ? "Sending code..." : "Text me a code"}
                   </button>
                   <div className="ha-alt">
-                    {supportsPassword && <button type="button" className="ha-link-btn" onClick={() => setView("password")}>Use password instead</button>}
-                    {supportsEmailOtp && <button type="button" className="ha-link-btn" onClick={() => setView("email-otp")}>Use email instead</button>}
-                    <button type="button" className="ha-link-btn" onClick={() => setView("login")}>Use a different email</button>
+                    {supportsPassword && <button type="button" className="ha-link-btn" onClick={() => setFormView("password")}>Use password instead</button>}
+                    {supportsEmailOtp && <button type="button" className="ha-link-btn" onClick={() => setFormView("email-otp")}>Use email instead</button>}
+                    <button type="button" className="ha-link-btn" onClick={() => setFormView("login")}>Use a different email</button>
                   </div>
                 </form>
               )}
@@ -732,10 +628,10 @@ export function SqlOSHeadlessAuthPanel() {
                     {loading ? "Verifying..." : "Verify code"}
                   </button>
                   <div className="ha-alt">
-                    <button type="button" className="ha-link-btn" onClick={() => setView("phone-otp")}>Send a new code</button>
-                    {supportsPassword && <button type="button" className="ha-link-btn" onClick={() => setView("password")}>Use password instead</button>}
-                    {supportsEmailOtp && <button type="button" className="ha-link-btn" onClick={() => setView("email-otp")}>Use email instead</button>}
-                    {supportsMagicLink && <button type="button" className="ha-link-btn" onClick={() => setView("magic-link")}>Email me a link instead</button>}
+                    <button type="button" className="ha-link-btn" onClick={() => setFormView("phone-otp")}>Send a new code</button>
+                    {supportsPassword && <button type="button" className="ha-link-btn" onClick={() => setFormView("password")}>Use password instead</button>}
+                    {supportsEmailOtp && <button type="button" className="ha-link-btn" onClick={() => setFormView("email-otp")}>Use email instead</button>}
+                    {supportsMagicLink && <button type="button" className="ha-link-btn" onClick={() => setFormView("magic-link")}>Email me a link instead</button>}
                   </div>
                 </form>
               )}
@@ -782,8 +678,8 @@ export function SqlOSHeadlessAuthPanel() {
                   </button>
                   <div className="ha-alt">
                     Already have an account?{" "}
-                    <button type="button" className="ha-link-btn" onClick={() => setView("login")}>Sign in</button>
-                    {supportsPhoneOtp && <button type="button" className="ha-link-btn" onClick={() => setView("phone-otp-signup")}>Create account with SMS</button>}
+                    <button type="button" className="ha-link-btn" onClick={() => setFormView("login")}>Sign in</button>
+                    {supportsPhoneOtp && <button type="button" className="ha-link-btn" onClick={() => setFormView("phone-otp-signup")}>Create account with SMS</button>}
                   </div>
                 </form>
               )}
@@ -823,8 +719,8 @@ export function SqlOSHeadlessAuthPanel() {
                     {loading ? "Sending code..." : "Text me a code"}
                   </button>
                   <div className="ha-alt">
-                    <button type="button" className="ha-link-btn" onClick={() => setView("signup")}>Use email and password</button>
-                    <button type="button" className="ha-link-btn" onClick={() => setView("login")}>Sign in</button>
+                    <button type="button" className="ha-link-btn" onClick={() => setFormView("signup")}>Use email and password</button>
+                    <button type="button" className="ha-link-btn" onClick={() => setFormView("login")}>Sign in</button>
                   </div>
                 </form>
               )}
@@ -839,7 +735,7 @@ export function SqlOSHeadlessAuthPanel() {
                     {loading ? "Creating account..." : "Verify and create account"}
                   </button>
                   <div className="ha-alt">
-                    <button type="button" className="ha-link-btn" onClick={() => setView("phone-otp-signup")}>Start over</button>
+                    <button type="button" className="ha-link-btn" onClick={() => setFormView("phone-otp-signup")}>Start over</button>
                   </div>
                 </form>
               )}
@@ -949,6 +845,17 @@ export function SqlOSHeadlessAuthPanel() {
                       </button>
                     </>
                   )}
+                </div>
+              )}
+
+              {!HANDLED_VIEWS.has(view) && (
+                <div className="ha-form">
+                  <p className="ha-helper-text">
+                    SqlOS needs the &ldquo;{view}&rdquo; step, which this page does not draw. Continue with hosted sign-in to finish.
+                  </p>
+                  <button type="button" className="ha-submit" onClick={() => void startHostedSqlOSSignIn("login", nextPath)}>
+                    Continue with hosted sign-in
+                  </button>
                 </div>
               )}
 

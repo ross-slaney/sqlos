@@ -1,0 +1,87 @@
+{
+  "name": "@sqlos/headless",
+  "version": "4.1.0",
+  "description": "SqlOS headless AuthPage state machine. Drives identify, password, OTP, MFA, and consent until an authorization code; it is not an OAuth/OIDC client.",
+  "license": "MIT",
+  "author": "Ross Slaney",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ross-slaney/sqlos.git",
+    "directory": "packages/headless"
+  },
+  "homepage": "https://sqlos.dev/docs/reference/headless-js",
+  "bugs": {
+    "url": "https://github.com/ross-slaney/sqlos/issues"
+  },
+  "keywords": [
+    "sqlos",
+    "headless",
+    "authpage",
+    "pkce"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "import": "./dist/react.js",
+      "require": "./dist/react.cjs"
+    },
+    "./react-native": {
+      "types": "./dist/react-native.d.ts",
+      "react-native": "./dist/react-native.js",
+      "import": "./dist/react-native.js",
+      "require": "./dist/react-native.cjs",
+      "default": "./dist/react-native.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "tsc --noEmit && vitest run && node scripts/verify-headless-contract.mjs",
+    "test:watch": "vitest"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-native": "*"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "react-native": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.2.0",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.2",
+    "jsdom": "^26.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.0"
+  }
+}

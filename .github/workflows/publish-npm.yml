@@ -1,0 +1,169 @@
+# Single npm publish entry point. npm Trusted Publishing (OIDC) allows only ONE
+# trusted publisher per package and matches the caller workflow's filename — so
+# PR-preview and release `latest` MUST live in this file. They cannot be split
+# across two workflows. Register `publish-npm.yml` as the trusted publisher for
+# `@sqlos/headless` on npmjs.com (no GitHub environment).
+#
+# Adapted from emcy-cli's publish-npm.yml. SqlOS still publishes NuGet from
+# publish.yml on the same GitHub release; that workflow does not publish npm.
+
+name: Publish @sqlos/headless
+
+on:
+  release:
+    types: [published]
+  pull_request:
+    branches: [main]
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+    # Preview publish is rare — most PRs are backend-only. Gate on the package
+    # (and this workflow) so unrelated PRs do not spam immutable -pr.* versions.
+    # Do NOT path-gate the headless-package job in pull-request.yml: that job
+    # runs the contract drift check against the .NET headless service.
+    paths:
+      - "packages/headless/**"
+      - ".github/workflows/publish-npm.yml"
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish to npm
+    if: >
+      github.event_name == 'release' ||
+      (github.event_name == 'pull_request' &&
+       github.event.action != 'closed' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Do not set registry-url here. setup-node would write an empty
+      # _authToken into .npmrc and npm would skip OIDC (ENEEDAUTH).
+      # Node 24 here, unlike NODE_VERSION 20 in pull-request.yml / main.yml:
+      # npm Trusted Publishing (OIDC provenance) needs npm 11+, which ships
+      # with Node 24. The package itself still supports Node >= 20.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Update npm for trusted publishing
+        run: npm install -g npm@11
+      - name: Confirm OIDC publish environment
+        run: |
+          node -v
+          npm -v
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+            echo "GitHub OIDC is not available. The job needs permissions.id-token: write."
+            exit 1
+          fi
+      - run: npm ci
+        working-directory: packages/headless
+      - name: Prepare package metadata
+        id: meta
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          # pull_request GITHUB_SHA is the temporary merge commit, which GitHub can
+          # reuse across pushes. Fingerprint the PR head so each synchronize gets a
+          # unique immutable version.
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        working-directory: packages/headless
+        run: |
+          node <<'NODE' >> "$GITHUB_OUTPUT"
+          const fs = require("node:fs");
+          const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+          const isPreview = Boolean(process.env.PR_NUMBER);
+
+          if (isPreview) {
+            // Prereleases sort below their base (4.1.0-pr.* < 4.1.0). Bump to the
+            // next patch so unreleased previews sort above the current latest.
+            const current = String(pkg.version).split("-")[0];
+            const parts = current.split(".").map((part) => Number.parseInt(part, 10));
+            if (parts.length !== 3 || parts.some((part) => Number.isNaN(part))) {
+              throw new Error(`packages/headless version is not semver X.Y.Z: ${pkg.version}`);
+            }
+            const previewBase = `${parts[0]}.${parts[1]}.${parts[2] + 1}`;
+            const shortSha = String(process.env.PR_HEAD_SHA || process.env.GITHUB_SHA)
+              .slice(0, 12)
+              .replace(/[^0-9A-Za-z-]/g, "");
+            pkg.version = `${previewBase}-pr.${process.env.PR_NUMBER}.${shortSha}.${process.env.GITHUB_RUN_NUMBER}.${process.env.GITHUB_RUN_ATTEMPT}`;
+            fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
+          }
+
+          const tag = isPreview ? `pr-${process.env.PR_NUMBER}` : "latest";
+          const packageUrl = `https://www.npmjs.com/package/${pkg.name}/v/${pkg.version}`;
+          console.log(`package_name=${pkg.name}`);
+          console.log(`version=${pkg.version}`);
+          console.log(`tag=${tag}`);
+          console.log(`package_ref=${pkg.name}@${pkg.version}`);
+          console.log(`tag_ref=${pkg.name}@${tag}`);
+          console.log(`package_url=${packageUrl}`);
+          NODE
+      - name: Verify npm version matches SqlOS on release
+        if: github.event_name == 'release'
+        run: |
+          CS_VERSION="$(sed -n 's/.*<Version>\([^<]*\)<\/Version>.*/\1/p' src/SqlOS/SqlOS.csproj | head -n 1)"
+          NPM_VERSION="$(node -p "require('./packages/headless/package.json').version")"
+          if [ "$CS_VERSION" != "$NPM_VERSION" ]; then
+            echo "SqlOS $CS_VERSION does not match @sqlos/headless $NPM_VERSION"
+            exit 1
+          fi
+      - run: npm test
+        working-directory: packages/headless
+      - run: npm run build
+        working-directory: packages/headless
+      - name: Publish to npm
+        working-directory: packages/headless
+        run: npm publish --provenance --access public --tag "${{ steps.meta.outputs.tag }}"
+      # npm often says the package "may take a few minutes to become available"
+      # after a successful publish. Keep retrying longer than the old 60s window.
+      - name: Verify published package
+        run: |
+          for attempt in {1..36}; do
+            if npm view "${{ steps.meta.outputs.package_ref }}" version; then
+              exit 0
+            fi
+            echo "Package is not visible in npm yet; retrying ($attempt/36)."
+            sleep 5
+          done
+          npm view "${{ steps.meta.outputs.package_ref }}" version
+      - name: Comment package preview
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          PACKAGE_NAME: ${{ steps.meta.outputs.package_name }}
+          PACKAGE_REF: ${{ steps.meta.outputs.package_ref }}
+          TAG_REF: ${{ steps.meta.outputs.tag_ref }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          PACKAGE_URL: ${{ steps.meta.outputs.package_url }}
+        with:
+          script: |
+            const marker = `<!-- sqlos-preview-package:${process.env.PACKAGE_NAME} -->`;
+            const body = [
+              marker,
+              "Preview package published.",
+              "",
+              `- Package: [${process.env.PACKAGE_REF}](${process.env.PACKAGE_URL})`,
+              `- Dist tag: \`${process.env.TAG}\``,
+              `- Install: \`npm i ${process.env.TAG_REF}\``,
+              "",
+              "In-repo examples keep using the local `file:` path. Do not point CI at this preview tag.",
+            ].join("\n");
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+            const existing = comments.find((comment) => comment.body?.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }

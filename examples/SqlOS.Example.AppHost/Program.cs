@@ -1,6 +1,26 @@
 using Aspire.Hosting;
 
+// Ports are configurable so the browser e2e tests
+// (examples/SqlOS.Example.E2eTests) can boot this same app host on alternate
+// ports with an ephemeral SQL container while a manually started demo keeps
+// running on the defaults. Everything derived (issuer, frontend origins,
+// callback URIs, CORS, seeded clients) flows from these values.
 var builder = DistributedApplication.CreateBuilder(args);
+
+var apiPort = GetPort(builder.Configuration["Example:ApiPort"], 5062);
+var webPort = GetPort(builder.Configuration["Example:WebPort"], 3010);
+var angularPort = GetPort(builder.Configuration["Example:AngularPort"], 4200);
+var sqlPort = GetPort(builder.Configuration["Example:SqlPort"], 1434);
+var ephemeralSql = string.Equals(
+    builder.Configuration["Example:EphemeralSql"], "true", StringComparison.OrdinalIgnoreCase);
+// The Todo API and the ASP.NET Core web client are independent of the retail
+// example; tests that only need the retail stack skip them.
+var includeTodoStack = !string.Equals(
+    builder.Configuration["Example:IncludeTodoStack"], "false", StringComparison.OrdinalIgnoreCase);
+
+var apiOrigin = $"http://localhost:{apiPort}";
+var webOrigin = $"http://localhost:{webPort}";
+var angularOrigin = $"http://localhost:{angularPort}";
 
 const int todoPort = 5080;
 var todoOrigin = $"http://localhost:{todoPort}";
@@ -33,23 +53,34 @@ var microsoftOidcTenant = builder.Configuration["SqlOS:Oidc:Microsoft:Tenant"]
     ?? builder.Configuration["AZURE_OIDC_MICROSOFT_TENANT"];
 var sqlPassword = builder.AddParameter("sql-password", value: "LocalDevPassword123!");
 
-var sql = builder.AddSqlServer("sql", password: sqlPassword, port: 1434)
-    .WithLifetime(ContainerLifetime.Persistent)
-    .WithDataVolume()
+var sql = builder.AddSqlServer("sql", password: sqlPassword, port: sqlPort)
     .WithContainerRuntimeArgs("--platform", "linux/amd64");
 
-var exampleDatabase = sql.AddDatabase("sqlos-example");
-var todoDatabase = sql.AddDatabase("sqlos-todo");
+if (!ephemeralSql)
+{
+    // The demo keeps a persistent container with a data volume so accounts
+    // survive restarts; tests opt out so they never share state with it.
+    sql = sql.WithLifetime(ContainerLifetime.Persistent)
+        .WithDataVolume();
+}
 
-var api = builder.AddProject<Projects.SqlOS_Example_Api>("api")
+var exampleDatabase = sql.AddDatabase("sqlos-example");
+
+// launchProfileName: null keeps the launchSettings port (5062) from being
+// claimed by the Aspire proxy, so the configured port is the only one bound.
+var api = builder.AddProject<Projects.SqlOS_Example_Api>("api", launchProfileName: null)
+    .WithHttpEndpoint(port: apiPort, isProxied: false)
     .WithReference(exampleDatabase)
     .WaitFor(exampleDatabase)
+    .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development")
+    .WithEnvironment("ASPNETCORE_URLS", apiOrigin)
     .WithEnvironment("ConnectionStrings__DefaultConnection", exampleDatabase.Resource.ConnectionStringExpression)
-    .WithEnvironment("SqlOS__Issuer", "http://localhost:5062/sqlos/auth")
-    .WithEnvironment("SqlOS__HeadlessFrontendUrl", "http://localhost:3010")
-    .WithEnvironment("ExampleFrontend__Origin", "http://localhost:3010")
-    .WithEnvironment("ExampleFrontend__CallbackUrl", "http://localhost:3010/auth/callback")
-    .WithEnvironment("ExampleFrontend__ClientId", "example-web");
+    .WithEnvironment("SqlOS__Issuer", $"{apiOrigin}/sqlos/auth")
+    .WithEnvironment("SqlOS__HeadlessFrontendUrl", webOrigin)
+    .WithEnvironment("ExampleFrontend__Origin", webOrigin)
+    .WithEnvironment("ExampleFrontend__CallbackUrl", $"{webOrigin}/auth/callback")
+    .WithEnvironment("ExampleFrontend__ClientId", "example-web")
+    .WithEnvironment("ExampleFrontend__AngularOrigin", angularOrigin);
 
 if (!string.IsNullOrWhiteSpace(emailConnectionString) && !string.IsNullOrWhiteSpace(emailFromAddress))
 {
@@ -96,6 +127,10 @@ if (!string.IsNullOrWhiteSpace(microsoftOidcClientId) && !string.IsNullOrWhiteSp
         api.WithEnvironment("SqlOS__Oidc__Microsoft__Tenant", microsoftOidcTenant);
     }
 }
+
+if (includeTodoStack)
+{
+var todoDatabase = sql.AddDatabase("sqlos-todo");
 
 var todoApi = builder.AddProject<Projects.SqlOS_Todo_Api>("todo-api")
     .WithReference(todoDatabase)
@@ -147,18 +182,26 @@ if (!string.IsNullOrWhiteSpace(phoneOtpDefaultRegion))
 {
     todoApi.WithEnvironment("SqlOS__PhoneOtp__DefaultRegion", phoneOtpDefaultRegion);
 }
+}
 
 builder.AddNpmApp("web", "../SqlOS.Example.Web", "dev")
-    .WithHttpEndpoint(port: 3010, env: "PORT", isProxied: false)
+    .WithHttpEndpoint(port: webPort, env: "PORT", isProxied: false)
     .WithEnvironment("NODE_ENV", "development")
-    .WithEnvironment("NEXT_PUBLIC_API_URL", api.GetEndpoint("http"))
-    .WithEnvironment("NEXTAUTH_URL", "http://localhost:3010")
+    .WithEnvironment("NEXT_PUBLIC_API_URL", apiOrigin)
+    .WithEnvironment("NEXTAUTH_URL", webOrigin)
     .WithEnvironment("NEXTAUTH_SECRET", "sqlos-example-local-secret")
+    // Each stack compiles into its own Next.js dist directory; two dev servers
+    // sharing one .next (demo + e2e tests) corrupt each other's builds.
+    .WithEnvironment("NEXT_DIST_DIR", webPort == 3010 ? ".next" : $".next-{webPort}")
     .WaitFor(api);
 
 builder.AddNpmApp("angular-web", "../SqlOS.Example.AngularWeb", "dev")
-    .WithHttpEndpoint(port: 4200, env: "PORT", isProxied: false)
+    .WithHttpEndpoint(port: angularPort, env: "PORT", isProxied: false)
     .WithEnvironment("NODE_ENV", "development")
+    .WithEnvironment("SQLOS_API_URL", apiOrigin)
     .WaitFor(api);
 
 builder.Build().Run();
+
+static int GetPort(string? configured, int fallback) =>
+    int.TryParse(configured, out var port) ? port : fallback;

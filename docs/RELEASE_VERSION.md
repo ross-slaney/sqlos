@@ -23,3 +23,5 @@ dotnet build SqlOS.sln
 4. Publish the GitHub release with the matching version tag.
 
 The publish workflow now blocks package publication if those checked items are missing from the release body.
+
+The same GitHub release also publishes `@sqlos/headless` at the matching version. Bump `packages/headless/package.json` with `SqlOS.csproj`. Operator setup for npm trusted publishing is in [NPM_PUBLISHING.md](NPM_PUBLISHING.md).

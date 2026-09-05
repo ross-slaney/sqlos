@@ -13,8 +13,6 @@ document.addEventListener("DOMContentLoaded", async () => {
       await handleCallbackPage();
     } else if (page === "app") {
       await initAppPage();
-    } else if (page === "headless") {
-      await initHeadlessPage();
     }
   } catch (error) {
     console.error(error);
@@ -106,37 +104,6 @@ async function initAppPage() {
   });
 
   await refreshTodos(todoList, sessionInfo);
-}
-
-async function initHeadlessPage() {
-  const requestInfo = document.getElementById("headless-request-info");
-  const requestId = new URLSearchParams(window.location.search).get("request");
-
-  if (!requestId) {
-    requestInfo.textContent = "No headless authorization request is active.";
-    return;
-  }
-
-  const requestResponse = await fetch(`/sqlos/auth/headless/requests/${encodeURIComponent(requestId)}`);
-  const requestModel = await requestResponse.json();
-  if (!requestResponse.ok) {
-    requestInfo.textContent = JSON.stringify(requestModel, null, 2);
-    throw new Error(requestModel.message || "Unable to load the headless request.");
-  }
-
-  requestInfo.textContent = JSON.stringify(
-    {
-      clientId: requestModel.clientId,
-      clientName: requestModel.clientName,
-      authBasePath: requestModel.authBasePath,
-      headlessApiBasePath: requestModel.headlessApiBasePath,
-      view: requestModel.view,
-      email: requestModel.email,
-      error: requestModel.error
-    },
-    null,
-    2
-  );
 }
 
 async function refreshTodos(todoListElement, sessionInfoElement) {

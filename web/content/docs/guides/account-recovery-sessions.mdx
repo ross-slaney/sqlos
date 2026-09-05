@@ -170,7 +170,14 @@ public sealed record HarborPasswordResetRequest(string Token, string NewPassword
 
 Add the rest of Harbor's password policy here: maximum length, compromised-password screening, and product-specific rules. Never log request bodies for the reset endpoint, because both the reset token and new password are secrets.
 
-The equivalent built-in headless endpoints are:
+A product-owned recovery UI on AuthPage should use [`@sqlos/headless`](/docs/reference/headless-js) (`flow.password.forgot` / `flow.password.reset`). Views are `forgot-password`, `forgot-password-sent`, and `password-reset`. Actions resolve on validation errors — read `error` and `fieldErrors`. See [Build your own login and signup UI](/docs/guides/custom-login-ui).
+
+```ts
+await flow.password.forgot({ email });
+await flow.password.reset({ token, newPassword });
+```
+
+The equivalent HTTP wire routes are:
 
 ```text
 POST /sqlos/auth/headless/password/forgot
@@ -375,6 +382,8 @@ Harbor users recover local-password accounts through an enumeration-safe, one-ti
 ## Next steps
 
 - [Password Login](/docs/authserver/password-login)
+- [`@sqlos/headless`](/docs/reference/headless-js)
+- [Build a custom login UI](/docs/guides/custom-login-ui)
 - [Sessions and Tokens](/docs/authserver/sessions-and-tokens)
 - [Refresh and Logout](/docs/authserver/refresh-and-logout)
 - [Token Validation](/docs/authserver/token-validation)

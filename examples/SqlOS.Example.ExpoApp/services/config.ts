@@ -4,4 +4,4 @@ import { Platform } from "react-native";
 const localhost = Platform.OS === "android" ? "10.0.2.2" : "localhost";
 
 export const API_URL = `http://${localhost}:5062`;
-export const CLIENT_ID = "example-web";
+export const CLIENT_ID = "example-expo";

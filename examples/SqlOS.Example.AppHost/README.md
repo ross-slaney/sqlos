@@ -31,6 +31,7 @@ The SQL image is started with the `linux/amd64` platform argument. Docker may em
 Install the two JavaScript applications once, then start Aspire from the repository root:
 
 ```bash
+npm ci --prefix packages/headless && npm run build --prefix packages/headless
 npm ci --prefix examples/SqlOS.Example.Web
 npm ci --prefix examples/SqlOS.Example.AngularWeb
 dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
@@ -69,9 +70,23 @@ The orchestration code in [`Program.cs`](Program.cs) deliberately makes local ca
 | Next.js | `NEXTAUTH_SECRET` | A local-only sample secret |
 | Todo API | connection string, issuer, origin, resource | Local `sqlos-todo` and `http://localhost:5080` URLs |
 
-The Angular API URL and client ID are compile-time values in [`environment.ts`](../SqlOS.Example.AngularWeb/src/app/environments/environment.ts): `http://localhost:5062` and `example-angular`.
+| Example API | `ExampleFrontend__AngularOrigin` | `http://localhost:4200` (seeded `example-angular` callback + CORS) |
+| Angular | `SQLOS_API_URL` | The example API origin; `scripts/write-env.mjs` writes it to `public/env.js` before `dev`, `start`, and `build` |
 
-The fixed ports are part of the seeded OAuth redirect URIs and issuer configuration. If you change one, update the AppHost environment, the corresponding client, and the client redirect registration together.
+The Angular client ID is a compile-time value in [`environment.ts`](../SqlOS.Example.AngularWeb/src/app/environments/environment.ts) (`example-angular`); its API URL is read at runtime from the generated `env.js` and defaults to `http://localhost:5062`.
+
+The ports are configurable so a second copy of the stack can run next to the demo. Everything derived (issuer, frontend origins, callback URIs, CORS, the seeded clients) flows from them:
+
+| Setting | Default | Used by |
+| --- | --- | --- |
+| `Example:ApiPort` | `5062` | Example API, issuer, `NEXT_PUBLIC_API_URL`, `SQLOS_API_URL` |
+| `Example:WebPort` | `3010` | Next.js, `NEXTAUTH_URL`, headless frontend URL, `example-web` callbacks |
+| `Example:AngularPort` | `4200` | Angular, `example-angular` callback, CORS |
+| `Example:SqlPort` | `1434` | SQL Server container |
+| `Example:EphemeralSql` | `false` | `true` drops the persistent container and data volume |
+| `Example:IncludeTodoStack` | `true` | `false` skips the Todo API and ASP.NET Core client |
+
+[`SqlOS.Example.E2eTests`](../SqlOS.Example.E2eTests/SqlOS.Example.E2eTests.csproj) boots this app host with `5162`/`3110`/`4300`/`1439`, an ephemeral database, and no Todo stack.
 
 ## Add optional email, phone, or Microsoft login
 

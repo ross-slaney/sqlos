@@ -6,7 +6,7 @@ This Angular 19 application shows how a single-page app integrates with SqlOS th
 
 - standalone Angular components and route guards
 - hosted SqlOS sign-in and sign-up via `angular-oauth2-oidc`
-- headless password, email OTP, signup, provider, and organization-selection states
+- headless password, email OTP, signup, provider, organization-selection, and MFA states
 - library-owned PKCE, discovery, and refresh
 - bearer API requests
 - FGA-filtered retail navigation and CRUD screens
@@ -19,6 +19,7 @@ The Angular client is intentionally independent of the Next.js implementation so
 From the repository root:
 
 ```bash
+npm ci --prefix packages/headless && npm run build --prefix packages/headless
 npm ci --prefix examples/SqlOS.Example.Web
 npm ci --prefix examples/SqlOS.Example.AngularWeb
 dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
@@ -44,11 +45,11 @@ Use the hosted sign-in or sign-up action.
 
 Start the custom/headless path. The same OIDC library starts `/authorize`. SqlOS directs interaction to Angular's `/auth/authorize` route, then the library finishes the code at `/auth/callback`.
 
-[`SqlosHeadlessService`](src/app/services/sqlos-headless.service.ts) retrieves the server-owned view model and posts actions back with credentialed requests. [`AuthAuthorizeComponent`](src/app/pages/auth-authorize/auth-authorize.component.ts) renders password, email-code, signup, organization-selection, and provider states.
+[`AuthAuthorizeComponent`](src/app/pages/auth-authorize/auth-authorize.component.ts) uses `createHeadlessFlow` from `@sqlos/headless`, subscribes to flow state (`status`, `view`, `viewModel`, `error`, `fieldErrors`), and renders login, password, email-code, signup, organization-selection, MFA, and provider states; any other view falls back to hosted sign-in. Actions resolve with status; the component does not catch those rejections. On redirect it calls `window.location.assign(flow.redirectUrl)`.
 
 Headless signup sends first name, last name, and a required referral source to the API's application hook.
 
-The Angular headless UI is deliberately smaller than the Next.js reference: it does not currently implement phone OTP, password reset, or MFA screens.
+The Angular headless UI is deliberately smaller than the Next.js reference: it does not implement phone OTP, magic link, or password reset screens. When SqlOS returns one of those views the page offers hosted sign-in instead of dead-ending.
 
 ## Explore authorization
 
@@ -71,26 +72,29 @@ Unlike the Next.js sample, Angular does not currently include the delegated SSO 
 Start [`SqlOS.Example.Api`](../SqlOS.Example.Api/README.md) at `http://localhost:5062`, then:
 
 ```bash
+npm ci --prefix packages/headless && npm run build --prefix packages/headless
 npm ci --prefix examples/SqlOS.Example.AngularWeb
 npm run dev --prefix examples/SqlOS.Example.AngularWeb
 ```
 
 Open `http://localhost:4200`.
 
-The development script binds to `0.0.0.0` and uses port `4200` unless `PORT` is supplied. The OAuth registration is fixed to `http://localhost:4200/auth/callback`, so changing `PORT` also requires changing the seeded redirect URI.
+The development script binds to `0.0.0.0` and uses port `4200` unless `PORT` is supplied. The OAuth registration defaults to `http://localhost:4200/auth/callback`; the API reads `ExampleFrontend:AngularOrigin` to seed another origin, which the AppHost sets from `Example:AngularPort`.
 
 ## Configuration
 
-The client configuration is checked into [`src/app/environments/environment.ts`](src/app/environments/environment.ts):
+The API origin is runtime configuration. `scripts/write-env.mjs` runs before `dev`, `start`, and `build` and writes `public/env.js` (git-ignored) from `SQLOS_API_URL`, defaulting to `http://localhost:5062`; `index.html` loads it before the bundle and [`src/app/environments/environment.ts`](src/app/environments/environment.ts) reads it:
 
 ```typescript
 export const environment = {
-  apiUrl: 'http://localhost:5062',
+  apiUrl: runtime.SQLOS_API_URL ?? 'http://localhost:5062',
   clientId: 'example-angular',
 };
 ```
 
-The current build does not read an AppHost-provided API URL. To target another host, replace these values through your Angular environment/build configuration and update the SqlOS client's exact redirect URI. Never add a client secret: this browser application is a public PKCE client.
+The Aspire AppHost sets `SQLOS_API_URL` so a second copy of this app (the browser e2e tests on port `4300`) can target an API on another port. Never add a client secret: this browser application is a public PKCE client.
+
+`angular.json` excludes `@sqlos/headless` from the dev server's Vite prebundle. The package is a `file:` link, and Vite's dependency cache does not notice a rebuilt `dist` when the version is unchanged, so without the exclusion `ng serve` can keep serving a stale copy of the package.
 
 The API allows credentialed CORS requests from `http://localhost:4200` in addition to its configured primary frontend origin. Those credentials are used by the headless AuthPage session; application API requests use bearer or example demo headers.
 
@@ -102,12 +106,11 @@ The API allows credentialed CORS requests from `http://localhost:4200` in additi
 | [`src/app/environments/environment.ts`](src/app/environments/environment.ts) | API origin and public client ID |
 | [`src/app/auth.config.ts`](src/app/auth.config.ts) | `angular-oauth2-oidc` issuer, redirect URI, and scopes |
 | [`src/app/app.config.ts`](src/app/app.config.ts) | Discovery + `tryLogin` on startup |
-| [`src/app/services/sqlos-headless.service.ts`](src/app/services/sqlos-headless.service.ts) | Calls to the SqlOS headless AuthPage endpoints |
 | [`src/app/services/auth.service.ts`](src/app/services/auth.service.ts) | OIDC session sync, library refresh, sign-out, demo overrides |
 | [`src/app/services/api.service.ts`](src/app/services/api.service.ts) | Protected API requests |
 | [`src/app/guards/auth.guard.ts`](src/app/guards/auth.guard.ts) | Retail route protection |
 | [`src/app/pages/auth-callback/auth-callback.component.ts`](src/app/pages/auth-callback/auth-callback.component.ts) | Hosted OAuth callback completion |
-| [`src/app/pages/auth-authorize/auth-authorize.component.ts`](src/app/pages/auth-authorize/auth-authorize.component.ts) | Custom headless auth UI |
+| [`src/app/pages/auth-authorize/auth-authorize.component.ts`](src/app/pages/auth-authorize/auth-authorize.component.ts) | Custom headless auth UI via `createHeadlessFlow` |
 | [`src/app/pages/retail/dashboard/dashboard.component.ts`](src/app/pages/retail/dashboard/dashboard.component.ts) | Representative protected retail page |
 | [`src/app/components/user-switcher/user-switcher.component.ts`](src/app/components/user-switcher/user-switcher.component.ts) | Local demo identity selection |
 
@@ -120,6 +123,7 @@ This makes protocol behavior easy to inspect, but it is still sample storage. Ch
 ## Build and test
 
 ```bash
+npm ci --prefix packages/headless && npm run build --prefix packages/headless
 npm ci --prefix examples/SqlOS.Example.AngularWeb
 npm run build --prefix examples/SqlOS.Example.AngularWeb
 ```

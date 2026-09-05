@@ -38,6 +38,7 @@ builder.AddSqlOS<ExampleAppDbContext>(
         var exampleOrigin = (builder.Configuration["ExampleFrontend:Origin"] ?? "http://localhost:3000").TrimEnd('/');
         var exampleCallbackUrl = builder.Configuration["ExampleFrontend:CallbackUrl"] ?? $"{exampleOrigin}/auth/callback";
         var exampleAuthJsCallbackUrl = $"{exampleOrigin}/api/auth/callback/sqlos";
+        var angularOrigin = (builder.Configuration["ExampleFrontend:AngularOrigin"] ?? "http://localhost:4200").TrimEnd('/');
         var emailConnectionString = builder.Configuration["SqlOS:Email:AzureCommunicationServicesConnectionString"]
             ?? builder.Configuration["SqlOS:EmailOtp:AzureCommunicationServicesConnectionString"]
             ?? builder.Configuration["AZURE_EMAIL_CONNECTION_STRING"];
@@ -161,12 +162,18 @@ builder.AddSqlOS<ExampleAppDbContext>(
             auth,
             "example-angular",
             "Example Angular Client",
-            "http://localhost:4200/auth/callback");
-        SeedExamplePublicClient(
-            auth,
-            "example-expo",
-            "Example Expo Client",
-            "sqlos-expo://auth-callback");
+            $"{angularOrigin}/auth/callback");
+        auth.SeedClient(client =>
+        {
+            client.ClientId = "example-expo";
+            client.Name = "Example Expo Client";
+            client.RedirectUris = ["sqlos-expo://auth-callback"];
+            client.ClientType = "public_pkce";
+            client.RequirePkce = true;
+            client.IsFirstParty = true;
+            client.AllowNativeHeadlessAuth = true;
+            client.AllowedScopes = ["openid", "profile", "email", "offline_access"];
+        });
 
         // Seed the Microsoft social connection only when credentials are supplied so a fresh checkout
         // without Azure configured still boots cleanly (the button simply does not appear).
@@ -304,7 +311,8 @@ builder.Services.AddCors(options =>
     options.AddPolicy("example-frontend", policy =>
     {
         var origin = builder.Configuration["ExampleFrontend:Origin"] ?? "http://localhost:3000";
-        policy.WithOrigins(origin, "http://localhost:4200")
+        var angularOrigin = builder.Configuration["ExampleFrontend:AngularOrigin"] ?? "http://localhost:4200";
+        policy.WithOrigins(origin, angularOrigin)
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
