@@ -1,13 +1,13 @@
 using System.Data;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using SqlOS.AuditLogs;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Models;
+using SqlOS.Database;
 using SqlOS.Pagination;
 
 namespace SqlOS.AuthServer.Services;
@@ -287,8 +287,7 @@ public sealed partial class SqlOSAdminService
     private async Task<List<SqlOSScimConnection>> LockSeededScimConnectionsForReconciliationAsync(
         CancellationToken cancellationToken)
     {
-        if (!_context.Database.IsRelational()
-            || !string.Equals(_context.Database.ProviderName, "Microsoft.EntityFrameworkCore.SqlServer", StringComparison.Ordinal))
+        if (!_context.Database.IsRelational())
         {
             return await _context.Set<SqlOSScimConnection>()
                 .Where(connection => connection.Source == SqlOSScimSources.Seeded)
@@ -297,12 +296,19 @@ public sealed partial class SqlOSAdminService
         }
 
         var schema = string.IsNullOrWhiteSpace(_options.Schema) ? "dbo" : _options.Schema.Trim();
-        var quotedSchema = schema.Replace("]", "]]", StringComparison.Ordinal);
+        var provider = SqlOSDatabase.Resolve(_context.Database);
+        var sql = provider.BuildLockedSelectSql(
+            schema,
+            "SqlOSScimConnections",
+            $"{provider.QuoteIdentifier("Source")} = @source",
+            provider.QuoteIdentifier("Id"));
+        if (provider.Kind == SqlOSDatabaseProviderKind.SqlServer)
+        {
+            sql += " OPTION (MAXDOP 1)";
+        }
 #pragma warning disable EF1002 // The schema is an escaped identifier; the source remains a SQL parameter.
         return await _context.Set<SqlOSScimConnection>()
-            .FromSqlRaw(
-                $"SELECT * FROM [{quotedSchema}].[SqlOSScimConnections] WITH (UPDLOCK, HOLDLOCK) WHERE [Source] = @source ORDER BY [Id] OPTION (MAXDOP 1)",
-                new SqlParameter("@source", SqlOSScimSources.Seeded))
+            .FromSqlRaw(sql, provider.CreateParameter("@source", SqlOSScimSources.Seeded))
             .ToListAsync(cancellationToken);
 #pragma warning restore EF1002
     }
@@ -703,19 +709,18 @@ public sealed partial class SqlOSAdminService
         string connectionId,
         CancellationToken cancellationToken)
     {
-        if (!_context.Database.IsRelational()
-            || !string.Equals(_context.Database.ProviderName, "Microsoft.EntityFrameworkCore.SqlServer", StringComparison.Ordinal))
+        if (!_context.Database.IsRelational())
         {
             return await GetRequiredScimConnectionAsync(connectionId, cancellationToken);
         }
 
         var schema = string.IsNullOrWhiteSpace(_options.Schema) ? "dbo" : _options.Schema.Trim();
-        var quotedSchema = schema.Replace("]", "]]", StringComparison.Ordinal);
+        var provider = SqlOSDatabase.Resolve(_context.Database);
 #pragma warning disable EF1002 // The schema is an escaped identifier; the connection id remains a SQL parameter.
         var connection = await _context.Set<SqlOSScimConnection>()
             .FromSqlRaw(
-                $"SELECT * FROM [{quotedSchema}].[SqlOSScimConnections] WITH (UPDLOCK, HOLDLOCK) WHERE [Id] = @connectionId",
-                new SqlParameter("@connectionId", connectionId))
+                provider.BuildLockedSelectSql(schema, "SqlOSScimConnections", $"{provider.QuoteIdentifier("Id")} = @connectionId"),
+                provider.CreateParameter("@connectionId", connectionId))
             .SingleOrDefaultAsync(cancellationToken);
 #pragma warning restore EF1002
         return connection ?? throw new InvalidOperationException("SCIM connection not found.");
@@ -903,7 +908,7 @@ public sealed partial class SqlOSAdminService
                     .AsNoTracking()
                     .AnyAsync(item => item.Id == commitMarkerId, cancellationToken);
             },
-            IsolationLevel.Serializable,
+            SqlOSDatabase.ExclusiveWorkIsolationLevel(_context.Database),
             cancellationToken);
     }
 

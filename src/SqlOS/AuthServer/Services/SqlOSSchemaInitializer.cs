@@ -1,11 +1,9 @@
-using System.Reflection;
-using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Interfaces;
+using SqlOS.Database;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -27,7 +25,9 @@ public sealed class SqlOSSchemaInitializer
 
     public async Task EnsureSchemaAsync(CancellationToken cancellationToken = default)
     {
-        var migrations = DiscoverMigrations();
+        var provider = SqlOSDatabase.Resolve(_context.Database);
+        var assembly = typeof(SqlOSSchemaInitializer).Assembly;
+        var migrations = SqlOSMigrationManifest.Discover(assembly, provider.AuthMigrationResourcePrefix);
         if (migrations.Count == 0)
         {
             _logger.LogWarning("No SqlOS migration scripts found.");
@@ -35,34 +35,14 @@ public sealed class SqlOSSchemaInitializer
         }
 
         var schema = _options.Schema;
-        var ensureVersionTableSql = $@"
-IF NOT EXISTS (SELECT * FROM sys.schemas WHERE name = '{schema}')
-BEGIN
-    EXEC('CREATE SCHEMA [{schema}]');
-END
-IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'SqlOSSchema' AND schema_id = SCHEMA_ID('{schema}'))
-BEGIN
-    CREATE TABLE [{schema}].[SqlOSSchema] ([Version] INT NOT NULL);
-END
-IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'SqlOSAppliedMigrations' AND schema_id = SCHEMA_ID('{schema}'))
-BEGIN
-    CREATE TABLE [{schema}].[SqlOSAppliedMigrations] (
-        [Sequence] BIGINT IDENTITY(1,1) NOT NULL,
-        [ScriptName] NVARCHAR(450) NOT NULL,
-        [Version] INT NOT NULL,
-        [AppliedAt] DATETIME2 NOT NULL,
-        CONSTRAINT [PK_SqlOSAppliedMigrations] PRIMARY KEY ([ScriptName]),
-        CONSTRAINT [UX_SqlOSAppliedMigrations_Sequence] UNIQUE ([Sequence])
-    );
-END";
-        await _context.Database.ExecuteSqlRawAsync(ensureVersionTableSql, cancellationToken);
+        await _context.Database.ExecuteSqlRawAsync(provider.BuildEnsureAuthVersionTablesSql(schema), cancellationToken);
 
-        var currentVersion = await GetCurrentVersionAsync(schema, cancellationToken);
+        var currentVersion = await GetCurrentVersionAsync(provider, schema, cancellationToken);
         var orderedMigrations = migrations
             .OrderBy(x => x.Version)
             .ThenBy(x => x.ResourceName, StringComparer.Ordinal)
             .ToList();
-        var appliedMigrations = await GetAppliedMigrationsAsync(schema, cancellationToken);
+        var appliedMigrations = await GetAppliedMigrationsAsync(provider, schema, cancellationToken);
         if (appliedMigrations.Count == 0 && currentVersion > 0)
         {
             // Legacy installations only recorded the latest version. Scripts below that
@@ -78,7 +58,7 @@ END";
             {
                 foreach (var migration in legacyAppliedMigrations)
                 {
-                    await RecordAppliedMigrationAsync(schema, migration, cancellationToken);
+                    await RecordAppliedMigrationAsync(provider, schema, migration, cancellationToken);
                 }
             }, cancellationToken);
             foreach (var migration in legacyAppliedMigrations)
@@ -101,37 +81,22 @@ END";
             _logger.LogInformation("Running SqlOS schema migration {Version}: {Name}", migration.Version, migration.Name);
             await ExecuteInTransactionAsync(async () =>
             {
-                await RunScriptAsync(migration.ResourceName, cancellationToken);
-                await RecordAppliedMigrationAsync(schema, migration, cancellationToken);
+                await RunScriptAsync(provider, migration.ResourceName, cancellationToken);
+                await RecordAppliedMigrationAsync(provider, schema, migration, cancellationToken);
             }, cancellationToken);
         }
 
         var targetVersion = orderedMigrations.Max(x => x.Version);
-        var updateVersionSql = $"UPDATE [{schema}].[SqlOSSchema] SET [Version] = @targetVersion";
-        await _context.Database.ExecuteSqlRawAsync(updateVersionSql, [new SqlParameter("@targetVersion", targetVersion)], cancellationToken);
+        await _context.Database.ExecuteSqlRawAsync(
+            provider.BuildUpdateVersionSql(schema),
+            [provider.CreateParameter("@targetVersion", targetVersion)],
+            cancellationToken);
     }
 
-    private List<MigrationScript> DiscoverMigrations()
-    {
-        var assembly = typeof(SqlOSSchemaInitializer).Assembly;
-        var pattern = new Regex(@"^SqlOS\.AuthServer\.Schema\.(\d+)_(.+)\.sql$", RegexOptions.IgnoreCase);
-        var migrations = new List<MigrationScript>();
-
-        foreach (var name in assembly.GetManifestResourceNames())
-        {
-            var match = pattern.Match(name);
-            if (!match.Success)
-            {
-                continue;
-            }
-
-            migrations.Add(new MigrationScript(int.Parse(match.Groups[1].Value), match.Groups[2].Value, name));
-        }
-
-        return migrations;
-    }
-
-    private async Task<int> GetCurrentVersionAsync(string schema, CancellationToken cancellationToken)
+    private async Task<int> GetCurrentVersionAsync(
+        ISqlOSDatabaseProvider provider,
+        string schema,
+        CancellationToken cancellationToken)
     {
         var connection = _context.Database.GetDbConnection();
         var wasOpen = connection.State == System.Data.ConnectionState.Open;
@@ -143,7 +108,7 @@ END";
         try
         {
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = $"SELECT TOP 1 [Version] FROM [{schema}].[SqlOSSchema]";
+            cmd.CommandText = provider.BuildSelectVersionSql(schema);
             var result = await cmd.ExecuteScalarAsync(cancellationToken);
             return result != null && result != DBNull.Value ? Convert.ToInt32(result) : 0;
         }
@@ -156,7 +121,10 @@ END";
         }
     }
 
-    private async Task<HashSet<string>> GetAppliedMigrationsAsync(string schema, CancellationToken cancellationToken)
+    private async Task<HashSet<string>> GetAppliedMigrationsAsync(
+        ISqlOSDatabaseProvider provider,
+        string schema,
+        CancellationToken cancellationToken)
     {
         var connection = _context.Database.GetDbConnection();
         var wasOpen = connection.State == System.Data.ConnectionState.Open;
@@ -168,7 +136,7 @@ END";
         try
         {
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = $"SELECT [ScriptName] FROM [{schema}].[SqlOSAppliedMigrations]";
+            cmd.CommandText = provider.BuildSelectAppliedMigrationsSql(schema);
             var result = new HashSet<string>(StringComparer.Ordinal);
             await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
@@ -187,18 +155,18 @@ END";
         }
     }
 
-    private Task RecordAppliedMigrationAsync(string schema, MigrationScript migration, CancellationToken cancellationToken)
-    {
-        var sql = $@"
-IF NOT EXISTS (SELECT 1 FROM [{schema}].[SqlOSAppliedMigrations] WHERE [ScriptName] = @scriptName)
-BEGIN
-    INSERT INTO [{schema}].[SqlOSAppliedMigrations] ([ScriptName], [Version], [AppliedAt])
-    VALUES (@scriptName, @version, SYSUTCDATETIME());
-END";
-        return _context.Database.ExecuteSqlRawAsync(sql,
-            [new SqlParameter("@scriptName", migration.ResourceName), new SqlParameter("@version", migration.Version)],
+    private Task RecordAppliedMigrationAsync(
+        ISqlOSDatabaseProvider provider,
+        string schema,
+        SqlOSMigrationManifest.Script migration,
+        CancellationToken cancellationToken)
+        => _context.Database.ExecuteSqlRawAsync(
+            provider.BuildRecordAppliedMigrationSql(schema),
+            [
+                provider.CreateParameter("@scriptName", migration.ResourceName),
+                provider.CreateParameter("@version", migration.Version)
+            ],
             cancellationToken);
-    }
 
     private async Task ExecuteInTransactionAsync(Func<Task> operation, CancellationToken cancellationToken)
     {
@@ -211,7 +179,10 @@ END";
         });
     }
 
-    private async Task RunScriptAsync(string resourceName, CancellationToken cancellationToken)
+    private async Task RunScriptAsync(
+        ISqlOSDatabaseProvider provider,
+        string resourceName,
+        CancellationToken cancellationToken)
     {
         var assembly = typeof(SqlOSSchemaInitializer).Assembly;
         await using var stream = assembly.GetManifestResourceStream(resourceName)
@@ -220,14 +191,9 @@ END";
         var rawSql = await reader.ReadToEndAsync(cancellationToken);
         var sql = rawSql.Replace("{Schema}", _options.Schema);
 
-        var batches = Regex.Split(sql, @"^\s*GO\s*$", RegexOptions.Multiline | RegexOptions.IgnoreCase)
-            .Where(x => !string.IsNullOrWhiteSpace(x));
-
-        foreach (var batch in batches)
+        foreach (var batch in provider.SplitBatches(sql))
         {
             await _context.Database.ExecuteSqlRawAsync(batch, cancellationToken);
         }
     }
-
-    private sealed record MigrationScript(int Version, string Name, string ResourceName);
 }

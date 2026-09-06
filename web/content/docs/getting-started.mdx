@@ -17,13 +17,13 @@ order: 0
   - **SqlOS 4.2.0**
   - **.NET 9** (`net9.0`)
   - **EF Core 9**
-  - **SQL Server**
+  - **SQL Server or PostgreSQL**
 </Callout>
 
 ## Pick your first result
 
 <CardGrid cols={2}>
-  <Card title="I want to see it work" description="Run the Todo sample with SQL Server, hosted login, and FGA already wired." href="/docs/quickstarts/run-todo" />
+  <Card title="I want to see it work" description="Run the Todo sample with SQL Server or PostgreSQL, hosted login, and FGA already wired." href="/docs/quickstarts/run-todo" />
   <Card title="I want it in my app" description="Install the package and declare one application with UseSingleApplication." href="/docs/quickstarts/add-to-app" />
   <Card title="I need a .NET login" description="Use ASP.NET Core OAuth, PKCE, a secure cookie, and revoking logout." href="/docs/quickstarts/aspnet-core-login" />
   <Card title="I want working source" description="Compare the runnable .NET, browser, mobile, and CLI examples." href="/docs/examples" />
@@ -36,7 +36,7 @@ Running the sample is the fastest evaluation. Adding SqlOS to your application i
 For a typical .NET B2B SaaS product, start with:
 
 - one ASP.NET Core host;
-- one EF Core `DbContext` backed by SQL Server;
+- one EF Core `DbContext` backed by SQL Server or PostgreSQL;
 - one first-party public PKCE application;
 - the hosted SqlOS login page;
 - the embedded dashboard;
@@ -59,6 +59,8 @@ builder.AddSqlOS<AppDbContext>(
         options.Dashboard.Password = dashboardPassword;
     });
 ```
+
+Switch the EF callback to `UseNpgsql(connectionString)` to run the same host on PostgreSQL. See [Choose SQL Server or PostgreSQL](/docs/guides/choosing-a-provider).
 
 `UseSingleApplication` creates one first-party PKCE client, a callback at `{Origin}/auth/callback`, a default client allowlist (`openid`, `profile`, `email`, `offline_access`), and matching AuthPage branding. With [OpenID Provider mode](/docs/authserver/openid-provider) enabled (the default), authorization-server metadata advertises `openid`, `profile`, and `email`; `offline_access` stays on the client only for gateway compatibility and is not advertised, because SqlOS issues refresh tokens to code-flow clients without gating them on that scope. Advanced public-client registration and resource indicators remain off until you opt in.
 

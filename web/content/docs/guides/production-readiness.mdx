@@ -11,7 +11,7 @@ section: guides
   href="../getting-started"
   actionLabel="Getting Started"
 >
-  SqlOS runs inside your ASP.NET Core process and stores identity and authorization state in your SQL Server database. A production deployment therefore has three parts to operate together: your application, the database, and the ASP.NET Core Data Protection key ring.
+  SqlOS runs inside your ASP.NET Core process and stores identity and authorization state in your SQL Server or PostgreSQL database. A production deployment therefore has three parts to operate together: your application, the database, and the ASP.NET Core Data Protection key ring.
 </Banner>
 
 This guide is the handoff between “the login flow works” and “the team can safely deploy, scale, restore, and troubleshoot it.” It describes the controls present in the current package and calls out the controls your host or platform must provide.
@@ -27,7 +27,7 @@ Use this as the minimum deployment contract:
 | Component | Production responsibility |
 | --- | --- |
 | ASP.NET Core host | Stable public issuer, trusted proxy handling, HTTPS, SqlOS configuration, health endpoints, logs |
-| SQL Server | Durable SqlOS and application data, backups, encryption, capacity, recovery testing |
+| SQL Server or PostgreSQL | Durable SqlOS and application data, backups, encryption, capacity, recovery testing |
 | Data Protection key ring | Shared by every replica and revision, durable across replacement, backed up, encrypted at rest |
 | Edge or reverse proxy | TLS, trusted forwarded headers, admin-route access control, rate limiting, request limits |
 | Deployment controller | One-writer schema rollout, readiness gates, compatible replicas, rollback/runbook |
@@ -227,9 +227,9 @@ SqlOS owns its tables separately from your EF Core migrations. At host startup, 
 4. applies the FGA scripts tracked by `SqlOSFgaSchema`;
 5. creates or verifies FGA functions and seed data when enabled.
 
-`Fga.MaxResourceHierarchyDepth` is one shared limit for resource synchronization, manual resource helpers, in-process authorization, and the SQL authorization function. Valid values are 1 through 100 because SQL Server limits the recursive CTE used by list authorization to 100 levels. Startup validates persisted resources against that limit and fails with the affected resource ID when existing data is deeper or cyclic. Before lowering the value, inspect and repair the stored hierarchy in a restored environment; do not lower it during a rollout and rely on authorization to silently truncate deeper ancestors.
+`Fga.MaxResourceHierarchyDepth` is one shared limit for resource synchronization, manual resource helpers, in-process authorization, and the SQL authorization function. Valid values are 1 through 100 because the recursive CTE used by list authorization is capped at 100 levels on both SQL Server and PostgreSQL. Startup validates persisted resources against that limit and fails with the affected resource ID when existing data is deeper or cyclic. Before lowering the value, inspect and repair the stored hierarchy in a restored environment; do not lower it during a rollout and rely on authorization to silently truncate deeper ancestors.
 
-The SQL authorization function is installed with `CREATE OR ALTER FUNCTION`, which requires SQL Server 2016 SP1 or newer. Updating SqlOS does not drop the live function during startup, so concurrent authorization queries never observe a missing-function window. If manual database changes introduce a cycle or a hierarchy deeper than the configured limit, the function terminates and denies access rather than returning a partial inherited grant.
+The SQL authorization function is installed without dropping the live object: SQL Server uses `CREATE OR ALTER FUNCTION` (2016 SP1 or newer) and PostgreSQL uses `CREATE OR REPLACE FUNCTION`. Updating SqlOS does not drop the live function during startup, so concurrent authorization queries never observe a missing-function window. If manual database changes introduce a cycle or a hierarchy deeper than the configured limit, the function terminates and denies access rather than returning a partial inherited grant.
 
 Each AuthServer script and its ledger entry commit in one transaction, so an interrupted startup safely retries the unrecorded script. The initializer does **not** acquire a distributed migration lock, wrap the entire release upgrade in one cross-script transaction, or provide down migrations.
 
@@ -253,7 +253,7 @@ Treat rollback as a recovery decision, not “deploy the old binary and hope.”
 The current package does not add health endpoints. Your host should expose separate liveness and readiness checks:
 
 - **Liveness** answers whether the process should be restarted. Do not make it depend on every external identity provider.
-- **Readiness** should stay false until application startup succeeds and should verify the SQL Server dependency your login and authorization paths require.
+- **Readiness** should stay false until application startup succeeds and should verify the SQL Server or PostgreSQL dependency your login and authorization paths require.
 - If your policy requires a schema assertion, add a host-owned check for the expected `SqlOSSchema` and `SqlOSFgaSchema` versions. Update that expectation with the package version.
 - Keep detailed diagnostics private; public health responses should not reveal connection strings, schema names, or provider errors.
 
@@ -284,7 +284,7 @@ Alert on:
 
 ## 8. Back up and restore the identity system
 
-The SQL Server backup must include SqlOS auth, FGA, audit, email, and calendar tables alongside any application rows that refer to them. The recovery plan must also include:
+The database backup must include SqlOS auth, FGA, audit, email, and calendar tables alongside any application rows that refer to them. The recovery plan must also include:
 
 - the matching Data Protection key ring and its at-rest decryption material;
 - application configuration and secret-provider versions;

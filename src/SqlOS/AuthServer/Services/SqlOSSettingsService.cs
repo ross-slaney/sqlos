@@ -1,10 +1,10 @@
-using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Database;
 using SqlOS.AuditLogs;
 using System.Text.Json;
 
@@ -205,7 +205,7 @@ public sealed class SqlOSSettingsService
         {
             await _context.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException ex) when (ex.GetBaseException() is SqlException { Number: 2601 or 2627 })
+        catch (DbUpdateException ex) when (SqlOSDatabaseErrors.IsUniqueConstraintViolation(ex))
         {
             if (_context is DbContext dbContext)
             {

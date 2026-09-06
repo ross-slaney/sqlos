@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using System.Text.RegularExpressions;
-using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -117,7 +116,7 @@ public sealed class SchemaInitializerIntegrationTests
             await IndexExistsAsync(AspireFixture.SharedContext, "SqlOSScopeDisplayNames", "UX_SqlOSScopeDisplayNames_Scope"),
             "Scope display names need a unique Scope index.");
         Assert.AreEqual(
-            "Latin1_General_100_BIN2",
+            TestDatabase.BinaryCollation,
             await ScalarStringAsync(
                 AspireFixture.SharedContext,
                 "SELECT COLLATION_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'SqlOSScopeDisplayNames' AND COLUMN_NAME = 'Scope'"),
@@ -129,7 +128,7 @@ public sealed class SchemaInitializerIntegrationTests
                 "SELECT CHARACTER_MAXIMUM_LENGTH FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'SqlOSScopeDisplayNames' AND COLUMN_NAME = 'ConfigurationSourceKey'"),
             "ConfigurationSourceKey stores the scope string, so it must fit every Scope value.");
         Assert.AreEqual(
-            "Latin1_General_100_BIN2",
+            TestDatabase.BinaryCollation,
             await ScalarStringAsync(
                 AspireFixture.SharedContext,
                 "SELECT COLLATION_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'SqlOSScopeDisplayNames' AND COLUMN_NAME = 'ConfigurationSourceKey'"),
@@ -188,7 +187,7 @@ public sealed class SchemaInitializerIntegrationTests
         try
         {
             var dbOptions = new DbContextOptionsBuilder<TestSqlOSDbContext>()
-                .UseSqlServer(databaseConnectionString, sql => sql.EnableRetryOnFailure())
+                .UseTestProvider(databaseConnectionString, sql => sql.EnableRetryOnFailure())
                 .Options;
             await using var context = new TestSqlOSDbContext(dbOptions);
             var initializer = new SqlOSSchemaInitializer(
@@ -206,7 +205,7 @@ public sealed class SchemaInitializerIntegrationTests
             CollectionAssert.AreEqual(expectedOrder, initialOrder,
                 "Migration order must be version-first and script-name deterministic.");
 
-            await context.Database.ExecuteSqlRawAsync("""
+            await context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite($"""
                 DROP TABLE [dbo].[SqlOSEmailDeliveries];
                 DROP TABLE [dbo].[SqlOSEmailTemplates];
                 DROP TABLE [dbo].[SqlOSMfaAttemptReservationBuckets];
@@ -217,43 +216,31 @@ public sealed class SchemaInitializerIntegrationTests
                 DROP TABLE [dbo].[SqlOSPasswordLoginBuckets];
                 DELETE FROM [dbo].[SqlOSAppliedMigrations]
                 WHERE [ScriptName] IN (
-                    'SqlOS.AuthServer.Schema.017_PasswordLoginAbuse.sql',
-                    'SqlOS.AuthServer.Schema.017_TransactionalEmail.sql',
-                    'SqlOS.AuthServer.Schema.039_AtomicPasswordLoginAdmission.sql',
-                    'SqlOS.AuthServer.Schema.040_MfaAttemptAdmission.sql');
+                    '{AppliedMigrationScriptName("017_PasswordLoginAbuse.sql")}',
+                    '{AppliedMigrationScriptName("017_TransactionalEmail.sql")}',
+                    '{AppliedMigrationScriptName("039_AtomicPasswordLoginAdmission.sql")}',
+                    '{AppliedMigrationScriptName("040_MfaAttemptAdmission.sql")}');
                 UPDATE [dbo].[SqlOSSchema] SET [Version] = 17;
-                """);
+                """));
 
             await initializer.EnsureSchemaAsync();
 
             Assert.AreEqual(3, await ScalarIntAsync(context,
                 "SELECT COUNT(*) FROM [dbo].[SqlOSAppliedMigrations] WHERE [Version] = 17"));
-            Assert.AreEqual(1, await ScalarIntAsync(context,
-                "SELECT COUNT(*) FROM sys.tables WHERE [name] = 'SqlOSPasswordLoginBuckets'"));
-            Assert.AreEqual(1, await ScalarIntAsync(context,
-                "SELECT COUNT(*) FROM sys.tables WHERE [name] = 'SqlOSPasswordLoginReservations'"));
-            Assert.AreEqual(1, await ScalarIntAsync(context,
-                "SELECT COUNT(*) FROM sys.tables WHERE [name] = 'SqlOSPasswordLoginReservationBuckets'"));
-            Assert.AreEqual(1, await ScalarIntAsync(context,
-                "SELECT COUNT(*) FROM sys.tables WHERE [name] = 'SqlOSMfaAttemptBuckets'"));
-            Assert.AreEqual(1, await ScalarIntAsync(context,
-                "SELECT COUNT(*) FROM sys.tables WHERE [name] = 'SqlOSMfaAttemptReservations'"));
-            Assert.AreEqual(1, await ScalarIntAsync(context,
-                "SELECT COUNT(*) FROM sys.tables WHERE [name] = 'SqlOSMfaAttemptReservationBuckets'"));
-            Assert.AreEqual(0, await ScalarIntAsync(context, """
-                SELECT COUNT(*) FROM sys.indexes
-                WHERE [name] = 'IX_SqlOSPasswordLoginBuckets_ClientKey_UpdatedAt'
-                  AND [object_id] = OBJECT_ID('[dbo].[SqlOSPasswordLoginBuckets]')
-                """));
-            Assert.AreEqual(1, await ScalarIntAsync(context,
-                "SELECT COUNT(*) FROM sys.tables WHERE [name] = 'SqlOSEmailTemplates'"));
-            Assert.AreEqual(1, await ScalarIntAsync(context,
-                "SELECT COUNT(*) FROM sys.tables WHERE [name] = 'SqlOSEmailDeliveries'"));
+            Assert.IsTrue(await TableExistsAsync(context, "SqlOSPasswordLoginBuckets"));
+            Assert.IsTrue(await TableExistsAsync(context, "SqlOSPasswordLoginReservations"));
+            Assert.IsTrue(await TableExistsAsync(context, "SqlOSPasswordLoginReservationBuckets"));
+            Assert.IsTrue(await TableExistsAsync(context, "SqlOSMfaAttemptBuckets"));
+            Assert.IsTrue(await TableExistsAsync(context, "SqlOSMfaAttemptReservations"));
+            Assert.IsTrue(await TableExistsAsync(context, "SqlOSMfaAttemptReservationBuckets"));
+            Assert.IsFalse(await IndexExistsAsync(context, "SqlOSPasswordLoginBuckets", "IX_SqlOSPasswordLoginBuckets_ClientKey_UpdatedAt"));
+            Assert.IsTrue(await TableExistsAsync(context, "SqlOSEmailTemplates"));
+            Assert.IsTrue(await TableExistsAsync(context, "SqlOSEmailDeliveries"));
             Assert.AreEqual(CurrentSchemaVersion, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
         }
         finally
         {
-            SqlConnection.ClearAllPools();
+            TestDatabase.ClearPools();
             await DropDatabaseAsync(databaseName);
         }
     }
@@ -319,16 +306,12 @@ public sealed class SchemaInitializerIntegrationTests
             await IndexExistsAsync(AspireFixture.SharedContext, "SqlOSSigningKeys", "UX_SqlOSSigningKeys_OneActive"),
             "SqlOSSigningKeys should enforce a single active key at the database boundary.");
         Assert.AreEqual(
-            4096,
-            await ScalarIntAsync(
-                AspireFixture.SharedContext,
-                "SELECT COL_LENGTH('dbo.SqlOSAuthorizationRequests', 'State')"),
+            2048,
+            await TestCatalog.GetStringColumnMaxLengthAsync(AspireFixture.SharedContext, "SqlOSAuthorizationRequests", "State"),
             "OAuth state must accommodate ASP.NET Core's protected correlation state.");
         Assert.AreEqual(
-            4096,
-            await ScalarIntAsync(
-                AspireFixture.SharedContext,
-                "SELECT COL_LENGTH('dbo.SqlOSAuthorizationCodes', 'State')"),
+            2048,
+            await TestCatalog.GetStringColumnMaxLengthAsync(AspireFixture.SharedContext, "SqlOSAuthorizationCodes", "State"),
             "Authorization codes must preserve the complete OAuth state value.");
     }
 
@@ -375,7 +358,7 @@ public sealed class SchemaInitializerIntegrationTests
         try
         {
             var dbOptions = new DbContextOptionsBuilder<TestSqlOSDbContext>()
-                .UseSqlServer(databaseConnectionString)
+                .UseTestProvider(databaseConnectionString)
                 .Options;
 
             await using var context = new TestSqlOSDbContext(dbOptions);
@@ -414,7 +397,7 @@ public sealed class SchemaInitializerIntegrationTests
         try
         {
             var dbOptions = new DbContextOptionsBuilder<TestSqlOSDbContext>()
-                .UseSqlServer(databaseConnectionString)
+                .UseTestProvider(databaseConnectionString)
                 .Options;
 
             await using var context = new TestSqlOSDbContext(dbOptions);
@@ -454,7 +437,7 @@ public sealed class SchemaInitializerIntegrationTests
         try
         {
             var dbOptions = new DbContextOptionsBuilder<TestSqlOSDbContext>()
-                .UseSqlServer(databaseConnectionString)
+                .UseTestProvider(databaseConnectionString)
                 .Options;
 
             await using var context = new TestSqlOSDbContext(dbOptions);
@@ -474,36 +457,12 @@ public sealed class SchemaInitializerIntegrationTests
                 Assert.IsTrue(await ColumnExistsAsync(context, "SqlOSScimExternalIds", column));
             }
 
-            Assert.AreEqual(
-                1,
-                await ScalarIntAsync(
-                    context,
-                    "SELECT CAST([is_nullable] AS INT) FROM sys.columns WHERE [object_id] = OBJECT_ID('dbo.SqlOSScimExternalIds') AND [name] = 'ExternalId'"));
-            Assert.AreEqual(
-                1,
-                await ScalarIntAsync(
-                    context,
-                    "SELECT CAST([is_unique] AS INT) FROM sys.indexes WHERE [object_id] = OBJECT_ID('dbo.SqlOSScimExternalIds') AND [name] = 'IX_SqlOSScimExternalIds_Connection_Resource_External'"));
-            Assert.AreEqual(
-                1,
-                await ScalarIntAsync(
-                    context,
-                    "SELECT CAST([has_filter] AS INT) FROM sys.indexes WHERE [object_id] = OBJECT_ID('dbo.SqlOSScimExternalIds') AND [name] = 'IX_SqlOSScimExternalIds_Connection_Resource_External'"));
-            Assert.AreEqual(
-                1,
-                await ScalarIntAsync(
-                    context,
-                    "SELECT CAST([is_unique] AS INT) FROM sys.indexes WHERE [object_id] = OBJECT_ID('dbo.SqlOSScimExternalIds') AND [name] = 'IX_SqlOSScimExternalIds_Connection_Resource_Entity'"));
-            Assert.AreEqual(
-                1,
-                await ScalarIntAsync(
-                    context,
-                    "SELECT CAST([is_unique] AS INT) FROM sys.indexes WHERE [object_id] = OBJECT_ID('dbo.SqlOSScimExternalIds') AND [name] = 'IX_SqlOSScimExternalIds_Connection_Resource_UserName'"));
-            Assert.AreEqual(
-                1,
-                await ScalarIntAsync(
-                    context,
-                    "SELECT CAST([is_unique] AS INT) FROM sys.indexes WHERE [object_id] = OBJECT_ID('dbo.SqlOSScimConnections') AND [name] = 'UX_SqlOSScimConnections_OneEnabledPerOrganization'"));
+            Assert.AreEqual(1, await TestCatalog.ColumnIsNullableAsync(context, "SqlOSScimExternalIds", "ExternalId"));
+            Assert.AreEqual(1, await TestCatalog.IndexIsUniqueAsync(context, "SqlOSScimExternalIds", "IX_SqlOSScimExternalIds_Connection_Resource_External"));
+            Assert.AreEqual(1, await TestCatalog.IndexHasFilterAsync(context, "SqlOSScimExternalIds", "IX_SqlOSScimExternalIds_Connection_Resource_External"));
+            Assert.AreEqual(1, await TestCatalog.IndexIsUniqueAsync(context, "SqlOSScimExternalIds", "IX_SqlOSScimExternalIds_Connection_Resource_Entity"));
+            Assert.AreEqual(1, await TestCatalog.IndexIsUniqueAsync(context, "SqlOSScimExternalIds", "IX_SqlOSScimExternalIds_Connection_Resource_UserName"));
+            Assert.AreEqual(1, await TestCatalog.IndexIsUniqueAsync(context, "SqlOSScimConnections", "UX_SqlOSScimConnections_OneEnabledPerOrganization"));
 
             Assert.AreEqual(
                 1,
@@ -551,21 +510,32 @@ public sealed class SchemaInitializerIntegrationTests
                 1,
                 await ScalarIntAsync(context, "SELECT COUNT(*) FROM [dbo].[SqlOSScimManagedGrants] WHERE [GrantId] = 'grant_enabled' AND [RevokedAt] IS NULL"));
 
-            await context.Database.ExecuteSqlRawAsync("""
+            await context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("""
                 INSERT INTO [dbo].[SqlOSScimExternalIds] (
                     [Id], [ConnectionId], [ResourceType], [ExternalId], [EntityId],
                     [FgaSubjectId], [DisplayName], [IsActive], [CreatedAt], [UpdatedAt], [LastSyncedAt])
                 VALUES
                     ('ext_null_1', 'conn_new', 'User', NULL, 'user_null_1', NULL, NULL, 1, SYSUTCDATETIME(), SYSUTCDATETIME(), SYSUTCDATETIME()),
                     ('ext_null_2', 'conn_new', 'User', NULL, 'user_null_2', NULL, NULL, 1, SYSUTCDATETIME(), SYSUTCDATETIME(), SYSUTCDATETIME());
-                """);
+                """));
             Assert.AreEqual(
                 2,
                 await ScalarIntAsync(context, "SELECT COUNT(*) FROM [dbo].[SqlOSScimExternalIds] WHERE [ExternalId] IS NULL"));
 
-            await Assert.ThrowsExceptionAsync<SqlException>(async () =>
-                await context.Database.ExecuteSqlRawAsync(
-                    "UPDATE [dbo].[SqlOSScimConnections] SET [IsEnabled] = 1 WHERE [Id] = 'conn_old'"));
+            Exception? uniqueViolation = null;
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("UPDATE [dbo].[SqlOSScimConnections] SET [IsEnabled] = 1 WHERE [Id] = 'conn_old'"));
+            }
+            catch (Exception ex)
+            {
+                uniqueViolation = ex;
+            }
+
+            Assert.IsNotNull(uniqueViolation, "Enabling a second SCIM connection for the same organization must fail.");
+            Assert.IsTrue(
+                SqlOS.Database.SqlOSDatabaseErrors.IsUniqueConstraintViolation(uniqueViolation),
+                uniqueViolation.ToString());
         }
         finally
         {
@@ -583,7 +553,7 @@ public sealed class SchemaInitializerIntegrationTests
         try
         {
             var dbOptions = new DbContextOptionsBuilder<TestSqlOSDbContext>()
-                .UseSqlServer(databaseConnectionString)
+                .UseTestProvider(databaseConnectionString)
                 .Options;
 
             await using var context = new TestSqlOSDbContext(dbOptions);
@@ -598,15 +568,11 @@ public sealed class SchemaInitializerIntegrationTests
             await initializer.EnsureSchemaAsync();
 
             Assert.AreEqual(
-                4096,
-                await ScalarIntAsync(
-                    context,
-                    "SELECT COL_LENGTH('dbo.SqlOSAuthorizationRequests', 'State')"));
+                2048,
+                await TestCatalog.GetStringColumnMaxLengthAsync(context, "SqlOSAuthorizationRequests", "State"));
             Assert.AreEqual(
-                4096,
-                await ScalarIntAsync(
-                    context,
-                    "SELECT COL_LENGTH('dbo.SqlOSAuthorizationCodes', 'State')"));
+                2048,
+                await TestCatalog.GetStringColumnMaxLengthAsync(context, "SqlOSAuthorizationCodes", "State"));
             Assert.AreEqual(
                 new string('s', 256),
                 await ScalarStringAsync(
@@ -632,7 +598,7 @@ public sealed class SchemaInitializerIntegrationTests
         try
         {
             var dbOptions = new DbContextOptionsBuilder<TestSqlOSDbContext>()
-                .UseSqlServer(databaseConnectionString)
+                .UseTestProvider(databaseConnectionString)
                 .Options;
 
             await using var context = new TestSqlOSDbContext(dbOptions);
@@ -647,15 +613,11 @@ public sealed class SchemaInitializerIntegrationTests
             await initializer.EnsureSchemaAsync();
 
             Assert.AreEqual(
-                8000,
-                await ScalarIntAsync(
-                    context,
-                    "SELECT COL_LENGTH('dbo.SqlOSAuthorizationRequests', 'State')"));
+                4000,
+                await TestCatalog.GetStringColumnMaxLengthAsync(context, "SqlOSAuthorizationRequests", "State"));
             Assert.AreEqual(
                 -1,
-                await ScalarIntAsync(
-                    context,
-                    "SELECT COL_LENGTH('dbo.SqlOSAuthorizationCodes', 'State')"));
+                await TestCatalog.GetStringColumnMaxLengthAsync(context, "SqlOSAuthorizationCodes", "State"));
             Assert.AreEqual(
                 3000,
                 await ScalarIntAsync(
@@ -681,13 +643,13 @@ public sealed class SchemaInitializerIntegrationTests
         try
         {
             var dbOptions = new DbContextOptionsBuilder<TestSqlOSDbContext>()
-                .UseSqlServer(databaseConnectionString)
+                .UseTestProvider(databaseConnectionString)
                 .Options;
             await using var context = new TestSqlOSDbContext(dbOptions);
             using var rsa = RSA.Create(2048);
             var privateKeyPem = rsa.ExportPkcs8PrivateKeyPem();
             var publicKeyPem = rsa.ExportRSAPublicKeyPem();
-            await context.Database.ExecuteSqlRawAsync("""
+            await context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("""
                 CREATE TABLE [dbo].[SqlOSSchema] ([Version] INT NOT NULL);
                 INSERT INTO [dbo].[SqlOSSchema] ([Version]) VALUES (26);
 
@@ -701,16 +663,21 @@ public sealed class SchemaInitializerIntegrationTests
                     [ActivatedAt] DATETIME2 NOT NULL,
                     [RetiredAt] DATETIME2 NULL
                 );
-                """);
-            await context.Database.ExecuteSqlInterpolatedAsync($"""
-                INSERT INTO [dbo].[SqlOSSigningKeys] (
-                    [Id], [Kid], [Algorithm], [PublicKeyPem], [PrivateKeyPem],
-                    [IsActive], [ActivatedAt], [RetiredAt])
-                VALUES (
-                    {"key_legacy_plaintext"}, {"legacy-plaintext-kid"},
-                    {SecurityAlgorithms.RsaSha256}, {publicKeyPem}, {privateKeyPem},
-                    {true}, {DateTime.UtcNow}, NULL);
-                """);
+                """));
+            await context.Database.ExecuteSqlRawAsync(
+                TestDatabase.Rewrite("""
+                    INSERT INTO [dbo].[SqlOSSigningKeys] (
+                        [Id], [Kid], [Algorithm], [PublicKeyPem], [PrivateKeyPem],
+                        [IsActive], [ActivatedAt], [RetiredAt])
+                    VALUES ({0}, {1}, {2}, {3}, {4}, {5}, {6}, NULL);
+                    """),
+                "key_legacy_plaintext",
+                "legacy-plaintext-kid",
+                SecurityAlgorithms.RsaSha256,
+                publicKeyPem,
+                privateKeyPem,
+                true,
+                DateTime.UtcNow);
             await SeedScimMigrationPrerequisitesAsync(context);
 
             var initializer = new SqlOSSchemaInitializer(
@@ -742,111 +709,27 @@ public sealed class SchemaInitializerIntegrationTests
         }
     }
 
-    private static async Task<bool> TableExistsAsync(string tableName)
-        => await TableExistsAsync(AspireFixture.SharedContext, tableName);
+    private static Task<bool> TableExistsAsync(string tableName)
+        => TestCatalog.TableExistsAsync(AspireFixture.SharedContext, tableName);
 
-    private static async Task<bool> TableExistsAsync(DbContext context, string tableName)
-    {
-        var connection = context.Database.GetDbConnection();
-        await connection.OpenAsync();
-        try
-        {
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = "SELECT COUNT(*) FROM sys.tables WHERE name = @name AND schema_id = SCHEMA_ID('dbo')";
-            cmd.Parameters.Add(new SqlParameter("@name", tableName));
-            var result = await cmd.ExecuteScalarAsync();
-            return Convert.ToInt32(result) > 0;
-        }
-        finally
-        {
-            await connection.CloseAsync();
-        }
-    }
+    private static Task<bool> TableExistsAsync(DbContext context, string tableName)
+        => TestCatalog.TableExistsAsync(context, tableName);
 
-    private static async Task<bool> ForeignKeyExistsAsync(DbContext context, string tableName, string foreignKeyName)
-    {
-        var connection = context.Database.GetDbConnection();
-        await connection.OpenAsync();
-        try
-        {
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
-                SELECT COUNT(*)
-                FROM sys.foreign_keys fk
-                INNER JOIN sys.tables t ON fk.parent_object_id = t.object_id
-                WHERE t.name = @tableName
-                  AND fk.name = @foreignKeyName
-                  AND t.schema_id = SCHEMA_ID('dbo')
-                """;
-            cmd.Parameters.Add(new SqlParameter("@tableName", tableName));
-            cmd.Parameters.Add(new SqlParameter("@foreignKeyName", foreignKeyName));
-            var result = await cmd.ExecuteScalarAsync();
-            return Convert.ToInt32(result) > 0;
-        }
-        finally
-        {
-            await connection.CloseAsync();
-        }
-    }
+    private static Task<bool> ForeignKeyExistsAsync(DbContext context, string tableName, string foreignKeyName)
+        => TestCatalog.ForeignKeyExistsAsync(context, tableName, foreignKeyName);
 
-    private static async Task<bool> ColumnExistsAsync(string tableName, string columnName)
-        => await ColumnExistsAsync(AspireFixture.SharedContext, tableName, columnName);
+    private static Task<bool> ColumnExistsAsync(string tableName, string columnName)
+        => TestCatalog.ColumnExistsAsync(AspireFixture.SharedContext, tableName, columnName);
 
-    private static async Task<bool> ColumnExistsAsync(DbContext context, string tableName, string columnName)
-    {
-        var connection = context.Database.GetDbConnection();
-        await connection.OpenAsync();
-        try
-        {
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
-                SELECT COUNT(*)
-                FROM sys.columns c
-                INNER JOIN sys.tables t ON c.object_id = t.object_id
-                WHERE t.name = @tableName
-                  AND c.name = @columnName
-                  AND t.schema_id = SCHEMA_ID('dbo')
-                """;
-            cmd.Parameters.Add(new SqlParameter("@tableName", tableName));
-            cmd.Parameters.Add(new SqlParameter("@columnName", columnName));
-            var result = await cmd.ExecuteScalarAsync();
-            return Convert.ToInt32(result) > 0;
-        }
-        finally
-        {
-            await connection.CloseAsync();
-        }
-    }
+    private static Task<bool> ColumnExistsAsync(DbContext context, string tableName, string columnName)
+        => TestCatalog.ColumnExistsAsync(context, tableName, columnName);
 
-    private static async Task<bool> IndexExistsAsync(DbContext context, string tableName, string indexName)
-    {
-        var connection = context.Database.GetDbConnection();
-        await connection.OpenAsync();
-        try
-        {
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
-                SELECT COUNT(*)
-                FROM sys.indexes i
-                INNER JOIN sys.tables t ON i.object_id = t.object_id
-                WHERE t.name = @tableName
-                  AND i.name = @indexName
-                  AND t.schema_id = SCHEMA_ID('dbo')
-                """;
-            cmd.Parameters.Add(new SqlParameter("@tableName", tableName));
-            cmd.Parameters.Add(new SqlParameter("@indexName", indexName));
-            var result = await cmd.ExecuteScalarAsync();
-            return Convert.ToInt32(result) > 0;
-        }
-        finally
-        {
-            await connection.CloseAsync();
-        }
-    }
+    private static Task<bool> IndexExistsAsync(DbContext context, string tableName, string indexName)
+        => TestCatalog.IndexExistsAsync(context, tableName, indexName);
 
     private static async Task SeedVersion22AuditEventsSchemaAsync(DbContext context)
     {
-        await context.Database.ExecuteSqlRawAsync("""
+        await context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("""
             CREATE TABLE [dbo].[SqlOSSchema] ([Version] INT NOT NULL);
             INSERT INTO [dbo].[SqlOSSchema] ([Version]) VALUES (22);
 
@@ -884,12 +767,12 @@ public sealed class SchemaInitializerIntegrationTests
                 'user',
                 SYSUTCDATETIME()
             );
-            """);
+            """));
     }
 
     private static async Task SeedScimMigrationPrerequisitesAsync(DbContext context)
     {
-        await context.Database.ExecuteSqlRawAsync("""
+        await context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("""
             IF OBJECT_ID('dbo.SqlOSOrganizations', 'U') IS NULL
             BEGIN
                 CREATE TABLE [dbo].[SqlOSOrganizations] (
@@ -908,12 +791,12 @@ public sealed class SchemaInitializerIntegrationTests
                     [UpdatedAt] DATETIME2 NOT NULL
                 );
             END
-            """);
+            """));
     }
 
     private static async Task SeedVersion23WithoutApplicationAssignmentsSchemaAsync(DbContext context)
     {
-        await context.Database.ExecuteSqlRawAsync("""
+        await context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("""
             CREATE TABLE [dbo].[SqlOSSchema] ([Version] INT NOT NULL);
             INSERT INTO [dbo].[SqlOSSchema] ([Version]) VALUES (23);
 
@@ -928,12 +811,12 @@ public sealed class SchemaInitializerIntegrationTests
             CREATE TABLE [dbo].[SqlOSSessions] (
                 [Id] NVARCHAR(64) NOT NULL PRIMARY KEY
             );
-            """);
+            """));
     }
 
     private static async Task SeedVersion29ScimSchemaAsync(DbContext context)
     {
-        await context.Database.ExecuteSqlRawAsync("""
+        await context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("""
             CREATE TABLE [dbo].[SqlOSSchema] ([Version] INT NOT NULL);
             INSERT INTO [dbo].[SqlOSSchema] ([Version]) VALUES (29);
 
@@ -1102,12 +985,12 @@ public sealed class SchemaInitializerIntegrationTests
                 ('link_alice_new', 'conn_new', 'User', 'alice-new', 'user_alice', NULL, NULL, 1, '2026-01-02', '2026-01-02', '2026-01-02'),
                 ('link_bob', 'conn_new', 'User', 'bob-external', 'user_bob', NULL, NULL, 1, '2026-01-03', '2026-01-03', '2026-01-03'),
                 ('link_carol', 'conn_new', 'User', 'carol-external', 'user_carol', NULL, NULL, 1, '2026-01-04', '2026-01-04', '2026-01-04');
-            """);
+            """));
     }
 
     private static async Task SeedVersion26OAuthStateSchemaAsync(DbContext context)
     {
-        await context.Database.ExecuteSqlRawAsync("""
+        await context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("""
             CREATE TABLE [dbo].[SqlOSSchema] ([Version] INT NOT NULL);
             INSERT INTO [dbo].[SqlOSSchema] ([Version]) VALUES (26);
 
@@ -1120,17 +1003,19 @@ public sealed class SchemaInitializerIntegrationTests
                 [Id] NVARCHAR(64) NOT NULL PRIMARY KEY,
                 [State] NVARCHAR(256) NOT NULL
             );
-            """);
+            """));
 
         var requestId = "req_state_upgrade";
         var state = new string('s', 256);
-        await context.Database.ExecuteSqlInterpolatedAsync(
-            $"INSERT INTO [dbo].[SqlOSAuthorizationRequests] ([Id], [State]) VALUES ({requestId}, {state})");
+        await context.Database.ExecuteSqlRawAsync(
+            TestDatabase.Rewrite("INSERT INTO [dbo].[SqlOSAuthorizationRequests] ([Id], [State]) VALUES ({0}, {1})"),
+            requestId,
+            state);
     }
 
     private static async Task SeedVersion26WideOAuthStateSchemaAsync(DbContext context)
     {
-        await context.Database.ExecuteSqlRawAsync("""
+        await context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("""
             CREATE TABLE [dbo].[SqlOSSchema] ([Version] INT NOT NULL);
             INSERT INTO [dbo].[SqlOSSchema] ([Version]) VALUES (26);
 
@@ -1143,12 +1028,14 @@ public sealed class SchemaInitializerIntegrationTests
                 [Id] NVARCHAR(64) NOT NULL PRIMARY KEY,
                 [State] NVARCHAR(MAX) NOT NULL
             );
-            """);
+            """));
 
         var requestId = "req_state_wide";
         var state = new string('s', 3000);
-        await context.Database.ExecuteSqlInterpolatedAsync(
-            $"INSERT INTO [dbo].[SqlOSAuthorizationRequests] ([Id], [State]) VALUES ({requestId}, {state})");
+        await context.Database.ExecuteSqlRawAsync(
+            TestDatabase.Rewrite("INSERT INTO [dbo].[SqlOSAuthorizationRequests] ([Id], [State]) VALUES ({0}, {1})"),
+            requestId,
+            state);
     }
 
     private static async Task<string?> ScalarStringAsync(DbContext context, string sql)
@@ -1158,7 +1045,7 @@ public sealed class SchemaInitializerIntegrationTests
         try
         {
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = sql;
+            cmd.CommandText = TestDatabase.Rewrite(sql);
             var result = await cmd.ExecuteScalarAsync();
             return result == DBNull.Value ? null : Convert.ToString(result);
         }
@@ -1175,7 +1062,7 @@ public sealed class SchemaInitializerIntegrationTests
         try
         {
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = sql;
+            cmd.CommandText = TestDatabase.Rewrite(sql);
             var result = await cmd.ExecuteScalarAsync();
             return Convert.ToInt32(result);
         }
@@ -1192,7 +1079,7 @@ public sealed class SchemaInitializerIntegrationTests
         try
         {
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = "SELECT [ScriptName] FROM [dbo].[SqlOSAppliedMigrations] ORDER BY [Sequence]";
+            cmd.CommandText = TestDatabase.Rewrite("SELECT [ScriptName] FROM [dbo].[SqlOSAppliedMigrations] ORDER BY [Sequence]");
             await using var reader = await cmd.ExecuteReaderAsync();
             var result = new List<string>();
             while (await reader.ReadAsync())
@@ -1208,52 +1095,24 @@ public sealed class SchemaInitializerIntegrationTests
         }
     }
 
+    private static string AppliedMigrationScriptName(string fileName)
+        => TestDatabase.IsPostgreSql
+            ? $"SqlOS.AuthServer.Schema.PostgreSql.{fileName}"
+            : $"SqlOS.AuthServer.Schema.{fileName}";
+
     private static int ParseMigrationVersion(string scriptName)
     {
-        var match = Regex.Match(scriptName, @"\.Schema\.(\d+)_", RegexOptions.CultureInvariant);
+        var match = Regex.Match(scriptName, @"\.Schema\.(?:PostgreSql\.)?(\d+)_", RegexOptions.CultureInvariant);
         Assert.IsTrue(match.Success, $"Unexpected migration resource name: {scriptName}");
         return int.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private static string BuildDatabaseConnectionString(string databaseName)
-    {
-        var builder = new SqlConnectionStringBuilder(AspireFixture.SqlConnectionString)
-        {
-            InitialCatalog = databaseName
-        };
-        return builder.ConnectionString;
-    }
+        => TestDatabase.CreateIsolatedConnectionString(AspireFixture.SqlConnectionString, databaseName);
 
-    private static string BuildMasterConnectionString()
-    {
-        var builder = new SqlConnectionStringBuilder(AspireFixture.SqlConnectionString)
-        {
-            InitialCatalog = "master"
-        };
-        return builder.ConnectionString;
-    }
+    private static Task CreateDatabaseAsync(string databaseName)
+        => TestDatabase.CreateDatabaseAsync(AspireFixture.SqlConnectionString, databaseName);
 
-    private static async Task CreateDatabaseAsync(string databaseName)
-    {
-        await using var connection = new SqlConnection(BuildMasterConnectionString());
-        await connection.OpenAsync();
-        await using var cmd = connection.CreateCommand();
-        cmd.CommandText = $"CREATE DATABASE [{databaseName}]";
-        await cmd.ExecuteNonQueryAsync();
-    }
-
-    private static async Task DropDatabaseAsync(string databaseName)
-    {
-        await using var connection = new SqlConnection(BuildMasterConnectionString());
-        await connection.OpenAsync();
-        await using var cmd = connection.CreateCommand();
-        cmd.CommandText = $"""
-            IF DB_ID(N'{databaseName}') IS NOT NULL
-            BEGIN
-                ALTER DATABASE [{databaseName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
-                DROP DATABASE [{databaseName}];
-            END
-            """;
-        await cmd.ExecuteNonQueryAsync();
-    }
+    private static Task DropDatabaseAsync(string databaseName)
+        => TestDatabase.DropDatabaseAsync(AspireFixture.SqlConnectionString, databaseName);
 }

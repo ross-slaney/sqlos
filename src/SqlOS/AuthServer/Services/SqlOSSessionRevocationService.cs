@@ -7,6 +7,7 @@ using SqlOS.AuditLogs;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Database;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -79,21 +80,17 @@ public sealed class SqlOSSessionRevocationService
     {
 
         await using var transaction = execute && _context.Database.IsRelational()
-            ? await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
+            ? await _context.Database.BeginTransactionAsync(SqlOSDatabase.ExclusiveWorkIsolationLevel(_context.Database), cancellationToken)
             : null;
 
-        if (execute && string.Equals(_context.Database.ProviderName, "Microsoft.EntityFrameworkCore.SqlServer", StringComparison.Ordinal))
+        if (execute)
         {
-            const string resource = "SqlOS:admin-session-revocation";
-            await _context.Database.ExecuteSqlInterpolatedAsync($"""
-                DECLARE @result int;
-                EXEC @result = sys.sp_getapplock
-                    @Resource = {resource},
-                    @LockMode = 'Exclusive',
-                    @LockOwner = 'Transaction',
-                    @LockTimeout = 30000;
-                IF @result < 0 THROW 51000, 'Could not acquire the session revocation lock.', 1;
-                """, cancellationToken);
+            await SqlOSDatabase.AcquireExclusiveTransactionLockAsync(
+                _context.Database,
+                "SqlOS:admin-session-revocation",
+                TimeSpan.FromSeconds(30),
+                "Could not acquire the session revocation lock.",
+                cancellationToken);
         }
 
         var selectorFingerprint = BuildSelectorFingerprint(normalized);

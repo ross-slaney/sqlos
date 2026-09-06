@@ -633,15 +633,17 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
             var key = await stack.Crypto.EnsureActiveSigningKeyAsync();
 
             var constrainedWrite = async () => await context.Database.ExecuteSqlRawAsync(
-                "UPDATE [dbo].[SqlOSSigningKeys] SET [IsActive] = 0, [RetiredAt] = NULL WHERE [Id] = {0}",
+                TestDatabase.Rewrite("UPDATE [dbo].[SqlOSSigningKeys] SET [IsActive] = 0, [RetiredAt] = NULL WHERE [Id] = {0}"),
                 key.Id);
             await constrainedWrite.Should().ThrowAsync<Exception>()
                 .WithMessage("*CK_SqlOSSigningKeys_Lifecycle*");
 
             await context.Database.ExecuteSqlRawAsync(
-                "ALTER TABLE [dbo].[SqlOSSigningKeys] NOCHECK CONSTRAINT [CK_SqlOSSigningKeys_Lifecycle]");
+                TestDatabase.IsPostgreSql
+                    ? """ALTER TABLE "dbo"."SqlOSSigningKeys" DROP CONSTRAINT "CK_SqlOSSigningKeys_Lifecycle";"""
+                    : "ALTER TABLE [dbo].[SqlOSSigningKeys] NOCHECK CONSTRAINT [CK_SqlOSSigningKeys_Lifecycle]");
             await context.Database.ExecuteSqlRawAsync(
-                "UPDATE [dbo].[SqlOSSigningKeys] SET [IsActive] = 0, [RetiredAt] = NULL WHERE [Id] = {0}",
+                TestDatabase.Rewrite("UPDATE [dbo].[SqlOSSigningKeys] SET [IsActive] = 0, [RetiredAt] = NULL WHERE [Id] = {0}"),
                 key.Id);
             await context.DisposeAsync();
             context = null;
@@ -694,7 +696,7 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
             var retiredReference = retiredKey.KeyReference;
 
             await context.Database.ExecuteSqlRawAsync(
-                "UPDATE [dbo].[SqlOSSigningKeys] SET [KeyReference] = {0} WHERE [Id] = {1}",
+                TestDatabase.Rewrite("UPDATE [dbo].[SqlOSSigningKeys] SET [KeyReference] = {0} WHERE [Id] = {1}"),
                 activeKey.KeyReference,
                 retiredKey.Id);
             context.ChangeTracker.Clear();
@@ -706,7 +708,7 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
             custody.DeleteCount.Should().Be(0);
 
             await context.Database.ExecuteSqlRawAsync(
-                "UPDATE [dbo].[SqlOSSigningKeys] SET [KeyReference] = {0} WHERE [Id] = {1}",
+                TestDatabase.Rewrite("UPDATE [dbo].[SqlOSSigningKeys] SET [KeyReference] = {0} WHERE [Id] = {1}"),
                 retiredReference,
                 retiredKey.Id);
             context.ChangeTracker.Clear();
@@ -921,16 +923,16 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
         => new(key.Kid, key.Algorithm, key.PublicKeyPem, key.KeyReference, key.CustodyProvider);
 
     private static TestSqlOSDbContext CreateContext(string connectionString)
-        => new(new DbContextOptionsBuilder<TestSqlOSDbContext>().UseSqlServer(connectionString).Options);
+        => new(new DbContextOptionsBuilder<TestSqlOSDbContext>().UseTestProvider(connectionString).Options);
 
     private static TestSqlOSDbContext CreateRetryEnabledContext(string connectionString)
         => new(new DbContextOptionsBuilder<TestSqlOSDbContext>()
-            .UseSqlServer(connectionString, sqlServer => sqlServer.EnableRetryOnFailure())
+            .UseTestProvider(connectionString, sqlServer => sqlServer.EnableRetryOnFailure())
             .Options);
 
     private static TestSqlOSDbContext CreateTestRetryContext(string connectionString)
         => new(new DbContextOptionsBuilder<TestSqlOSDbContext>()
-            .UseSqlServer(connectionString)
+            .UseTestProvider(connectionString)
             .AddInterceptors(new FailOnceSaveChangesInterceptor())
             .ReplaceService<IExecutionStrategyFactory, TestRetryExecutionStrategyFactory>()
             .Options);
@@ -1004,7 +1006,7 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
             });
             builder.WebHost.UseTestServer();
             builder.Services.AddDbContext<TestSqlOSDbContext>(database =>
-                database.UseSqlServer(connectionString));
+                database.UseTestProvider(connectionString));
             builder.Services.AddSqlOS<TestSqlOSDbContext>(options =>
             {
                 options.AuthServer.PublicOrigin = "https://replicas.integration.test";

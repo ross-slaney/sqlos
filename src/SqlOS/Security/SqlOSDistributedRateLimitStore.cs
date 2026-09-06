@@ -1,9 +1,12 @@
 using System.Data;
 using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
+using Npgsql;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Interfaces;
+using SqlOS.Database;
 
 namespace SqlOS.Security;
 
@@ -20,7 +23,7 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
         IOptions<SqlOSAuthServerOptions> options)
     {
         _context = context;
-        _schema = EscapeIdentifier(options.Value.Schema);
+        _schema = options.Value.Schema;
     }
 
     public async Task<SqlOSRateLimitBucketState> IncrementAsync(
@@ -32,87 +35,7 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
         DateTimeOffset now,
         CancellationToken cancellationToken = default)
     {
-        var sql = $"""
-            SET XACT_ABORT ON;
-            SET NOCOUNT ON;
-            BEGIN TRANSACTION;
-
-            DECLARE @admitted BIT = 0;
-
-            DECLARE @applicationLockResult INT;
-            DECLARE @applicationLockResource NVARCHAR(255) =
-                N'SqlOS:rate-limit:' + CONVERT(NVARCHAR(64), HASHBYTES('SHA2_256', @scope + N':' + @key), 2);
-            EXEC @applicationLockResult = sys.sp_getapplock
-                @Resource = @applicationLockResource,
-                @LockMode = 'Exclusive',
-                @LockOwner = 'Transaction',
-                @LockTimeout = 10000;
-            IF @applicationLockResult < 0
-                THROW 51000, 'Unable to acquire the SqlOS rate-limit lock.', 1;
-
-            DELETE FROM [{_schema}].[SqlOSRateLimitBuckets]
-            WHERE [Scope] = @scope
-              AND [BucketKey] = @key
-              AND ([LockedUntil] IS NULL OR [LockedUntil] <= @now)
-              AND [WindowStartedAt] <= @windowStartedBefore;
-
-            IF EXISTS (
-                SELECT 1
-                FROM [{_schema}].[SqlOSRateLimitBuckets] WITH (UPDLOCK, HOLDLOCK)
-                WHERE [Scope] = @scope AND [BucketKey] = @key)
-            BEGIN
-                IF EXISTS (
-                    SELECT 1
-                    FROM [{_schema}].[SqlOSRateLimitBuckets]
-                    WHERE [Scope] = @scope
-                      AND [BucketKey] = @key
-                      AND ([LockedUntil] IS NULL OR [LockedUntil] <= @now))
-                    SET @admitted = 1;
-
-                UPDATE [{_schema}].[SqlOSRateLimitBuckets]
-                SET
-                    [Count] = CASE WHEN [LockedUntil] IS NOT NULL AND [LockedUntil] > @now
-                        THEN [Count] ELSE [Count] + 1 END,
-                    [LockedUntil] = CASE
-                        WHEN [LockedUntil] IS NOT NULL AND [LockedUntil] > @now THEN [LockedUntil]
-                        WHEN [Count] + 1 >= @lockThreshold
-                            THEN @lockedUntil
-                        ELSE NULL
-                    END,
-                    [UpdatedAt] = @now
-                WHERE [Scope] = @scope AND [BucketKey] = @key;
-            END
-            ELSE
-            BEGIN
-                SET @admitted = 1;
-                INSERT INTO [{_schema}].[SqlOSRateLimitBuckets]
-                    ([Scope], [BucketKey], [WindowStartedAt], [Count], [LockedUntil], [UpdatedAt])
-                VALUES
-                    (@scope, @key, @now, 1,
-                     CASE WHEN @lockThreshold <= 1
-                        THEN @lockedUntil
-                        ELSE NULL END,
-                     @now);
-            END
-
-            DELETE FROM [{_schema}].[SqlOSRateLimitBuckets]
-            WHERE [Scope] = @scope
-              AND [BucketKey] IN (
-                  SELECT TOP (@cleanupBatchSize) [BucketKey]
-                  FROM [{_schema}].[SqlOSRateLimitBuckets]
-                  WHERE [Scope] = @scope
-                    AND [UpdatedAt] < @staleBefore
-                    AND ([LockedUntil] IS NULL OR [LockedUntil] <= @now)
-                  ORDER BY [UpdatedAt])
-              AND [UpdatedAt] < @staleBefore
-              AND ([LockedUntil] IS NULL OR [LockedUntil] <= @now);
-
-            SELECT [Count], [LockedUntil], @admitted
-            FROM [{_schema}].[SqlOSRateLimitBuckets]
-            WHERE [Scope] = @scope AND [BucketKey] = @key;
-
-            COMMIT TRANSACTION;
-            """;
+        var sql = SqlOSDatabase.Resolve(_context.Database).BuildRateLimitIncrementSql(_schema);
 
         return await ExecuteStateAsync(
             sql,
@@ -122,8 +45,9 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
             window,
             lockoutDuration,
             now,
-            cancellationToken)
-            ?? throw new InvalidOperationException("SqlOS rate-limit state was not returned by SQL Server.");
+            cancellationToken,
+            lockResources: [RateLimitLockResource(scope, key)])
+            ?? throw new InvalidOperationException("SqlOS rate-limit state was not returned by the database.");
     }
 
     public async Task<SqlOSRateLimitPairReservationState> ReservePairAsync(
@@ -132,88 +56,14 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
         DateTimeOffset now,
         CancellationToken cancellationToken = default)
     {
-        var sql = $"""
-            SET XACT_ABORT ON;
-            SET NOCOUNT ON;
-            BEGIN TRANSACTION;
-
-            DECLARE @applicationLockResult INT;
-            EXEC @applicationLockResult = sys.sp_getapplock
-                @Resource = N'SqlOS:rate-limit-pair-reservation',
-                @LockMode = 'Exclusive',
-                @LockOwner = 'Transaction',
-                @LockTimeout = 10000;
-            IF @applicationLockResult < 0
-                THROW 51000, 'Unable to acquire the SqlOS rate-limit pair lock.', 1;
-
-            DELETE FROM [{_schema}].[SqlOSRateLimitBuckets]
-            WHERE ([Scope] = @firstScope AND [BucketKey] = @firstKey
-                   AND ([LockedUntil] IS NULL OR [LockedUntil] <= @now)
-                   AND [WindowStartedAt] <= @firstWindowStartedBefore)
-               OR ([Scope] = @secondScope AND [BucketKey] = @secondKey
-                   AND ([LockedUntil] IS NULL OR [LockedUntil] <= @now)
-                   AND [WindowStartedAt] <= @secondWindowStartedBefore);
-
-            DECLARE @rejectedIndex INT = NULL;
-            DECLARE @rejectedLockedUntil DATETIME2 = NULL;
-            SELECT TOP (1) @rejectedIndex = 0, @rejectedLockedUntil = [LockedUntil]
-            FROM [{_schema}].[SqlOSRateLimitBuckets] WITH (UPDLOCK, HOLDLOCK)
-            WHERE [Scope] = @firstScope AND [BucketKey] = @firstKey AND [LockedUntil] > @now;
-            IF @rejectedIndex IS NULL
-                SELECT TOP (1) @rejectedIndex = 1, @rejectedLockedUntil = [LockedUntil]
-                FROM [{_schema}].[SqlOSRateLimitBuckets] WITH (UPDLOCK, HOLDLOCK)
-                WHERE [Scope] = @secondScope AND [BucketKey] = @secondKey AND [LockedUntil] > @now;
-
-            IF @rejectedIndex IS NULL
-            BEGIN
-                UPDATE [{_schema}].[SqlOSRateLimitBuckets]
-                SET [Count] = [Count] + 1,
-                    [LockedUntil] = CASE WHEN [Count] + 1 >= @firstThreshold
-                        THEN @firstLockedUntil ELSE NULL END,
-                    [UpdatedAt] = @now
-                WHERE [Scope] = @firstScope AND [BucketKey] = @firstKey;
-                IF @@ROWCOUNT = 0
-                    INSERT INTO [{_schema}].[SqlOSRateLimitBuckets]
-                        ([Scope], [BucketKey], [WindowStartedAt], [Count], [LockedUntil], [UpdatedAt])
-                    VALUES (@firstScope, @firstKey, @now, 1,
-                        CASE WHEN @firstThreshold <= 1 THEN @firstLockedUntil ELSE NULL END, @now);
-
-                UPDATE [{_schema}].[SqlOSRateLimitBuckets]
-                SET [Count] = [Count] + 1,
-                    [LockedUntil] = CASE WHEN [Count] + 1 >= @secondThreshold
-                        THEN @secondLockedUntil ELSE NULL END,
-                    [UpdatedAt] = @now
-                WHERE [Scope] = @secondScope AND [BucketKey] = @secondKey;
-                IF @@ROWCOUNT = 0
-                    INSERT INTO [{_schema}].[SqlOSRateLimitBuckets]
-                        ([Scope], [BucketKey], [WindowStartedAt], [Count], [LockedUntil], [UpdatedAt])
-                    VALUES (@secondScope, @secondKey, @now, 1,
-                        CASE WHEN @secondThreshold <= 1 THEN @secondLockedUntil ELSE NULL END, @now);
-            END
-
-            ;WITH staleBuckets AS (
-                SELECT TOP (@cleanupBatchSize) *
-                FROM [{_schema}].[SqlOSRateLimitBuckets]
-                WHERE [Scope] IN (@firstScope, @secondScope)
-                  AND [UpdatedAt] < @staleBefore
-                  AND ([LockedUntil] IS NULL OR [LockedUntil] <= @now)
-                ORDER BY [UpdatedAt]
-            )
-            DELETE FROM staleBuckets;
-
-            SELECT @rejectedIndex, @rejectedLockedUntil,
-                   firstBucket.[Count], firstBucket.[LockedUntil], firstBucket.[WindowStartedAt],
-                   secondBucket.[Count], secondBucket.[LockedUntil], secondBucket.[WindowStartedAt]
-            FROM (VALUES (1)) AS anchor([Value])
-            LEFT JOIN [{_schema}].[SqlOSRateLimitBuckets] firstBucket
-              ON firstBucket.[Scope] = @firstScope AND firstBucket.[BucketKey] = @firstKey
-            LEFT JOIN [{_schema}].[SqlOSRateLimitBuckets] secondBucket
-              ON secondBucket.[Scope] = @secondScope AND secondBucket.[BucketKey] = @secondKey;
-
-            COMMIT TRANSACTION;
-            """;
-
-        return await ExecutePairStateAsync(sql, first, second, now, cancellationToken);
+        var sql = SqlOSDatabase.Resolve(_context.Database).BuildRateLimitReservePairSql(_schema);
+        return await ExecutePairStateAsync(
+            sql,
+            first,
+            second,
+            now,
+            cancellationToken,
+            lockResources: [PairLockResource]);
     }
 
     public async Task<SqlOSRateLimitReservationState> ReserveManyAsync(
@@ -236,10 +86,11 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
         }
 
         return await ExecuteReservationStateAsync(
-            BuildReserveManySql(buckets.Count),
+            SqlOSDatabase.Resolve(_context.Database).BuildRateLimitReserveManySql(_schema, buckets.Count),
             buckets,
             now,
-            cancellationToken);
+            cancellationToken,
+            lockResources: SortedRateLimitLockResources(buckets.Select(bucket => (bucket.Scope, bucket.Key))));
     }
 
     public async Task<SqlOSRateLimitBucketState?> GetAsync(
@@ -249,19 +100,7 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
         TimeSpan window,
         CancellationToken cancellationToken = default)
     {
-        var sql = $"""
-            SET NOCOUNT ON;
-
-            DELETE FROM [{_schema}].[SqlOSRateLimitBuckets]
-            WHERE [Scope] = @scope
-              AND [BucketKey] = @key
-              AND ([LockedUntil] IS NULL OR [LockedUntil] <= @now)
-              AND [WindowStartedAt] <= @windowStartedBefore;
-
-            SELECT [Count], [LockedUntil]
-            FROM [{_schema}].[SqlOSRateLimitBuckets]
-            WHERE [Scope] = @scope AND [BucketKey] = @key;
-            """;
+        var sql = SqlOSDatabase.Resolve(_context.Database).BuildRateLimitGetSql(_schema);
 
         return await ExecuteStateAsync(
             sql,
@@ -280,7 +119,7 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
         string key,
         CancellationToken cancellationToken = default)
         => ExecuteNonQueryAsync(
-            $"DELETE FROM [{_schema}].[SqlOSRateLimitBuckets] WHERE [Scope] = @scope AND [BucketKey] = @key",
+            SqlOSDatabase.Resolve(_context.Database).BuildRateLimitDeleteSql(_schema),
             scope,
             key,
             now: null,
@@ -292,17 +131,7 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
         DateTimeOffset now,
         CancellationToken cancellationToken = default)
         => ExecuteNonQueryAsync(
-            $"""
-            UPDATE [{_schema}].[SqlOSRateLimitBuckets]
-            SET [Count] = CASE WHEN [Count] > 0 THEN [Count] - 1 ELSE 0 END,
-                [UpdatedAt] = @now
-            WHERE [Scope] = @scope
-              AND [BucketKey] = @key
-              AND ([LockedUntil] IS NULL OR [LockedUntil] <= @now);
-
-            DELETE FROM [{_schema}].[SqlOSRateLimitBuckets]
-            WHERE [Scope] = @scope AND [BucketKey] = @key AND [Count] = 0;
-            """,
+            SqlOSDatabase.Resolve(_context.Database).BuildRateLimitDecrementSql(_schema),
             scope,
             key,
             now,
@@ -316,42 +145,14 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
         DateTimeOffset now,
         CancellationToken cancellationToken = default)
         => ExecuteNonQueryAsync(
-            $"""
-            SET XACT_ABORT ON;
-            SET NOCOUNT ON;
-            BEGIN TRANSACTION;
-
-            DECLARE @applicationLockResult INT;
-            DECLARE @applicationLockResource NVARCHAR(255) =
-                N'SqlOS:rate-limit:' + CONVERT(NVARCHAR(64), HASHBYTES('SHA2_256', @scope + N':' + @key), 2);
-            EXEC @applicationLockResult = sys.sp_getapplock
-                @Resource = @applicationLockResource,
-                @LockMode = 'Exclusive',
-                @LockOwner = 'Transaction',
-                @LockTimeout = 10000;
-            IF @applicationLockResult < 0
-                THROW 51000, 'Unable to acquire the SqlOS rate-limit lock.', 1;
-
-            UPDATE [{_schema}].[SqlOSRateLimitBuckets]
-            SET [Count] = CASE WHEN [Count] > 0 THEN [Count] - 1 ELSE 0 END,
-                [LockedUntil] = CASE WHEN [Count] - 1 < @lockThreshold THEN NULL ELSE [LockedUntil] END,
-                [UpdatedAt] = @now
-            WHERE [Scope] = @scope AND [BucketKey] = @key
-              AND [WindowStartedAt] = @windowStartedAt;
-
-            DELETE FROM [{_schema}].[SqlOSRateLimitBuckets]
-            WHERE [Scope] = @scope AND [BucketKey] = @key
-              AND [WindowStartedAt] = @windowStartedAt
-              AND [Count] = 0;
-
-            COMMIT TRANSACTION;
-            """,
+            SqlOSDatabase.Resolve(_context.Database).BuildRateLimitReleaseSql(_schema),
             scope,
             key,
             now,
             cancellationToken,
             lockThreshold,
-            windowStartedAt);
+            windowStartedAt,
+            lockResources: [RateLimitLockResource(scope, key)]);
 
     public Task ReleaseManyAsync(
         IReadOnlyList<SqlOSRateLimitReservationRelease> releases,
@@ -372,7 +173,12 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
                 $"SqlOS rate-limit reservations support at most {MaximumReservationBuckets} buckets.");
         }
 
-        return ExecuteReleaseManyAsync(BuildReleaseManySql(releases.Count), releases, now, cancellationToken);
+        return ExecuteReleaseManyAsync(
+            SqlOSDatabase.Resolve(_context.Database).BuildRateLimitReleaseManySql(_schema, releases.Count),
+            releases,
+            now,
+            cancellationToken,
+            lockResources: SortedRateLimitLockResources(releases.Select(release => (release.Scope, release.Key))));
     }
 
     private async Task ExecuteNonQueryAsync(
@@ -382,43 +188,33 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
         DateTimeOffset? now,
         CancellationToken cancellationToken,
         int? lockThreshold = null,
-        DateTimeOffset? windowStartedAt = null)
+        DateTimeOffset? windowStartedAt = null,
+        IReadOnlyList<string>? lockResources = null)
     {
-        var connection = _context.Database.GetDbConnection();
-        var wasOpen = connection.State == ConnectionState.Open;
-        if (!wasOpen)
-        {
-            await connection.OpenAsync(cancellationToken);
-        }
+        await ExecuteWithOptionalPostgreSqlLocksAsync(
+            lockResources,
+            async (connection, transaction) =>
+            {
+                await using var command = CreateCommand(connection, transaction, sql);
+                AddParameter(command, "@scope", scope);
+                AddParameter(command, "@key", NormalizeKey(key));
+                if (now.HasValue)
+                {
+                    AddParameter(command, "@now", now.Value.UtcDateTime);
+                }
+                if (lockThreshold.HasValue)
+                {
+                    AddParameter(command, "@lockThreshold", lockThreshold.Value);
+                }
+                if (windowStartedAt.HasValue)
+                {
+                    AddParameter(command, "@windowStartedAt", windowStartedAt.Value.UtcDateTime);
+                }
 
-        try
-        {
-            await using var command = connection.CreateCommand();
-            command.CommandText = sql;
-            AddParameter(command, "@scope", scope);
-            AddParameter(command, "@key", NormalizeKey(key));
-            if (now.HasValue)
-            {
-                AddParameter(command, "@now", now.Value.UtcDateTime);
-            }
-            if (lockThreshold.HasValue)
-            {
-                AddParameter(command, "@lockThreshold", lockThreshold.Value);
-            }
-            if (windowStartedAt.HasValue)
-            {
-                AddParameter(command, "@windowStartedAt", windowStartedAt.Value.UtcDateTime);
-            }
-
-            await command.ExecuteNonQueryAsync(cancellationToken);
-        }
-        finally
-        {
-            if (!wasOpen)
-            {
-                await connection.CloseAsync();
-            }
-        }
+                await command.ExecuteNonQueryAsync(cancellationToken);
+                return 0;
+            },
+            cancellationToken);
     }
 
     private async Task<SqlOSRateLimitBucketState?> ExecuteStateAsync(
@@ -430,56 +226,45 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
         TimeSpan lockoutDuration,
         DateTimeOffset now,
         CancellationToken cancellationToken,
-        bool allowMissing = false)
+        bool allowMissing = false,
+        IReadOnlyList<string>? lockResources = null)
     {
-        var connection = _context.Database.GetDbConnection();
-        var wasOpen = connection.State == ConnectionState.Open;
-        if (!wasOpen)
-        {
-            await connection.OpenAsync(cancellationToken);
-        }
-
-        try
-        {
-            await using var command = connection.CreateCommand();
-            command.CommandText = sql;
-            AddParameter(command, "@scope", scope);
-            AddParameter(command, "@key", NormalizeKey(key));
-            AddParameter(command, "@lockThreshold", lockThreshold);
-            AddParameter(command, "@now", now.UtcDateTime);
-            AddParameter(command, "@windowStartedBefore", now.Subtract(window).UtcDateTime);
-            AddParameter(command, "@lockedUntil", now.Add(lockoutDuration).UtcDateTime);
-            AddParameter(command, "@cleanupBatchSize", CleanupBatchSize);
-            AddParameter(command, "@staleBefore", now.Subtract(StaleBucketRetention).UtcDateTime);
-
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            if (!await reader.ReadAsync(cancellationToken))
+        return await ExecuteWithOptionalPostgreSqlLocksAsync(
+            lockResources,
+            async (connection, transaction) =>
             {
-                if (allowMissing)
+                await using var command = CreateCommand(connection, transaction, sql);
+                AddParameter(command, "@scope", scope);
+                AddParameter(command, "@key", NormalizeKey(key));
+                AddParameter(command, "@lockThreshold", lockThreshold);
+                AddParameter(command, "@now", now.UtcDateTime);
+                AddParameter(command, "@windowStartedBefore", now.Subtract(window).UtcDateTime);
+                AddParameter(command, "@lockedUntil", now.Add(lockoutDuration).UtcDateTime);
+                AddParameter(command, "@cleanupBatchSize", CleanupBatchSize);
+                AddParameter(command, "@staleBefore", now.Subtract(StaleBucketRetention).UtcDateTime);
+
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                if (!await reader.ReadAsync(cancellationToken))
                 {
-                    return null;
+                    if (allowMissing)
+                    {
+                        return null;
+                    }
+
+                    throw new InvalidOperationException("SqlOS rate-limit state was not returned by the database.");
                 }
 
-                throw new InvalidOperationException("SqlOS rate-limit state was not returned by SQL Server.");
-            }
-
-            return new SqlOSRateLimitBucketState(
-                reader.GetInt32(0),
-                reader.IsDBNull(1)
-                    ? null
-                    : new DateTimeOffset(DateTime.SpecifyKind(reader.GetDateTime(1), DateTimeKind.Utc)),
-                reader.FieldCount < 3 || reader.GetBoolean(2),
-                reader.FieldCount < 4 || reader.IsDBNull(3)
-                    ? null
-                    : new DateTimeOffset(DateTime.SpecifyKind(reader.GetDateTime(3), DateTimeKind.Utc)));
-        }
-        finally
-        {
-            if (!wasOpen)
-            {
-                await connection.CloseAsync();
-            }
-        }
+                return new SqlOSRateLimitBucketState(
+                    reader.GetInt32(0),
+                    reader.IsDBNull(1)
+                        ? null
+                        : new DateTimeOffset(DateTime.SpecifyKind(reader.GetDateTime(1), DateTimeKind.Utc)),
+                    reader.FieldCount < 3 || reader.GetBoolean(2),
+                    reader.FieldCount < 4 || reader.IsDBNull(3)
+                        ? null
+                        : new DateTimeOffset(DateTime.SpecifyKind(reader.GetDateTime(3), DateTimeKind.Utc)));
+            },
+            cancellationToken);
     }
 
     private async Task<SqlOSRateLimitPairReservationState> ExecutePairStateAsync(
@@ -487,45 +272,34 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
         SqlOSRateLimitBucketRequest first,
         SqlOSRateLimitBucketRequest second,
         DateTimeOffset now,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyList<string>? lockResources = null)
     {
-        var connection = _context.Database.GetDbConnection();
-        var wasOpen = connection.State == ConnectionState.Open;
-        if (!wasOpen)
-        {
-            await connection.OpenAsync(cancellationToken);
-        }
-
-        try
-        {
-            await using var command = connection.CreateCommand();
-            command.CommandText = sql;
-            AddPairParameters(command, "first", first, now);
-            AddPairParameters(command, "second", second, now);
-            AddParameter(command, "@now", now.UtcDateTime);
-            AddParameter(command, "@cleanupBatchSize", CleanupBatchSize);
-            AddParameter(command, "@staleBefore", now.Subtract(StaleBucketRetention).UtcDateTime);
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            if (!await reader.ReadAsync(cancellationToken))
+        return await ExecuteWithOptionalPostgreSqlLocksAsync(
+            lockResources,
+            async (connection, transaction) =>
             {
-                throw new InvalidOperationException("SqlOS paired rate-limit state was not returned by SQL Server.");
-            }
+                await using var command = CreateCommand(connection, transaction, sql);
+                AddPairParameters(command, "first", first, now);
+                AddPairParameters(command, "second", second, now);
+                AddParameter(command, "@now", now.UtcDateTime);
+                AddParameter(command, "@cleanupBatchSize", CleanupBatchSize);
+                AddParameter(command, "@staleBefore", now.Subtract(StaleBucketRetention).UtcDateTime);
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                if (!await reader.ReadAsync(cancellationToken))
+                {
+                    throw new InvalidOperationException("SqlOS paired rate-limit state was not returned by the database.");
+                }
 
-            int? rejectedIndex = reader.IsDBNull(0) ? null : reader.GetInt32(0);
-            var rejectedUntil = ReadDateTimeOffset(reader, 1);
-            return new SqlOSRateLimitPairReservationState(
-                ReadPairBucketState(reader, 2),
-                ReadPairBucketState(reader, 5),
-                rejectedIndex,
-                rejectedUntil);
-        }
-        finally
-        {
-            if (!wasOpen)
-            {
-                await connection.CloseAsync();
-            }
-        }
+                int? rejectedIndex = reader.IsDBNull(0) ? null : reader.GetInt32(0);
+                var rejectedUntil = ReadDateTimeOffset(reader, 1);
+                return new SqlOSRateLimitPairReservationState(
+                    ReadPairBucketState(reader, 2),
+                    ReadPairBucketState(reader, 5),
+                    rejectedIndex,
+                    rejectedUntil);
+            },
+            cancellationToken);
     }
 
     private static void AddPairParameters(
@@ -565,268 +339,97 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
     private static string NormalizeKey(string key)
         => key.Length <= 384 ? key : key[..384];
 
-    private static string EscapeIdentifier(string identifier)
-        => identifier.Replace("]", "]]", StringComparison.Ordinal);
-
-    private string BuildReserveManySql(int count)
-    {
-        var sql = new System.Text.StringBuilder();
-        sql.AppendLine("SET XACT_ABORT ON;");
-        sql.AppendLine("SET NOCOUNT ON;");
-        sql.AppendLine("BEGIN TRANSACTION;");
-        sql.AppendLine();
-        sql.AppendLine("DECLARE @applicationLockResult INT;");
-        for (var index = 0; index < count; index++)
-        {
-            sql.AppendLine($"""
-                DECLARE @applicationLockResource{index} NVARCHAR(255) =
-                    N'SqlOS:rate-limit:' + CONVERT(NVARCHAR(64), HASHBYTES('SHA2_256', @scope{index} + N':' + @key{index}), 2);
-                """);
-        }
-
-        // Acquire per-key locks in deterministic (scope, key) order. The parameter values are
-        // compared in SQL so C# does not need the normalized keys before command execution.
-        sql.AppendLine("""
-            DECLARE @lockCursor TABLE ([Ordinal] INT NOT NULL, [Scope] NVARCHAR(64) NOT NULL, [BucketKey] NVARCHAR(384) NOT NULL);
-            """);
-        for (var index = 0; index < count; index++)
-        {
-            sql.AppendLine($"INSERT INTO @lockCursor ([Ordinal], [Scope], [BucketKey]) VALUES ({index}, @scope{index}, @key{index});");
-        }
-
-        sql.AppendLine("""
-            DECLARE lock_cursor CURSOR LOCAL FAST_FORWARD FOR
-                SELECT [Ordinal] FROM @lockCursor ORDER BY [Scope], [BucketKey], [Ordinal];
-            DECLARE @lockOrdinal INT;
-            OPEN lock_cursor;
-            FETCH NEXT FROM lock_cursor INTO @lockOrdinal;
-            WHILE @@FETCH_STATUS = 0
-            BEGIN
-            """);
-        for (var index = 0; index < count; index++)
-        {
-            sql.AppendLine($"""
-                IF @lockOrdinal = {index}
-                BEGIN
-                    EXEC @applicationLockResult = sys.sp_getapplock
-                        @Resource = @applicationLockResource{index},
-                        @LockMode = 'Exclusive',
-                        @LockOwner = 'Transaction',
-                        @LockTimeout = 10000;
-                    IF @applicationLockResult < 0
-                        THROW 51000, 'Unable to acquire the SqlOS rate-limit lock.', 1;
-                END
-                """);
-        }
-
-        sql.AppendLine("""
-            FETCH NEXT FROM lock_cursor INTO @lockOrdinal;
-            END
-            CLOSE lock_cursor;
-            DEALLOCATE lock_cursor;
-            """);
-
-        for (var index = 0; index < count; index++)
-        {
-            sql.AppendLine($"""
-                DELETE FROM [{_schema}].[SqlOSRateLimitBuckets]
-                WHERE [Scope] = @scope{index}
-                  AND [BucketKey] = @key{index}
-                  AND ([LockedUntil] IS NULL OR [LockedUntil] <= @now)
-                  AND [WindowStartedAt] <= @windowStartedBefore{index};
-                """);
-        }
-
-        sql.AppendLine("DECLARE @rejectedIndex INT = NULL;");
-        sql.AppendLine("DECLARE @rejectedLockedUntil DATETIME2 = NULL;");
-        for (var index = 0; index < count; index++)
-        {
-            sql.AppendLine($"""
-                IF @rejectedIndex IS NULL
-                    SELECT TOP (1) @rejectedIndex = {index}, @rejectedLockedUntil = [LockedUntil]
-                    FROM [{_schema}].[SqlOSRateLimitBuckets] WITH (UPDLOCK, HOLDLOCK)
-                    WHERE [Scope] = @scope{index} AND [BucketKey] = @key{index} AND [LockedUntil] > @now;
-                """);
-        }
-
-        sql.AppendLine("IF @rejectedIndex IS NULL");
-        sql.AppendLine("BEGIN");
-        for (var index = 0; index < count; index++)
-        {
-            sql.AppendLine($"""
-                    UPDATE [{_schema}].[SqlOSRateLimitBuckets]
-                    SET [Count] = [Count] + 1,
-                        [LockedUntil] = CASE WHEN [Count] + 1 >= @threshold{index}
-                            THEN @lockedUntil{index} ELSE NULL END,
-                        [UpdatedAt] = @now
-                    WHERE [Scope] = @scope{index} AND [BucketKey] = @key{index};
-                    IF @@ROWCOUNT = 0
-                        INSERT INTO [{_schema}].[SqlOSRateLimitBuckets]
-                            ([Scope], [BucketKey], [WindowStartedAt], [Count], [LockedUntil], [UpdatedAt])
-                        VALUES (@scope{index}, @key{index}, @now, 1,
-                            CASE WHEN @threshold{index} <= 1 THEN @lockedUntil{index} ELSE NULL END, @now);
-                """);
-        }
-
-        sql.AppendLine("END");
-        sql.AppendLine($"""
-            ;WITH staleBuckets AS (
-                SELECT TOP (@cleanupBatchSize) *
-                FROM [{_schema}].[SqlOSRateLimitBuckets]
-                WHERE [Scope] IN ({string.Join(", ", Enumerable.Range(0, count).Select(index => $"@scope{index}"))})
-                  AND [UpdatedAt] < @staleBefore
-                  AND ([LockedUntil] IS NULL OR [LockedUntil] <= @now)
-                ORDER BY [UpdatedAt]
-            )
-            DELETE FROM staleBuckets;
-            """);
-
-        sql.Append("SELECT @rejectedIndex, @rejectedLockedUntil");
-        for (var index = 0; index < count; index++)
-        {
-            sql.Append($", bucket{index}.[Count], bucket{index}.[LockedUntil], bucket{index}.[WindowStartedAt]");
-        }
-
-        sql.AppendLine();
-        sql.AppendLine("FROM (VALUES (1)) AS anchor([Value])");
-        for (var index = 0; index < count; index++)
-        {
-            sql.AppendLine($"""
-                LEFT JOIN [{_schema}].[SqlOSRateLimitBuckets] bucket{index}
-                  ON bucket{index}.[Scope] = @scope{index} AND bucket{index}.[BucketKey] = @key{index}
-                """);
-        }
-
-        sql.AppendLine("COMMIT TRANSACTION;");
-        return sql.ToString();
-    }
-
-    private string BuildReleaseManySql(int count)
-    {
-        var sql = new System.Text.StringBuilder();
-        sql.AppendLine("SET XACT_ABORT ON;");
-        sql.AppendLine("SET NOCOUNT ON;");
-        sql.AppendLine("BEGIN TRANSACTION;");
-        sql.AppendLine("DECLARE @applicationLockResult INT;");
-        sql.AppendLine("""
-            DECLARE @lockCursor TABLE ([Ordinal] INT NOT NULL, [Scope] NVARCHAR(64) NOT NULL, [BucketKey] NVARCHAR(384) NOT NULL);
-            """);
-        for (var index = 0; index < count; index++)
-        {
-            sql.AppendLine($"""
-                DECLARE @applicationLockResource{index} NVARCHAR(255) =
-                    N'SqlOS:rate-limit:' + CONVERT(NVARCHAR(64), HASHBYTES('SHA2_256', @scope{index} + N':' + @key{index}), 2);
-                INSERT INTO @lockCursor ([Ordinal], [Scope], [BucketKey]) VALUES ({index}, @scope{index}, @key{index});
-                """);
-        }
-
-        sql.AppendLine("""
-            DECLARE lock_cursor CURSOR LOCAL FAST_FORWARD FOR
-                SELECT [Ordinal] FROM @lockCursor ORDER BY [Scope], [BucketKey], [Ordinal];
-            DECLARE @lockOrdinal INT;
-            OPEN lock_cursor;
-            FETCH NEXT FROM lock_cursor INTO @lockOrdinal;
-            WHILE @@FETCH_STATUS = 0
-            BEGIN
-            """);
-        for (var index = 0; index < count; index++)
-        {
-            sql.AppendLine($"""
-                IF @lockOrdinal = {index}
-                BEGIN
-                    EXEC @applicationLockResult = sys.sp_getapplock
-                        @Resource = @applicationLockResource{index},
-                        @LockMode = 'Exclusive',
-                        @LockOwner = 'Transaction',
-                        @LockTimeout = 10000;
-                    IF @applicationLockResult < 0
-                        THROW 51000, 'Unable to acquire the SqlOS rate-limit lock.', 1;
-                END
-                """);
-        }
-
-        sql.AppendLine("""
-            FETCH NEXT FROM lock_cursor INTO @lockOrdinal;
-            END
-            CLOSE lock_cursor;
-            DEALLOCATE lock_cursor;
-            """);
-
-        for (var index = 0; index < count; index++)
-        {
-            sql.AppendLine($"""
-                UPDATE [{_schema}].[SqlOSRateLimitBuckets]
-                SET [Count] = CASE WHEN [Count] > 0 THEN [Count] - 1 ELSE 0 END,
-                    [LockedUntil] = CASE WHEN [Count] - 1 < @threshold{index} THEN NULL ELSE [LockedUntil] END,
-                    [UpdatedAt] = @now
-                WHERE [Scope] = @scope{index} AND [BucketKey] = @key{index}
-                  AND [WindowStartedAt] = @windowStartedAt{index};
-
-                DELETE FROM [{_schema}].[SqlOSRateLimitBuckets]
-                WHERE [Scope] = @scope{index} AND [BucketKey] = @key{index}
-                  AND [WindowStartedAt] = @windowStartedAt{index}
-                  AND [Count] = 0;
-                """);
-        }
-
-        sql.AppendLine("COMMIT TRANSACTION;");
-        return sql.ToString();
-    }
-
     private async Task<SqlOSRateLimitReservationState> ExecuteReservationStateAsync(
         string sql,
         IReadOnlyList<SqlOSRateLimitBucketRequest> buckets,
         DateTimeOffset now,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyList<string>? lockResources = null)
     {
-        var connection = _context.Database.GetDbConnection();
-        var wasOpen = connection.State == ConnectionState.Open;
-        if (!wasOpen)
-        {
-            await connection.OpenAsync(cancellationToken);
-        }
-
-        try
-        {
-            await using var command = connection.CreateCommand();
-            command.CommandText = sql;
-            for (var index = 0; index < buckets.Count; index++)
+        return await ExecuteWithOptionalPostgreSqlLocksAsync(
+            lockResources,
+            async (connection, transaction) =>
             {
-                AddReservationParameters(command, index, buckets[index], now);
-            }
+                await using var command = CreateCommand(connection, transaction, sql);
+                for (var index = 0; index < buckets.Count; index++)
+                {
+                    AddReservationParameters(command, index, buckets[index], now);
+                }
 
-            AddParameter(command, "@now", now.UtcDateTime);
-            AddParameter(command, "@cleanupBatchSize", CleanupBatchSize);
-            AddParameter(command, "@staleBefore", now.Subtract(StaleBucketRetention).UtcDateTime);
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            if (!await reader.ReadAsync(cancellationToken))
-            {
-                throw new InvalidOperationException("SqlOS reserved rate-limit state was not returned by SQL Server.");
-            }
+                AddParameter(command, "@now", now.UtcDateTime);
+                AddParameter(command, "@cleanupBatchSize", CleanupBatchSize);
+                AddParameter(command, "@staleBefore", now.Subtract(StaleBucketRetention).UtcDateTime);
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                if (!await reader.ReadAsync(cancellationToken))
+                {
+                    throw new InvalidOperationException("SqlOS reserved rate-limit state was not returned by the database.");
+                }
 
-            int? rejectedIndex = reader.IsDBNull(0) ? null : reader.GetInt32(0);
-            var rejectedUntil = ReadDateTimeOffset(reader, 1);
-            var states = new SqlOSRateLimitBucketState?[buckets.Count];
-            for (var index = 0; index < buckets.Count; index++)
-            {
-                states[index] = ReadPairBucketState(reader, 2 + (index * 3));
-            }
+                int? rejectedIndex = reader.IsDBNull(0) ? null : reader.GetInt32(0);
+                var rejectedUntil = ReadDateTimeOffset(reader, 1);
+                var states = new SqlOSRateLimitBucketState?[buckets.Count];
+                for (var index = 0; index < buckets.Count; index++)
+                {
+                    states[index] = ReadPairBucketState(reader, 2 + (index * 3));
+                }
 
-            return new SqlOSRateLimitReservationState(states, rejectedIndex, rejectedUntil);
-        }
-        finally
-        {
-            if (!wasOpen)
-            {
-                await connection.CloseAsync();
-            }
-        }
+                return new SqlOSRateLimitReservationState(states, rejectedIndex, rejectedUntil);
+            },
+            cancellationToken);
     }
 
     private async Task ExecuteReleaseManyAsync(
         string sql,
         IReadOnlyList<SqlOSRateLimitReservationRelease> releases,
         DateTimeOffset now,
+        CancellationToken cancellationToken,
+        IReadOnlyList<string>? lockResources = null)
+    {
+        await ExecuteWithOptionalPostgreSqlLocksAsync(
+            lockResources,
+            async (connection, transaction) =>
+            {
+                await using var command = CreateCommand(connection, transaction, sql);
+                for (var index = 0; index < releases.Count; index++)
+                {
+                    var release = releases[index];
+                    AddParameter(command, $"@scope{index}", release.Scope);
+                    AddParameter(command, $"@key{index}", NormalizeKey(release.Key));
+                    AddParameter(command, $"@threshold{index}", release.LockThreshold);
+                    AddParameter(command, $"@windowStartedAt{index}", release.WindowStartedAt.UtcDateTime);
+                }
+
+                AddParameter(command, "@now", now.UtcDateTime);
+                await command.ExecuteNonQueryAsync(cancellationToken);
+                return 0;
+            },
+            cancellationToken);
+    }
+
+    private const string PairLockResource = "SqlOS:rate-limit-pair-reservation";
+
+    private static string RateLimitLockResource(string scope, string key)
+        => $"SqlOS:rate-limit:{scope}:{NormalizeKey(key)}";
+
+    private static IReadOnlyList<string> SortedRateLimitLockResources(
+        IEnumerable<(string Scope, string Key)> buckets)
+        => buckets
+            .Select(bucket => RateLimitLockResource(bucket.Scope, bucket.Key))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(resource => resource, StringComparer.Ordinal)
+            .ToArray();
+
+    private static DbCommand CreateCommand(DbConnection connection, DbTransaction? transaction, string sql)
+    {
+        var command = connection.CreateCommand();
+        command.CommandText = sql;
+        command.Transaction = transaction;
+        return command;
+    }
+
+    private async Task<T> ExecuteWithOptionalPostgreSqlLocksAsync<T>(
+        IReadOnlyList<string>? lockResources,
+        Func<DbConnection, DbTransaction?, Task<T>> execute,
         CancellationToken cancellationToken)
     {
         var connection = _context.Database.GetDbConnection();
@@ -838,19 +441,24 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
 
         try
         {
-            await using var command = connection.CreateCommand();
-            command.CommandText = sql;
-            for (var index = 0; index < releases.Count; index++)
+            if (lockResources is not { Count: > 0 }
+                || !SqlOSDatabase.IsPostgreSql(_context.Database.ProviderName))
             {
-                var release = releases[index];
-                AddParameter(command, $"@scope{index}", release.Scope);
-                AddParameter(command, $"@key{index}", NormalizeKey(release.Key));
-                AddParameter(command, $"@threshold{index}", release.LockThreshold);
-                AddParameter(command, $"@windowStartedAt{index}", release.WindowStartedAt.UtcDateTime);
+                return await execute(connection, _context.Database.CurrentTransaction?.GetDbTransaction());
             }
 
-            AddParameter(command, "@now", now.UtcDateTime);
-            await command.ExecuteNonQueryAsync(cancellationToken);
+            var existing = _context.Database.CurrentTransaction?.GetDbTransaction();
+            if (existing != null)
+            {
+                await AcquirePostgreSqlLocksAsync(connection, existing, lockResources, cancellationToken);
+                return await execute(connection, existing);
+            }
+
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            await AcquirePostgreSqlLocksAsync(connection, transaction, lockResources, cancellationToken);
+            var result = await execute(connection, transaction);
+            await transaction.CommitAsync(cancellationToken);
+            return result;
         }
         finally
         {
@@ -858,6 +466,39 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
             {
                 await connection.CloseAsync();
             }
+        }
+    }
+
+    private static async Task AcquirePostgreSqlLocksAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        IReadOnlyList<string> resources,
+        CancellationToken cancellationToken)
+    {
+        await using (var timeout = CreateCommand(connection, transaction, "SET LOCAL lock_timeout = '10000ms'"))
+        {
+            await timeout.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        try
+        {
+            foreach (var resource in resources)
+            {
+                await using var command = CreateCommand(
+                    connection,
+                    transaction,
+                    """
+                    SELECT pg_advisory_xact_lock(
+                        ('x' || substr(md5(@resource), 1, 8))::bit(32)::int,
+                        ('x' || substr(md5(@resource), 9, 8))::bit(32)::int)
+                    """);
+                AddParameter(command, "@resource", resource);
+                await command.ExecuteNonQueryAsync(cancellationToken);
+            }
+        }
+        catch (Exception ex) when (ex is Npgsql.PostgresException { SqlState: PostgresErrorCodes.LockNotAvailable or "57014" })
+        {
+            throw new InvalidOperationException("Unable to acquire the SqlOS rate-limit lock.", ex);
         }
     }
 

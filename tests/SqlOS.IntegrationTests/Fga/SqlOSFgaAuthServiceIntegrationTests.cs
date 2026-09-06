@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -23,6 +24,21 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
             Context,
             Options.Create(new SqlOSFgaOptions()),
             loggerFactory.CreateLogger<SqlOSFgaAuthService>());
+    }
+
+    [TestMethod]
+    public async Task BuildFilterAsync_ComposesIntoASingleSqlQuery()
+    {
+        var filter = await _authService.BuildFilterAsync<LifecycleProtectedEntity>(
+            FgaTestDataSeeder.SystemAdminSubjectId,
+            "TEST_VIEW");
+        var sql = Context.Set<LifecycleProtectedEntity>().Where(filter).ToQueryString();
+
+        StringAssert.Contains(sql, "fn_IsResourceAccessible");
+        Assert.AreEqual(
+            1,
+            Regex.Matches(sql, "fn_IsResourceAccessible", RegexOptions.IgnoreCase).Count,
+            $"Authorization filter must compose to one SQL query. SQL:{Environment.NewLine}{sql}");
     }
 
     [TestMethod]

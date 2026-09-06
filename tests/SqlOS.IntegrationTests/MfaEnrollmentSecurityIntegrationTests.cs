@@ -679,7 +679,7 @@ public sealed class MfaEnrollmentSecurityIntegrationTests
         {
             var context = new TestSqlOSDbContext(
                 new DbContextOptionsBuilder<TestSqlOSDbContext>()
-                    .UseSqlServer(connectionString)
+                    .UseTestProvider(connectionString)
                     .Options);
             return Build(context, options, deleteDatabaseOnDispose: false);
         }
@@ -788,7 +788,7 @@ public sealed class MfaEnrollmentSecurityIntegrationTests
                 EnvironmentName = Environments.Development
             });
             builder.WebHost.UseTestServer();
-            builder.Services.AddDbContext<TestSqlOSDbContext>(db => db.UseSqlServer(connectionString));
+            builder.Services.AddDbContext<TestSqlOSDbContext>(db => db.UseTestProvider(connectionString));
             builder.Services.AddSqlOS<TestSqlOSDbContext>(options =>
             {
                 options.AuthServer.Issuer = "https://tests/sqlos/auth";

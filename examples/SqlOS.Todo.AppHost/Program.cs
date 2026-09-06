@@ -24,14 +24,28 @@ var twilioVerifyServiceSid = builder.Configuration["SqlOS:PhoneOtp:TwilioVerifyS
     ?? builder.Configuration["TWILIO_VERIFY_SERVICE_SID"];
 var phoneOtpDefaultRegion = builder.Configuration["SqlOS:PhoneOtp:DefaultRegion"]
     ?? builder.Configuration["TWILIO_DEFAULT_REGION"];
-var sqlPassword = builder.AddParameter("sql-password", value: "LocalDevPassword123!");
+var usePostgreSql = string.Equals(
+    builder.Configuration["SqlOS:DatabaseProvider"],
+    "PostgreSql",
+    StringComparison.OrdinalIgnoreCase);
 
-var sql = builder.AddSqlServer("sql", password: sqlPassword, port: 1435)
-    .WithLifetime(ContainerLifetime.Persistent)
-    .WithDataVolume()
-    .WithContainerRuntimeArgs("--platform", "linux/amd64");
-
-var database = sql.AddDatabase("sqlos-todo");
+IResourceBuilder<IResourceWithConnectionString> database;
+if (usePostgreSql)
+{
+    database = builder.AddPostgres("sql")
+        .WithLifetime(ContainerLifetime.Persistent)
+        .WithDataVolume()
+        .AddDatabase("sqlos-todo");
+}
+else
+{
+    var sqlPassword = builder.AddParameter("sql-password", value: "LocalDevPassword123!");
+    database = builder.AddSqlServer("sql", password: sqlPassword, port: 1435)
+        .WithLifetime(ContainerLifetime.Persistent)
+        .WithDataVolume()
+        .WithContainerRuntimeArgs("--platform", "linux/amd64")
+        .AddDatabase("sqlos-todo");
+}
 
 var todoApi = builder.AddProject<Projects.SqlOS_Todo_Api>("todo-api")
     .WithReference(database)
@@ -41,7 +55,8 @@ var todoApi = builder.AddProject<Projects.SqlOS_Todo_Api>("todo-api")
     .WithEnvironment("TodoSample__PublicOrigin", todoOrigin)
     .WithEnvironment("TodoSample__Resource", todoResource)
     .WithEnvironment("TodoSample__EnableHeadless", "false")
-    .WithEnvironment("TodoSample__EnableDcr", todoEnableDcr);
+    .WithEnvironment("TodoSample__EnableDcr", todoEnableDcr)
+    .WithEnvironment("SqlOS__DatabaseProvider", usePostgreSql ? "PostgreSql" : "SqlServer");
 
 builder.AddProject<Projects.SqlOS_Example_AspNetCoreWeb>("aspnet-web")
     .WithEnvironment("SqlOS__Origin", todoOrigin)

@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Database;
 using SqlOS.Pagination;
 
 namespace SqlOS.AuthServer.Services;
@@ -243,7 +244,7 @@ public sealed class SqlOSClientAuthenticationService
             }
 
             await using var transaction = await _context.Database.BeginTransactionAsync(
-                IsolationLevel.Serializable,
+                SqlOSDatabase.ExclusiveWorkIsolationLevel(_context.Database),
                 cancellationToken);
             var created = await CreateCredentialCoreAsync(
                 clientApplicationId,
@@ -309,29 +310,15 @@ public sealed class SqlOSClientAuthenticationService
         return new SqlOSClientCredentialCreated(ToDto(credential), prepared.Secret);
     }
 
-    private async Task AcquireCredentialCreationLockAsync(
+    private Task AcquireCredentialCreationLockAsync(
         string clientApplicationId,
         CancellationToken cancellationToken)
-    {
-        if (!string.Equals(
-            _context.Database.ProviderName,
-            "Microsoft.EntityFrameworkCore.SqlServer",
-            StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        var resource = $"SqlOS:ClientCredentialCreation:{clientApplicationId}";
-        await _context.Database.ExecuteSqlInterpolatedAsync($"""
-            DECLARE @result int;
-            EXEC @result = sys.sp_getapplock
-                @Resource = {resource},
-                @LockMode = 'Exclusive',
-                @LockOwner = 'Transaction',
-                @LockTimeout = 30000;
-            IF @result < 0 THROW 51000, 'Could not acquire the client-credential creation lock.', 1;
-            """, cancellationToken);
-    }
+        => SqlOSDatabase.AcquireExclusiveTransactionLockAsync(
+            _context.Database,
+            $"SqlOS:ClientCredentialCreation:{clientApplicationId}",
+            TimeSpan.FromSeconds(30),
+            "Could not acquire the client-credential creation lock.",
+            cancellationToken);
 
     public async Task RevokeCredentialAsync(
         string clientApplicationId,

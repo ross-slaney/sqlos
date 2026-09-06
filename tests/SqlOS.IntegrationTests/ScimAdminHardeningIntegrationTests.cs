@@ -53,10 +53,20 @@ public sealed class ScimAdminHardeningIntegrationTests
             await capturedAdmin.UpsertSeededScimConnectionsAsync();
         }
 
-        interceptor.Commands.Should().Contain(command =>
-            command.Contains("WITH (UPDLOCK, HOLDLOCK)", StringComparison.Ordinal)
-            && command.Contains("WHERE [Source] = @source", StringComparison.Ordinal)
-            && command.Contains("ORDER BY [Id]", StringComparison.Ordinal));
+        if (TestDatabase.IsPostgreSql)
+        {
+            interceptor.Commands.Should().Contain(command =>
+                command.Contains("FOR UPDATE", StringComparison.Ordinal)
+                && command.Contains("WHERE \"Source\" = @source", StringComparison.Ordinal)
+                && command.Contains("ORDER BY \"Id\"", StringComparison.Ordinal));
+        }
+        else
+        {
+            interceptor.Commands.Should().Contain(command =>
+                command.Contains("WITH (UPDLOCK, HOLDLOCK)", StringComparison.Ordinal)
+                && command.Contains("WHERE [Source] = @source", StringComparison.Ordinal)
+                && command.Contains("ORDER BY [Id]", StringComparison.Ordinal));
+        }
 
         var contexts = Enumerable.Range(0, 4)
             .Select(_ => CreateContext(connectionString!))
@@ -236,7 +246,7 @@ public sealed class ScimAdminHardeningIntegrationTests
         params IInterceptor[] interceptors)
     {
         var builder = new DbContextOptionsBuilder<TestSqlOSDbContext>()
-            .UseSqlServer(connectionString);
+            .UseTestProvider(connectionString);
         if (interceptors.Length > 0)
         {
             builder.AddInterceptors(interceptors);

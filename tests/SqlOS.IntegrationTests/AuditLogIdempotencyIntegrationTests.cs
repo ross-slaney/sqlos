@@ -127,7 +127,7 @@ public sealed class AuditLogIdempotencyIntegrationTests
 
     private static TestSqlOSDbContext CreateContext(string connectionString)
         => new(new DbContextOptionsBuilder<TestSqlOSDbContext>()
-            .UseSqlServer(connectionString)
+            .UseTestProvider(connectionString)
             .Options);
 
     private static SqlOSAuditLogService CreateService(TestSqlOSDbContext context)

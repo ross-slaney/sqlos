@@ -6,6 +6,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Services;
 using SqlOS.IntegrationTests.Fga.Infrastructure;
+using SqlOS.IntegrationTests.Infrastructure;
 
 namespace SqlOS.IntegrationTests.Fga;
 
@@ -145,11 +146,11 @@ public class SqlOSFgaSchemaInitializerIntegrationTests : FgaIntegrationTestBase
 
         await initializer.EnsureSchemaAsync();
 
-        Assert.IsTrue(await IndexKeyWidthAsync("SqlOSFgaResources", "IX_SqlOSFgaResources_ParentId_Id") <= 1700);
-        Assert.IsTrue(await IndexKeyWidthAsync("SqlOSFgaGrants", "IX_SqlOSFgaGrants_SubjectId_CreatedAt_Id") <= 1700);
-        Assert.IsTrue(await IndexKeyWidthAsync("SqlOSFgaGrants", "IX_SqlOSFgaGrants_ResourceId_CreatedAt_Id") <= 1700);
-        Assert.IsTrue(await IndexKeyWidthAsync("SqlOSFgaGrants", "IX_SqlOSFgaGrants_ResourceId_SubjectId") <= 1700);
-        Assert.IsTrue(await IndexKeyWidthAsync("SqlOSFgaRolePermissions", "IX_SqlOSFgaRolePermissions_PermissionId_RoleId") <= 1700);
+        await AssertIndexFitsProviderLimitsAsync("SqlOSFgaResources", "IX_SqlOSFgaResources_ParentId_Id");
+        await AssertIndexFitsProviderLimitsAsync("SqlOSFgaGrants", "IX_SqlOSFgaGrants_SubjectId_CreatedAt_Id");
+        await AssertIndexFitsProviderLimitsAsync("SqlOSFgaGrants", "IX_SqlOSFgaGrants_ResourceId_CreatedAt_Id");
+        await AssertIndexFitsProviderLimitsAsync("SqlOSFgaGrants", "IX_SqlOSFgaGrants_ResourceId_SubjectId");
+        await AssertIndexFitsProviderLimitsAsync("SqlOSFgaRolePermissions", "IX_SqlOSFgaRolePermissions_PermissionId_RoleId");
 
         var token = Guid.NewGuid().ToString("N");
         string MaxId(string prefix) => (prefix + token).PadRight(450, 'x');
@@ -222,43 +223,18 @@ public class SqlOSFgaSchemaInitializerIntegrationTests : FgaIntegrationTestBase
         Assert.AreEqual(GetLatestMigrationVersion(), version);
     }
 
-    private async Task<bool> TableExistsAsync(string tableName)
-    {
-        var connection = Context.Database.GetDbConnection();
-        await connection.OpenAsync();
-        try
-        {
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = $"SELECT COUNT(*) FROM sys.tables WHERE name = @name AND schema_id = SCHEMA_ID('dbo')";
-            cmd.Parameters.Add(new SqlParameter("@name", tableName));
-            var result = await cmd.ExecuteScalarAsync();
-            return Convert.ToInt32(result) > 0;
-        }
-        finally
-        {
-            await connection.CloseAsync();
-        }
-    }
+    private Task<bool> TableExistsAsync(string tableName)
+        => TestCatalog.TableExistsAsync(Context, tableName);
 
-    private async Task<bool> ColumnExistsAsync(string tableName, string columnName)
+    private Task<bool> ColumnExistsAsync(string tableName, string columnName)
+        => TestCatalog.ColumnExistsAsync(Context, tableName, columnName);
+
+    private async Task AssertIndexFitsProviderLimitsAsync(string tableName, string indexName)
     {
-        var connection = Context.Database.GetDbConnection();
-        await connection.OpenAsync();
-        try
+        Assert.IsTrue(await TestCatalog.IndexExistsAsync(Context, tableName, indexName), indexName);
+        if (TestDatabase.IsSqlServer)
         {
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = @"
-                SELECT COUNT(*) FROM sys.columns c
-                INNER JOIN sys.tables t ON c.object_id = t.object_id
-                WHERE t.name = @tableName AND c.name = @columnName AND t.schema_id = SCHEMA_ID('dbo')";
-            cmd.Parameters.Add(new SqlParameter("@tableName", tableName));
-            cmd.Parameters.Add(new SqlParameter("@columnName", columnName));
-            var result = await cmd.ExecuteScalarAsync();
-            return Convert.ToInt32(result) > 0;
-        }
-        finally
-        {
-            await connection.CloseAsync();
+            Assert.IsTrue(await IndexKeyWidthAsync(tableName, indexName) <= 1700, indexName);
         }
     }
 
@@ -290,30 +266,8 @@ public class SqlOSFgaSchemaInitializerIntegrationTests : FgaIntegrationTestBase
         }
     }
 
-    private async Task<bool> IndexExistsAsync(string tableName, string indexName)
-    {
-        var connection = Context.Database.GetDbConnection();
-        await connection.OpenAsync();
-        try
-        {
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = @"
-                SELECT COUNT(*)
-                FROM sys.indexes i
-                INNER JOIN sys.tables t ON i.object_id = t.object_id
-                WHERE t.name = @tableName
-                  AND i.name = @indexName
-                  AND t.schema_id = SCHEMA_ID('dbo')";
-            cmd.Parameters.Add(new SqlParameter("@tableName", tableName));
-            cmd.Parameters.Add(new SqlParameter("@indexName", indexName));
-            var result = await cmd.ExecuteScalarAsync();
-            return Convert.ToInt32(result) > 0;
-        }
-        finally
-        {
-            await connection.CloseAsync();
-        }
-    }
+    private Task<bool> IndexExistsAsync(string tableName, string indexName)
+        => TestCatalog.IndexExistsAsync(Context, tableName, indexName);
 
     private async Task<int> GetSchemaVersionAsync()
     {
@@ -322,7 +276,7 @@ public class SqlOSFgaSchemaInitializerIntegrationTests : FgaIntegrationTestBase
         try
         {
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = "SELECT TOP 1 [Version] FROM [dbo].[SqlOSFgaSchema]";
+            cmd.CommandText = TestDatabase.Rewrite("SELECT TOP 1 [Version] FROM [dbo].[SqlOSFgaSchema]");
             var result = await cmd.ExecuteScalarAsync();
             return result != null ? Convert.ToInt32(result) : 0;
         }
@@ -334,14 +288,11 @@ public class SqlOSFgaSchemaInitializerIntegrationTests : FgaIntegrationTestBase
 
     private static int GetLatestMigrationVersion()
     {
-        const string resourcePrefix = "SqlOS.Fga.Schema.";
-
-        return typeof(SqlOSFgaSchemaInitializer).Assembly
-            .GetManifestResourceNames()
-            .Where(name => name.StartsWith(resourcePrefix, StringComparison.Ordinal)
-                && name.EndsWith(".sql", StringComparison.OrdinalIgnoreCase))
-            .Select(name => name[resourcePrefix.Length..].Split('_', 2)[0])
-            .Select(int.Parse)
-            .Max();
+        var prefix = TestDatabase.IsPostgreSql
+            ? "SqlOS.Fga.Schema.PostgreSql."
+            : "SqlOS.Fga.Schema.";
+        return SqlOS.Database.SqlOSMigrationManifest
+            .Discover(typeof(SqlOSFgaSchemaInitializer).Assembly, prefix)
+            .Max(script => script.Version);
     }
 }

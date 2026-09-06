@@ -92,7 +92,16 @@ builder.Services.AddCors(options =>
 });
 
 builder.AddSqlOS<TodoSampleDbContext>(
-    db => db.UseSqlServer(connectionString),
+    db =>
+    {
+        if (string.Equals(builder.Configuration["SqlOS:DatabaseProvider"], "PostgreSql", StringComparison.OrdinalIgnoreCase))
+        {
+            db.UseNpgsql(connectionString);
+            return;
+        }
+
+        db.UseSqlServer(connectionString);
+    },
     options =>
     {
         options.DashboardBasePath = "/sqlos";

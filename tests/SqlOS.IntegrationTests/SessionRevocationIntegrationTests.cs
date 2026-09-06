@@ -53,7 +53,7 @@ public sealed class SessionRevocationIntegrationTests
             async Task<SqlOSAdminSessionRevocationResult> RunAsync(string operationId)
             {
                 await using var context = new TestSqlOSDbContext(
-                    new DbContextOptionsBuilder<TestSqlOSDbContext>().UseSqlServer(connectionString).Options);
+                    new DbContextOptionsBuilder<TestSqlOSDbContext>().UseTestProvider(connectionString).Options);
                 var options = Options.Create(new SqlOSAuthServerOptions());
                 var crypto = new SqlOSCryptoService(context, options);
                 var service = new SqlOSSessionRevocationService(context, new SqlOSAuditLogService(context, crypto));

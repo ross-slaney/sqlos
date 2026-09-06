@@ -5,8 +5,8 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
-using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using SqlOS.Database;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -70,36 +70,10 @@ public static partial class EndpointRouteBuilderExtensions
     }
 
     private static bool IsSqlServerDeadlock(Exception exception)
-    {
-        for (var current = exception; current != null; current = current.InnerException!)
-        {
-            if (current is SqlException { Number: 1205 })
-            {
-                return true;
-            }
-            if (current.InnerException == null)
-            {
-                break;
-            }
-        }
-        return false;
-    }
+        => SqlOSDatabaseErrors.IsDeadlock(exception);
 
     private static bool IsSqlServerUniqueConstraintViolation(Exception exception)
-    {
-        for (var current = exception; current != null; current = current.InnerException!)
-        {
-            if (current is SqlException { Number: 2601 or 2627 })
-            {
-                return true;
-            }
-            if (current.InnerException == null)
-            {
-                break;
-            }
-        }
-        return false;
-    }
+        => SqlOSDatabaseErrors.IsUniqueConstraintViolation(exception);
 
     private static async Task<IResult> HandleAdminApiAsync(
         HttpContext context,

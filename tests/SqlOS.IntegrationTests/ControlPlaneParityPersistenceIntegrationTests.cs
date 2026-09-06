@@ -34,7 +34,7 @@ public sealed class ControlPlaneParityPersistenceIntegrationTests
             var firstFingerprint = (await firstContext.Set<SqlOSClientApplication>().AsNoTracking().SingleAsync()).ConfigurationFingerprint;
 
             await using var secondContext = new TestSqlOSDbContext(
-                new DbContextOptionsBuilder<TestSqlOSDbContext>().UseSqlServer(connectionString).Options);
+                new DbContextOptionsBuilder<TestSqlOSDbContext>().UseTestProvider(connectionString).Options);
             var secondAdmin = new SqlOSAdminService(secondContext, options, new SqlOSCryptoService(secondContext, options));
             await secondAdmin.UpsertSeededClientsAsync();
 

@@ -181,7 +181,7 @@ public sealed class PublicOriginSecurityIntegrationTests
             var emailSender = new TestAuthEmailSender { IsConfigured = true };
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = Environments.Development });
             builder.WebHost.UseTestServer();
-            builder.Services.AddDbContext<TestSqlOSDbContext>(db => db.UseSqlServer(connectionString));
+            builder.Services.AddDbContext<TestSqlOSDbContext>(db => db.UseTestProvider(connectionString));
             builder.Services.AddSqlOS<TestSqlOSDbContext>(options =>
             {
                 options.AuthServer.Issuer = issuer;

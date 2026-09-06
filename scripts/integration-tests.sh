@@ -14,6 +14,14 @@ dotnet test tests/SqlOS.IntegrationTests/SqlOS.IntegrationTests.csproj \
     --logger "console;verbosity=normal" \
     --logger "trx;LogFileName=IntegrationTests.trx"
 
+provider="$(printf '%s' "${SQLOS_TEST_PROVIDER:-}" | tr '[:upper:]' '[:lower:]')"
+if [ "$provider" = "postgresql" ] || [ "$provider" = "postgres" ] || [ "$provider" = "npgsql" ]; then
+    echo "Skipping Example/Todo integration tests on PostgreSQL."
+    echo "Those fixtures host SQL Server and are covered by the default integration-tests job."
+    echo "=== Integration Tests Complete ==="
+    exit 0
+fi
+
 dotnet test examples/SqlOS.Example.IntegrationTests/SqlOS.Example.IntegrationTests.csproj \
     --configuration Release \
     --no-build \

@@ -840,7 +840,7 @@ public sealed class AuthServiceIntegrationTests
     private static TestSqlOSDbContext BuildIsolatedContext(IInterceptor? interceptor = null)
     {
         var builder = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<TestSqlOSDbContext>()
-            .UseSqlServer(AspireFixture.SqlConnectionString);
+            .UseTestProvider(AspireFixture.SqlConnectionString);
         if (interceptor != null)
         {
             builder.AddInterceptors(interceptor);

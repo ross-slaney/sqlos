@@ -16,7 +16,7 @@ export default function StatementSection() {
         <p className="mx-auto mt-6 max-w-2xl text-pretty text-base leading-7 text-muted-foreground sm:text-lg">
           Other stacks fetch rows and then ask a policy service about each one. SqlOS
           folds the access check into the query plan — filtering, sorting, pagination,
-          and permissions in one round-trip to your SQL Server.
+          and permissions in one round-trip to your SQL Server or PostgreSQL.
         </p>
 
         <div className="mx-auto mt-10 inline-block overflow-x-auto rounded-2xl border bg-zinc-950 px-6 py-4 text-left shadow-xl">

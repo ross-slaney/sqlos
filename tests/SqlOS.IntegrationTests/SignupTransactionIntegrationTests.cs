@@ -547,7 +547,7 @@ public sealed class SignupTransactionIntegrationTests
         {
             var context = new TestSqlOSDbContext(
                 new DbContextOptionsBuilder<TestSqlOSDbContext>()
-                    .UseSqlServer(AspireFixture.SqlConnectionString)
+                    .UseTestProvider(AspireFixture.SqlConnectionString)
                     .Options);
             var connectionString = AspireFixture.SqlConnectionString;
             var clientId = $"signup-{Guid.NewGuid():N}";
@@ -577,7 +577,7 @@ public sealed class SignupTransactionIntegrationTests
         {
             var context = new TestSqlOSDbContext(
                 new DbContextOptionsBuilder<TestSqlOSDbContext>()
-                    .UseSqlServer(_connectionString)
+                    .UseTestProvider(_connectionString)
                     .Options);
             return BuildActor(context, Options, ownsContext: true);
         }
@@ -722,7 +722,7 @@ public sealed class SignupTransactionIntegrationTests
 
         public TestSqlOSDbContext CreateContext()
             => new(new DbContextOptionsBuilder<TestSqlOSDbContext>()
-                .UseSqlServer(ConnectionString)
+                .UseTestProvider(ConnectionString)
                 .Options);
 
         public static async Task<SignupHttpServer> CreateAsync()
@@ -735,7 +735,7 @@ public sealed class SignupTransactionIntegrationTests
                 EnvironmentName = Environments.Development
             });
             builder.WebHost.UseTestServer();
-            builder.Services.AddDbContext<TestSqlOSDbContext>(database => database.UseSqlServer(connectionString));
+            builder.Services.AddDbContext<TestSqlOSDbContext>(database => database.UseTestProvider(connectionString));
             builder.Services.AddSqlOS<TestSqlOSDbContext>(options =>
             {
                 options.AuthServer.Issuer = $"{TrustedOrigin}/sqlos/auth";

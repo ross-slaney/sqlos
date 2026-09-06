@@ -19,7 +19,7 @@ You'll learn how to run the full test suite and focused filters while developing
 ## Test layout
 
 - `tests/SqlOS.Tests` — unit tests
-- `tests/SqlOS.IntegrationTests` — real SQL Server (Aspire container)
+- `tests/SqlOS.IntegrationTests` — real SQL Server or PostgreSQL (Aspire container; set `SQLOS_TEST_PROVIDER=postgresql` for Postgres)
 - `examples/SqlOS.Example.IntegrationTests` — example API flows
 - `examples/SqlOS.Todo.IntegrationTests` — Todo sample flows
 - `tests/SqlOS.Benchmarks` — performance benchmarks
@@ -37,7 +37,7 @@ dotnet build SqlOS.sln
 
 ## Integration coverage
 
-Integration tests use Aspire and SQL Server containers for:
+Integration tests use Aspire and SQL Server or PostgreSQL containers for:
 
 - Auth and FGA schema bootstrap
 - OAuth, OTP, and invitation flows

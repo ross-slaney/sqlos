@@ -1,6 +1,6 @@
 # SqlOS
 
-**A complete auth stack for .NET B2B SaaS — inside your app, on the SQL Server you already run. No identity service to deploy.**
+**A complete auth stack for .NET B2B SaaS — inside your app, on the SQL Server or PostgreSQL database you already run. No identity service to deploy.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![NuGet](https://img.shields.io/nuget/v/SqlOS)](https://www.nuget.org/packages/SqlOS)
@@ -10,7 +10,7 @@ One NuGet package adds authentication *and* authorization to an ASP.NET Core app
 
 ```csharp
 builder.AddSqlOS<AppDbContext>(
-    db => db.UseSqlServer(connectionString),
+    db => db.UseSqlServer(connectionString), // or db.UseNpgsql(connectionString)
     options => options.UseSingleApplication("Acme", app =>
     {
         app.Origin = "http://localhost:5050";

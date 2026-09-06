@@ -42,7 +42,7 @@ public sealed class ApplicationAccessSeedIntegrationTests
                     Reason: "operator exception"));
 
             var contexts = Enumerable.Range(0, 4)
-                .Select(_ => new TestSqlOSDbContext(new DbContextOptionsBuilder<TestSqlOSDbContext>().UseSqlServer(connectionString).Options))
+                .Select(_ => new TestSqlOSDbContext(new DbContextOptionsBuilder<TestSqlOSDbContext>().UseTestProvider(connectionString).Options))
                 .ToList();
             try
             {

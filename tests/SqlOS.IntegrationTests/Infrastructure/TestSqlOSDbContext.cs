@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using SqlOS.AuthServer.Interfaces;
+using SqlOS.Database;
 using SqlOS.Extensions;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
@@ -10,6 +11,10 @@ public sealed class TestSqlOSDbContext : DbContext, ISqlOSAuthServerDbContext, I
 {
     public TestSqlOSDbContext(DbContextOptions<TestSqlOSDbContext> options) : base(options)
     {
+        if (SqlOSDatabase.IsPostgreSql(Database.ProviderName))
+        {
+            SqlOSDatabase.EnablePostgreSqlTimestampCompatibility();
+        }
     }
 
     public IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessible(
@@ -26,7 +31,7 @@ public sealed class TestSqlOSDbContext : DbContext, ISqlOSAuthServerDbContext, I
             entity.ToTable("LifecycleProtectedEntities");
             entity.HasKey(item => item.Id);
         });
-        modelBuilder.UseSqlOS(GetType());
+        modelBuilder.UseSqlOS(GetType(), Database.ProviderName);
     }
 }
 

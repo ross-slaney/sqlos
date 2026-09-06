@@ -8,6 +8,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Database;
 using SqlOS.Fga.Models;
 using SqlOS.Pagination;
 
@@ -46,15 +47,13 @@ public sealed class SqlOSMachineClientAdminService
         var strategy = _context.Database.CreateExecutionStrategy();
         await strategy.ExecuteAsync(async () =>
         {
-            await using var transaction = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
-            if (string.Equals(_context.Database.ProviderName, "Microsoft.EntityFrameworkCore.SqlServer", StringComparison.Ordinal))
-            {
-                await _context.Database.ExecuteSqlRawAsync("""
-                    DECLARE @result int;
-                    EXEC @result = sys.sp_getapplock @Resource=N'SqlOS:MachineClientReconciliation', @LockMode=N'Exclusive', @LockOwner=N'Transaction', @LockTimeout=30000;
-                    IF @result < 0 THROW 51000, 'Could not acquire the machine-client reconciliation lock.', 1;
-                    """, cancellationToken);
-            }
+            await using var transaction = await _context.Database.BeginTransactionAsync(SqlOSDatabase.ExclusiveWorkIsolationLevel(_context.Database), cancellationToken);
+            await SqlOSDatabase.AcquireExclusiveTransactionLockAsync(
+                _context.Database,
+                "SqlOS:MachineClientReconciliation",
+                TimeSpan.FromSeconds(30),
+                "Could not acquire the machine-client reconciliation lock.",
+                cancellationToken);
             await UpsertSeededMachineClientsCoreAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         });
@@ -66,7 +65,7 @@ public sealed class SqlOSMachineClientAdminService
         var secret = GenerateSecret();
         var secretHash = _crypto.HashPassword(secret);
         var transaction = _context.Database.IsRelational() && _context.Database.CurrentTransaction == null
-            ? await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
+            ? await _context.Database.BeginTransactionAsync(SqlOSDatabase.ExclusiveWorkIsolationLevel(_context.Database), cancellationToken)
             : null;
         try
         {

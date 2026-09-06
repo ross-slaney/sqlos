@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using SqlOS.Database;
 using QRCoder;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
@@ -348,6 +349,10 @@ public sealed class SqlOSTotpMfaService
             await _context.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateConcurrencyException)
+        {
+            throw new InvalidOperationException("MFA enrollment challenge has already been used.");
+        }
+        catch (DbUpdateException ex) when (SqlOSDatabaseErrors.IsUniqueConstraintViolation(ex))
         {
             throw new InvalidOperationException("MFA enrollment challenge has already been used.");
         }
