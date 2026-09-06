@@ -1,7 +1,6 @@
 using Aspire.Hosting;
 using Aspire.Hosting.Testing;
 using Microsoft.AspNetCore.DataProtection;
-using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -28,6 +27,11 @@ public static class AspireFixture
     [AssemblyInitialize]
     public static async Task InitializeAsync(TestContext context)
     {
+        if (TestDatabase.IsPostgreSql)
+        {
+            AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
+        }
+
         var appHost = await DistributedApplicationTestingBuilder
             .CreateAsync<Projects.SqlOS_IntegrationTests_AppHost>();
 
@@ -40,13 +44,14 @@ public static class AspireFixture
         var baseConnectionString = await _app.GetConnectionStringAsync("sqlos-test")
             ?? throw new InvalidOperationException("Could not get SQL connection string from Aspire.");
         var databaseName = $"SqlOSTest_{Guid.NewGuid():N}"[..30];
-        SqlConnectionString = baseConnectionString.Replace("Database=sqlos-test", $"Database={databaseName}");
+        await TestDatabase.CreateDatabaseAsync(baseConnectionString, databaseName);
+        SqlConnectionString = TestDatabase.CreateIsolatedConnectionString(baseConnectionString, databaseName);
         Options = new SqlOSAuthServerOptions { Issuer = "https://tests/sqlos/auth", BasePath = "/sqlos/auth" };
         Options.SeedBrowserClient("test-client", "Test Client", "https://client.example.test/callback");
         FgaOptions = new SqlOSFgaOptions();
 
         var dbOptions = new DbContextOptionsBuilder<TestSqlOSDbContext>()
-            .UseSqlServer(SqlConnectionString)
+            .UseTestProvider(SqlConnectionString)
             .Options;
         SharedContext = new TestSqlOSDbContext(dbOptions);
         await SharedContext.Database.EnsureCreatedAsync();
@@ -100,13 +105,12 @@ public static class AspireFixture
         }
 
         safePrefix = safePrefix.Length > 24 ? safePrefix[..24] : safePrefix;
-        var builder = new SqlConnectionStringBuilder(SqlConnectionString)
-        {
-            InitialCatalog = $"{safePrefix}_{Guid.NewGuid():N}"
-        };
+        var databaseName = $"{safePrefix}_{Guid.NewGuid():N}";
+        await TestDatabase.CreateDatabaseAsync(SqlConnectionString, databaseName, cancellationToken);
+        var connectionString = TestDatabase.CreateIsolatedConnectionString(SqlConnectionString, databaseName);
 
         var dbOptions = new DbContextOptionsBuilder<TestSqlOSDbContext>()
-            .UseSqlServer(builder.ConnectionString)
+            .UseTestProvider(connectionString)
             .Options;
         var context = new TestSqlOSDbContext(dbOptions);
         await context.Database.EnsureCreatedAsync(cancellationToken);

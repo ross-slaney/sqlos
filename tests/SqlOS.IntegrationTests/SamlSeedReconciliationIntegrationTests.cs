@@ -35,7 +35,7 @@ public sealed class SamlSeedReconciliationIntegrationTests
             });
             var connectionString = setup.Database.GetConnectionString()!;
             var contexts = Enumerable.Range(0, 4).Select(_ => new TestSqlOSDbContext(
-                new DbContextOptionsBuilder<TestSqlOSDbContext>().UseSqlServer(connectionString).Options)).ToList();
+                new DbContextOptionsBuilder<TestSqlOSDbContext>().UseTestProvider(connectionString).Options)).ToList();
             try
             {
                 var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

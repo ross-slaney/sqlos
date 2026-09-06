@@ -263,12 +263,13 @@ public sealed class DeliveryAdmissionIntegrationTests
     private static async Task ExpireRateLimitBucketsAsync(DeliveryAdmissionDatabase database)
     {
         await database.Context.Database.ExecuteSqlRawAsync(
-            """
-            UPDATE [dbo].[SqlOSRateLimitBuckets]
-            SET [WindowStartedAt] = DATEADD(day, -2, SYSUTCDATETIME()),
-                [LockedUntil] = DATEADD(day, -1, SYSUTCDATETIME()),
-                [UpdatedAt] = DATEADD(day, -1, SYSUTCDATETIME());
-            """);
+            TestDatabase.Rewrite(
+                """
+                UPDATE [dbo].[SqlOSRateLimitBuckets]
+                SET [WindowStartedAt] = DATEADD(day, -2, SYSUTCDATETIME()),
+                    [LockedUntil] = DATEADD(day, -1, SYSUTCDATETIME()),
+                    [UpdatedAt] = DATEADD(day, -1, SYSUTCDATETIME());
+                """));
     }
 
     private static DefaultHttpContext CreateHttpContext(string ipAddress)
@@ -374,7 +375,7 @@ public sealed class DeliveryAdmissionIntegrationTests
         {
             var context = new TestSqlOSDbContext(
                 new DbContextOptionsBuilder<TestSqlOSDbContext>()
-                    .UseSqlServer(_connectionString)
+                    .UseTestProvider(_connectionString)
                     .Options);
             return BuildPasswordResetActor(context, _options, sender, ownsContext: true);
         }
@@ -383,7 +384,7 @@ public sealed class DeliveryAdmissionIntegrationTests
         {
             var context = new TestSqlOSDbContext(
                 new DbContextOptionsBuilder<TestSqlOSDbContext>()
-                    .UseSqlServer(_connectionString)
+                    .UseTestProvider(_connectionString)
                     .Options);
             return BuildPhoneOtpActor(context, _options, channel, ownsContext: true);
         }

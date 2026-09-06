@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Database;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -462,7 +463,7 @@ public sealed class SqlOSPasswordLoginAbuseService
         {
             ClearTrackedAbuseState();
             await using var transaction = await _context.Database.BeginTransactionAsync(
-                IsolationLevel.Serializable,
+                SqlOSDatabase.ExclusiveWorkIsolationLevel(_context.Database),
                 cancellationToken);
             await AcquireAdmissionLockAsync(cancellationToken);
             var result = await operation();
@@ -472,22 +473,12 @@ public sealed class SqlOSPasswordLoginAbuseService
     }
 
     private Task AcquireAdmissionLockAsync(CancellationToken cancellationToken)
-    {
-        if (!string.Equals(_context.Database.ProviderName, "Microsoft.EntityFrameworkCore.SqlServer", StringComparison.Ordinal))
-        {
-            return Task.CompletedTask;
-        }
-
-        return _context.Database.ExecuteSqlRawAsync("""
-            DECLARE @result int;
-            EXEC @result = sys.sp_getapplock
-                @Resource = N'SqlOS:PasswordLoginAdmission',
-                @LockMode = N'Exclusive',
-                @LockOwner = N'Transaction',
-                @LockTimeout = 10000;
-            IF @result < 0 THROW 51000, 'Could not acquire the SqlOS password-login admission lock.', 1;
-            """, cancellationToken);
-    }
+        => SqlOSDatabase.AcquireExclusiveTransactionLockAsync(
+            _context.Database,
+            "SqlOS:PasswordLoginAdmission",
+            TimeSpan.FromSeconds(10),
+            "Could not acquire the SqlOS password-login admission lock.",
+            cancellationToken);
 
     private void ClearTrackedAbuseState()
     {

@@ -2,8 +2,8 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.WebUtilities;
-using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using SqlOS.Database;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Configuration;
@@ -2204,7 +2204,7 @@ public sealed class SqlOSAuthorizationServerService
         => !string.Equals(_context.Database.ProviderName, "Microsoft.EntityFrameworkCore.InMemory", StringComparison.Ordinal);
 
     private static bool IsUniqueConstraintViolation(DbUpdateException exception)
-        => exception.InnerException is SqlException { Number: 2601 or 2627 };
+        => SqlOSDatabaseErrors.IsUniqueConstraintViolation(exception);
 }
 
 public sealed record SqlOSAuthorizeRequestInput(

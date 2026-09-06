@@ -22,6 +22,8 @@ Use the AppHost to get SQL Server plus the Todo sample on one command:
 dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
 ```
 
+Set `SqlOS:DatabaseProvider=PostgreSql` to start PostgreSQL instead; the API then calls `UseNpgsql` for the same connection string.
+
 Or run the broader Aspire stack and get the Todo app there too:
 
 ```bash

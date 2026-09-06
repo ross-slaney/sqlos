@@ -976,7 +976,7 @@ public sealed class HeadlessAuthIntegrationTests
     private static TestSqlOSDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<TestSqlOSDbContext>()
-            .UseSqlServer(AspireFixture.SqlConnectionString)
+            .UseTestProvider(AspireFixture.SqlConnectionString)
             .Options;
         return new TestSqlOSDbContext(options);
     }

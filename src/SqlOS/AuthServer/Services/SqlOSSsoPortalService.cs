@@ -6,6 +6,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Database;
 using SqlOS.Pagination;
 
 namespace SqlOS.AuthServer.Services;
@@ -127,7 +128,7 @@ public sealed class SqlOSSsoPortalService
             }
 
             await using var transaction = await _context.Database.BeginTransactionAsync(
-                IsolationLevel.Serializable,
+                SqlOSDatabase.ExclusiveWorkIsolationLevel(_context.Database),
                 cancellationToken);
             var created = await CreateSessionCoreAsync(
                 request,
@@ -240,7 +241,7 @@ public sealed class SqlOSSsoPortalService
             }
 
             await using var transaction = await _context.Database.BeginTransactionAsync(
-                IsolationLevel.Serializable,
+                SqlOSDatabase.ExclusiveWorkIsolationLevel(_context.Database),
                 cancellationToken);
             var opened = await OpenSessionCoreAsync(
                 tokenHash,
@@ -1145,7 +1146,7 @@ public sealed class SqlOSSsoPortalService
             }
 
             await using var transaction = await _context.Database.BeginTransactionAsync(
-                IsolationLevel.Serializable,
+                SqlOSDatabase.ExclusiveWorkIsolationLevel(_context.Database),
                 cancellationToken);
             var result = await ExecutePortalOperationCoreAsync(
                 sessionId,

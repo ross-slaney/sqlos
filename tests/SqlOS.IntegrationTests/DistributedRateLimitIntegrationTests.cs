@@ -220,7 +220,7 @@ public class DistributedRateLimitIntegrationTests
     private static TestSqlOSDbContext CreateContext(string connectionString)
     {
         var options = new DbContextOptionsBuilder<TestSqlOSDbContext>()
-            .UseSqlServer(connectionString)
+            .UseTestProvider(connectionString)
             .Options;
         return new TestSqlOSDbContext(options);
     }

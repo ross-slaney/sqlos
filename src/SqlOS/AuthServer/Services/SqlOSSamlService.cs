@@ -7,8 +7,8 @@ using System.Security;
 using System.IO.Compression;
 using System.Xml;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using SqlOS.Database;
 using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
@@ -1099,5 +1099,5 @@ public sealed class SqlOSSamlService
         DateTime? AuthnInstant);
 
     private static bool IsUniqueConstraintViolation(DbUpdateException exception)
-        => exception.InnerException is SqlException { Number: 2601 or 2627 };
+        => SqlOSDatabaseErrors.IsUniqueConstraintViolation(exception);
 }

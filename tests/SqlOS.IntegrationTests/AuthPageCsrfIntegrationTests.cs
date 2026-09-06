@@ -223,7 +223,7 @@ public sealed class AuthPageCsrfIntegrationTests
                 EnvironmentName = Environments.Development
             });
             builder.WebHost.UseTestServer();
-            builder.Services.AddDbContext<TestSqlOSDbContext>(database => database.UseSqlServer(connectionString));
+            builder.Services.AddDbContext<TestSqlOSDbContext>(database => database.UseTestProvider(connectionString));
             builder.Services.AddSqlOS<TestSqlOSDbContext>(options =>
             {
                 options.AuthServer.Issuer = $"{TrustedOrigin}/sqlos/auth";

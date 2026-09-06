@@ -11,7 +11,7 @@ section: quickstarts
   href="#run"
   actionLabel="Run the sample"
 >
-  Aspire starts SQL Server, the SqlOS-enabled Todo API, and a Razor Pages client. Password signup works without an email, SMS, or external identity provider.
+  Aspire starts SQL Server (or PostgreSQL), the SqlOS-enabled Todo API, and a Razor Pages client. Password signup works without an email, SMS, or external identity provider.
 </Banner>
 
 ## Goal
@@ -22,7 +22,7 @@ Create an account through the SqlOS hosted AuthPage, return to a secure ASP.NET 
 
 - the SqlOS repository checked out locally;
 - .NET 9 SDK;
-- Docker running with enough memory for SQL Server;
+- Docker running with enough memory for SQL Server or PostgreSQL;
 - ports `1435`, `5080`, `5090`, `18890`, and `18891` available.
 
 This quickstart uses the source at **SqlOS 4.2.0**. Local password authentication is the default, so the first run does not require Azure Communication Services, Twilio, or an OIDC provider.
@@ -41,9 +41,9 @@ Use the authenticated Aspire dashboard URL printed in the terminal. Its configur
 https://localhost:18890
 ```
 
-Wait for SQL Server to become healthy and for `todo-api` and `aspnet-web` to show **Running**. Aspire keeps the logs and resource endpoints together, which is the fastest place to diagnose a failed first start.
+Wait for the database to become healthy and for `todo-api` and `aspnet-web` to show **Running**. Aspire keeps the logs and resource endpoints together, which is the fastest place to diagnose a failed first start.
 
-The AppHost uses a persistent SQL Server container on port `1435` and passes the database connection string to the API. SqlOS initializes its schema, automatically protected signing key, OAuth clients, and FGA seed data when `todo-api` starts.
+The AppHost uses a persistent SQL Server container on port `1435` by default and passes the database connection string to the API. Set `SqlOS:DatabaseProvider=PostgreSql` to start PostgreSQL instead; the API then calls `UseNpgsql` for the same connection. SqlOS initializes its schema, automatically protected signing key, OAuth clients, and FGA seed data when `todo-api` starts.
 
 ## Verify the all-.NET login
 

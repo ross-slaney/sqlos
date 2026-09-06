@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Models;
+using SqlOS.Database;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -27,19 +28,13 @@ public sealed partial class SqlOSAdminService
             {
                 retryContext.ChangeTracker.Clear();
             }
-            await using var transaction = await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
-            if (string.Equals(_context.Database.ProviderName, "Microsoft.EntityFrameworkCore.SqlServer", StringComparison.Ordinal))
-            {
-                await _context.Database.ExecuteSqlRawAsync("""
-                    DECLARE @result int;
-                    EXEC @result = sys.sp_getapplock
-                        @Resource = N'SqlOS:ScopeDisplayNameSeedReconciliation',
-                        @LockMode = N'Exclusive',
-                        @LockOwner = N'Transaction',
-                        @LockTimeout = 30000;
-                    IF @result < 0 THROW 51000, 'Could not acquire the SqlOS scope display name seed reconciliation lock.', 1;
-                    """, cancellationToken);
-            }
+            await using var transaction = await _context.Database.BeginTransactionAsync(SqlOSDatabase.ExclusiveWorkIsolationLevel(_context.Database), cancellationToken);
+            await SqlOSDatabase.AcquireExclusiveTransactionLockAsync(
+                _context.Database,
+                "SqlOS:ScopeDisplayNameSeedReconciliation",
+                TimeSpan.FromSeconds(30),
+                "Could not acquire the SqlOS scope display name seed reconciliation lock.",
+                cancellationToken);
             await UpsertSeededScopeDisplayNamesCoreAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         });

@@ -534,15 +534,17 @@ public sealed class OAuthArtifactConcurrencyIntegrationTests
                     storedCodes.Should().BeEmpty(
                         "a request the user denied must never leak an authorization code");
                     approveOutcome.Error.Should().BeOfType<InvalidOperationException>();
-                    // The winning denial's effect must include the grant: an approval that
-                    // committed its grant before losing the terminal-write race compensates
-                    // by revoking it, so no active remembered grant survives the denial.
-                    storedGrants.Should().OnlyContain(
-                        x => x.RevokedAt != null,
+                    // Denial may win before approval writes a grant (empty set). If approval
+                    // committed a grant first, the losing terminal write must revoke it so
+                    // the next visit is not silently remembered.
+                    storedGrants.Where(x => x.RevokedAt == null).Should().BeEmpty(
                         "a denial that wins the CancelledAt race must not leave an active grant that would skip consent next time");
-                    storedGrants
-                        .Where(x => x.RevocationReason != null)
-                        .Should().OnlyContain(x => x.RevocationReason == "authorization_request_cancelled");
+                    foreach (var grant in storedGrants)
+                    {
+                        grant.RevocationReason.Should().Be(
+                            "authorization_request_cancelled",
+                            "if approval wrote a grant before losing the CancelledAt race, denial must revoke it with the cancellation reason");
+                    }
                 }
                 else
                 {
@@ -714,7 +716,7 @@ public sealed class OAuthArtifactConcurrencyIntegrationTests
     private static TestSqlOSDbContext CreateContext(string connectionString)
     {
         var options = new DbContextOptionsBuilder<TestSqlOSDbContext>()
-            .UseSqlServer(connectionString)
+            .UseTestProvider(connectionString)
             .Options;
         return new TestSqlOSDbContext(options);
     }

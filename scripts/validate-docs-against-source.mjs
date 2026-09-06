@@ -202,16 +202,29 @@ for (const [relativePath, pattern, contractName] of requiredSourceContracts) {
   );
 }
 
-const oauthStateMigration = read("src/SqlOS/AuthServer/Schema/027_OAuthStateLength.sql");
-const widenedStateColumns = oauthStateMigration.match(
+const oauthStateSqlServer = read("src/SqlOS/AuthServer/Schema/SqlServer/027_OAuthStateLength.sql");
+const widenedStateColumns = oauthStateSqlServer.match(
   /ALTER COLUMN \[State\] NVARCHAR\(2048\) NOT NULL;/g,
 );
-const stateWideningGuards = oauthStateMigration.match(
+const stateWideningGuards = oauthStateSqlServer.match(
   /COL_LENGTH\('[^']+', 'State'\) < 4096/g,
 );
 if (widenedStateColumns?.length !== 2 || stateWideningGuards?.length !== 2) {
   errors.push(
-    "src/SqlOS/AuthServer/Schema/027_OAuthStateLength.sql: both OAuth state columns must widen for ASP.NET Core protected state without narrowing larger operator hotfixes.",
+    "src/SqlOS/AuthServer/Schema/SqlServer/027_OAuthStateLength.sql: both OAuth state columns must widen for ASP.NET Core protected state without narrowing larger operator hotfixes.",
+  );
+}
+
+const oauthStatePostgreSql = read("src/SqlOS/AuthServer/Schema/PostgreSql/027_OAuthStateLength.sql");
+const widenedStateColumnsPg = oauthStatePostgreSql.match(
+  /ALTER COLUMN "State" TYPE varchar\(2048\);/g,
+);
+const stateWideningGuardsPg = oauthStatePostgreSql.match(
+  /character_maximum_length < 2048/g,
+);
+if (widenedStateColumnsPg?.length !== 2 || stateWideningGuardsPg?.length !== 2) {
+  errors.push(
+    "src/SqlOS/AuthServer/Schema/PostgreSql/027_OAuthStateLength.sql: both OAuth state columns must widen for ASP.NET Core protected state without narrowing larger operator hotfixes.",
   );
 }
 

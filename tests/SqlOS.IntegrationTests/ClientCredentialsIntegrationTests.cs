@@ -71,7 +71,7 @@ public sealed class ClientCredentialsIntegrationTests
             {
                 await using var context = new TestSqlOSDbContext(
                     new DbContextOptionsBuilder<TestSqlOSDbContext>()
-                        .UseSqlServer(connectionString)
+                        .UseTestProvider(connectionString)
                         .Options);
                 var crypto = new SqlOSCryptoService(context, options, AspireFixture.DataProtectionProvider);
                 var service = new SqlOSClientAuthenticationService(

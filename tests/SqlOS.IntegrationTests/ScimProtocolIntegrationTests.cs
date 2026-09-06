@@ -768,7 +768,7 @@ public sealed class ScimProtocolIntegrationTests
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = Environments.Development });
             builder.WebHost.UseTestServer();
             builder.Services.AddDbContext<TestSqlOSDbContext>(options =>
-                options.UseSqlServer(connectionString, sqlServer => sqlServer.EnableRetryOnFailure()));
+                options.UseTestProvider(connectionString, sqlServer => sqlServer.EnableRetryOnFailure()));
             builder.Services.AddSqlOS<TestSqlOSDbContext>(options =>
             {
                 options.AuthServer.PublicOrigin = "https://scim.integration.test";

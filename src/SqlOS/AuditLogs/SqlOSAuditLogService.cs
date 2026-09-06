@@ -2,9 +2,9 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using SqlOS.AuthServer.Interfaces;
+using SqlOS.Database;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
 using SqlOS.Pagination;
@@ -678,7 +678,7 @@ public sealed class SqlOSAuditLogService : ISqlOSAuditLogService
     }
 
     private static bool IsUniqueConstraintViolation(DbUpdateException exception)
-        => exception.GetBaseException() is SqlException { Number: 2601 or 2627 };
+        => SqlOSDatabaseErrors.IsUniqueConstraintViolation(exception);
 
     private static string EscapeForJsonContains(string value)
         => value.Replace("\\", "\\\\", StringComparison.Ordinal)

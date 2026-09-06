@@ -62,7 +62,8 @@ public sealed class AdminCursorPaginationIntegrationTests
         AssertNoOffsetOrFullCount(interceptor.Commands);
         interceptor.Commands.Should().Contain(command =>
             command.Contains("DisplayName", StringComparison.OrdinalIgnoreCase)
-            && command.Contains("TOP", StringComparison.OrdinalIgnoreCase));
+            && (command.Contains("TOP", StringComparison.OrdinalIgnoreCase)
+                || command.Contains("LIMIT", StringComparison.OrdinalIgnoreCase)));
 
         interceptor.Commands.Clear();
         var third = Serialize(await admin.ListUsersAsync(cursor: second.GetProperty("nextCursor").GetString(), pageSize: 10));
@@ -119,7 +120,7 @@ public sealed class AdminCursorPaginationIntegrationTests
     private static TestSqlOSDbContext CreateContext(string connectionString, params IInterceptor[] interceptors)
     {
         var builder = new DbContextOptionsBuilder<TestSqlOSDbContext>()
-            .UseSqlServer(connectionString);
+            .UseTestProvider(connectionString);
         if (interceptors.Length > 0)
         {
             builder.AddInterceptors(interceptors);

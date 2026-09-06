@@ -1,6 +1,6 @@
-using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using SqlOS.AuthServer.Contracts;
+using SqlOS.Database;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 
@@ -390,5 +390,5 @@ public sealed class SqlOSConsentService
     // Same pattern as SqlOSAuthorizationServerService.IsUniqueConstraintViolation: SQL Server
     // raises 2601 (unique index) or 2627 (unique constraint) for duplicate keys.
     private static bool IsUniqueConstraintViolation(DbUpdateException exception)
-        => exception.InnerException is SqlException { Number: 2601 or 2627 };
+        => SqlOSDatabaseErrors.IsUniqueConstraintViolation(exception);
 }

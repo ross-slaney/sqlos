@@ -1,9 +1,8 @@
-using System.Reflection;
-using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using SqlOS.Database;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
 
@@ -29,10 +28,10 @@ public class SqlOSFgaSchemaInitializer
     {
         _logger.LogInformation("Checking SqlOSFga schema version...");
 
+        var provider = SqlOSDatabase.Resolve(_context.Database);
         var schema = _options.Schema;
-
-        // Discover all migration scripts (NNN_Name.sql pattern)
-        var migrations = DiscoverMigrations();
+        var assembly = typeof(SqlOSFgaSchemaInitializer).Assembly;
+        var migrations = SqlOSMigrationManifest.Discover(assembly, provider.FgaMigrationResourcePrefix);
         if (migrations.Count == 0)
         {
             _logger.LogWarning("No migration scripts found.");
@@ -42,23 +41,16 @@ public class SqlOSFgaSchemaInitializer
         var maxVersion = migrations.Max(m => m.Version);
         _logger.LogDebug("Found {Count} migration scripts (max version: {MaxVersion})", migrations.Count, maxVersion);
 
-        // Ensure the version tracking table exists
-        var ensureVersionTableSql = $@"
-IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'SqlOSFgaSchema' AND schema_id = SCHEMA_ID('{schema}'))
-BEGIN
-    CREATE TABLE [{schema}].[SqlOSFgaSchema] ([Version] INT NOT NULL);
-END";
-        await _context.Database.ExecuteSqlRawAsync(ensureVersionTableSql, cancellationToken);
+        await _context.Database.ExecuteSqlRawAsync(provider.BuildEnsureFgaVersionTableSql(schema), cancellationToken);
 
-        // Read the current version
-        var currentVersion = await GetCurrentVersionAsync(schema, cancellationToken);
+        var currentVersion = await GetCurrentVersionAsync(provider, schema, cancellationToken);
 
         if (currentVersion == null)
         {
             _logger.LogInformation("Fresh install detected. Running all migrations (v1 -> v{MaxVersion})...", maxVersion);
             foreach (var migration in migrations.OrderBy(m => m.Version))
             {
-                await RunMigrationAsync(schema, migration, cancellationToken);
+                await RunMigrationAsync(provider, schema, migration, cancellationToken);
             }
             _logger.LogInformation("Schema v{Version} installed successfully.", maxVersion);
         }
@@ -68,7 +60,7 @@ END";
             var pendingMigrations = migrations.Where(m => m.Version > currentVersion).OrderBy(m => m.Version);
             foreach (var migration in pendingMigrations)
             {
-                await RunMigrationAsync(schema, migration, cancellationToken);
+                await RunMigrationAsync(provider, schema, migration, cancellationToken);
             }
             _logger.LogInformation("Schema upgraded to v{Version}.", maxVersion);
         }
@@ -79,21 +71,23 @@ END";
     }
 
     private async Task RunMigrationAsync(
+        ISqlOSDatabaseProvider provider,
         string schema,
-        MigrationScript migration,
+        SqlOSMigrationManifest.Script migration,
         CancellationToken cancellationToken)
     {
         _logger.LogDebug("Running migration {Version}: {Name}", migration.Version, migration.Name);
-        await RunScriptAsync(migration.ResourceName, cancellationToken);
-        await EnsurePersistedVersionAsync(schema, migration.Version, cancellationToken);
+        await RunScriptAsync(provider, migration.ResourceName, cancellationToken);
+        await EnsurePersistedVersionAsync(provider, schema, migration.Version, cancellationToken);
     }
 
     private async Task EnsurePersistedVersionAsync(
+        ISqlOSDatabaseProvider provider,
         string schema,
         int expectedVersion,
         CancellationToken cancellationToken)
     {
-        var persistedVersion = await GetCurrentVersionAsync(schema, cancellationToken);
+        var persistedVersion = await GetCurrentVersionAsync(provider, schema, cancellationToken);
         if (persistedVersion != expectedVersion)
         {
             throw new InvalidOperationException(
@@ -102,30 +96,10 @@ END";
         }
     }
 
-    private List<MigrationScript> DiscoverMigrations()
-    {
-        var assembly = typeof(SqlOSFgaSchemaInitializer).Assembly;
-        var resourceNames = assembly.GetManifestResourceNames();
-        var migrations = new List<MigrationScript>();
-
-        // Pattern: SqlOS.Fga.Schema.NNN_Name.sql where NNN is a number
-        var pattern = new Regex(@"^SqlOS\.Fga\.Schema\.(\d+)_(.+)\.sql$", RegexOptions.IgnoreCase);
-
-        foreach (var resourceName in resourceNames)
-        {
-            var match = pattern.Match(resourceName);
-            if (match.Success)
-            {
-                var version = int.Parse(match.Groups[1].Value);
-                var name = match.Groups[2].Value;
-                migrations.Add(new MigrationScript(version, name, resourceName));
-            }
-        }
-
-        return migrations;
-    }
-
-    private async Task<int?> GetCurrentVersionAsync(string schema, CancellationToken cancellationToken)
+    private async Task<int?> GetCurrentVersionAsync(
+        ISqlOSDatabaseProvider provider,
+        string schema,
+        CancellationToken cancellationToken)
     {
         var connection = _context.Database.GetDbConnection();
         var wasOpen = connection.State == System.Data.ConnectionState.Open;
@@ -135,7 +109,7 @@ END";
         try
         {
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = $"SELECT TOP 1 [Version] FROM [{schema}].[SqlOSFgaSchema]";
+            cmd.CommandText = provider.BuildSelectFgaVersionSql(schema);
             if (_context.Database.CurrentTransaction != null)
                 cmd.Transaction = _context.Database.CurrentTransaction.GetDbTransaction();
 
@@ -151,9 +125,10 @@ END";
         }
     }
 
-    private record MigrationScript(int Version, string Name, string ResourceName);
-
-    private async Task RunScriptAsync(string resourceName, CancellationToken cancellationToken)
+    private async Task RunScriptAsync(
+        ISqlOSDatabaseProvider provider,
+        string resourceName,
+        CancellationToken cancellationToken)
     {
         var assembly = typeof(SqlOSFgaSchemaInitializer).Assembly;
         using var stream = assembly.GetManifestResourceStream(resourceName)
@@ -161,16 +136,10 @@ END";
 
         using var reader = new StreamReader(stream);
         var rawSql = await reader.ReadToEndAsync(cancellationToken);
-
-        // Replace placeholders with configured values
         var sql = SubstitutePlaceholders(rawSql);
 
-        // Split on GO batches (GO on its own line)
-        var batches = Regex.Split(sql, @"^\s*GO\s*$", RegexOptions.Multiline | RegexOptions.IgnoreCase)
-            .Where(b => !string.IsNullOrWhiteSpace(b))
-            .ToArray();
-
-        _logger.LogDebug("Executing {Count} SQL batch(es) from {Resource}...", batches.Length, resourceName);
+        var batches = provider.SplitBatches(sql);
+        _logger.LogDebug("Executing {Count} SQL batch(es) from {Resource}...", batches.Count, resourceName);
 
         foreach (var batch in batches)
         {

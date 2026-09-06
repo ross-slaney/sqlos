@@ -362,7 +362,7 @@ public sealed class PasswordLoginAdmissionIntegrationTests
         {
             var context = new TestSqlOSDbContext(
                 new DbContextOptionsBuilder<TestSqlOSDbContext>()
-                    .UseSqlServer(_connectionString)
+                    .UseTestProvider(_connectionString)
                     .Options);
             return BuildActor(context, _options, ownsContext: true);
         }

@@ -328,7 +328,7 @@ public sealed class SamlServiceIntegrationTests
 
         await using (var offboardingContext = new TestSqlOSDbContext(
             new DbContextOptionsBuilder<TestSqlOSDbContext>()
-                .UseSqlServer(AspireFixture.SqlConnectionString)
+                .UseTestProvider(AspireFixture.SqlConnectionString)
                 .Options))
         {
             var offboardedUser = await offboardingContext.Set<SqlOSUser>()
@@ -1565,7 +1565,7 @@ public sealed class SamlServiceIntegrationTests
     private static TestSqlOSDbContext CreateIsolatedContext()
     {
         var dbOptions = new DbContextOptionsBuilder<TestSqlOSDbContext>()
-            .UseSqlServer(AspireFixture.SqlConnectionString)
+            .UseTestProvider(AspireFixture.SqlConnectionString)
             .Options;
         return new TestSqlOSDbContext(dbOptions);
     }

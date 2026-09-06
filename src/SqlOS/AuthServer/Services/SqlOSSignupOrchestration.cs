@@ -1,10 +1,10 @@
-using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Database;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -178,7 +178,7 @@ internal static class SqlOSSignupOrchestration
         => !string.Equals(context.Database.ProviderName, "Microsoft.EntityFrameworkCore.InMemory", StringComparison.Ordinal);
 
     public static bool IsUniqueConstraintViolation(DbUpdateException exception)
-        => exception.GetBaseException() is SqlException { Number: 2601 or 2627 };
+        => SqlOSDatabaseErrors.IsUniqueConstraintViolation(exception);
 
     private static string RequireBoundedText(string? value, string requiredMessage, int maxLength, string tooLongMessage)
     {

@@ -4,6 +4,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using SqlOS.AuthServer.Configuration;
+using SqlOS.Database;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Models;
 
@@ -199,16 +200,13 @@ public sealed partial class SqlOSAdminService
         await strategy.ExecuteAsync(async () =>
         {
             if (attempt++ > 0 && _context is DbContext retryContext) retryContext.ChangeTracker.Clear();
-            await using var transaction = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
-            if (string.Equals(_context.Database.ProviderName, "Microsoft.EntityFrameworkCore.SqlServer", StringComparison.Ordinal))
-            {
-                const string resource = "SqlOS:SamlSeedReconciliation";
-                await _context.Database.ExecuteSqlInterpolatedAsync($"""
-                    DECLARE @result int;
-                    EXEC @result = sys.sp_getapplock @Resource = {resource}, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 30000;
-                    IF @result < 0 THROW 51000, 'Could not acquire the SAML seed reconciliation lock.', 1;
-                    """, cancellationToken);
-            }
+            await using var transaction = await _context.Database.BeginTransactionAsync(SqlOSDatabase.ExclusiveWorkIsolationLevel(_context.Database), cancellationToken);
+            await SqlOSDatabase.AcquireExclusiveTransactionLockAsync(
+                _context.Database,
+                "SqlOS:SamlSeedReconciliation",
+                TimeSpan.FromSeconds(30),
+                "Could not acquire the SAML seed reconciliation lock.",
+                cancellationToken);
             await action();
             await transaction.CommitAsync(cancellationToken);
         });

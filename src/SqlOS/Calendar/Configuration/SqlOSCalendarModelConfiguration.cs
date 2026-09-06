@@ -30,9 +30,6 @@ public static class SqlOSCalendarModelConfiguration
             entity.Property(x => x.DisplayName).HasMaxLength(200);
             entity.Property(x => x.ProviderAccountEmail).HasMaxLength(320);
             entity.Property(x => x.ProviderAccountSubject).HasMaxLength(256);
-            entity.Property(x => x.ScopesJson).HasColumnType("nvarchar(max)");
-            entity.Property(x => x.AccessTokenEncrypted).HasColumnType("nvarchar(max)");
-            entity.Property(x => x.RefreshTokenEncrypted).HasColumnType("nvarchar(max)");
             entity.Property(x => x.LastError).HasMaxLength(1000);
             entity.Property(x => x.RevokedReason).HasMaxLength(160);
             entity.HasOne(x => x.User)
@@ -58,7 +55,6 @@ public static class SqlOSCalendarModelConfiguration
             entity.Property(x => x.CalendarConnectionId).HasMaxLength(64);
             entity.Property(x => x.ProviderCalendarId).HasMaxLength(256);
             entity.Property(x => x.DisplayName).HasMaxLength(200);
-            entity.Property(x => x.SyncCursor).HasColumnType("nvarchar(max)");
             entity.Property(x => x.LastSyncStatus).HasMaxLength(40);
             entity.Property(x => x.LastSyncError).HasMaxLength(1000);
             entity.HasOne(x => x.CalendarConnection)

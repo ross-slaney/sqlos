@@ -13,6 +13,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Database;
 using System.IdentityModel.Tokens.Jwt;
 
 namespace SqlOS.AuthServer.Services;
@@ -1260,33 +1261,17 @@ public sealed class SqlOSCryptoService
         return await strategy.ExecuteInTransactionAsync(
             ExecuteAttemptAsync,
             VerifySucceededAsync,
-            IsolationLevel.Serializable,
+            SqlOSDatabase.ExclusiveWorkIsolationLevel(_context.Database),
             cancellationToken);
     }
 
-    private async Task AcquireSigningKeyLockAsync(CancellationToken cancellationToken)
-    {
-        if (!string.Equals(
-            _context.Database.ProviderName,
-            "Microsoft.EntityFrameworkCore.SqlServer",
-            StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        await _context.Database.ExecuteSqlRawAsync(
-            """
-            DECLARE @result int;
-            EXEC @result = sys.sp_getapplock
-                @Resource = 'SqlOS.SigningKeys',
-                @LockMode = 'Exclusive',
-                @LockOwner = 'Transaction',
-                @LockTimeout = 30000;
-            IF @result < 0
-                THROW 51000, 'SqlOS could not acquire the signing-key custody lock.', 1;
-            """,
+    private Task AcquireSigningKeyLockAsync(CancellationToken cancellationToken)
+        => SqlOSDatabase.AcquireExclusiveTransactionLockAsync(
+            _context.Database,
+            "SqlOS.SigningKeys",
+            TimeSpan.FromSeconds(30),
+            "SqlOS could not acquire the signing-key custody lock.",
             cancellationToken);
-    }
 
     private async Task<bool> HasSingleActiveSigningKeyAsync(string keyId, CancellationToken cancellationToken)
     {

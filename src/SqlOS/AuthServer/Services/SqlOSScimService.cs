@@ -3,7 +3,6 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
@@ -12,6 +11,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Database;
 using SqlOS.Fga.Models;
 
 namespace SqlOS.AuthServer.Services;
@@ -824,16 +824,15 @@ internal sealed class SqlOSScimService
     {
         var authenticatedTokenHash = connection.TokenHash;
         SqlOSScimConnection? current;
-        if (_context.Database.IsRelational()
-            && string.Equals(_context.Database.ProviderName, "Microsoft.EntityFrameworkCore.SqlServer", StringComparison.Ordinal))
+        if (_context.Database.IsRelational())
         {
             var schema = string.IsNullOrWhiteSpace(_options.Schema) ? "dbo" : _options.Schema.Trim();
-            var quotedSchema = schema.Replace("]", "]]", StringComparison.Ordinal);
+            var provider = SqlOSDatabase.Resolve(_context.Database);
 #pragma warning disable EF1002 // The schema is an escaped identifier; the connection id remains a SQL parameter.
             current = await _context.Set<SqlOSScimConnection>()
                 .FromSqlRaw(
-                    $"SELECT * FROM [{quotedSchema}].[SqlOSScimConnections] WITH (UPDLOCK, HOLDLOCK) WHERE [Id] = @connectionId",
-                    new SqlParameter("@connectionId", connection.Id))
+                    provider.BuildLockedSelectSql(schema, "SqlOSScimConnections", $"{provider.QuoteIdentifier("Id")} = @connectionId"),
+                    provider.CreateParameter("@connectionId", connection.Id))
                 .AsNoTracking()
                 .SingleOrDefaultAsync(cancellationToken);
 #pragma warning restore EF1002
@@ -912,7 +911,7 @@ internal sealed class SqlOSScimService
                     .AsNoTracking()
                     .AnyAsync(item => item.Id == commitMarkerId, cancellationToken);
             },
-            IsolationLevel.Serializable,
+            SqlOSDatabase.ExclusiveWorkIsolationLevel(_context.Database),
             cancellationToken);
     }
 

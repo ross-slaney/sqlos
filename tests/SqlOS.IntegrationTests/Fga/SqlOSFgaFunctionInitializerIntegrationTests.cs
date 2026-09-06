@@ -1,6 +1,5 @@
 using FluentAssertions;
 using System.Text.Json;
-using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -47,8 +46,10 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
             await initializer.EnsureFunctionsExistAsync();
 
             var definition = await GetFunctionDefinitionAsync();
-            definition.Should().Contain("a.Depth < 3");
-            definition.Should().Contain("truncated.Depth = 3");
+            (definition.Contains("Depth < 3", StringComparison.Ordinal)
+                || definition.Contains("\"Depth\" < 3", StringComparison.Ordinal)).Should().BeTrue();
+            (definition.Contains("Depth = 3", StringComparison.Ordinal)
+                || definition.Contains("\"Depth\" = 3", StringComparison.Ordinal)).Should().BeTrue();
         }
         finally
         {
@@ -125,13 +126,26 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
     {
         var definition = await GetFunctionDefinitionAsync();
 
-        definition.Should().Contain("IsActive = 1");
-        definition.Should().Contain("u.IsActive = 1");
-        definition.Should().Contain("sa.ExpiresAt > GETUTCDATE()");
-        definition.Should().Contain("ug.IsActive = 1");
-        definition.Should().Contain("OPENJSON(@SubjectIds)");
-        definition.Should().Contain("JSON_VALUE(@SubjectIds, '$[0]')");
-        definition.Should().Contain("permission.ResourceTypeId IS NULL OR permission.ResourceTypeId = target.ResourceTypeId");
+        if (TestDatabase.IsPostgreSql)
+        {
+            definition.Should().Contain("\"IsActive\" = TRUE");
+            definition.Should().Contain("u.\"IsActive\" = TRUE");
+            definition.Should().Contain("sa.\"ExpiresAt\" > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')");
+            definition.Should().Contain("ug.\"IsActive\" = TRUE");
+            definition.Should().Contain("jsonb_array_elements_text");
+            definition.Should().Contain("p_subject_ids::jsonb ->> 0");
+            definition.Should().Contain("permission.\"ResourceTypeId\" IS NULL OR permission.\"ResourceTypeId\" = target.\"ResourceTypeId\"");
+        }
+        else
+        {
+            definition.Should().Contain("IsActive = 1");
+            definition.Should().Contain("u.IsActive = 1");
+            definition.Should().Contain("sa.ExpiresAt > GETUTCDATE()");
+            definition.Should().Contain("ug.IsActive = 1");
+            definition.Should().Contain("OPENJSON(@SubjectIds)");
+            definition.Should().Contain("JSON_VALUE(@SubjectIds, '$[0]')");
+            definition.Should().Contain("permission.ResourceTypeId IS NULL OR permission.ResourceTypeId = target.ResourceTypeId");
+        }
     }
 
     [TestMethod]
@@ -169,8 +183,10 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
             Context.Set<SqlOSFgaResource>().AddRange(first, second);
             Context.Set<SqlOSFgaGrant>().Add(grant);
             await Context.SaveChangesAsync();
-            await Context.Database.ExecuteSqlInterpolatedAsync(
-                $"UPDATE [dbo].[SqlOSFgaResources] SET ParentId = {second.Id} WHERE Id = {first.Id}");
+            await Context.Database.ExecuteSqlRawAsync(
+                TestDatabase.Rewrite("UPDATE [dbo].[SqlOSFgaResources] SET [ParentId] = {0} WHERE [Id] = {1}"),
+                second.Id,
+                first.Id);
             Context.ChangeTracker.Clear();
             await initializer.EnsureFunctionsExistAsync();
 
@@ -184,8 +200,9 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
         }
         finally
         {
-            await Context.Database.ExecuteSqlInterpolatedAsync(
-                $"UPDATE [dbo].[SqlOSFgaResources] SET ParentId = NULL WHERE Id = {first.Id}");
+            await Context.Database.ExecuteSqlRawAsync(
+                TestDatabase.Rewrite("UPDATE [dbo].[SqlOSFgaResources] SET [ParentId] = NULL WHERE [Id] = {0}"),
+                first.Id);
             Context.ChangeTracker.Clear();
             Context.Set<SqlOSFgaGrant>().Remove(grant);
             Context.Set<SqlOSFgaResource>().RemoveRange(second, first);
@@ -227,21 +244,30 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
             await startGate.Task;
             for (var attempt = 0; attempt < 5; attempt++)
             {
-                await using var connection = new SqlConnection(connectionString);
+                await using var connection = TestDatabase.CreateConnection(connectionString);
                 await connection.OpenAsync();
                 await using var command = connection.CreateCommand();
-                command.CommandText = """
-                    SELECT COUNT(*)
-                    FROM [dbo].fn_IsResourceAccessible(
-                        @resourceId,
-                        @subjectIds,
-                        @permissionId)
-                    """;
-                command.Parameters.AddWithValue("@resourceId", FgaTestDataSeeder.TestAgencyResourceId);
-                command.Parameters.AddWithValue(
+                command.CommandText = TestDatabase.IsPostgreSql
+                    ? """
+                      SELECT COUNT(*)
+                      FROM "dbo"."fn_IsResourceAccessible"(
+                          @resourceId,
+                          @subjectIds,
+                          @permissionId)
+                      """
+                    : """
+                      SELECT COUNT(*)
+                      FROM [dbo].fn_IsResourceAccessible(
+                          @resourceId,
+                          @subjectIds,
+                          @permissionId)
+                      """;
+                TestDatabase.AddParameter(command, "@resourceId", FgaTestDataSeeder.TestAgencyResourceId);
+                TestDatabase.AddParameter(
+                    command,
                     "@subjectIds",
                     JsonSerializer.Serialize(new[] { FgaTestDataSeeder.SystemAdminSubjectId }));
-                command.Parameters.AddWithValue("@permissionId", FgaTestDataSeeder.ViewPermissionId);
+                TestDatabase.AddParameter(command, "@permissionId", FgaTestDataSeeder.ViewPermissionId);
                 Convert.ToInt32(await command.ExecuteScalarAsync()).Should().Be(1);
             }
         }).ToArray();
@@ -253,24 +279,11 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
     private static TestSqlOSDbContext CreateContext(string connectionString)
     {
         var options = new DbContextOptionsBuilder<TestSqlOSDbContext>()
-            .UseSqlServer(connectionString)
+            .UseTestProvider(connectionString)
             .Options;
         return new TestSqlOSDbContext(options);
     }
 
-    private static async Task<string> GetFunctionDefinitionAsync()
-    {
-        var connection = Context.Database.GetDbConnection();
-        await connection.OpenAsync();
-        try
-        {
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = "SELECT OBJECT_DEFINITION(OBJECT_ID('[dbo].[fn_IsResourceAccessible]'))";
-            return (await cmd.ExecuteScalarAsync())?.ToString() ?? string.Empty;
-        }
-        finally
-        {
-            await connection.CloseAsync();
-        }
-    }
+    private static Task<string> GetFunctionDefinitionAsync()
+        => TestCatalog.GetFunctionDefinitionAsync(Context, "fn_IsResourceAccessible");
 }

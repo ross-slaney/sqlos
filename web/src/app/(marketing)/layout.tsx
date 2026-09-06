@@ -6,7 +6,7 @@ export const metadata: Metadata = {
   metadataBase: new URL("https://sqlos.dev"),
   title: "SqlOS | Auth, Social Login, SSO, and FGA for .NET",
   description:
-    "Embedded OAuth server, branded login, enterprise SSO, and fine-grained authorization for .NET — one NuGet package in your process and your SQL Server.",
+    "Embedded OAuth server, branded login, enterprise SSO, and fine-grained authorization for .NET — one NuGet package in your process and your SQL Server or PostgreSQL.",
   openGraph: {
     title: "SqlOS | Enterprise auth for your .NET app",
     description:

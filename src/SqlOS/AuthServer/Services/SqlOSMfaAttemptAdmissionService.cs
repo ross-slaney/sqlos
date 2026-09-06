@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Database;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -267,7 +268,7 @@ public sealed class SqlOSMfaAttemptAdmissionService
         {
             ClearTrackedState();
             await using var transaction = await _context.Database.BeginTransactionAsync(
-                IsolationLevel.Serializable,
+                SqlOSDatabase.ExclusiveWorkIsolationLevel(_context.Database),
                 cancellationToken);
             await AcquireAdmissionLockAsync(cancellationToken);
             var result = await operation();
@@ -277,22 +278,12 @@ public sealed class SqlOSMfaAttemptAdmissionService
     }
 
     private Task AcquireAdmissionLockAsync(CancellationToken cancellationToken)
-    {
-        if (!string.Equals(_context.Database.ProviderName, "Microsoft.EntityFrameworkCore.SqlServer", StringComparison.Ordinal))
-        {
-            return Task.CompletedTask;
-        }
-
-        return _context.Database.ExecuteSqlRawAsync("""
-            DECLARE @result int;
-            EXEC @result = sys.sp_getapplock
-                @Resource = N'SqlOS:MfaAttemptAdmission',
-                @LockMode = N'Exclusive',
-                @LockOwner = N'Transaction',
-                @LockTimeout = 10000;
-            IF @result < 0 THROW 51000, 'Could not acquire the SqlOS MFA attempt admission lock.', 1;
-            """, cancellationToken);
-    }
+        => SqlOSDatabase.AcquireExclusiveTransactionLockAsync(
+            _context.Database,
+            "SqlOS:MfaAttemptAdmission",
+            TimeSpan.FromSeconds(10),
+            "Could not acquire the SqlOS MFA attempt admission lock.",
+            cancellationToken);
 
     private void ClearTrackedState()
     {
@@ -360,7 +351,7 @@ public sealed class SqlOSMfaAttemptAdmissionService
         {
             yield return new MfaBucketIdentity(
                 "device",
-                BoundKey($"{challenge.UserId}\0{challenge.ClientApplicationId}\0{userAgent.Trim()}"),
+                BoundKey($"{challenge.UserId}\u001F{challenge.ClientApplicationId}\u001F{userAgent.Trim()}"),
                 _options.MaxFailedAttemptsPerDevice);
         }
 
