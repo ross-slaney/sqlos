@@ -530,11 +530,10 @@ public sealed class SqlOSCryptoService
         }
 
         // The granted scope is the ceiling of what the client application may do with
-        // this delegation (RFC 9068 §2.2.3 shape); resource servers may enforce it via
-        // RequiredScopes. A null session scope (pre-scope-tracking sessions, direct
-        // logins) omits the claim — mirroring the token response, which omits the
-        // scope field rather than fabricating a grant. An empty grant is a real
-        // deny-all string and is still emitted.
+        // this delegation (RFC 9068 §2.2.3 shape). A null session scope
+        // (pre-scope-tracking sessions, direct logins) omits the claim — mirroring the
+        // token response, which omits the scope field rather than fabricating a grant.
+        // An empty grant is a real deny-all string and is still emitted.
         if (session.Scope is not null)
         {
             payload["scope"] = session.Scope;

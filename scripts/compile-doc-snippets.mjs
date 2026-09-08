@@ -30,15 +30,6 @@ builder.AddSqlOS<AppDbContext>`) + `
 public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : SqlOSDbContext<AppDbContext>(options);
 `,
   },
-  {
-    name: "README additional API scope", relativePath: "README.md",
-    heading: "### API protection and middleware ordering", marker: "app.MapGroup",
-    wrap: (snippet) => `using SqlOS.AuthServer.Extensions;
-using SqlOS.Extensions;
-var app = WebApplication.CreateBuilder(args).Build();
-const string origin = "https://acme.example.com";
-${snippet}`,
-  },
   ...[
     "### Complete identity-provider host",
     "### Complete downstream OIDC application",
@@ -489,6 +480,7 @@ try {
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="9.0.0" />
     <ProjectReference Include="${sourceProject}" />
     <ProjectReference Include="${path.join(repoRoot, "examples", "SqlOS.OneCall.Api", "SqlOS.OneCall.Api.csproj")}" />
   </ItemGroup>

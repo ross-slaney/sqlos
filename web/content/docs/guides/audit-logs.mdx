@@ -74,11 +74,10 @@ Targets:
 
 ## 3. Record the event from server-side code
 
-Inject `ISqlOSAuditLogService` into the endpoint, controller, or domain service that performs the mutation. Mount the endpoint on a route group that uses `RequireSqlOSAccessToken`, so it can read the validated token. Scope the resource to that trusted organization and authorize the mutation before changing state.
+Inject `ISqlOSAuditLogService` into the endpoint, controller, or domain service that performs the mutation. Mount the endpoint under a declared `Api` surface so it can read the validated token. Scope the resource to that trusted organization and authorize the mutation before changing state.
 
 ```csharp
-var inventoryApi = app.MapGroup("/api")
-    .RequireSqlOSAccessToken(apiAudience);
+var inventoryApi = app.MapGroup("/api");
 
 inventoryApi.MapPut("/locations/{locationId}/inventory/{itemId}", async (
     string locationId,

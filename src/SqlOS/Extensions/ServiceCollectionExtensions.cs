@@ -42,7 +42,6 @@ public static class ServiceCollectionExtensions
 
         services.AddRouting();
         services.AddSingleton<SqlOSEndpointMappingState>();
-        services.AddSingleton<SqlOSSurfaceProtectionState>();
         services.AddSingleton(Options.Create(options));
         services.AddSingleton(Options.Create(options.AuthServer));
         services.AddSingleton(Options.Create(options.Fga));

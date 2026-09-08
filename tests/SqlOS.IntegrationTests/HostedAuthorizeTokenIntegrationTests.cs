@@ -138,7 +138,7 @@ public sealed class HostedAuthorizeTokenIntegrationTests
         using var tokens = await fixture.AuthorizeLoginAndExchangeAsync("openid profile email");
 
         // The granted scope rides in the access token (RFC 9068 shape) so resource
-        // servers can enforce the client's delegation ceiling via RequiredScopes.
+        // servers can inspect the client's delegation ceiling.
         var jwt = new JwtSecurityTokenHandler().ReadJwtToken(
             tokens.RootElement.GetProperty("access_token").GetString());
         jwt.Payload["scope"].Should().Be("openid profile email");

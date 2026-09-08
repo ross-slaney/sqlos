@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Routing;
@@ -21,8 +20,9 @@ namespace SqlOS.Hosting;
 /// <summary>
 /// Registers SqlOS dashboard middleware and adds the auth-server, admin, protected-resource-metadata,
 /// and companion-package endpoints to the application's route table without requiring app code
-/// after <see cref="WebApplicationBuilder.Build"/>. Declared surfaces are protected by an early
-/// middleware guard, or at the root application's explicit placement point.
+/// after <see cref="WebApplicationBuilder.Build"/>. Declared API/MCP surfaces attach bearer
+/// validation to the mapped endpoints under those paths; SqlOS does not add application
+/// pipeline middleware for them.
 /// </summary>
 internal sealed class SqlOSPipelineStartupFilter : IStartupFilter
 {
@@ -97,7 +97,7 @@ internal sealed class SqlOSPipelineStartupFilter : IStartupFilter
         }
 
         // Map the auth-server/admin routes into a SqlOS-owned data source. It withholds them at
-        // dispatch time when application code also called the obsolete MapSqlOS() or MapAuthServer(),
+        // dispatch time when application code also called MapAuthServer(),
         // whether that call runs before or after this filter, so no route is ever registered twice.
         var application = hostOptions.AuthServer.Application;
         var hostExtensions = application?.HostExtensions ?? [];
@@ -119,38 +119,17 @@ internal sealed class SqlOSPipelineStartupFilter : IStartupFilter
             extension.MapEndpoints(sharedEndpoints, hostOptions);
         }
 
-        var sqlosEndpoints = new SqlOSEndpointDataSource(
-            mappingState,
-            coreEndpoints.DataSources.ToArray(),
-            sharedEndpoints.DataSources.ToArray());
-
-        var protection = services.GetRequiredService<SqlOSSurfaceProtectionState>();
-        protection.RootApplicationBuilder = app;
-        var hasSurfaces = SqlOSSingleApplicationSurfaces.HasAnySurface(hostOptions.AuthServer.Application);
-        if (hasSurfaces)
-        {
-            app.Use(nextMiddleware =>
-            {
-                var guard = new SqlOSSurfaceProtectionMiddleware(nextMiddleware, Options.Create(hostOptions));
-                return context => protection.ExplicitlyPlaced
-                    ? nextMiddleware(context)
-                    : guard.InvokeAsync(context, context.RequestServices.GetRequiredService<SqlOS.AuthServer.Services.SqlOSAuthService>());
-            });
-        }
+        var sqlosEndpoints = ProtectSurfaceEndpoints(
+            new SqlOSEndpointDataSource(
+                mappingState,
+                coreEndpoints.DataSources.ToArray(),
+                sharedEndpoints.DataSources.ToArray()),
+            hostOptions);
 
         // Let the application configure its pipeline first. WebApplication wraps it in
         // UseRouting()/UseEndpoints() when the application mapped endpoints of its own and leaves
         // the route builder it used (the WebApplication itself) in the builder properties.
         next(app);
-
-        if (hasSurfaces && !protection.ExplicitlyPlaced
-            && services.GetService<IAuthenticationSchemeProvider>() != null)
-        {
-            throw new InvalidOperationException(
-                "SqlOS API/MCP surfaces require app.UseSqlOSSurfaceProtection() when ASP.NET authentication is registered. " +
-                "Call app.UseAuthentication(); app.UseSqlOSSurfaceProtection(); app.UseAuthorization(); " +
-                "after routing/CORS and before protected handlers, so cookie authentication cannot replace the bearer identity.");
-        }
 
         if (app.Properties.TryGetValue(EndpointRouteBuilderKey, out var value)
             && value is IEndpointRouteBuilder applicationRoutes)
@@ -161,6 +140,7 @@ internal sealed class SqlOSPipelineStartupFilter : IStartupFilter
             // routing middleware snapshots the data sources when the pipeline is built, which
             // happens after every startup filter has run. UseEndpoints() only registers the new
             // sources with the global EndpointDataSource; it ignores ones already present.
+            ProtectMappedEndpoints(applicationRoutes.DataSources, hostOptions);
             applicationRoutes.DataSources.Add(sqlosEndpoints);
             app.UseEndpoints(static _ => { });
             return;
@@ -171,6 +151,30 @@ internal sealed class SqlOSPipelineStartupFilter : IStartupFilter
         app.UseRouting();
         app.UseEndpoints(endpoints => endpoints.DataSources.Add(sqlosEndpoints));
     };
+
+    private static EndpointDataSource ProtectSurfaceEndpoints(EndpointDataSource source, SqlOSOptions hostOptions)
+    {
+        var surfaces = SqlOSSingleApplicationSurfaces.Describe(hostOptions.AuthServer.Application);
+        return surfaces.Count == 0 ? source : new SqlOSSurfaceEndpointDataSource(source, surfaces);
+    }
+
+    private static void ProtectMappedEndpoints(ICollection<EndpointDataSource> sources, SqlOSOptions hostOptions)
+    {
+        var surfaces = SqlOSSingleApplicationSurfaces.Describe(hostOptions.AuthServer.Application);
+        if (surfaces.Count == 0)
+        {
+            return;
+        }
+
+        var existing = sources.ToArray();
+        sources.Clear();
+        foreach (var source in existing)
+        {
+            sources.Add(source is SqlOSSurfaceEndpointDataSource
+                ? source
+                : new SqlOSSurfaceEndpointDataSource(source, surfaces));
+        }
+    }
 
     /// <summary>
     /// The <see cref="IApplicationBuilder.Properties"/> key under which <c>UseRouting()</c> records

@@ -1,7 +1,3 @@
-using Microsoft.AspNetCore.Antiforgery;
-using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using SqlOS.AuthServer.Extensions;
@@ -23,7 +19,7 @@ public static class NotesApplication
         var origin = (builder.Configuration["Notes:Origin"] ?? "http://localhost:5085").TrimEnd('/');
 
         // One call describes the application. SqlOS derives the rest:
-        //  - the auth server, hosted sign-in, and dashboard are mapped at startup (no MapSqlOS),
+        //  - the auth server, hosted sign-in, and dashboard are mapped at startup,
         //  - bearer tokens are validated under /api (audience {origin}/api) and /mcp (audience {origin}/mcp),
         //  - RFC 9728 documents are served for both surfaces,
         //  - the MCP server is registered and mapped on /mcp with CIMD + resource indicators enabled,
@@ -44,14 +40,12 @@ public static class NotesApplication
                 {
                     app.Origin = origin;
                     app.Api = "/api";
-                    app.ClientId = "notes";
-                    app.RedirectPath = "/auth/callback";
                     app.Mcp("/mcp", mcp => mcp.WithTools<NotesMcpTools>());
 
                     app.Brand(page =>
                     {
                         page.PageTitle = "Notes";
-                        page.PageSubtitle = "Sign in to read and write your notes from the web or an MCP client.";
+                        page.PageSubtitle = "Sign in to read and write your notes from any client or an MCP agent.";
                         page.PrimaryColor = "#14532d";
                         page.AccentColor = "#16a34a";
                     });
@@ -73,47 +67,6 @@ public static class NotesApplication
 
         builder.Services.AddScoped<NotesService>();
 
-        // This is the browser client of our embedded provider. ASP.NET owns PKCE, state,
-        // nonce, callback validation, and the encrypted HttpOnly application cookie.
-        builder.Services.AddAuthentication(options =>
-        {
-            options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
-            options.DefaultChallengeScheme = "SqlOS";
-        }).AddCookie(options =>
-        {
-            options.Cookie.Name = "notes.session";
-            options.Cookie.SameSite = SameSiteMode.Lax;
-            options.ExpireTimeSpan = TimeSpan.FromMinutes(10);
-            options.SlidingExpiration = false;
-        }).AddOpenIdConnect("SqlOS", options =>
-        {
-            options.Authority = origin + "/sqlos/auth";
-            options.ClientId = "notes";
-            options.CallbackPath = "/auth/callback";
-            options.ResponseType = "code";
-            options.ResponseMode = "query";
-            options.UsePkce = true;
-            options.SaveTokens = true;
-            options.GetClaimsFromUserInfoEndpoint = true;
-            options.MapInboundClaims = false;
-            options.TokenValidationParameters.NameClaimType = "name";
-            options.Scope.Clear();
-            options.Scope.Add("openid");
-            options.Scope.Add("profile");
-            options.Scope.Add("email");
-            options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
-            if (builder.Environment.IsDevelopment())
-            {
-                options.CorrelationCookie.SameSite = SameSiteMode.Lax;
-                options.CorrelationCookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
-                options.NonceCookie.SameSite = SameSiteMode.Lax;
-                options.NonceCookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
-            }
-        });
-        builder.Services.AddAuthorization();
-        builder.Services.AddAntiforgery();
-        builder.Services.AddHttpClient("notes-api", client => client.BaseAddress = new Uri(origin));
-
         var app = builder.Build();
         app.UseExceptionHandler(errors => errors.Run(async http =>
         {
@@ -121,18 +74,14 @@ public static class NotesApplication
             http.Response.StatusCode = error switch
             {
                 UnauthorizedAccessException => StatusCodes.Status403Forbidden,
-                ArgumentException or AntiforgeryValidationException => StatusCodes.Status400BadRequest,
+                ArgumentException => StatusCodes.Status400BadRequest,
                 _ => StatusCodes.Status500InternalServerError
             };
             await http.Response.WriteAsJsonAsync(new { error = http.Response.StatusCode == 403
                 ? "Your notebook access has been removed." : "The request could not be completed." });
         }));
-        app.UseRouting();
-        app.UseAuthentication();
-        app.UseSqlOSSurfaceProtection();
-        app.UseAuthorization();
-        NotesBrowser.Map(app);
 
+        // Already protected: SqlOS validated the token for {origin}/api before these handlers run.
         var api = app.MapGroup("/api");
         api.MapGet("/notes", async (HttpContext http, NotesService notes, CancellationToken ct)
             => Results.Ok(await notes.ListAsync(http.GetSqlOSValidatedToken()!.UserId!, ct)));

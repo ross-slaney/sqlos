@@ -59,10 +59,7 @@ Create a protected entity after checking access to its parent resource. `SqlOSDb
 using SqlOS.AuthServer.Extensions;
 using SqlOS.Extensions;
 
-const string apiAudience = "https://api.acme.test";
-
-var api = app.MapGroup("/api")
-    .RequireSqlOSAccessToken(apiAudience);
+var api = app.MapGroup("/api");
 
 api.MapPost("/workspaces", async (
     CreateWorkspaceRequest request,

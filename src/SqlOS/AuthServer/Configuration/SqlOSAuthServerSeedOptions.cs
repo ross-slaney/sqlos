@@ -17,9 +17,17 @@ public sealed class SqlOSSingleApplicationOptions : SqlOSApplicationOptions
     /// <summary>Gets or sets the callback path appended to <see cref="SqlOSApplicationOptions.Origin"/>.</summary>
     public string RedirectPath { get; set; } = "/auth/callback";
 
-    /// <summary>Gets the explicit absolute redirect URIs allowed for the client.</summary>
+    /// <summary>
+    /// Gets the additional absolute redirect URIs allowed for the client, alongside <c>{Origin}{RedirectPath}</c>.
+    /// Native applications add their custom-scheme or loopback callback here, such as <c>com.acme.app:/callback</c>.
+    /// </summary>
     public List<string> RedirectUris { get; } = [];
 
+    /// <summary>
+    /// Gets or sets whether native applications may drive the headless authentication API directly
+    /// with this client instead of a browser. Same meaning as <c>SqlOSClientSeedOptions.AllowNativeHeadlessAuth</c>.
+    /// </summary>
+    public bool AllowNativeHeadlessAuth { get; set; }
 }
 
 public sealed class SqlOSAuthPageSeedOptions

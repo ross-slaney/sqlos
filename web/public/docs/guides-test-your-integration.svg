@@ -25,7 +25,7 @@
   <text x="408" y="258" class="nodeTitle">WebApplicationFactory</text>
   <text x="408" y="294" class="nodeSub">your actual ASP.NET Core entry point</text>
   <rect x="408" y="326" width="274" height="66" rx="16" fill="#ecfeff"/>
-  <text x="545" y="354" text-anchor="middle" class="nodeSub">AddSqlOS + MapSqlOS</text>
+  <text x="545" y="354" text-anchor="middle" class="nodeSub">AddSqlOS</text>
   <text x="545" y="378" text-anchor="middle" class="nodeSub">application middleware + endpoints</text>
 
   <text x="818" y="280" class="nodeTitle">Real SQL Server</text>

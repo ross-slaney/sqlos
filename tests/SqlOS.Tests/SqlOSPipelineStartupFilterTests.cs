@@ -6,7 +6,6 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
@@ -181,7 +180,7 @@ public sealed class SqlOSPipelineStartupFilterTests
     // ----- Endpoint mapping and single-application surfaces (issue #356) -----
 
     [TestMethod]
-    public async Task Startup_WithoutMapSqlOS_ServesAuthServerAdminAndDashboardRoutes()
+    public async Task Startup_MapsAuthServerAdminAndDashboardRoutes()
     {
         await using var host = await SingleApplicationTestHost.StartAsync(
             options => options.UseSingleApplication("Todo", app => app.Origin = SingleApplicationTestHost.Origin),
@@ -195,38 +194,7 @@ public sealed class SqlOSPipelineStartupFilterTests
         (await host.Client.GetAsync("/sqlos/admin/auth/api/stats")).StatusCode.Should().NotBe(HttpStatusCode.NotFound);
         (await host.Client.GetAsync("/sqlos")).StatusCode.Should().NotBe(HttpStatusCode.NotFound, "the dashboard middleware serves the operator UI in Development");
         (await host.Client.GetStringAsync("/hello")).Should().Be("app", "unmatched requests fall through to the application's pipeline");
-        host.Logs.Entries.Should().NotContain(entry => entry.Message.Contains("MapSqlOS()", StringComparison.Ordinal));
-    }
-
-    [TestMethod]
-    public async Task MapSqlOS_StillCalled_IsIdempotentRegistersNoDuplicateRoutesAndLogsOneWarning()
-    {
-        await using var host = await SingleApplicationTestHost.StartAsync(
-            options => options.UseSingleApplication("Todo", app => app.Origin = SingleApplicationTestHost.Origin),
-            app =>
-            {
-#pragma warning disable CS0618 // Existing applications still call the obsolete method.
-                app.MapSqlOS();
-                app.MapSqlOS();
-#pragma warning restore CS0618
-                app.MapGet("/hello", () => "app");
-            });
-
-        (await host.Client.GetAsync("/sqlos/auth/.well-known/oauth-authorization-server")).StatusCode.Should().Be(HttpStatusCode.OK);
-        (await host.Client.GetAsync("/sqlos/auth/.well-known/jwks.json")).StatusCode.Should().Be(HttpStatusCode.OK);
-        (await host.Client.GetStringAsync("/hello")).Should().Be("app");
-
-        var routes = host.App.Services.GetRequiredService<EndpointDataSource>().Endpoints
-            .OfType<RouteEndpoint>()
-            .SelectMany(endpoint => (endpoint.Metadata.GetMetadata<IHttpMethodMetadata>()?.HttpMethods ?? [])
-                .Select(method => $"{method} {endpoint.RoutePattern.RawText}"))
-            .ToList();
-        routes.Should().OnlyHaveUniqueItems("MapSqlOS must not register a route twice, and the startup filter must not register them again");
-        routes.Should().Contain("GET /sqlos/auth/.well-known/oauth-authorization-server");
-
-        host.Logs.Entries.Should().ContainSingle(entry =>
-            entry.Level == LogLevel.Warning
-            && entry.Message.Contains("MapSqlOS() is obsolete", StringComparison.Ordinal));
+        host.Logs.Entries.Should().NotContain(entry => entry.Message.Contains("MapAuthServer()", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -374,39 +342,6 @@ public sealed class SqlOSPipelineStartupFilterTests
         var suffixed = await host.Client.GetFromJsonAsync<JsonElement>("/.well-known/oauth-protected-resource/mcp");
         suffixed.GetProperty("resource").GetString().Should().Be($"{SingleApplicationTestHost.Origin}/mcp");
         (await host.Client.GetAsync("/.well-known/oauth-protected-resource/api")).StatusCode.Should().Be(HttpStatusCode.NotFound);
-    }
-
-    [TestMethod]
-    public async Task RequireSqlOSAccessToken_UnderDeclaredSurface_ReusesValidationAndStillEnforcesScopes()
-    {
-        var audience = $"{SingleApplicationTestHost.Origin}/api";
-        await using var host = await SingleApplicationTestHost.StartAsync(
-            options => options.UseSingleApplication("Todo", app =>
-            {
-                app.Origin = SingleApplicationTestHost.Origin;
-                app.Api = "/api";
-            }),
-            app =>
-            {
-                var plain = app.MapGroup("/api/plain").RequireSqlOSAccessToken(audience);
-                plain.MapGet("/me", (HttpContext context) => context.GetSqlOSValidatedToken()?.Audience);
-                var scoped = app.MapGroup("/api/scoped").RequireSqlOSAccessToken(validation =>
-                {
-                    validation.ExpectedAudience = audience;
-                    validation.RequiredScopes = ["todos.write"];
-                });
-                scoped.MapGet("/me", () => "ok");
-            });
-
-        var readToken = await host.MintAccessTokenAsync(audience, scope: "openid todos.read");
-
-        var plain = await SendAsync(host, HttpMethod.Get, "/api/plain/me", readToken);
-        plain.StatusCode.Should().Be(HttpStatusCode.OK, "a second RequireSqlOSAccessToken for the same audience is harmless");
-        (await plain.Content.ReadAsStringAsync()).Should().Be(audience);
-
-        var scoped = await SendAsync(host, HttpMethod.Get, "/api/scoped/me", readToken);
-        scoped.StatusCode.Should().Be(HttpStatusCode.Forbidden, "the group's scope requirement is still enforced on the reused validation");
-        scoped.Headers.WwwAuthenticate.ToString().Should().Contain("error=\"insufficient_scope\"");
     }
 
     [TestMethod]

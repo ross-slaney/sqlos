@@ -39,9 +39,8 @@ public static partial class EndpointRouteBuilderExtensions
             endpoints.ServiceProvider.GetService<ILoggerFactory>()?
                 .CreateLogger("SqlOS.Hosting")
                 .LogWarning(
-                    "MapSqlOS() is obsolete and no longer required: AddSqlOS maps the SqlOS endpoints at startup. " +
-                    "Remove the app.MapSqlOS() (or manual MapAuthServer()) call. It remains safe and idempotent, " +
-                    "and no route was registered twice.");
+                    "AddSqlOS maps the SqlOS endpoints at startup. Remove the manual MapAuthServer() call. " +
+                    "It remains safe and idempotent, and no route was registered twice.");
         }
 
         var authOptions = endpoints.ServiceProvider.GetService<IOptions<SqlOSAuthServerOptions>>()?.Value

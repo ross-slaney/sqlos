@@ -65,8 +65,7 @@ SqlOS requests `access_type=offline&prompt=consent` for Google and `offline_acce
 From your app's backend (the user is already signed in), start a connect session and redirect the browser to the returned URL:
 
 ```csharp
-var calendarApi = app.MapGroup("/api/calendar")
-    .RequireSqlOSAccessToken(apiAudience);
+var calendarApi = app.MapGroup("/api/calendar");
 
 calendarApi.MapPost("/connect", async (
     HttpContext http,

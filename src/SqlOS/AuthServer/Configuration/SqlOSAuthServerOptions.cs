@@ -364,6 +364,7 @@ public class SqlOSAuthServerOptions
             Api = section["Api"],
             Mcp = section["Mcp"],
             RedirectPath = section["RedirectPath"] ?? "/auth/callback",
+            AllowNativeHeadlessAuth = ReadBool(section, "AllowNativeHeadlessAuth", false),
             EnablePasswordSignup = ReadBool(section, "EnablePasswordSignup", true),
             ConfigureAuthPageBranding = ReadBool(section, "ConfigureAuthPageBranding", true),
             ConfigureEmailBranding = ReadBool(section, "ConfigureEmailBranding", true)

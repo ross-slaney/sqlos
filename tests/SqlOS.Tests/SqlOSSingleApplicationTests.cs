@@ -127,6 +127,42 @@ public sealed class SqlOSSingleApplicationTests
     }
 
     [TestMethod]
+    public async Task SingleApplication_NativeCallbacks_AreAllowedNextToTheOriginCallback()
+    {
+        await using var harness = CreateHarness(options =>
+            options.UseSingleApplication("Todo", app =>
+            {
+                app.Origin = "https://todo.example.com";
+                app.RedirectUris.Add("com.example.todo:/callback");
+                app.RedirectUris.Add("http://127.0.0.1/callback");
+                app.AllowNativeHeadlessAuth = true;
+            }));
+
+        await harness.Admin.UpsertSeededClientsAsync();
+
+        var client = await harness.Context.Set<SqlOSClientApplication>().SingleAsync();
+        DeserializeJsonList(client.RedirectUrisJson).Should().BeEquivalentTo(
+            "com.example.todo:/callback", "http://127.0.0.1/callback", "https://todo.example.com/auth/callback");
+        client.AllowNativeHeadlessAuth.Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task SingleApplication_RedirectUriWithFragment_ThrowsClearStartupError()
+    {
+        await using var harness = CreateHarness(options =>
+            options.UseSingleApplication("Todo", app =>
+            {
+                app.Origin = "https://todo.example.com";
+                app.RedirectUris.Add("https://todo.example.com/callback#fragment");
+            }));
+
+        var act = async () => await harness.Admin.UpsertSeededClientsAsync();
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Redirect URI 'https://todo.example.com/callback#fragment' must be an absolute URI without a fragment.");
+    }
+
+    [TestMethod]
     public async Task SingleApplication_InvalidOrigin_ThrowsClearStartupError()
     {
         await using var harness = CreateHarness(options =>

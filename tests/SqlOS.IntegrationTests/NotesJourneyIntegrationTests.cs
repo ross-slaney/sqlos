@@ -2,9 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using FluentAssertions;
-using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
@@ -25,40 +23,44 @@ using SqlOS.OneCall.Api;
 
 namespace SqlOS.IntegrationTests;
 
+/// <summary>
+/// Runs the real Notes host: one <c>AddSqlOS</c> call, plain <c>/api</c> handlers, MCP tools, and
+/// nothing else in application code. Clients obtain tokens through the hosted sign-in for the
+/// derived first-party client and call the two surfaces as any browser, native, or agent client would.
+/// </summary>
 [TestClass]
 public sealed class NotesJourneyIntegrationTests
 {
     private const string Origin = HostedAuthorizeTokenFixture.TrustedOrigin;
 
     [TestMethod]
-    public async Task BrowserLogin_CreateNote_McpReadsSameData_AndRevocationSurvivesBothSurfaces()
+    public async Task ApiAndMcpShareOneNotebook_AndRevocationSurvivesBothSurfaces()
     {
         await using var host = await NotesHost.StartAsync();
         var alice = await host.CreateUser("Alice");
         var bob = await host.CreateUser("Bob");
-        using var browser = host.Browser();
-        (await browser.GetStringAsync("/")).Should().Contain("Sign in or create an account");
-        await host.LoginBrowser(browser, alice.Email);
-        var home = await browser.GetStringAsync("/");
-        home.Should().Contain("New note");
-        (await browser.PostAsync("/notes", new FormUrlEncodedContent(new Dictionary<string, string>
-        {
-            ["text"] = "forged"
-        }))).StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        (await browser.PostAsync("/notes", new FormUrlEncodedContent(new Dictionary<string, string>
-        {
-            ["text"] = "Alice's <private> note",
-            ["__RequestVerificationToken"] = Input(home, "__RequestVerificationToken")
-        }))).StatusCode.Should().Be(HttpStatusCode.Redirect);
-        (await browser.GetStringAsync("/")).Should().Contain("Alice&#x27;s &lt;private&gt; note");
+
+        var anonymous = await host.Api(HttpMethod.Get, token: null);
+        anonymous.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        anonymous.Headers.WwwAuthenticate.ToString().Should().Contain("realm=\"Notes API\"")
+            .And.Contain($"resource_metadata=\"{Origin}/.well-known/oauth-protected-resource\"");
+        var apiDocument = await host.Client.GetFromJsonAsync<JsonElement>("/.well-known/oauth-protected-resource");
+        apiDocument.GetProperty("resource").GetString().Should().Be(Origin + "/api");
+        var mcpDocument = await host.Client.GetFromJsonAsync<JsonElement>("/.well-known/oauth-protected-resource/mcp");
+        mcpDocument.GetProperty("resource").GetString().Should().Be(Origin + "/mcp");
 
         var aliceApi = await host.Token(alice, "/api");
         var aliceMcp = await host.Token(alice, "/mcp");
         var bobApi = await host.Token(bob, "/api");
         var bobMcp = await host.Token(bob, "/mcp");
-        (await host.Api(HttpMethod.Get, aliceApi)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        (await host.Api(HttpMethod.Post, aliceApi, "Alice's <private> note")).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await host.Api(HttpMethod.Post, aliceApi, "")).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await (await host.Api(HttpMethod.Get, aliceApi)).Content.ReadAsStringAsync()).Should().Contain("Alice's <private> note");
         (await (await host.Api(HttpMethod.Get, bobApi)).Content.ReadAsStringAsync()).Should().Be("[]");
-        (await host.Api(HttpMethod.Get, aliceMcp)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await host.Api(HttpMethod.Get, aliceMcp)).StatusCode.Should().Be(HttpStatusCode.Unauthorized, "an MCP token is not an API token");
+        (await host.McpRaw(aliceApi)).StatusCode.Should().Be(HttpStatusCode.Unauthorized, "an API token is not an MCP token");
+
         await using var aliceTools = await host.Mcp(aliceMcp);
         await using var bobTools = await host.Mcp(bobMcp);
         var aliceNotes = await aliceTools.CallToolAsync("list_notes", new Dictionary<string, object?>());
@@ -67,7 +69,7 @@ public sealed class NotesJourneyIntegrationTests
         Text(await bobTools.CallToolAsync("list_notes", new Dictionary<string, object?>())).Should().NotContain("Alice");
         var added = await aliceTools.CallToolAsync("add_note", new Dictionary<string, object?> { ["text"] = "Added through MCP" });
         added.IsError.Should().NotBe(true);
-        (await browser.GetStringAsync("/")).Should().Contain("Added through MCP");
+        (await (await host.Api(HttpMethod.Get, aliceApi)).Content.ReadAsStringAsync()).Should().Contain("Added through MCP");
 
         await using (var scope = host.App.Services.CreateAsyncScope())
         {
@@ -76,38 +78,23 @@ public sealed class NotesJourneyIntegrationTests
             await db.SaveChangesAsync();
         }
         (await host.Api(HttpMethod.Get, aliceApi)).StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        (await host.Api(HttpMethod.Post, aliceApi)).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await host.Api(HttpMethod.Post, aliceApi, "denied")).StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await aliceTools.CallToolAsync("list_notes", new Dictionary<string, object?>())).IsError.Should().Be(true);
         (await aliceTools.CallToolAsync("add_note", new Dictionary<string, object?> { ["text"] = "denied" })).IsError.Should().Be(true);
-        (await browser.GetStringAsync("/")).Should().Contain("access has been removed");
+        (await host.Api(HttpMethod.Get, bobApi)).StatusCode.Should().Be(HttpStatusCode.OK, "Bob's notebook is unaffected");
         await using (var scope = host.App.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<NotesDbContext>();
-            (await db.Set<SqlOSFgaGrant>().CountAsync(x => x.SubjectId == alice.Id)).Should().Be(0);
+            (await db.Set<SqlOSFgaGrant>().CountAsync(x => x.SubjectId == alice.Id)).Should().Be(0, "ordinary requests never restore a revoked grant");
             await db.GrantRoleAsync(alice.Id, NotesAuthorization.NotebookId(alice.Id), NotesAuthorization.OwnerRole);
             await db.SaveChangesAsync();
         }
         (await host.Api(HttpMethod.Get, aliceApi)).StatusCode.Should().Be(HttpStatusCode.OK);
         (await aliceTools.CallToolAsync("list_notes", new Dictionary<string, object?>())).IsError.Should().NotBe(true);
-        home = await browser.GetStringAsync("/");
-        (await browser.PostAsync("/logout", new FormUrlEncodedContent(new Dictionary<string, string>())))
-            .StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        var logout = await browser.PostAsync("/logout", new FormUrlEncodedContent(new Dictionary<string, string>
-        {
-            ["__RequestVerificationToken"] = Input(home, "__RequestVerificationToken")
-        }));
-        logout.StatusCode.Should().Be(HttpStatusCode.Redirect);
-        await browser.GetAsync(logout.Headers.Location);
-        (await browser.GetStringAsync("/")).Should().Contain("Sign in or create an account");
+
         await using var finalScope = host.App.Services.CreateAsyncScope();
         var finalDb = finalScope.ServiceProvider.GetRequiredService<NotesDbContext>();
-        (await finalDb.Set<SqlOSSession>().CountAsync(x => x.UserId == alice.Id && x.RevokedAt != null)).Should().BeGreaterThan(0);
-        (await finalDb.Set<SqlOSIssuerSessionFamily>().CountAsync(x => x.UserId == alice.Id && x.RevokedAt != null)).Should().BeGreaterThan(0);
         (await finalDb.Set<SqlOSAuditEvent>().CountAsync(x => x.Action == "mcp.tool.called" && x.UserId == alice.Id)).Should().BeGreaterThanOrEqualTo(5);
-        var newLogin = await browser.GetAsync("/login");
-        var loginForm = await browser.GetAsync(newLogin.Headers.Location);
-        loginForm.StatusCode.Should().Be(HttpStatusCode.OK, "the issuer session must no longer silently sign the user in");
-        Input(await loginForm.Content.ReadAsStringAsync(), "requestId").Should().NotBeNullOrWhiteSpace();
     }
 
     [TestMethod]
@@ -129,24 +116,19 @@ public sealed class NotesJourneyIntegrationTests
     }
 
     private static string Text(CallToolResult result) => string.Join("", result.Content.OfType<TextContentBlock>().Select(x => x.Text));
-    private static string Input(string html, string name)
-    {
-        var match = Regex.Match(html, "<input\\b(?=[^>]*\\bname=['\"]" + Regex.Escape(name) + "['\"])[^>]*\\bvalue=['\"](?<value>[^'\"]*)", RegexOptions.IgnoreCase);
-        match.Success.Should().BeTrue($"form must contain {name}");
-        return WebUtility.HtmlDecode(match.Groups["value"].Value);
-    }
 
     private sealed record User(string Id, string Email);
 
     private sealed class NotesHost(WebApplication app, HttpClient client) : IAsyncDisposable
     {
         public WebApplication App { get; } = app;
+        public HttpClient Client { get; } = client;
+
         public static async Task<NotesHost> StartAsync()
         {
             var database = "NotesJourney_" + Guid.NewGuid().ToString("N");
             await TestDatabase.CreateDatabaseAsync(AspireFixture.SqlConnectionString, database);
-            WebApplication? app = null;
-            app = await NotesApplication.BuildAsync([], builder =>
+            var app = await NotesApplication.BuildAsync([], builder =>
             {
                 builder.WebHost.UseTestServer();
                 builder.Environment.EnvironmentName = "Development";
@@ -157,16 +139,13 @@ public sealed class NotesJourneyIntegrationTests
                     ["Notes:Origin"] = Origin,
                     ["Notes:DatabaseProvider"] = TestDatabase.IsPostgreSql ? "PostgreSQL" : "SqlServer"
                 });
-                builder.Services.AddHttpClient("notes-api").ConfigurePrimaryHttpMessageHandler(() => app!.GetTestServer().CreateHandler());
-                builder.Services.PostConfigure<OpenIdConnectOptions>("SqlOS", options =>
-                    options.Backchannel = new HttpClient(new DeferredHandler(() => app!.GetTestServer().CreateHandler())));
             });
             await app.StartAsync();
             var client = app.GetTestClient();
             client.BaseAddress = new Uri(Origin);
             return new NotesHost(app, client);
         }
-        public HttpClient Browser() => new(new CookieHandler(App.GetTestServer().CreateHandler())) { BaseAddress = new Uri(Origin) };
+
         public async Task<User> CreateUser(string name)
         {
             await using var scope = App.Services.CreateAsyncScope();
@@ -175,29 +154,14 @@ public sealed class NotesJourneyIntegrationTests
                 new SqlOSCreateUserRequest(name, email, HostedAuthorizeTokenFixture.Password));
             return new User(user.Id, email);
         }
-        public async Task LoginBrowser(HttpClient browser, string email)
-        {
-            var challenge = await browser.GetAsync("/login");
-            challenge.StatusCode.Should().Be(HttpStatusCode.Redirect);
-            var authorize = await browser.GetAsync(challenge.Headers.Location);
-            var html = await authorize.Content.ReadAsStringAsync();
-            using var request = new HttpRequestMessage(HttpMethod.Post, "/sqlos/auth/login/password")
-            {
-                Content = new FormUrlEncodedContent(new Dictionary<string, string>
-                {
-                    ["requestId"] = Input(html, "requestId"), ["email"] = email,
-                    ["password"] = HostedAuthorizeTokenFixture.Password,
-                    ["__RequestVerificationToken"] = Input(html, "__RequestVerificationToken")
-                })
-            };
-            request.Headers.Add("Origin", Origin);
-            var login = await browser.SendAsync(request);
-            var callback = await HostedAuthorizeTokenFixture.ReadClientRedirectAsync(login);
-            (await browser.GetAsync(callback)).StatusCode.Should().Be(HttpStatusCode.Redirect);
-        }
+
+        /// <summary>
+        /// Signs in through the hosted pages as the derived first-party client and exchanges the code
+        /// for a token bound to one surface, the way any OIDC client library does it.
+        /// </summary>
         public async Task<string> Token(User user, string resource)
         {
-            using var browser = Browser();
+            using var browser = new HttpClient(new CookieHandler(App.GetTestServer().CreateHandler())) { BaseAddress = new Uri(Origin) };
             var fixture = new HostedAuthorizeTokenFixture { App = App, Client = browser, Email = user.Email, UserId = user.Id };
             var start = await fixture.StartAuthorizeAsync("openid profile email", clientId: "notes", redirectUri: Origin + "/auth/callback",
                 extraParameters: new Dictionary<string, string> { ["resource"] = Origin + resource });
@@ -205,21 +169,31 @@ public sealed class NotesJourneyIntegrationTests
             var result = await fixture.ExchangeAuthorizationCodeAsync(code, start.CodeVerifier, clientId: "notes", redirectUri: Origin + "/auth/callback", resource: Origin + resource);
             return result.RootElement.GetProperty("access_token").GetString()!;
         }
-        public Task<HttpResponseMessage> Api(HttpMethod method, string token)
+
+        public Task<HttpResponseMessage> Api(HttpMethod method, string? token, string? text = null)
         {
             var request = new HttpRequestMessage(method, "/api/notes");
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            if (method == HttpMethod.Post) request.Content = JsonContent.Create(new NoteRequest("denied"));
-            return client.SendAsync(request);
+            if (token != null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            if (method == HttpMethod.Post) request.Content = JsonContent.Create(new NoteRequest(text ?? "denied"));
+            return Client.SendAsync(request);
         }
+
+        public Task<HttpResponseMessage> McpRaw(string token)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, "/mcp") { Content = JsonContent.Create(new { }) };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            return Client.SendAsync(request);
+        }
+
         public Task<McpClient> Mcp(string token) => McpClient.CreateAsync(new HttpClientTransport(new HttpClientTransportOptions
         {
             Endpoint = new Uri(Origin + "/mcp"), TransportMode = HttpTransportMode.StreamableHttp,
             AdditionalHeaders = new Dictionary<string, string> { ["Authorization"] = "Bearer " + token }
-        }, client, LoggerFactory.Create(_ => { }), ownsHttpClient: false));
+        }, Client, LoggerFactory.Create(_ => { }), ownsHttpClient: false));
+
         public async ValueTask DisposeAsync()
         {
-            client.Dispose();
+            Client.Dispose();
             await App.StopAsync();
             await using (var scope = App.Services.CreateAsyncScope())
                 await scope.ServiceProvider.GetRequiredService<NotesDbContext>().Database.EnsureDeletedAsync();
@@ -227,13 +201,6 @@ public sealed class NotesJourneyIntegrationTests
         }
     }
 
-    private sealed class DeferredHandler(Func<HttpMessageHandler> create) : HttpMessageHandler
-    {
-        private HttpMessageInvoker? _inner;
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => (_inner ??= new HttpMessageInvoker(create())).SendAsync(request, cancellationToken);
-        protected override void Dispose(bool disposing) { if (disposing) _inner?.Dispose(); base.Dispose(disposing); }
-    }
     private sealed class CookieHandler(HttpMessageHandler inner) : DelegatingHandler(inner)
     {
         private readonly CookieContainer _cookies = new();

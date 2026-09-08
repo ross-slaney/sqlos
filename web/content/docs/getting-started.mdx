@@ -22,7 +22,7 @@ order: 0
 
 ## The standard flow: one app, one call
 
-For a typical .NET B2B SaaS product you have one ASP.NET Core host, one EF Core `DbContext` on SQL Server or PostgreSQL, and one product that users sign in to. `builder.AddSqlOS<TContext>(…)` describes that product once and SqlOS derives every protocol consequence — routes, token validation, metadata documents, client registration, seeds. `Program.cs` contains no `MapSqlOS`, `RequireSqlOSAccessToken`, `AddMcpServer`, or `MapMcp` calls.
+For a typical .NET B2B SaaS product you have one ASP.NET Core host, one EF Core `DbContext` on SQL Server or PostgreSQL, and one product that users sign in to. `builder.AddSqlOS<TContext>(…)` describes that product once and SqlOS derives every protocol consequence — routes, token validation, metadata documents, client registration, seeds. `Program.cs` contains no `AddMcpServer` or `MapMcp` calls.
 
 ```csharp
 builder.AddSqlOS<AppDbContext>(
@@ -54,12 +54,12 @@ Every line is optional except `Origin`. Start with `Origin` alone and add lines 
 | Option | Default | What SqlOS does with it |
 | --- | --- | --- |
 | `app.Origin` | required | Public origin of your app. Issuer (`{Origin}/sqlos/auth`), redirect URI (`{Origin}/auth/callback`), and audiences derive from it. |
-| `app.Api = "/api"` | off | Requires a bearer token for the audience `{Origin}/api` on every request under `/api` (`401` + `WWW-Authenticate` otherwise) and serves `/.well-known/oauth-protected-resource`. Handlers read the user with `http.GetSqlOSValidatedToken()`. [Protect an API](/docs/quickstarts/protect-api) |
+| `app.Api = "/api"` | off | Requires a bearer token for the audience `{Origin}/api` on mapped endpoints under `/api` (`401` + `WWW-Authenticate` otherwise) and serves `/.well-known/oauth-protected-resource`. Handlers read the user with `http.GetSqlOSValidatedToken()`. [Protect an API](/docs/quickstarts/protect-api) |
 | `app.Mcp("/mcp", mcp => …)` | off | Hosts an MCP server at `/mcp` with the same token protection, a distinct audience, its own protected-resource document, and portable-client registration (CIMD + resource indicators) turned on. Needs the `SqlOS.Mcp` package; the lambda is the MCP SDK's `IMcpServerBuilder`. [MCP server](/docs/authserver/mcp-server) |
 | `app.Brand(page => …)` | `Sign in to {Name}` | Brands the hosted login, signup, OTP, MFA, and consent pages. Same options as `AuthServer.SeedAuthPage`. [Branding](/docs/guides/auth-branding) |
 | `app.Headless("/auth/authorize")` | hosted pages | Switches to **your** sign-in UI: SqlOS redirects browser interaction to `{Origin}/auth/authorize` with the standard `request`, `view`, `email`, `pendingToken`, `mfaToken`, … parameters that `@sqlos/headless` reads. Same as `AuthServer.UseHeadlessAuthPage`. [Custom login UI](/docs/guides/custom-login-ui) |
 | `app.Authorization(fga => …)` | none | Declares resource types, permissions, and roles; reconciled idempotently at startup. Same as `Fga.Seed`. [Model your FGA](/docs/guides/model-fga) |
-| `app.AllowedScopes`, `ClientId`, `RedirectPath`, `EnablePasswordSignup`, `EnabledCredentialTypes` | sensible | Fine-tuning of the single first-party PKCE client SqlOS seeds for you. [All defaults](/docs/authserver/single-application#defaults) |
+| `app.AllowedScopes`, `ClientId`, `RedirectPath`, `RedirectUris`, `AllowNativeHeadlessAuth`, `EnablePasswordSignup`, `EnabledCredentialTypes` | sensible | Fine-tuning of the single first-party PKCE client SqlOS seeds for you. [All defaults](/docs/authserver/single-application#defaults) |
 | `options.Dashboard.AuthMode` / `Password` | development-only | Who may open `/sqlos`. Set `Password` (from secrets) before anyone else can reach the host. |
 
 Sign-in methods — passwords, email OTP, magic links, social login, SAML, MFA — are `options.AuthServer` seeds or dashboard settings, not code changes. Turn them on when you need them: [Password](/docs/authserver/password-login) · [Email OTP](/docs/authserver/email-otp) · [Social OIDC](/docs/guides/social-oidc) · [SAML](/docs/guides/saml-sso) · [MFA](/docs/authserver/mfa-totp).
@@ -78,7 +78,7 @@ Your frontend then talks to a typed state machine (`npm install @sqlos/headless`
   `AddSqlOS` does not automatically bind an `SqlOS` configuration section. Read values from `builder.Configuration`, your secret store, or environment variables and assign them in the options callback as shown above. (`options.UseSingleApplication(builder.Configuration)` binds just the application description from `SqlOS:Application`.)
 </Callout>
 
-Your application uses its standard OIDC client library to start sign-in and handle the callback, with either hosted AuthPage or headless authentication UI. See the [complete Notes sample](https://github.com/ross-slaney/sqlos/tree/main/examples/SqlOS.OneCall.Api). Hosts with ASP.NET authentication must place `UseSqlOSSurfaceProtection()` after `UseAuthentication()` and before `UseAuthorization()`; place CORS and rewriting before the guard too.
+Your front end (a browser SPA, a native app, or an agent) uses its standard OIDC client library to sign in as the derived client, with either hosted AuthPage or headless authentication UI, and calls `/api` with the resulting bearer token. `AddSqlOS` protects the endpoints you map under the declared surfaces; there is no middleware to place. See the [complete Notes sample](https://github.com/ross-slaney/sqlos/tree/main/examples/SqlOS.OneCall.Api).
 
 `UseSingleApplication` creates one first-party PKCE client, a callback at `{Origin}/auth/callback`, a default client allowlist (`openid`, `profile`, `email`, `offline_access`), and matching AuthPage branding. With [OpenID Provider mode](/docs/authserver/openid-provider) enabled (the default), authorization-server metadata advertises `openid`, `profile`, and `email`; `offline_access` stays on the client only for gateway compatibility and is not advertised, because SqlOS issues refresh tokens to code-flow clients without gating them on that scope. DCR stays off; CIMD and resource indicators turn on only when you declare `Mcp`.
 
@@ -128,7 +128,7 @@ Runnable examples use this API: the [retail stack](https://github.com/ross-slane
 
 ## What starts automatically
 
-When the host starts, SqlOS initializes and upgrades its own tables, automatically creates and protects a signing key when none exists, and applies settings and startup seeds. Your EF migrations continue to own your application tables. `AddSqlOS` also maps the OAuth, hosted login, and admin API routes and registers the dashboard middleware at startup; there is no separate `MapSqlOS()` call.
+When the host starts, SqlOS initializes and upgrades its own tables, automatically creates and protects a signing key when none exists, and applies settings and startup seeds. Your EF migrations continue to own your application tables. `AddSqlOS` also maps the OAuth, hosted login, and admin API routes and registers the dashboard middleware at startup.
 
 Default paths:
 

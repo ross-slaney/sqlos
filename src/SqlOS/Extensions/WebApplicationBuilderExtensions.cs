@@ -25,8 +25,7 @@ public static class WebApplicationBuilderExtensions
     /// <returns>The same <paramref name="builder"/> instance so that additional calls can be chained.</returns>
     /// <remarks>
     /// This overload does not register <typeparamref name="TContext"/>. Register the context before
-    /// calling this method. After <see cref="WebApplicationBuilder.Build"/>, call
-    /// <see cref="WebApplicationExtensions.MapSqlOS"/> once to map the SqlOS endpoints.
+    /// calling this method. <c>AddSqlOS</c> maps the SqlOS endpoints at startup.
     /// </remarks>
     public static WebApplicationBuilder AddSqlOS<TContext>(this WebApplicationBuilder builder, Action<SqlOSOptions>? configure = null)
         where TContext : DbContext, ISqlOSAuthServerDbContext, ISqlOSFgaDbContext
@@ -47,8 +46,7 @@ public static class WebApplicationBuilderExtensions
     /// <returns>The same <paramref name="builder"/> instance so that additional calls can be chained.</returns>
     /// <remarks>
     /// This overload calls <see cref="EntityFrameworkServiceCollectionExtensions.AddDbContext{TContext}(IServiceCollection,Action{DbContextOptionsBuilder},ServiceLifetime,ServiceLifetime)"/>
-    /// before registering SqlOS. After <see cref="WebApplicationBuilder.Build"/>, call
-    /// <see cref="WebApplicationExtensions.MapSqlOS"/> once to map the SqlOS endpoints.
+    /// before registering SqlOS. <c>AddSqlOS</c> maps the SqlOS endpoints at startup.
     /// </remarks>
     public static WebApplicationBuilder AddSqlOS<TContext>(
         this WebApplicationBuilder builder,

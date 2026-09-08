@@ -38,7 +38,7 @@ public sealed class SingleApplicationSurfacesIntegrationTests
     private const string EphemeralLoopbackRedirect = "http://127.0.0.1:49731/callback/abc123";
 
     [TestMethod]
-    public async Task OneCallHost_MapsSqlOSWithoutMapSqlOS_AndProtectsBothSurfaces()
+    public async Task OneCallHost_MapsSurfacesWithoutManualMapping_AndProtectsBothSurfaces()
     {
         await using var fixture = await CreateFixtureAsync();
 
@@ -91,25 +91,6 @@ public sealed class SingleApplicationSurfacesIntegrationTests
         using var mcpResponse = await fixture.Client.SendAsync(mcp);
         mcpResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         mcpResponse.Headers.WwwAuthenticate.ToString().Should().Contain("invalid_token");
-    }
-
-    [TestMethod]
-    public async Task RequireSqlOSAccessToken_UnderApiSurface_ReturnsInsufficientScopeWithoutRevalidating()
-    {
-        await using var fixture = await CreateFixtureAsync();
-
-        var readOnly = (await AuthorizeFirstPartyAsync(fixture, "openid petals.read")).RootElement.GetProperty("access_token").GetString()!;
-        using var denied = new HttpRequestMessage(HttpMethod.Post, "/api/petals/prune");
-        denied.Headers.Authorization = new AuthenticationHeaderValue("Bearer", readOnly);
-        using var deniedResponse = await fixture.Client.SendAsync(denied);
-        deniedResponse.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        deniedResponse.Headers.WwwAuthenticate.ToString().Should().Contain("insufficient_scope");
-
-        var writer = (await AuthorizeFirstPartyAsync(fixture, "openid petals.read petals.write")).RootElement.GetProperty("access_token").GetString()!;
-        using var allowed = new HttpRequestMessage(HttpMethod.Post, "/api/petals/prune");
-        allowed.Headers.Authorization = new AuthenticationHeaderValue("Bearer", writer);
-        using var allowedResponse = await fixture.Client.SendAsync(allowed);
-        allowedResponse.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
     [DataTestMethod]
@@ -214,21 +195,13 @@ public sealed class SingleApplicationSurfacesIntegrationTests
                 })),
             configureApp: app =>
             {
-                // Application code: no MapSqlOS, no RequireSqlOSAccessToken on the surface itself.
+                // Application code: map under the declared Api/Mcp prefixes. SqlOS validates the token.
                 app.MapGet("/", () => Results.Text("home"));
                 app.MapGet("/api/ping", (HttpContext http) =>
                 {
                     var token = http.GetSqlOSValidatedToken()!;
                     return Results.Json(new { userId = token.UserId, audience = token.Audience });
                 });
-                // Optional scope tightening on a sub-group reuses the surface's validation.
-                app.MapGroup("/api/petals")
-                    .RequireSqlOSAccessToken(options =>
-                    {
-                        options.ExpectedAudience = ApiAudience;
-                        options.RequiredScopes = ["petals.write"];
-                    })
-                    .MapPost("/prune", () => Results.Ok());
             },
             mapAuthServer: false,
             seedBrowserClient: false);

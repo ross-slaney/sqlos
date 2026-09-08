@@ -3,9 +3,9 @@ using Microsoft.AspNetCore.Http;
 namespace SqlOS.AuthServer.Configuration;
 
 /// <summary>
-/// Configures bearer access-token validation for a SqlOS-protected ASP.NET Core pipeline or route group.
+/// Configures bearer access-token validation for a declared <c>Api</c> or <c>Mcp</c> surface.
 /// </summary>
-public sealed class SqlOSAccessTokenValidationOptions
+internal sealed class SqlOSAccessTokenValidationOptions
 {
     /// <summary>
     /// Gets or sets the exact audience that a validated access token must contain.

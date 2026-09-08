@@ -67,7 +67,7 @@ var app = builder.Build();
 app.Run();
 ```
 
-SqlOS maps its routes at startup and derives the first-party PKCE client, callback, API audience, and protection. Your browser application uses its standard OIDC library with the registered callback, through either hosted AuthPage or headless UI. If this same process registers ASP.NET authentication, place `UseSqlOSSurfaceProtection()` after `UseAuthentication()` and before `UseAuthorization()`. See the [complete README browser example](https://github.com/ross-slaney/sqlos#one-application-sign-in-and-call-your-api).
+SqlOS maps its routes at startup and derives the first-party PKCE client, callback, API audience, and protection; nothing is placed in the pipeline by your code. Your front end uses its standard OIDC library with the registered callback, through either hosted AuthPage or headless UI, and calls `/api` with the token. See the [complete README example](https://github.com/ross-slaney/sqlos#one-application-describe-it-once).
 
 ## Wire the DbContext
 

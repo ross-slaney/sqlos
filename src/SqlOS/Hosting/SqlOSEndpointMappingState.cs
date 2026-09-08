@@ -4,8 +4,7 @@ namespace SqlOS.Hosting;
 
 /// <summary>
 /// Records which host mapped the SqlOS auth-server and admin endpoints so the startup filter and
-/// the obsolete <c>MapSqlOS()</c> / manual <c>MapAuthServer()</c> calls never register the same
-/// routes twice.
+/// a manual <c>MapAuthServer()</c> call never registers the same routes twice.
 /// </summary>
 internal sealed class SqlOSEndpointMappingState
 {
@@ -14,7 +13,7 @@ internal sealed class SqlOSEndpointMappingState
     private bool _mappedByApplication;
 
     /// <summary>
-    /// <see langword="true"/> once application code called <c>MapSqlOS()</c> or <c>MapAuthServer()</c>.
+    /// <see langword="true"/> once application code called <c>MapAuthServer()</c>.
     /// The SqlOS-owned <see cref="SqlOSEndpointDataSource"/> then withdraws its copy of those routes
     /// (it decides lazily, so the application call may happen before or after the startup filter).
     /// </summary>

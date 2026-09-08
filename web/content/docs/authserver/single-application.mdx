@@ -21,7 +21,7 @@ This expands into the same seeded client records SqlOS already uses. It does not
 
 ## Describe the whole application in one call
 
-The same description can carry the application's protected surfaces, branding, and authorization model. SqlOS derives every protocol consequence, so `Program.cs` contains no `MapSqlOS`, `RequireSqlOSAccessToken`, `AddMcpServer`, `MapMcp`, or hand-written protected-resource document:
+The same description can carry the application's protected surfaces, branding, and authorization model. SqlOS derives every protocol consequence, so `Program.cs` contains no `AddMcpServer`, `MapMcp`, or hand-written protected-resource document:
 
 ```csharp
 using SqlOS.Mcp; // SqlOS.Mcp package, only needed for app.Mcp(...)
@@ -48,29 +48,19 @@ app.Run();
 
 | Declaration | What SqlOS does |
 | --- | --- |
-| `Api = "/api"` | Validates bearer tokens for the audience `{Origin}/api` on every request under `/api` (401 with a Bearer challenge otherwise), serves `/.well-known/oauth-protected-resource`, and uses `{Origin}/api` as the first-party client's default audience. |
+| `Api = "/api"` | Validates bearer tokens for the audience `{Origin}/api` on mapped endpoints under `/api` (401 with a Bearer challenge otherwise), serves `/.well-known/oauth-protected-resource`, and uses `{Origin}/api` as the first-party client's default audience. |
 | `Mcp("/mcp", ...)` | Validates tokens for `{Origin}/mcp` under `/mcp`, serves `/.well-known/oauth-protected-resource/mcp`, enables client ID metadata documents and resource indicators for portable MCP clients, and hosts the MCP server there. See [MCP server](/docs/authserver/mcp-server). |
 | `Brand(...)` | Forwards to `AuthServer.SeedAuthPage` on top of the single-application defaults. |
 | `Headless("/auth/authorize")` | Forwards to `AuthServer.UseHeadlessAuthPage` with a generated `BuildUiUrl` that sends browser interaction to `{Origin}/auth/authorize` with the standard headless parameters. See [Hosted or headless](#hosted-or-headless). |
 | `Authorization(...)` | Forwards to `Fga.Seed`. |
 
-The auth server, hosted sign-in pages, and dashboard are mapped by `AddSqlOS` at startup. `app.MapSqlOS()` is obsolete; calling it remains safe and idempotent and logs one warning.
+The auth server, hosted sign-in pages, and dashboard are mapped by `AddSqlOS` at startup.
 
-## Browser sign-in and middleware placement
+## How the surfaces are protected
 
-The client registration does not implement your browser callback. Use your framework's OIDC handler to start authorization, validate the callback, and establish the application's cookie. The [Notes sample](https://github.com/ross-slaney/sqlos/tree/main/examples/SqlOS.OneCall.Api) includes a complete browser, API, and MCP journey.
+`AddSqlOS` attaches bearer validation to the endpoints you map under `Api` or `Mcp`. There is no SqlOS middleware in the host pipeline and no CORS handling: your `UseCors`, `UseAuthentication`, and the rest of the pipeline run first, then the selected endpoint checks the token. A missing or wrong-audience token is answered with `401` and a Bearer challenge. Handlers read the result through `HttpContext.GetSqlOSValidatedToken()` and `HttpContext.User`. Unmatched paths are 404s; raw middleware branches are not endpoints and are not protected.
 
-Bearer-only hosts get an automatic early surface guard. When ASP.NET authentication is registered, place the guard explicitly; otherwise startup fails with guidance:
-
-```csharp
-app.UseRouting();
-// app.UseCors("frontend"); // after configuring that CORS policy
-app.UseAuthentication();
-app.UseSqlOSSurfaceProtection();
-app.UseAuthorization();
-```
-
-Put exception handling, `UsePathBase`, and rewriting before routing and the guard; put protected middleware branches after it. Configure paths relative to `PathBase`; the audience remains the configured `{Origin}{Api}` or `{Origin}{Mcp}`. A configured CORS policy may answer preflight, but an arbitrary `OPTIONS` request is not exempt. The bearer identity replaces the cookie identity within a protected surface; authorization policies should use that current principal.
+The derived client is a public PKCE client for whatever front end you build: a browser SPA, a native app, or an agent. It completes the authorization-code flow with its standard OIDC library, requests `resource={Origin}/api`, and sends the token as a bearer. Add a native app's custom-scheme or loopback callback to `RedirectUris`, and set `AllowNativeHeadlessAuth = true` if it drives the [headless authentication API](/docs/authserver/headless-auth) directly. The [Notes sample](https://github.com/ross-slaney/sqlos/tree/main/examples/SqlOS.OneCall.Api) is a complete bearer-only host with API and MCP.
 
 ## Hosted or headless
 
@@ -96,7 +86,7 @@ app.Headless(headless =>
 
 `BuildUiUrl` present means headless; there is no second switch. Continue with [Build your own login and signup UI](/docs/guides/custom-login-ui) and the [headless reference](/docs/authserver/headless-auth).
 
-Surface paths are validated at startup: they must be absolute, non-root, distinct and non-nested, and must not overlap `/.well-known`, the auth base path, or `DashboardBasePath`. `Api` and `Mcp` are separate audiences, so a token minted for `/api` is rejected at `/mcp` and vice versa. Nested `RequireSqlOSAccessToken` groups under a declared surface reuse the already validated token and only add scope enforcement.
+Surface paths are validated at startup: they must be absolute, non-root, distinct and non-nested, and must not overlap `/.well-known`, the auth base path, or `DashboardBasePath`. `Api` and `Mcp` are separate audiences, so a token minted for `/api` is rejected at `/mcp` and vice versa. Inspect `GetSqlOSValidatedToken()?.Scope` in the handler when a client's granted ceiling must be checked.
 
 ## Defaults
 
@@ -134,7 +124,7 @@ builder.AddSqlOS<AppDbContext>(options =>
 });
 ```
 
-`Origin` must be an absolute `http` or `https` origin without a query string or fragment. `RedirectPath` must start with `/`. You can also provide `RedirectUris` directly when an origin-derived callback is not enough.
+`Origin` must be an absolute `http` or `https` origin without a query string or fragment. `RedirectPath` must start with `/`. `RedirectUris` adds callbacks next to `{Origin}{RedirectPath}`; any absolute URI without a fragment is accepted, including `com.example.todo:/callback` for a native app. `AllowNativeHeadlessAuth` lets a native app use the headless authentication API with this client.
 
 ## Configuration
 

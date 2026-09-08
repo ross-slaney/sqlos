@@ -5,25 +5,17 @@ order: 28
 section: authserver
 ---
 
-Access tokens are RS256 JWTs. Validate on the server for each API call and always require the audience for the API that will process the token. SqlOS SDK/middleware validation is session-aware; plain JWKS validation is not.
+Access tokens are RS256 JWTs. Validate on the server for each API call and always require the audience for the API that will process the token. SqlOS validation is session-aware; plain JWKS validation is not.
 
 SqlOS validation is stateful: after signature, issuer, audience, and JWT lifetime checks, it loads the current session and requires that the session is not revoked or idle/absolutely expired. It also requires an active user and, for organization-scoped tokens, an active organization and membership. This is what makes logout and offboarding visible before the JWT's `exp` time.
 
-## Resource-server middleware
+## Declared API and MCP surfaces
+
+Declare `app.Api = "/api"` (and `app.Mcp("/mcp", …)` when you host MCP) inside `UseSingleApplication` or `ConfigureApplication`. `AddSqlOS` validates mapped endpoints under those prefixes for the surface audience, sets `HttpContext.User`, and stores the `SqlOSValidatedToken` on the current request:
 
 ```csharp
 using SqlOS.AuthServer.Extensions;
 
-app.UseSqlOSAccessTokenValidation(options =>
-{
-    options.ExpectedAudience = "https://api.example.com";
-    options.ShouldValidate = http => http.Request.Path.StartsWithSegments("/api");
-});
-```
-
-The middleware rejects requests at startup if `ExpectedAudience` is empty. On successful authentication it sets `HttpContext.User` and stores the `SqlOSValidatedToken` on the current request:
-
-```csharp
 var validated = httpContext.GetSqlOSValidatedToken();
 var clientId = validated?.ClientId;
 var audience = validated?.Audience;
@@ -99,7 +91,7 @@ And the OAuth metadata endpoint:
 GET /sqlos/auth/.well-known/oauth-authorization-server
 ```
 
-JWKS-only validation is necessarily stateless. It cannot observe a SqlOS session revocation, idle expiry, user deactivation, organization deactivation, or membership removal until the JWT expires. Use `UseSqlOSAccessTokenValidation`, `RequireSqlOSAccessToken`, or `ValidateAccessTokenAsync` when immediate lifecycle enforcement matters. If a resource server must remain JWKS-only, keep access-token lifetimes short and treat that delay as an explicit deployment tradeoff.
+JWKS-only validation is necessarily stateless. It cannot observe a SqlOS session revocation, idle expiry, user deactivation, organization deactivation, or membership removal until the JWT expires. Use a declared `Api`/`Mcp` surface or `ValidateAccessTokenAsync` when immediate lifecycle enforcement matters. If a resource server must remain JWKS-only, keep access-token lifetimes short and treat that delay as an explicit deployment tradeoff.
 
 ## Token claims
 
@@ -120,16 +112,17 @@ JWKS-only validation is necessarily stateless. It cannot observe a SqlOS session
 
 The `scope` claim records what the *client application* was granted, not what the user may do: per-user, per-resource authorization stays with FGA, and effective permission is the intersection of both. Service tokens from client-credentials machine clients also carry `scope`, plus `token_kind: "service"`. See [Scopes and Permissions](/docs/authserver/scopes-and-permissions).
 
-## Requiring scopes
+## Checking the granted scope
 
-To bound what a delegated client — especially a third-party one — may reach with a user's token, require scopes at the API edge. Enforcement runs only when `RequiredScopes` is set:
+To bound what a delegated client — especially a third-party one — may reach with a user's token, inspect the granted scope on the validated token in the handler. Tokens without a `scope` claim fail closed — their grant is unknown, and enforcement must not assume the widest one. Scope bounds the client's ceiling; it never replaces the FGA decision for the user.
 
 ```csharp
-var api = app.MapGroup("/api").RequireSqlOSAccessToken(options =>
-{
-    options.ExpectedAudience = "https://api.example.com";
-    options.RequiredScopes = ["todos.read"];
-});
-```
+var token = http.GetSqlOSValidatedToken();
+if (token is null)
+    return Results.Unauthorized();
 
-A validated token whose granted scope misses a required entry answers `403` with an RFC 6750 §3.1 `insufficient_scope` Bearer challenge naming the required scope. Tokens without a `scope` claim fail closed — their grant is unknown, and enforcement must not assume the widest one. The granted scope is also available as `Scope` on the validated token from `GetSqlOSValidatedToken()`. Scope requirements bound the client's ceiling; they never replace the FGA decision for the user.
+var granted = token.Scope?.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+    ?? [];
+if (!granted.Contains("todos.read"))
+    return Results.Forbid();
+```

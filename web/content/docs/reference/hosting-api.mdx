@@ -155,17 +155,17 @@ Single-application mode creates one first-party public PKCE client and applies A
 | --- | --- | --- |
 | `Name` | `string` | Display name; also the default `ClientName` and AuthPage title. |
 | `Origin` | `string?` | Absolute HTTP(S) origin of the application (no path). Required when `Api` or `Mcp` is set. |
-| `Api` | `string?` | Absolute path prefix of the protected REST surface, for example `/api`. SqlOS validates bearer tokens for the audience `{Origin}{Api}` on every request under it and serves the RFC 9728 document at `/.well-known/oauth-protected-resource`. |
-| `Mcp` | `string?` | Absolute path prefix of the protected MCP surface, for example `/mcp`. SqlOS validates tokens for `{Origin}{Mcp}` under it, serves `/.well-known/oauth-protected-resource{Mcp}`, and enables client ID metadata documents plus resource indicators. Set it through `app.Mcp(path, configure)` from the `SqlOS.Mcp` package to also host the server. |
+| `Api` | `string?` | Absolute path of the protected REST surface, for example `/api`. SqlOS validates bearer tokens for the audience `{Origin}{Api}` on mapped endpoints under that path and serves the RFC 9728 document at `/.well-known/oauth-protected-resource`. |
+| `Mcp` | `string?` | Absolute path of the protected MCP surface, for example `/mcp`. SqlOS validates tokens for `{Origin}{Mcp}` on mapped endpoints under that path, serves `/.well-known/oauth-protected-resource{Mcp}`, and enables client ID metadata documents plus resource indicators. Set it through `app.Mcp(path, configure)` from the `SqlOS.Mcp` package to also host the server. |
 | `Brand(Action<SqlOSAuthPageSeedOptions>)` | method | Forwards to `AuthServer.SeedAuthPage` on top of the single-application defaults. |
 | `Headless(string uiPath, Action<SqlOSHeadlessAuthOptions>? configure = null)` | method | Uses your own sign-in UI at `{Origin}{uiPath}` instead of the hosted pages. Forwards to `AuthServer.UseHeadlessAuthPage` with a generated `BuildUiUrl` that passes `request`, `view`, `error`, `email`, `displayName`, `pendingToken`, `mfaToken`, `consentToken`, and `ui_context`. Requires `Origin`; `uiPath` must start with `/`. |
 | `Headless(Action<SqlOSHeadlessAuthOptions>)` | method | Forwards to `AuthServer.UseHeadlessAuthPage` unchanged; set `BuildUiUrl` yourself. |
 | `Authorization(Action<SqlOSFgaSeedBuilder>)` | method | Forwards to `Fga.Seed`. |
-| `Audience`, `ClientId`, `RedirectPath`, `RedirectUris`, `AllowedScopes` | | Client overrides. `Audience` defaults to `{Origin}{Api}` when `Api` is set. |
+| `Audience`, `ClientId`, `RedirectPath`, `RedirectUris`, `AllowedScopes`, `AllowNativeHeadlessAuth` | | Client overrides. `Audience` defaults to `{Origin}{Api}` when `Api` is set. `RedirectUris` accepts any absolute URI without a fragment, including native custom-scheme callbacks. |
 
 Declared surfaces are validated at startup: paths must be absolute, non-root, distinct and non-nested, and must not overlap `/.well-known`, the auth base path, or `DashboardBasePath`. `Audience` must equal `{Origin}{Api}` when both are set, and CIMD/resource indicators cannot be disabled after an `Mcp` surface is declared.
 
-Requests under a declared surface that carry no token or a token for another audience receive HTTP `401` with a Bearer challenge that names the surface's `realm` and `resource_metadata` URL. The validated token is available through `HttpContext.GetSqlOSValidatedToken()`; `RequireSqlOSAccessToken` on a nested group reuses it and only adds scope enforcement.
+`AddSqlOS` attaches that validation to mapped endpoints under the declared paths. SqlOS does not add application pipeline middleware and does not handle CORS. Requests to those endpoints that carry no token or a token for another audience receive HTTP `401` with a Bearer challenge that names the surface's `realm` and `resource_metadata` URL. The validated token is available through `HttpContext.GetSqlOSValidatedToken()` and `HttpContext.User`. Inspect `Scope` on that token in the handler when a client's granted ceiling must be checked.
 
 ### Exceptions
 
@@ -183,70 +183,11 @@ Describes the host independently of client registration. `SqlOSApplicationOption
 
 `ConfigureApplication` seeds no client. Use explicit client seeds, the administration API, or dashboard records. Declaring MCP still enables CIMD and resource indicators. The [multiple-applications guide](/docs/authserver/multiple-applications) shows how to preserve an existing client's identity when graduating.
 
-## UseSqlOSSurfaceProtection
-
-**Namespace:** `SqlOS.Extensions`
-
-Places the declared API/MCP guard in the root application pipeline. Call after exception handling, rewriting, `UsePathBase`, routing, CORS, and authentication, and before authorization or any middleware that serves protected content. Surface paths are application-relative after `UsePathBase`. Repeated calls are idempotent; placing the guard inside a branch is rejected.
-
-```csharp
-app.UseRouting();
-app.UseAuthentication();
-app.UseSqlOSSurfaceProtection();
-app.UseAuthorization();
-```
-
-Without explicit placement, a bearer-only host gets an early guard before application middleware. Hosts registering ASP.NET authentication must place it explicitly or startup fails: cookie authentication must run before the surface's bearer identity is established. Policies inside the surface should use the current principal, not select a different authentication scheme. Configured CORS may answer preflights before the guard; `OPTIONS` alone does not bypass it.
-
 ## Endpoint mapping
 
 `AddSqlOS` registers an `IStartupFilter` that maps the AuthServer routes, audit-log admin routes, transactional-email admin routes, calendar routes (when `SqlOSOptions.Calendar.Enabled` is `true`), the protected-resource documents for declared surfaces, and companion-package endpoints such as the MCP server. They join the application's own route table, so the application's middleware (CORS, exception handling, rate limiting) runs in front of them and normal route precedence applies.
 
-### MapSqlOS (obsolete)
-
-**Namespace:** `SqlOS.Extensions`
-
-**Type:** `WebApplicationExtensions`
-
-```csharp
-[Obsolete]
-public static WebApplication MapSqlOS(this WebApplication app)
-```
-
-Existing callers keep working: the call is idempotent, SqlOS detects it and does not register the same routes twice, and one warning is logged at startup. Remove the call.
-
-## RequireSqlOSAccessToken
-
-**Namespace:** `SqlOS.Extensions`
-
-**Type:** `SqlOSErgonomicsExtensions`
-
-```csharp
-public static RouteGroupBuilder RequireSqlOSAccessToken(
-    this RouteGroupBuilder group,
-    string expectedAudience)
-```
-
-```csharp
-public static RouteGroupBuilder RequireSqlOSAccessToken(
-    this RouteGroupBuilder group,
-    Action<SqlOSAccessTokenValidationOptions> configure)
-```
-
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `group` | `RouteGroupBuilder` | Minimal API route group to protect. |
-| `expectedAudience` | `string` | Required JWT audience. Validation fails closed when empty. |
-| `configure` | `Action<SqlOSAccessTokenValidationOptions>` | Configures `ExpectedAudience`, optional `Realm`, `ResourceMetadataUrl`, and `ShouldValidate`. |
-
-**Returns:** the same route group.
-
-The endpoint filter validates the bearer token, issuer, lifetime, server-side session state, and exact audience. On success it sets `HttpContext.User` and stores a `SqlOSValidatedToken`. On failure it returns HTTP `401` with a Bearer challenge.
-
-### Exceptions
-
-- `ArgumentNullException` when `group` or `configure` is null.
-- `InvalidOperationException` when `ExpectedAudience` is empty.
+A leftover `MapAuthServer()` call is safe and idempotent: SqlOS withdraws its own copy of those routes and logs one warning. Remove the call.
 
 ## GetSqlOSValidatedToken
 
@@ -259,14 +200,13 @@ public static SqlOSValidatedToken? GetSqlOSValidatedToken(
     this HttpContext context)
 ```
 
-**Returns:** the validated token stored by `RequireSqlOSAccessToken` or `UseSqlOSAccessTokenValidation`; otherwise `null`.
+**Returns:** the validated token stored by a declared `Api` or `Mcp` surface; otherwise `null`.
 
 ```csharp
 using SqlOS.AuthServer.Extensions;
-using SqlOS.Extensions;
 
-var api = app.MapGroup("/api")
-    .RequireSqlOSAccessToken("https://app.example.com/api");
+// Declare app.Api = "/api" in UseSingleApplication. Mapped endpoints under /api are already protected.
+var api = app.MapGroup("/api");
 
 api.MapGet("/me", (HttpContext http) =>
 {
@@ -318,6 +258,6 @@ app.MapGet("/api/projects", (HttpContext http) =>
 app.Run();
 ```
 
-Application code contains no `MapSqlOS`, `RequireSqlOSAccessToken`, `AddMcpServer`, `MapMcp`, or hand-written protected-resource document. `AuthServer.Issuer` defaults to `{Origin}/sqlos/auth`.
+Application code contains no `AddMcpServer`, `MapMcp`, or hand-written protected-resource document. `AuthServer.Issuer` defaults to `{Origin}/sqlos/auth`.
 
 SqlOS bootstraps its owned schema, signing key, default settings, client seed, and FGA core data when the host starts. Application EF migrations remain responsible only for application-owned tables.

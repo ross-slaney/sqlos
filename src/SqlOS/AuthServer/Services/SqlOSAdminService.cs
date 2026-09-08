@@ -3224,6 +3224,7 @@ public sealed partial class SqlOSAdminService
             ClientType = "public_pkce",
             RequirePkce = true,
             IsFirstParty = true,
+            AllowNativeHeadlessAuth = application.AllowNativeHeadlessAuth,
             IsActive = true
         };
     }
@@ -3278,14 +3279,15 @@ public sealed partial class SqlOSAdminService
         return $"{authority}{path}";
     }
 
+    // Same acceptance as explicit client seeds: any absolute URI without a fragment, so a native
+    // application's custom-scheme or loopback callback is allowed next to the {Origin} callback.
     private static string NormalizeRedirectUri(string redirectUri)
     {
         if (!Uri.TryCreate(redirectUri, UriKind.Absolute, out var uri)
-            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
-            || string.IsNullOrWhiteSpace(uri.Host)
-            || !string.IsNullOrWhiteSpace(uri.Fragment))
+            || !string.IsNullOrWhiteSpace(uri.Fragment)
+            || ((uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps) && string.IsNullOrWhiteSpace(uri.Host)))
         {
-            throw new InvalidOperationException($"Redirect URI '{redirectUri}' must be an absolute http(s) URI without a fragment.");
+            throw new InvalidOperationException($"Redirect URI '{redirectUri}' must be an absolute URI without a fragment.");
         }
 
         return redirectUri;

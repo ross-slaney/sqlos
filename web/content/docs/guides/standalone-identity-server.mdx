@@ -229,7 +229,7 @@ app.MapGet("/me", (HttpContext http) => new { userId = http.User.FindFirst("sub"
 app.Run();
 ```
 
-This separate API uses `Microsoft.AspNetCore.Authentication.JwtBearer` and validates signature, issuer, expiry, and audience through discovery/JWKS. It does not query SqlOS session state on each request. In a process that hosts SqlOS, declared `Api`/`Mcp` surfaces and `UseSqlOSAccessTokenValidation` additionally validate the persisted session through SqlOS services; see [token validation](/docs/authserver/token-validation).
+This separate API uses `Microsoft.AspNetCore.Authentication.JwtBearer` and validates signature, issuer, expiry, and audience through discovery/JWKS. It does not query SqlOS session state on each request. In a process that hosts SqlOS, declared `Api`/`Mcp` surfaces additionally validate the persisted session through SqlOS services; see [token validation](/docs/authserver/token-validation).
 
 Use FGA or app policy after token validation when the API needs row-level or resource-level authorization.
 

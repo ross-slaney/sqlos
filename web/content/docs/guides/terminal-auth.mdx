@@ -215,14 +215,10 @@ resource=https%3A%2F%2Fapi.forge.test
 
 ## 7. Validate the token at the API
 
-Protect the Forge routes with the same exact audience requested by the CLI:
+Declare `app.Api` so mapped Forge routes require the same exact audience requested by the CLI:
 
 ```csharp
-var deployments = app.MapGroup("/api/deployments")
-    .RequireSqlOSAccessToken(validation =>
-    {
-        validation.ExpectedAudience = "https://api.forge.test";
-    });
+var deployments = app.MapGroup("/api/deployments");
 ```
 
 Send the access token in the standard header:

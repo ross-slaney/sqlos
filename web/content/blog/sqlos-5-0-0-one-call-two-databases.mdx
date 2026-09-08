@@ -6,7 +6,7 @@ author: "Ross Slaney"
 tags: ["AuthServer", "OAuth", "MCP", "PostgreSQL", "Security", "SqlOS"]
 ---
 
-SqlOS 5.0 changes how a host describes itself. Before this release, one application's topology was repeated across service registration, `MapSqlOS`, `RequireSqlOSAccessToken` groups, MCP setup, and a hand-written protected-resource document. Each of those had to agree with the others, and nothing checked that they did. Now the host says what it is once, inside `AddSqlOS`, and SqlOS derives every protocol consequence from that description.
+SqlOS 5.0 changes how a host describes itself. Before this release, one application's topology was repeated across service registration, mapping calls, token-validation groups, MCP setup, and a hand-written protected-resource document. Each of those had to agree with the others, and nothing checked that they did. Now the host says what it is once, inside `AddSqlOS`, and SqlOS derives every protocol consequence from that description.
 
 The same release adds PostgreSQL as a first-class provider, closes a logout replay gap at the issuer session, and renames the types behind that session to say what they actually are. The rename is the reason this is 5.0 rather than 4.3.
 
@@ -40,18 +40,9 @@ builder.AddSqlOS<AppDbContext>(
     });
 ```
 
-Every line except `Origin` is optional. From `Origin`, SqlOS derives the issuer, the first-party PKCE client and its callback, the audiences for `/api` and `/mcp`, and the protected-resource metadata documents. `AddSqlOS` maps the auth server, hosted pages, dashboard, admin APIs, and metadata at startup; `Program.cs` contains no `MapSqlOS`, `RequireSqlOSAccessToken`, `AddMcpServer`, or `MapMcp`.
+Every line except `Origin` is optional. From `Origin`, SqlOS derives the issuer, the first-party PKCE client and its callback, the audiences for `/api` and `/mcp`, and the protected-resource metadata documents. `AddSqlOS` maps the auth server, hosted pages, dashboard, admin APIs, and metadata at startup; `Program.cs` contains no `AddMcpServer` or `MapMcp`.
 
-`app.Api = "/api"` is a real boundary, not a naming convention. Every request under that path must carry a bearer token for the `{Origin}/api` audience, or it gets `401` with `WWW-Authenticate`. `app.Mcp("/mcp", …)` gets a distinct audience and its own validation; a shared route cannot borrow the other surface's check, and a middleware branch cannot serve a protected path before the guard runs. A bearer-only host gets that guard placed automatically. If your host also registers ASP.NET authentication, you place it yourself, and startup fails if you do not:
-
-```csharp
-app.UseRouting();
-app.UseAuthentication();
-app.UseSqlOSSurfaceProtection();
-app.UseAuthorization();
-```
-
-That failure is deliberate. Cookie authentication has to run before the surface establishes its bearer identity, and a guard inside a branch is rejected rather than silently skipped.
+`app.Api = "/api"` is a real boundary, not a naming convention. Mapped endpoints under that path must carry a bearer token for the `{Origin}/api` audience, or they get `401` with `WWW-Authenticate`. `app.Mcp("/mcp", …)` gets a distinct audience and its own validation; a shared route cannot borrow the other surface's check. `AddSqlOS` attaches that validation to the endpoints. There is no middleware to place and no ordering rule: `Program.cs` is `AddSqlOS`, `Build`, your handlers, `Run`.
 
 When a second application needs to sign in with your accounts, you do not start over. `ConfigureApplication` keeps the same API, MCP, branding, headless, and FGA surfaces and stops deriving a client; you declare each relying party with `SeedClient`, the dashboard, or the admin API, through the same validation and audit path. A graduation test in the repository proves an existing single-application client keeps its database identity, audience, callbacks, scopes, and PKCE settings while a second client is added next to it.
 
@@ -61,7 +52,7 @@ See [Getting started](/docs/getting-started), [Single application](/docs/authser
 
 `SqlOS.Mcp` now hosts a stateless Streamable HTTP MCP server on the path you declare. SqlOS owns the OAuth side: audience validation, the protected-resource document, and portable-client onboarding through CIMD and resource indicators so Codex, ChatGPT, Claude, and Cursor can connect without pre-registration. Tools read the validated caller through `ISqlOSMcpUserContext`, and each tool call is recorded as an audit event without its arguments or the token. Dynamic client registration stays an explicit opt-in. Core SqlOS takes no MCP SDK dependency.
 
-The Notes sample in the repository shows the full shape: browser OIDC sign-in, a protected API, and MCP tools sharing one FGA-enforcing service, with two-user isolation, revocation, and logout exercised against real SQL Server and PostgreSQL. See [MCP server](/docs/authserver/mcp-server).
+The Notes sample in the repository shows the full shape: hosted sign-in for the derived client, a protected API, and MCP tools sharing one FGA-enforcing service, with two-user isolation, cross-audience rejection, and revocation exercised against real SQL Server and PostgreSQL. See [MCP server](/docs/authserver/mcp-server).
 
 ## PostgreSQL
 
@@ -101,10 +92,9 @@ npm install @sqlos/headless@5.0.0              # if you render your own login UI
 ```
 
 - **Rename** any direct references to the four types above. Most hosts have none.
-- **Remove `MapSqlOS()`.** `AddSqlOS` maps everything at startup. Leaving the call in place is safe and idempotent; it logs one obsolete-use warning.
-- **Place `UseSqlOSSurfaceProtection()`** after `UseAuthentication()` and before `UseAuthorization()` if you declare `Api` or `Mcp` and your host registers ASP.NET authentication. Startup tells you if it is missing or in a branch.
+- **Remove leftover mapping and token-filter calls.** `AddSqlOS` maps the SqlOS endpoints at startup. Declare `Api` and `Mcp` instead of attaching token validation to route groups.
 - **Expect one re-login.** Schema 045 applies at startup and consumes pre-upgrade issuer-session cookies. Refresh tokens and application cookies are unaffected.
-- **Existing `SeedClient`, `SeedAuthPage`, `Fga.Seed`, and `RequireSqlOSAccessToken` calls keep working.** `UseSingleApplication` and `ConfigureApplication` are the recommended way to express the same things; you can adopt them incrementally.
+- **Existing `SeedClient`, `SeedAuthPage`, and `Fga.Seed` calls keep working.** `UseSingleApplication` and `ConfigureApplication` are the recommended way to express the same things; you can adopt them incrementally.
 - **PostgreSQL** needs only `UseNpgsql` in the EF callback. If your process already maps host `DateTime` properties to `timestamptz`, keep those mappings explicit; SqlOS remaps only its own columns.
 
 This release passed the repository's complete gate: build, documentation, unit, SQL Server and PostgreSQL integration, example-application, Todo web and CLI end-to-end, headless Next.js and Angular end-to-end, OpenID conformance, and coverage thresholds.

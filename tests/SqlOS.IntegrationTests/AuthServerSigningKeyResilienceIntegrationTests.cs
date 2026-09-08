@@ -1024,13 +1024,29 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
                 .SetApplicationName("SqlOS.IntegrationTests.SigningKeyCustody");
 
             var app = builder.Build();
-            var protectedApi = app.MapGroup("/replica-api")
-                .RequireSqlOSAccessToken("replica-cache");
-            protectedApi.MapGet("/validate", (HttpContext context) => Results.Ok(new
+            app.MapGet("/replica-api/validate", async (HttpContext context, SqlOSAuthService auth) =>
             {
-                replica = replicaName,
-                subject = context.User.FindFirstValue(JwtRegisteredClaimNames.Sub)
-            }));
+                var authorization = context.Request.Headers.Authorization.ToString();
+                if (!authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                {
+                    return Results.Unauthorized();
+                }
+
+                var validated = await auth.ValidateAccessTokenAsync(
+                    authorization["Bearer ".Length..].Trim(),
+                    "replica-cache",
+                    context.RequestAborted);
+                if (validated is null)
+                {
+                    return Results.Unauthorized();
+                }
+
+                return Results.Ok(new
+                {
+                    replica = replicaName,
+                    subject = validated.Principal.FindFirstValue(JwtRegisteredClaimNames.Sub)
+                });
+            });
             await app.StartAsync();
 
             var client = app.GetTestClient();
