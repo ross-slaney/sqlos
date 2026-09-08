@@ -1,0 +1,72 @@
+---
+title: "SqlOS 6.0: One Call Is the Only Call"
+description: "MapSqlOS, RequireSqlOSAccessToken, and UseSqlOSAccessTokenValidation are gone. Describe the application once; mapped endpoints under Api and Mcp are already protected."
+date: "2026-09-08"
+author: "Ross Slaney"
+tags: ["AuthServer", "OAuth", "MCP", "Security", "SqlOS"]
+---
+
+SqlOS 5.0 let a host describe itself once inside `AddSqlOS`. SqlOS 6.0 makes that the only public way to do it.
+
+`MapSqlOS`, `RequireSqlOSAccessToken`, and `UseSqlOSAccessTokenValidation` are removed. They were leftover helpers around the one-call path, and they invited a second foundation: a mapping call, a token filter, a middleware placement. Agents treated them as the real API. Hosts copied them next to `UseSingleApplication` and asked which one was required. Neither is. The application description is the contract.
+
+```bash
+dotnet add package SqlOS --version 6.0.0
+```
+
+## The host you write
+
+```csharp
+builder.AddSqlOS<AppDbContext>(db => db.UseSqlServer(connectionString), options =>
+    options.UseSingleApplication("Acme", app =>
+    {
+        app.Origin = "https://app.example.com";
+        app.Api = "/api";
+        app.Mcp("/mcp", mcp => mcp.WithTools<AcmeTools>());
+        app.Brand(page => page.PrimaryColor = "#0f172a");
+        app.Authorization(fga => fga
+            .ResourceType("project", "Project")
+            .Permission("PROJECT_READ", "Read projects", "project")
+            .Role("project_viewer", "Viewer").Can("PROJECT_READ"));
+    }));
+
+var app = builder.Build();
+var api = app.MapGroup("/api");
+api.MapGet("/me", (HttpContext http) =>
+    Results.Ok(new { userId = http.GetSqlOSValidatedToken()!.UserId }));
+app.Run();
+```
+
+`AddSqlOS` maps the auth server, hosted pages, dashboard, and metadata at startup. Declared `Api` and `Mcp` surfaces validate mapped endpoints under those prefixes for the surface audience — signature, issuer, expiry, and the persisted SqlOS session — when the endpoint runs. There is no SqlOS middleware to place in the host pipeline and no CORS handling inside SqlOS. `Program.cs` is the description, `Build`, your handlers, `Run`.
+
+Handlers read the result with `GetSqlOSValidatedToken()` and `HttpContext.User`. A token minted for `/api` is rejected at `/mcp` and vice versa. Unmatched paths under the prefix are ordinary 404s. A raw `app.Map("/api/...")` middleware branch is not an endpoint and is not protected.
+
+The granted `scope` claim remains the client's delegation ceiling. Inspect it on the validated token in the handler when a third-party client must not reach an operation, then still authorize the user with FGA.
+
+See [Getting started](/docs/getting-started), [Single application](/docs/authserver/single-application), [Token validation](/docs/authserver/token-validation), and the [hosting API](/docs/reference/hosting-api).
+
+## What this is not
+
+It is not a new authorization model. FGA, sessions, and token minting are the same. It is not a new MCP host: `app.Mcp(...)` from `SqlOS.Mcp` still registers and maps the server on the protected path. It is not a pipeline product. SqlOS does not add `Use*` methods for surface protection, and it does not special-case CORS.
+
+A leftover `MapAuthServer()` call is still safe and idempotent — SqlOS withdraws its own copy of those routes and logs one warning — but it is not part of the application description. Remove it.
+
+## License
+
+The repository now carries a root MIT license so GitHub, the README badge, and the package metadata resolve to the same grant.
+
+## Upgrade notes
+
+```bash
+dotnet add package SqlOS --version 6.0.0
+dotnet add package SqlOS.Mcp --version 6.0.0   # if you host MCP
+npm install @sqlos/headless@6.0.0              # if you render your own login UI
+```
+
+- **Delete `MapSqlOS()`.** `AddSqlOS` already maps the SqlOS endpoints. The method no longer exists.
+- **Delete `RequireSqlOSAccessToken` and `UseSqlOSAccessTokenValidation`.** Declare `app.Api` and `app.Mcp` instead. Mapped endpoints under those prefixes are already protected.
+- **Keep `GetSqlOSValidatedToken()` and `ValidateAccessTokenAsync`.** The first is how a handler reads the token SqlOS already validated. The second is the explicit SDK check for a host that is not sitting on a declared surface.
+- **Check granted scope in the handler.** There is no nested-group helper for extra scopes. Read `GetSqlOSValidatedToken()?.Scope`, then still authorize the user with FGA.
+- **No schema bump.** 6.0 does not consume cookies or rotate sessions. Users stay signed in.
+
+This release passed the repository's complete gate: build, documentation, unit, SQL Server and PostgreSQL integration, example-application, Todo web and CLI end-to-end, headless Next.js and Angular end-to-end, OpenID conformance, and coverage thresholds.
