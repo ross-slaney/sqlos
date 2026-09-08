@@ -94,20 +94,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
 
 Declaring `Api` makes SqlOS validate mapped endpoints under `/api` for the audience `http://localhost:5050/api`, use that audience for the `acme-web` client, serve `/.well-known/oauth-protected-resource`, and answer unauthenticated requests with a Bearer challenge that names `realm="Acme API"` and the metadata URL. `AddSqlOS` attaches that validation to those endpoints; nothing is placed or ordered in `Program.cs`. See [how the surfaces are protected](/docs/authserver/single-application#how-the-surfaces-are-protected). After validation it sets `HttpContext.User` and stores the typed `SqlOSValidatedToken`, available through `GetSqlOSValidatedToken()`.
 
-When the API also serves delegated (especially third-party) clients, add scope enforcement on a nested group. It reuses the token SqlOS already validated and only checks scopes — a token whose `scope` claim misses a required entry answers `403 insufficient_scope`:
-
-```csharp
-var writes = app.MapGroup("/api/admin")
-    .RequireSqlOSAccessToken(options =>
-    {
-        options.ExpectedAudience = $"{publicOrigin}/api";
-        options.RequiredScopes = ["acme.admin"];
-    });
-```
-
-Scope bounds the *client*; per-user, per-resource decisions stay with FGA. See [Scopes and Permissions](/docs/authserver/scopes-and-permissions).
-
-`RequireSqlOSAccessToken` remains the explicit alternative for hosts that need explicit route groups, custom resource identifiers, or several audiences; `ConfigureApplication` also supports derived `Api` and `Mcp` protection. See the [Hosting API](/docs/reference/hosting-api#requiresqlosaccesstoken).
+When the API also serves delegated (especially third-party) clients, inspect `GetSqlOSValidatedToken()?.Scope` in the handler. Scope bounds the *client*; per-user, per-resource decisions stay with FGA. See [Scopes and Permissions](/docs/authserver/scopes-and-permissions).
 
 <Callout type="info" title="Audience follows the API, not the login sample">
   The runnable ASP.NET Core sample requests the Todo audience at `http://localhost:5080/api/todos`. When adapting that handler to this standalone host, register and request `http://localhost:5050/api`. A valid token for the Todo API is correctly rejected here.
@@ -155,7 +142,7 @@ The persisted session remains visible to operators, including its user, client, 
 
 ### Every request returns `401`
 
-Compare the token's `aud` claim with `{Origin}{Api}` (or `ExpectedAudience` on an explicit group). Audience matching is exact. A token minted for another API is intentionally rejected even when the issuer and user are valid.
+Compare the token's `aud` claim with `{Origin}{Api}`. Audience matching is exact. A token minted for another API is intentionally rejected even when the issuer and user are valid.
 
 ### The bearer token is valid but revoked
 
@@ -163,7 +150,7 @@ SqlOS session-aware validation checks that the persisted session exists and is n
 
 ### `GetSqlOSValidatedToken()` is null
 
-Confirm the endpoint's path is under the declared `Api` prefix (or belongs to a `RequireSqlOSAccessToken` group) and import `SqlOS.AuthServer.Extensions`.
+Confirm the endpoint's path is under the declared `Api` prefix and import `SqlOS.AuthServer.Extensions`.
 
 ### The browser cannot call the API
 
@@ -174,7 +161,7 @@ Bearer validation does not configure CORS. Add an explicit CORS policy for trust
 - Use an HTTPS audience that identifies the deployed resource server.
 - Keep audiences distinct when separate APIs should not accept each other's tokens.
 - Resolve the acting subject from the validated token or `HttpContext.User`; never trust a subject ID supplied in a request body.
-- For an MCP surface, declare `app.Mcp("/mcp", ...)` next to `Api`; see [MCP server](/docs/authserver/mcp-server). Explicit `RequireSqlOSAccessToken` groups need `ResourceMetadataUrl` set by hand.
+- For an MCP surface, declare `app.Mcp("/mcp", ...)` next to `Api`; see [MCP server](/docs/authserver/mcp-server).
 - Use authorization checks in addition to token validation. A valid token identifies the caller; it does not grant access to every application row.
 
 ## Next steps

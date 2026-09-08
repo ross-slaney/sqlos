@@ -7,7 +7,7 @@ namespace SqlOS.Hosting;
 /// <summary>
 /// The endpoints SqlOS maps on the application's behalf. The auth-server/admin routes are withheld
 /// while <see cref="SqlOSEndpointMappingState.MappedByApplication"/> is set, so an obsolete
-/// <c>MapSqlOS()</c> or manual <c>MapAuthServer()</c> call anywhere in application startup never
+/// manual <c>MapAuthServer()</c> call anywhere in application startup never
 /// produces duplicate routes, whether it runs before or after the SqlOS startup filter.
 /// </summary>
 internal sealed class SqlOSEndpointDataSource : EndpointDataSource

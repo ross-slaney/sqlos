@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
@@ -7,7 +6,8 @@ using SqlOS.AuthServer.Services;
 namespace SqlOS.AuthServer.Extensions;
 
 /// <summary>
-/// Provides ASP.NET Core middleware and request-context helpers for validating SqlOS access tokens.
+/// Request-context helpers for a token SqlOS already validated on a declared <c>Api</c> or
+/// <c>Mcp</c> surface.
 /// </summary>
 public static class SqlOSAccessTokenValidationExtensions
 {
@@ -15,49 +15,7 @@ public static class SqlOSAccessTokenValidationExtensions
     public const string ValidatedTokenItemKey = "SqlOS.AuthServer.ValidatedAccessToken";
 
     /// <summary>
-    /// Adds SqlOS bearer access-token validation to the application pipeline for the specified audience.
-    /// </summary>
-    /// <param name="app">The application pipeline builder.</param>
-    /// <param name="expectedAudience">The exact audience required in a valid access token.</param>
-    /// <returns>The same <paramref name="app"/> instance.</returns>
-    /// <exception cref="InvalidOperationException"><paramref name="expectedAudience"/> is empty or contains only whitespace.</exception>
-    public static IApplicationBuilder UseSqlOSAccessTokenValidation(
-        this IApplicationBuilder app,
-        string expectedAudience)
-        => app.UseSqlOSAccessTokenValidation(options => options.ExpectedAudience = expectedAudience);
-
-    /// <summary>
-    /// Adds configured SqlOS bearer access-token validation to the application pipeline.
-    /// </summary>
-    /// <param name="app">The application pipeline builder.</param>
-    /// <param name="configure">A callback that configures token validation.</param>
-    /// <returns>The same <paramref name="app"/> instance.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="app"/> or <paramref name="configure"/> is <see langword="null"/>.</exception>
-    /// <exception cref="InvalidOperationException">
-    /// The configured <see cref="SqlOSAccessTokenValidationOptions.ExpectedAudience"/> is empty.
-    /// </exception>
-    /// <remarks>
-    /// Successful validation sets <see cref="HttpContext.User"/> and makes the validated token
-    /// available through <see cref="GetSqlOSValidatedToken(HttpContext)"/>. Failed validation
-    /// short-circuits the request with an HTTP 401 response and a Bearer challenge.
-    /// </remarks>
-    public static IApplicationBuilder UseSqlOSAccessTokenValidation(
-        this IApplicationBuilder app,
-        Action<SqlOSAccessTokenValidationOptions> configure)
-    {
-        ArgumentNullException.ThrowIfNull(app);
-        ArgumentNullException.ThrowIfNull(configure);
-
-        var options = new SqlOSAccessTokenValidationOptions();
-        configure(options);
-        SqlOSAccessTokenValidationMiddleware.ValidateOptions(options);
-
-        return app.UseMiddleware<SqlOSAccessTokenValidationMiddleware>(options);
-    }
-
-    /// <summary>
-    /// Gets the token validated for the current request by SqlOS access-token middleware or a
-    /// SqlOS-protected route group.
+    /// Gets the token validated for the current request by a declared <c>Api</c> or <c>Mcp</c> surface.
     /// </summary>
     /// <param name="context">The current HTTP context.</param>
     /// <returns>The validated token, or <see langword="null"/> when SqlOS did not validate a token for the request.</returns>
@@ -73,9 +31,9 @@ public static class SqlOSAccessTokenValidationExtensions
 }
 
 /// <summary>
-/// Shared scope-requirement evaluation for the validation middleware and the route-group
-/// filter: the token's granted scope (the client application's delegation ceiling) must
-/// include every required scope. Per-user, per-resource authorization remains with FGA.
+/// Shared scope-requirement evaluation for token validation: the token's granted scope
+/// (the client application's delegation ceiling) must include every required scope.
+/// Per-user, per-resource authorization remains with FGA.
 /// </summary>
 internal static class SqlOSScopeRequirementPolicy
 {
@@ -113,7 +71,7 @@ internal static class SqlOSScopeRequirementPolicy
     }
 }
 
-public sealed class SqlOSAccessTokenValidationMiddleware
+internal sealed class SqlOSAccessTokenValidationMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly SqlOSAccessTokenValidationOptions _options;

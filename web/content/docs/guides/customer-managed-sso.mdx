@@ -105,8 +105,7 @@ Open `/sqlos/admin/auth/organizations`, select the organization, open its **SSO*
 Use a host endpoint when setup starts in your own customer-admin product. Authenticate the access token, enforce your customer SSO-admin policy, and derive both the organization and actor from trusted server-owned state:
 
 ```csharp
-var customerAdmin = app.MapGroup("/api/customer-admin")
-    .RequireSqlOSAccessToken(apiAudience);
+var customerAdmin = app.MapGroup("/api/customer-admin");
 
 customerAdmin.MapPost("/sso/setup-link", async (
     CreateSetupLinkRequest request,

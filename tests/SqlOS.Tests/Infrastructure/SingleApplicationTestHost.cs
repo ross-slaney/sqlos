@@ -18,7 +18,7 @@ namespace SqlOS.Tests.Infrastructure;
 /// <summary>
 /// Builds a real <see cref="WebApplication"/> on the in-memory provider exactly the way an
 /// application would: <c>AddSqlOS</c> plus its own endpoints, and nothing else. Tests use it to
-/// prove what the SqlOS startup filter maps and protects without any <c>MapSqlOS()</c> call.
+/// prove what the SqlOS startup filter maps and protects without a manual mapping call.
 /// </summary>
 internal sealed class SingleApplicationTestHost : IAsyncDisposable
 {

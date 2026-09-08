@@ -26,7 +26,7 @@ See [Consent](/docs/authserver/consent).
 
 ## APIs can enforce the granted scope
 
-User access tokens now carry the granted scope as a standard RFC 9068 `scope` claim — exactly the grant the token response reported. If you want an endpoint to require a scope, opt in with `RequiredScopes` on access-token validation; tokens without the scope get a `403` with a proper `insufficient_scope` challenge. Tokens issued before scope tracking have no claim and fail closed rather than being treated as all-powerful.
+User access tokens now carry the granted scope as a standard RFC 9068 `scope` claim — exactly the grant the token response reported. Inspect that claim on the validated token when an endpoint must bound a client's ceiling. Tokens issued before scope tracking have no claim and fail closed rather than being treated as all-powerful.
 
 Scope remains the *client's* ceiling — what the user let the app do. Per-user, per-resource authorization stays with FGA, and effective permission is the intersection of the two. See [Scopes and permissions](/docs/authserver/scopes-and-permissions) and [Token validation](/docs/authserver/token-validation).
 
@@ -50,6 +50,6 @@ What to expect after upgrading:
 - **First-party apps** — no behavior change if `AllowedScopes` is set and your app sends `scope` on `/authorize`.
 - **Third-party clients** — their next authorization pauses on the consent screen until the user approves. Seed scope display names so that screen reads well.
 - **Compiled compatibility** — `SqlOSTokenResponse` gains an optional trailing `IdToken` member: source-compatible, but recompile anything that binds against the package binary.
-- **New capabilities are opt-in** — nothing requires you to adopt `RequiredScopes` or register downstream relying parties; existing deployments keep working as before.
+- **New capabilities are opt-in** — nothing requires you to inspect the scope claim or register downstream relying parties; existing deployments keep working as before.
 
 This release passed the repository's complete gate: build, documentation, unit, integration, and example-application tests, coverage thresholds, the OpenID Foundation Basic OP and Config OP plans, and the real-browser federation suite.

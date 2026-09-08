@@ -186,20 +186,15 @@ POST /sqlos/auth/headless/password/reset
 
 ## 4. Protect the account-security API
 
-The recovery request remains public. Device management does not. Validate every `/api/account` request against Harbor's API audience:
+The recovery request remains public — keep those routes outside the declared `Api` prefix. Device management does not. Declare `app.Api = "/api"` and map account endpoints under `/api/account` so every request is validated against Harbor's API audience:
 
 ```csharp
 using SqlOS.AuthServer.Extensions;
 
-app.UseSqlOSAccessTokenValidation(validation =>
-{
-    validation.ExpectedAudience = "https://api.harbor.example";
-    validation.ShouldValidate = http =>
-        http.Request.Path.StartsWithSegments("/api/account");
-});
+var account = app.MapGroup("/api/account");
 ```
 
-Place this middleware before the account endpoints. Do not use user ids from route parameters, forms, query strings, or JSON to decide whose sessions are visible.
+Do not use user ids from route parameters, forms, query strings, or JSON to decide whose sessions are visible.
 
 ## 5. List only the current user's sessions
 
@@ -354,7 +349,7 @@ After that call, discard Harbor's local credentials and require a fresh sign-in.
 
 ## 8. Understand revocation timing
 
-SqlOS's database-backed `ValidateAccessTokenAsync` and `UseSqlOSAccessTokenValidation` check session state. Once a session is revoked, an access token for that session is rejected on the next protected request, and its refresh tokens cannot rotate.
+SqlOS's database-backed `ValidateAccessTokenAsync` and declared `Api`/`Mcp` surfaces check session state. Once a session is revoked, an access token for that session is rejected on the next protected request, and its refresh tokens cannot rotate.
 
 An external resource server that validates only JWT signature and lifetime from JWKS has no database session lookup. It can continue accepting an already-issued access token until `exp`. Keep access tokens short-lived, or use a session-aware introspection/validation path where immediate revocation is required.
 

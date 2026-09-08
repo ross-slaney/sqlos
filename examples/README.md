@@ -6,7 +6,7 @@ These samples are working reference applications, not isolated snippets. They sh
 
 | You want to… | Start here | Why |
 | --- | --- | --- |
-| See the smallest complete host | [One-call sample](SqlOS.OneCall.Api/README.md) | One `AddSqlOS` call declares the API and MCP surfaces, branding, and FGA model; no `MapSqlOS`, token filters, or MCP wiring in `Program.cs` |
+| See the smallest complete host | [One-call sample](SqlOS.OneCall.Api/README.md) | One `AddSqlOS` call declares the API and MCP surfaces, branding, and FGA model; no token filters or MCP wiring in `Program.cs` |
 | Run multiple clients against one Todo host | [Todo API](SqlOS.Todo.Api/README.md) + `SqlOS.Todo.AppHost` | One .NET API, hosted sign-in, a protected Todo resource, FGA, and Swagger |
 | Run one identity host for Next.js, Angular, and Expo | [Full example AppHost](SqlOS.Example.AppHost/README.md) | Runs the example API, Todo API, SQL Server, and three web clients together |
 | Integrate a server-rendered .NET app | [ASP.NET Core client](SqlOS.Example.AspNetCoreWeb/README.md) | Razor Pages, ASP.NET Core OAuth middleware, PKCE, encrypted cookies, and a protected API call |

@@ -5,7 +5,7 @@ order: 26
 section: authserver
 ---
 
-`SqlOS.Mcp` hosts a [Model Context Protocol](https://modelcontextprotocol.io) server on the MCP surface you declare inside `UseSingleApplication` or `ConfigureApplication`. SqlOS owns the OAuth side (audience validation, protected-resource metadata, client onboarding for portable clients such as Codex, ChatGPT, Claude, and Cursor); the package registers the official MCP SDK server and maps it on the protected path. Application code contains no `AddMcpServer`, `MapMcp`, `RequireSqlOSAccessToken`, or hand-written metadata document.
+`SqlOS.Mcp` hosts a [Model Context Protocol](https://modelcontextprotocol.io) server on the MCP surface you declare inside `UseSingleApplication` or `ConfigureApplication`. SqlOS owns the OAuth side (audience validation, protected-resource metadata, client onboarding for portable clients such as Codex, ChatGPT, Claude, and Cursor); the package registers the official MCP SDK server and maps it on the protected path. Application code contains no `AddMcpServer`, `MapMcp`, or hand-written metadata document.
 
 ## Install
 

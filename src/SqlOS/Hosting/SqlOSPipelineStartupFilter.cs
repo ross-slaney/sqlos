@@ -97,7 +97,7 @@ internal sealed class SqlOSPipelineStartupFilter : IStartupFilter
         }
 
         // Map the auth-server/admin routes into a SqlOS-owned data source. It withholds them at
-        // dispatch time when application code also called the obsolete MapSqlOS() or MapAuthServer(),
+        // dispatch time when application code also called MapAuthServer(),
         // whether that call runs before or after this filter, so no route is ever registered twice.
         var application = hostOptions.AuthServer.Application;
         var hostExtensions = application?.HostExtensions ?? [];

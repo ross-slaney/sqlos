@@ -63,6 +63,7 @@ builder.AddSqlOS<AppDbContext>(
         {
             app.Origin = publicOrigin;
             app.ClientId = "acme-web";
+            app.Api = "/api";
             app.Audience = apiAudience;
         });
 
@@ -79,8 +80,7 @@ builder.AddSqlOS<AppDbContext>(
 
 var app = builder.Build();
 
-var api = app.MapGroup("/api")
-    .RequireSqlOSAccessToken(apiAudience);
+var api = app.MapGroup("/api");
 
 api.MapPost("/projects", async (
     CreateProjectRequest request,

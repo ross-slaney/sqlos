@@ -19,8 +19,8 @@ namespace SqlOS.Tests;
 
 /// <summary>
 /// Proves the <c>SqlOS.Mcp</c> one-call shape: <c>app.Mcp("/mcp", mcp => mcp.WithTools&lt;T&gt;())</c>
-/// inside <c>AddSqlOS</c> hosts a protected MCP server with no <c>AddMcpServer</c>, <c>MapMcp</c>,
-/// <c>MapSqlOS</c>, or <c>RequireSqlOSAccessToken</c> in application code.
+/// inside <c>AddSqlOS</c> hosts a protected MCP server with no <c>AddMcpServer</c> or <c>MapMcp</c>
+/// in application code.
 /// </summary>
 [TestClass]
 public sealed class SqlOSMcpHostingTests

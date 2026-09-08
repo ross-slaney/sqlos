@@ -16,25 +16,28 @@ These are complementary, not competing: scope bounds the **client's ceiling**, F
 
 User access tokens carry the granted scope as a `scope` claim (alongside `sub`, `sid`, `client_id`, and the rest — see [Token Validation](/docs/authserver/token-validation)). The claim is omitted for sessions created before scope tracking and for direct non-OAuth logins, where the grant is unknown; it is never fabricated.
 
-Enforcement at the API edge is opt-in via `RequiredScopes`:
+Enforcement at the API edge is opt-in in the handler. Inspect `GetSqlOSValidatedToken()?.Scope` after a declared `Api` or `Mcp` surface has validated the token:
 
 ```csharp
-var api = app.MapGroup("/api").RequireSqlOSAccessToken(options =>
-{
-    options.ExpectedAudience = "https://api.example.com";
-    options.RequiredScopes = ["todos.read"];
-});
+var token = http.GetSqlOSValidatedToken();
+if (token is null)
+    return Results.Unauthorized();
+
+var granted = token.Scope?.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+    ?? [];
+if (!granted.Contains("todos.read"))
+    return Results.Forbid();
 ```
 
-A token outside the requirement answers `403` with an RFC 6750 §3.1 `insufficient_scope` Bearer challenge; tokens without a `scope` claim fail closed. The same option exists on `UseSqlOSAccessTokenValidation`.
+A token without a `scope` claim fails closed. Do not assume the widest grant.
 
-**When does this matter?** With [OpenID Provider mode](/docs/authserver/openid-provider), third-party applications hold delegated user tokens. The consent screen's promise — "this application will be able to: sign you in, see your name" — is a claim about the *client's* ceiling, and `RequiredScopes` is how an API makes that ceiling real: a client granted only `openid profile` cannot reach an endpoint that requires `todos.write`, no matter what its user could do directly. For APIs serving only first-party clients, requiring scopes adds little — audience binding plus FGA already carries the load — and leaving `RequiredScopes` unset keeps exactly that behavior.
+**When does this matter?** With [OpenID Provider mode](/docs/authserver/openid-provider), third-party applications hold delegated user tokens. The consent screen's promise — "this application will be able to: sign you in, see your name" — is a claim about the *client's* ceiling, and a handler scope check is how an API makes that ceiling real: a client granted only `openid profile` cannot reach an endpoint that requires `todos.write`, no matter what its user could do directly. For APIs serving only first-party clients, requiring scopes adds little — audience binding plus FGA already carries the load.
 
 ## What scope enforcement must never replace
 
 A scope check authorizes the **application**, not the user. `todos.write` in a token means the client was granted permission to ask for writes — it says nothing about whether *this user* may write *this row*, and it is frozen at authorization time, blind to every grant or role change since. FGA sees the subject, the resource, and the current grants on every request, and SqlOS validation is session-aware, so revocation and offboarding bite before token expiry.
 
-So the resource-server shape is: bind the audience, optionally require the client's scope ceiling, then let FGA decide — the same flow as the [EF authorization quickstart](/docs/quickstarts/ef-authorization):
+So the resource-server shape is: bind the audience on a declared surface, optionally check the client's scope ceiling in the handler, then let FGA decide — the same flow as the [EF authorization quickstart](/docs/quickstarts/ef-authorization):
 
 ```csharp
 api.MapGet("/projects", async (
@@ -62,11 +65,11 @@ api.MapGet("/projects", async (
 });
 ```
 
-The audience check proves the token was minted for this API. `RequiredScopes` (when set) proves the client's delegation covers the operation. The FGA filter decides which rows this user sees. Treat a scope check that stands in for the FGA decision as a bug: it authorizes the app while leaving the user unchecked.
+The audience check proves the token was minted for this API. A handler scope check (when you need one) proves the client's delegation covers the operation. The FGA filter decides which rows this user sees. Treat a scope check that stands in for the FGA decision as a bug: it authorizes the app while leaving the user unchecked.
 
 This example is the **user-token** flow: `UserId` is deliberately null on a validated client-credentials service token. An endpoint that also accepts service tokens should branch on the `token_kind` claim and resolve the service-account subject from the principal's `sub` claim instead.
 
-This applies with full force to MCP resource servers: a dynamically registered MCP client can request whatever scopes it likes, so *requested* scope is untrusted input. The *granted* scope claim is trustworthy — it survived the allowlist intersection — and `RequiredScopes` plus audience binding plus per-operation FGA is the full pattern; see [MCP OAuth](/docs/guides/mcp-oauth).
+This applies with full force to MCP resource servers: a dynamically registered MCP client can request whatever scopes it likes, so *requested* scope is untrusted input. The *granted* scope claim is trustworthy — it survived the allowlist intersection — and a handler scope check plus audience binding plus per-operation FGA is the full pattern; see [MCP OAuth](/docs/guides/mcp-oauth).
 
 ## Service tokens
 
@@ -80,7 +83,7 @@ Client-credentials tokens for [machine clients](/docs/authserver/machine-clients
 
 ## See also
 
-- [Token Validation](/docs/authserver/token-validation) — the exact claims on user access tokens and `RequiredScopes`
+- [Token Validation](/docs/authserver/token-validation) — the exact claims on user access tokens and how to inspect granted scope
 - [OpenID Provider](/docs/authserver/openid-provider) — ID tokens and UserInfo, where scope gates claim release
 - [Clients](/docs/authserver/clients) — allowed scopes and the intersection rule
 - [Machine Clients](/docs/authserver/machine-clients) — service tokens and service scope

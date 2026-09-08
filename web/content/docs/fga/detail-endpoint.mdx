@@ -17,10 +17,7 @@ It does not authenticate the caller. Validate a bearer token for this API's exac
 using SqlOS.AuthServer.Extensions;
 using SqlOS.Extensions;
 
-const string apiAudience = "https://api.acme.test";
-
-var api = app.MapGroup("/api")
-    .RequireSqlOSAccessToken(apiAudience);
+var api = app.MapGroup("/api");
 
 api.MapGet("/chains/{id}", async (
     string id,

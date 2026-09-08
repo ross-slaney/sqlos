@@ -19,7 +19,7 @@ section: guides
 This guide builds **Taskrail**, a fictional MCP server at `https://mcp.taskrail.test`. A portable client identifies itself with a metadata document, completes authorization code with PKCE, and receives a SqlOS access token whose `aud` is exactly the Taskrail MCP resource.
 
 <Callout type="info" title="Hosting the MCP server in your own SqlOS app? Use the one-call path">
-  When the MCP server lives in the same host as SqlOS, declare it inside `UseSingleApplication` or `ConfigureApplication` with `app.Mcp("/mcp", mcp => mcp.WithTools<MyTools>())` from the `SqlOS.Mcp` package. SqlOS then serves the protected-resource document, validates the audience under `/mcp`, enables CIMD and resource indicators, and hosts the server; steps 1, 2, and the route-group protection below are derived for you. See [MCP server](/docs/authserver/mcp-server). This guide covers the explicit, multi-client setup where the authorization server and the MCP resource are separate deployments.
+  When the MCP server lives in the same host as SqlOS, declare it inside `UseSingleApplication` or `ConfigureApplication` with `app.Mcp("/mcp", mcp => mcp.WithTools<MyTools>())` from the `SqlOS.Mcp` package. SqlOS then serves the protected-resource document, validates the audience under `/mcp`, enables CIMD and resource indicators, and hosts the server; steps 1 and 2 below are derived for you. See [MCP server](/docs/authserver/mcp-server). This guide covers the explicit, multi-client setup where the authorization server and the MCP resource are separate deployments.
 </Callout>
 
 <Callout type="info" title="Use the simpler client path when you can">
@@ -103,17 +103,7 @@ app.MapGet("/.well-known/oauth-protected-resource", () =>
 });
 ```
 
-An unauthenticated MCP request should receive a bearer challenge that points back to this URL. `RequireSqlOSAccessToken` adds it for the protected route group:
-
-```csharp
-var mcp = app.MapGroup("/mcp")
-    .RequireSqlOSAccessToken(validation =>
-    {
-        validation.ExpectedAudience = resource;
-        validation.Realm = "Taskrail MCP";
-        validation.ResourceMetadataUrl = resourceMetadata;
-    });
-```
+An unauthenticated MCP request should receive a bearer challenge that points back to this URL. On a SqlOS host, declare `app.Mcp("/mcp", …)` so mapped endpoints under `/mcp` validate the resource audience and emit that challenge. On a host that only calls `ValidateAccessTokenAsync`, write the same `WWW-Authenticate` Bearer challenge yourself when validation fails.
 
 ## 3. Publish the portable client document
 
@@ -184,7 +174,7 @@ The token response returns `access_token`, `refresh_token`, `token_type`, `expir
 }
 ```
 
-The `scope` claim is the *granted* scope — the requested set already intersected with the client's allowlist — and records the MCP client's delegation ceiling, which the resource server may enforce with `RequiredScopes`. It is a client grant, not a per-user authorization decision: never authorize an MCP tool from scope alone. See [Scopes and Permissions](/docs/authserver/scopes-and-permissions).
+The `scope` claim is the *granted* scope — the requested set already intersected with the client's allowlist — and records the MCP client's delegation ceiling, which the resource server may inspect on the validated token. It is a client grant, not a per-user authorization decision: never authorize an MCP tool from scope alone. See [Scopes and Permissions](/docs/authserver/scopes-and-permissions).
 
 ## 6. Authorize each MCP operation
 

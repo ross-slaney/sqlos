@@ -21,7 +21,7 @@ This expands into the same seeded client records SqlOS already uses. It does not
 
 ## Describe the whole application in one call
 
-The same description can carry the application's protected surfaces, branding, and authorization model. SqlOS derives every protocol consequence, so `Program.cs` contains no `MapSqlOS`, `RequireSqlOSAccessToken`, `AddMcpServer`, `MapMcp`, or hand-written protected-resource document:
+The same description can carry the application's protected surfaces, branding, and authorization model. SqlOS derives every protocol consequence, so `Program.cs` contains no `AddMcpServer`, `MapMcp`, or hand-written protected-resource document:
 
 ```csharp
 using SqlOS.Mcp; // SqlOS.Mcp package, only needed for app.Mcp(...)
@@ -54,7 +54,7 @@ app.Run();
 | `Headless("/auth/authorize")` | Forwards to `AuthServer.UseHeadlessAuthPage` with a generated `BuildUiUrl` that sends browser interaction to `{Origin}/auth/authorize` with the standard headless parameters. See [Hosted or headless](#hosted-or-headless). |
 | `Authorization(...)` | Forwards to `Fga.Seed`. |
 
-The auth server, hosted sign-in pages, and dashboard are mapped by `AddSqlOS` at startup. `app.MapSqlOS()` is obsolete; calling it remains safe and idempotent and logs one warning.
+The auth server, hosted sign-in pages, and dashboard are mapped by `AddSqlOS` at startup.
 
 ## How the surfaces are protected
 
@@ -86,7 +86,7 @@ app.Headless(headless =>
 
 `BuildUiUrl` present means headless; there is no second switch. Continue with [Build your own login and signup UI](/docs/guides/custom-login-ui) and the [headless reference](/docs/authserver/headless-auth).
 
-Surface paths are validated at startup: they must be absolute, non-root, distinct and non-nested, and must not overlap `/.well-known`, the auth base path, or `DashboardBasePath`. `Api` and `Mcp` are separate audiences, so a token minted for `/api` is rejected at `/mcp` and vice versa. Nested `RequireSqlOSAccessToken` groups under a declared surface reuse the already validated token and only add scope enforcement.
+Surface paths are validated at startup: they must be absolute, non-root, distinct and non-nested, and must not overlap `/.well-known`, the auth base path, or `DashboardBasePath`. `Api` and `Mcp` are separate audiences, so a token minted for `/api` is rejected at `/mcp` and vice versa. Inspect `GetSqlOSValidatedToken()?.Scope` in the handler when a client's granted ceiling must be checked.
 
 ## Defaults
 

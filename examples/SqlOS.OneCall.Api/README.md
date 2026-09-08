@@ -1,6 +1,6 @@
 # Notes: one `AddSqlOS` call, a protected API, and an MCP server
 
-This is the smallest complete SqlOS application. `Program.cs` describes the app once and SqlOS derives the rest: the auth server and hosted sign-in, bearer validation for `/api` and `/mcp`, the protected-resource documents, the MCP server, the branding, and the permission model. Application code contains no `MapSqlOS`, `RequireSqlOSAccessToken`, `AddMcpServer`, `MapMcp`, hand-written metadata document, or middleware placement.
+This is the smallest complete SqlOS application. `Program.cs` describes the app once and SqlOS derives the rest: the auth server and hosted sign-in, bearer validation for `/api` and `/mcp`, the protected-resource documents, the MCP server, the branding, and the permission model. Application code contains no `AddMcpServer`, `MapMcp`, hand-written metadata document, or middleware placement.
 
 ```csharp
 builder.AddSqlOS<NotesDbContext>(db => db.UseSqlServer(connectionString), options =>

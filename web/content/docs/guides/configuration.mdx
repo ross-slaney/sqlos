@@ -114,15 +114,10 @@ Manual resource APIs such as `CreateResourceAsync(...)`, `CreateResourceWithIdAs
 
 ## Protected API token validation
 
-Protect a route group with SqlOS access-token validation when your API accepts SqlOS-issued tokens. The middleware validates the token and populates `HttpContext.User`; your endpoint still resolves the application subject explicitly.
+Declare `app.Api = "/api"` when your API accepts SqlOS-issued tokens. Mapped endpoints under that prefix are already validated and `HttpContext.User` is populated; your endpoint still resolves the application subject explicitly.
 
 ```csharp
-var api = app.MapGroup("/api")
-    .RequireSqlOSAccessToken(options =>
-    {
-        options.ExpectedAudience = "https://api.example.com";
-        options.ResourceMetadataUrl = "https://api.example.com/.well-known/oauth-protected-resource";
-    });
+var api = app.MapGroup("/api");
 
 api.MapPost("/workspaces", async (
     CreateWorkspace request,

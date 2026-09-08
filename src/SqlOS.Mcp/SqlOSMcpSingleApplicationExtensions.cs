@@ -19,8 +19,8 @@ public static class SqlOSMcpSingleApplicationExtensions
     /// registers <c>AddMcpServer().WithHttpTransport(stateless)</c>, applies
     /// <paramref name="configure"/> to the SDK builder as-is (for example
     /// <c>mcp.WithTools&lt;MyTools&gt;()</c>), audits every tool call, and maps the server on the
-    /// protected branch during startup. Application code needs no <c>AddMcpServer</c>,
-    /// <c>MapMcp</c>, <c>MapSqlOS</c>, or <c>RequireSqlOSAccessToken</c>.
+    /// protected branch during startup. Application code needs no <c>AddMcpServer</c> or
+    /// <c>MapMcp</c>.
     /// Tools can inject <see cref="ISqlOSMcpUserContext"/> to act as the connecting user.
     /// </remarks>
     /// <param name="app">The application description.</param>

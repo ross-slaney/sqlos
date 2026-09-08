@@ -30,14 +30,6 @@ builder.AddSqlOS<AppDbContext>`) + `
 public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : SqlOSDbContext<AppDbContext>(options);
 `,
   },
-  {
-    name: "README additional API scope", relativePath: "README.md",
-    heading: "### How the surfaces are protected", marker: "app.MapGroup",
-    wrap: (snippet) => `using SqlOS.AuthServer.Extensions;
-using SqlOS.Extensions;
-var app = WebApplication.CreateBuilder(args).Build();
-${snippet}`,
-  },
   ...[
     "### Complete identity-provider host",
     "### Complete downstream OIDC application",

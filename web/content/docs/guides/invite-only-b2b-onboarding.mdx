@@ -101,20 +101,15 @@ SqlOS creates the built-in `auth.invitation` template automatically. Customize i
 
 ## 2. Protect the team-management API
 
-Invitation creation is an administrative product action. Protect the route with database-backed SqlOS token validation before mapping it:
+Invitation creation is an administrative product action. Declare `app.Api = "/api"` so mapped team routes are validated before the handler runs:
 
 ```csharp
 using SqlOS.AuthServer.Extensions;
 
-app.UseSqlOSAccessTokenValidation(validation =>
-{
-    validation.ExpectedAudience = "https://api.atlas.example";
-    validation.ShouldValidate = http =>
-        http.Request.Path.StartsWithSegments("/api/team");
-});
+var team = app.MapGroup("/api/team");
 ```
 
-The middleware validates the signature, issuer, audience, token lifetime, and current SqlOS session. It then makes the validated `UserId`, `OrganizationId`, and `SessionId` available through `GetSqlOSValidatedToken()`.
+SqlOS validates the signature, issuer, audience, token lifetime, and current session. It then makes the validated `UserId`, `OrganizationId`, and `SessionId` available through `GetSqlOSValidatedToken()`.
 
 ## 3. Create invitations from an app-owned endpoint
 

@@ -22,7 +22,7 @@ order: 0
 
 ## The standard flow: one app, one call
 
-For a typical .NET B2B SaaS product you have one ASP.NET Core host, one EF Core `DbContext` on SQL Server or PostgreSQL, and one product that users sign in to. `builder.AddSqlOS<TContext>(…)` describes that product once and SqlOS derives every protocol consequence — routes, token validation, metadata documents, client registration, seeds. `Program.cs` contains no `MapSqlOS`, `RequireSqlOSAccessToken`, `AddMcpServer`, or `MapMcp` calls.
+For a typical .NET B2B SaaS product you have one ASP.NET Core host, one EF Core `DbContext` on SQL Server or PostgreSQL, and one product that users sign in to. `builder.AddSqlOS<TContext>(…)` describes that product once and SqlOS derives every protocol consequence — routes, token validation, metadata documents, client registration, seeds. `Program.cs` contains no `AddMcpServer` or `MapMcp` calls.
 
 ```csharp
 builder.AddSqlOS<AppDbContext>(
@@ -128,7 +128,7 @@ Runnable examples use this API: the [retail stack](https://github.com/ross-slane
 
 ## What starts automatically
 
-When the host starts, SqlOS initializes and upgrades its own tables, automatically creates and protects a signing key when none exists, and applies settings and startup seeds. Your EF migrations continue to own your application tables. `AddSqlOS` also maps the OAuth, hosted login, and admin API routes and registers the dashboard middleware at startup; there is no separate `MapSqlOS()` call.
+When the host starts, SqlOS initializes and upgrades its own tables, automatically creates and protects a signing key when none exists, and applies settings and startup seeds. Your EF migrations continue to own your application tables. `AddSqlOS` also maps the OAuth, hosted login, and admin API routes and registers the dashboard middleware at startup.
 
 Default paths:
 

@@ -99,19 +99,7 @@ SqlOS creates and upgrades its own tables at startup. Your EF migrations own you
 
 The challenge's `resource_metadata` URL points to `/.well-known/oauth-protected-resource` for the API and `/.well-known/oauth-protected-resource/mcp` for MCP.
 
-Additional scope requirements are explicit and retain the same audience:
-
-```csharp
-app.MapGroup("/api/admin")
-    .RequireSqlOSAccessToken(options =>
-    {
-        options.ExpectedAudience = "http://localhost:5050/api";
-        options.RequiredScopes = ["acme.admin"];
-    })
-    .MapPost("/reindex", () => Results.Accepted());
-```
-
-Add `acme.admin` to the client allowlist before requesting it. A valid token without that scope receives `403`; the application must also check who may perform the operation.
+The token's `scope` claim is the client's delegation ceiling. Inspect it on `GetSqlOSValidatedToken()?.Scope` in the handler when a third-party client must not reach an operation, then still authorize the user with FGA.
 
 ## MCP and authorization: the same Notes service
 

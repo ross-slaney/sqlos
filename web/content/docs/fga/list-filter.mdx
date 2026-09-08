@@ -65,10 +65,7 @@ From the retail example app:
 using SqlOS.AuthServer.Extensions;
 using SqlOS.Extensions;
 
-const string apiAudience = "https://api.acme.test";
-
-var api = app.MapGroup("/api")
-    .RequireSqlOSAccessToken(apiAudience);
+var api = app.MapGroup("/api");
 
 api.MapGet("/chains", async (
     ExampleAppDbContext context,

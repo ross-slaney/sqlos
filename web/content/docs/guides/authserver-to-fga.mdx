@@ -268,8 +268,7 @@ Protect the route with the expected audience, then read the typed token saved by
 using SqlOS.AuthServer.Extensions;
 using SqlOS.Extensions;
 
-var workspaces = app.MapGroup("/api/workspaces")
-    .RequireSqlOSAccessToken("https://api.example.com");
+var workspaces = app.MapGroup("/api/workspaces");
 
 workspaces.MapGet("/", async (
     HttpContext http,

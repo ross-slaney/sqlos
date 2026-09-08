@@ -108,7 +108,7 @@ app.MapExampleEndpoints();
 app.Run();
 ```
 
-`AddSqlOS()` alone exposes the configured SqlOS dashboard, OAuth authorization endpoints and metadata, social OIDC relying-party callbacks, hosted auth UI, and admin APIs: it installs the dashboard middleware and maps the endpoint groups from a startup filter, so no `MapSqlOS()` call is needed. Application endpoints remain explicit and independently testable.
+`AddSqlOS()` alone exposes the configured SqlOS dashboard, OAuth authorization endpoints and metadata, social OIDC relying-party callbacks, hosted auth UI, and admin APIs: it installs the dashboard middleware and maps the endpoint groups from a startup filter. Application endpoints remain explicit and independently testable.
 
 ## What the sample demonstrates
 
@@ -171,7 +171,7 @@ The Swagger document deliberately excludes SqlOS library/admin routes and exampl
 
 This middleware is example code, not a requirement to write custom authentication in every service. Because this sample hosts SqlOS and the API in one process, it can call `SqlOSAuthService` directly.
 
-For a separate resource API, use ASP.NET Core's standard JWT bearer handler against the SqlOS issuer and metadata/JWKS endpoint. `Program.cs` includes a commented `AddJwtBearer` configuration showing issuer, audience, lifetime validation, and automatic signing-key refresh. Standard JWKS validation does not query the SqlOS session table, so a revoked token can remain accepted until its JWT expiry. When immediate logout/session revocation is required, add a session-aware check through a trusted SqlOS host or keep the resource API in the same process and use `ValidateAccessTokenAsync`/`RequireSqlOSAccessToken`.
+For a separate resource API, use ASP.NET Core's standard JWT bearer handler against the SqlOS issuer and metadata/JWKS endpoint. `Program.cs` includes a commented `AddJwtBearer` configuration showing issuer, audience, lifetime validation, and automatic signing-key refresh. Standard JWKS validation does not query the SqlOS session table, so a revoked token can remain accepted until its JWT expiry. When immediate logout/session revocation is required, add a session-aware check through a trusted SqlOS host or keep the resource API in the same process and use a declared `Api` surface or `ValidateAccessTokenAsync`.
 
 ## Run the API without Aspire
 

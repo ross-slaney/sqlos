@@ -165,7 +165,7 @@ Single-application mode creates one first-party public PKCE client and applies A
 
 Declared surfaces are validated at startup: paths must be absolute, non-root, distinct and non-nested, and must not overlap `/.well-known`, the auth base path, or `DashboardBasePath`. `Audience` must equal `{Origin}{Api}` when both are set, and CIMD/resource indicators cannot be disabled after an `Mcp` surface is declared.
 
-`AddSqlOS` attaches that validation to mapped endpoints under the declared paths. SqlOS does not add application pipeline middleware and does not handle CORS. Requests to those endpoints that carry no token or a token for another audience receive HTTP `401` with a Bearer challenge that names the surface's `realm` and `resource_metadata` URL. The validated token is available through `HttpContext.GetSqlOSValidatedToken()` and `HttpContext.User`. Extra scope requirements can still be added with `RequireSqlOSAccessToken` on a nested group; it reuses the already-validated token.
+`AddSqlOS` attaches that validation to mapped endpoints under the declared paths. SqlOS does not add application pipeline middleware and does not handle CORS. Requests to those endpoints that carry no token or a token for another audience receive HTTP `401` with a Bearer challenge that names the surface's `realm` and `resource_metadata` URL. The validated token is available through `HttpContext.GetSqlOSValidatedToken()` and `HttpContext.User`. Inspect `Scope` on that token in the handler when a client's granted ceiling must be checked.
 
 ### Exceptions
 
@@ -187,51 +187,7 @@ Describes the host independently of client registration. `SqlOSApplicationOption
 
 `AddSqlOS` registers an `IStartupFilter` that maps the AuthServer routes, audit-log admin routes, transactional-email admin routes, calendar routes (when `SqlOSOptions.Calendar.Enabled` is `true`), the protected-resource documents for declared surfaces, and companion-package endpoints such as the MCP server. They join the application's own route table, so the application's middleware (CORS, exception handling, rate limiting) runs in front of them and normal route precedence applies.
 
-### MapSqlOS (obsolete)
-
-**Namespace:** `SqlOS.Extensions`
-
-**Type:** `WebApplicationExtensions`
-
-```csharp
-[Obsolete]
-public static WebApplication MapSqlOS(this WebApplication app)
-```
-
-Existing callers keep working: the call is idempotent, SqlOS detects it and does not register the same routes twice, and one warning is logged at startup. Remove the call.
-
-## RequireSqlOSAccessToken
-
-**Namespace:** `SqlOS.Extensions`
-
-**Type:** `SqlOSErgonomicsExtensions`
-
-```csharp
-public static RouteGroupBuilder RequireSqlOSAccessToken(
-    this RouteGroupBuilder group,
-    string expectedAudience)
-```
-
-```csharp
-public static RouteGroupBuilder RequireSqlOSAccessToken(
-    this RouteGroupBuilder group,
-    Action<SqlOSAccessTokenValidationOptions> configure)
-```
-
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `group` | `RouteGroupBuilder` | Minimal API route group to protect. |
-| `expectedAudience` | `string` | Required JWT audience. Validation fails closed when empty. |
-| `configure` | `Action<SqlOSAccessTokenValidationOptions>` | Configures `ExpectedAudience`, optional `Realm`, `ResourceMetadataUrl`, and `ShouldValidate`. |
-
-**Returns:** the same route group.
-
-The endpoint filter validates the bearer token, issuer, lifetime, server-side session state, and exact audience. On success it sets `HttpContext.User` and stores a `SqlOSValidatedToken`. On failure it returns HTTP `401` with a Bearer challenge.
-
-### Exceptions
-
-- `ArgumentNullException` when `group` or `configure` is null.
-- `InvalidOperationException` when `ExpectedAudience` is empty.
+A leftover `MapAuthServer()` call is safe and idempotent: SqlOS withdraws its own copy of those routes and logs one warning. Remove the call.
 
 ## GetSqlOSValidatedToken
 
@@ -244,14 +200,13 @@ public static SqlOSValidatedToken? GetSqlOSValidatedToken(
     this HttpContext context)
 ```
 
-**Returns:** the validated token stored by `RequireSqlOSAccessToken` or `UseSqlOSAccessTokenValidation`; otherwise `null`.
+**Returns:** the validated token stored by a declared `Api` or `Mcp` surface; otherwise `null`.
 
 ```csharp
 using SqlOS.AuthServer.Extensions;
-using SqlOS.Extensions;
 
-var api = app.MapGroup("/api")
-    .RequireSqlOSAccessToken("https://app.example.com/api");
+// Declare app.Api = "/api" in UseSingleApplication. Mapped endpoints under /api are already protected.
+var api = app.MapGroup("/api");
 
 api.MapGet("/me", (HttpContext http) =>
 {
@@ -303,6 +258,6 @@ app.MapGet("/api/projects", (HttpContext http) =>
 app.Run();
 ```
 
-Application code contains no `MapSqlOS`, `RequireSqlOSAccessToken`, `AddMcpServer`, `MapMcp`, or hand-written protected-resource document. `AuthServer.Issuer` defaults to `{Origin}/sqlos/auth`.
+Application code contains no `AddMcpServer`, `MapMcp`, or hand-written protected-resource document. `AuthServer.Issuer` defaults to `{Origin}/sqlos/auth`.
 
 SqlOS bootstraps its owned schema, signing key, default settings, client seed, and FGA core data when the host starts. Application EF migrations remain responsible only for application-owned tables.

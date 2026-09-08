@@ -125,16 +125,6 @@ const requiredSourceContracts = [
     "WebApplicationBuilder.AddSqlOS<TContext>",
   ],
   [
-    "src/SqlOS/Extensions/WebApplicationExtensions.cs",
-    /public static WebApplication MapSqlOS/,
-    "WebApplication.MapSqlOS",
-  ],
-  [
-    "src/SqlOS/Extensions/SqlOSErgonomicsExtensions.cs",
-    /public static RouteGroupBuilder RequireSqlOSAccessToken/,
-    "RouteGroupBuilder.RequireSqlOSAccessToken",
-  ],
-  [
     "src/SqlOS/AuthServer/Extensions/SqlOSAccessTokenValidationExtensions.cs",
     /public static SqlOSValidatedToken\? GetSqlOSValidatedToken/,
     "HttpContext.GetSqlOSValidatedToken",

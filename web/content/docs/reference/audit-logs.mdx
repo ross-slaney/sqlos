@@ -42,11 +42,10 @@ builder.AddSqlOS<ExampleAppDbContext>(
 
 Inject the service into server-side application code. Frontends should not write audit rows directly.
 
-The actor and organization are security context, not client input. For endpoints protected with `RequireSqlOSAccessToken`, derive them from `GetSqlOSValidatedToken()`. For cookie, API-key, or service authentication, resolve the equivalent identity from the authenticated server-side principal or credential mapping. Authorize the requested mutation before changing state or recording a success event.
+The actor and organization are security context, not client input. For endpoints under a declared `Api` surface, derive them from `GetSqlOSValidatedToken()`. For cookie, API-key, or service authentication, resolve the equivalent identity from the authenticated server-side principal or credential mapping. Authorize the requested mutation before changing state or recording a success event.
 
 ```csharp
-var documentsApi = app.MapGroup("/api")
-    .RequireSqlOSAccessToken(apiAudience);
+var documentsApi = app.MapGroup("/api");
 
 documentsApi.MapPost("/documents/{id}/share", async (
     string id,

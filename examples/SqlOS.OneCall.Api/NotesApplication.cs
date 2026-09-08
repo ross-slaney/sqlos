@@ -19,7 +19,7 @@ public static class NotesApplication
         var origin = (builder.Configuration["Notes:Origin"] ?? "http://localhost:5085").TrimEnd('/');
 
         // One call describes the application. SqlOS derives the rest:
-        //  - the auth server, hosted sign-in, and dashboard are mapped at startup (no MapSqlOS),
+        //  - the auth server, hosted sign-in, and dashboard are mapped at startup,
         //  - bearer tokens are validated under /api (audience {origin}/api) and /mcp (audience {origin}/mcp),
         //  - RFC 9728 documents are served for both surfaces,
         //  - the MCP server is registered and mapped on /mcp with CIMD + resource indicators enabled,

@@ -97,10 +97,7 @@ Expose app endpoints that call `SqlOSAuthService`, but put them behind bearer-to
 using SqlOS.AuthServer.Extensions;
 using SqlOS.Extensions;
 
-const string apiAudience = "https://api.acme.test";
-
-var api = app.MapGroup("/api")
-    .RequireSqlOSAccessToken(apiAudience);
+var api = app.MapGroup("/api");
 
 api.MapGet("/mfa/status", async (
     SqlOSAuthService authService,
@@ -153,7 +150,7 @@ api.MapPost("/mfa/totp/enroll/verify", async (
 });
 ```
 
-`RequireSqlOSAccessToken` rejects missing, invalid, expired, revoked, or wrong-audience tokens before any enrollment handler runs. If your host already uses ASP.NET Core authentication instead, apply an equivalent authorization policy that validates the exact audience and active SqlOS session.
+A declared `Api` surface rejects missing, invalid, expired, revoked, or wrong-audience tokens before any enrollment handler runs. If your host already uses ASP.NET Core authentication instead, apply an equivalent authorization policy that validates the exact audience and active SqlOS session.
 
 Render `qrCodeDataUrl` as an image, keep `secret` available for manual setup, and verify the 6-digit TOTP code with the server-minted enrollment token returned by the authenticated start call. Show recovery codes once after verification.
 

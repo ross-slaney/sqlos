@@ -1,9 +1,11 @@
 "use client";
 
-const setupCode = `builder.AddSqlOS<AppDbContext>();
+const setupCode = `builder.AddSqlOS<AppDbContext>(options =>
+    options.UseSingleApplication("Acme", app =>
+        app.Origin = "https://app.example.com"));
 
 var app = builder.Build();
-app.MapSqlOS();`;
+app.Run();`;
 
 function DashboardMockup() {
   return (
