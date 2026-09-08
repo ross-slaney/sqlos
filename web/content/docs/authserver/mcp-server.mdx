@@ -75,7 +75,7 @@ public sealed class GardenMcpTools
 
 ## Combine with an API surface
 
-`Api` and `Mcp` are separate audiences under the same origin. The first-party client receives `{Origin}/api` tokens by default; MCP clients request `{Origin}/mcp` through the `resource` parameter. Both surfaces share the auth server, sessions, users, organizations, and FGA model, and both are served by the same host. `AddSqlOS` guards both ahead of the application's pipeline; nothing is placed by application code. See [how the surfaces are protected](/docs/authserver/single-application#how-the-surfaces-are-protected).
+`Api` and `Mcp` are separate audiences under the same origin. The first-party client receives `{Origin}/api` tokens by default; MCP clients request `{Origin}/mcp` through the `resource` parameter. Both surfaces share the auth server, sessions, users, organizations, and FGA model, and both are served by the same host. `AddSqlOS` attaches bearer validation to the mapped endpoints under each path; nothing is placed in the host pipeline. See [how the surfaces are protected](/docs/authserver/single-application#how-the-surfaces-are-protected).
 
 Surface paths are validated at startup: absolute, non-root, distinct and non-nested, and outside `/.well-known`, the auth base path, and `DashboardBasePath`.
 

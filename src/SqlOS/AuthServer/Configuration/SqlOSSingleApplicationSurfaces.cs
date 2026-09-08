@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing.Patterns;
 using SqlOS.Configuration;
 
 namespace SqlOS.AuthServer.Configuration;
@@ -151,6 +152,33 @@ internal static class SqlOSSingleApplicationSurfaces
 
     public static bool Matches(PathString requestPath, string surfacePath)
         => requestPath.StartsWithSegments(surfacePath);
+
+    /// <summary>
+    /// True when the route's leading literal segments are exactly the surface path
+    /// (<c>/api</c> matches <c>/api/me</c> and <c>/api/{id}</c>, not <c>/apiary</c> or
+    /// <c>/{surface}/me</c>). Used to attach token validation to mapped endpoints.
+    /// </summary>
+    public static bool MatchesRoute(RoutePattern pattern, string surfacePath)
+    {
+        var expected = surfacePath.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (expected.Length == 0 || pattern.PathSegments.Count < expected.Length)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < expected.Length; i++)
+        {
+            var segment = pattern.PathSegments[i];
+            if (!segment.IsSimple
+                || segment.Parts[0] is not RoutePatternLiteralPart literal
+                || !string.Equals(literal.Content, expected[i], StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     /// <summary>
     /// Applies the host-level consequences of the single-application description that live

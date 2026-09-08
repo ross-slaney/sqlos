@@ -48,7 +48,7 @@ app.Run();
 
 | Declaration | What SqlOS does |
 | --- | --- |
-| `Api = "/api"` | Validates bearer tokens for the audience `{Origin}/api` on every request under `/api` (401 with a Bearer challenge otherwise), serves `/.well-known/oauth-protected-resource`, and uses `{Origin}/api` as the first-party client's default audience. |
+| `Api = "/api"` | Validates bearer tokens for the audience `{Origin}/api` on mapped endpoints under `/api` (401 with a Bearer challenge otherwise), serves `/.well-known/oauth-protected-resource`, and uses `{Origin}/api` as the first-party client's default audience. |
 | `Mcp("/mcp", ...)` | Validates tokens for `{Origin}/mcp` under `/mcp`, serves `/.well-known/oauth-protected-resource/mcp`, enables client ID metadata documents and resource indicators for portable MCP clients, and hosts the MCP server there. See [MCP server](/docs/authserver/mcp-server). |
 | `Brand(...)` | Forwards to `AuthServer.SeedAuthPage` on top of the single-application defaults. |
 | `Headless("/auth/authorize")` | Forwards to `AuthServer.UseHeadlessAuthPage` with a generated `BuildUiUrl` that sends browser interaction to `{Origin}/auth/authorize` with the standard headless parameters. See [Hosted or headless](#hosted-or-headless). |
@@ -58,12 +58,7 @@ The auth server, hosted sign-in pages, and dashboard are mapped by `AddSqlOS` at
 
 ## How the surfaces are protected
 
-`AddSqlOS` installs the guard for the declared surfaces ahead of the application's pipeline. Every request under `Api` or `Mcp` carries a validated bearer token for that surface's audience before any of your middleware, branches, or endpoints run; otherwise it is answered with `401` and a Bearer challenge. Handlers read the result through `HttpContext.GetSqlOSValidatedToken()` and `HttpContext.User`. There is nothing to place or order, and a host that also registers ASP.NET authentication, authorization, CORS, or exception handling changes nothing about this.
-
-Two details:
-
-- A CORS preflight carries no credentials. When the host has registered CORS, the preflight is passed to your `UseCors` and the request that follows is validated like any other. Without CORS services, an `OPTIONS` request under a surface is challenged like everything else.
-- Surfaces match the path as the server receives it. If your application calls `UsePathBase` or rewrites paths into a surface, declare the paths clients actually request, or protect those routes with `RequireSqlOSAccessToken` instead.
+`AddSqlOS` attaches bearer validation to the endpoints you map under `Api` or `Mcp`. There is no SqlOS middleware in the host pipeline and no CORS handling: your `UseCors`, `UseAuthentication`, and the rest of the pipeline run first, then the selected endpoint checks the token. A missing or wrong-audience token is answered with `401` and a Bearer challenge. Handlers read the result through `HttpContext.GetSqlOSValidatedToken()` and `HttpContext.User`. Unmatched paths are 404s; raw middleware branches are not endpoints and are not protected.
 
 The derived client is a public PKCE client for whatever front end you build: a browser SPA, a native app, or an agent. It completes the authorization-code flow with its standard OIDC library, requests `resource={Origin}/api`, and sends the token as a bearer. Add a native app's custom-scheme or loopback callback to `RedirectUris`, and set `AllowNativeHeadlessAuth = true` if it drives the [headless authentication API](/docs/authserver/headless-auth) directly. The [Notes sample](https://github.com/ross-slaney/sqlos/tree/main/examples/SqlOS.OneCall.Api) is a complete bearer-only host with API and MCP.
 

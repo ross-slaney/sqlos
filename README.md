@@ -82,7 +82,7 @@ Run it and `curl -i http://localhost:5050/api/me` returns `401` with a Bearer ch
 | Option | Effect |
 | --- | --- |
 | `Origin` | Public origin used to derive the default issuer, callback and surface audiences. Configure the externally visible URL, not a container address. |
-| `Api = "/api"` | Requires a valid bearer token for `{Origin}/api` on every request under `/api`, including middleware branches and unmatched paths, before any of your code runs. A sibling such as `/api-public` is outside it. |
+| `Api = "/api"` | Requires a valid bearer token for `{Origin}/api` on mapped endpoints under `/api` before the handler runs. A sibling such as `/apiary` is outside it. |
 | `Mcp("/mcp", ...)` | Registers and maps a stateless Streamable HTTP MCP server, with a separate `{Origin}/mcp` audience and OAuth discovery. Requires `SqlOS.Mcp`. |
 | `Brand(...)` | Reconciles hosted sign-in branding into code-owned settings. Equivalent to `AuthServer.SeedAuthPage`. |
 | `Authorization(...)` | Reconciles resource types, permissions, and roles. Equivalent to `Fga.Seed`; application services must still create grants and enforce access. |
@@ -95,9 +95,9 @@ SqlOS creates and upgrades its own tables at startup. Your EF migrations own you
 
 ### How the surfaces are protected
 
-Each request under a declared surface validates signature, issuer, expiry, audience, and SqlOS session state before anything in your pipeline runs, and handlers read the result with `GetSqlOSValidatedToken()` or `HttpContext.User`. API and MCP tokens are not interchangeable. The challenge's `resource_metadata` URL points to `/.well-known/oauth-protected-resource` for the API and `/.well-known/oauth-protected-resource/mcp` for MCP.
+`AddSqlOS` attaches that validation to the endpoints you map under a declared surface. It does not add middleware to the host pipeline and does not handle CORS. Signature, issuer, expiry, audience, and SqlOS session state are checked when the endpoint runs, after your `UseCors`, `UseAuthentication`, and the rest of the pipeline. Handlers read the result with `GetSqlOSValidatedToken()` or `HttpContext.User`. API and MCP tokens are not interchangeable. Unmatched paths under the prefix are ordinary 404s; a raw `app.Map("/api/...")` middleware branch is not an endpoint and is not protected.
 
-Surfaces match the request path as the server receives it. A host that registers its own ASP.NET authentication, CORS, or exception handling changes nothing: a CORS preflight is answered by your `UseCors`, and everything else under the surface is validated first. If your application calls `UsePathBase` or rewrites paths into a surface, declare the paths clients actually request or protect those routes with `RequireSqlOSAccessToken` instead.
+The challenge's `resource_metadata` URL points to `/.well-known/oauth-protected-resource` for the API and `/.well-known/oauth-protected-resource/mcp` for MCP.
 
 Additional scope requirements are explicit and retain the same audience:
 

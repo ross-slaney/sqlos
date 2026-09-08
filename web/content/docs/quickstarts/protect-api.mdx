@@ -11,7 +11,7 @@ section: quickstarts
   href="#complete-program"
   actionLabel="View the code"
 >
-  Declare `app.Api = "/api"` inside `UseSingleApplication`. SqlOS validates signature, lifetime, audience, and persisted session existence/revocation/absolute expiry for every request under `/api` before your endpoint runs.
+  Declare `app.Api = "/api"` inside `UseSingleApplication`. SqlOS validates signature, lifetime, audience, and persisted session existence/revocation/absolute expiry on mapped endpoints under `/api` before the handler runs.
 </Banner>
 
 ## Goal
@@ -92,7 +92,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
 }
 ```
 
-Declaring `Api` makes SqlOS validate every request under `/api` for the audience `http://localhost:5050/api`, use that audience for the `acme-web` client, serve `/.well-known/oauth-protected-resource`, and answer unauthenticated requests with a Bearer challenge that names `realm="Acme API"` and the metadata URL. `AddSqlOS` installs that guard ahead of your pipeline, so nothing is placed or ordered in `Program.cs`; see [how the surfaces are protected](/docs/authserver/single-application#how-the-surfaces-are-protected). After validation it sets `HttpContext.User` and stores the typed `SqlOSValidatedToken`, available through `GetSqlOSValidatedToken()`.
+Declaring `Api` makes SqlOS validate mapped endpoints under `/api` for the audience `http://localhost:5050/api`, use that audience for the `acme-web` client, serve `/.well-known/oauth-protected-resource`, and answer unauthenticated requests with a Bearer challenge that names `realm="Acme API"` and the metadata URL. `AddSqlOS` attaches that validation to those endpoints; nothing is placed or ordered in `Program.cs`. See [how the surfaces are protected](/docs/authserver/single-application#how-the-surfaces-are-protected). After validation it sets `HttpContext.User` and stores the typed `SqlOSValidatedToken`, available through `GetSqlOSValidatedToken()`.
 
 When the API also serves delegated (especially third-party) clients, add scope enforcement on a nested group. It reuses the token SqlOS already validated and only checks scopes — a token whose `scope` claim misses a required entry answers `403 insufficient_scope`:
 

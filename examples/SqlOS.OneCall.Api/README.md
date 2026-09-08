@@ -66,7 +66,7 @@ The dashboard at `/sqlos` is open without a password in Development only. Config
 | Configuration or file | Effect |
 | --- | --- |
 | [NotesApplication.cs](NotesApplication.cs) | The complete host: one `AddSqlOS` call, the `/api` handlers, and sample database setup |
-| `app.Api = "/api"` | Requires a token for `http://localhost:5085/api` on every request under `/api`, before any handler runs |
+| `app.Api = "/api"` | Requires a token for `http://localhost:5085/api` on the mapped `/api` endpoints before the handler runs |
 | `app.Mcp("/mcp", mcp => mcp.WithTools<NotesMcpTools>())` | Hosts and audits the MCP tools, protects the distinct MCP audience, and enables CIMD/resource indicators |
 | `app.Brand(...)` | Seeds code-owned title, copy, and colors for the hosted pages |
 | `app.Authorization(...)` | Seeds notebook resource type, read/write permissions, and the owner role; it grants nobody access by itself |

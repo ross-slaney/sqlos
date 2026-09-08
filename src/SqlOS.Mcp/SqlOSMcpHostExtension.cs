@@ -9,9 +9,9 @@ using SqlOS.Hosting;
 namespace SqlOS.Mcp;
 
 /// <summary>
-/// Registers the MCP SDK server and maps it on the declared MCP surface. SqlOS core owns the
-/// path-scoped token validation and the RFC 9728 document for that surface; this extension only
-/// adds the server itself, so application code contains no <c>AddMcpServer</c> or <c>MapMcp</c>.
+/// Registers the MCP SDK server and maps it on the declared MCP surface. SqlOS core attaches
+/// token validation to those mapped endpoints and serves the RFC 9728 document; this extension
+/// only adds the server itself, so application code contains no <c>AddMcpServer</c> or <c>MapMcp</c>.
 /// </summary>
 internal sealed class SqlOSMcpHostExtension : ISqlOSHostExtension
 {

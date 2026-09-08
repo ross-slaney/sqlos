@@ -993,9 +993,9 @@ internal static class SqlOSAccessTokenEndpointFilter
         }
 
         // A declared single-application surface (Api/Mcp) already validated this request's token
-        // for the same audience before routing ran. Re-using that result keeps an explicit
+        // for the same audience on the endpoint. Re-using that result keeps an explicit
         // RequireSqlOSAccessToken on a group under the surface harmless; scope requirements are
-        // still enforced here because the surface middleware does not know them.
+        // still enforced here because the surface does not know them.
         if (httpContext.GetSqlOSValidatedToken() is { } alreadyValidated
             && string.Equals(alreadyValidated.Audience, options.ExpectedAudience, StringComparison.Ordinal))
         {

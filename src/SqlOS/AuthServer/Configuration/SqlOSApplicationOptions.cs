@@ -19,17 +19,17 @@ public class SqlOSApplicationOptions
     public string? Origin { get; set; }
 
     /// <summary>
-    /// Gets or sets the application-relative REST API path prefix under <see cref="Origin"/>, for example
-    /// <c>/api</c>. When set, SqlOS validates bearer tokens for the audience <c>{Origin}{Api}</c>
-    /// on every request under the prefix before protected handlers run, and serves the matching
-    /// RFC 9728 protected-resource document at <c>/.well-known/oauth-protected-resource</c>.
+    /// Gets or sets the application-relative REST API path, for example <c>/api</c>. When set,
+    /// SqlOS validates bearer tokens for the audience <c>{Origin}{Api}</c> on mapped endpoints
+    /// under that path before the handler runs, and serves the matching RFC 9728
+    /// protected-resource document at <c>/.well-known/oauth-protected-resource</c>.
     /// </summary>
     public string? Api { get; set; }
 
     /// <summary>
-    /// Gets or sets the application-relative MCP path prefix under <see cref="Origin"/>, for example
-    /// <c>/mcp</c>. When set, SqlOS validates bearer tokens for the audience <c>{Origin}{Mcp}</c>
-    /// under the prefix, serves the protected-resource document at
+    /// Gets or sets the application-relative MCP path, for example <c>/mcp</c>. When set, SqlOS
+    /// validates bearer tokens for the audience <c>{Origin}{Mcp}</c> on mapped endpoints under
+    /// that path, serves the protected-resource document at
     /// <c>/.well-known/oauth-protected-resource{Mcp}</c>, and enables client ID metadata documents
     /// and resource indicators so portable MCP clients can connect. Dynamic client registration is
     /// not enabled by this property.

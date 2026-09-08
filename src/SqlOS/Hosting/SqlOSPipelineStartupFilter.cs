@@ -20,8 +20,9 @@ namespace SqlOS.Hosting;
 /// <summary>
 /// Registers SqlOS dashboard middleware and adds the auth-server, admin, protected-resource-metadata,
 /// and companion-package endpoints to the application's route table without requiring app code
-/// after <see cref="WebApplicationBuilder.Build"/>. Declared API/MCP surfaces are guarded by
-/// <see cref="SqlOSSurfaceProtectionMiddleware"/> ahead of the application's pipeline.
+/// after <see cref="WebApplicationBuilder.Build"/>. Declared API/MCP surfaces attach bearer
+/// validation to the mapped endpoints under those paths; SqlOS does not add application
+/// pipeline middleware for them.
 /// </summary>
 internal sealed class SqlOSPipelineStartupFilter : IStartupFilter
 {
@@ -118,19 +119,12 @@ internal sealed class SqlOSPipelineStartupFilter : IStartupFilter
             extension.MapEndpoints(sharedEndpoints, hostOptions);
         }
 
-        var sqlosEndpoints = new SqlOSEndpointDataSource(
-            mappingState,
-            coreEndpoints.DataSources.ToArray(),
-            sharedEndpoints.DataSources.ToArray());
-
-        // Guard the declared API/MCP surfaces ahead of everything the application adds, so no
-        // middleware, branch, or endpoint under a surface prefix runs without a validated token
-        // and handlers find HttpContext.User and GetSqlOSValidatedToken() populated. The
-        // application places nothing: this is the same guarantee RequireSqlOSAccessToken gives.
-        if (SqlOSSingleApplicationSurfaces.HasAnySurface(hostOptions.AuthServer.Application))
-        {
-            app.UseMiddleware<SqlOSSurfaceProtectionMiddleware>();
-        }
+        var sqlosEndpoints = ProtectSurfaceEndpoints(
+            new SqlOSEndpointDataSource(
+                mappingState,
+                coreEndpoints.DataSources.ToArray(),
+                sharedEndpoints.DataSources.ToArray()),
+            hostOptions);
 
         // Let the application configure its pipeline first. WebApplication wraps it in
         // UseRouting()/UseEndpoints() when the application mapped endpoints of its own and leaves
@@ -146,6 +140,7 @@ internal sealed class SqlOSPipelineStartupFilter : IStartupFilter
             // routing middleware snapshots the data sources when the pipeline is built, which
             // happens after every startup filter has run. UseEndpoints() only registers the new
             // sources with the global EndpointDataSource; it ignores ones already present.
+            ProtectMappedEndpoints(applicationRoutes.DataSources, hostOptions);
             applicationRoutes.DataSources.Add(sqlosEndpoints);
             app.UseEndpoints(static _ => { });
             return;
@@ -156,6 +151,30 @@ internal sealed class SqlOSPipelineStartupFilter : IStartupFilter
         app.UseRouting();
         app.UseEndpoints(endpoints => endpoints.DataSources.Add(sqlosEndpoints));
     };
+
+    private static EndpointDataSource ProtectSurfaceEndpoints(EndpointDataSource source, SqlOSOptions hostOptions)
+    {
+        var surfaces = SqlOSSingleApplicationSurfaces.Describe(hostOptions.AuthServer.Application);
+        return surfaces.Count == 0 ? source : new SqlOSSurfaceEndpointDataSource(source, surfaces);
+    }
+
+    private static void ProtectMappedEndpoints(ICollection<EndpointDataSource> sources, SqlOSOptions hostOptions)
+    {
+        var surfaces = SqlOSSingleApplicationSurfaces.Describe(hostOptions.AuthServer.Application);
+        if (surfaces.Count == 0)
+        {
+            return;
+        }
+
+        var existing = sources.ToArray();
+        sources.Clear();
+        foreach (var source in existing)
+        {
+            sources.Add(source is SqlOSSurfaceEndpointDataSource
+                ? source
+                : new SqlOSSurfaceEndpointDataSource(source, surfaces));
+        }
+    }
 
     /// <summary>
     /// The <see cref="IApplicationBuilder.Properties"/> key under which <c>UseRouting()</c> records
