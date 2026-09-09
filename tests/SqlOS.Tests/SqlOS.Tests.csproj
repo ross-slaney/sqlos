@@ -16,6 +16,7 @@
     <PackageReference Include="Microsoft.AspNetCore.TestHost" Version="9.0.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="9.0.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="9.0.0" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="MSTest.TestAdapter" Version="3.6.3" />
     <PackageReference Include="MSTest.TestFramework" Version="3.6.3" />
@@ -27,6 +28,5 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\SqlOS\SqlOS.csproj" />
-    <ProjectReference Include="..\..\src\SqlOS.Mcp\SqlOS.Mcp.csproj" />
   </ItemGroup>
 </Project>

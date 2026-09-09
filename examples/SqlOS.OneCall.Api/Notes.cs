@@ -1,9 +1,10 @@
 using System.ComponentModel;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using ModelContextProtocol.Server;
+using SqlOS.AuthServer.Extensions;
 using SqlOS.Extensions;
 using SqlOS.Fga.Interfaces;
-using SqlOS.Mcp;
 
 namespace SqlOS.OneCall.Api;
 
@@ -125,22 +126,23 @@ public sealed class NotesService(NotesDbContext db, ISqlOSFgaAuthService fga)
 
 /// <summary>
 /// MCP tools exposed on /mcp. SqlOS already validated the token for the MCP audience; the tools
-/// act as the connecting user through <see cref="ISqlOSMcpUserContext"/>.
+/// act as the connecting user through <see cref="HttpContext.GetSqlOSValidatedToken"/>.
 /// </summary>
 public sealed class NotesMcpTools
 {
     [McpServerTool(Name = "list_notes"), Description("Lists the connecting user's notes.")]
-    public static async Task<IReadOnlyList<string>> ListNotes(ISqlOSMcpUserContext user, NotesService notes, CancellationToken ct)
-        => (await notes.ListAsync(RequireUser(user), ct)).Select(n => n.Text).ToArray();
+    public static async Task<IReadOnlyList<string>> ListNotes(IHttpContextAccessor http, NotesService notes, CancellationToken ct)
+        => (await notes.ListAsync(RequireUser(http), ct)).Select(n => n.Text).ToArray();
 
     [McpServerTool(Name = "add_note"), Description("Adds a note to the connecting user's notebook.")]
     public static async Task<string> AddNote(
-        ISqlOSMcpUserContext user,
+        IHttpContextAccessor http,
         NotesService notes,
         [Description("The note text.")] string text,
         CancellationToken ct)
-        => (await notes.AddAsync(RequireUser(user), text, ct)).Id.ToString();
+        => (await notes.AddAsync(RequireUser(http), text, ct)).Id.ToString();
 
-    private static string RequireUser(ISqlOSMcpUserContext user)
-        => user.UserId ?? throw new InvalidOperationException("This tool requires a user token.");
+    private static string RequireUser(IHttpContextAccessor http)
+        => http.HttpContext?.GetSqlOSValidatedToken()?.UserId
+           ?? throw new InvalidOperationException("This tool requires a user token.");
 }

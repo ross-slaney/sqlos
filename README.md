@@ -29,10 +29,9 @@ Use .NET 9, EF Core 9, and an accessible SQL Server or PostgreSQL database. The 
 dotnet add package SqlOS --version 7.0.0
 ```
 
-Optional packages for the MCP and custom-login examples:
+Optional package for the custom-login examples:
 
 ```bash
-dotnet add package SqlOS.Mcp --version 7.0.0
 npm install @sqlos/headless@7.0.0
 ```
 
@@ -83,7 +82,7 @@ Run it and `curl -i http://localhost:5050/api/me` returns `401` with a Bearer ch
 | --- | --- |
 | `Origin` | Public origin used to derive the default issuer, callback and surface audiences. Configure the externally visible URL, not a container address. |
 | `Api = "/api"` | Resource id `{Origin}/api`: default JWT scheme audience, first-party client audience, and `/.well-known/oauth-protected-resource`. Lock routes with `RequireAuthorization()`. |
-| `Mcp("/mcp", ...)` | Registers and maps a stateless Streamable HTTP MCP server, with a separate `{Origin}/mcp` audience and OAuth discovery. Requires `SqlOS.Mcp`. |
+| `Mcp = "/mcp"` | Resource id `{Origin}/mcp`: scheme/policy `SqlOS.Mcp`, RFC 9728 document, CIMD, and resource indicators. Map Microsoft's MCP SDK yourself and lock it with `RequireAuthorization("SqlOS.Mcp")`. |
 | `Brand(...)` | Reconciles hosted sign-in branding into code-owned settings. Equivalent to `AuthServer.SeedAuthPage`. |
 | `Authorization(...)` | Reconciles resource types, permissions, and roles. Equivalent to `Fga.Seed`; application services must still create grants and enforce access. |
 | `Headless("/auth/authorize")` | Sends browser interaction to your UI at `{Origin}/auth/authorize`; SqlOS continues to own the authentication protocol. You must implement that UI. |
@@ -95,7 +94,7 @@ SqlOS creates and upgrades its own tables at startup. Your EF migrations own you
 
 ### How the surfaces are protected
 
-`AddSqlOS` registers the `SqlOS` JWT scheme (session-aware `ValidateAccessTokenAsync`) with that API audience. Call `RequireAuthorization()` on the groups you want locked — the same ASP.NET API as `AddJwtBearer`. `SqlOS.Mcp` requires authorization on the MCP endpoint it maps, using scheme/policy `SqlOS.Mcp`. SqlOS does not wrap routes from a path string and does not handle CORS. Handlers read the result with `GetSqlOSValidatedToken()` or `HttpContext.User`. API and MCP tokens are not interchangeable.
+`AddSqlOS` registers the `SqlOS` JWT scheme (session-aware `ValidateAccessTokenAsync`) with that API audience. Call `RequireAuthorization()` on the groups you want locked — the same ASP.NET API as `AddJwtBearer`. When `app.Mcp` is set, scheme/policy `SqlOS.Mcp` is registered for that audience; the host calls `RequireAuthorization("SqlOS.Mcp")` on `MapMcp`. SqlOS does not wrap routes from a path string and does not handle CORS. Handlers read the result with `GetSqlOSValidatedToken()` or `HttpContext.User`. API and MCP tokens are not interchangeable.
 
 The challenge's `resource_metadata` URL points to `/.well-known/oauth-protected-resource` for the API and `/.well-known/oauth-protected-resource/mcp` for MCP.
 
@@ -105,61 +104,71 @@ The token's `scope` claim is the client's delegation ceiling. Inspect it on `Get
 
 The [Notes sample](examples/SqlOS.OneCall.Api) is a complete version of this setup. Each user gets a personal notebook on first use. Both HTTP handlers and MCP tools call `NotesService`, which checks the same permissions before reading or writing.
 
-### `app.Mcp(...)`: register tools and protect the server
+### MCP: resource settings and the Microsoft SDK
 
-Add the `SqlOS.Mcp` package, then describe the surfaces and permission vocabulary together. This is the registration used with the sample's `NotesDbContext`, `NotesService`, and `NotesMcpTools`:
+SqlOS is the auth server. `app.Mcp = "/mcp"` is a resource id — audience `{Origin}/mcp`, the RFC 9728 document, scheme/policy `SqlOS.Mcp`, and CIMD/resource indicators for portable clients. The transport is Microsoft's MCP SDK, referenced by the host. Describe the surfaces and permission vocabulary together, then map the SDK:
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
+using ModelContextProtocol.AspNetCore;
+using SqlOS.AuthServer.Authentication;
 using SqlOS.Extensions;
-using SqlOS.Mcp;
 using SqlOS.OneCall.Api;
 
 builder.Services.AddScoped<NotesService>();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddMcpServer()
+    .WithHttpTransport(transport => transport.SessionMode = HttpServerSessionMode.Stateless)
+    .WithTools<NotesMcpTools>();
 builder.AddSqlOS<NotesDbContext>(db => db.UseSqlServer(connectionString), options =>
     options.UseSingleApplication("Notes", app =>
     {
         app.Origin = "http://localhost:5085";
         app.ClientId = "notes";
         app.Api = "/api";
-        app.Mcp("/mcp", mcp => mcp.WithTools<NotesMcpTools>());
+        app.Mcp = "/mcp";
         app.Authorization(fga => fga
             .ResourceType("notebook", "Notebook")
             .Permission("NOTES_READ", "Read notes", "notebook")
             .Permission("NOTES_WRITE", "Write notes", "notebook")
             .Role("notebook_owner", "Notebook owner").Can("NOTES_READ", "NOTES_WRITE"));
     }));
+
+var app = builder.Build();
+app.MapMcp("/mcp").RequireAuthorization(SqlOSJwtDefaults.McpPolicy);
 ```
 
-Here is the entire tool class. It obtains the authenticated user from SqlOS and delegates to the application service:
+Here is the entire tool class. It obtains the authenticated user from the token SqlOS already validated and delegates to the application service:
 
 ```csharp
 using System.ComponentModel;
+using Microsoft.AspNetCore.Http;
 using ModelContextProtocol.Server;
-using SqlOS.Mcp;
+using SqlOS.AuthServer.Extensions;
 using SqlOS.OneCall.Api;
 
 public sealed class NotesMcpTools
 {
     [McpServerTool(Name = "list_notes"), Description("Lists the connecting user's notes.")]
     public static async Task<IReadOnlyList<string>> ListNotes(
-        ISqlOSMcpUserContext user, NotesService notes, CancellationToken ct)
-        => (await notes.ListAsync(RequireUser(user), ct)).Select(note => note.Text).ToArray();
+        IHttpContextAccessor http, NotesService notes, CancellationToken ct)
+        => (await notes.ListAsync(RequireUser(http), ct)).Select(note => note.Text).ToArray();
 
     [McpServerTool(Name = "add_note"), Description("Adds a note to the connecting user's notebook.")]
     public static async Task<string> AddNote(
-        ISqlOSMcpUserContext user, NotesService notes,
+        IHttpContextAccessor http, NotesService notes,
         [Description("The note text.")] string text, CancellationToken ct)
-        => (await notes.AddAsync(RequireUser(user), text, ct)).Id.ToString();
+        => (await notes.AddAsync(RequireUser(http), text, ct)).Id.ToString();
 
-    private static string RequireUser(ISqlOSMcpUserContext user)
-        => user.UserId ?? throw new InvalidOperationException("This tool requires a user token.");
+    private static string RequireUser(IHttpContextAccessor http)
+        => http.HttpContext?.GetSqlOSValidatedToken()?.UserId
+           ?? throw new InvalidOperationException("This tool requires a user token.");
 }
 ```
 
-**What changes:** SqlOS hosts these tools at `/mcp`, validates tokens for `http://localhost:5085/mcp`, publishes the protected-resource document, and enables client ID metadata documents (CIMD) plus resource indicators. Compatible clients can use their metadata URL as `client_id` and request the MCP resource. This does not enable dynamic client registration (DCR); clients needing DCR require [explicit compatibility configuration](https://sqlos.dev/docs/authserver/dynamic-client-registration). Internet-hosted clients also need an HTTPS endpoint they can reach.
+**What changes:** SqlOS validates tokens for `http://localhost:5085/mcp`, publishes the protected-resource document, and enables client ID metadata documents (CIMD) plus resource indicators. Compatible clients can use their metadata URL as `client_id` and request the MCP resource. This does not enable dynamic client registration (DCR); clients needing DCR require [explicit compatibility configuration](https://sqlos.dev/docs/authserver/dynamic-client-registration). Internet-hosted clients also need an HTTPS endpoint they can reach.
 
-Tool calls are audited with their name, subject, client, and outcome, without arguments or tokens. `ISqlOSMcpUserContext` exposes the validated user, organization, client, and scopes. Hosting a tool does **not** automatically authorize its database operations: the service below supplies that enforcement. Use this when agents should act through the same business rules as your UI and API.
+Hosting a tool does **not** automatically authorize its database operations: the service below supplies that enforcement. Use this when agents should act through the same business rules as your UI and API. The Notes sample records `mcp.tool.called` audit events in the host, not in SqlOS.
 
 ### `app.Authorization(...)`: vocabulary, grants, and enforcement
 

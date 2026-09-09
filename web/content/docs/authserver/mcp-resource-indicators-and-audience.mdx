@@ -43,7 +43,7 @@ If no `resource` is supplied, SqlOS can preserve the client-audience fallback fo
 
 ## Configuration
 
-Resource indicators are enabled in the raw multi-client defaults. `UseSingleApplication(...)` keeps them off for the simpler one-app model unless you declare an `Mcp` surface (`app.Mcp("/mcp", ...)`), which turns them on together with CIMD because portable MCP clients need both. Without an MCP surface, enable them explicitly before expecting a supplied `resource` value to control `aud`.
+Resource indicators are enabled in the raw multi-client defaults. `UseSingleApplication(...)` keeps them off for the simpler one-app model unless you declare an `Mcp` surface (`app.Mcp = "/mcp"`), which turns them on together with CIMD because portable MCP clients need both. Without an MCP surface, enable them explicitly before expecting a supplied `resource` value to control `aud`.
 
 You can configure them directly:
 

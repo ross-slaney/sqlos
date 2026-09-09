@@ -2,25 +2,28 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using FluentAssertions;
-using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using ModelContextProtocol;
+using ModelContextProtocol.AspNetCore;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Server;
+using SqlOS.AuthServer.Authentication;
 using SqlOS.AuthServer.Configuration;
-using SqlOS.AuthServer.Models;
+using SqlOS.AuthServer.Extensions;
 using SqlOS.Configuration;
-using SqlOS.Mcp;
 using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.Tests;
 
 /// <summary>
-/// Proves the <c>SqlOS.Mcp</c> one-call shape: <c>app.Mcp("/mcp", mcp => mcp.WithTools&lt;T&gt;())</c>
-/// inside <c>AddSqlOS</c> hosts a protected MCP server with no <c>AddMcpServer</c> or <c>MapMcp</c>
-/// in application code.
+/// Proves the settings-plus-SDK shape: <c>app.Mcp = "/mcp"</c> is a SqlOS resource id
+/// (audience, PRM, CIMD, resource indicators, scheme/policy <c>SqlOS.Mcp</c>). The host
+/// registers Microsoft's MCP SDK and locks <c>MapMcp</c> with that policy. SqlOS.dll
+/// takes no MCP SDK dependency.
 /// </summary>
 [TestClass]
 public sealed class SqlOSMcpHostingTests
@@ -29,30 +32,19 @@ public sealed class SqlOSMcpHostingTests
     private const string ApiAudience = SingleApplicationTestHost.Origin + "/api";
 
     [TestMethod]
-    public void Mcp_SetsSurfaceAndRegistersHostExtension()
+    public void Mcp_SetsSurfaceAndEnablesPortableClientSettings()
     {
         var options = new SqlOSAuthServerOptions();
         options.UseSingleApplication("Todo", app =>
         {
             app.Origin = "https://todo.example.com";
-            app.Mcp("/mcp", mcp => mcp.WithTools<EchoTools>());
+            app.Mcp = "/mcp";
         });
 
         options.SingleApplication!.Mcp.Should().Be("/mcp");
-        options.SingleApplication.HostExtensions.Should().ContainSingle();
+        options.SingleApplication.HostExtensions.Should().BeEmpty();
         options.ClientRegistration.Cimd.Enabled.Should().BeTrue();
         options.ResourceIndicators.Enabled.Should().BeTrue();
-    }
-
-    [TestMethod]
-    public void Mcp_CalledTwice_Throws()
-    {
-        var app = new SqlOSSingleApplicationOptions { Name = "Todo", Origin = "https://todo.example.com" };
-        app.Mcp("/mcp", mcp => mcp.WithTools<EchoTools>());
-
-        var act = () => app.Mcp("/mcp2", mcp => mcp.WithTools<EchoTools>());
-
-        act.Should().Throw<InvalidOperationException>().WithMessage("*more than once*");
     }
 
     [TestMethod]
@@ -105,51 +97,6 @@ public sealed class SqlOSMcpHostingTests
     }
 
     [TestMethod]
-    public async Task McpToolCall_WritesOneAuditEventWithoutArgumentsOrTokens()
-    {
-        await using var host = await StartHostAsync();
-        var token = await host.MintAccessTokenAsync(McpAudience, scope: "openid");
-        await using var client = await ConnectAsync(host, token);
-
-        var result = await client.CallToolAsync("echo", new Dictionary<string, object?> { ["message"] = "super-secret-argument" });
-        result.IsError.Should().NotBe(true);
-
-        await using var scope = host.App.Services.CreateAsyncScope();
-        var context = scope.ServiceProvider.GetRequiredService<TestSqlOSInMemoryDbContext>();
-        var events = await context.Set<SqlOSAuditEvent>().Where(x => x.Action == "mcp.tool.called").ToListAsync();
-
-        var audit = events.Should().ContainSingle().Subject;
-        audit.Source.Should().Be("mcp");
-        audit.ActorType.Should().Be("user");
-        audit.UserId.Should().NotBeNullOrWhiteSpace();
-        audit.ActorId.Should().Be(audit.UserId);
-        audit.ApplicationKey.Should().NotBeNullOrWhiteSpace();
-        audit.TargetsJson.Should().Contain("\"mcp_tool\"").And.Contain("\"echo\"");
-        audit.MetadataJson.Should().Contain("\"outcome\":\"succeeded\"");
-        audit.MetadataJson.Should().NotContain("super-secret-argument");
-        audit.MetadataJson.Should().NotContain(token);
-        audit.ContextJson.Should().NotContain(token);
-    }
-
-    [TestMethod]
-    public async Task McpToolCall_ThrowingTool_IsAuditedAsExceptionWithoutMessage()
-    {
-        await using var host = await StartHostAsync();
-        var token = await host.MintAccessTokenAsync(McpAudience, scope: "openid");
-        await using var client = await ConnectAsync(host, token);
-
-        var result = await client.CallToolAsync("echo", new Dictionary<string, object?> { ["message"] = "fail" });
-        result.IsError.Should().Be(true);
-
-        await using var scope = host.App.Services.CreateAsyncScope();
-        var context = scope.ServiceProvider.GetRequiredService<TestSqlOSInMemoryDbContext>();
-        var audit = await context.Set<SqlOSAuditEvent>().SingleAsync(x => x.Action == "mcp.tool.called");
-        audit.MetadataJson.Should().Contain("\"outcome\":\"exception\"");
-        audit.MetadataJson.Should().Contain("\"failureKind\":\"McpException\"");
-        audit.MetadataJson.Should().NotContain("echo refused");
-    }
-
-    [TestMethod]
     public async Task McpHost_ServesProtectedResourceDocumentAndAdvertisesCimd()
     {
         await using var host = await StartHostAsync();
@@ -174,15 +121,24 @@ public sealed class SqlOSMcpHostingTests
     }
 
     private static Task<SingleApplicationTestHost> StartHostAsync()
-        => SingleApplicationTestHost.StartAsync(options =>
-        {
-            options.AuthServer.UseSingleApplication("Todo", app =>
+        => SingleApplicationTestHost.StartAsync(
+            options =>
             {
-                app.Origin = SingleApplicationTestHost.Origin;
-                app.Api = "/api";
-                app.Mcp("/mcp", mcp => mcp.WithTools<EchoTools>());
-            });
-        });
+                options.AuthServer.UseSingleApplication("Todo", app =>
+                {
+                    app.Origin = SingleApplicationTestHost.Origin;
+                    app.Api = "/api";
+                    app.Mcp = "/mcp";
+                });
+            },
+            configureServices: services =>
+            {
+                services.AddHttpContextAccessor();
+                services.AddMcpServer()
+                    .WithHttpTransport(transport => transport.SessionMode = HttpServerSessionMode.Stateless)
+                    .WithTools<EchoTools>();
+            },
+            configureApp: app => app.MapMcp("/mcp").RequireAuthorization(SqlOSJwtDefaults.McpPolicy));
 
     private static async Task<McpClient> ConnectAsync(SingleApplicationTestHost host, string token)
     {
@@ -212,14 +168,20 @@ public sealed class SqlOSMcpHostingTests
             => message == "fail" ? throw new McpException("echo refused") : message;
 
         [McpServerTool(Name = "whoami"), System.ComponentModel.Description("Describes the connecting SqlOS user.")]
-        public static string WhoAmI(ISqlOSMcpUserContext user)
-            => JsonSerializer.Serialize(new
+        public static string WhoAmI(IHttpContextAccessor http)
+        {
+            var token = http.HttpContext?.GetSqlOSValidatedToken();
+            var scopes = string.IsNullOrWhiteSpace(token?.Scope)
+                ? Array.Empty<string>()
+                : token.Scope.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            return JsonSerializer.Serialize(new
             {
-                authenticated = user.IsAuthenticated,
-                userId = user.UserId,
-                clientId = user.ClientId,
-                audience = user.Audience,
-                scopes = user.Scopes
+                authenticated = token != null,
+                userId = token?.UserId,
+                clientId = token?.ClientId,
+                audience = token?.Audience,
+                scopes
             });
+        }
     }
 }

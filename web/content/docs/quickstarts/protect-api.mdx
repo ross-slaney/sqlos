@@ -160,7 +160,7 @@ Bearer validation does not configure CORS. Add an explicit CORS policy for trust
 - Use an HTTPS audience that identifies the deployed resource server.
 - Keep audiences distinct when separate APIs should not accept each other's tokens.
 - Resolve the acting subject from the validated token or `HttpContext.User`; never trust a subject ID supplied in a request body.
-- For an MCP surface, declare `app.Mcp("/mcp", ...)` next to `Api`; see [MCP server](/docs/authserver/mcp-server).
+- For an MCP surface, set `app.Mcp = "/mcp"` next to `Api` and map Microsoft's SDK with `RequireAuthorization("SqlOS.Mcp")`; see [MCP server](/docs/authserver/mcp-server).
 - Use authorization checks in addition to token validation. A valid token identifies the caller; it does not grant access to every application row.
 
 ## Next steps

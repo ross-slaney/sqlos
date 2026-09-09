@@ -17,6 +17,7 @@
     <PackageReference Include="Microsoft.AspNetCore.TestHost" Version="9.0.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="9.0.0" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.4" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="MSTest.TestAdapter" Version="3.6.3" />
     <PackageReference Include="MSTest.TestFramework" Version="3.6.3" />
@@ -28,7 +29,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\SqlOS\SqlOS.csproj" />
-    <ProjectReference Include="..\..\src\SqlOS.Mcp\SqlOS.Mcp.csproj" />
     <ProjectReference Include="..\..\examples\SqlOS.OneCall.Api\SqlOS.OneCall.Api.csproj" />
     <ProjectReference Include="..\SqlOS.IntegrationTests.AppHost\SqlOS.IntegrationTests.AppHost.csproj" />
   </ItemGroup>

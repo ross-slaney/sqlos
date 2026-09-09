@@ -18,8 +18,8 @@ section: guides
 
 This guide builds **Taskrail**, a fictional MCP server at `https://mcp.taskrail.test`. A portable client identifies itself with a metadata document, completes authorization code with PKCE, and receives a SqlOS access token whose `aud` is exactly the Taskrail MCP resource.
 
-<Callout type="info" title="Hosting the MCP server in your own SqlOS app? Use the one-call path">
-  When the MCP server lives in the same host as SqlOS, declare it inside `UseSingleApplication` or `ConfigureApplication` with `app.Mcp("/mcp", mcp => mcp.WithTools<MyTools>())` from the `SqlOS.Mcp` package. SqlOS then serves the protected-resource document, registers scheme/policy `SqlOS.Mcp` with that audience, enables CIMD and resource indicators, and hosts the server; steps 1 and 2 below are derived for you. See [MCP server](/docs/authserver/mcp-server). This guide covers the explicit, multi-client setup where the authorization server and the MCP resource are separate deployments.
+<Callout type="info" title="Hosting the MCP server in your own SqlOS app?">
+  When the MCP server lives in the same host as SqlOS, set `app.Mcp = "/mcp"` inside `UseSingleApplication` or `ConfigureApplication`. SqlOS then serves the protected-resource document, registers scheme/policy `SqlOS.Mcp` with that audience, and enables CIMD and resource indicators. Map Microsoft's MCP SDK with `AddMcpServer` / `MapMcp` and lock it with `RequireAuthorization("SqlOS.Mcp")`. See [MCP server](/docs/authserver/mcp-server). This guide covers the explicit, multi-client setup where the authorization server and the MCP resource are separate deployments.
 </Callout>
 
 <Callout type="info" title="Use the simpler client path when you can">
@@ -103,7 +103,7 @@ app.MapGet("/.well-known/oauth-protected-resource", () =>
 });
 ```
 
-An unauthenticated MCP request should receive a bearer challenge that points back to this URL. On a SqlOS host, declare `app.Mcp("/mcp", …)` so `SqlOS.Mcp` requires the MCP scheme and emits that challenge. On a host that only calls `ValidateAccessTokenAsync`, write the same `WWW-Authenticate` Bearer challenge yourself when validation fails.
+An unauthenticated MCP request should receive a bearer challenge that points back to this URL. On a SqlOS host, set `app.Mcp = "/mcp"` and call `RequireAuthorization("SqlOS.Mcp")` on `MapMcp` so the MCP scheme emits that challenge. On a host that only calls `ValidateAccessTokenAsync`, write the same `WWW-Authenticate` Bearer challenge yourself when validation fails.
 
 ## 3. Publish the portable client document
 

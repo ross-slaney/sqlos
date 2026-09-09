@@ -11,7 +11,7 @@ SqlOS validation is stateful: after signature, issuer, audience, and JWT lifetim
 
 ## Declared API and MCP surfaces
 
-Declare `app.Api = "/api"` (and `app.Mcp("/mcp", …)` when you host MCP) inside `UseSingleApplication` or `ConfigureApplication`. `AddSqlOS` registers the `SqlOS` JWT scheme with that API audience. Call `RequireAuthorization()` on the groups you lock. Authentication sets `HttpContext.User` and stores the `SqlOSValidatedToken` on the current request:
+Declare `app.Api = "/api"` (and `app.Mcp = "/mcp"` when you expose MCP) inside `UseSingleApplication` or `ConfigureApplication`. `AddSqlOS` registers the `SqlOS` JWT scheme with that API audience, and scheme/policy `SqlOS.Mcp` when `Mcp` is set. Call `RequireAuthorization()` on the groups you lock. Authentication sets `HttpContext.User` and stores the `SqlOSValidatedToken` on the current request:
 
 ```csharp
 using SqlOS.AuthServer.Extensions;

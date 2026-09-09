@@ -14,7 +14,6 @@ Suppose the existing host used `UseSingleApplication("Acme", app => ...)` at `ht
 ```csharp
 using Microsoft.EntityFrameworkCore;
 using SqlOS.Extensions;
-using SqlOS.Mcp;
 
 builder.AddSqlOS<AppDbContext>(db => db.UseSqlServer(connectionString), options =>
 {
@@ -22,7 +21,7 @@ builder.AddSqlOS<AppDbContext>(db => db.UseSqlServer(connectionString), options 
     {
         app.Origin = "https://acme.example.com";
         app.Api = "/api";
-        app.Mcp("/mcp", mcp => mcp.WithTools<AcmeTools>());
+        app.Mcp = "/mcp";
         app.Brand(page => page.PrimaryColor = "#0f172a");
         app.Authorization(fga => fga
             .ResourceType("project", "Project")

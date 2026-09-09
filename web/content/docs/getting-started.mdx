@@ -22,7 +22,7 @@ order: 0
 
 ## The standard flow: one app, one call
 
-For a typical .NET B2B SaaS product you have one ASP.NET Core host, one EF Core `DbContext` on SQL Server or PostgreSQL, and one product that users sign in to. `builder.AddSqlOS<TContext>(…)` describes that product once and SqlOS derives every protocol consequence — auth routes, JWT schemes, metadata documents, client registration, seeds. `Program.cs` contains no `AddMcpServer` or `MapMcp` calls. Lock application APIs with `RequireAuthorization()`.
+For a typical .NET B2B SaaS product you have one ASP.NET Core host, one EF Core `DbContext` on SQL Server or PostgreSQL, and one product that users sign in to. `builder.AddSqlOS<TContext>(…)` describes that product once and SqlOS derives the protocol consequences — auth routes, JWT schemes, metadata documents, client registration, seeds. Lock application APIs with `RequireAuthorization()`. If you expose MCP, set `app.Mcp` and map Microsoft's SDK yourself.
 
 ```csharp
 builder.AddSqlOS<AppDbContext>(
@@ -33,7 +33,7 @@ builder.AddSqlOS<AppDbContext>(
         {
             app.Origin = publicOrigin;                            // everything else derives from this
             app.Api = "/api";                                     // resource id {Origin}/api — scheme audience + PRM
-            app.Mcp("/mcp", mcp => mcp.WithTools<AcmeTools>());   // SqlOS.Mcp: hosted, OAuth-protected MCP server
+            app.Mcp = "/mcp";                                      // resource id {Origin}/mcp — map the MCP SDK yourself
             app.Brand(page => page.PrimaryColor = "#0f172a");     // hosted sign-in colors, logo, copy
             // app.Headless("/auth/authorize");                   // ...or your own sign-in UI instead of the hosted pages
             app.Authorization(fga => fga                          // your permission model, reconciled at startup
@@ -55,7 +55,7 @@ Every line is optional except `Origin`. Start with `Origin` alone and add lines 
 | --- | --- | --- |
 | `app.Origin` | required | Public origin of your app. Issuer (`{Origin}/sqlos/auth`), redirect URI (`{Origin}/auth/callback`), and audiences derive from it. |
 | `app.Api = "/api"` | off | Resource id `{Origin}/api`: default `SqlOS` JWT scheme audience, first-party client audience, and `/.well-known/oauth-protected-resource`. Lock your routes with `RequireAuthorization()`. [Protect an API](/docs/quickstarts/protect-api) |
-| `app.Mcp("/mcp", mcp => …)` | off | Hosts an MCP server at `/mcp` with scheme/policy `SqlOS.Mcp`, a distinct audience, its own protected-resource document, and portable-client registration (CIMD + resource indicators) turned on. Needs the `SqlOS.Mcp` package; the lambda is the MCP SDK's `IMcpServerBuilder`. [MCP server](/docs/authserver/mcp-server) |
+| `app.Mcp = "/mcp"` | off | Resource id `{Origin}/mcp`: scheme/policy `SqlOS.Mcp`, a distinct audience, its own protected-resource document, and portable-client registration (CIMD + resource indicators). The host maps Microsoft's MCP SDK and calls `RequireAuthorization("SqlOS.Mcp")`. [MCP server](/docs/authserver/mcp-server) |
 | `app.Brand(page => …)` | `Sign in to {Name}` | Brands the hosted login, signup, OTP, MFA, and consent pages. Same options as `AuthServer.SeedAuthPage`. [Branding](/docs/guides/auth-branding) |
 | `app.Headless("/auth/authorize")` | hosted pages | Switches to **your** sign-in UI: SqlOS redirects browser interaction to `{Origin}/auth/authorize` with the standard `request`, `view`, `email`, `pendingToken`, `mfaToken`, … parameters that `@sqlos/headless` reads. Same as `AuthServer.UseHeadlessAuthPage`. [Custom login UI](/docs/guides/custom-login-ui) |
 | `app.Authorization(fga => …)` | none | Declares resource types, permissions, and roles; reconciled idempotently at startup. Same as `Fga.Seed`. [Model your FGA](/docs/guides/model-fga) |

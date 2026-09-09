@@ -23,7 +23,6 @@ const snippetSpecs = [
     name: "multiple-application migration", relativePath: "web/content/docs/authserver/multiple-applications.mdx",
     heading: "## Graduate an existing application", marker: "builder.AddSqlOS<AppDbContext>",
     wrap: (snippet) => snippet.replace("builder.AddSqlOS<AppDbContext>", `using SqlOS;
-using AcmeTools = SqlOS.OneCall.Api.NotesMcpTools;
 var builder = WebApplication.CreateBuilder(args);
 var connectionString = "Server=localhost;Database=acme;Integrated Security=True;TrustServerCertificate=True";
 builder.AddSqlOS<AppDbContext>`) + `
@@ -41,13 +40,13 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : SqlOS
   })),
   {
     name: "README MCP registration", relativePath: "README.md",
-    heading: "### `app.Mcp(...)`: register tools and protect the server",
+    heading: "### MCP: resource settings and the Microsoft SDK",
     marker: "builder.AddSqlOS<NotesDbContext>",
     wrap: (snippet) => snippet.replace("builder.Services.AddScoped", 'var builder = WebApplication.CreateBuilder(args);\nvar connectionString = "Server=localhost;Database=notes;Integrated Security=True;TrustServerCertificate=True";\nbuilder.Services.AddScoped'),
   },
   {
     name: "README MCP tools", relativePath: "README.md",
-    heading: "### `app.Mcp(...)`: register tools and protect the server",
+    heading: "### MCP: resource settings and the Microsoft SDK",
     marker: "public sealed class NotesMcpTools",
     wrap: (snippet) => snippet.replace("public sealed class NotesMcpTools", "var builder = WebApplication.CreateBuilder(args);\nbuilder.Build().Run();\n\npublic sealed class NotesMcpTools"),
   },
@@ -481,6 +480,7 @@ try {
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.0" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="9.0.0" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
     <ProjectReference Include="${sourceProject}" />
     <ProjectReference Include="${path.join(repoRoot, "examples", "SqlOS.OneCall.Api", "SqlOS.OneCall.Api.csproj")}" />
   </ItemGroup>

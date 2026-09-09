@@ -81,7 +81,7 @@ builder.AddSqlOS<AppDbContext>(
             app.Api = "/api";                                       // resource id {Origin}/api — scheme audience + PRM
             app.Brand(page => page.PrimaryColor = "#0f172a");       // hosted sign-in pages
             // app.Headless("/auth/authorize");                     // ...or your own sign-in UI instead
-            // app.Mcp("/mcp", mcp => mcp.WithTools<AcmeTools>());  // SqlOS.Mcp package: hosted MCP server
+            // app.Mcp = "/mcp";                                   // resource id {Origin}/mcp — map the MCP SDK yourself
             // app.Authorization(fga => ...);                       // permission model, when you need row-level rules
         });
 

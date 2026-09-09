@@ -156,7 +156,7 @@ Single-application mode creates one first-party public PKCE client and applies A
 | `Name` | `string` | Display name; also the default `ClientName` and AuthPage title. |
 | `Origin` | `string?` | Absolute HTTP(S) origin of the application (no path). Required when `Api` or `Mcp` is set. |
 | `Api` | `string?` | Absolute path of the REST resource, for example `/api`. Sets the `SqlOS` JWT scheme audience to `{Origin}{Api}`, the first-party client audience, and serves the RFC 9728 document at `/.well-known/oauth-protected-resource`. Lock routes with `RequireAuthorization()`. |
-| `Mcp` | `string?` | Absolute path of the MCP resource, for example `/mcp`. Registers scheme/policy `SqlOS.Mcp` with audience `{Origin}{Mcp}`, serves `/.well-known/oauth-protected-resource{Mcp}`, and enables client ID metadata documents plus resource indicators. Set it through `app.Mcp(path, configure)` from the `SqlOS.Mcp` package to also host the server. |
+| `Mcp` | `string?` | Absolute path of the MCP resource, for example `/mcp`. Registers scheme/policy `SqlOS.Mcp` with audience `{Origin}{Mcp}`, serves `/.well-known/oauth-protected-resource{Mcp}`, and enables client ID metadata documents plus resource indicators. The host maps Microsoft's MCP SDK and calls `RequireAuthorization("SqlOS.Mcp")`. |
 | `Brand(Action<SqlOSAuthPageSeedOptions>)` | method | Forwards to `AuthServer.SeedAuthPage` on top of the single-application defaults. |
 | `Headless(string uiPath, Action<SqlOSHeadlessAuthOptions>? configure = null)` | method | Uses your own sign-in UI at `{Origin}{uiPath}` instead of the hosted pages. Forwards to `AuthServer.UseHeadlessAuthPage` with a generated `BuildUiUrl` that passes `request`, `view`, `error`, `email`, `displayName`, `pendingToken`, `mfaToken`, `consentToken`, and `ui_context`. Requires `Origin`; `uiPath` must start with `/`. |
 | `Headless(Action<SqlOSHeadlessAuthOptions>)` | method | Forwards to `AuthServer.UseHeadlessAuthPage` unchanged; set `BuildUiUrl` yourself. |
@@ -185,7 +185,7 @@ Describes the host independently of client registration. `SqlOSApplicationOption
 
 ## Endpoint mapping
 
-`AddSqlOS` registers an `IStartupFilter` that maps the AuthServer routes, audit-log admin routes, transactional-email admin routes, calendar routes (when `SqlOSOptions.Calendar.Enabled` is `true`), the protected-resource documents for declared surfaces, and companion-package endpoints such as the MCP server. They join the application's own route table, so the application's middleware (CORS, exception handling, rate limiting) runs in front of them and normal route precedence applies.
+`AddSqlOS` registers an `IStartupFilter` that maps the AuthServer routes, audit-log admin routes, transactional-email admin routes, calendar routes (when `SqlOSOptions.Calendar.Enabled` is `true`), and the protected-resource documents for declared surfaces. They join the application's own route table, so the application's middleware (CORS, exception handling, rate limiting) runs in front of them and normal route precedence applies. The MCP transport is the host's `AddMcpServer` / `MapMcp` calls.
 
 A leftover `MapAuthServer()` call is safe and idempotent: SqlOS withdraws its own copy of those routes and logs one warning. Remove the call.
 
@@ -235,9 +235,10 @@ api.MapGet("/me", (HttpContext http) =>
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
+using ModelContextProtocol.AspNetCore;
+using SqlOS.AuthServer.Authentication;
 using SqlOS.AuthServer.Extensions;
 using SqlOS.Extensions;
-using SqlOS.Mcp; // SqlOS.Mcp package, only for app.Mcp(...)
 
 const string origin = "https://localhost:5001";
 
@@ -254,7 +255,7 @@ builder.AddSqlOS<AppDbContext>(
         {
             app.Origin = origin;
             app.Api = "/api";
-            app.Mcp("/mcp", mcp => mcp.WithTools<AcmeTools>());
+            app.Mcp = "/mcp";
             app.Brand(page => page.PrimaryColor = "#0f172a");
             app.Authorization(fga => fga
                 .ResourceType("project", "Project")
@@ -263,15 +264,21 @@ builder.AddSqlOS<AppDbContext>(
         });
     });
 
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddMcpServer()
+    .WithHttpTransport(transport => transport.SessionMode = HttpServerSessionMode.Stateless)
+    .WithTools<AcmeTools>();
+
 var app = builder.Build();
 
 app.MapGet("/api/projects", (HttpContext http) =>
     Results.Ok(new { user = http.GetSqlOSValidatedToken()!.UserId }))
     .RequireAuthorization();
+app.MapMcp("/mcp").RequireAuthorization(SqlOSJwtDefaults.McpPolicy);
 
 app.Run();
 ```
 
-Application code contains no `AddMcpServer`, `MapMcp`, or hand-written protected-resource document. `AuthServer.Issuer` defaults to `{Origin}/sqlos/auth`.
+SqlOS does not map the MCP server. `AuthServer.Issuer` defaults to `{Origin}/sqlos/auth`.
 
 SqlOS bootstraps its owned schema, signing key, default settings, client seed, and FGA core data when the host starts. Application EF migrations remain responsible only for application-owned tables.
