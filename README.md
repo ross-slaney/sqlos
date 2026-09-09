@@ -26,14 +26,14 @@ Both use the same users, sessions, organizations, FGA services, and dashboard. A
 Use .NET 9, EF Core 9, and an accessible SQL Server or PostgreSQL database. The currently published package version is:
 
 ```bash
-dotnet add package SqlOS --version 6.0.0
+dotnet add package SqlOS --version 7.0.0
 ```
 
 Optional packages for the MCP and custom-login examples:
 
 ```bash
-dotnet add package SqlOS.Mcp --version 6.0.0
-npm install @sqlos/headless@6.0.0
+dotnet add package SqlOS.Mcp --version 7.0.0
+npm install @sqlos/headless@7.0.0
 ```
 
 This is a complete `Program.cs`. Supply `ConnectionStrings:DefaultConnection` through user secrets or your deployment configuration, then run on `http://localhost:5050` in Development. Use an HTTPS origin in production.
