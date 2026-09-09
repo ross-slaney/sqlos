@@ -48,60 +48,62 @@ export default async function BlogPostPage({ params }: PageProps) {
     notFound();
   }
 
+  const published = new Date(post.date).toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+
   return (
-    <div className="mx-auto max-w-3xl px-6 py-16">
-      <Link
-        href="/blog"
-        className="text-sm font-medium text-primary hover:text-primary/80"
-      >
-        &larr; Back to Blog
-      </Link>
+    <div className="sqlos-editorial">
+      <div className="mx-auto max-w-3xl px-6 pb-20 pt-12">
+        <Link href="/blog" className="sqlos-pill-link">
+          <span aria-hidden="true">&larr;</span>
+          All posts
+        </Link>
 
-      <article className="mt-8">
-        <header className="mb-10 border-b border-border pb-8">
-          <time className="text-sm text-muted-foreground">
-            {new Date(post.date).toLocaleDateString("en-US", {
-              year: "numeric",
-              month: "long",
-              day: "numeric",
-            })}
-          </time>
-          <h1 className="mt-2 text-4xl font-bold tracking-tight text-foreground">
-            {post.title}
-          </h1>
-          <p className="mt-4 text-lg leading-7 text-muted-foreground">
-            {post.description}
-          </p>
-          {post.tags.length > 0 && (
-            <div className="mt-4 flex flex-wrap gap-2">
-              {post.tags.map((tag) => (
-                <span
-                  key={tag}
-                  className="inline-flex items-center rounded-full border border-border bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground"
-                >
-                  {tag}
-                </span>
-              ))}
+        <article className="mt-10">
+          <header className="relative mb-12 pb-10">
+            <p className="sqlos-eyebrow">
+              <time dateTime={post.date}>{published}</time>
+            </p>
+            <h1 className="mt-4 text-[clamp(2.4rem,1.5rem+2.6vw,3.4rem)] font-medium leading-[1.05] tracking-[-0.03em] text-[hsl(var(--sq-ink))]">
+              {post.title}
+            </h1>
+            <p className="mt-5 max-w-2xl text-xl leading-8 text-[hsl(var(--sq-ink-3))]">
+              {post.description}
+            </p>
+            <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-3">
+              <p className="text-sm font-medium text-[hsl(var(--sq-ink-2))]">
+                By {post.author}
+              </p>
+              {post.tags.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {post.tags.map((tag) => (
+                    <span key={tag} className="sqlos-tag">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
-          )}
-          <p className="mt-4 text-sm text-muted-foreground">
-            By {post.author}
-          </p>
-        </header>
+            <div className="sqlos-hairline absolute inset-x-0 bottom-0" />
+          </header>
 
-        <div className="sqlos-prose prose prose-zinc max-w-none prose-headings:font-semibold prose-headings:tracking-tight prose-headings:text-foreground prose-p:text-zinc-800 prose-li:text-zinc-800 prose-strong:text-foreground prose-a:font-medium prose-a:text-primary prose-a:no-underline hover:prose-a:underline prose-code:before:content-none prose-code:after:content-none prose-pre:bg-transparent prose-pre:p-0">
-          <MDXRemote
-            source={post.content}
-            components={blogMdxComponents}
-            options={{
-              mdxOptions: {
-                remarkPlugins: [remarkGfm],
-                rehypePlugins: [[rehypePrettyCode, prettyCodeOptions]],
-              },
-            }}
-          />
-        </div>
-      </article>
+          <div className="sqlos-prose prose max-w-none">
+            <MDXRemote
+              source={post.content}
+              components={blogMdxComponents}
+              options={{
+                mdxOptions: {
+                  remarkPlugins: [remarkGfm],
+                  rehypePlugins: [[rehypePrettyCode, prettyCodeOptions]],
+                },
+              }}
+            />
+          </div>
+        </article>
+      </div>
     </div>
   );
 }

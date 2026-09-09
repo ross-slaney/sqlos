@@ -10,7 +10,7 @@ export default function DocsRootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <>
+    <div className="sqlos-docs-site">
       <Header />
       <DocsLayout
         navigation={docsSource.getNavigation()}
@@ -53,18 +53,18 @@ export default function DocsRootLayout({
             secondary: "228 22% 96%",
             secondaryForeground: "240 22% 8%",
             muted: "228 18% 95%",
-            mutedForeground: "240 12% 28%",
+            mutedForeground: "240 12% 30%",
             accent: "270 90% 95%",
             accentForeground: "270 70% 24%",
-            border: "228 16% 80%",
-            borderStrong: "228 16% 68%",
+            border: "228 16% 84%",
+            borderStrong: "228 16% 72%",
             input: "228 16% 80%",
             ring: "270 82% 46%",
             accentSoft: "270 90% 94% / 0.7",
             surface: "0 0% 100%",
             bg: "40 20% 99%",
-            codeBg: "228 26% 93%",
-            codeBorder: "228 16% 72%",
+            codeBg: "228 30% 96%",
+            codeBorder: "230 18% 80%",
             info: "217 90% 44%",
             infoSoft: "217 92% 92% / 0.7",
             warning: "32 90% 42%",
@@ -81,6 +81,6 @@ export default function DocsRootLayout({
         {children}
       </DocsLayout>
       <Footer />
-    </>
+    </div>
   );
 }

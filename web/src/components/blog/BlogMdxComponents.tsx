@@ -244,9 +244,11 @@ export function BlogCallout({
   children: React.ReactNode;
 }) {
   return (
-    <aside className="not-prose my-8 rounded-lg border border-border bg-accent p-5 text-accent-foreground">
-      <h3 className="text-sm font-semibold uppercase tracking-wide">{title}</h3>
-      <div className="mt-2 text-sm leading-6 text-foreground">
+    <aside className="not-prose relative my-8 overflow-hidden rounded-xl border border-border bg-[linear-gradient(90deg,hsl(var(--sq-violet-soft)),#fff_55%)] p-5 pl-6 shadow-sm before:absolute before:inset-y-0 before:left-0 before:w-1 before:bg-[hsl(var(--sq-violet))]">
+      <h3 className="text-xs font-bold uppercase tracking-[0.08em] text-[hsl(var(--sq-ink))]">
+        {title}
+      </h3>
+      <div className="mt-2 text-[0.9375rem] leading-7 text-[hsl(var(--sq-ink-2))]">
         {children}
       </div>
     </aside>
