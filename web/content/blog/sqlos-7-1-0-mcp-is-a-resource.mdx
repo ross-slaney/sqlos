@@ -1,0 +1,57 @@
+---
+title: "SqlOS 7.1: MCP is a resource, not a package"
+description: "SqlOS declares the MCP audience. Microsoft's SDK hosts the server. SqlOS.Mcp is gone."
+date: "2026-09-09"
+author: "Ross Slaney"
+tags: ["AuthServer", "OAuth", "MCP", "SqlOS"]
+---
+
+SqlOS is the auth server. A Model Context Protocol endpoint is a protected resource: an audience, an RFC 9728 document, and (for portable clients) CIMD plus resource indicators. The transport is [Microsoft's MCP C# SDK](https://github.com/modelcontextprotocol/csharp-sdk). 7.1 says that out loud and stops shipping a second package that pretended otherwise.
+
+```bash
+dotnet add package SqlOS --version 7.1.0
+dotnet add package ModelContextProtocol.AspNetCore
+```
+
+## What SqlOS still does
+
+`app.Mcp = "/mcp"` is settings. From that assignment SqlOS registers scheme/policy `SqlOS.Mcp` with audience `{Origin}/mcp`, serves `/.well-known/oauth-protected-resource/mcp`, and turns on CIMD and resource indicators. It does not mint a special MCP token type, change the OpenID Provider, or authorize your data.
+
+## What the host writes
+
+```csharp
+builder.AddSqlOS<AppDbContext>(db => db.UseSqlServer(connectionString), options =>
+    options.UseSingleApplication("Acme", app =>
+    {
+        app.Origin = "https://app.example.com";
+        app.Api = "/api";
+        app.Mcp = "/mcp";
+    }));
+
+builder.Services.AddMcpServer()
+    .WithHttpTransport(transport => transport.SessionMode = HttpServerSessionMode.Stateless)
+    .WithTools<AcmeTools>();
+
+var app = builder.Build();
+var api = app.MapGroup("/api").RequireAuthorization();
+app.MapMcp("/mcp").RequireAuthorization("SqlOS.Mcp");
+```
+
+Tools read the connecting user with `GetSqlOSValidatedToken()`, then call your API and FGA. Core SqlOS takes no MCP SDK dependency.
+
+See [MCP server](/docs/authserver/mcp-server), [OAuth for MCP clients](/docs/guides/mcp-oauth), and [single-application setup](/docs/authserver/single-application).
+
+## Upgrade notes
+
+```bash
+dotnet add package SqlOS --version 7.1.0
+dotnet add package ModelContextProtocol.AspNetCore
+npm install @sqlos/headless@7.1.0              # if you render your own login UI
+```
+
+- **Drop `SqlOS.Mcp`.** It was a convenience wrapper around `AddMcpServer`, stateless Streamable HTTP, `MapMcp`, a user-context adapter, and a tool-call audit filter.
+- **Replace `app.Mcp("/mcp", mcp => mcp.WithTools<T>())` with `app.Mcp = "/mcp"`.** Then map the SDK in the host and lock it with `RequireAuthorization("SqlOS.Mcp")`.
+- **Replace `ISqlOSMcpUserContext` with `GetSqlOSValidatedToken()`.** Keep any `mcp.tool.called` audit filter in the host if you still want those events.
+- **No schema bump.** 7.1 does not rotate sessions. Users stay signed in.
+
+This release passed the repository's complete gate: build, documentation, unit, SQL Server and PostgreSQL integration, example-application, Todo web and CLI end-to-end, headless Next.js and Angular end-to-end, OpenID conformance, and coverage thresholds.
