@@ -89,7 +89,7 @@ export default async function BlogPage({ searchParams }: BlogPageProps) {
                       day: "numeric",
                     })}
                   </time>
-                  <h2 className="text-2xl font-semibold text-foreground transition-colors group-hover:text-muted-foreground">
+                  <h2 className="text-2xl font-semibold text-foreground transition-colors group-hover:text-primary">
                     {post.title}
                   </h2>
                   <p className="text-muted-foreground">{post.description}</p>
