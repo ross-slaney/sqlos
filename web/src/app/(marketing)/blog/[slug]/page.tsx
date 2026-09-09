@@ -1,7 +1,19 @@
 import { notFound } from "next/navigation";
 import { getAllPosts, getPostBySlug } from "@/lib/blog";
 import { MDXRemote } from "next-mdx-remote/rsc";
+import rehypePrettyCode from "rehype-pretty-code";
 import remarkGfm from "remark-gfm";
+
+const prettyCodeOptions = {
+  theme: {
+    light: "github-light",
+    dark: "github-dark-default",
+  },
+  keepBackground: false,
+  defaultLang: {
+    block: "plaintext",
+  },
+};
 import Link from "next/link";
 import { blogMdxComponents } from "@/components/blog/BlogMdxComponents";
 
@@ -36,55 +48,62 @@ export default async function BlogPostPage({ params }: PageProps) {
     notFound();
   }
 
+  const published = new Date(post.date).toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+
   return (
-    <div className="mx-auto max-w-3xl px-6 py-16">
-      <Link
-        href="/blog"
-        className="text-sm text-indigo-600 hover:text-indigo-500 dark:text-indigo-400"
-      >
-        &larr; Back to Blog
-      </Link>
+    <div className="sqlos-editorial">
+      <div className="mx-auto max-w-3xl px-6 pb-20 pt-12">
+        <Link href="/blog" className="sqlos-pill-link">
+          <span aria-hidden="true">&larr;</span>
+          All posts
+        </Link>
 
-      <article className="mt-8">
-        <header className="mb-8">
-          <time className="text-sm text-zinc-500 dark:text-zinc-500">
-            {new Date(post.date).toLocaleDateString("en-US", {
-              year: "numeric",
-              month: "long",
-              day: "numeric",
-            })}
-          </time>
-          <h1 className="mt-2 text-4xl font-bold text-zinc-900 dark:text-white">
-            {post.title}
-          </h1>
-          <p className="mt-4 text-lg text-zinc-600 dark:text-zinc-400">
-            {post.description}
-          </p>
-          {post.tags.length > 0 && (
-            <div className="flex flex-wrap gap-2 mt-4">
-              {post.tags.map((tag) => (
-                <span
-                  key={tag}
-                  className="inline-flex items-center rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400"
-                >
-                  {tag}
-                </span>
-              ))}
+        <article className="mt-10">
+          <header className="relative mb-12 pb-10">
+            <p className="sqlos-eyebrow">
+              <time dateTime={post.date}>{published}</time>
+            </p>
+            <h1 className="mt-4 text-[clamp(2.4rem,1.5rem+2.6vw,3.4rem)] font-medium leading-[1.05] tracking-[-0.03em] text-[hsl(var(--sq-ink))]">
+              {post.title}
+            </h1>
+            <p className="mt-5 max-w-2xl text-xl leading-8 text-[hsl(var(--sq-ink-3))]">
+              {post.description}
+            </p>
+            <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-3">
+              <p className="text-sm font-medium text-[hsl(var(--sq-ink-2))]">
+                By {post.author}
+              </p>
+              {post.tags.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {post.tags.map((tag) => (
+                    <span key={tag} className="sqlos-tag">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
-          )}
-          <p className="mt-4 text-sm text-zinc-500 dark:text-zinc-500">
-            By {post.author}
-          </p>
-        </header>
+            <div className="sqlos-hairline absolute inset-x-0 bottom-0" />
+          </header>
 
-        <div className="prose prose-zinc dark:prose-invert max-w-none prose-headings:font-semibold prose-a:text-indigo-600 dark:prose-a:text-indigo-400 prose-pre:bg-zinc-900 prose-pre:text-zinc-300 prose-code:text-indigo-600 dark:prose-code:text-indigo-400 prose-code:before:content-none prose-code:after:content-none">
-          <MDXRemote
-            source={post.content}
-            components={blogMdxComponents}
-            options={{ mdxOptions: { remarkPlugins: [remarkGfm] } }}
-          />
-        </div>
-      </article>
+          <div className="sqlos-prose prose max-w-none">
+            <MDXRemote
+              source={post.content}
+              components={blogMdxComponents}
+              options={{
+                mdxOptions: {
+                  remarkPlugins: [remarkGfm],
+                  rehypePlugins: [[rehypePrettyCode, prettyCodeOptions]],
+                },
+              }}
+            />
+          </div>
+        </article>
+      </div>
     </div>
   );
 }

@@ -170,12 +170,12 @@ export function BlogVisual({ kind }: { kind: VisualKind }) {
   const visual = visualCopy[kind];
 
   return (
-    <figure className="not-prose my-10 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="border-b border-zinc-200 bg-zinc-50 px-5 py-4 dark:border-zinc-800 dark:bg-zinc-900">
-        <h3 className="text-base font-semibold text-zinc-950 dark:text-white">
+    <figure className="not-prose my-10 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+      <div className="border-b border-border bg-muted px-5 py-4">
+        <h3 className="text-base font-semibold text-foreground">
           {visual.title}
         </h3>
-        <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+        <p className="mt-1 text-sm leading-6 text-muted-foreground">
           {visual.caption}
         </p>
       </div>
@@ -218,7 +218,7 @@ export function BlogScreenshot({
   caption?: string;
 }) {
   return (
-    <figure className="not-prose my-10 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+    <figure className="not-prose my-10 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
       <Image
         src={src}
         alt={alt}
@@ -228,7 +228,7 @@ export function BlogScreenshot({
         className="h-auto w-full"
       />
       {caption ? (
-        <figcaption className="border-t border-zinc-200 bg-zinc-50 px-5 py-3 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+        <figcaption className="border-t border-border bg-muted px-5 py-3 text-sm text-muted-foreground">
           {caption}
         </figcaption>
       ) : null}
@@ -244,9 +244,11 @@ export function BlogCallout({
   children: React.ReactNode;
 }) {
   return (
-    <aside className="not-prose my-8 rounded-lg border border-indigo-200 bg-indigo-50 p-5 text-indigo-950 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-100">
-      <h3 className="text-sm font-semibold uppercase tracking-wide">{title}</h3>
-      <div className="mt-2 text-sm leading-6 text-indigo-900 dark:text-indigo-100">
+    <aside className="not-prose relative my-8 overflow-hidden rounded-xl border border-border bg-[linear-gradient(90deg,hsl(var(--sq-violet-soft)),#fff_55%)] p-5 pl-6 shadow-sm before:absolute before:inset-y-0 before:left-0 before:w-1 before:bg-[hsl(var(--sq-violet))]">
+      <h3 className="text-xs font-bold uppercase tracking-[0.08em] text-[hsl(var(--sq-ink))]">
+        {title}
+      </h3>
+      <div className="mt-2 text-[0.9375rem] leading-7 text-[hsl(var(--sq-ink-2))]">
         {children}
       </div>
     </aside>
@@ -257,10 +259,10 @@ function BlogTable(props: TableHTMLAttributes<HTMLTableElement>) {
   const { className, ...tableProps } = props;
 
   return (
-    <div className="not-prose my-8 overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
+    <div className="not-prose my-8 overflow-x-auto rounded-lg border border-border">
       <table
         {...tableProps}
-        className={`min-w-full border-collapse bg-white text-sm dark:bg-zinc-950 [&_td]:border-t [&_td]:border-zinc-200 [&_td]:px-4 [&_td]:py-3 [&_td]:align-top [&_td]:text-zinc-700 dark:[&_td]:border-zinc-800 dark:[&_td]:text-zinc-300 [&_th]:bg-zinc-50 [&_th]:px-4 [&_th]:py-3 [&_th]:text-left [&_th]:font-semibold [&_th]:text-zinc-950 dark:[&_th]:bg-zinc-900 dark:[&_th]:text-zinc-100 ${className ?? ""}`}
+        className={`min-w-full border-collapse bg-card text-sm [&_td]:border-t [&_td]:border-border [&_td]:px-4 [&_td]:py-3 [&_td]:align-top [&_td]:text-foreground [&_th]:bg-muted [&_th]:px-4 [&_th]:py-3 [&_th]:text-left [&_th]:font-semibold [&_th]:text-foreground ${className ?? ""}`}
       />
     </div>
   );
