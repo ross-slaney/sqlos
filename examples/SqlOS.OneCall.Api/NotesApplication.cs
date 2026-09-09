@@ -20,8 +20,8 @@ public static class NotesApplication
 
         // One call describes the application. SqlOS derives the rest:
         //  - the auth server, hosted sign-in, and dashboard are mapped at startup,
-        //  - bearer tokens are validated under /api (audience {origin}/api) and /mcp (audience {origin}/mcp),
-        //  - RFC 9728 documents are served for both surfaces,
+        //  - app.Api / app.Mcp are resource ids (audiences + RFC 9728 documents),
+        //  - the SqlOS JWT scheme (and SqlOS.Mcp policy) validate session-aware bearer tokens,
         //  - the MCP server is registered and mapped on /mcp with CIMD + resource indicators enabled,
         //  - the AuthPage branding and the FGA model are seeded.
         builder.AddSqlOS<NotesDbContext>(
@@ -81,8 +81,7 @@ public static class NotesApplication
                 ? "Your notebook access has been removed." : "The request could not be completed." });
         }));
 
-        // Already protected: SqlOS validated the token for {origin}/api before these handlers run.
-        var api = app.MapGroup("/api");
+        var api = app.MapGroup("/api").RequireAuthorization();
         api.MapGet("/notes", async (HttpContext http, NotesService notes, CancellationToken ct)
             => Results.Ok(await notes.ListAsync(http.GetSqlOSValidatedToken()!.UserId!, ct)));
         api.MapPost("/notes", async (HttpContext http, NoteRequest request, NotesService notes, CancellationToken ct)

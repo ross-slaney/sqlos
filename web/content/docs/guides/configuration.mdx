@@ -114,10 +114,10 @@ Manual resource APIs such as `CreateResourceAsync(...)`, `CreateResourceWithIdAs
 
 ## Protected API token validation
 
-Declare `app.Api = "/api"` when your API accepts SqlOS-issued tokens. Mapped endpoints under that prefix are already validated and `HttpContext.User` is populated; your endpoint still resolves the application subject explicitly.
+Declare `app.Api = "/api"` when your API accepts SqlOS-issued tokens, then lock the group with `RequireAuthorization()`. `HttpContext.User` is populated after authentication; your endpoint still resolves the application subject explicitly.
 
 ```csharp
-var api = app.MapGroup("/api");
+var api = app.MapGroup("/api").RequireAuthorization();
 
 api.MapPost("/workspaces", async (
     CreateWorkspace request,

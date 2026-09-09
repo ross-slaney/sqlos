@@ -201,7 +201,7 @@ public sealed class SingleApplicationSurfacesIntegrationTests
                 {
                     var token = http.GetSqlOSValidatedToken()!;
                     return Results.Json(new { userId = token.UserId, audience = token.Audience });
-                });
+                }).RequireAuthorization();
             },
             mapAuthServer: false,
             seedBrowserClient: false);

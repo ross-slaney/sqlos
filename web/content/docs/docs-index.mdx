@@ -18,8 +18,8 @@ builder.AddSqlOS<AppDbContext>(
     options => options.UseSingleApplication("Acme", app =>
     {
         app.Origin = "https://acme.example.com";
-        app.Api = "/api";                                     // protected REST surface
-        app.Mcp("/mcp", mcp => mcp.WithTools<AcmeTools>());   // protected MCP server (SqlOS.Mcp)
+        app.Api = "/api";                                     // resource id {Origin}/api
+        app.Mcp("/mcp", mcp => mcp.WithTools<AcmeTools>());   // MCP server (SqlOS.Mcp)
         app.Brand(page => page.PrimaryColor = "#0f172a");     // hosted sign-in, or app.Headless("/auth/authorize") for your own UI
         app.Authorization(fga => /* resource types, permissions, roles */ fga);
     }));
@@ -29,7 +29,7 @@ builder.AddSqlOS<AppDbContext>(
   <Card title="Getting started: every option on one screen" description="Origin, Api, Mcp, Brand, Headless, Authorization, Dashboard — what each line does and its default." href="/docs/getting-started" />
   <Card title="Add SqlOS to one app" description="Install the package, paste one Program.cs, run it." href="/docs/quickstarts/add-to-app" />
   <Card title="Sign in from ASP.NET Core" description="Use the built-in OpenID Connect handler, PKCE, and a secure application cookie." href="/docs/quickstarts/aspnet-core-login" />
-  <Card title="Protect an API" description="Declare app.Api and read the validated token in handlers." href="/docs/quickstarts/protect-api" />
+  <Card title="Protect an API" description="Declare app.Api, RequireAuthorization(), and read the validated token." href="/docs/quickstarts/protect-api" />
   <Card title="Authorize EF queries" description="Declare app.Authorization and filter rows in SQL." href="/docs/quickstarts/ef-authorization" />
   <Card title="Run the Todo sample" description="See hosted login and authorized EF Core queries without changing an app." href="/docs/quickstarts/run-todo" />
 </CardGrid>

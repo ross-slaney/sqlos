@@ -78,7 +78,7 @@ builder.AddSqlOS<AppDbContext>(
         {
             app.Origin = publicOrigin;                              // issuer, callback, audiences derive from this
             app.ClientId = "acme-web";
-            app.Api = "/api";                                       // bearer tokens for {Origin}/api required under /api
+            app.Api = "/api";                                       // resource id {Origin}/api — scheme audience + PRM
             app.Brand(page => page.PrimaryColor = "#0f172a");       // hosted sign-in pages
             // app.Headless("/auth/authorize");                     // ...or your own sign-in UI instead
             // app.Mcp("/mcp", mcp => mcp.WithTools<AcmeTools>());  // SqlOS.Mcp package: hosted MCP server
@@ -92,7 +92,8 @@ builder.AddSqlOS<AppDbContext>(
 var app = builder.Build();
 
 app.MapGet("/", () => Results.Ok(new { sqlos = "ready" }));
-app.MapGet("/api/me", (HttpContext http) => http.GetSqlOSValidatedToken()!.UserId); // already protected
+app.MapGet("/api/me", (HttpContext http) => http.GetSqlOSValidatedToken()!.UserId)
+    .RequireAuthorization();
 
 app.Run();
 
@@ -102,7 +103,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
 }
 ```
 
-`SqlOSDbContext<TContext>` registers the AuthServer, calendar, email, and FGA EF models. `UseSingleApplication` creates the application seed, AuthPage branding, and the `/api` token boundary without exposing client-registration terminology in the common path. Every line inside `app => { … }` except `Origin` is optional; the full option table is on [Getting started](/docs/getting-started#every-option-you-need-on-one-screen).
+`SqlOSDbContext<TContext>` registers the AuthServer, calendar, email, and FGA EF models. `UseSingleApplication` creates the application seed, AuthPage branding, and the `{Origin}/api` resource id without exposing client-registration terminology in the common path. Lock `/api/me` with `RequireAuthorization()`. Every line inside `app => { … }` except `Origin` is optional; the full option table is on [Getting started](/docs/getting-started#every-option-you-need-on-one-screen).
 
 ### Hosted or headless
 

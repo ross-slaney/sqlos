@@ -20,19 +20,20 @@ public class SqlOSApplicationOptions
 
     /// <summary>
     /// Gets or sets the application-relative REST API path, for example <c>/api</c>. When set,
-    /// SqlOS validates bearer tokens for the audience <c>{Origin}{Api}</c> on mapped endpoints
-    /// under that path before the handler runs, and serves the matching RFC 9728
-    /// protected-resource document at <c>/.well-known/oauth-protected-resource</c>.
+    /// SqlOS uses <c>{Origin}{Api}</c> as the default JWT audience and first-party client audience
+    /// and serves the matching RFC 9728 protected-resource document at
+    /// <c>/.well-known/oauth-protected-resource</c>. Application routes under this path are not
+    /// locked until they call <c>RequireAuthorization()</c>.
     /// </summary>
     public string? Api { get; set; }
 
     /// <summary>
     /// Gets or sets the application-relative MCP path, for example <c>/mcp</c>. When set, SqlOS
-    /// validates bearer tokens for the audience <c>{Origin}{Mcp}</c> on mapped endpoints under
-    /// that path, serves the protected-resource document at
-    /// <c>/.well-known/oauth-protected-resource{Mcp}</c>, and enables client ID metadata documents
-    /// and resource indicators so portable MCP clients can connect. Dynamic client registration is
-    /// not enabled by this property.
+    /// uses <c>{Origin}{Mcp}</c> as that surface's audience, serves the protected-resource
+    /// document at <c>/.well-known/oauth-protected-resource{Mcp}</c>, and enables client ID
+    /// metadata documents and resource indicators so portable MCP clients can connect.
+    /// <c>SqlOS.Mcp</c> requires authorization on the endpoint it maps. Dynamic client
+    /// registration is not enabled by this property.
     /// </summary>
     public string? Mcp { get; set; }
 

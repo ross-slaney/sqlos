@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.AspNetCore;
+using SqlOS.AuthServer.Authentication;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.Configuration;
 using SqlOS.Hosting;
@@ -9,9 +10,9 @@ using SqlOS.Hosting;
 namespace SqlOS.Mcp;
 
 /// <summary>
-/// Registers the MCP SDK server and maps it on the declared MCP surface. SqlOS core attaches
-/// token validation to those mapped endpoints and serves the RFC 9728 document; this extension
-/// only adds the server itself, so application code contains no <c>AddMcpServer</c> or <c>MapMcp</c>.
+/// Registers the MCP SDK server and maps it on the declared MCP surface with
+/// <c>RequireAuthorization()</c> for the MCP audience. SqlOS core serves the RFC 9728 document.
+/// Application code contains no <c>AddMcpServer</c> or <c>MapMcp</c>.
 /// </summary>
 internal sealed class SqlOSMcpHostExtension : ISqlOSHostExtension
 {
@@ -43,6 +44,6 @@ internal sealed class SqlOSMcpHostExtension : ISqlOSHostExtension
             ?? throw new InvalidOperationException(
                 "SqlOS.Mcp requires an MCP surface. Call app.Mcp(\"/mcp\", ...) inside UseSingleApplication.");
 
-        endpoints.MapMcp(path);
+        endpoints.MapMcp(path).RequireAuthorization(SqlOSJwtDefaults.McpPolicy);
     }
 }

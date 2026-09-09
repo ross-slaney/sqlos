@@ -186,12 +186,12 @@ POST /sqlos/auth/headless/password/reset
 
 ## 4. Protect the account-security API
 
-The recovery request remains public — keep those routes outside the declared `Api` prefix. Device management does not. Declare `app.Api = "/api"` and map account endpoints under `/api/account` so every request is validated against Harbor's API audience:
+The recovery request remains public — do not put `RequireAuthorization()` on those routes. Device management does. Declare `app.Api = "/api"` and lock account endpoints against Harbor's API audience:
 
 ```csharp
 using SqlOS.AuthServer.Extensions;
 
-var account = app.MapGroup("/api/account");
+var account = app.MapGroup("/api/account").RequireAuthorization();
 ```
 
 Do not use user ids from route parameters, forms, query strings, or JSON to decide whose sessions are visible.

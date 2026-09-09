@@ -6,8 +6,7 @@ using SqlOS.AuthServer.Services;
 namespace SqlOS.AuthServer.Extensions;
 
 /// <summary>
-/// Request-context helpers for a token SqlOS already validated on a declared <c>Api</c> or
-/// <c>Mcp</c> surface.
+/// Request-context helpers for a token the <c>SqlOS</c> authentication scheme already validated.
 /// </summary>
 public static class SqlOSAccessTokenValidationExtensions
 {
@@ -15,7 +14,7 @@ public static class SqlOSAccessTokenValidationExtensions
     public const string ValidatedTokenItemKey = "SqlOS.AuthServer.ValidatedAccessToken";
 
     /// <summary>
-    /// Gets the token validated for the current request by a declared <c>Api</c> or <c>Mcp</c> surface.
+    /// Gets the token validated for the current request by the <c>SqlOS</c> authentication scheme.
     /// </summary>
     /// <param name="context">The current HTTP context.</param>
     /// <returns>The validated token, or <see langword="null"/> when SqlOS did not validate a token for the request.</returns>
@@ -28,6 +27,131 @@ public static class SqlOSAccessTokenValidationExtensions
             ? value as SqlOSValidatedToken
             : null;
     }
+}
+
+internal enum SqlOSBearerTicketKind
+{
+    Missing,
+    Invalid,
+    InsufficientScope,
+    Success
+}
+
+internal readonly struct SqlOSBearerTicket
+{
+    public SqlOSBearerTicketKind Kind { get; private init; }
+    public SqlOSValidatedToken? Token { get; private init; }
+    public string Failure { get; private init; }
+
+    public static SqlOSBearerTicket Missing()
+        => new() { Kind = SqlOSBearerTicketKind.Missing, Failure = "A bearer access token is required." };
+
+    public static SqlOSBearerTicket Invalid()
+        => new()
+        {
+            Kind = SqlOSBearerTicketKind.Invalid,
+            Failure = "The bearer access token is invalid, expired, revoked, or was not minted for this resource."
+        };
+
+    public static SqlOSBearerTicket InsufficientScope(string description)
+        => new() { Kind = SqlOSBearerTicketKind.InsufficientScope, Failure = description };
+
+    public static SqlOSBearerTicket Success(SqlOSValidatedToken token)
+        => new() { Kind = SqlOSBearerTicketKind.Success, Token = token, Failure = string.Empty };
+}
+
+internal static class SqlOSBearerAuthentication
+{
+    public static async Task<SqlOSBearerTicket> AuthenticateAsync(
+        HttpContext context,
+        SqlOSAccessTokenValidationOptions options,
+        SqlOSAuthService authService,
+        CancellationToken cancellationToken)
+    {
+        var authorization = context.Request.Headers.Authorization.ToString();
+        if (!authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            return SqlOSBearerTicket.Missing();
+        }
+
+        var rawToken = authorization["Bearer ".Length..].Trim();
+        if (string.IsNullOrWhiteSpace(rawToken))
+        {
+            return SqlOSBearerTicket.Missing();
+        }
+
+        var validated = await authService.ValidateAccessTokenAsync(
+            rawToken,
+            options.ExpectedAudience,
+            cancellationToken);
+
+        if (validated == null)
+        {
+            return SqlOSBearerTicket.Invalid();
+        }
+
+        if (SqlOSScopeRequirementPolicy.DescribeUnsatisfied(options.RequiredScopes, validated.Scope) is { } scopeFailure)
+        {
+            return SqlOSBearerTicket.InsufficientScope(scopeFailure);
+        }
+
+        context.Items[SqlOSAccessTokenValidationExtensions.ValidatedTokenItemKey] = validated;
+        return SqlOSBearerTicket.Success(validated);
+    }
+
+    public static Task WriteUnauthorizedAsync(
+        HttpResponse response,
+        SqlOSAccessTokenValidationOptions options,
+        string description)
+        => WriteChallengeAsync(response, options, StatusCodes.Status401Unauthorized, "invalid_token", description);
+
+    public static Task WriteInsufficientScopeAsync(
+        HttpResponse response,
+        SqlOSAccessTokenValidationOptions options,
+        string description)
+        => WriteChallengeAsync(response, options, StatusCodes.Status403Forbidden, "insufficient_scope", description);
+
+    private static async Task WriteChallengeAsync(
+        HttpResponse response,
+        SqlOSAccessTokenValidationOptions options,
+        int statusCode,
+        string error,
+        string description)
+    {
+        options = SqlOSAccessTokenValidationMiddleware.NormalizeOptions(options, requireAudience: false);
+        response.StatusCode = statusCode;
+        response.Headers.WWWAuthenticate = BuildChallenge(options, error, description);
+        await response.WriteAsJsonAsync(new
+        {
+            error,
+            error_description = description
+        });
+    }
+
+    internal static string BuildChallenge(SqlOSAccessTokenValidationOptions options, string error, string description)
+    {
+        var parts = new List<string>
+        {
+            $"Bearer realm=\"{EscapeHeaderValue(options.Realm)}\"",
+            $"error=\"{error}\"",
+            $"error_description=\"{EscapeHeaderValue(description)}\""
+        };
+
+        if (string.Equals(error, "insufficient_scope", StringComparison.Ordinal) && options.RequiredScopes.Count > 0)
+        {
+            parts.Add($"scope=\"{EscapeHeaderValue(string.Join(' ', options.RequiredScopes))}\"");
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.ResourceMetadataUrl))
+        {
+            parts.Add($"resource_metadata=\"{EscapeHeaderValue(options.ResourceMetadataUrl)}\"");
+        }
+
+        return string.Join(", ", parts);
+    }
+
+    private static string EscapeHeaderValue(string value)
+        => value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal);
 }
 
 /// <summary>
@@ -94,53 +218,43 @@ internal sealed class SqlOSAccessTokenValidationMiddleware
             return;
         }
 
-        var authorization = context.Request.Headers.Authorization.ToString();
-        if (!authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
-        {
-            await WriteUnauthorizedAsync(context, "A bearer access token is required.");
-            return;
-        }
-
-        var rawToken = authorization["Bearer ".Length..].Trim();
-        if (string.IsNullOrWhiteSpace(rawToken))
-        {
-            await WriteUnauthorizedAsync(context, "A bearer access token is required.");
-            return;
-        }
-
-        var validated = await authService.ValidateAccessTokenAsync(
-            rawToken,
-            _options.ExpectedAudience,
+        var ticket = await SqlOSBearerAuthentication.AuthenticateAsync(
+            context,
+            _options,
+            authService,
             context.RequestAborted);
 
-        if (validated == null)
+        if (ticket.Kind == SqlOSBearerTicketKind.Success && ticket.Token != null)
         {
-            await WriteUnauthorizedAsync(context, "The bearer access token is invalid, expired, revoked, or was not minted for this resource.");
+            context.User = ticket.Token.Principal;
+            await _next(context);
             return;
         }
 
-        if (SqlOSScopeRequirementPolicy.DescribeUnsatisfied(_options.RequiredScopes, validated.Scope) is { } scopeFailure)
+        if (ticket.Kind == SqlOSBearerTicketKind.InsufficientScope)
         {
-            await WriteInsufficientScopeAsync(context, scopeFailure);
+            await SqlOSBearerAuthentication.WriteInsufficientScopeAsync(context.Response, _options, ticket.Failure);
             return;
         }
 
-        context.User = validated.Principal;
-        context.Items[SqlOSAccessTokenValidationExtensions.ValidatedTokenItemKey] = validated;
-
-        await _next(context);
+        await SqlOSBearerAuthentication.WriteUnauthorizedAsync(context.Response, _options, ticket.Failure);
     }
 
     internal static SqlOSAccessTokenValidationOptions ValidateOptions(SqlOSAccessTokenValidationOptions? options)
+        => NormalizeOptions(options, requireAudience: true);
+
+    internal static SqlOSAccessTokenValidationOptions NormalizeOptions(
+        SqlOSAccessTokenValidationOptions? options,
+        bool requireAudience)
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        if (string.IsNullOrWhiteSpace(options.ExpectedAudience))
+        if (requireAudience && string.IsNullOrWhiteSpace(options.ExpectedAudience))
         {
             throw new InvalidOperationException("SqlOS access-token validation requires a non-empty expected audience.");
         }
 
-        options.ExpectedAudience = options.ExpectedAudience.Trim();
+        options.ExpectedAudience = options.ExpectedAudience?.Trim() ?? string.Empty;
         options.RequiredScopes = SqlOSScopeRequirementPolicy.Normalize(options.RequiredScopes);
         options.Realm = string.IsNullOrWhiteSpace(options.Realm) ? "SqlOS API" : options.Realm.Trim();
         options.ResourceMetadataUrl = string.IsNullOrWhiteSpace(options.ResourceMetadataUrl)
@@ -149,53 +263,4 @@ internal sealed class SqlOSAccessTokenValidationMiddleware
 
         return options;
     }
-
-    private async Task WriteUnauthorizedAsync(HttpContext context, string description)
-    {
-        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-        context.Response.Headers.WWWAuthenticate = BuildChallenge("invalid_token", description);
-        await context.Response.WriteAsJsonAsync(new
-        {
-            error = "invalid_token",
-            error_description = description
-        });
-    }
-
-    // RFC 6750 §3.1: a token that is valid but lacks the required scope answers 403
-    // with an insufficient_scope challenge naming the scope the resource requires.
-    private async Task WriteInsufficientScopeAsync(HttpContext context, string description)
-    {
-        context.Response.StatusCode = StatusCodes.Status403Forbidden;
-        context.Response.Headers.WWWAuthenticate = BuildChallenge("insufficient_scope", description);
-        await context.Response.WriteAsJsonAsync(new
-        {
-            error = "insufficient_scope",
-            error_description = description
-        });
-    }
-
-    private string BuildChallenge(string error, string description)
-    {
-        var parts = new List<string>
-        {
-            $"Bearer realm=\"{EscapeHeaderValue(_options.Realm)}\"",
-            $"error=\"{error}\"",
-            $"error_description=\"{EscapeHeaderValue(description)}\""
-        };
-
-        if (string.Equals(error, "insufficient_scope", StringComparison.Ordinal) && _options.RequiredScopes.Count > 0)
-        {
-            parts.Add($"scope=\"{EscapeHeaderValue(string.Join(' ', _options.RequiredScopes))}\"");
-        }
-
-        if (!string.IsNullOrWhiteSpace(_options.ResourceMetadataUrl))
-        {
-            parts.Add($"resource_metadata=\"{EscapeHeaderValue(_options.ResourceMetadataUrl!)}\"");
-        }
-
-        return string.Join(", ", parts);
-    }
-
-    private static string EscapeHeaderValue(string value)
-        => value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal);
 }
