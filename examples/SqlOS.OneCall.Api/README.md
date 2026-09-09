@@ -1,6 +1,6 @@
 # Notes: one `AddSqlOS` call, a protected API, and an MCP server
 
-This is the smallest complete SqlOS application. `Program.cs` describes the app once and SqlOS derives the rest: the auth server and hosted sign-in, bearer validation for `/api` and `/mcp`, the protected-resource documents, the MCP server, the branding, and the permission model. Application code contains no `AddMcpServer`, `MapMcp`, hand-written metadata document, or middleware placement.
+This is the smallest complete SqlOS application. `Program.cs` describes the app once and SqlOS derives the rest: the auth server and hosted sign-in, resource ids for `/api` and `/mcp`, the protected-resource documents, the MCP server, the branding, and the permission model. Application code locks `/api` with `RequireAuthorization()`. It contains no `AddMcpServer`, `MapMcp`, or hand-written metadata document.
 
 ```csharp
 builder.AddSqlOS<NotesDbContext>(db => db.UseSqlServer(connectionString), options =>
@@ -18,7 +18,7 @@ builder.AddSqlOS<NotesDbContext>(db => db.UseSqlServer(connectionString), option
     }));
 
 var app = builder.Build();
-var api = app.MapGroup("/api");   // already protected
+var api = app.MapGroup("/api").RequireAuthorization();
 api.MapGet("/notes", ...);
 api.MapPost("/notes", ...);
 app.Run();
@@ -66,8 +66,8 @@ The dashboard at `/sqlos` is open without a password in Development only. Config
 | Configuration or file | Effect |
 | --- | --- |
 | [NotesApplication.cs](NotesApplication.cs) | The complete host: one `AddSqlOS` call, the `/api` handlers, and sample database setup |
-| `app.Api = "/api"` | Requires a token for `http://localhost:5085/api` on the mapped `/api` endpoints before the handler runs |
-| `app.Mcp("/mcp", mcp => mcp.WithTools<NotesMcpTools>())` | Hosts and audits the MCP tools, protects the distinct MCP audience, and enables CIMD/resource indicators |
+| `app.Api = "/api"` | Resource id `http://localhost:5085/api`: default JWT scheme audience and PRM. `RequireAuthorization()` on the group locks the notes routes. |
+| `app.Mcp("/mcp", mcp => mcp.WithTools<NotesMcpTools>())` | Hosts and audits the MCP tools, requires the `SqlOS.Mcp` policy, and enables CIMD/resource indicators |
 | `app.Brand(...)` | Seeds code-owned title, copy, and colors for the hosted pages |
 | `app.Authorization(...)` | Seeds notebook resource type, read/write permissions, and the owner role; it grants nobody access by itself |
 | [Notes.cs](Notes.cs) | Domain entities, transactional first-use provisioning, FGA enforcement, and MCP tools |

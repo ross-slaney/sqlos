@@ -215,10 +215,10 @@ resource=https%3A%2F%2Fapi.forge.test
 
 ## 7. Validate the token at the API
 
-Declare `app.Api` so mapped Forge routes require the same exact audience requested by the CLI:
+Declare `app.Api` so the `SqlOS` scheme requires the same exact audience requested by the CLI, then lock the group:
 
 ```csharp
-var deployments = app.MapGroup("/api/deployments");
+var deployments = app.MapGroup("/api/deployments").RequireAuthorization();
 ```
 
 Send the access token in the standard header:

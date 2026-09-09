@@ -155,8 +155,8 @@ Single-application mode creates one first-party public PKCE client and applies A
 | --- | --- | --- |
 | `Name` | `string` | Display name; also the default `ClientName` and AuthPage title. |
 | `Origin` | `string?` | Absolute HTTP(S) origin of the application (no path). Required when `Api` or `Mcp` is set. |
-| `Api` | `string?` | Absolute path of the protected REST surface, for example `/api`. SqlOS validates bearer tokens for the audience `{Origin}{Api}` on mapped endpoints under that path and serves the RFC 9728 document at `/.well-known/oauth-protected-resource`. |
-| `Mcp` | `string?` | Absolute path of the protected MCP surface, for example `/mcp`. SqlOS validates tokens for `{Origin}{Mcp}` on mapped endpoints under that path, serves `/.well-known/oauth-protected-resource{Mcp}`, and enables client ID metadata documents plus resource indicators. Set it through `app.Mcp(path, configure)` from the `SqlOS.Mcp` package to also host the server. |
+| `Api` | `string?` | Absolute path of the REST resource, for example `/api`. Sets the `SqlOS` JWT scheme audience to `{Origin}{Api}`, the first-party client audience, and serves the RFC 9728 document at `/.well-known/oauth-protected-resource`. Lock routes with `RequireAuthorization()`. |
+| `Mcp` | `string?` | Absolute path of the MCP resource, for example `/mcp`. Registers scheme/policy `SqlOS.Mcp` with audience `{Origin}{Mcp}`, serves `/.well-known/oauth-protected-resource{Mcp}`, and enables client ID metadata documents plus resource indicators. Set it through `app.Mcp(path, configure)` from the `SqlOS.Mcp` package to also host the server. |
 | `Brand(Action<SqlOSAuthPageSeedOptions>)` | method | Forwards to `AuthServer.SeedAuthPage` on top of the single-application defaults. |
 | `Headless(string uiPath, Action<SqlOSHeadlessAuthOptions>? configure = null)` | method | Uses your own sign-in UI at `{Origin}{uiPath}` instead of the hosted pages. Forwards to `AuthServer.UseHeadlessAuthPage` with a generated `BuildUiUrl` that passes `request`, `view`, `error`, `email`, `displayName`, `pendingToken`, `mfaToken`, `consentToken`, and `ui_context`. Requires `Origin`; `uiPath` must start with `/`. |
 | `Headless(Action<SqlOSHeadlessAuthOptions>)` | method | Forwards to `AuthServer.UseHeadlessAuthPage` unchanged; set `BuildUiUrl` yourself. |
@@ -165,7 +165,7 @@ Single-application mode creates one first-party public PKCE client and applies A
 
 Declared surfaces are validated at startup: paths must be absolute, non-root, distinct and non-nested, and must not overlap `/.well-known`, the auth base path, or `DashboardBasePath`. `Audience` must equal `{Origin}{Api}` when both are set, and CIMD/resource indicators cannot be disabled after an `Mcp` surface is declared.
 
-`AddSqlOS` attaches that validation to mapped endpoints under the declared paths. SqlOS does not add application pipeline middleware and does not handle CORS. Requests to those endpoints that carry no token or a token for another audience receive HTTP `401` with a Bearer challenge that names the surface's `realm` and `resource_metadata` URL. The validated token is available through `HttpContext.GetSqlOSValidatedToken()` and `HttpContext.User`. Inspect `Scope` on that token in the handler when a client's granted ceiling must be checked.
+`AddSqlOS` registers those JWT schemes. Call `RequireAuthorization()` (or `RequireAuthorization("SqlOS.Mcp")` for a hand-mapped MCP route) on the endpoints you lock. A missing or wrong-audience token receives HTTP `401` with a Bearer challenge that names the scheme's `realm` and `resource_metadata` URL. The validated token is available through `HttpContext.GetSqlOSValidatedToken()` and `HttpContext.User`. Inspect `Scope` on that token in the handler when a client's granted ceiling must be checked. SqlOS does not wrap routes from a path string and does not handle CORS.
 
 ### Exceptions
 
@@ -200,13 +200,27 @@ public static SqlOSValidatedToken? GetSqlOSValidatedToken(
     this HttpContext context)
 ```
 
-**Returns:** the validated token stored by a declared `Api` or `Mcp` surface; otherwise `null`.
+**Returns:** the validated token stored by the `SqlOS` authentication scheme; otherwise `null`.
+
+## AddSqlOSJwt
+
+**Namespace:** `SqlOS.AuthServer.Authentication`
+
+Same-process extra audience. Same shape as `AddJwtBearer`: the scheme's `ExpectedAudience` is the required `aud`. Use it when one host exposes a second resource. A separate API host keeps `AddJwtBearer` against JWKS and accepts revoke-at-`exp`.
+
+```csharp
+using SqlOS.AuthServer.Authentication;
+
+builder.Services.AddAuthentication()
+    .AddSqlOSJwt("Billing", options => options.ExpectedAudience = $"{origin}/billing");
+
+app.MapGroup("/billing").RequireAuthorization("Billing");
+```
 
 ```csharp
 using SqlOS.AuthServer.Extensions;
 
-// Declare app.Api = "/api" in UseSingleApplication. Mapped endpoints under /api are already protected.
-var api = app.MapGroup("/api");
+var api = app.MapGroup("/api").RequireAuthorization();
 
 api.MapGet("/me", (HttpContext http) =>
 {
@@ -251,9 +265,9 @@ builder.AddSqlOS<AppDbContext>(
 
 var app = builder.Build();
 
-// Already protected: SqlOS validated the token for {origin}/api.
 app.MapGet("/api/projects", (HttpContext http) =>
-    Results.Ok(new { user = http.GetSqlOSValidatedToken()!.UserId }));
+    Results.Ok(new { user = http.GetSqlOSValidatedToken()!.UserId }))
+    .RequireAuthorization();
 
 app.Run();
 ```

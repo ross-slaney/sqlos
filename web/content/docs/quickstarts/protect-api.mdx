@@ -11,7 +11,7 @@ section: quickstarts
   href="#complete-program"
   actionLabel="View the code"
 >
-  Declare `app.Api = "/api"` inside `UseSingleApplication`. SqlOS validates signature, lifetime, audience, and persisted session existence/revocation/absolute expiry on mapped endpoints under `/api` before the handler runs.
+  Declare `app.Api = "/api"` inside `UseSingleApplication`, then lock the group with `RequireAuthorization()`. The `SqlOS` JWT scheme validates signature, lifetime, audience, and the persisted session.
 </Banner>
 
 ## Goal
@@ -55,7 +55,7 @@ builder.AddSqlOS<AppDbContext>(
         {
             app.Origin = publicOrigin;
             app.ClientId = "acme-web";
-            app.Api = "/api"; // audience {Origin}/api, protected-resource metadata, bearer challenge
+            app.Api = "/api"; // resource id {Origin}/api — scheme audience + PRM
         });
 
         options.Dashboard.AuthMode = SqlOSDashboardAuthMode.Password;
@@ -64,8 +64,7 @@ builder.AddSqlOS<AppDbContext>(
 
 var app = builder.Build();
 
-// Already protected: SqlOS validated the token for http://localhost:5050/api.
-var api = app.MapGroup("/api");
+var api = app.MapGroup("/api").RequireAuthorization();
 
 api.MapGet("/me", (HttpContext http) =>
 {
@@ -92,7 +91,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
 }
 ```
 
-Declaring `Api` makes SqlOS validate mapped endpoints under `/api` for the audience `http://localhost:5050/api`, use that audience for the `acme-web` client, serve `/.well-known/oauth-protected-resource`, and answer unauthenticated requests with a Bearer challenge that names `realm="Acme API"` and the metadata URL. `AddSqlOS` attaches that validation to those endpoints; nothing is placed or ordered in `Program.cs`. See [how the surfaces are protected](/docs/authserver/single-application#how-the-surfaces-are-protected). After validation it sets `HttpContext.User` and stores the typed `SqlOSValidatedToken`, available through `GetSqlOSValidatedToken()`.
+Declaring `Api` sets the `SqlOS` scheme's audience to `http://localhost:5050/api`, uses that audience for the `acme-web` client, and serves `/.well-known/oauth-protected-resource`. `RequireAuthorization()` on the group is ordinary ASP.NET: missing or wrong-audience tokens get `401` with a Bearer challenge that names `realm="Acme API"` and the metadata URL. After authentication, `HttpContext.User` and `GetSqlOSValidatedToken()` are populated. See [token validation](/docs/authserver/token-validation).
 
 When the API also serves delegated (especially third-party) clients, inspect `GetSqlOSValidatedToken()?.Scope` in the handler. Scope bounds the *client*; per-user, per-resource decisions stay with FGA. See [Scopes and Permissions](/docs/authserver/scopes-and-permissions).
 
@@ -150,7 +149,7 @@ SqlOS session-aware validation checks that the persisted session exists and is n
 
 ### `GetSqlOSValidatedToken()` is null
 
-Confirm the endpoint's path is under the declared `Api` prefix and import `SqlOS.AuthServer.Extensions`.
+Confirm the endpoint has `RequireAuthorization()` and import `SqlOS.AuthServer.Extensions`.
 
 ### The browser cannot call the API
 

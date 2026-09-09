@@ -12,7 +12,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SqlOS.AuthServer.Authentication;
 using SqlOS.AuthServer.Extensions;
+using SqlOS.AuthServer.Models;
 using SqlOS.Configuration;
 using SqlOS.Extensions;
 using SqlOS.Tests.Infrastructure;
@@ -20,9 +22,8 @@ using SqlOS.Tests.Infrastructure;
 namespace SqlOS.Tests;
 
 /// <summary>
-/// Declaring <c>Api</c>/<c>Mcp</c> is the only thing an application does. SqlOS attaches token
-/// validation to mapped endpoints under those paths. No test here places middleware, handles CORS,
-/// or orders the host pipeline for SqlOS.
+/// <c>app.Api</c> / <c>app.Mcp</c> are resource ids. Application routes lock with
+/// <c>RequireAuthorization()</c> against the SqlOS JWT scheme (or <c>SqlOS.Mcp</c>).
 /// </summary>
 [TestClass]
 public sealed class SqlOSSurfaceProtectionTests
@@ -30,11 +31,22 @@ public sealed class SqlOSSurfaceProtectionTests
     private const string Origin = SingleApplicationTestHost.Origin;
 
     [TestMethod]
-    public async Task Guard_ProtectsMappedEndpoints_AndLeavesSiblingsUnknownPathsAndBranchesAlone()
+    public async Task DeclaredApi_WithoutRequireAuthorization_StaysAnonymous()
+    {
+        await using var host = await SingleApplicationTestHost.StartAsync(Configure, app =>
+            app.MapGet("/api/me", () => "open"));
+        var response = await host.Client.GetAsync("/api/me");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await response.Content.ReadAsStringAsync()).Should().Be("open");
+    }
+
+    [TestMethod]
+    public async Task RequireAuthorization_ProtectsMappedEndpoints_AndLeavesSiblingsUnknownPathsAndBranchesAlone()
     {
         await using var host = await SingleApplicationTestHost.StartAsync(Configure, app =>
         {
-            app.MapGet("/api/me", (HttpContext http) => http.User.Identity!.IsAuthenticated.ToString());
+            app.MapGet("/api/me", (HttpContext http) => http.User.Identity!.IsAuthenticated.ToString())
+                .RequireAuthorization();
             app.Map("/api/legacy", branch => branch.Run(context => context.Response.WriteAsync("branch")));
             app.MapGet("/apiary", () => "public");
         });
@@ -52,12 +64,14 @@ public sealed class SqlOSSurfaceProtectionTests
     [DataTestMethod]
     [DataRow("api", "mcp")]
     [DataRow("mcp", "api")]
-    public async Task SharedRouteNames_UseRequestedSurfaceRegardlessOfWarmupOrder(string first, string second)
+    public async Task ApiAndMcpSchemes_RejectTheOtherAudience(string first, string second)
     {
         await using var host = await SingleApplicationTestHost.StartAsync(Configure, app =>
         {
-            app.MapGet("/api/me", (HttpContext http) => http.GetSqlOSValidatedToken()!.Audience);
-            app.MapGet("/mcp/me", (HttpContext http) => http.GetSqlOSValidatedToken()!.Audience);
+            app.MapGet("/api/me", (HttpContext http) => http.GetSqlOSValidatedToken()!.Audience)
+                .RequireAuthorization();
+            app.MapGet("/mcp/me", (HttpContext http) => http.GetSqlOSValidatedToken()!.Audience)
+                .RequireAuthorization(SqlOSJwtDefaults.McpPolicy);
         });
         var firstToken = await host.MintAccessTokenAsync($"{Origin}/{first}");
         var secondToken = await host.MintAccessTokenAsync($"{Origin}/{second}");
@@ -71,9 +85,64 @@ public sealed class SqlOSSurfaceProtectionTests
     }
 
     [TestMethod]
+    public async Task SecondScheme_AddSqlOSJwt_RequiresThatAudience()
+    {
+        var billingAudience = Origin + "/billing";
+        await using var host = await SingleApplicationTestHost.StartAsync(Configure, app =>
+        {
+            app.MapGet("/api/me", (HttpContext http) => http.GetSqlOSValidatedToken()!.Audience)
+                .RequireAuthorization();
+            app.MapGet("/billing/me", (HttpContext http) => http.GetSqlOSValidatedToken()!.Audience)
+                .RequireAuthorization("Billing");
+        }, configureServices: services =>
+        {
+            services.AddAuthentication().AddSqlOSJwt("Billing", options =>
+            {
+                options.ExpectedAudience = billingAudience;
+                options.Realm = "Review Billing";
+            });
+        });
+
+        var apiToken = await host.MintAccessTokenAsync(Origin + "/api");
+        var billingToken = await host.MintAccessTokenAsync(billingAudience);
+
+        (await Send(host, "/api/me", apiToken)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await Send(host, "/billing/me", apiToken)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        var billing = await Send(host, "/billing/me", billingToken);
+        billing.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await billing.Content.ReadAsStringAsync()).Should().Be(billingAudience);
+        (await Send(host, "/api/me", billingToken)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+
+        var challenge = (await host.Client.GetAsync("/billing/me")).Headers.WwwAuthenticate.ToString();
+        challenge.Should().Contain("realm=\"Review Billing\"");
+    }
+
+    [TestMethod]
+    public async Task RequireAuthorization_RevokedSession_Returns401()
+    {
+        await using var host = await SingleApplicationTestHost.StartAsync(Configure, app =>
+            app.MapGet("/api/me", () => "private").RequireAuthorization());
+        var token = await host.MintAccessTokenAsync(Origin + "/api");
+        (await Send(host, "/api/me", token)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        await using (var scope = host.App.Services.CreateAsyncScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<TestSqlOSInMemoryDbContext>();
+            var session = await context.Set<SqlOSSession>().SingleAsync();
+            session.RevokedAt = DateTime.UtcNow;
+            session.RevocationReason = "test";
+            await context.SaveChangesAsync();
+        }
+
+        (await Send(host, "/api/me", token)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [TestMethod]
     public async Task Challenge_NamesRealmAndResourceMetadata()
     {
-        await using var host = await SingleApplicationTestHost.StartAsync(Configure, app => app.MapGet("/api/me", () => "private"));
+        await using var host = await SingleApplicationTestHost.StartAsync(
+            Configure,
+            app => app.MapGet("/api/me", () => "private").RequireAuthorization());
         var response = await host.Client.GetAsync("/api/me");
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         var challenge = response.Headers.WwwAuthenticate.ToString();
@@ -82,11 +151,12 @@ public sealed class SqlOSSurfaceProtectionTests
     }
 
     [TestMethod]
-    public async Task HostWithAspNetAuthentication_NeedsNothingExtra()
+    public async Task CookieDefaultScheme_DoesNotStealRequireAuthorization()
     {
         await using var host = await SingleApplicationTestHost.StartAsync(Configure, app =>
         {
-            app.MapGet("/api/me", (HttpContext http) => http.GetSqlOSValidatedToken()!.UserId);
+            app.MapGet("/api/me", (HttpContext http) => http.GetSqlOSValidatedToken()!.UserId)
+                .RequireAuthorization();
             app.MapGet("/public", () => "public");
         }, configureServices: services =>
         {
@@ -117,7 +187,7 @@ public sealed class SqlOSSurfaceProtectionTests
             {
                 user = http.User.FindFirstValue("sub") ?? http.User.FindFirstValue(ClaimTypes.NameIdentifier),
                 tokenUser = http.GetSqlOSValidatedToken()!.UserId
-            }));
+            })).RequireAuthorization();
         }, configureServices: services => services.AddAuthentication("cookie").AddCookie("cookie"));
 
         using var signIn = await host.Client.GetAsync("/signin");
@@ -135,7 +205,7 @@ public sealed class SqlOSSurfaceProtectionTests
     }
 
     [TestMethod]
-    public async Task ConventionalStartupHost_IsProtectedWithoutPlacement()
+    public async Task ConventionalStartupHost_RequireAuthorization_UsesSqlOSScheme()
     {
         var databaseName = Guid.NewGuid().ToString("N");
         using var server = new TestServer(new WebHostBuilder().UseEnvironment("Development")
@@ -155,7 +225,7 @@ public sealed class SqlOSSurfaceProtectionTests
                 app.UseAuthorization();
                 app.UseEndpoints(endpoints =>
                 {
-                    endpoints.MapGet("/api/me", () => "private");
+                    endpoints.MapGet("/api/me", () => "private").RequireAuthorization();
                     endpoints.MapGet("/public", () => "public");
                 });
             }));
@@ -173,7 +243,11 @@ public sealed class SqlOSSurfaceProtectionTests
         await using var host = await SingleApplicationTestHost.StartAsync(Configure, app =>
         {
             if (endpointPolicy) app.UseCors(); else app.UseCors("browser");
-            var route = app.MapGet("/api/me", () => "private");
+            // WebApplication inserts UseAuthentication/UseAuthorization immediately after
+            // UseRouting unless the host calls them. CORS then never sees preflight or 401s.
+            app.UseAuthentication();
+            app.UseAuthorization();
+            var route = app.MapGet("/api/me", () => "private").RequireAuthorization();
             if (endpointPolicy) route.RequireCors("browser");
         }, configureServices: services => services.AddCors(cors => cors.AddPolicy("browser", policy =>
             policy.WithOrigins("https://browser.example").WithMethods("GET").WithHeaders("Authorization"))));
@@ -197,7 +271,7 @@ public sealed class SqlOSSurfaceProtectionTests
     public async Task MappedOptionsEndpoint_IsValidatedLikeAnyOtherHandler()
     {
         await using var host = await SingleApplicationTestHost.StartAsync(Configure, app =>
-            app.MapMethods("/api/options", ["OPTIONS"], () => "private"));
+            app.MapMethods("/api/options", ["OPTIONS"], () => "private").RequireAuthorization());
         using var request = new HttpRequestMessage(HttpMethod.Options, "/api/options");
         request.Headers.Add("Origin", "https://browser.example");
         request.Headers.Add("Access-Control-Request-Method", "POST");

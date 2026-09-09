@@ -9,7 +9,6 @@ using Microsoft.Extensions.Options;
 using System.Net;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Endpoints;
-using SqlOS.AuthServer.Extensions;
 using SqlOS.Configuration;
 using SqlOS.Extensions;
 using SqlOS.Fga.Dashboard;
@@ -20,9 +19,8 @@ namespace SqlOS.Hosting;
 /// <summary>
 /// Registers SqlOS dashboard middleware and adds the auth-server, admin, protected-resource-metadata,
 /// and companion-package endpoints to the application's route table without requiring app code
-/// after <see cref="WebApplicationBuilder.Build"/>. Declared API/MCP surfaces attach bearer
-/// validation to the mapped endpoints under those paths; SqlOS does not add application
-/// pipeline middleware for them.
+/// after <see cref="WebApplicationBuilder.Build"/>. Declared API/MCP surfaces are resource
+/// identifiers (audiences, PRM). Application routes are locked with ASP.NET authorization.
 /// </summary>
 internal sealed class SqlOSPipelineStartupFilter : IStartupFilter
 {
@@ -119,16 +117,15 @@ internal sealed class SqlOSPipelineStartupFilter : IStartupFilter
             extension.MapEndpoints(sharedEndpoints, hostOptions);
         }
 
-        var sqlosEndpoints = ProtectSurfaceEndpoints(
-            new SqlOSEndpointDataSource(
-                mappingState,
-                coreEndpoints.DataSources.ToArray(),
-                sharedEndpoints.DataSources.ToArray()),
-            hostOptions);
+        var sqlosEndpoints = new SqlOSEndpointDataSource(
+            mappingState,
+            coreEndpoints.DataSources.ToArray(),
+            sharedEndpoints.DataSources.ToArray());
 
         // Let the application configure its pipeline first. WebApplication wraps it in
-        // UseRouting()/UseEndpoints() when the application mapped endpoints of its own and leaves
-        // the route builder it used (the WebApplication itself) in the builder properties.
+        // UseRouting() → user middleware (CORS) → UseAuthentication/UseAuthorization →
+        // UseEndpoints() when the application mapped endpoints of its own, and leaves the
+        // route builder it used (the WebApplication itself) in the builder properties.
         next(app);
 
         if (app.Properties.TryGetValue(EndpointRouteBuilderKey, out var value)
@@ -140,41 +137,20 @@ internal sealed class SqlOSPipelineStartupFilter : IStartupFilter
             // routing middleware snapshots the data sources when the pipeline is built, which
             // happens after every startup filter has run. UseEndpoints() only registers the new
             // sources with the global EndpointDataSource; it ignores ones already present.
-            ProtectMappedEndpoints(applicationRoutes.DataSources, hostOptions);
             applicationRoutes.DataSources.Add(sqlosEndpoints);
             app.UseEndpoints(static _ => { });
             return;
         }
 
-        // The application mapped nothing itself, so WebApplication added no routing pass. SqlOS
-        // appends one after the application's middleware; unmatched requests still end in 404.
+        // The application mapped nothing itself, so WebApplication added no routing pass
+        // (and may have inserted UseAuthentication/UseAuthorization with no endpoint).
+        // SqlOS endpoints such as MCP use RequireAuthorization(); routing must select
+        // the endpoint before authorization runs.
         app.UseRouting();
+        app.UseAuthentication();
+        app.UseAuthorization();
         app.UseEndpoints(endpoints => endpoints.DataSources.Add(sqlosEndpoints));
     };
-
-    private static EndpointDataSource ProtectSurfaceEndpoints(EndpointDataSource source, SqlOSOptions hostOptions)
-    {
-        var surfaces = SqlOSSingleApplicationSurfaces.Describe(hostOptions.AuthServer.Application);
-        return surfaces.Count == 0 ? source : new SqlOSSurfaceEndpointDataSource(source, surfaces);
-    }
-
-    private static void ProtectMappedEndpoints(ICollection<EndpointDataSource> sources, SqlOSOptions hostOptions)
-    {
-        var surfaces = SqlOSSingleApplicationSurfaces.Describe(hostOptions.AuthServer.Application);
-        if (surfaces.Count == 0)
-        {
-            return;
-        }
-
-        var existing = sources.ToArray();
-        sources.Clear();
-        foreach (var source in existing)
-        {
-            sources.Add(source is SqlOSSurfaceEndpointDataSource
-                ? source
-                : new SqlOSSurfaceEndpointDataSource(source, surfaces));
-        }
-    }
 
     /// <summary>
     /// The <see cref="IApplicationBuilder.Properties"/> key under which <c>UseRouting()</c> records

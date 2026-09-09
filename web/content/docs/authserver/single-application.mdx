@@ -31,8 +31,8 @@ builder.AddSqlOS<AppDbContext>(
     options => options.UseSingleApplication("Todo", app =>
     {
         app.Origin = "https://todo.example.com";
-        app.Api = "/api";                                        // protected REST surface
-        app.Mcp("/mcp", mcp => mcp.WithTools<TodoTools>());      // protected MCP surface
+        app.Api = "/api";                                        // resource id {Origin}/api
+        app.Mcp("/mcp", mcp => mcp.WithTools<TodoTools>());      // MCP server (SqlOS.Mcp)
         app.Brand(page => page.PrimaryColor = "#0f172a");        // AuthPage branding seed
         // app.Headless("/auth/authorize");                      // your own sign-in UI instead of the hosted pages
         app.Authorization(fga => fga                             // FGA model seed
@@ -42,23 +42,23 @@ builder.AddSqlOS<AppDbContext>(
     }));
 
 var app = builder.Build();
-app.MapGet("/api/todos", ...);   // already protected
+app.MapGet("/api/todos", ...).RequireAuthorization();
 app.Run();
 ```
 
 | Declaration | What SqlOS does |
 | --- | --- |
-| `Api = "/api"` | Validates bearer tokens for the audience `{Origin}/api` on mapped endpoints under `/api` (401 with a Bearer challenge otherwise), serves `/.well-known/oauth-protected-resource`, and uses `{Origin}/api` as the first-party client's default audience. |
-| `Mcp("/mcp", ...)` | Validates tokens for `{Origin}/mcp` under `/mcp`, serves `/.well-known/oauth-protected-resource/mcp`, enables client ID metadata documents and resource indicators for portable MCP clients, and hosts the MCP server there. See [MCP server](/docs/authserver/mcp-server). |
+| `Api = "/api"` | Resource id `{Origin}/api`: default `SqlOS` JWT scheme audience, first-party client audience, and `/.well-known/oauth-protected-resource`. Lock routes with `RequireAuthorization()`. |
+| `Mcp("/mcp", ...)` | Resource id `{Origin}/mcp`, `/.well-known/oauth-protected-resource/mcp`, CIMD + resource indicators, and a hosted MCP server. `SqlOS.Mcp` calls `RequireAuthorization("SqlOS.Mcp")` on the endpoint it maps. See [MCP server](/docs/authserver/mcp-server). |
 | `Brand(...)` | Forwards to `AuthServer.SeedAuthPage` on top of the single-application defaults. |
 | `Headless("/auth/authorize")` | Forwards to `AuthServer.UseHeadlessAuthPage` with a generated `BuildUiUrl` that sends browser interaction to `{Origin}/auth/authorize` with the standard headless parameters. See [Hosted or headless](#hosted-or-headless). |
 | `Authorization(...)` | Forwards to `Fga.Seed`. |
 
 The auth server, hosted sign-in pages, and dashboard are mapped by `AddSqlOS` at startup.
 
-## How the surfaces are protected
+## How tokens are validated
 
-`AddSqlOS` attaches bearer validation to the endpoints you map under `Api` or `Mcp`. There is no SqlOS middleware in the host pipeline and no CORS handling: your `UseCors`, `UseAuthentication`, and the rest of the pipeline run first, then the selected endpoint checks the token. A missing or wrong-audience token is answered with `401` and a Bearer challenge. Handlers read the result through `HttpContext.GetSqlOSValidatedToken()` and `HttpContext.User`. Unmatched paths are 404s; raw middleware branches are not endpoints and are not protected.
+`AddSqlOS` registers the `SqlOS` JWT scheme with the `Api` audience when `app.Api` is set, and scheme/policy `SqlOS.Mcp` when `app.Mcp` is set. Audience lives on the scheme, the same way `JwtBearerOptions.Audience` does. Call `RequireAuthorization()` on the groups you lock. A missing or wrong-audience token is answered with `401` and a Bearer challenge. Handlers read the result through `HttpContext.GetSqlOSValidatedToken()` and `HttpContext.User`. SqlOS does not wrap routes from a path string and does not handle CORS.
 
 The derived client is a public PKCE client for whatever front end you build: a browser SPA, a native app, or an agent. It completes the authorization-code flow with its standard OIDC library, requests `resource={Origin}/api`, and sends the token as a bearer. Add a native app's custom-scheme or loopback callback to `RedirectUris`, and set `AllowNativeHeadlessAuth = true` if it drives the [headless authentication API](/docs/authserver/headless-auth) directly. The [Notes sample](https://github.com/ross-slaney/sqlos/tree/main/examples/SqlOS.OneCall.Api) is a complete bearer-only host with API and MCP.
 

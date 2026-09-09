@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using SqlOS.AuditLogs;
 using SqlOS.Configuration;
+using SqlOS.AuthServer.Authentication;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Services;
@@ -150,6 +151,7 @@ public static class ServiceCollectionExtensions
         services.AddHostedService<SqlOSCalendarSyncHostedService>();
         services.AddHostedService<SqlOSBootstrapHostedService>();
         services.AddSingleton<IStartupFilter, SqlOSPipelineStartupFilter>();
+        SqlOSJwtAuthentication.Add(services, options);
 
         foreach (var extension in options.AuthServer.Application?.HostExtensions ?? [])
         {

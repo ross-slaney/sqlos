@@ -11,7 +11,7 @@ SqlOS validation is stateful: after signature, issuer, audience, and JWT lifetim
 
 ## Declared API and MCP surfaces
 
-Declare `app.Api = "/api"` (and `app.Mcp("/mcp", …)` when you host MCP) inside `UseSingleApplication` or `ConfigureApplication`. `AddSqlOS` validates mapped endpoints under those prefixes for the surface audience, sets `HttpContext.User`, and stores the `SqlOSValidatedToken` on the current request:
+Declare `app.Api = "/api"` (and `app.Mcp("/mcp", …)` when you host MCP) inside `UseSingleApplication` or `ConfigureApplication`. `AddSqlOS` registers the `SqlOS` JWT scheme with that API audience. Call `RequireAuthorization()` on the groups you lock. Authentication sets `HttpContext.User` and stores the `SqlOSValidatedToken` on the current request:
 
 ```csharp
 using SqlOS.AuthServer.Extensions;
@@ -91,7 +91,7 @@ And the OAuth metadata endpoint:
 GET /sqlos/auth/.well-known/oauth-authorization-server
 ```
 
-JWKS-only validation is necessarily stateless. It cannot observe a SqlOS session revocation, idle expiry, user deactivation, organization deactivation, or membership removal until the JWT expires. Use a declared `Api`/`Mcp` surface or `ValidateAccessTokenAsync` when immediate lifecycle enforcement matters. If a resource server must remain JWKS-only, keep access-token lifetimes short and treat that delay as an explicit deployment tradeoff.
+JWKS-only validation is necessarily stateless. It cannot observe a SqlOS session revocation, idle expiry, user deactivation, organization deactivation, or membership removal until the JWT expires. Same-process hosts use the `SqlOS` scheme (`RequireAuthorization()`), which calls `ValidateAccessTokenAsync`. A separate API uses `AddJwtBearer` against JWKS and accepts revoke-at-`exp`. If a resource server must remain JWKS-only, keep access-token lifetimes short and treat that delay as an explicit deployment tradeoff.
 
 ## Token claims
 

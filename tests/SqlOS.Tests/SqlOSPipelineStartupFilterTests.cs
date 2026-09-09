@@ -14,6 +14,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SqlOS.AuthServer.Authentication;
 using SqlOS.AuthServer.Extensions;
 using SqlOS.Configuration;
 using SqlOS.Dashboard;
@@ -224,7 +225,7 @@ public sealed class SqlOSPipelineStartupFilterTests
                 app.Origin = SingleApplicationTestHost.Origin;
                 app.Api = "/api";
             }),
-            app => app.MapGet("/api/anything", () => "should not run"));
+            app => app.MapGet("/api/anything", () => "should not run").RequireAuthorization());
 
         var response = await host.Client.GetAsync("/api/anything");
 
@@ -267,7 +268,7 @@ public sealed class SqlOSPipelineStartupFilterTests
                     userId = token?.UserId,
                     authenticated = context.User.Identity?.IsAuthenticated ?? false
                 });
-            }));
+            }).RequireAuthorization());
 
         var token = await host.MintAccessTokenAsync($"{SingleApplicationTestHost.Origin}/api");
         using var request = new HttpRequestMessage(HttpMethod.Get, "/api/me");
@@ -298,8 +299,10 @@ public sealed class SqlOSPipelineStartupFilterTests
             }),
             app =>
             {
-                app.MapGet("/api/me", (HttpContext context) => context.GetSqlOSValidatedToken()?.Audience);
-                app.MapPost("/mcp", (HttpContext context) => context.GetSqlOSValidatedToken()?.Audience);
+                app.MapGet("/api/me", (HttpContext context) => context.GetSqlOSValidatedToken()?.Audience)
+                    .RequireAuthorization();
+                app.MapPost("/mcp", (HttpContext context) => context.GetSqlOSValidatedToken()?.Audience)
+                    .RequireAuthorization(SqlOSJwtDefaults.McpPolicy);
             });
 
         var apiToken = await host.MintAccessTokenAsync($"{SingleApplicationTestHost.Origin}/api");
@@ -360,7 +363,7 @@ public sealed class SqlOSPipelineStartupFilterTests
         host.App.Services.GetService<RecordingHostExtension.Marker>().Should().NotBeNull();
 
         var anonymous = await host.Client.PostAsync("/mcp", new StringContent("{}"));
-        anonymous.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "extension endpoints sit behind the surface validation");
+        anonymous.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "the extension requires the SqlOS.Mcp policy");
         anonymous.Headers.WwwAuthenticate.ToString().Should().Contain("/.well-known/oauth-protected-resource/mcp");
 
         var token = await host.MintAccessTokenAsync($"{SingleApplicationTestHost.Origin}/mcp");
@@ -394,7 +397,8 @@ public sealed class SqlOSPipelineStartupFilterTests
         public void MapEndpoints(IEndpointRouteBuilder endpoints, SqlOSOptions options)
         {
             endpoints.MapPost(options.AuthServer.SingleApplication!.Mcp!, (HttpContext context) =>
-                Results.Text(context.GetSqlOSValidatedToken()?.Audience ?? "unvalidated"));
+                Results.Text(context.GetSqlOSValidatedToken()?.Audience ?? "unvalidated"))
+                .RequireAuthorization(SqlOSJwtDefaults.McpPolicy);
         }
 
         public sealed class Marker;

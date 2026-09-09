@@ -19,7 +19,7 @@ Both use the same users, sessions, organizations, FGA services, and dashboard. A
 
 ## One application: describe it once
 
-`builder.AddSqlOS<TContext>(...)` registers SqlOS, maps its auth endpoints and dashboard, and protects the surfaces you declare. Nothing else is placed or ordered by your code.
+`builder.AddSqlOS<TContext>(...)` registers SqlOS and maps its auth endpoints and dashboard. Declared `Api` and `Mcp` are resource ids (audience, PRM, CIMD). Lock your routes with `RequireAuthorization()`. Nothing else is placed or ordered by your code.
 
 ### Add it to a project
 
@@ -63,7 +63,7 @@ builder.AddSqlOS<AppDbContext>(db => db.UseSqlServer(connectionString), options 
 
 var app = builder.Build();
 
-var api = app.MapGroup("/api"); // already protected
+var api = app.MapGroup("/api").RequireAuthorization();
 api.MapGet("/me", (HttpContext http) => Results.Ok(new
 {
     userId = http.GetSqlOSValidatedToken()!.UserId
@@ -82,7 +82,7 @@ Run it and `curl -i http://localhost:5050/api/me` returns `401` with a Bearer ch
 | Option | Effect |
 | --- | --- |
 | `Origin` | Public origin used to derive the default issuer, callback and surface audiences. Configure the externally visible URL, not a container address. |
-| `Api = "/api"` | Requires a valid bearer token for `{Origin}/api` on mapped endpoints under `/api` before the handler runs. A sibling such as `/apiary` is outside it. |
+| `Api = "/api"` | Resource id `{Origin}/api`: default JWT scheme audience, first-party client audience, and `/.well-known/oauth-protected-resource`. Lock routes with `RequireAuthorization()`. |
 | `Mcp("/mcp", ...)` | Registers and maps a stateless Streamable HTTP MCP server, with a separate `{Origin}/mcp` audience and OAuth discovery. Requires `SqlOS.Mcp`. |
 | `Brand(...)` | Reconciles hosted sign-in branding into code-owned settings. Equivalent to `AuthServer.SeedAuthPage`. |
 | `Authorization(...)` | Reconciles resource types, permissions, and roles. Equivalent to `Fga.Seed`; application services must still create grants and enforce access. |
@@ -95,7 +95,7 @@ SqlOS creates and upgrades its own tables at startup. Your EF migrations own you
 
 ### How the surfaces are protected
 
-`AddSqlOS` attaches that validation to the endpoints you map under a declared surface. It does not add middleware to the host pipeline and does not handle CORS. Signature, issuer, expiry, audience, and SqlOS session state are checked when the endpoint runs, after your `UseCors`, `UseAuthentication`, and the rest of the pipeline. Handlers read the result with `GetSqlOSValidatedToken()` or `HttpContext.User`. API and MCP tokens are not interchangeable. Unmatched paths under the prefix are ordinary 404s; a raw `app.Map("/api/...")` middleware branch is not an endpoint and is not protected.
+`AddSqlOS` registers the `SqlOS` JWT scheme (session-aware `ValidateAccessTokenAsync`) with that API audience. Call `RequireAuthorization()` on the groups you want locked — the same ASP.NET API as `AddJwtBearer`. `SqlOS.Mcp` requires authorization on the MCP endpoint it maps, using scheme/policy `SqlOS.Mcp`. SqlOS does not wrap routes from a path string and does not handle CORS. Handlers read the result with `GetSqlOSValidatedToken()` or `HttpContext.User`. API and MCP tokens are not interchangeable.
 
 The challenge's `resource_metadata` URL points to `/.well-known/oauth-protected-resource` for the API and `/.well-known/oauth-protected-resource/mcp` for MCP.
 
@@ -347,7 +347,7 @@ var app = builder.Build();
 app.MapGet("/api/me", (HttpContext http) => Results.Ok(new
 {
     userId = http.GetSqlOSValidatedToken()!.UserId
-}));
+})).RequireAuthorization();
 app.Run();
 
 public sealed class AppDbContext(DbContextOptions<AppDbContext> options)

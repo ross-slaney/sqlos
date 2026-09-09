@@ -2,6 +2,16 @@
 
 These instructions apply to the entire repository.
 
+## Product shape
+
+SqlOS is an OpenID Provider and an FGA engine. It is not an API gateway.
+
+- Tokens are JWTs. Same-process hosts authenticate them with the `SqlOS` authentication scheme that `AddSqlOS` registers. Separate resource APIs may use `AddJwtBearer` against JWKS and accept revoke-at-`exp`.
+- Apps lock routes with ASP.NET (`AddAuthentication` / `RequireAuthorization` / `[Authorize]`). `SqlOS.Mcp` may `RequireAuthorization()` on the MCP endpoint it maps. It must not wrap `/api`.
+- `app.Api` and `app.Mcp` are resource identifiers and host topology (RFC 9728 PRM, token `aud`, CIMD). They do not wrap endpoints and they do not infer which application routes return 401.
+- Do not add `RequireSqlOSAccessToken`, surface `EndpointDataSource` wrappers, path-inferred middleware, or any other hide that decides the application's lock for it.
+- Session lookup stays inside `ValidateAccessTokenAsync` (and therefore inside the `SqlOS` handler). That is not a reason to hide `[Authorize]` or to tell hosts they cannot use a JWT bearer scheme.
+
 ## Product control-plane parity
 
 Administrative product capabilities should be designed as one domain model exposed through three control planes. Do not build separate policy or validation implementations for code, HTTP APIs, and the dashboard.

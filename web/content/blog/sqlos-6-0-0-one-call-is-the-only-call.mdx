@@ -8,6 +8,8 @@ tags: ["AuthServer", "OAuth", "MCP", "Security", "SqlOS"]
 
 SqlOS 5.0 let a host describe itself once inside `AddSqlOS`. SqlOS 6.0 makes that the only public way to do it.
 
+SqlOS 7.0 keeps that one call and puts the API lock back on ordinary `RequireAuthorization()`. This article is the 6.0 shipping note.
+
 `MapSqlOS`, `RequireSqlOSAccessToken`, and `UseSqlOSAccessTokenValidation` are removed. They were leftover helpers around the one-call path, and they invited a second foundation: a mapping call, a token filter, a middleware placement. Agents treated them as the real API. Hosts copied them next to `UseSingleApplication` and asked which one was required. Neither is. The application description is the contract.
 
 ```bash
