@@ -6,26 +6,26 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.WebUtilities;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
+using ModelContextProtocol.AspNetCore;
+using SqlOS.AuthServer.Authentication;
 using SqlOS.AuthServer.Extensions;
-using SqlOS.AuthServer.Models;
 using SqlOS.Extensions;
 using SqlOS.IntegrationTests.Infrastructure;
-using SqlOS.Mcp;
 
 namespace SqlOS.IntegrationTests;
 
 /// <summary>
-/// Real-SQL proof of the one-call single-application shape: <c>AddSqlOS</c> declares
-/// <c>Api = "/api"</c> and <c>app.Mcp("/mcp", ...)</c>, application code maps nothing SqlOS-related,
-/// and a Codex-shaped CIMD client (portless loopback registration, ephemeral-port authorize)
-/// completes authorize → consent → token → <c>POST /mcp</c>.
+/// Real-SQL proof of the single-application shape: <c>AddSqlOS</c> declares
+/// <c>Api = "/api"</c> and <c>Mcp = "/mcp"</c>, the host maps Microsoft's MCP SDK
+/// with <c>RequireAuthorization("SqlOS.Mcp")</c>, and a Codex-shaped CIMD client
+/// (portless loopback registration, ephemeral-port authorize) completes
+/// authorize → consent → token → <c>POST /mcp</c>.
 /// </summary>
 [TestClass]
 public sealed class SingleApplicationSurfacesIntegrationTests
@@ -130,15 +130,6 @@ public sealed class SingleApplicationSurfacesIntegrationTests
         who.GetProperty("userId").GetString().Should().Be(fixture.UserId);
         who.GetProperty("clientId").GetString().Should().Be(ClientMetadataUrl);
         who.GetProperty("audience").GetString().Should().Be(McpAudience);
-
-        await using var scope = fixture.App.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<TestSqlOSDbContext>();
-        var audit = await db.Set<SqlOSAuditEvent>().SingleAsync(x => x.Action == "mcp.tool.called");
-        audit.Source.Should().Be("mcp");
-        audit.UserId.Should().Be(fixture.UserId);
-        audit.ApplicationKey.Should().Be(ClientMetadataUrl);
-        audit.TargetsJson.Should().Contain("\"whoami\"");
-        audit.MetadataJson.Should().Contain("\"outcome\":\"succeeded\"").And.NotContain(accessToken);
     }
 
     private static async Task<HostedAuthorizeTokenFixture> CreateFixtureAsync(bool explicitClients = false)
@@ -151,7 +142,7 @@ public sealed class SingleApplicationSurfacesIntegrationTests
                     app.Origin = Origin;
                     app.AllowedScopes = ["openid", "profile", "email", "offline_access", "petals.read", "petals.write"];
                     app.Api = "/api";
-                    app.Mcp("/mcp", mcp => mcp.WithTools<PetalTools>());
+                    app.Mcp = "/mcp";
                 }
                 if (explicitClients)
                 {
@@ -177,31 +168,38 @@ public sealed class SingleApplicationSurfacesIntegrationTests
                 }
                 options.AuthServer.ClientRegistration.Cimd.TrustedHosts.Add("portable.example.test");
             },
-            configureServices: services => services.AddSingleton<IHttpClientFactory>(
-                new FakeCimdHttpClientFactory(new Dictionary<string, string>
-                {
-                    [ClientMetadataUrl] = JsonSerializer.Serialize(new Dictionary<string, object?>
+            configureServices: services =>
+            {
+                services.AddHttpContextAccessor();
+                services.AddMcpServer()
+                    .WithHttpTransport(transport => transport.SessionMode = HttpServerSessionMode.Stateless)
+                    .WithTools<PetalTools>();
+                services.AddSingleton<IHttpClientFactory>(
+                    new FakeCimdHttpClientFactory(new Dictionary<string, string>
                     {
-                        ["client_id"] = ClientMetadataUrl,
-                        ["client_name"] = "Codex",
-                        ["redirect_uris"] = new[] { RegisteredLoopbackRedirect },
-                        ["grant_types"] = new[] { "authorization_code", "refresh_token" },
-                        ["response_types"] = new[] { "code" },
-                        ["token_endpoint_auth_method"] = "none",
-                        ["client_uri"] = "https://portable.example.test",
-                        ["software_id"] = "codex",
-                        ["software_version"] = "2026.9"
-                    })
-                })),
+                        [ClientMetadataUrl] = JsonSerializer.Serialize(new Dictionary<string, object?>
+                        {
+                            ["client_id"] = ClientMetadataUrl,
+                            ["client_name"] = "Codex",
+                            ["redirect_uris"] = new[] { RegisteredLoopbackRedirect },
+                            ["grant_types"] = new[] { "authorization_code", "refresh_token" },
+                            ["response_types"] = new[] { "code" },
+                            ["token_endpoint_auth_method"] = "none",
+                            ["client_uri"] = "https://portable.example.test",
+                            ["software_id"] = "codex",
+                            ["software_version"] = "2026.9"
+                        })
+                    }));
+            },
             configureApp: app =>
             {
-                // Application code: map under the declared Api/Mcp prefixes. SqlOS validates the token.
                 app.MapGet("/", () => Results.Text("home"));
                 app.MapGet("/api/ping", (HttpContext http) =>
                 {
                     var token = http.GetSqlOSValidatedToken()!;
                     return Results.Json(new { userId = token.UserId, audience = token.Audience });
                 }).RequireAuthorization();
+                app.MapMcp("/mcp").RequireAuthorization(SqlOSJwtDefaults.McpPolicy);
             },
             mapAuthServer: false,
             seedBrowserClient: false);
@@ -258,7 +256,10 @@ public sealed class SingleApplicationSurfacesIntegrationTests
     public sealed class PetalTools
     {
         [McpServerTool(Name = "whoami"), System.ComponentModel.Description("Describes the connecting SqlOS user.")]
-        public static string WhoAmI(ISqlOSMcpUserContext user)
-            => JsonSerializer.Serialize(new { userId = user.UserId, clientId = user.ClientId, audience = user.Audience });
+        public static string WhoAmI(IHttpContextAccessor http)
+        {
+            var token = http.HttpContext?.GetSqlOSValidatedToken();
+            return JsonSerializer.Serialize(new { userId = token?.UserId, clientId = token?.ClientId, audience = token?.Audience });
+        }
     }
 }

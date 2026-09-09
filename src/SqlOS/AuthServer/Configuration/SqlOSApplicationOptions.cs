@@ -30,15 +30,16 @@ public class SqlOSApplicationOptions
     /// <summary>
     /// Gets or sets the application-relative MCP path, for example <c>/mcp</c>. When set, SqlOS
     /// uses <c>{Origin}{Mcp}</c> as that surface's audience, serves the protected-resource
-    /// document at <c>/.well-known/oauth-protected-resource{Mcp}</c>, and enables client ID
-    /// metadata documents and resource indicators so portable MCP clients can connect.
-    /// <c>SqlOS.Mcp</c> requires authorization on the endpoint it maps. Dynamic client
-    /// registration is not enabled by this property.
+    /// document at <c>/.well-known/oauth-protected-resource{Mcp}</c>, registers scheme/policy
+    /// <c>SqlOS.Mcp</c>, and enables client ID metadata documents and resource indicators so
+    /// portable MCP clients can connect. The host maps Microsoft's MCP SDK on this path and calls
+    /// <c>RequireAuthorization("SqlOS.Mcp")</c>. Dynamic client registration is not enabled by this
+    /// property.
     /// </summary>
     public string? Mcp { get; set; }
 
     /// <summary>
-    /// Gets the host extensions contributed by companion packages (for example <c>SqlOS.Mcp</c>).
+    /// Gets the host extensions registered on this application description.
     /// SqlOS runs <see cref="ISqlOSHostExtension.ConfigureServices"/> during <c>AddSqlOS</c> and
     /// <see cref="ISqlOSHostExtension.MapEndpoints"/> when it maps its own endpoints at startup.
     /// </summary>

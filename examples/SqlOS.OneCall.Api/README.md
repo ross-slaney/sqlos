@@ -1,6 +1,6 @@
 # Notes: one `AddSqlOS` call, a protected API, and an MCP server
 
-This is the smallest complete SqlOS application. `Program.cs` describes the app once and SqlOS derives the rest: the auth server and hosted sign-in, resource ids for `/api` and `/mcp`, the protected-resource documents, the MCP server, the branding, and the permission model. Application code locks `/api` with `RequireAuthorization()`. It contains no `AddMcpServer`, `MapMcp`, or hand-written metadata document.
+This is the smallest complete SqlOS application. `Program.cs` describes the app once and SqlOS derives the rest: the auth server and hosted sign-in, resource ids for `/api` and `/mcp`, the protected-resource documents, branding, and the permission model. Application code locks `/api` with `RequireAuthorization()`, maps Microsoft's MCP SDK on `/mcp`, and locks that endpoint with `RequireAuthorization("SqlOS.Mcp")`.
 
 ```csharp
 builder.AddSqlOS<NotesDbContext>(db => db.UseSqlServer(connectionString), options =>
@@ -8,7 +8,7 @@ builder.AddSqlOS<NotesDbContext>(db => db.UseSqlServer(connectionString), option
     {
         app.Origin = origin;
         app.Api = "/api";
-        app.Mcp("/mcp", mcp => mcp.WithTools<NotesMcpTools>());
+        app.Mcp = "/mcp";
         app.Brand(page => { page.PageTitle = "Notes"; page.PrimaryColor = "#14532d"; });
         app.Authorization(fga => fga
             .ResourceType("notebook", "Notebook")
@@ -17,10 +17,15 @@ builder.AddSqlOS<NotesDbContext>(db => db.UseSqlServer(connectionString), option
             .Role("notebook_owner", "Notebook owner").Can("NOTES_READ", "NOTES_WRITE"));
     }));
 
+builder.Services.AddMcpServer()
+    .WithHttpTransport(transport => transport.SessionMode = HttpServerSessionMode.Stateless)
+    .WithTools<NotesMcpTools>();
+
 var app = builder.Build();
 var api = app.MapGroup("/api").RequireAuthorization();
 api.MapGet("/notes", ...);
 api.MapPost("/notes", ...);
+app.MapMcp("/mcp").RequireAuthorization("SqlOS.Mcp");
 app.Run();
 ```
 
@@ -65,9 +70,10 @@ The dashboard at `/sqlos` is open without a password in Development only. Config
 
 | Configuration or file | Effect |
 | --- | --- |
-| [NotesApplication.cs](NotesApplication.cs) | The complete host: one `AddSqlOS` call, the `/api` handlers, and sample database setup |
+| [NotesApplication.cs](NotesApplication.cs) | The complete host: one `AddSqlOS` call, the `/api` handlers, Microsoft's MCP SDK, and sample database setup |
 | `app.Api = "/api"` | Resource id `http://localhost:5085/api`: default JWT scheme audience and PRM. `RequireAuthorization()` on the group locks the notes routes. |
-| `app.Mcp("/mcp", mcp => mcp.WithTools<NotesMcpTools>())` | Hosts and audits the MCP tools, requires the `SqlOS.Mcp` policy, and enables CIMD/resource indicators |
+| `app.Mcp = "/mcp"` | Resource id `http://localhost:5085/mcp`: scheme/policy `SqlOS.Mcp`, PRM, CIMD, and resource indicators |
+| `AddMcpServer` / `MapMcp` | Hosts the MCP tools with Microsoft's SDK and `RequireAuthorization("SqlOS.Mcp")` |
 | `app.Brand(...)` | Seeds code-owned title, copy, and colors for the hosted pages |
 | `app.Authorization(...)` | Seeds notebook resource type, read/write permissions, and the owner role; it grants nobody access by itself |
 | [Notes.cs](Notes.cs) | Domain entities, transactional first-use provisioning, FGA enforcement, and MCP tools |

@@ -15,7 +15,7 @@ These samples are working reference applications, not isolated snippets. They sh
 | Build a terminal sign-in flow | [Todo CLI](SqlOS.Todo.Cli/README.md) | OAuth device authorization, browser handoff, polling, token refresh, and CLI API calls |
 | Offer "Sign in with your app" to other apps | [Sign in with X](SqlOS.SignInWithX.AppHost/README.md) | SqlOS as an OpenID Provider: a Next.js + Auth.js relying party federates via pure OIDC discovery, with the consent screen and remembered grants |
 
-Start with the [Notes sample](SqlOS.OneCall.Api/README.md) for `UseSingleApplication`, browser login, a protected API, and hosted MCP tools. Use Todo or the full example for `ConfigureApplication` with several explicit clients.
+Start with the [Notes sample](SqlOS.OneCall.Api/README.md) for `UseSingleApplication`, browser login, a protected API, and MCP tools on Microsoft's SDK. Use Todo or the full example for `ConfigureApplication` with several explicit clients.
 
 ## Which hosts use which API?
 

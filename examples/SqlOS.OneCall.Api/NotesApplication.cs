@@ -1,8 +1,9 @@
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
+using ModelContextProtocol.AspNetCore;
+using SqlOS.AuthServer.Authentication;
 using SqlOS.AuthServer.Extensions;
 using SqlOS.Extensions;
-using SqlOS.Mcp;
 
 namespace SqlOS.OneCall.Api;
 
@@ -22,7 +23,7 @@ public static class NotesApplication
         //  - the auth server, hosted sign-in, and dashboard are mapped at startup,
         //  - app.Api / app.Mcp are resource ids (audiences + RFC 9728 documents),
         //  - the SqlOS JWT scheme (and SqlOS.Mcp policy) validate session-aware bearer tokens,
-        //  - the MCP server is registered and mapped on /mcp with CIMD + resource indicators enabled,
+        //  - CIMD + resource indicators turn on because app.Mcp is set,
         //  - the AuthPage branding and the FGA model are seeded.
         builder.AddSqlOS<NotesDbContext>(
             (DbContextOptionsBuilder db) =>
@@ -40,7 +41,7 @@ public static class NotesApplication
                 {
                     app.Origin = origin;
                     app.Api = "/api";
-                    app.Mcp("/mcp", mcp => mcp.WithTools<NotesMcpTools>());
+                    app.Mcp = "/mcp";
 
                     app.Brand(page =>
                     {
@@ -65,7 +66,12 @@ public static class NotesApplication
                 });
             });
 
+        builder.Services.AddHttpContextAccessor();
         builder.Services.AddScoped<NotesService>();
+        builder.Services.AddMcpServer()
+            .WithHttpTransport(transport => transport.SessionMode = HttpServerSessionMode.Stateless)
+            .WithTools<NotesMcpTools>()
+            .WithRequestFilters(filters => filters.AddCallToolFilter(NotesMcpToolCallAudit.Wrap));
 
         var app = builder.Build();
         app.UseExceptionHandler(errors => errors.Run(async http =>
@@ -86,6 +92,8 @@ public static class NotesApplication
             => Results.Ok(await notes.ListAsync(http.GetSqlOSValidatedToken()!.UserId!, ct)));
         api.MapPost("/notes", async (HttpContext http, NoteRequest request, NotesService notes, CancellationToken ct)
             => Results.Ok(await notes.AddAsync(http.GetSqlOSValidatedToken()!.UserId!, request.Text, ct)));
+
+        app.MapMcp("/mcp").RequireAuthorization(SqlOSJwtDefaults.McpPolicy);
 
         // Sample-only application schema setup; production apps use their own EF migrations.
         await using var scope = app.Services.CreateAsyncScope();

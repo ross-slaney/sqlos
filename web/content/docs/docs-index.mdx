@@ -19,7 +19,7 @@ builder.AddSqlOS<AppDbContext>(
     {
         app.Origin = "https://acme.example.com";
         app.Api = "/api";                                     // resource id {Origin}/api
-        app.Mcp("/mcp", mcp => mcp.WithTools<AcmeTools>());   // MCP server (SqlOS.Mcp)
+        app.Mcp = "/mcp";                                      // resource id {Origin}/mcp
         app.Brand(page => page.PrimaryColor = "#0f172a");     // hosted sign-in, or app.Headless("/auth/authorize") for your own UI
         app.Authorization(fga => /* resource types, permissions, roles */ fga);
     }));

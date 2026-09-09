@@ -6,13 +6,13 @@ using ModelContextProtocol.Server;
 using SqlOS.AuditLogs;
 using SqlOS.AuthServer.Extensions;
 
-namespace SqlOS.Mcp;
+namespace SqlOS.OneCall.Api;
 
 /// <summary>
-/// Records one SqlOS audit event per MCP tool call: tool name, subject, organization, client, and
-/// outcome. Tool arguments, results, and tokens are never written.
+/// Sample host filter: one SqlOS audit event per MCP tool call. Tool arguments, results, and
+/// tokens are never written. This is application code, not a SqlOS surface.
 /// </summary>
-internal static class SqlOSMcpToolCallAudit
+internal static class NotesMcpToolCallAudit
 {
     public const string Action = "mcp.tool.called";
     public const string Source = "mcp";
@@ -23,17 +23,21 @@ internal static class SqlOSMcpToolCallAudit
         => async (context, cancellationToken) =>
         {
             var toolName = context.Params?.Name ?? string.Empty;
-            string outcome;
             try
             {
                 var result = await next(context, cancellationToken).ConfigureAwait(false);
-                outcome = result.IsError == true ? "tool_error" : "succeeded";
-                await RecordAsync(context, toolName, outcome, failureKind: null, cancellationToken).ConfigureAwait(false);
+                await RecordAsync(
+                    context,
+                    toolName,
+                    result.IsError == true ? "tool_error" : "succeeded",
+                    failureKind: null,
+                    cancellationToken).ConfigureAwait(false);
                 return result;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                await RecordAsync(context, toolName, "exception", ex.GetType().Name, cancellationToken).ConfigureAwait(false);
+                await RecordAsync(context, toolName, "exception", ex.GetType().Name, cancellationToken)
+                    .ConfigureAwait(false);
                 throw;
             }
         };
@@ -76,7 +80,6 @@ internal static class SqlOSMcpToolCallAudit
         };
         if (failureKind != null)
         {
-            // The exception type only; messages and stack traces are never recorded.
             metadata["failureKind"] = failureKind;
         }
 
@@ -98,8 +101,8 @@ internal static class SqlOSMcpToolCallAudit
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             services.GetService<ILoggerFactory>()?
-                .CreateLogger("SqlOS.Mcp")
-                .LogError(ex, "Failed to record the SqlOS audit event for MCP tool {Tool}.", toolName);
+                .CreateLogger("SqlOS.OneCall.Api")
+                .LogError(ex, "Failed to record the audit event for MCP tool {Tool}.", toolName);
         }
     }
 }

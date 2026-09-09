@@ -64,9 +64,7 @@ Reuse `release-<version>` if it already exists and is this release. Do not reset
 
 Canonical version: `src/SqlOS/SqlOS.csproj` `<Version>`.
 
-Bump `src/SqlOS.Mcp/SqlOS.Mcp.csproj` `<Version>` to the same value; the companion package ships on the same version line and `publish.yml` packs both projects. `scripts/validate-docs-against-source.mjs` fails when the two versions differ.
-
-Bump `packages/headless/package.json` `version` to the same value in this PR. `@sqlos/headless` publishes from the same GitHub release as NuGet; see `docs/NPM_PUBLISHING.md`.
+Bump `packages/headless/package.json` `version` to the same value in this PR. `@sqlos/headless` publishes from the same GitHub release as NuGet; see `docs/NPM_PUBLISHING.md`. Pack only `SqlOS`. Do not revive `SqlOS.Mcp`; MCP transport is the host's `ModelContextProtocol.AspNetCore` reference.
 
 `scripts/validate-docs-against-source.mjs` fails the PR unless these also contain the new version:
 
@@ -135,10 +133,9 @@ From the repo root:
 git diff --check
 ./scripts/docs-check.sh
 dotnet pack src/SqlOS/SqlOS.csproj -c Release -o /tmp/sqlos-nupkg
-dotnet pack src/SqlOS.Mcp/SqlOS.Mcp.csproj -c Release -o /tmp/sqlos-nupkg
 ```
 
-Confirm the nupkg names and metadata are `SqlOS.<version>` and `SqlOS.Mcp.<version>`. Delete the temp pack afterward.
+Confirm the nupkg name and metadata are `SqlOS.<version>`. Delete the temp pack afterward.
 
 CI will run build, unit, integration, and coverage. Run `./scripts/build.sh`, `./scripts/unit-tests.sh`, and `./scripts/integration-tests.sh` locally when the unreleased product change is large or the last CI on `main` is stale. Do not skip `docs-check.sh`.
 

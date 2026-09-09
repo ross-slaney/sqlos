@@ -21,7 +21,7 @@ Do **not** start here if you are just wiring your own first-party web app. Seed 
 
 ## Turn it on
 
-`CIMD` is disabled by default. With `UseSingleApplication` or `ConfigureApplication`, declaring an MCP surface (`app.Mcp("/mcp", ...)` from `SqlOS.Mcp`) enables it together with resource indicators, because portable MCP clients need both. Otherwise the helper below explicitly enables portable-client behavior and resource indicators without requiring a host allowlist:
+`CIMD` is disabled by default. With `UseSingleApplication` or `ConfigureApplication`, declaring an MCP surface (`app.Mcp = "/mcp"`) enables it together with resource indicators, because portable MCP clients need both. Otherwise the helper below explicitly enables portable-client behavior and resource indicators without requiring a host allowlist:
 
 ```csharp
 builder.AddSqlOS<AppDbContext>(options =>

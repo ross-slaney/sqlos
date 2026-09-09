@@ -21,18 +21,16 @@ This expands into the same seeded client records SqlOS already uses. It does not
 
 ## Describe the whole application in one call
 
-The same description can carry the application's protected surfaces, branding, and authorization model. SqlOS derives every protocol consequence, so `Program.cs` contains no `AddMcpServer`, `MapMcp`, or hand-written protected-resource document:
+The same description can carry the application's protected surfaces, branding, and authorization model. SqlOS derives the protocol consequences (audiences, RFC 9728 documents, CIMD when `Mcp` is set). The host maps Microsoft's MCP SDK and locks routes itself:
 
 ```csharp
-using SqlOS.Mcp; // SqlOS.Mcp package, only needed for app.Mcp(...)
-
 builder.AddSqlOS<AppDbContext>(
     db => db.UseSqlServer(connectionString),
     options => options.UseSingleApplication("Todo", app =>
     {
         app.Origin = "https://todo.example.com";
         app.Api = "/api";                                        // resource id {Origin}/api
-        app.Mcp("/mcp", mcp => mcp.WithTools<TodoTools>());      // MCP server (SqlOS.Mcp)
+        app.Mcp = "/mcp";                                        // resource id {Origin}/mcp
         app.Brand(page => page.PrimaryColor = "#0f172a");        // AuthPage branding seed
         // app.Headless("/auth/authorize");                      // your own sign-in UI instead of the hosted pages
         app.Authorization(fga => fga                             // FGA model seed
@@ -43,13 +41,14 @@ builder.AddSqlOS<AppDbContext>(
 
 var app = builder.Build();
 app.MapGet("/api/todos", ...).RequireAuthorization();
+app.MapMcp("/mcp").RequireAuthorization("SqlOS.Mcp");
 app.Run();
 ```
 
 | Declaration | What SqlOS does |
 | --- | --- |
 | `Api = "/api"` | Resource id `{Origin}/api`: default `SqlOS` JWT scheme audience, first-party client audience, and `/.well-known/oauth-protected-resource`. Lock routes with `RequireAuthorization()`. |
-| `Mcp("/mcp", ...)` | Resource id `{Origin}/mcp`, `/.well-known/oauth-protected-resource/mcp`, CIMD + resource indicators, and a hosted MCP server. `SqlOS.Mcp` calls `RequireAuthorization("SqlOS.Mcp")` on the endpoint it maps. See [MCP server](/docs/authserver/mcp-server). |
+| `Mcp = "/mcp"` | Resource id `{Origin}/mcp`, `/.well-known/oauth-protected-resource/mcp`, CIMD + resource indicators, and scheme/policy `SqlOS.Mcp`. Map Microsoft's MCP SDK and call `RequireAuthorization("SqlOS.Mcp")`. See [MCP server](/docs/authserver/mcp-server). |
 | `Brand(...)` | Forwards to `AuthServer.SeedAuthPage` on top of the single-application defaults. |
 | `Headless("/auth/authorize")` | Forwards to `AuthServer.UseHeadlessAuthPage` with a generated `BuildUiUrl` that sends browser interaction to `{Origin}/auth/authorize` with the standard headless parameters. See [Hosted or headless](#hosted-or-headless). |
 | `Authorization(...)` | Forwards to `Fga.Seed`. |
@@ -152,7 +151,7 @@ builder.AddSqlOS<AppDbContext>(options =>
 });
 ```
 
-`Api` and `Mcp` bind the same way as in code. Hosting the MCP server itself still requires the `app.Mcp(path, configure)` call from `SqlOS.Mcp`, since tool registration is code.
+`Api` and `Mcp` bind the same way as in code. Hosting the MCP server itself is the host's `AddMcpServer` / `MapMcp` calls, since tool registration is application code.
 
 ## Branding and permission ownership
 

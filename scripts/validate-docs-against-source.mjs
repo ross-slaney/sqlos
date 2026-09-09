@@ -34,14 +34,6 @@ if (!packageVersion) {
   errors.push("src/SqlOS/SqlOS.csproj: could not read <Version>.");
 }
 
-const mcpProject = read("src/SqlOS.Mcp/SqlOS.Mcp.csproj");
-const mcpPackageVersion = mcpProject.match(/<Version>([^<]+)<\/Version>/)?.[1];
-if (packageVersion && mcpPackageVersion !== packageVersion) {
-  errors.push(
-    `src/SqlOS.Mcp/SqlOS.Mcp.csproj: <Version> must match SqlOS ${packageVersion} (found ${mcpPackageVersion ?? "none"}).`,
-  );
-}
-
 if (!targetFramework) {
   errors.push("src/SqlOS/SqlOS.csproj: could not read <TargetFramework>.");
 }
