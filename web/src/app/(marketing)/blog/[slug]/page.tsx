@@ -3,6 +3,8 @@ import { getAllPosts, getPostBySlug } from "@/lib/blog";
 import { MDXRemote } from "next-mdx-remote/rsc";
 import rehypePrettyCode from "rehype-pretty-code";
 import remarkGfm from "remark-gfm";
+import Link from "next/link";
+import { blogMdxComponents } from "@/components/blog/BlogMdxComponents";
 
 const prettyCodeOptions = {
   theme: {
@@ -14,8 +16,6 @@ const prettyCodeOptions = {
     block: "plaintext",
   },
 };
-import Link from "next/link";
-import { blogMdxComponents } from "@/components/blog/BlogMdxComponents";
 
 interface PageProps {
   params: Promise<{ slug: string }>;
@@ -67,7 +67,7 @@ export default async function BlogPostPage({ params }: PageProps) {
             <p className="sqlos-eyebrow">
               <time dateTime={post.date}>{published}</time>
             </p>
-            <h1 className="mt-4 text-[clamp(2.4rem,1.5rem+2.6vw,3.4rem)] font-medium leading-[1.05] tracking-[-0.03em] text-[hsl(var(--sq-ink))]">
+            <h1 className="mt-4 text-[clamp(2.1rem,1.4rem+1.8vw,2.85rem)] font-bold leading-[1.1] tracking-[-0.03em] text-[hsl(var(--sq-ink))]">
               {post.title}
             </h1>
             <p className="mt-5 max-w-2xl text-xl leading-8 text-[hsl(var(--sq-ink-3))]">

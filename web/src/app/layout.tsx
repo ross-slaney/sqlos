@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Mono, Manrope, Newsreader } from "next/font/google";
+import { IBM_Plex_Mono, Manrope } from "next/font/google";
 import "@emcy/docs/styles.css";
 import "./globals.css";
 import ThemeProvider from "@/components/ThemeProvider";
@@ -13,12 +13,6 @@ const ibmPlexMono = IBM_Plex_Mono({
   variable: "--font-mono-ui",
   subsets: ["latin"],
   weight: ["400", "500", "600"],
-});
-
-const newsreader = Newsreader({
-  variable: "--font-display",
-  subsets: ["latin"],
-  style: ["normal", "italic"],
 });
 
 export const metadata: Metadata = {
@@ -35,7 +29,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning data-theme="violet">
       <body
-        className={`${manrope.variable} ${ibmPlexMono.variable} ${newsreader.variable} antialiased`}
+        className={`${manrope.variable} ${ibmPlexMono.variable} antialiased`}
       >
         <ThemeProvider>{children}</ThemeProvider>
       </body>

@@ -31,8 +31,8 @@ export default async function BlogPage({ searchParams }: BlogPageProps) {
       <div className="mx-auto max-w-5xl px-6 pb-20 pt-14">
         <header className="relative pb-10">
           <p className="sqlos-eyebrow">Blog</p>
-          <h1 className="mt-4 text-[clamp(2.6rem,1.6rem+3vw,3.75rem)] font-medium leading-[1.02] tracking-[-0.03em] text-[hsl(var(--sq-ink))]">
-            Notes from the SqlOS workshop
+          <h1 className="mt-4 text-[clamp(2.25rem,1.5rem+2vw,3rem)] font-bold leading-[1.05] tracking-[-0.03em] text-[hsl(var(--sq-ink))]">
+            Blog
           </h1>
           <p className="mt-5 max-w-2xl text-xl leading-8 text-[hsl(var(--sq-ink-3))]">
             Auth, hierarchical authorization, EF Core, and practical .NET
@@ -101,7 +101,7 @@ export default async function BlogPage({ searchParams }: BlogPageProps) {
                     })}
                   </time>
                   <div className="min-w-0">
-                    <h2 className="font-[family-name:var(--font-display)] text-[1.7rem] font-medium leading-tight tracking-[-0.025em] text-[hsl(var(--sq-ink))] transition-colors group-hover:text-[hsl(var(--sq-violet-deep))]">
+                    <h2 className="text-2xl font-semibold leading-tight tracking-[-0.02em] text-[hsl(var(--sq-ink))] transition-colors group-hover:text-[hsl(var(--sq-violet-deep))]">
                       {post.title}
                     </h2>
                     <p className="mt-3 text-[1.0625rem] leading-7 text-[hsl(var(--sq-ink-3))]">
