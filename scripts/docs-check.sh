@@ -12,12 +12,6 @@ node scripts/compile-doc-snippets.mjs
 npm ci --prefix web
 npm run lint --prefix web
 npm run build --prefix web
-if [ -n "${CI:-}" ]; then
-  npx --prefix web playwright install --with-deps chromium
-else
-  npx --prefix web playwright install chromium
-fi
-npm run docs:screenshots --prefix web
 node scripts/validate-doc-links.mjs
 
 echo "=== Docs Checks Complete ==="
