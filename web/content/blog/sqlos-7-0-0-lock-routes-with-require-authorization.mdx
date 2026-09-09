@@ -1,0 +1,73 @@
+---
+title: "SqlOS 7.0: Lock Routes with RequireAuthorization"
+description: "SqlOS is an auth server, not an API gateway. AddSqlOS registers a JWT scheme; your app locks routes with ordinary ASP.NET."
+date: "2026-09-09"
+author: "Ross Slaney"
+tags: ["AuthServer", "OAuth", "MCP", "Security", "SqlOS"]
+---
+
+SqlOS issues RS256 `at+jwt` access tokens. It always did. What 6.0 got wrong was the resource-server side: declaring `app.Api = "/api"` wrapped every mapped endpoint under that prefix. Hosts could not lock their own routes with `RequireAuthorization()` / `[Authorize]`, the same way they would with Entra or `AddJwtBearer`.
+
+7.0 puts that lock back where it belongs.
+
+```bash
+dotnet add package SqlOS --version 7.0.0
+```
+
+## The host you write
+
+```csharp
+builder.AddSqlOS<AppDbContext>(db => db.UseSqlServer(connectionString), options =>
+    options.UseSingleApplication("Acme", app =>
+    {
+        app.Origin = "https://app.example.com";
+        app.Api = "/api";
+        app.Mcp("/mcp", mcp => mcp.WithTools<AcmeTools>());
+        app.Brand(page => page.PrimaryColor = "#0f172a");
+        app.Authorization(fga => fga
+            .ResourceType("project", "Project")
+            .Permission("PROJECT_READ", "Read projects", "project")
+            .Role("project_viewer", "Viewer").Can("PROJECT_READ"));
+    }));
+
+var app = builder.Build();
+var api = app.MapGroup("/api").RequireAuthorization();
+api.MapGet("/me", (HttpContext http) =>
+    Results.Ok(new { userId = http.GetSqlOSValidatedToken()!.UserId }));
+app.Run();
+```
+
+`app.Api` and `app.Mcp` are resource identifiers: token `aud`, RFC 9728 protected-resource metadata, first-party client audience, CIMD. They do not wrap endpoints. A `MapGet("/api/me")` without `RequireAuthorization()` stays anonymous.
+
+`AddSqlOS` registers the `SqlOS` JWT scheme with audience `{Origin}/api`. The default authorization policy uses that scheme, so a later cookie default does not steal `RequireAuthorization()`. Same-process validation still calls `ValidateAccessTokenAsync` — signature, issuer, expiry, audience, and the persisted session. A separate API host keeps `AddJwtBearer` against JWKS and accepts revoke-at-`exp`.
+
+`SqlOS.Mcp` calls `RequireAuthorization("SqlOS.Mcp")` on the endpoint it maps. Application code does not wrap `/api` for it.
+
+A second same-process audience is another scheme, the same shape as `AddJwtBearer`:
+
+```csharp
+builder.Services.AddAuthentication()
+    .AddSqlOSJwt("Billing", options => options.ExpectedAudience = $"{origin}/billing");
+
+app.MapGroup("/billing").RequireAuthorization("Billing");
+```
+
+See [Getting started](/docs/getting-started), [Protect an API](/docs/quickstarts/protect-api), [Token validation](/docs/authserver/token-validation), and the [hosting API](/docs/reference/hosting-api).
+
+## Upgrade notes
+
+```bash
+dotnet add package SqlOS --version 7.0.0
+dotnet add package SqlOS.Mcp --version 7.0.0   # if you host MCP
+npm install @sqlos/headless@7.0.0              # if you render your own login UI
+```
+
+- **Add `RequireAuthorization()`** on the API groups you intend to lock. 6.0 treated `app.Api` as already protected. 7.0 does not.
+- **Keep `app.Api` and `app.Mcp`.** They still derive audience, PRM, and CIMD. They no longer decide which of your routes return 401.
+- **Keep `GetSqlOSValidatedToken()` and `ValidateAccessTokenAsync`.** The handler still stores the validated token on the request.
+- **Do not restore `RequireSqlOSAccessToken`.** Audience lives on the scheme (`SqlOSJwtOptions.ExpectedAudience`), not on a per-route helper.
+- **No schema bump.** 7.0 does not consume cookies or rotate sessions. Users stay signed in.
+
+This release also includes the documentation visual reset from [#370](https://github.com/ross-slaney/sqlos/pull/370).
+
+This release passed the repository's complete gate: build, documentation, unit, SQL Server and PostgreSQL integration, example-application, Todo web and CLI end-to-end, headless Next.js and Angular end-to-end, OpenID conformance, and coverage thresholds.
