@@ -91,7 +91,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
 }
 ```
 
-Declaring `Api` sets the `SqlOS` scheme's audience to `http://localhost:5050/api`, uses that audience for the `acme-web` client, and serves `/.well-known/oauth-protected-resource`. `RequireAuthorization()` on the group is ordinary ASP.NET: missing or wrong-audience tokens get `401` with a Bearer challenge that names `realm="Acme API"` and the metadata URL. After authentication, `HttpContext.User` and `GetSqlOSValidatedToken()` are populated. See [token validation](/docs/authserver/token-validation).
+Declaring `Api` sets the `SqlOS` scheme's audience to `http://localhost:5050/api`, uses that audience for the `acme-web` client, and serves `/.well-known/oauth-protected-resource`. `RequireAuthorization()` with no name is ordinary ASP.NET: it uses the default policy, which SqlOS sets to that scheme. Missing or wrong-audience tokens get `401` with a Bearer challenge that names `realm="Acme API"` and the metadata URL. After authentication, `HttpContext.User` and `GetSqlOSValidatedToken()` are populated. See [token validation](/docs/authserver/token-validation).
 
 When the API also serves delegated (especially third-party) clients, inspect `GetSqlOSValidatedToken()?.Scope` in the handler. Scope bounds the *client*; per-user, per-resource decisions stay with FGA. See [Scopes and Permissions](/docs/authserver/scopes-and-permissions).
 

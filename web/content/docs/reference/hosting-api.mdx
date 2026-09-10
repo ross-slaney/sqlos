@@ -11,7 +11,7 @@ section: reference
   href="/docs/getting-started"
   actionLabel="Getting Started"
 >
-  The recommended path has two integration points: derive your EF context from `SqlOSDbContext<TContext>` and call the combined `AddSqlOS` overload. SqlOS maps its endpoints and protects the surfaces you declare at startup.
+  The recommended path has two integration points: derive your EF context from `SqlOSDbContext<TContext>` and call the combined `AddSqlOS` overload. SqlOS maps its auth endpoints at startup. Declared `Api` and `Mcp` paths are audiences. Lock your routes with `RequireAuthorization()`.
 </Banner>
 
 ## Package and assembly
@@ -165,7 +165,7 @@ Single-application mode creates one first-party public PKCE client and applies A
 
 Declared surfaces are validated at startup: paths must be absolute, non-root, distinct and non-nested, and must not overlap `/.well-known`, the auth base path, or `DashboardBasePath`. `Audience` must equal `{Origin}{Api}` when both are set, and CIMD/resource indicators cannot be disabled after an `Mcp` surface is declared.
 
-`AddSqlOS` registers those JWT schemes. Call `RequireAuthorization()` (or `RequireAuthorization("SqlOS.Mcp")` for a hand-mapped MCP route) on the endpoints you lock. A missing or wrong-audience token receives HTTP `401` with a Bearer challenge that names the scheme's `realm` and `resource_metadata` URL. The validated token is available through `HttpContext.GetSqlOSValidatedToken()` and `HttpContext.User`. Inspect `Scope` on that token in the handler when a client's granted ceiling must be checked. SqlOS does not wrap routes from a path string and does not handle CORS.
+`AddSqlOS` registers those JWT schemes and makes `SqlOS` the default authorization policy. `RequireAuthorization()` with no name uses that default, so it requires the API audience. `RequireAuthorization("SqlOS.Mcp")` uses the second scheme. A missing or wrong-audience token receives HTTP `401` with a Bearer challenge that names the scheme's `realm` and `resource_metadata` URL. The validated token is available through `HttpContext.GetSqlOSValidatedToken()` and `HttpContext.User`. Inspect `Scope` on that token in the handler when a client's granted ceiling must be checked. SqlOS does not wrap routes from a path string and does not handle CORS.
 
 ### Exceptions
 

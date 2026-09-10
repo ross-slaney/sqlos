@@ -81,7 +81,9 @@ Resolve the acting identity from the validated token, never from tool arguments,
 
 ## Combine with an API surface
 
-`Api` and `Mcp` are separate audiences under the same origin. The first-party client receives `{Origin}/api` tokens by default; MCP clients request `{Origin}/mcp` through the `resource` parameter. Both surfaces share the auth server, sessions, users, organizations, and FGA model. Lock API routes with `RequireAuthorization()`. Lock `MapMcp` with `RequireAuthorization("SqlOS.Mcp")`. See [how tokens are validated](/docs/authserver/single-application#how-tokens-are-validated).
+`Api` and `Mcp` are separate audiences under the same origin. The first-party client receives `{Origin}/api` tokens by default; MCP clients request `{Origin}/mcp` through the `resource` parameter. Both surfaces share the auth server, sessions, users, organizations, and FGA model.
+
+Lock API routes with `RequireAuthorization()`. That call has no name because it uses ASP.NET's default policy, which SqlOS sets to the `SqlOS` scheme (API audience). Lock `MapMcp` with `RequireAuthorization("SqlOS.Mcp")`. ASP.NET has only one default, so the MCP route has to name the second policy. `RequireAuthorization()` on `/mcp` would check for an API token. See [how tokens are validated](/docs/authserver/single-application#how-tokens-are-validated).
 
 Surface paths are validated at startup: absolute, non-root, distinct and non-nested, and outside `/.well-known`, the auth base path, and `DashboardBasePath`.
 

@@ -69,7 +69,7 @@ The [README](https://github.com/ross-slaney/sqlos#multiple-applications-sqlos-as
 | --- | --- | --- |
 | Host | `UseSingleApplication` | `ConfigureApplication`; same host options |
 | Browser clients | One derived first-party PKCE client | One seed, dashboard record, or API operation per client |
-| Local API/MCP protection | Derived from declared paths | Same protection; configure each client's audience deliberately |
+| Local API/MCP protection | Host locks routes with `RequireAuthorization()` (and `RequireAuthorization("SqlOS.Mcp")` for MCP). Audiences come from the declared `Api`/`Mcp` paths. | Same lock; configure each client's audience deliberately |
 | Consent | Derived client is first-party | Third-party clients request consent; first-party clients skip it |
 | Scope configuration | Application scopes also seed the derived client | Application scopes describe resources; each explicit client has its own allowlist |
 | Branding and FGA | `Brand`, `Headless`, `Authorization` | The same methods, or the underlying seed APIs |

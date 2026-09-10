@@ -57,7 +57,14 @@ The auth server, hosted sign-in pages, and dashboard are mapped by `AddSqlOS` at
 
 ## How tokens are validated
 
-`AddSqlOS` registers the `SqlOS` JWT scheme with the `Api` audience when `app.Api` is set, and scheme/policy `SqlOS.Mcp` when `app.Mcp` is set. Audience lives on the scheme, the same way `JwtBearerOptions.Audience` does. Call `RequireAuthorization()` on the groups you lock. A missing or wrong-audience token is answered with `401` and a Bearer challenge. Handlers read the result through `HttpContext.GetSqlOSValidatedToken()` and `HttpContext.User`. SqlOS does not wrap routes from a path string and does not handle CORS.
+`AddSqlOS` registers two ASP.NET authentication schemes when both paths are set, because one scheme can require only one audience:
+
+- Scheme `SqlOS` expects a token whose audience is `{Origin}/api`. SqlOS also makes this the default authenticate scheme, challenge scheme, and authorization policy.
+- Scheme and policy `SqlOS.Mcp` expect a token whose audience is `{Origin}/mcp`.
+
+`RequireAuthorization()` with no name uses that default policy, so it checks for an API token. The MCP route cannot use the default: a valid MCP token would be rejected, and a valid API token would be accepted on `/mcp`. Name the second policy: `RequireAuthorization("SqlOS.Mcp")`.
+
+Setting `app.Api` or `app.Mcp` does not lock any route. A missing or wrong-audience token on a locked route is answered with `401` and a Bearer challenge. Handlers read the result through `HttpContext.GetSqlOSValidatedToken()` and `HttpContext.User`. SqlOS does not wrap routes from a path string and does not handle CORS.
 
 The derived client is a public PKCE client for whatever front end you build: a browser SPA, a native app, or an agent. It completes the authorization-code flow with its standard OIDC library, requests `resource={Origin}/api`, and sends the token as a bearer. Add a native app's custom-scheme or loopback callback to `RedirectUris`, and set `AllowNativeHeadlessAuth = true` if it drives the [headless authentication API](/docs/authserver/headless-auth) directly. The [Notes sample](https://github.com/ross-slaney/sqlos/tree/main/examples/SqlOS.OneCall.Api) is a complete bearer-only host with API and MCP.
 
