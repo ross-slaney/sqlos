@@ -21,24 +21,21 @@ Do **not** start here if you are just wiring your own first-party web app. Seed 
 
 ## Turn it on
 
-`CIMD` is disabled by default. With `UseSingleApplication` or `ConfigureApplication`, declaring an MCP surface (`app.Mcp = "/mcp"`) enables it together with resource indicators, because portable MCP clients need both. Otherwise the helper below explicitly enables portable-client behavior and resource indicators without requiring a host allowlist:
+`CIMD` is disabled by default. With `UseSingleApplication` or `ConfigureApplication`, `app.Mcp = "/mcp"` turns it on together with resource indicators, because portable clients that speak MCP need both. On a host that does not declare `Mcp`, set the flags:
 
 ```csharp
-builder.AddSqlOS<AppDbContext>(options =>
-{
-    options.AuthServer.EnablePortableMcpClients();
-});
-```
-
-You can also configure it directly:
-
-```csharp
-builder.AddSqlOS<AppDbContext>(options =>
-{
-    options.AuthServer.ClientRegistration.Cimd.Enabled = true;
-    options.AuthServer.ClientRegistration.Cimd.DefaultCacheTtl = TimeSpan.FromHours(12);
-    options.AuthServer.ClientRegistration.Cimd.TrustedHosts.Add("clients.example.com");
-});
+builder.AddSqlOS<AppDbContext>(
+    db => db.UseSqlServer(connectionString),
+    options =>
+    {
+        options.ConfigureApplication("Acme", app =>
+        {
+            app.Origin = "https://auth.example.com";
+        });
+        options.AuthServer.ClientRegistration.Cimd.Enabled = true;
+        options.AuthServer.ClientRegistration.Cimd.DefaultCacheTtl = TimeSpan.FromHours(12);
+        options.AuthServer.ClientRegistration.Cimd.TrustedHosts.Add("clients.example.com");
+    });
 ```
 
 <Callout type="warning" title="CIMD performs a server-side fetch">

@@ -46,31 +46,32 @@ There are three independently verified identities:
 
 ## 1. Configure the authorization server
 
-This is the explicit multi-client setup for an authorization server that protects an MCP resource on another origin. (In single-application mode, declaring an `Mcp` surface enables CIMD and resource indicators automatically; you only need `EnablePortableMcpClients` here because no surface is declared.)
+This is a dedicated identity host. The MCP server is on another origin, so this app does not declare `Api` or `Mcp`. `app.Origin` is the public auth origin; SqlOS derives the issuer as `{Origin}/sqlos/auth`. Portable clients need CIMD on, which is off until you set it. Resource indicators stay on by default outside `UseSingleApplication`.
 
 ```csharp
-const string publicOrigin = "https://auth.taskrail.test";
+const string origin = "https://auth.taskrail.test";
 
-builder.AddSqlOS<AppDbContext>(options =>
-{
-    var auth = options.AuthServer;
-    auth.PublicOrigin = publicOrigin;
-    auth.Issuer = $"{publicOrigin}/sqlos/auth";
-
-    auth.EnablePortableMcpClients(registration =>
+builder.AddSqlOS<AppDbContext>(
+    db => db.UseSqlServer(connectionString),
+    options =>
     {
-        registration.Cimd.TrustedHosts.Add("client.taskrail.test");
-        registration.Cimd.HttpTimeout = TimeSpan.FromSeconds(5);
-        registration.Cimd.MaxMetadataBytes = 32 * 1024;
-        registration.Cimd.DefaultCacheTtl = TimeSpan.FromHours(12);
+        options.ConfigureApplication("Taskrail", app =>
+        {
+            app.Origin = origin;
+        });
+
+        var cimd = options.AuthServer.ClientRegistration.Cimd;
+        cimd.Enabled = true;
+        cimd.TrustedHosts.Add("client.taskrail.test");
+        cimd.HttpTimeout = TimeSpan.FromSeconds(5);
+        cimd.MaxMetadataBytes = 32 * 1024;
     });
-});
 ```
 
-`EnablePortableMcpClients` enables CIMD and resource indicators and disables DCR. The discovery document advertises CIMD support, the `resource` parameter, `S256`, and public clients with `token_endpoint_auth_method=none`.
+Discovery then advertises CIMD, the `resource` parameter, `S256`, and public clients with `token_endpoint_auth_method=none`. Same-host apps that set `app.Mcp = "/mcp"` get CIMD and resource indicators from that assignment and do not repeat these flags. See [MCP server](/docs/authserver/mcp-server).
 
-<Callout type="warning" title="The CIMD allowlist is not an egress firewall">
-  In the current runtime, `TrustedHosts` and `TrustPolicy` decide whether fetched metadata is accepted, but they are evaluated after the outbound request. Enforce DNS/IP and redirect-safe HTTPS egress at the network or `HttpClient` layer so the identity host cannot reach loopback, link-local, private, or metadata-service addresses. If you cannot enforce that boundary, use a preregistered client instead of CIMD.
+<Callout type="warning" title="CIMD performs a server-side fetch">
+  `TrustedHosts` is an allowlist checked before SqlOS requests the metadata URL. When it is empty, any syntactically valid HTTPS client-ID URL with a non-root path is eligible. SqlOS rejects mixed public/private DNS answers and does not follow redirects. Still enforce DNS/IP and HTTPS egress at the network or `HttpClient` layer. If you cannot, seed a client instead of using CIMD.
 </Callout>
 
 ## 2. Publish protected-resource metadata
@@ -127,7 +128,7 @@ The document URL and `client_id` value must match exactly. SqlOS also requires H
 
 Serve the file as JSON with conservative caching. Changing redirect URIs, auth method, grant types, or response types causes SqlOS to revoke active sessions when it refreshes the cached metadata.
 
-Desktop and CLI clients (ChatGPT desktop / Codex, for example) register a **portless loopback** redirect such as `http://127.0.0.1/callback/<id>` and bind an ephemeral port at login. Per RFC 8252 §7.3, SqlOS accepts any port on a loopback IP-literal redirect (`127.0.0.1` or `[::1]`) while still requiring the scheme, address, path, and query to match the registered URI exactly. This applies only to loopback IP literals — `localhost`, HTTPS, and every other redirect URI require an exact match — and only while `ClientRegistration.Dcr.AllowLoopbackRedirectUris` is enabled (the `EnablePortableMcpClients` default).
+Desktop and CLI clients (ChatGPT desktop / Codex, for example) register a **portless loopback** redirect such as `http://127.0.0.1/callback/<id>` and bind an ephemeral port at login. Per RFC 8252 §7.3, SqlOS accepts any port on a loopback IP-literal redirect (`127.0.0.1` or `[::1]`) while still requiring the scheme, address, path, and query to match the registered URI exactly. This applies only to loopback IP literals — `localhost`, HTTPS, and every other redirect URI require an exact match — and only while `ClientRegistration.Dcr.AllowLoopbackRedirectUris` is enabled (the default).
 
 ## 4. Start authorization with state and PKCE
 

@@ -110,13 +110,17 @@ This is the better long-term public-client model because:
 - the same client can work across many deployments
 
 ```csharp
-builder.AddSqlOS<AppDbContext>(options =>
-{
-    options.AuthServer.EnablePortableMcpClients(registration =>
+builder.AddSqlOS<AppDbContext>(
+    db => db.UseSqlServer(connectionString),
+    options =>
     {
-        registration.Cimd.TrustedHosts.Add("clients.example.com");
+        options.ConfigureApplication("Acme", app =>
+        {
+            app.Origin = "https://auth.example.com";
+        });
+        options.AuthServer.ClientRegistration.Cimd.Enabled = true;
+        options.AuthServer.ClientRegistration.Cimd.TrustedHosts.Add("clients.example.com");
     });
-});
 ```
 
 ### 3. Compatibility clients
