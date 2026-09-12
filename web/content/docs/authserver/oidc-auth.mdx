@@ -1,8 +1,9 @@
 ---
 title: "OIDC Social Login"
 description: "Configure Google, Microsoft, Apple, GitHub, and custom social providers."
-order: 14
-section: authserver
+section: "sign-in"
+group: "social"
+order: 0
 ---
 
 SqlOS supports social login via OpenID Connect providers and GitHub OAuth. Users click a provider button, authenticate with the provider, and are linked or created in SqlOS.
@@ -221,7 +222,7 @@ window.location.href = authorizationUrl;
 3. Create the connection with `providerType: "github"`, your GitHub client ID and secret
 4. Keep default scopes so SqlOS can request `read:user` and `user:email`
 
-See [GitHub OIDC](/docs/authserver/github-oidc) for dashboard, API, and code-first setup.
+See [GitHub OIDC](/docs/guides/github-oidc) for dashboard, API, and code-first setup.
 
 ### Custom OIDC
 

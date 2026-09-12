@@ -1,8 +1,8 @@
 ---
 title: "AuthServer API Reference"
 description: "Application-facing methods for login, signup, OTP, SSO, OIDC, token management, and trusted admin workflows."
-order: 11
-section: reference
+section: "reference"
+order: 4
 ---
 
 <Banner
@@ -11,7 +11,7 @@ section: reference
   href="../getting-started"
   actionLabel="Start with Getting Started"
 >
-  New to SqlOS? Complete [Getting Started](/docs/getting-started) and the [Guides](/docs/guides/index) first. Use this page when you need the exact signature for a specific service method.
+  New to SqlOS? Complete [Getting Started](/docs/getting-started) first, then browse by capability from the [documentation home](/docs). Use this page when you need the exact signature for a specific service method.
 </Banner>
 
 This page documents the AuthServer methods intended for application and trusted backend use. It is not an inventory of every public implementation class in the assembly. Hosting and route-mapping APIs are in [Hosting API](/docs/reference/hosting-api); namespace and adjacent service coverage are in the [.NET SDK Map](/docs/reference/sdk-reference).
@@ -152,7 +152,7 @@ Browser/CLI clients normally use the RFC endpoints instead:
 
 Headless browser UIs still start with `GET /sqlos/auth/device?user_code=...`. SqlOS creates a normal headless authorization request, then your app loads `/sqlos/auth/headless/requests/{requestId}` and approves or denies with `/sqlos/auth/headless/device/approve` or `/sqlos/auth/headless/device/deny` using the `requestId`.
 
-See [CLI OAuth](/docs/authserver/cli-oauth).
+See [CLI OAuth](/docs/guides/terminal-auth).
 
 ---
 
@@ -332,7 +332,7 @@ return ToLoginHttpResult(result);
 | `ClientId` | `string?` | Client application ID. |
 | `OrganizationId` | `string?` | Must be null for self-service signup. A supplied ID is rejected; it never joins an existing organization. |
 
-The same restriction applies to password, Email OTP, and phone OTP self-service signup. To add a user to an existing organization, use the [invitation flow](/docs/authserver/invitations) or trusted backend provisioning with `CreateUserAsync` followed by `CreateMembershipAsync`.
+The same restriction applies to password, Email OTP, and phone OTP self-service signup. To add a user to an existing organization, use the [invitation flow](/docs/guides/invite-only-b2b-onboarding) or trusted backend provisioning with `CreateUserAsync` followed by `CreateMembershipAsync`.
 
 **Returns**
 
@@ -1162,7 +1162,7 @@ var conn = await adminService.CreateOidcConnectionAsync(
 | Custom + discovery | Client ID, client secret, callback URI, discovery URL | Loads issuer, authorization, token, JWKS, and optional UserInfo endpoints from discovery. |
 | Custom + manual | Client ID, client secret, callback URI, issuer, authorization endpoint, token endpoint, JWKS URI | Uses the supplied endpoints; UserInfo remains optional. |
 
-Provider setup is covered end to end in [Google OIDC](/docs/authserver/google-oidc), [Microsoft OIDC](/docs/authserver/microsoft-oidc), [Apple OIDC](/docs/authserver/apple-oidc), [GitHub OAuth](/docs/authserver/github-oidc), and [Custom OIDC](/docs/authserver/custom-oidc). See [OIDC social login](/docs/authserver/oidc-auth) for the shared browser flow.
+Provider setup is covered end to end in [Google OIDC](/docs/authserver/google-oidc), [Microsoft OIDC](/docs/authserver/microsoft-oidc), [Apple OIDC](/docs/authserver/apple-oidc), [GitHub OAuth](/docs/guides/github-oidc), and [Custom OIDC](/docs/authserver/custom-oidc). See [OIDC social login](/docs/authserver/oidc-auth) for the shared browser flow.
 
 ---
 
@@ -1187,7 +1187,7 @@ options.AuthServer.SeedGitHubConnection(
 
 The seeded connection uses provider type `GitHub`, display name `GitHub`, protocol `OAuthProfile`, default scopes `read:user` and `user:email`, and the built-in GitHub authorization/token/profile endpoints.
 
-See [GitHub OIDC](/docs/authserver/github-oidc).
+See [GitHub OIDC](/docs/guides/github-oidc).
 
 ---
 
@@ -1718,7 +1718,7 @@ dotnet test tests/SqlOS.IntegrationTests/SqlOS.IntegrationTests.csproj \
 ./scripts/docs-check.sh
 ```
 
-See [SCIM Directory Sync](/docs/authserver/scim-directory-sync) for the exact filter and PATCH profile, validation commands, error behavior, dashboard workflow, token rotation, and tenant-isolated deprovisioning. See [SCIM group mapping](/docs/fga/scim-group-mapping) for FGA behavior.
+See [SCIM Directory Sync](/docs/guides/scim-directory-sync) for the exact filter and PATCH profile, validation commands, error behavior, dashboard workflow, token rotation, and tenant-isolated deprovisioning. See [SCIM group mapping](/docs/fga/scim-group-mapping) for FGA behavior.
 
 ---
 

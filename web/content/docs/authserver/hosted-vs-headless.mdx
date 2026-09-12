@@ -1,8 +1,8 @@
 ---
 title: "Hosted vs Headless"
 description: "Choose between hosted and headless auth UI."
-order: 5
-section: authserver
+section: "sign-in"
+order: 0
 ---
 
 SqlOS runs OAuth. You choose who draws the login screens.
@@ -66,7 +66,7 @@ builder.AddSqlOS<AppDbContext>(options =>
 });
 ```
 
-Headless uses one switch: `BuildUiUrl`. If that callback exists, `/sqlos/auth/authorize` redirects into your app. [Build the custom UI](/docs/guides/custom-login-ui) or review the [mode details](/docs/authserver/headless-auth#how-sqlos-picks-the-ui).
+Headless uses one switch: `BuildUiUrl`. If that callback exists, `/sqlos/auth/authorize` redirects into your app. [Build the custom UI](/docs/guides/custom-login-ui) or review the [mode details](/docs/guides/custom-login-ui#how-sqlos-picks-the-ui).
 
 Headless JSON endpoints deliberately do not require the hosted HTML form token. A native client is not subject to browser cookie CSRF. For a browser-owned headless UI, keep credentialed CORS limited to the exact UI origins, prefer same-origin or backend-for-frontend requests, and apply the UI host's normal CSRF control if it accepts cookie-authenticated actions. Do not copy the hidden hosted-form token into SDK or native-client integrations.
 
@@ -85,4 +85,4 @@ Want your own UI? Use **headless**. Still let SqlOS own codes, tokens, and PKCE.
 
 You can flip hosted ↔ headless. OAuth, tokens, sessions, OTP, magic links, invitations, CLI device flow, and refresh stay the same. Only the login UI changes. The [issuer session](/docs/authserver/sessions-and-tokens) (the `sqlos_auth_page` cookie that `/authorize` reuses for silent sign-in) is part of what stays the same: hosted and headless establish and read the same session.
 
-How-to: [Custom login UI](/docs/guides/custom-login-ui) · [Headless Auth reference](/docs/authserver/headless-auth) · [Phone OTP](/docs/authserver/phone-otp) · [Email Invitations](/docs/authserver/invitations) · [CLI OAuth](/docs/authserver/cli-oauth)
+How-to: [Custom login UI](/docs/guides/custom-login-ui) · [Headless Auth reference](/docs/guides/custom-login-ui) · [Phone OTP](/docs/authserver/phone-otp) · [Email Invitations](/docs/guides/invite-only-b2b-onboarding) · [CLI OAuth](/docs/guides/terminal-auth)

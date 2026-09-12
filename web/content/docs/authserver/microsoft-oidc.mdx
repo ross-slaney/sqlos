@@ -1,8 +1,9 @@
 ---
 title: "Microsoft OIDC"
 description: "Configure Microsoft Entra OAuth for SqlOS AuthServer."
-order: 16
-section: authserver
+section: "sign-in"
+group: "social"
+order: 2
 ---
 
 ## Setup
@@ -53,6 +54,6 @@ options.AuthServer.SeedMicrosoftConnection(
     "http://localhost:5062/sqlos/auth/oidc/callback");
 ```
 
-See [Social sign-in](/docs/guides/social-oidc#seed-from-startup) for seeding behavior and the general `SeedOidcConnection` form.
+See [Social sign-in](/docs/authserver/oidc-auth#seed-from-startup) for seeding behavior and the general `SeedOidcConnection` form.
 
 See [OIDC Social Login](/docs/authserver/oidc-auth) for the complete auth flow.

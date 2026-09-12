@@ -35,7 +35,7 @@ Do not scatter `CheckAccessAsync` calls until the model below is written and rev
 | **Grant** | Subject + role + resource node. Permissions inherit **down** the tree. |
 | **Subject** | Actor receiving grants: `user`, `group`, `agent`, or `service_account`. |
 
-Docs: `web/content/docs/fga/*`, `web/content/docs/guides/model-fga.mdx`, `web/content/blog/developers-guide-to-hierarchical-rbac.mdx`.
+Docs: `web/content/docs/fga/*`, `web/content/docs/fga/overview.mdx`, `web/content/blog/developers-guide-to-hierarchical-rbac.mdx`.
 
 ## Worked Examples (read only when you need a concrete reference)
 

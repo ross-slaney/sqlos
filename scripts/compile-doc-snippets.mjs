@@ -163,10 +163,18 @@ new SqlOSOptions().UseSingleApplication("Acme", app => { ${snippet} });`,
   },
   {
     name: "code-first application access policy",
-    relativePath: "web/content/docs/authserver/application-access.mdx",
-    heading: "## Code-first policy",
-    marker: "client.AssignOrganization(",
-    wrap: asApplicationAccessSeedProgram,
+    relativePath: "web/content/docs/guides/multi-app-access.mdx",
+    heading: "## 1. Register a client per application",
+    marker: "client.AssignOrganization(\"northwind-subscription\"",
+    wrap: (snippet) => snippet.replace("builder.AddSqlOS<AppDbContext>", `using Microsoft.EntityFrameworkCore;
+using SqlOS;
+using SqlOS.AuthServer.Contracts;
+using SqlOS.Extensions;
+var builder = WebApplication.CreateBuilder(args);
+var connectionString = "Server=localhost;Database=atlas;Integrated Security=True;TrustServerCertificate=True";
+builder.AddSqlOS<AppDbContext>`) + `
+public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : SqlOSDbContext<AppDbContext>(options);
+`,
   },
   {
     name: "platform-admin session revocation",
@@ -186,13 +194,6 @@ new SqlOSOptions().UseSingleApplication("Acme", app => { ${snippet} });`,
     name: "unified machine-client seed",
     relativePath: "web/content/docs/guides/service-account-jobs.mdx",
     heading: "## Recommended: declare one machine client",
-    marker: "SeedMachineClient(",
-    wrap: asMachineClientSeedProgram,
-  },
-  {
-    name: "machine-client reference seed",
-    relativePath: "web/content/docs/authserver/machine-clients.mdx",
-    heading: "## Seed the bound pair",
     marker: "SeedMachineClient(",
     wrap: asMachineClientSeedProgram,
   },
@@ -335,16 +336,6 @@ function asSecuritySettingsProgram(snippet) {
 using SqlOS.AuthServer.Services;
 
 SqlOSSettingsService settingsService = null!;
-
-${snippet}
-`;
-}
-
-function asApplicationAccessSeedProgram(snippet) {
-  return `using SqlOS.AuthServer.Configuration;
-using SqlOS.AuthServer.Contracts;
-
-var auth = new SqlOSAuthServerOptions();
 
 ${snippet}
 `;

@@ -1,8 +1,8 @@
 ---
 title: "Single Application (standard flow)"
 description: "The canonical SqlOS setup: describe one application in one AddSqlOS call and let SqlOS derive the protocol consequences."
-order: 1
-section: authserver
+section: "host"
+order: 0
 ---
 
 This is the standard SqlOS shape and the one almost every product should start with: one SaaS app, described once. You get organizations, users, sessions, SSO, invitations, and permissions with a derived first-party OAuth client, surface audiences, and metadata documents. The [multiple-applications shape](/docs/authserver/multiple-applications) exists for when a second application must sign in with your accounts.
@@ -59,7 +59,7 @@ The auth server, hosted sign-in pages, and dashboard are mapped by `AddSqlOS` at
 
 `AddSqlOS` registers the `SqlOS` JWT scheme with the `Api` audience when `app.Api` is set, and scheme/policy `SqlOS.Mcp` when `app.Mcp` is set. Audience lives on the scheme, the same way `JwtBearerOptions.Audience` does. Call `RequireAuthorization()` on the groups you lock. A missing or wrong-audience token is answered with `401` and a Bearer challenge. Handlers read the result through `HttpContext.GetSqlOSValidatedToken()` and `HttpContext.User`. SqlOS does not wrap routes from a path string and does not handle CORS.
 
-The derived client is a public PKCE client for whatever front end you build: a browser SPA, a native app, or an agent. It completes the authorization-code flow with its standard OIDC library, requests `resource={Origin}/api`, and sends the token as a bearer. Add a native app's custom-scheme or loopback callback to `RedirectUris`, and set `AllowNativeHeadlessAuth = true` if it drives the [headless authentication API](/docs/authserver/headless-auth) directly. The [Notes sample](https://github.com/ross-slaney/sqlos/tree/main/examples/SqlOS.OneCall.Api) is a complete bearer-only host with API and MCP.
+The derived client is a public PKCE client for whatever front end you build: a browser SPA, a native app, or an agent. It completes the authorization-code flow with its standard OIDC library, requests `resource={Origin}/api`, and sends the token as a bearer. Add a native app's custom-scheme or loopback callback to `RedirectUris`, and set `AllowNativeHeadlessAuth = true` if it drives the [headless authentication API](/docs/guides/custom-login-ui) directly. The [Notes sample](https://github.com/ross-slaney/sqlos/tree/main/examples/SqlOS.OneCall.Api) is a complete bearer-only host with API and MCP.
 
 ## Hosted or headless
 
@@ -83,7 +83,7 @@ app.Headless(headless =>
 });
 ```
 
-`BuildUiUrl` present means headless; there is no second switch. Continue with [Build your own login and signup UI](/docs/guides/custom-login-ui) and the [headless reference](/docs/authserver/headless-auth).
+`BuildUiUrl` present means headless; there is no second switch. Continue with [Build your own login and signup UI](/docs/guides/custom-login-ui) and the [headless reference](/docs/guides/custom-login-ui).
 
 Surface paths are validated at startup: they must be absolute, non-root, distinct and non-nested, and must not overlap `/.well-known`, the auth base path, or `DashboardBasePath`. `Api` and `Mcp` are separate audiences, so a token minted for `/api` is rejected at `/mcp` and vice versa. Inspect `GetSqlOSValidatedToken()?.Scope` in the handler when a client's granted ceiling must be checked.
 
@@ -161,7 +161,7 @@ builder.AddSqlOS<AppDbContext>(options =>
 
 ## When to graduate
 
-Move to the [multiple-applications shape](/docs/authserver/multiple-applications) when you have more than one app experience, such as a customer portal, an admin console, a CLI, and a partner integration. Replace `UseSingleApplication` with `ConfigureApplication`, preserve the existing host description, and explicitly seed the original client with its existing ID, audience, callbacks, and scopes. Then use seeded clients or the dashboard to manage each application and use [Application Access](/docs/authserver/application-access) to control who can use each one.
+Move to the [multiple-applications shape](/docs/authserver/multiple-applications) when you have more than one app experience, such as a customer portal, an admin console, a CLI, and a partner integration. Replace `UseSingleApplication` with `ConfigureApplication`, preserve the existing host description, and explicitly seed the original client with its existing ID, audience, callbacks, and scopes. Then use seeded clients or the dashboard to manage each application and use [Application Access](/docs/guides/multi-app-access) to control who can use each one.
 
 For the product framing behind the simple path, read [Single-Application Mode: WorkOS-Style Defaults Without Giving Up SqlOS](/blog/single-application-mode-workos-style-setup).
 

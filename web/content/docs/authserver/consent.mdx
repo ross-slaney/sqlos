@@ -1,8 +1,8 @@
 ---
 title: "Consent"
 description: "The per-user consent screen for non-first-party clients and the scope display-name catalog."
-order: 28.6
-section: authserver
+section: "tokens"
+order: 3
 ---
 
 Non-first-party clients — dynamically registered, [CIMD](/docs/authserver/client-id-metadata-documents), and any manually created client without `IsFirstParty` — get an explicit per-user consent screen before SqlOS issues their authorization code. First-party clients never see it. Device authorization requests are also exempt: the device-approval page is already an explicit consent surface for the client and its scopes.

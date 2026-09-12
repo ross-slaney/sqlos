@@ -1,8 +1,8 @@
 ---
 title: "Magic Link"
 description: "Passwordless email-link sign in for hosted, headless, and SDK flows."
-order: 11
-section: authserver
+section: "sign-in"
+order: 6
 ---
 
 Magic links let users sign in from a short-lived email link. They use the same AuthServer user, client, organization, email branding, transactional email, session, and audit infrastructure as [Email OTP](/docs/authserver/email-otp).
@@ -116,7 +116,7 @@ var login = await authService.CompleteMagicLinkAsync(
 
 ## Email delivery
 
-SqlOS creates the built-in `auth.magic-link` transactional template automatically. It uses [Email Branding](/docs/authserver/email-branding), and rendered bodies are suppressed in delivery history because they contain token-bearing links.
+SqlOS creates the built-in `auth.magic-link` transactional template automatically. It uses [Email Branding](/docs/guides/auth-branding), and rendered bodies are suppressed in delivery history because they contain token-bearing links.
 
 The default link authority comes from `AuthServer.PublicOrigin`, or from the configured issuer when `PublicOrigin` is omitted. SqlOS never builds an emailed link from the incoming `Host` header. Set `PublicOrigin` during production readiness when the public address differs from the issuer host.
 

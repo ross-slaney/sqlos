@@ -1,8 +1,8 @@
 ---
 title: "Multiple Applications (identity provider)"
 description: "Keep your host configuration and register explicit clients for applications that sign in through SqlOS."
-order: 2
-section: authserver
+section: "host"
+order: 1
 ---
 
 Use SqlOS as an OpenID Connect provider when several applications should sign in with your accounts. `ConfigureApplication` describes the host independently of client registration. It supports the same API and MCP surfaces, branding, headless UI, and authorization seeds as `UseSingleApplication`, but does not create a client.
@@ -75,13 +75,13 @@ The [README](https://github.com/ross-slaney/sqlos#multiple-applications-sqlos-as
 | Branding and FGA | `Brand`, `Headless`, `Authorization` | The same methods, or the underlying seed APIs |
 | Portable MCP clients | CIMD and resource indicators enabled by MCP | Same behavior when MCP is declared; DCR remains opt-in |
 
-Clients created through the dashboard and administration API coexist with code-owned clients under distinct IDs. Startup does not overwrite operator-owned records. [Application Access](/docs/authserver/application-access) controls which organizations and principals can use each client; audience checks control where the resulting token is accepted.
+Clients created through the dashboard and administration API coexist with code-owned clients under distinct IDs. Startup does not overwrite operator-owned records. [Application Access](/docs/guides/multi-app-access) controls which organizations and principals can use each client; audience checks control where the resulting token is accepted.
 
 ## OIDC and SCIM directions
 
 - **Downstream OIDC:** SqlOS is the provider. Your applications redirect users to it, validate its ID tokens, and fetch profile claims from UserInfo. Each relying party manages its own application cookie.
 - **Upstream OIDC/SAML:** an enterprise or social identity provider authenticates a user into SqlOS. These connections are separate from downstream client registrations.
-- **Inbound SCIM:** an external directory provisions users and groups into a SqlOS organization. Enable `AuthServer.EnableScim`, then create a connection and group mappings through the [SCIM configuration workflow](/docs/authserver/scim-directory-sync). This does not replace SSO or application access policies.
+- **Inbound SCIM:** an external directory provisions users and groups into a SqlOS organization. Enable `AuthServer.EnableScim`, then create a connection and group mappings through the [SCIM configuration workflow](/docs/guides/scim-directory-sync). This does not replace SSO or application access policies.
 - **Outbound SCIM:** not implemented. SqlOS does not push accounts to downstream SaaS services; that requires a separate provisioning integration.
 
 ## Runnable multi-application examples
@@ -94,7 +94,7 @@ The examples preserve their existing client IDs, callbacks, scopes, and audience
 
 ## Other application types
 
-- [Machine clients](/docs/authserver/machine-clients): client credentials bound to service accounts.
+- [Machine clients](/docs/guides/service-account-jobs): client credentials bound to service accounts.
 - [Terminal auth](/docs/guides/terminal-auth): device authorization for CLIs.
 - [Clients](/docs/authserver/clients): registration, callback validation, credentials, and ownership.
 - [OpenID Provider](/docs/authserver/openid-provider): discovery, ID tokens, UserInfo, and protocol behavior.

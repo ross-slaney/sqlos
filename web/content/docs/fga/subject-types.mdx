@@ -1,8 +1,9 @@
 ---
 title: "Subject Types"
 description: "Users, agents, service accounts, and groups."
-order: 6
-section: fga
+section: "authorization"
+group: "model"
+order: 5
 ---
 
 A subject is the entity being authorized. Every grant links a subject to a role on a resource.
@@ -76,7 +77,7 @@ Groups are subjects with type `group`, but groups cannot be members of other gro
 
 For the complete membership, grant, inherited-access, and removal workflow, follow [Authorize teams with FGA groups](/docs/guides/fga-groups). That guide also explains why `SqlOSFgaUserGroup.Id` is used for membership while `SubjectId` is used for grants.
 
-A service account is an FGA subject. It can receive grants without being an AuthServer user. It is not a machine client. A machine client is the AuthServer confidential OAuth client that exchanges a secret at `/sqlos/auth/token`. `SeedMachineClient` and **Auth Server > Machine Clients** can create both and link them; provisioning a service account here does not register that OAuth client. See [Machine Clients](/docs/authserver/machine-clients).
+A service account is an FGA subject. It can receive grants without being an AuthServer user. It is not a machine client. A machine client is the AuthServer confidential OAuth client that exchanges a secret at `/sqlos/auth/token`. `SeedMachineClient` and **Auth Server > Machine Clients** can create both and link them; provisioning a service account here does not register that OAuth client. See [Machine Clients](/docs/guides/service-account-jobs).
 
 ## Authentication by subject type
 

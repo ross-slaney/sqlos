@@ -1,14 +1,14 @@
 ---
 title: "Add sign-in to a terminal app"
 description: "Authenticate a CLI with browser-based device authorization, refresh tokens, and a resource-bound API token."
-order: 5
-section: guides
+section: "sign-in"
+order: 12
 ---
 
 <Banner
   eyebrow="Guide"
   title="Sign in from a terminal without handling passwords"
-  href="/docs/authserver/cli-oauth"
+  href="/docs/guides/terminal-auth"
   actionLabel="Device flow reference"
 >
   Register a public CLI client, send the user to SqlOS AuthPage, poll safely for tokens, and protect the target API with an exact audience.
@@ -137,7 +137,7 @@ The complete verification URI opens `/sqlos/auth/device?user_code=...`. SqlOS re
 
 The CLI should remain useful while it waits: explain that authentication continues in the browser and let the user cancel locally. Do not ask them to paste the browser result back into the terminal.
 
-For a custom sign-in UI, configure [headless auth](/docs/authserver/headless-auth) and reuse the device-bound request. Do not build a separate credential pipeline just for the CLI.
+For a custom sign-in UI, configure [headless auth](/docs/guides/custom-login-ui) and reuse the device-bound request. Do not build a separate credential pipeline just for the CLI.
 
 ## 5. Poll without overwhelming the server
 
@@ -274,7 +274,7 @@ Forge users authenticate in the browser while the CLI receives only resource-bou
 
 ## Next steps
 
-- [CLI OAuth reference](/docs/authserver/cli-oauth) for exact endpoints, response fields, and headless approval contracts
+- [CLI OAuth reference](/docs/guides/terminal-auth) for exact endpoints, response fields, and headless approval contracts
 - [Protect an API](/docs/quickstarts/protect-api) for bearer-token validation
-- [Model FGA](/docs/guides/model-fga) for operation and resource authorization
+- [Model FGA](/docs/fga/overview) for operation and resource authorization
 - [Sessions and tokens](/docs/authserver/sessions-and-tokens) for token lifetime and refresh behavior

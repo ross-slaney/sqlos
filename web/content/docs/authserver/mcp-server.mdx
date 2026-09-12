@@ -1,8 +1,8 @@
 ---
 title: "MCP Server"
 description: "Declare an MCP resource in SqlOS and host Microsoft's MCP SDK on that path."
-order: 26
-section: authserver
+section: "mcp"
+order: 0
 ---
 
 SqlOS is the auth server. A [Model Context Protocol](https://modelcontextprotocol.io) endpoint is a protected resource: an audience, an RFC 9728 document, and (for portable clients) CIMD plus resource indicators. The transport is [Microsoft's MCP C# SDK](https://github.com/modelcontextprotocol/csharp-sdk). SqlOS does not take an MCP SDK dependency and does not map the server for you.

@@ -179,6 +179,14 @@ function resolveRelativeLink(sourceFile, rawUrl) {
 }
 
 const docRoutes = buildDocRoutes();
+const docsRedirects = JSON.parse(
+  fs.readFileSync(path.join(webRoot, "docs-redirects.json"), "utf8")
+);
+for (const redirect of docsRedirects) {
+  if (typeof redirect.source === "string") {
+    docRoutes.add(redirect.source);
+  }
+}
 const blogRoutes = buildBlogRoutes();
 const publicAssetRoutes = buildPublicAssetRoutes();
 const markdownFiles = walkFiles(repoRoot, (fullPath) => markdownExtensions.has(path.extname(fullPath)));

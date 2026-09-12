@@ -1,8 +1,8 @@
 ---
 title: "Dashboard"
 description: "Manage auth and authorization from the embedded admin UI."
-order: 1
-section: authserver
+section: "host"
+order: 5
 ---
 
 The dashboard is admin UI inside your app. It covers AuthServer, Audit Logs, communications, and FGA.
@@ -95,7 +95,7 @@ Audit Logs are a top-level governance surface. Filter by organization, applicati
 
 The Auth Page settings screen includes email branding for built-in OTP, invitation, and password-reset emails. It stores the application name, logo data URL, primary color, accent color, and background color used by the default templates. AuthPage and email branding are owned independently: a `SeedAuthPage` or `SeedAuthEmails` surface is code-owned and read-only in the dashboard until that seed is removed.
 
-For the end-to-end workflow, see [Brand hosted authentication and email](/docs/guides/auth-branding). Exact feature references remain in [Email OTP](/docs/authserver/email-otp), [Email Invitations](/docs/authserver/invitations), and [Email Branding](/docs/authserver/email-branding).
+For the end-to-end workflow, see [Brand hosted authentication and email](/docs/guides/auth-branding). Exact feature references remain in [Email OTP](/docs/authserver/email-otp), [Email Invitations](/docs/guides/invite-only-b2b-onboarding), and [Email Branding](/docs/guides/auth-branding).
 
 ## Delegated SSO setup
 
@@ -125,7 +125,7 @@ If MFA settings are managed by a startup seed, the dashboard shows a startup-man
 
 Organization-specific MFA policy is available through the admin API and startup seeding in this release. Use it when one tenant requires MFA and another tenant leaves it optional.
 
-For setup details, see [MFA and TOTP](/docs/authserver/mfa-totp) and [Require Authenticator MFA](/docs/guides/mfa-totp).
+For setup details, see [MFA and TOTP](/docs/authserver/mfa-totp) and [Require Authenticator MFA](/docs/authserver/mfa-totp).
 
 ## FGA pages
 

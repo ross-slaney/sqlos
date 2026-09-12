@@ -1,6 +1,7 @@
 ---
 title: "Getting Started"
 description: "Choose the shortest SqlOS path for your .NET application."
+section: "start"
 order: 0
 ---
 
@@ -58,11 +59,11 @@ Every line is optional except `Origin`. Start with `Origin` alone and add lines 
 | `app.Mcp = "/mcp"` | off | Resource id `{Origin}/mcp`: scheme/policy `SqlOS.Mcp`, a distinct audience, its own protected-resource document, and portable-client registration (CIMD + resource indicators). The host maps Microsoft's MCP SDK and calls `RequireAuthorization("SqlOS.Mcp")`. [MCP server](/docs/authserver/mcp-server) |
 | `app.Brand(page => …)` | `Sign in to {Name}` | Brands the hosted login, signup, OTP, MFA, and consent pages. Same options as `AuthServer.SeedAuthPage`. [Branding](/docs/guides/auth-branding) |
 | `app.Headless("/auth/authorize")` | hosted pages | Switches to **your** sign-in UI: SqlOS redirects browser interaction to `{Origin}/auth/authorize` with the standard `request`, `view`, `email`, `pendingToken`, `mfaToken`, … parameters that `@sqlos/headless` reads. Same as `AuthServer.UseHeadlessAuthPage`. [Custom login UI](/docs/guides/custom-login-ui) |
-| `app.Authorization(fga => …)` | none | Declares resource types, permissions, and roles; reconciled idempotently at startup. Same as `Fga.Seed`. [Model your FGA](/docs/guides/model-fga) |
+| `app.Authorization(fga => …)` | none | Declares resource types, permissions, and roles; reconciled idempotently at startup. Same as `Fga.Seed`. [Model your FGA](/docs/fga/overview) |
 | `app.AllowedScopes`, `ClientId`, `RedirectPath`, `RedirectUris`, `AllowNativeHeadlessAuth`, `EnablePasswordSignup`, `EnabledCredentialTypes` | sensible | Fine-tuning of the single first-party PKCE client SqlOS seeds for you. [All defaults](/docs/authserver/single-application#defaults) |
 | `options.Dashboard.AuthMode` / `Password` | development-only | Who may open `/sqlos`. Set `Password` (from secrets) before anyone else can reach the host. |
 
-Sign-in methods — passwords, email OTP, magic links, social login, SAML, MFA — are `options.AuthServer` seeds or dashboard settings, not code changes. Turn them on when you need them: [Password](/docs/authserver/password-login) · [Email OTP](/docs/authserver/email-otp) · [Social OIDC](/docs/guides/social-oidc) · [SAML](/docs/guides/saml-sso) · [MFA](/docs/authserver/mfa-totp).
+Sign-in methods — passwords, email OTP, magic links, social login, SAML, MFA — are `options.AuthServer` seeds or dashboard settings, not code changes. Turn them on when you need them: [Password](/docs/authserver/password-login) · [Email OTP](/docs/authserver/email-otp) · [Social OIDC](/docs/authserver/oidc-auth) · [SAML](/docs/authserver/saml-sso) · [MFA](/docs/authserver/mfa-totp).
 
 ### Hosted or headless: one line
 
@@ -142,10 +143,10 @@ Default paths:
 ## Continue by job
 
 <CardGrid cols={2}>
-  <Card title="Invite organization members" description="Create email-bound, one-time organization invitations." href="/docs/authserver/invitations" />
-  <Card title="Add social login" description="Configure Google, Microsoft, GitHub, Apple, or custom OIDC." href="/docs/guides/social-oidc" />
-  <Card title="Add enterprise SSO" description="Connect an organization to a SAML identity provider." href="/docs/guides/saml-sso" />
+  <Card title="Invite organization members" description="Create email-bound, one-time organization invitations." href="/docs/guides/invite-only-b2b-onboarding" />
+  <Card title="Add social login" description="Configure Google, Microsoft, GitHub, Apple, or custom OIDC." href="/docs/authserver/oidc-auth" />
+  <Card title="Add enterprise SSO" description="Connect an organization to a SAML identity provider." href="/docs/authserver/saml-sso" />
   <Card title="Record audit events" description="Capture application and SqlOS governance events." href="/docs/guides/audit-logs" />
 </CardGrid>
 
-For the complete task directory, see [Guides](/docs/guides/index). Use [Example applications](/docs/examples) when you want a complete source path instead of an isolated integration step, and use the reference section after you know which service or endpoint you need.
+For the complete task directory, start at the [documentation home](/docs). Use [Example applications](/docs/examples) when you want a complete source path instead of an isolated integration step, and use the reference section after you know which service or endpoint you need.

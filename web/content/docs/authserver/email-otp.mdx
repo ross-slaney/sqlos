@@ -1,8 +1,8 @@
 ---
 title: "Email OTP"
 description: "Passwordless email-code sign in and signup for hosted, headless, and SDK flows."
-order: 10
-section: authserver
+section: "sign-in"
+order: 4
 ---
 
 Email OTP lets users sign in or create an account with a short-lived code sent to their inbox. The same runtime works in hosted AuthPage, headless UI, and backend SDK flows. For email-link sign-in without a code entry step, see [Magic Link](/docs/authserver/magic-link).
@@ -134,7 +134,7 @@ SqlOS checks the limits before creating or sending a challenge and records audit
 
 SqlOS creates the default `auth.email-otp` template automatically. Edit it in **Dashboard > Communications > Templates** to customize the subject, HTML, and text while keeping the same runtime variables.
 
-For built-in branding, use [Email Branding](/docs/authserver/email-branding). For complete control outside the template system, provide a message builder:
+For built-in branding, use [Email Branding](/docs/guides/auth-branding). For complete control outside the template system, provide a message builder:
 
 ```csharp
 options.AuthServer.ConfigureEmailOtp(email =>

@@ -1,8 +1,9 @@
 ---
 title: "Capability Checks"
 description: "Root-level permission checks for global gates."
-order: 12
-section: fga
+section: "authorization"
+group: "checks"
+order: 4
 ---
 
 `HasCapabilityAsync` checks whether a subject has a specific permission on the configured FGA root resource. Use it only for capabilities you deliberately grant at root. It does not search every descendant for any matching grant.

@@ -1,14 +1,14 @@
 ---
 title: "Assign access across multiple apps"
 description: "Decide which organizations, roles, and users can enter each client application."
-order: 8
-section: guides
+section: "orgs"
+order: 3
 ---
 
 <Banner
   eyebrow="Guide"
   title="Give each organization the right application surfaces"
-  href="/docs/authserver/application-access"
+  href="/docs/guides/multi-app-access"
   actionLabel="Application access"
 >
   Register each app as its own OAuth client, then use application assignments to decide who may enter it.
@@ -41,7 +41,7 @@ The final row demonstrates deny precedence: a specific deny wins over organizati
 Use one stable client ID and exact callback list per surface. This example gives all three tokens the same `https://api.atlas.test` audience while retaining separate application policy.
 
 ```csharp
-builder.AddSqlOS<AppDbContext>(options =>
+builder.AddSqlOS<AppDbContext>(db => db.UseSqlServer(connectionString), options =>
 {
     options.ConfigureApplication("Atlas Suite", application =>
     {
@@ -250,7 +250,7 @@ Northwind members can enter the portal and mobile app, only Northwind admins can
 
 ## Next steps
 
-- [Application access](/docs/authserver/application-access)
+- [Application access](/docs/guides/multi-app-access)
 - [Clients](/docs/authserver/clients)
 - [Protect an API](/docs/quickstarts/protect-api)
 - [Standalone identity server](/docs/guides/standalone-identity-server)

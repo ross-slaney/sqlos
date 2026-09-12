@@ -1,8 +1,8 @@
 ---
 title: "Clients"
 description: "Choose the right client onboarding path for owned apps, portable clients, and compatibility clients."
-order: 20
-section: authserver
+section: "clients"
+order: 0
 ---
 
 A **client** is the app that sends a user into SqlOS sign in and later exchanges the auth code for tokens.
@@ -98,7 +98,7 @@ The credential belongs to the OAuth client. Creating a confidential client for
 authorization-code or refresh does not create an FGA service account, and it
 does not enable `client_credentials`.
 
-A [machine client](/docs/authserver/machine-clients) is a different AuthServer
+A [machine client](/docs/guides/service-account-jobs) is a different AuthServer
 shape: confidential, `client_secret_basic`, and `client_credentials`, with no
 user session. Use `SeedMachineClient` or **Auth Server > Machine Clients** when
 a worker also needs an FGA subject and grants. That binding is optional; an FGA
@@ -160,7 +160,7 @@ CLI clients are public clients. They do not require redirect URIs and are allowe
 - `urn:ietf:params:oauth:grant-type:device_code`
 - `refresh_token`
 
-See [CLI OAuth](/docs/authserver/cli-oauth) for the complete flow and polling rules.
+See [CLI OAuth](/docs/guides/terminal-auth) for the complete flow and polling rules.
 
 ## Startup-managed vs dashboard-created
 
@@ -300,11 +300,11 @@ Session revoke remains available for every owner.
 
 ## Next client guides
 
-- [Machine Clients](/docs/authserver/machine-clients)
+- [Machine Clients](/docs/guides/service-account-jobs)
 - [Single-Application Setup](/docs/authserver/single-application)
-- [Application Access](/docs/authserver/application-access)
+- [Application Access](/docs/guides/multi-app-access)
 - [Preregistration vs CIMD vs DCR](/docs/authserver/preregistration-vs-cimd-vs-dcr)
 - [Client ID Metadata Documents](/docs/authserver/client-id-metadata-documents)
 - [Dynamic Client Registration](/docs/authserver/dynamic-client-registration)
-- [CLI OAuth](/docs/authserver/cli-oauth)
+- [CLI OAuth](/docs/guides/terminal-auth)
 - [MCP Resource Indicators and Audience](/docs/authserver/mcp-resource-indicators-and-audience)

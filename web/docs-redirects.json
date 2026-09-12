@@ -1,0 +1,107 @@
+[
+  {
+    "source": "/docs/guides",
+    "destination": "/docs/getting-started",
+    "permanent": true
+  },
+  {
+    "source": "/docs/authserver",
+    "destination": "/docs/getting-started",
+    "permanent": true
+  },
+  {
+    "source": "/docs/quickstarts",
+    "destination": "/docs/quickstarts/add-to-app",
+    "permanent": true
+  },
+  {
+    "source": "/docs/guides/password-login",
+    "destination": "/docs/authserver/password-login",
+    "permanent": true
+  },
+  {
+    "source": "/docs/guides/mfa-totp",
+    "destination": "/docs/authserver/mfa-totp",
+    "permanent": true
+  },
+  {
+    "source": "/docs/guides/saml-sso",
+    "destination": "/docs/authserver/saml-sso",
+    "permanent": true
+  },
+  {
+    "source": "/docs/authserver/scim-directory-sync",
+    "destination": "/docs/guides/scim-directory-sync",
+    "permanent": true
+  },
+  {
+    "source": "/docs/authserver/github-oidc",
+    "destination": "/docs/guides/github-oidc",
+    "permanent": true
+  },
+  {
+    "source": "/docs/guides/social-oidc",
+    "destination": "/docs/authserver/oidc-auth",
+    "permanent": true
+  },
+  {
+    "source": "/docs/authserver/email-branding",
+    "destination": "/docs/guides/auth-branding",
+    "permanent": true
+  },
+  {
+    "source": "/docs/authserver/headless-auth",
+    "destination": "/docs/guides/custom-login-ui",
+    "permanent": true
+  },
+  {
+    "source": "/docs/authserver/headless-auth-how-to",
+    "destination": "/docs/guides/custom-login-ui",
+    "permanent": true
+  },
+  {
+    "source": "/docs/authserver/machine-clients",
+    "destination": "/docs/guides/service-account-jobs",
+    "permanent": true
+  },
+  {
+    "source": "/docs/authserver/application-access",
+    "destination": "/docs/guides/multi-app-access",
+    "permanent": true
+  },
+  {
+    "source": "/docs/authserver/invitations",
+    "destination": "/docs/guides/invite-only-b2b-onboarding",
+    "permanent": true
+  },
+  {
+    "source": "/docs/authserver/transactional-email",
+    "destination": "/docs/guides/transactional-email",
+    "permanent": true
+  },
+  {
+    "source": "/docs/authserver/calendar-integration",
+    "destination": "/docs/guides/calendar-integration",
+    "permanent": true
+  },
+  {
+    "source": "/docs/guides/model-fga",
+    "destination": "/docs/fga/overview",
+    "permanent": true
+  },
+  {
+    "source": "/docs/guides/ef-query-filters",
+    "destination": "/docs/fga/list-filter",
+    "permanent": true
+  },
+  {
+    "source": "/docs/fga/syncing-auth-to-fga",
+    "destination": "/docs/guides/authserver-to-fga",
+    "permanent": true
+  },
+  {
+    "source": "/docs/authserver/cli-oauth",
+    "destination": "/docs/guides/terminal-auth",
+    "permanent": true
+  }
+]

@@ -1,4 +1,4 @@
-import { DocsLayout, DocsSearch } from "@emcy/docs";
+import { DocsLayout, DocsSearch } from "@agenetix/docs";
 import { searchDocsAction } from "@/app/docs/actions";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";

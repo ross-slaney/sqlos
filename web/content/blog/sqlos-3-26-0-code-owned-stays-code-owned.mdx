@@ -16,7 +16,7 @@ AuthPage chrome and transactional email branding share one settings row, but the
 
 A later code seed does not overwrite dashboard-owned values, and a dashboard save does not mutate a code-owned surface. Removing a seed orphans the record; it does not revert colors, copy, or logos. Logo bytes stay write-only after upload.
 
-See [Brand the hosted login page](/docs/guides/auth-branding) and [Email branding](/docs/authserver/email-branding).
+See [Brand the hosted login page](/docs/guides/auth-branding) and [Email branding](/docs/guides/auth-branding).
 
 ## Client lifecycle follows the same rule
 
@@ -24,7 +24,7 @@ Ordinary disable and enable stay available for dashboard-owned and dynamically r
 
 Machine clients already followed this pattern for revoke. 3.26 keeps ordinary revoke blocked on code-owned identities and keeps emergency disable as the incident path.
 
-See [Clients](/docs/authserver/clients) and [Machine clients](/docs/authserver/machine-clients).
+See [Clients](/docs/authserver/clients) and [Machine clients](/docs/guides/service-account-jobs).
 
 ## FGA roles and permissions stay a startup contract
 

@@ -1,8 +1,8 @@
 ---
 title: "Configuration"
 description: "Service registration, EF integration, dashboard setup, and client onboarding modes."
-order: 6
-section: guides
+section: "host"
+order: 4
 ---
 
 <Banner
@@ -29,16 +29,11 @@ Only add `ISqlOSResourceEntity`, FGA seeds, and grants when you are ready to aut
 ```csharp
 builder.AddSqlOS<AppDbContext>(
     db => db.UseSqlServer(connectionString),
-    options =>
+    options => options.UseSingleApplication("Main Web App", app =>
     {
-        options.AuthServer.Issuer = "https://app.example.com/sqlos/auth";
-        options.AuthServer.PublicOrigin = "https://app.example.com";
-        options.UseSingleApplication("Main Web App", app =>
-        {
-            app.Origin = "https://app.example.com";
-            app.Audience = "https://app.example.com/api";
-        });
-    });
+        app.Origin = "https://app.example.com";
+        app.Api = "/api";
+    }));
 ```
 
 Single-application mode creates one first-party PKCE client and keeps CIMD, DCR, resource indicators, and multi-application policy out of the starting path.
@@ -58,7 +53,7 @@ options.AuthServer.SeedClient(client =>
 });
 ```
 
-The organization ID/slug and referenced principals must already exist. Reconciliation is idempotent and source-owned: code changes affect only the keyed rows above, while dashboard-created assignments remain operator-owned. See [Application Access](/docs/authserver/application-access) and [Assign access across multiple apps](/docs/guides/multi-app-access).
+The organization ID/slug and referenced principals must already exist. Reconciliation is idempotent and source-owned: code changes affect only the keyed rows above, while dashboard-created assignments remain operator-owned. See [Application Access](/docs/guides/multi-app-access) and [Assign access across multiple apps](/docs/guides/multi-app-access).
 
 ## FGA seeding
 
@@ -164,14 +159,12 @@ Grant helpers never create subjects implicitly. Provision users, agents, or serv
 | Mode | When to use |
 | --- | --- |
 | **Owned app** | Seeded or dashboard client; hosted or headless UI |
-| **Portable MCP (`CIMD`)** | Public clients discovered via metadata URL |
+| **CIMD** | Public clients discovered via a metadata URL |
 | **DCR** | Compatibility clients that must register at runtime |
 
 ```csharp
-options.AuthServer.EnablePortableMcpClients(registration =>
-{
-    registration.Cimd.TrustedHosts.Add("clients.example.com");
-});
+options.AuthServer.ClientRegistration.Cimd.Enabled = true;
+options.AuthServer.ClientRegistration.Cimd.TrustedHosts.Add("clients.example.com");
 
 options.AuthServer.SeedDeviceFlowClient(
     "myapp-cli",

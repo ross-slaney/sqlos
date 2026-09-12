@@ -1,4 +1,4 @@
-import { DocsHomePage } from "@emcy/docs";
+import { DocsHomePage } from "@agenetix/docs";
 import { docsSource } from "@/lib/docs-source";
 
 export const metadata = {

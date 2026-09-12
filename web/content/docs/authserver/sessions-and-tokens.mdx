@@ -1,8 +1,8 @@
 ---
 title: "Sessions and Tokens"
 description: "Access tokens, refresh tokens, validation, and session lifecycle."
-order: 9
-section: authserver
+section: "tokens"
+order: 0
 ---
 
 Each login creates an OAuth session (access token plus refresh token) and, for a hosted or headless browser flow (including system-browser and device-approval sign-in for mobile, desktop, and CLI clients), a separate **issuer session**. Clearing the tokens does not end the issuer session. See [Refresh and Logout](/docs/authserver/refresh-and-logout).
@@ -116,7 +116,7 @@ device_code=opaque-device-code
 resource=https://api.acme.com
 ```
 
-Until the browser user approves the CLI request, `/sqlos/auth/token` returns `authorization_pending`. After approval it returns the normal OAuth token response and consumes the device code exactly once. See [CLI OAuth](/docs/authserver/cli-oauth).
+Until the browser user approves the CLI request, `/sqlos/auth/token` returns `authorization_pending`. After approval it returns the normal OAuth token response and consumes the device code exactly once. See [CLI OAuth](/docs/guides/terminal-auth).
 
 ## Logout
 
