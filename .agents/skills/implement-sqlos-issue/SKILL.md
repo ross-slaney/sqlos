@@ -62,7 +62,7 @@ Use the narrowest applicable installed skill in addition to this workflow:
 
 ## 3. Create the isolated worktree
 
-Fetch current remote state, then create a new branch directly from `origin/main`. Do not prefix the branch with `codex/` or `codex-`.
+Fetch current remote state, then create a new branch directly from `origin/main`:
 
 ```bash
 git fetch --prune origin
