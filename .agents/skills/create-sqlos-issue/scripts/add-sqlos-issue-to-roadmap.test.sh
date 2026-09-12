@@ -34,6 +34,12 @@ contains() {
   grep -F -- "$needle" "$file" >/dev/null
 }
 
+does_not_contain() {
+  local needle="$1"
+  local file="$2"
+  ! grep -F -- "$needle" "$file" >/dev/null
+}
+
 assert_ok "help" "$script" --help
 
 assert_fails "missing bv and size" "$script" --dry-run --fields-json "$fields" --issue 357
@@ -45,8 +51,9 @@ assert_fails "invalid release" "$script" --dry-run --fields-json "$fields" --iss
 
 "$script" --dry-run --fields-json "$fields" --issue 357 --bv 2 --size 2 \
   >/tmp/sqlos-roadmap-default.txt
-assert_ok "default release command" contains '--value No\ Release' /tmp/sqlos-roadmap-default.txt
-assert_ok "default release summary" contains 'Release: No Release' /tmp/sqlos-roadmap-default.txt
+assert_ok "default omits release summary" does_not_contain 'Release:' /tmp/sqlos-roadmap-default.txt
+assert_ok "default omits release field" does_not_contain '--field Release' /tmp/sqlos-roadmap-default.txt
+assert_ok "default omits no-release value" does_not_contain 'No Release' /tmp/sqlos-roadmap-default.txt
 assert_ok "default bv summary" contains 'Business Value: BV 2' /tmp/sqlos-roadmap-default.txt
 assert_ok "default size summary" contains 'Job Size: Size 2' /tmp/sqlos-roadmap-default.txt
 assert_ok "default issue url" contains 'https://github.com/ross-slaney/sqlos/issues/357' /tmp/sqlos-roadmap-default.txt

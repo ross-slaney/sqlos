@@ -72,10 +72,10 @@ Required fields:
 
 - **Business Value**: `BV 1`–`BV 4`. Score unless the caller passed `bv`.
 - **Job Size**: `Size 1`–`Size 4`. Score unless the caller passed `size`.
-- **Release**: **No Release** unless the caller passed an exact current board release.
 
 Optional fields:
 
+- **Release**: set only when the caller passed an exact current board release. Do not assign **No Release**.
 - **Status**: `Backlog` is the usual new-issue column.
 - **Track**: set only when the issue clearly maps to a current Track option.
 

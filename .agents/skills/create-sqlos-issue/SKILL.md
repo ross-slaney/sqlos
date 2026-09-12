@@ -14,7 +14,7 @@ Use this skill to convert a rough desired state into a SqlOS issue that is ready
 - Check for duplicates or adjacent issues and link them.
 - Separate what already exists from what is missing.
 - Assign all defensible issue metadata: priority in title/body, labels, milestone when clearly mapped, assignee only when the repo convention or user explicitly indicates one.
-- When filing (not drafting), always add the issue to the **sqlos Roadmap** project and assign **Business Value**, **Job Size**, and **Release**. Release is **No Release** unless the caller explicitly named a current board release.
+- When filing (not drafting), always add the issue to the **sqlos Roadmap** project and assign **Business Value** and **Job Size**. Do not assign **Release** unless the caller explicitly named a current board release. Never default Release to **No Release**.
 - Do not invent implementation facts. If evidence is absent, say "I did not find..." and list the search terms or areas checked.
 - If the user asked to file the issue, create it with `gh issue create` after the research, then score it on the roadmap. If they asked for a draft, do not file it and do not add a project item.
 
@@ -102,7 +102,7 @@ Roadmap project fields (required when filing):
 
 - Always add the new issue to [sqlos Roadmap](https://github.com/users/ross-slaney/projects/1) (`gh project` number `1`, owner `ross-slaney`).
 - Always assign **Business Value** (`BV 1`–`BV 4`) and **Job Size** (`Size 1`–`Size 4`). Caller overrides win. Otherwise score them and explain the score in the handoff.
-- Always assign **Release**. Default is **No Release**. Use a named release only when the skill invocation explicitly provided a current board option, for example `release: 4.1.0 Security hardening`.
+- Leave **Release** unset unless the skill invocation explicitly provided a current board option, for example `release: 4.1.0 Security hardening`. Do not assign **No Release**.
 - Do not invent Release names, BV values, or Size values. Read current options from `--check-fields` or the gather script.
 - Status and Track are optional. Set Status to `Backlog` when filing unless the caller asked for another current status. Set Track only when the issue clearly maps to one current Track option.
 
@@ -117,7 +117,7 @@ Scoring guidance:
 - **Size 3**: multiple surfaces or moderate product work.
 - **Size 4**: cross-cutting work across control planes or a large feature.
 
-Caller overrides look like `bv: 3`, `size: 2`, or `release: 4.1.0 Security hardening` in the skill invocation. If those are absent, score BV/Size yourself and keep Release at **No Release**.
+Caller overrides look like `bv: 3`, `size: 2`, or `release: 4.1.0 Security hardening` in the skill invocation. If those are absent, score BV/Size yourself and leave Release unset.
 
 ## Drafting Rules
 
@@ -140,7 +140,7 @@ Write for another coding agent that will implement from the issue alone.
 
 ## Filing Workflow
 
-1. Draft the title, labels, milestone, body, BV, Size, and Release. Release is **No Release** unless the caller named a current board release.
+1. Draft the title, labels, milestone, body, BV, and Size. Leave Release unset unless the caller named a current board release.
 2. Re-check duplicates with targeted `gh issue list --search`.
 3. If the user asked for a draft only, stop here. Do not run `gh issue create` and do not add a project item.
 4. If filing, run `gh issue create --repo ross-slaney/sqlos --title ... --body-file ... --label ...` and add `--milestone` only when certain.
@@ -153,9 +153,9 @@ bash .agents/skills/create-sqlos-issue/scripts/add-sqlos-issue-to-roadmap.sh \
   --size <1-4>
 ```
 
-Add `--release "<exact board option>"` only when the caller provided one. Add `--status Backlog` and `--track "<exact board option>"` when those are defensible. The helper looks up options by field name; do not hard-code GraphQL option IDs.
+Add `--release "<exact board option>"` only when the caller provided a named release. Do not pass **No Release**. Add `--status Backlog` and `--track "<exact board option>"` when those are defensible. The helper looks up options by field name; do not hard-code GraphQL option IDs.
 6. If a needed label does not exist, create a narrow label only when the user requested that taxonomy or the issue family already has a clear label pattern.
-7. Return the issue URL plus labels, BV, Size, and Release. List Status and Track only when set. Mention any other field intentionally left unset. If project add or field assignment fails after `gh issue create`, report the issue URL and the exact error. Do not pretend the issue is scored.
+7. Return the issue URL plus labels, BV, and Size. List Release, Status, and Track only when set. Mention any other field intentionally left unset. If project add or field assignment fails after `gh issue create`, report the issue URL and the exact error. Do not pretend the issue is scored.
 
 ## Quality Bar
 

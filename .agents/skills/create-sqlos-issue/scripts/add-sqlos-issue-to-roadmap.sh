@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 # Add a filed ross-slaney/sqlos issue to the sqlos Roadmap project and
-# assign Business Value, Job Size, and Release by field name.
+# assign Business Value and Job Size by field name. Release is optional.
 set -euo pipefail
 
 owner="${SQLOS_ROADMAP_OWNER:-ross-slaney}"
 project_number="${SQLOS_ROADMAP_NUMBER:-1}"
 repo="${GH_REPO:-ross-slaney/sqlos}"
-default_release="No Release"
 
 issue=""
 issue_url=""
@@ -32,7 +31,7 @@ Required:
   --size                 Job Size: 1-4 or "Size N"
 
 Optional:
-  --release              Release option name. Defaults to "No Release".
+  --release              Release option name. Omit to leave Release unset.
   --status               Status option name (for example Backlog)
   --track                Track option name
   --dry-run              Print planned gh commands without changing the board
@@ -244,14 +243,12 @@ if ! size="$(normalize_size "$size")"; then
   fail "invalid --size '$size'. Use 1-4 or 'Size N'"
 fi
 
-if [ -z "$release" ]; then
-  release="$default_release"
-fi
-
 payload="$(load_fields_json)"
 require_option "Business Value" "$bv" "$payload"
 require_option "Job Size" "$size" "$payload"
-require_option "Release" "$release" "$payload"
+if [ -n "$release" ]; then
+  require_option "Release" "$release" "$payload"
+fi
 if [ -n "$status" ]; then
   require_option "Status" "$status" "$payload"
 fi
@@ -263,7 +260,9 @@ echo "Roadmap: https://github.com/users/${owner}/projects/${project_number}"
 echo "Issue: $issue_url"
 echo "Business Value: $bv"
 echo "Job Size: $size"
-echo "Release: $release"
+if [ -n "$release" ]; then
+  echo "Release: $release"
+fi
 if [ -n "$status" ]; then
   echo "Status: $status"
 fi
@@ -283,8 +282,10 @@ run_or_echo gh project item-edit "$project_number" --owner "$owner" --url "$issu
   --field "Business Value" --value "$bv"
 run_or_echo gh project item-edit "$project_number" --owner "$owner" --url "$issue_url" \
   --field "Job Size" --value "$size"
-run_or_echo gh project item-edit "$project_number" --owner "$owner" --url "$issue_url" \
-  --field "Release" --value "$release"
+if [ -n "$release" ]; then
+  run_or_echo gh project item-edit "$project_number" --owner "$owner" --url "$issue_url" \
+    --field "Release" --value "$release"
+fi
 
 if [ -n "$status" ]; then
   run_or_echo gh project item-edit "$project_number" --owner "$owner" --url "$issue_url" \
