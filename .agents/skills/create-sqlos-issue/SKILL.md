@@ -20,22 +20,14 @@ Use this skill to convert a rough desired state into a SqlOS issue that is ready
 
 ## Fast Context Pass
 
-From the SqlOS repo root, run the bundled snapshot script with the user's key terms:
-
-```bash
-bash .agents/skills/create-sqlos-issue/scripts/gather-sqlos-issue-context.sh magic link passwordless email
-```
-
-Then manually inspect the most relevant files. The script is a starting point, not proof by itself.
-
-Always run or equivalent:
+From the SqlOS repo root, inspect current state, then open the files that matter:
 
 ```bash
 git status --short --branch
 gh issue list --repo ross-slaney/sqlos --state all --limit 35 --json number,title,state,labels,body,url
 gh label list --repo ross-slaney/sqlos --limit 100 --json name,description
 gh api repos/ross-slaney/sqlos/milestones
-bash .agents/skills/create-sqlos-issue/scripts/add-sqlos-issue-to-roadmap.sh --check-fields
+gh project field-list 1 --owner ross-slaney
 rg -n "<important terms>" src tests docs web/content examples README.md
 ```
 
@@ -103,7 +95,7 @@ Roadmap project fields (required when filing):
 - Always add the new issue to [sqlos Roadmap](https://github.com/users/ross-slaney/projects/1) (`gh project` number `1`, owner `ross-slaney`).
 - Always assign **Business Value** (`BV 1`–`BV 4`) and **Job Size** (`Size 1`–`Size 4`). Caller overrides win. Otherwise score them and explain the score in the handoff.
 - Leave **Release** unset unless the skill invocation explicitly provided a current board option, for example `release: 4.1.0 Security hardening`. Do not assign **No Release**.
-- Do not invent Release names, BV values, or Size values. Read current options from `--check-fields` or the gather script.
+- Do not invent Release names, BV values, or Size values. Read current options from `gh project field-list 1 --owner ross-slaney`.
 - Status and Track are optional. Set Status to `Backlog` when filing unless the caller asked for another current status. Set Track only when the issue clearly maps to one current Track option.
 
 Scoring guidance:
@@ -144,16 +136,17 @@ Write for another coding agent that will implement from the issue alone.
 2. Re-check duplicates with targeted `gh issue list --search`.
 3. If the user asked for a draft only, stop here. Do not run `gh issue create` and do not add a project item.
 4. If filing, run `gh issue create --repo ross-slaney/sqlos --title ... --body-file ... --label ...` and add `--milestone` only when certain.
-5. Immediately add the new issue to the roadmap and set required fields. Prefer the helper so field names stay current:
+5. Immediately add the new issue to the roadmap and set required fields by name. Do not hard-code GraphQL option IDs.
 
 ```bash
-bash .agents/skills/create-sqlos-issue/scripts/add-sqlos-issue-to-roadmap.sh \
-  --issue <number-or-url> \
-  --bv <1-4> \
-  --size <1-4>
+gh project item-add 1 --owner ross-slaney --url <issue-url>
+gh project item-edit 1 --owner ross-slaney --url <issue-url> \
+  --field "Business Value" --value "BV <1-4>"
+gh project item-edit 1 --owner ross-slaney --url <issue-url> \
+  --field "Job Size" --value "Size <1-4>"
 ```
 
-Add `--release "<exact board option>"` only when the caller provided a named release. Do not pass **No Release**. Add `--status Backlog` and `--track "<exact board option>"` when those are defensible. The helper looks up options by field name; do not hard-code GraphQL option IDs.
+Set `--field Release` only when the caller provided a named board release. Do not assign **No Release**. Set Status to `Backlog` and Track when those are defensible.
 6. If a needed label does not exist, create a narrow label only when the user requested that taxonomy or the issue family already has a clear label pattern.
 7. Return the issue URL plus labels, BV, and Size. List Release, Status, and Track only when set. Mention any other field intentionally left unset. If project add or field assignment fails after `gh issue create`, report the issue URL and the exact error. Do not pretend the issue is scored.
 

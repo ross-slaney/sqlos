@@ -79,7 +79,7 @@ Optional fields:
 - **Status**: `Backlog` is the usual new-issue column.
 - **Track**: set only when the issue clearly maps to a current Track option.
 
-Use `.agents/skills/create-sqlos-issue/scripts/add-sqlos-issue-to-roadmap.sh` after `gh issue create`. Confirm current option names with `--check-fields` before inventing values.
+After `gh issue create`, add the issue with `gh project item-add` and set **Business Value** and **Job Size** with `gh project item-edit`. Confirm current option names with `gh project field-list 1 --owner ross-slaney` before inventing values.
 
 ## Duplicate Checks
 
