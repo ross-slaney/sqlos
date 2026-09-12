@@ -81,7 +81,7 @@ For invitation links, the same rule applies:
 Read more:
 
 - site docs: `/docs/authserver/hosted-vs-headless`
-- site docs: `/docs/authserver/headless-auth`
+- site docs: `/docs/guides/custom-login-ui`
 
 ## Clients and AuthPage
 

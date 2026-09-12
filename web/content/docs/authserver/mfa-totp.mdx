@@ -1,8 +1,8 @@
 ---
 title: "MFA and TOTP"
 description: "Configure authenticator-app MFA, recovery codes, and tenant enforcement."
-order: 12
-section: authserver
+section: "sign-in"
+order: 9
 ---
 
 SqlOS MFA adds authenticator-app second factor checks to the AuthServer login path. The first supported strong factor is TOTP, the 6-digit code format used by Google Authenticator, Microsoft Authenticator, 1Password, Authy, and other compatible apps.
@@ -362,7 +362,7 @@ Production deployments should configure a durable Data Protection key ring outsi
 
 ## Next reading
 
-- [Headless Auth](/docs/authserver/headless-auth)
+- [Headless Auth](/docs/guides/custom-login-ui)
 - [`@sqlos/headless`](/docs/reference/headless-js)
 - [Build a custom login UI](/docs/guides/custom-login-ui)
 - [Security Settings](/docs/authserver/security-settings)

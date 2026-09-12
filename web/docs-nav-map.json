@@ -1,0 +1,40 @@
+{
+  "sections": {
+    "start": "Start here",
+    "host": "Host",
+    "sign-in": "Sign-in",
+    "tokens": "Tokens and APIs",
+    "clients": "Clients",
+    "mcp": "MCP",
+    "orgs": "Organizations",
+    "directory": "Directory",
+    "authorization": "Authorization",
+    "operations": "Operations",
+    "reference": "Reference"
+  },
+  "groups": {
+    "sign-in/social": "Social",
+    "sign-in/sso": "Enterprise SSO",
+    "authorization/model": "Model",
+    "authorization/checks": "Checks",
+    "authorization/tenancy": "Tenancy"
+  },
+  "order": [
+    "start",
+    "host",
+    "sign-in",
+    "sign-in/social",
+    "sign-in/sso",
+    "tokens",
+    "clients",
+    "mcp",
+    "orgs",
+    "directory",
+    "authorization",
+    "authorization/model",
+    "authorization/checks",
+    "authorization/tenancy",
+    "operations",
+    "reference"
+  ]
+}

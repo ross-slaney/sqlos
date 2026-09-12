@@ -1,8 +1,8 @@
 ---
 title: "Glossary"
 description: "Plain-English definitions for the identity, OAuth, SAML, FGA, and ASP.NET Core terms used throughout SqlOS."
-order: 15
-section: reference
+section: "reference"
+order: 8
 ---
 
 <Banner
@@ -55,7 +55,7 @@ An FGA subject type for an automated actor, including an application agent or AI
 
 ### Application access
 
-Policy that decides whether a user or principal may use a **client application** at all. It is enforced during authorization, provider callbacks, device approval, and refresh. This is separate from FGA, which decides what the caller can do to resources after entering the application. See [Application Access](/docs/authserver/application-access).
+Policy that decides whether a user or principal may use a **client application** at all. It is enforced during authorization, provider callbacks, device approval, and refresh. This is separate from FGA, which decides what the caller can do to resources after entering the application. See [Application Access](/docs/guides/multi-app-access).
 
 ### Audience (`aud`)
 
@@ -117,7 +117,7 @@ ASP.NET Core's cross-platform, key-ring-based cryptographic system for protectin
 
 ### Device Authorization Grant (device flow)
 
-An OAuth flow for a CLI, terminal, TV, or input-constrained device. The CLI receives a device code and user code, the user approves the request in a browser, and the CLI polls the token endpoint until approval. The device code is a temporary credential and should never be logged. See [CLI OAuth](/docs/authserver/cli-oauth).
+An OAuth flow for a CLI, terminal, TV, or input-constrained device. The CLI receives a device code and user code, the user approves the request in a browser, and the CLI polls the token endpoint until approval. The device code is a temporary credential and should never be logged. See [CLI OAuth](/docs/guides/terminal-auth).
 
 ### Discovery document
 
@@ -179,11 +179,11 @@ A public document containing the keys resource servers use to validate SqlOS JWT
 
 ### Machine client
 
-An AuthServer confidential OAuth client that uses the `client_credentials` grant and `client_secret_basic`. It authenticates a worker at the token endpoint and receives a short-lived access token. A machine client is not an FGA subject. `SeedMachineClient` and the dashboard Machine Clients page can bind one to an FGA service account, but either record can exist without the other. See [Machine Clients](/docs/authserver/machine-clients).
+An AuthServer confidential OAuth client that uses the `client_credentials` grant and `client_secret_basic`. It authenticates a worker at the token endpoint and receives a short-lived access token. A machine client is not an FGA subject. `SeedMachineClient` and the dashboard Machine Clients page can bind one to an FGA service account, but either record can exist without the other. See [Machine Clients](/docs/guides/service-account-jobs).
 
 ### Membership
 
-The AuthServer relationship between a user and an organization, including the user's organization role/context. Membership answers “does this person belong to this tenant?” It does not by itself create an FGA subject or resource grant; bridge the identity into FGA explicitly when authorizing domain data. See [Memberships](/docs/authserver/memberships) and [Syncing Auth to FGA](/docs/fga/syncing-auth-to-fga).
+The AuthServer relationship between a user and an organization, including the user's organization role/context. Membership answers “does this person belong to this tenant?” It does not by itself create an FGA subject or resource grant; bridge the identity into FGA explicitly when authorizing domain data. See [Memberships](/docs/authserver/memberships) and [Syncing Auth to FGA](/docs/guides/authserver-to-fga).
 
 ### MFA (multi-factor authentication)
 
@@ -269,7 +269,7 @@ A string requested by an OAuth client and allowed by its registration, such as `
 
 ### Service account
 
-An FGA subject type (`service_account` / `SqlOSFgaServiceAccount`) for non-human authorization. It can receive roles and grants without being an AuthServer user. It is not an OAuth client and has no token endpoint. A dashboard or `SeedMachineClient` workflow may link one to a machine client by `client_id`; provisioning a service account alone does not create that client. See [Subject Types](/docs/fga/subject-types) and [Machine Clients](/docs/authserver/machine-clients).
+An FGA subject type (`service_account` / `SqlOSFgaServiceAccount`) for non-human authorization. It can receive roles and grants without being an AuthServer user. It is not an OAuth client and has no token endpoint. A dashboard or `SeedMachineClient` workflow may link one to a machine client by `client_id`; provisioning a service account alone does not create that client. See [Subject Types](/docs/fga/subject-types) and [Machine Clients](/docs/guides/service-account-jobs).
 
 ### SDK (.NET SDK)
 
@@ -297,7 +297,7 @@ A client-generated value that correlates the authorization response with the bro
 
 ### Subject
 
-The actor FGA authorizes: a user, agent, service account, or group. The access token's `sub` identifies the AuthServer user, but the corresponding FGA subject must be provisioned/resolved before grants and checks can use it. See [Syncing Auth to FGA](/docs/fga/syncing-auth-to-fga).
+The actor FGA authorizes: a user, agent, service account, or group. The access token's `sub` identifies the AuthServer user, but the corresponding FGA subject must be provisioned/resolved before grants and checks can use it. See [Syncing Auth to FGA](/docs/guides/authserver-to-fga).
 
 ## T
 

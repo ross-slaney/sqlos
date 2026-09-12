@@ -1,8 +1,9 @@
 ---
 title: "Creating Resources"
 description: "Create FGA resources through entity-backed sync or manual APIs."
-order: 13
-section: fga
+section: "authorization"
+group: "checks"
+order: 5
 ---
 
 The recommended path for protected application rows is to make the EF entity implement `ISqlOSResourceEntity`. When the app derives its DbContext from `SqlOSDbContext<TContext>`, SqlOS creates, updates, and deletes the backing `SqlOSFgaResource` row during `SaveChanges` / `SaveChangesAsync`.

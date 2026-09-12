@@ -1,8 +1,8 @@
 ---
 title: ".NET SDK Reference"
 description: "Application-facing SqlOS services, trust boundaries, contracts, and source-aligned end-to-end examples."
-order: 9
-section: reference
+section: "reference"
+order: 1
 ---
 
 <Banner
@@ -502,7 +502,7 @@ var sent = await email.SendAsync(
 
 Inspect `sent.Status`. An unconfigured sender or provider failure normally returns `Status = "failed"` with `SanitizedError`; it is not reported only by an exception. A successful provider submission returns `Status = "queued"` plus the provider message ID when available.
 
-The configured `ISqlOSEmailSender` performs delivery. When Azure Communication Services is not your provider, register a custom implementation after `AddSqlOS` so it becomes the single service resolved by the sender pipeline. Built-in auth templates use the `auth.*` keys and are normally invoked by the corresponding AuthServer workflow. See [Transactional Email](/docs/authserver/transactional-email) for provider configuration, retention, privacy, and built-in templates.
+The configured `ISqlOSEmailSender` performs delivery. When Azure Communication Services is not your provider, register a custom implementation after `AddSqlOS` so it becomes the single service resolved by the sender pipeline. Built-in auth templates use the `auth.*` keys and are normally invoked by the corresponding AuthServer workflow. See [Transactional Email](/docs/guides/transactional-email) for provider configuration, retention, privacy, and built-in templates.
 
 ## Calendar
 
@@ -615,7 +615,7 @@ await calendars.DisconnectAsync(
     cancellationToken: ct);
 ```
 
-See [Calendar Integration](/docs/authserver/calendar-integration) for provider scopes, scheduler configuration, conflict policy, and dashboard operations.
+See [Calendar Integration](/docs/guides/calendar-integration) for provider scopes, scheduler configuration, conflict policy, and dashboard operations.
 
 ## Key result types
 

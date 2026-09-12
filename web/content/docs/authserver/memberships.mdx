@@ -1,13 +1,13 @@
 ---
 title: "Memberships"
 description: "Assign users to organizations with roles."
-order: 22
-section: authserver
+section: "orgs"
+order: 2
 ---
 
 Memberships link users to organizations. Each membership carries a role that your app can use for authorization logic.
 
-For human onboarding, prefer [Email Invitations](/docs/authserver/invitations) over directly creating a user and assigning a password. Invitations are email-bound, expiring, one-time links that create or activate membership only after the invited identity is verified.
+For human onboarding, prefer [Email Invitations](/docs/guides/invite-only-b2b-onboarding) over directly creating a user and assigning a password. Invitations are email-bound, expiring, one-time links that create or activate membership only after the invited identity is verified.
 
 ## Create a membership
 
@@ -56,7 +56,7 @@ var orgs = await adminService.GetUserOrganizationsAsync(userId, ct);
 
 ## Syncing to FGA
 
-When using FGA, membership roles can be mapped to explicit FGA grants. Use [Turn AuthServer memberships into FGA access](/docs/guides/authserver-to-fga) for role upgrade, downgrade, removal, organization switching, and cross-tenant guidance. [Syncing Auth to FGA](/docs/fga/syncing-auth-to-fga) is the shorter API reference.
+When using FGA, membership roles can be mapped to explicit FGA grants. Use [Turn AuthServer memberships into FGA access](/docs/guides/authserver-to-fga) for role upgrade, downgrade, removal, organization switching, and cross-tenant guidance. [Syncing Auth to FGA](/docs/guides/authserver-to-fga) is the shorter API reference.
 
 ## Invite a member
 

@@ -1,8 +1,9 @@
 ---
 title: "Todo Sample"
 description: "Run hosted password login, an ASP.NET Core PKCE client, protected APIs, EF authorization, and optional OTP providers."
+section: "start"
 order: 8
-section: authserver
+sidebar: false
 ---
 
 The Todo sample is the canonical "ship hosted AuthPage plus simple FGA fast" walkthrough. Its default path is deliberately provider-free: local password sign-in and signup work without an email, SMS, or external identity account.
@@ -184,7 +185,7 @@ dotnet run --project examples/SqlOS.Todo.Cli -- toggle <todo-id>
 
 `login` prints and opens `verification_uri_complete`. Sign in through SqlOS AuthPage, approve the CLI request, then return to the terminal. The demo stores tokens under `~/.sqlos/todo-cli/tokens.json`.
 
-More detail: [CLI OAuth](/docs/authserver/cli-oauth).
+More detail: [CLI OAuth](/docs/guides/terminal-auth).
 
 ## Portable public clients
 

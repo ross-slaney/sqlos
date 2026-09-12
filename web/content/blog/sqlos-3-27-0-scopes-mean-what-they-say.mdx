@@ -14,7 +14,7 @@ The dashboard and Admin API now warn when a user-facing client will grant nothin
 
 `SeedBrowserClient` and `SeedOwnedWebApp` still register redirect URIs only. They leave `AllowedScopes` empty. After this release that empty list grants no scopes, even if `/authorize` asks for `openid profile email`. Set the allowlist with `SeedClient`, the Admin API, or the dashboard, and send the same `scope` on the authorize request.
 
-See [Clients](/docs/authserver/clients) and [Headless authentication](/docs/authserver/headless-auth).
+See [Clients](/docs/authserver/clients) and [Headless authentication](/docs/guides/custom-login-ui).
 
 ## One grant policy
 

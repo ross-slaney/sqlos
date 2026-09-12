@@ -1,8 +1,8 @@
 ---
 title: "Token Validation"
 description: "Validate access tokens for protected APIs."
-order: 28
-section: authserver
+section: "tokens"
+order: 1
 ---
 
 Access tokens are RS256 JWTs. Validate on the server for each API call and always require the audience for the API that will process the token. SqlOS validation is session-aware; plain JWKS validation is not.

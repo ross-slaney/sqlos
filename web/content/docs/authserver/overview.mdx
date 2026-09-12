@@ -1,8 +1,9 @@
 ---
 title: "AuthServer Overview"
 description: "Identity, sessions, organizations, and SSO in one embedded module."
-order: 0
-section: authserver
+section: "start"
+order: 9
+sidebar: false
 ---
 
 <Banner
@@ -19,9 +20,9 @@ AuthServer is SqlOS's identity piece. Users, orgs, sessions, OAuth tokens, socia
 <Callout type="info" title="Recommended reading order">
   1. The standard flow: [Single application](/docs/authserver/single-application) — one `AddSqlOS` call with `Origin`, `Api`, `Mcp`, `Brand` or `Headless`, and `Authorization`
   2. [Dashboard](/docs/authserver/dashboard-overview) → [Organizations](/docs/authserver/organizations) → [Hosted vs headless](/docs/authserver/hosted-vs-headless)
-  3. [Password login](/docs/authserver/password-login), [Email OTP](/docs/authserver/email-otp), [Magic Link](/docs/authserver/magic-link), or [Phone OTP](/docs/authserver/phone-otp) → [OIDC](/docs/authserver/oidc-auth) / [SAML](/docs/authserver/saml-sso) / [SCIM](/docs/authserver/scim-directory-sync)
+  3. [Password login](/docs/authserver/password-login), [Email OTP](/docs/authserver/email-otp), [Magic Link](/docs/authserver/magic-link), or [Phone OTP](/docs/authserver/phone-otp) → [OIDC](/docs/authserver/oidc-auth) / [SAML](/docs/authserver/saml-sso) / [SCIM](/docs/guides/scim-directory-sync)
   4. Security policy: [MFA and TOTP](/docs/authserver/mfa-totp) and [Security Settings](/docs/authserver/security-settings)
-  5. Many apps: [Multiple applications](/docs/authserver/multiple-applications), then [Clients](/docs/authserver/clients), [OpenID Provider](/docs/authserver/openid-provider), [Machine Clients](/docs/authserver/machine-clients), [Application Access](/docs/authserver/application-access), [CIMD](/docs/authserver/client-id-metadata-documents), [DCR](/docs/authserver/dynamic-client-registration) -- only when you need them
+  5. Many apps: [Multiple applications](/docs/authserver/multiple-applications), then [Clients](/docs/authserver/clients), [OpenID Provider](/docs/authserver/openid-provider), [Machine Clients](/docs/guides/service-account-jobs), [Application Access](/docs/guides/multi-app-access), [CIMD](/docs/authserver/client-id-metadata-documents), [DCR](/docs/authserver/dynamic-client-registration) -- only when you need them
 </Callout>
 
 ## What you get
@@ -101,17 +102,17 @@ Open `/sqlos/admin/auth/`. Manage orgs, users, memberships, clients, OIDC, SSO, 
   </AccordionItem>
 </Accordion>
 
-[Headless Auth](/docs/authserver/headless-auth) · [Email OTP](/docs/authserver/email-otp) · [Magic Link](/docs/authserver/magic-link) · [Phone OTP](/docs/authserver/phone-otp) · [MFA and TOTP](/docs/authserver/mfa-totp) · [Email Invitations](/docs/authserver/invitations) · [SAML SSO](/docs/authserver/saml-sso) · [SCIM Directory Sync](/docs/authserver/scim-directory-sync) · [CLI OAuth](/docs/authserver/cli-oauth) · [Hosted vs Headless](/docs/authserver/hosted-vs-headless)
+[Headless Auth](/docs/guides/custom-login-ui) · [Email OTP](/docs/authserver/email-otp) · [Magic Link](/docs/authserver/magic-link) · [Phone OTP](/docs/authserver/phone-otp) · [MFA and TOTP](/docs/authserver/mfa-totp) · [Email Invitations](/docs/guides/invite-only-b2b-onboarding) · [SAML SSO](/docs/authserver/saml-sso) · [SCIM Directory Sync](/docs/guides/scim-directory-sync) · [CLI OAuth](/docs/guides/terminal-auth) · [Hosted vs Headless](/docs/authserver/hosted-vs-headless)
 
 ## Client guides
 
 - [Single-Application Setup](/docs/authserver/single-application)
 - [Clients](/docs/authserver/clients)
-- [Machine Clients](/docs/authserver/machine-clients)
-- [Application Access](/docs/authserver/application-access)
+- [Machine Clients](/docs/guides/service-account-jobs)
+- [Application Access](/docs/guides/multi-app-access)
 - [Preregistration vs CIMD vs DCR](/docs/authserver/preregistration-vs-cimd-vs-dcr)
 - [Client ID Metadata Documents](/docs/authserver/client-id-metadata-documents)
 - [Dynamic Client Registration](/docs/authserver/dynamic-client-registration)
-- [CLI OAuth](/docs/authserver/cli-oauth)
+- [CLI OAuth](/docs/guides/terminal-auth)
 - [MCP Server](/docs/authserver/mcp-server)
 - [MCP Resource Indicators and Audience](/docs/authserver/mcp-resource-indicators-and-audience)

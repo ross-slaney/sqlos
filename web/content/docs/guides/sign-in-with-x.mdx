@@ -1,8 +1,8 @@
 ---
 title: "Ship \"Sign in with X\" for your product"
 description: "Turn a SqlOS-hosted app into the identity provider for your other apps: one OIDC client seed, scope display names, an Auth.js relying party, consent, and federated sign-out."
-order: 5
-section: guides
+section: "host"
+order: 2
 ---
 
 Your SqlOS host is already a full OpenID Connect Provider — discovery, ID tokens, UserInfo, and a consent screen are on by default (see [OpenID Provider](/docs/authserver/openid-provider)). This guide turns that into a product feature: a **"Sign in with X"** button in another app, where X is *your* app. The relying party needs no SqlOS SDK — only the standard OIDC discovery document, which is the point.

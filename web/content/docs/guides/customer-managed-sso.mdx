@@ -1,14 +1,15 @@
 ---
 title: "Let customer admins set up enterprise SSO"
 description: "Delegate one organization's SAML setup without granting access to the SqlOS operator dashboard."
-order: 4
-section: guides
+section: "sign-in"
+group: "sso"
+order: 1
 ---
 
 <Banner
   eyebrow="Guide"
   title="Give each customer a one-organization SSO setup portal"
-  href="/docs/guides/saml-sso"
+  href="/docs/authserver/saml-sso"
   actionLabel="Operator-managed SAML"
 >
   Your platform keeps global control. The customer IT admin receives a one-time link that can configure only their organization's SAML connection.
@@ -21,7 +22,7 @@ section: guides
   - A public HTTPS SqlOS origin and, for self-serve domain verification, access to the customer's public DNS
 </Callout>
 
-This guide uses the bundled hosted portal. If your platform team owns the entire setup, use [Set up SAML SSO](/docs/guides/saml-sso) instead. The [SAML reference](/docs/authserver/saml-sso) documents every route and contract after you choose a setup model.
+This guide uses the bundled hosted portal. If your platform team owns the entire setup, use [Set up SAML SSO](/docs/authserver/saml-sso) instead. The [SAML reference](/docs/authserver/saml-sso) documents every route and contract after you choose a setup model.
 
 ![A platform operator issues a one-organization setup link that lets a customer IT admin verify DNS and connect an identity provider](/docs/guides-customer-managed-sso.svg)
 

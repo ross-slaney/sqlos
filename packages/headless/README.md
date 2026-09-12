@@ -148,7 +148,7 @@ Subscribe with `flow.subscribe(listener)` outside React, or use `useHeadlessAuth
 
 - Guide: [Build your own login and signup UI](https://sqlos.dev/docs/guides/custom-login-ui)
 - Package reference: [@sqlos/headless](https://sqlos.dev/docs/reference/headless-js)
-- Wire protocol: [Headless Auth](https://sqlos.dev/docs/authserver/headless-auth)
+- Wire protocol: [Headless Auth](https://sqlos.dev/docs/guides/custom-login-ui)
 
 ## What this package does not do
 

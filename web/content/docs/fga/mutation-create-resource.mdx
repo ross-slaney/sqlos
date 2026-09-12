@@ -1,8 +1,9 @@
 ---
 title: "Mutations"
 description: "Authorize writes while SqlOS syncs entity-backed resources."
-order: 11
-section: fga
+section: "authorization"
+group: "checks"
+order: 3
 ---
 
 For create, update, and delete operations, check authorization first with `CheckAccessAsync`, then mutate your EF entity. If the entity implements `ISqlOSResourceEntity` and the DbContext derives from `SqlOSDbContext<TContext>`, SqlOS keeps the backing FGA resource row synchronized when EF saves.

@@ -1,8 +1,8 @@
 ---
 title: "Preregistration vs CIMD vs DCR"
 description: "Pick the right client onboarding path without memorizing OAuth acronyms first."
-order: 24
-section: authserver
+section: "clients"
+order: 1
 ---
 
 SqlOS supports three client onboarding paths.
@@ -55,20 +55,20 @@ Use it when:
 - you want a better long-term public-client story than hand-entry everywhere
 
 ```csharp
-builder.AddSqlOS<AppDbContext>(options =>
-{
-    options.AuthServer.EnablePortableMcpClients(registration =>
+builder.AddSqlOS<AppDbContext>(
+    db => db.UseSqlServer(connectionString),
+    options =>
     {
-        registration.Cimd.TrustedHosts.Add("clients.example.com");
+        options.ConfigureApplication("Acme", app =>
+        {
+            app.Origin = "https://auth.example.com";
+        });
+        options.AuthServer.ClientRegistration.Cimd.Enabled = true;
+        options.AuthServer.ClientRegistration.Cimd.TrustedHosts.Add("clients.example.com");
     });
-});
 ```
 
-That helper turns on:
-
-- `CIMD`
-- resource indicators
-- a portable-client mental model
+`app.Mcp = "/mcp"` on a same-host app turns CIMD and resource indicators on for you. Otherwise CIMD is a flag. Resource indicators are already on outside `UseSingleApplication`.
 
 ## 3. DCR
 

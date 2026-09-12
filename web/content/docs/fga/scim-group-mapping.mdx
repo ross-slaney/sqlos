@@ -1,8 +1,8 @@
 ---
 title: "SCIM group mapping"
 description: "Use IdP groups as FGA user groups and optional authorization grants."
-order: 15
-section: fga
+section: "directory"
+order: 4
 ---
 
 SCIM group sync feeds the same authorization model your application already uses. The identity provider is the SCIM client: it writes Group resources and membership to SqlOS. SqlOS mirrors those groups into FGA and can optionally map selected groups to roles on existing resources.
@@ -226,10 +226,10 @@ dotnet test tests/SqlOS.IntegrationTests/SqlOS.IntegrationTests.csproj \
 
 ## Related
 
-- [SCIM Directory Sync](/docs/authserver/scim-directory-sync)
+- [SCIM Directory Sync](/docs/guides/scim-directory-sync)
 - [SCIM directory sync guide](/docs/guides/scim-directory-sync)
 - [Microsoft Entra setup](/docs/guides/scim-microsoft-entra)
 - [Okta setup](/docs/guides/scim-okta)
 - [Grants](/docs/fga/grants)
-- [Syncing Auth to FGA](/docs/fga/syncing-auth-to-fga)
-- [Application Access](/docs/authserver/application-access)
+- [Syncing Auth to FGA](/docs/guides/authserver-to-fga)
+- [Application Access](/docs/guides/multi-app-access)

@@ -1,14 +1,14 @@
 ---
 title: "Build your own login and signup UI"
 description: "Render a product-owned browser UI while SqlOS keeps OAuth, credentials, organizations, and MFA server-owned."
-order: 4
-section: guides
+section: "sign-in"
+order: 1
 ---
 
 <Banner
   eyebrow="Guide"
   title="Own the screens, keep the authorization state machine"
-  href="/docs/authserver/headless-auth"
+  href="/docs/guides/custom-login-ui"
   actionLabel="Headless Auth reference"
 >
   Build a branded browser experience without rebuilding OAuth, home realm discovery, provider callbacks, organization selection, MFA, sessions, or token issuance.
@@ -295,13 +295,13 @@ The core transition rule stays the same. Add only the views your enabled policy 
 | `email-otp`, `email-otp-verify`, `email-otp-signup-verify` | Start or verify an inbox code while retaining challenge/signup tokens | [Email-code onboarding](/docs/guides/email-otp-onboarding) |
 | `magic-link`, `magic-link-sent` | Send an opt-in sign-in link (`flow.magicLink.start`); consume the emailed token with `flow.magicLink.complete({ token })` — there is no headless confirm view | [Magic-link login](/docs/authserver/magic-link) |
 | `phone-otp`, `phone-otp-verify`, `phone-otp-signup`, `phone-otp-signup-verify` | Start or verify a Twilio code | [SMS mobile sign-in](/docs/guides/sms-mobile-sign-in) |
-| `signup` | Submit display name, email, password, organization name, and optional custom fields | [Password login](/docs/guides/password-login) |
+| `signup` | Submit display name, email, password, organization name, and optional custom fields | [Password login](/docs/authserver/password-login) |
 | `invite`, `invite-login`, `invite-email-otp-verify`, `invite-accepted` | Resolve and preserve the invitation-bound request instead of starting unrelated signup | [Invite teammates](/docs/guides/invite-only-b2b-onboarding) |
-| Provider redirect | Follow the exact returned OIDC/SAML URL; SqlOS owns callback validation | [Social sign-in](/docs/guides/social-oidc) · [SAML SSO](/docs/guides/saml-sso) |
-| `mfa`, `mfa-enroll` | Verify an existing factor or render forced enrollment with its returned token and QR data | [Authenticator MFA](/docs/guides/mfa-totp) |
+| Provider redirect | Follow the exact returned OIDC/SAML URL; SqlOS owns callback validation | [Social sign-in](/docs/authserver/oidc-auth) · [SAML SSO](/docs/authserver/saml-sso) |
+| `mfa`, `mfa-enroll` | Verify an existing factor or render forced enrollment with its returned token and QR data | [Authenticator MFA](/docs/authserver/mfa-totp) |
 | `consent` | Show the client name and `consentScopes`, then call `flow.consent.approve()` or `flow.consent.deny()` | [Consent](/docs/authserver/consent) |
 | `forgot-password`, `forgot-password-sent`, `password-reset` | Keep recovery enumeration-safe and use the configured reset destination | [Account recovery](/docs/guides/account-recovery-sessions) |
-| `device`, `device-approve`, `device-approved`, `device-denied` | Keep the device request bound to its request ID and require explicit approval | [CLI OAuth](/docs/authserver/cli-oauth) |
+| `device`, `device-approve`, `device-approved`, `device-denied` | Keep the device request bound to its request ID and require explicit approval | [CLI OAuth](/docs/guides/terminal-auth) |
 
 Use [`@sqlos/headless`](/docs/reference/headless-js) for the flow object, then the [Headless AuthPage HTTP reference](/docs/reference/api-reference#headless-authpage-api) for exact server records. Do not guess a response field: route validation errors are not yet one universal JSON envelope.
 

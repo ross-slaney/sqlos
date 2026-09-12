@@ -365,7 +365,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
 
 `ConfigureApplication` keeps the same `Api`, `Mcp`, `Brand`, `Headless`, and `Authorization` options but seeds **no client**. Each explicit client has its own redirect allowlist, scopes, audience, and consent behavior. Acme Web can call this host's API. The partner's token cannot: its audience is `partner-portal`. First-party status skips consent; it does not bypass application access policy or FGA.
 
-The issuer is `https://id.acme.example.com/sqlos/auth`; OIDC discovery is at `https://id.acme.example.com/sqlos/auth/.well-known/openid-configuration`. Code-owned clients reconcile on startup. Dashboard/API-created clients can coexist under different IDs, using the same domain validation and audit behavior. Use [application access policies](https://sqlos.dev/docs/authserver/application-access) to restrict which organizations and principals may sign in to each application.
+The issuer is `https://id.acme.example.com/sqlos/auth`; OIDC discovery is at `https://id.acme.example.com/sqlos/auth/.well-known/openid-configuration`. Code-owned clients reconcile on startup. Dashboard/API-created clients can coexist under different IDs, using the same domain validation and audit behavior. Use [application access policies](https://sqlos.dev/docs/guides/multi-app-access) to restrict which organizations and principals may sign in to each application.
 
 ### Complete downstream OIDC application
 
@@ -438,7 +438,7 @@ var connection = await admin.CreateScimConnectionAsync(
 
 Run this as an explicit setup operation for an existing organization, not on every restart. The dashboard uses the same administration service and validation. A bearer token is scoped to its connection's organization; enabling SCIM globally does not create a connection or grant applications access.
 
-**Outbound SCIM provisioning is not implemented.** SqlOS can be the central OIDC provider for your applications and receive enterprise-directory provisioning, but it does not push accounts to downstream SaaS services over SCIM. That requires a separate provisioning integration. See [SCIM directory sync](https://sqlos.dev/docs/authserver/scim-directory-sync) for connection lifecycle, rotation, group mapping, and protocol examples.
+**Outbound SCIM provisioning is not implemented.** SqlOS can be the central OIDC provider for your applications and receive enterprise-directory provisioning, but it does not push accounts to downstream SaaS services over SCIM. That requires a separate provisioning integration. See [SCIM directory sync](https://sqlos.dev/docs/guides/scim-directory-sync) for connection lifecycle, rotation, group mapping, and protocol examples.
 
 For runnable multi-client setups, the [retail AppHost](examples/SqlOS.Example.AppHost/README.md) runs one `ConfigureApplication` host with Next.js and Angular clients (Expo connects separately). The [Todo AppHost](examples/SqlOS.Todo.Api/README.md) runs the host and Razor Pages client, with a CLI available separately. [Sign in with X](examples/SqlOS.SignInWithX.AppHost/README.md) demonstrates a dedicated provider and a third-party Auth.js relying party.
 
@@ -500,7 +500,7 @@ No sidecar, no policy service round-trips, no post-filtering in memory. The same
   </tr>
 </table>
 
-→ [Authorize EF Core queries](https://sqlos.dev/docs/quickstarts/ef-authorization) · [Model your FGA](https://sqlos.dev/docs/guides/model-fga) · [EF query filters](https://sqlos.dev/docs/guides/ef-query-filters)
+→ [Authorize EF Core queries](https://sqlos.dev/docs/quickstarts/ef-authorization) · [Model your FGA](https://sqlos.dev/docs/fga/overview) · [EF query filters](https://sqlos.dev/docs/fga/list-filter)
 
 ### 4. Headless auth — bring your own UI
 
@@ -510,7 +510,7 @@ If the hosted pages don't fit your product, keep SqlOS as the protocol engine an
   <img src="https://sqlos.dev/docs/guides-custom-login-ui.svg" alt="Product-owned login UI connected to the SqlOS headless authentication state machine" width="900" />
 </p>
 
-→ [Build your own login and signup UI](https://sqlos.dev/docs/guides/custom-login-ui) · [Headless auth reference](https://sqlos.dev/docs/authserver/headless-auth)
+→ [Build your own login and signup UI](https://sqlos.dev/docs/guides/custom-login-ui) · [Headless auth reference](https://sqlos.dev/docs/guides/custom-login-ui)
 
 ## See it running in 2 minutes
 
@@ -537,9 +537,9 @@ Everything is documented as a task, not a feature tour. Start with whichever mat
 | Run on SQL Server or PostgreSQL | [Choose a database](https://sqlos.dev/docs/guides/choosing-a-provider) |
 | Protect an API with access tokens | [Protect an API](https://sqlos.dev/docs/quickstarts/protect-api) |
 | Return only the rows a user may see | [Authorize EF Core queries](https://sqlos.dev/docs/quickstarts/ef-authorization) |
-| Add native ASP.NET Core password login | [Password login](https://sqlos.dev/docs/guides/password-login) |
-| Add Google/Microsoft/GitHub sign-in | [Social OIDC login](https://sqlos.dev/docs/guides/social-oidc) |
-| Sell to enterprises that require SSO | [SAML SSO](https://sqlos.dev/docs/guides/saml-sso) · [SCIM directory sync](https://sqlos.dev/docs/guides/scim-directory-sync) |
+| Add native ASP.NET Core password login | [Password login](https://sqlos.dev/docs/authserver/password-login) |
+| Add Google/Microsoft/GitHub sign-in | [Social OIDC login](https://sqlos.dev/docs/authserver/oidc-auth) |
+| Sell to enterprises that require SSO | [SAML SSO](https://sqlos.dev/docs/authserver/saml-sso) · [SCIM directory sync](https://sqlos.dev/docs/guides/scim-directory-sync) |
 | Let other apps sign in with my app's accounts | [Sign in with X](https://sqlos.dev/docs/guides/sign-in-with-x) |
 | Build my own login UI | [Custom login UI](https://sqlos.dev/docs/guides/custom-login-ui) |
 | Host an MCP server agents can sign in to | [MCP server](https://sqlos.dev/docs/authserver/mcp-server) |

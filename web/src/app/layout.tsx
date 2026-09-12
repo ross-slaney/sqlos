@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono, Manrope } from "next/font/google";
-import "@emcy/docs/styles.css";
+import "@agenetix/docs/styles.css";
 import "./globals.css";
 import ThemeProvider from "@/components/ThemeProvider";
 

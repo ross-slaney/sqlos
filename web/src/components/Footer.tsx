@@ -13,7 +13,7 @@ const exampleLinks = [
   { href: "/docs/getting-started#run-the-right-sample", label: "Todo sample" },
   { href: "/docs/authserver/todo-sample", label: "Example stack guide" },
   { href: "/docs/fga/overview", label: "FGA overview" },
-  { href: "/docs/guides/index", label: "Guides" },
+  { href: "/docs/authserver/mcp-server", label: "MCP" },
 ];
 
 const communityLinks = [

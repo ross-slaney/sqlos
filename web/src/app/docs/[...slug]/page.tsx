@@ -1,5 +1,5 @@
 import { notFound, redirect } from "next/navigation";
-import { DocsPage } from "@emcy/docs";
+import { DocsPage } from "@agenetix/docs";
 import { docsSource } from "@/lib/docs-source";
 
 interface PageProps {

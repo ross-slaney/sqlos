@@ -1,14 +1,14 @@
 ---
 title: "Send transactional email"
 description: "Create, preview, send, retry, and inspect an application-owned email template."
-order: 18
-section: guides
+section: "operations"
+order: 1
 ---
 
 <Banner
   eyebrow="Guide"
   title="Send a retry-safe product email"
-  href="/docs/authserver/transactional-email"
+  href="/docs/guides/transactional-email"
   actionLabel="Transactional email reference"
 >
   Build an `order-shipped` template, send it from trusted server code, and inspect the persisted delivery record without creating a second email subsystem.
@@ -208,7 +208,7 @@ SqlOS seeds three built-in templates:
 
 You can edit their copy in **Communications > Email Templates**. Their rendered text and HTML are suppressed from delivery history because they contain codes or token-bearing links.
 
-Use [Email Branding](/docs/authserver/email-branding) for shared product identity and colors. Existing `BuildMessage` callbacks and custom `ISqlOSAuthEmailSender` implementations remain the advanced escape hatch for auth-specific layouts or provider behavior.
+Use [Email Branding](/docs/guides/auth-branding) for shared product identity and colors. Existing `BuildMessage` callbacks and custom `ISqlOSAuthEmailSender` implementations remain the advanced escape hatch for auth-specific layouts or provider behavior.
 
 This subsystem is for operational product email. It does not provide campaigns, subscriber lists, preference management, or marketing-email compliance workflows.
 
@@ -235,7 +235,7 @@ dotnet test tests/SqlOS.Tests/SqlOS.Tests.csproj \
 
 ## Next steps
 
-- [Transactional Email reference](/docs/authserver/transactional-email)
-- [Email Branding](/docs/authserver/email-branding)
+- [Transactional Email reference](/docs/guides/transactional-email)
+- [Email Branding](/docs/guides/auth-branding)
 - [Audit Logs](/docs/guides/audit-logs)
 - [Production Readiness](/docs/guides/production-readiness)

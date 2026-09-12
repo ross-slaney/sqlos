@@ -1,8 +1,8 @@
 ---
 title: "Standalone Identity Server Reference"
 description: "Reference tables for using SqlOS as a dedicated identity host for multiple applications."
-order: 14
-section: reference
+section: "reference"
+order: 7
 ---
 
 This reference covers the advanced multi-application topology. Use [Single-Application Setup](/docs/authserver/single-application) if your product has one app.
@@ -15,9 +15,9 @@ This reference covers the advanced multi-application topology. Use [Single-Appli
 | Client application | OAuth client representing one app surface | [Clients](/docs/authserver/clients) |
 | OpenID Provider | OIDC discovery, ID tokens, and UserInfo served to downstream apps | [OpenID Provider](/docs/authserver/openid-provider) |
 | Audience | Resource/API identifier placed in access tokens | [Token Validation](/docs/authserver/token-validation) |
-| Application access | Policy for who may use a client application | [Application Access](/docs/authserver/application-access) |
-| Headless auth | App-owned UI with SqlOS-owned protocol state | [Headless Auth](/docs/authserver/headless-auth) |
-| Device flow | CLI/native flow without a redirect listener | [CLI OAuth](/docs/authserver/cli-oauth) |
+| Application access | Policy for who may use a client application | [Application Access](/docs/guides/multi-app-access) |
+| Headless auth | App-owned UI with SqlOS-owned protocol state | [Headless Auth](/docs/guides/custom-login-ui) |
+| Device flow | CLI/native flow without a redirect listener | [CLI OAuth](/docs/guides/terminal-auth) |
 
 ## Required host settings
 
@@ -171,7 +171,7 @@ When `UseHeadlessAuthPage` is configured, SqlOS redirects to the app-owned UI wi
 | `pendingToken` | Token for intermediate auth state |
 | `ui_context` | Context for invitations, CLI, or specialized flows |
 
-The app should call [headless endpoints](/docs/authserver/headless-auth) with the request ID instead of inventing separate login state.
+The app should call [headless endpoints](/docs/guides/custom-login-ui) with the request ID instead of inventing separate login state.
 
 ## Decision checklist
 
@@ -189,5 +189,5 @@ Related:
 
 - [Run a standalone identity server](/docs/guides/standalone-identity-server)
 - [Standalone SqlOS identity server for multiple apps](/blog/standalone-sqlos-identity-server-multi-app)
-- [Application Access](/docs/authserver/application-access)
+- [Application Access](/docs/guides/multi-app-access)
 - [Clients](/docs/authserver/clients)

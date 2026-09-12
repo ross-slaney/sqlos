@@ -1,8 +1,8 @@
 ---
 title: "MCP Resource Indicators and Audience"
 description: "Bind tokens to a protected resource when you need MCP-style OAuth behavior."
-order: 27
-section: authserver
+section: "mcp"
+order: 1
 ---
 
 For normal owned-app flows, SqlOS can still fall back to the client's configured audience.
@@ -57,16 +57,7 @@ builder.AddSqlOS<AppDbContext>(options =>
 });
 ```
 
-`Enabled` is the runtime switch. SqlOS currently applies client-audience fallback, exact token-exchange resource matching, and refresh binding as fixed behavior rather than independently switchable policies.
-
-Or turn them on implicitly with portable and compatibility helpers:
-
-```csharp
-builder.AddSqlOS<AppDbContext>(options =>
-{
-    options.AuthServer.EnablePortableMcpClients();
-});
-```
+`Enabled` is the runtime switch. SqlOS currently applies client-audience fallback, exact token-exchange resource matching, and refresh binding as fixed behavior rather than independently switchable policies. `app.Mcp = "/mcp"` turns this on together with CIMD. `EnableChatGptCompatibility` and `EnableVsCodeCompatibility` also set `Enabled = true`.
 
 ## Resource-server side
 

@@ -1,8 +1,8 @@
 ---
 title: "Run a standalone identity server"
 description: "Configure SqlOS as a dedicated auth host for several web, mobile, CLI, and API surfaces."
-order: 10
-section: guides
+section: "host"
+order: 3
 ---
 
 <Banner
@@ -158,7 +158,7 @@ application.Headless(headless =>
 });
 ```
 
-See [Headless Auth](/docs/authserver/headless-auth) and [Hosted vs Headless](/docs/authserver/hosted-vs-headless).
+See [Headless Auth](/docs/guides/custom-login-ui) and [Hosted vs Headless](/docs/authserver/hosted-vs-headless).
 
 ## 4. Configure application access
 
@@ -304,7 +304,7 @@ Use the SDK services for flows that are not just browser redirect login.
 
 <CardGrid cols={2}>
   <Card title="Standalone reference" description="Tables for clients, access modes, assignment targets, endpoints, and enforcement points." href="/docs/reference/standalone-identity-server" />
-  <Card title="Application access" description="Assign applications to organizations, users, groups, and roles." href="/docs/authserver/application-access" />
+  <Card title="Application access" description="Assign applications to organizations, users, groups, and roles." href="/docs/guides/multi-app-access" />
   <Card title="Clients" description="Owned apps, CLI clients, CIMD, and DCR paths." href="/docs/authserver/clients" />
   <Card title="SDK reference" description="AuthService, admin service, OTP, invitations, device flow, and token validation." href="/docs/reference/sdk-reference" />
 </CardGrid>
