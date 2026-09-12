@@ -66,7 +66,7 @@ Fetch current remote state, then create a new branch directly from `origin/main`
 
 ```bash
 git fetch --prune origin
-git worktree add -b codex/issue-<number>-<slug> <safe-sibling-path> origin/main
+git worktree add -b issue-<number>-<slug> <safe-sibling-path> origin/main
 ```
 
 Before creating it, verify the branch and path do not already exist. If stale worktree metadata blocks setup, inspect it and use `git worktree prune --verbose` only for entries whose directories no longer exist.
@@ -130,7 +130,7 @@ Confirm every changed file belongs to the issue and every acceptance criterion h
 
 ## 7. Publish the pull request
 
-Commit only intended files with an issue-focused message, push the `codex/` branch, and open a PR to `main`. Include:
+Commit only intended files with an issue-focused message, push the branch, and open a PR to `main`. Include:
 
 - The problem and resulting behavior.
 - The implementation shape and control-plane implications.
