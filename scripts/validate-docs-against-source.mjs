@@ -53,7 +53,7 @@ const referenceContents = referenceFiles
   .map((name) => fs.readFileSync(path.join(referenceRoot, name), "utf8"))
   .join("\n");
 const index = fs.readFileSync(path.join(referenceRoot, "index.mdx"), "utf8");
-const repositoryReadme = read("README.md");
+const hostingQuickReference = read("docs/QUICK_REFERENCE.md");
 const addToAppQuickstart = read("web/content/docs/quickstarts/add-to-app.mdx");
 
 if (packageVersion && !index.includes(`SqlOS ${packageVersion}`)) {
@@ -62,15 +62,15 @@ if (packageVersion && !index.includes(`SqlOS ${packageVersion}`)) {
   );
 }
 
-if (packageVersion && !repositoryReadme.includes(`--version ${packageVersion}`)) {
+if (packageVersion && !hostingQuickReference.includes(`--version ${packageVersion}`)) {
   errors.push(
-    `README.md: expected package install command for SqlOS ${packageVersion}.`,
+    `docs/QUICK_REFERENCE.md: expected package install command for SqlOS ${packageVersion}.`,
   );
 }
 
-if (packageVersion && !repositoryReadme.includes(`npm install @sqlos/headless@${packageVersion}`)) {
+if (packageVersion && !hostingQuickReference.includes(`npm install @sqlos/headless@${packageVersion}`)) {
   errors.push(
-    `README.md: expected npm install command for @sqlos/headless@${packageVersion}.`,
+    `docs/QUICK_REFERENCE.md: expected npm install command for @sqlos/headless@${packageVersion}.`,
   );
 }
 

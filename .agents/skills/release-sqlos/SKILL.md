@@ -68,7 +68,7 @@ Bump `packages/headless/package.json` `version` to the same value in this PR. `@
 
 `scripts/validate-docs-against-source.mjs` fails the PR unless these also contain the new version:
 
-- `README.md` — `dotnet add package SqlOS --version <version>` and `npm install @sqlos/headless@<version>`
+- `docs/QUICK_REFERENCE.md` — `dotnet add package SqlOS --version <version>` and `npm install @sqlos/headless@<version>`
 - `packages/headless/package.json` — `"version": "<version>"`
 - `web/content/docs/quickstarts/add-to-app.mdx` — same install command
 - `web/content/docs/reference/index.mdx` — `SqlOS <version>` in the banner/title
@@ -83,7 +83,7 @@ rg -n --glob '!**/bin/**' --glob '!**/obj/**' --glob '!**/package-lock.json' \
 
 Typical current-contract files from recent releases:
 
-- `README.md` (install commands, including `npm install @sqlos/headless@<version>`)
+- `docs/QUICK_REFERENCE.md` (install commands, including `npm install @sqlos/headless@<version>`)
 - `packages/headless/package.json`
 - `web/content/docs/reference/headless-js.mdx`
 - `web/content/docs/docs-index.mdx`

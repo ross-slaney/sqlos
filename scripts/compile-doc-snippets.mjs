@@ -34,24 +34,24 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : SqlOS
     "### Complete downstream OIDC application",
   ].map((heading) => ({
     name: "README complete OIDC program",
-    relativePath: "README.md", heading,
+    relativePath: "docs/QUICK_REFERENCE.md", heading,
     marker: "var builder = WebApplication.CreateBuilder(args);",
     wrap: asCompleteProgram,
   })),
   {
-    name: "README MCP registration", relativePath: "README.md",
+    name: "README MCP registration", relativePath: "docs/QUICK_REFERENCE.md",
     heading: "### MCP: resource settings and the Microsoft SDK",
     marker: "builder.AddSqlOS<NotesDbContext>",
     wrap: (snippet) => snippet.replace("builder.Services.AddScoped", 'var builder = WebApplication.CreateBuilder(args);\nvar connectionString = "Server=localhost;Database=notes;Integrated Security=True;TrustServerCertificate=True";\nbuilder.Services.AddScoped'),
   },
   {
-    name: "README MCP tools", relativePath: "README.md",
+    name: "README MCP tools", relativePath: "docs/QUICK_REFERENCE.md",
     heading: "### MCP: resource settings and the Microsoft SDK",
     marker: "public sealed class NotesMcpTools",
     wrap: (snippet) => snippet.replace("public sealed class NotesMcpTools", "var builder = WebApplication.CreateBuilder(args);\nbuilder.Build().Run();\n\npublic sealed class NotesMcpTools"),
   },
   {
-    name: "README FGA service", relativePath: "README.md",
+    name: "README FGA service", relativePath: "docs/QUICK_REFERENCE.md",
     heading: "### `app.Authorization(...)`: vocabulary, grants, and enforcement",
     marker: "public async Task<IReadOnlyList<Note>> ListAsync",
     wrap: (snippet) => `using Microsoft.EntityFrameworkCore;
@@ -63,24 +63,24 @@ builder.Build().Run();
 public sealed class DocumentedNotesService(NotesDbContext db, ISqlOSFgaAuthService fga)
 {
 ${snippet}
-${extractCsharpBlock({ relativePath: "README.md", heading: "### `app.Authorization(...)`: vocabulary, grants, and enforcement", marker: "private async Task CreateNotebookIfMissingAsync" })}
+${extractCsharpBlock({ relativePath: "docs/QUICK_REFERENCE.md", heading: "### `app.Authorization(...)`: vocabulary, grants, and enforcement", marker: "private async Task CreateNotebookIfMissingAsync" })}
 }
 `,
   },
   {
-    name: "README branding", relativePath: "README.md",
+    name: "README branding", relativePath: "docs/QUICK_REFERENCE.md",
     heading: "## `app.Brand(...)`: hosted pages and ownership", marker: "app.Brand(page =>",
     wrap: (snippet) => `using SqlOS.Configuration;
 new SqlOSOptions().UseSingleApplication("Acme", app => { ${snippet} });`,
   },
   {
-    name: "README SCIM administration", relativePath: "README.md",
+    name: "README SCIM administration", relativePath: "docs/QUICK_REFERENCE.md",
     heading: "### SCIM: provision into SqlOS", marker: "await using var scope",
     wrap: (snippet) => snippet.replace("await using var scope", 'var app = WebApplication.CreateBuilder(args).Build();\nvar organizationId = "org_acme";\nawait using var scope'),
   },
   {
     name: "README first-run program",
-    relativePath: "README.md",
+    relativePath: "docs/QUICK_REFERENCE.md",
     heading: "### Add it to a project",
     marker: "var builder = WebApplication.CreateBuilder(args);",
     wrap: asCompleteProgram,
