@@ -60,6 +60,36 @@ requireMatch(
   "web/src/app/docs/layout.tsx: docs header must be full-bleed so it shares gutters with the sidebar.",
 );
 requireMatch(
+  docsLayout,
+  /<DocsMobileChrome/,
+  "web/src/app/docs/layout.tsx: must mount DocsMobileChrome so narrow docs chrome can label Docs and dock search.",
+);
+requireMatch(
+  css,
+  /@media \(max-width: 1023px\)/,
+  "web/src/app/globals.css: narrow docs chrome must live in a max-width 1023px query so desktop layout stays unchanged.",
+);
+requireMatch(
+  css,
+  /\.sqlos-docs-shell \.emcydocs-mobile-toc,[\s\S]*?display:\s*none;/,
+  "web/src/app/globals.css: the in-article On this page card must be hidden on narrow viewports.",
+);
+requireMatch(
+  css,
+  /content:\s*"Docs";/,
+  "web/src/app/globals.css: the embedded nav toggle must read Docs on narrow viewports.",
+);
+requireMatch(
+  css,
+  /emcydocs-search-dialog:modal \{[\s\S]*?inset:\s*var\(--sqlos-docs-search-dock-top/,
+  "web/src/app/globals.css: mobile search must dock under the docs bar instead of centering as a modal.",
+);
+requireMatch(
+  css,
+  /\.sqlos-docs-shell \.emcydocs-embedded-nav-panel \{[\s\S]*?padding:\s*0\.75rem 0 1\.25rem;/,
+  "web/src/app/globals.css: the mobile Docs panel must use the shared left gutter instead of centering search and nav.",
+);
+requireMatch(
   css,
   /\.sqlos-docs-shell \.emcydocs-article,[\s\S]*?\.sqlos-docs-shell \.emcydocs-home-content \{[\s\S]*?max-width:\s*none;/,
   "web/src/app/globals.css: article and docs-home content must drop the 48rem island (max-width: none).",
@@ -76,8 +106,13 @@ requireMatch(
 );
 requireMatch(
   css,
-  /--sqlos-docs-radius:\s*0\.5rem;/,
-  "web/src/app/globals.css: docs surfaces must use a 0.5rem square radius.",
+  /--sqlos-docs-radius:\s*0\.25rem;/,
+  "web/src/app/globals.css: docs surfaces must use a 0.25rem square radius.",
+);
+requireMatch(
+  css,
+  /--radius:\s*var\(--sqlos-docs-radius\) !important;/,
+  "web/src/app/globals.css: must override EmcyDocs inline --radius so cards and controls stay square.",
 );
 
 if (errors.length > 0) {
