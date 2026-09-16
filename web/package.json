@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "docs:screenshots": "playwright test"
+    "docs:screenshots": "playwright test",
+    "docs:layout": "playwright test e2e/docs-layout.spec.ts"
   },
   "dependencies": {
     "@agenetix/docs": "^1.3.0",

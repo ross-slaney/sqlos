@@ -11,7 +11,7 @@ const navLinks = [
   { href: "/blog", label: "Blog" },
 ];
 
-export default function Header() {
+export default function Header({ fullBleed = false }: { fullBleed?: boolean }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
@@ -40,7 +40,12 @@ export default function Header() {
           : "bg-transparent",
       ].join(" ")}
     >
-      <div className="mx-auto flex h-14 w-full max-w-[1400px] items-center justify-between px-6">
+      <div
+        className={[
+          "mx-auto flex h-14 w-full items-center justify-between",
+          fullBleed ? "max-w-none px-6 lg:px-8" : "max-w-[1400px] px-6",
+        ].join(" ")}
+      >
         <Link
           href="/"
           className="flex items-center gap-2.5 font-semibold text-foreground"
