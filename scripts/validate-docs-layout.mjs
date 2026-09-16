@@ -106,8 +106,13 @@ requireMatch(
 );
 requireMatch(
   css,
-  /--sqlos-docs-radius:\s*0\.5rem;/,
-  "web/src/app/globals.css: docs surfaces must use a 0.5rem square radius.",
+  /--sqlos-docs-radius:\s*0\.25rem;/,
+  "web/src/app/globals.css: docs surfaces must use a 0.25rem square radius.",
+);
+requireMatch(
+  css,
+  /--radius:\s*var\(--sqlos-docs-radius\) !important;/,
+  "web/src/app/globals.css: must override EmcyDocs inline --radius so cards and controls stay square.",
 );
 
 if (errors.length > 0) {

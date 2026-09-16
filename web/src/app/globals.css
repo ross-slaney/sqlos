@@ -243,7 +243,7 @@ pre code {
 .sqlos-docs-site {
   --sqlos-docs-gutter: 2rem;
   --sqlos-docs-mobile-gutter: 1.5rem;
-  --sqlos-docs-radius: 0.5rem;
+  --sqlos-docs-radius: 0.25rem;
   --sqlos-docs-header-height: 3.5rem;
   min-height: 100vh;
   background: #fff;
@@ -254,6 +254,11 @@ pre code {
   background: #fff;
 }
 
+.sqlos-docs-site > header button,
+.sqlos-docs-site > header a {
+  border-radius: var(--sqlos-docs-radius);
+}
+
 .sqlos-docs-site > footer > div {
   max-width: none;
   padding-left: var(--sqlos-docs-gutter);
@@ -261,7 +266,7 @@ pre code {
 }
 
 .sqlos-docs-shell {
-  --radius: var(--sqlos-docs-radius);
+  --radius: var(--sqlos-docs-radius) !important;
   --emcydocs-layout-width: 100%;
   --emcydocs-content-width: 100%;
   --emcydocs-page-padding: var(--sqlos-docs-gutter);
@@ -341,6 +346,13 @@ pre code {
 
 .sqlos-docs-shell .emcydocs-home-grid {
   gap: 1.25rem;
+}
+
+.sqlos-docs-shell .emcydocs-search-dialog,
+.sqlos-docs-shell .emcydocs-copymenu-trigger,
+.sqlos-docs-shell .emcydocs-copymenu-panel,
+.sqlos-docs-shell .emcydocs-search-trigger-compact {
+  border-radius: var(--sqlos-docs-radius);
 }
 
 @media (max-width: 1023px) {
@@ -588,7 +600,7 @@ pre code {
 .sqlos-docs-shell .emcydocs-prose :not(pre) > code {
   padding: 0.12rem 0.38rem;
   border: 1px solid hsl(240 8% 80%);
-  border-radius: 0.35rem;
+  border-radius: var(--sqlos-docs-radius);
   background: hsl(240 8% 95%);
   color: hsl(var(--sq-ink));
   font-family: var(--sq-mono);

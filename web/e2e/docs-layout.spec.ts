@@ -45,6 +45,11 @@ test.describe("docs reading layout", () => {
 
     expect(headerPadding).toBe("32px");
     expect(sidebarPadding).toBe("32px");
+
+    const heroRadius = await page
+      .locator(".emcydocs-home-hero")
+      .evaluate((el) => getComputedStyle(el).borderTopLeftRadius);
+    expect(heroRadius).toBe("4px");
   });
 });
 
@@ -74,6 +79,15 @@ test.describe("docs mobile chrome", () => {
       .locator(".emcydocs-embedded-mobile-bar")
       .evaluate((el) => getComputedStyle(el).paddingLeft);
     expect(barPadding).toBe("24px");
+
+    const searchRadius = await search.evaluate(
+      (el) => getComputedStyle(el).borderTopLeftRadius,
+    );
+    const toggleRadius = await toggle.evaluate(
+      (el) => getComputedStyle(el).borderTopLeftRadius,
+    );
+    expect(searchRadius).toBe("4px");
+    expect(toggleRadius).toBe("4px");
 
     await expect(toggle).toHaveAttribute("aria-label", /docs navigation/i);
     const docsLabel = await toggle.locator("span").evaluate((el) =>
