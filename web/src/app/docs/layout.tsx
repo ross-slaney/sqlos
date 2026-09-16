@@ -2,6 +2,7 @@ import { DocsLayout, DocsSearch } from "@agenetix/docs";
 import { searchDocsAction } from "@/app/docs/actions";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
+import DocsMobileChrome from "@/components/DocsMobileChrome";
 import { docsTheme } from "@/lib/docs-layout";
 import { docsSource } from "@/lib/docs-source";
 
@@ -13,6 +14,7 @@ export default function DocsRootLayout({
   return (
     <div className="sqlos-docs-site">
       <Header fullBleed />
+      <DocsMobileChrome />
       <DocsLayout
         navigation={docsSource.getNavigation()}
         searchAction={searchDocsAction}
