@@ -8,6 +8,14 @@ const webRoot = path.join(repoRoot, "web");
 const port = Number.parseInt(process.env.SQLOS_DOCS_RUNTIME_PORT ?? "3012", 10);
 const origin = `http://127.0.0.1:${port}`;
 
+function bypassProxyForLocalhost() {
+  const noProxy = [process.env.NO_PROXY, process.env.no_proxy, "127.0.0.1", "localhost", "::1"]
+    .filter(Boolean)
+    .join(",");
+  process.env.NO_PROXY = noProxy;
+  process.env.no_proxy = noProxy;
+}
+
 function findSearchDocsActionId(manifest) {
   const runtimes = [manifest?.node, manifest?.edge];
   for (const runtime of runtimes) {
@@ -26,12 +34,21 @@ function findSearchDocsActionId(manifest) {
   return null;
 }
 
+async function fetchWithTimeout(url, options = {}, timeoutMs = 10_000) {
+  const response = await fetch(url, {
+    ...options,
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  const body = await response.text();
+  return { response, body };
+}
+
 async function waitForReady(url, timeoutMs) {
   const started = Date.now();
   let lastError = "";
   while (Date.now() - started < timeoutMs) {
     try {
-      const response = await fetch(url, { redirect: "manual" });
+      const { response } = await fetchWithTimeout(url, { redirect: "manual" }, 2_000);
       if (response.status < 500) {
         return;
       }
@@ -46,40 +63,45 @@ async function waitForReady(url, timeoutMs) {
 }
 
 async function postServerAction(actionId, args) {
-  const response = await fetch(`${origin}/docs`, {
-    method: "POST",
-    headers: {
-      accept: "text/x-component",
-      "content-type": "text/plain;charset=UTF-8",
-      origin,
-      "next-action": actionId,
-      rsc: "1",
-      "next-router-state-tree": JSON.stringify([
-        "",
-        { children: ["docs", { children: ["__PAGE__", {}, null, null] }, null, null] },
-        null,
-        null,
-      ]),
+  return fetchWithTimeout(
+    `${origin}/docs`,
+    {
+      method: "POST",
+      headers: {
+        accept: "text/x-component",
+        "content-type": "text/plain;charset=UTF-8",
+        origin,
+        "next-action": actionId,
+        rsc: "1",
+        "next-router-state-tree": JSON.stringify([
+          "",
+          { children: ["docs", { children: ["__PAGE__", {}, null, null] }, null, null] },
+          null,
+          null,
+        ]),
+      },
+      body: JSON.stringify(args),
     },
-    body: JSON.stringify(args),
-  });
-
-  const body = await response.text();
-  return { response, body };
+    15_000,
+  );
 }
 
 function startProductionServer() {
-  const child = spawn("npm", ["run", "start"], {
-    cwd: webRoot,
-    env: {
-      ...process.env,
-      NODE_ENV: "production",
-      PORT: String(port),
-      HOSTNAME: "127.0.0.1",
-      NEXT_TELEMETRY_DISABLED: "1",
+  const child = spawn(
+    "npm",
+    ["run", "start", "--", "--hostname", "127.0.0.1", "--port", String(port)],
+    {
+      cwd: webRoot,
+      env: {
+        ...process.env,
+        NODE_ENV: "production",
+        PORT: String(port),
+        HOSTNAME: "127.0.0.1",
+        NEXT_TELEMETRY_DISABLED: "1",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
     },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  );
 
   let output = "";
   const append = (chunk) => {
@@ -110,6 +132,8 @@ function startProductionServer() {
   };
 }
 
+bypassProxyForLocalhost();
+
 const nextDir = path.join(webRoot, ".next");
 if (!fs.existsSync(path.join(nextDir, "BUILD_ID"))) {
   throw new Error("validate-docs-production-start requires a production Next.js build in web/.next.");
@@ -129,14 +153,14 @@ if (!actionId) {
 const server = startProductionServer();
 
 try {
+  console.log(`Starting production docs server at ${origin} (Dockerfile CMD is npm run start).`);
   await waitForReady(`${origin}/docs`, 60_000);
 
-  const docsHome = await fetch(`${origin}/docs`);
-  const docsHomeHtml = await docsHome.text();
-  if (docsHome.status !== 200) {
-    throw new Error(`GET /docs returned HTTP ${docsHome.status}`);
+  const docsHome = await fetchWithTimeout(`${origin}/docs`);
+  if (docsHome.response.status !== 200) {
+    throw new Error(`GET /docs returned HTTP ${docsHome.response.status}`);
   }
-  if (!docsHomeHtml.includes("Search docs")) {
+  if (!docsHome.body.includes("Search docs")) {
     throw new Error("Production /docs did not render the docs search control.");
   }
 

@@ -132,6 +132,7 @@ function runNpmAudit(webRoot) {
     {
       encoding: "utf8",
       maxBuffer: 20 * 1024 * 1024,
+      timeout: 60_000,
     },
   );
 
