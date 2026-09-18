@@ -87,9 +87,10 @@ async function postServerAction(actionId, args) {
 }
 
 function startProductionServer() {
+  const nextBin = path.join(webRoot, "node_modules/next/dist/bin/next");
   const child = spawn(
-    "npm",
-    ["run", "start", "--", "--hostname", "127.0.0.1", "--port", String(port)],
+    process.execPath,
+    [nextBin, "start", "--hostname", "127.0.0.1", "--port", String(port)],
     {
       cwd: webRoot,
       env: {
@@ -110,24 +111,23 @@ function startProductionServer() {
   child.stdout?.on("data", append);
   child.stderr?.on("data", append);
 
+  const exitPromise = new Promise((resolve) => {
+    child.once("exit", resolve);
+  });
+
   return {
     child,
     output: () => output,
     async stop() {
-      if (child.exitCode !== null || child.signalCode) {
-        return;
-      }
-
-      await new Promise((resolve) => {
-        const timer = setTimeout(() => {
-          child.kill("SIGKILL");
-        }, 3_000);
-        child.once("exit", () => {
-          clearTimeout(timer);
-          resolve();
-        });
+      if (child.exitCode === null && child.signalCode == null) {
         child.kill("SIGTERM");
-      });
+        setTimeout(() => {
+          if (child.exitCode === null && child.signalCode == null) {
+            child.kill("SIGKILL");
+          }
+        }, 3_000);
+      }
+      await exitPromise;
     },
   };
 }
