@@ -1,0 +1,4 @@
+{
+  "description": "Reviewable exceptions for high and critical findings from `npm audit --omit=dev --prefix web`. CI fails when a matching advisory is still in the production graph after these exceptions are applied. Each exception must include advisory, package, reason, and expires (YYYY-MM-DD). Expired or unused exceptions also fail the gate.",
+  "exceptions": []
+}
