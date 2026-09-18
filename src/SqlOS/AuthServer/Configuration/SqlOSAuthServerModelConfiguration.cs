@@ -447,6 +447,9 @@ public static class SqlOSAuthServerModelConfiguration
             entity.HasIndex(x => new { x.SsoConnectionId, x.Subject })
                 .IsUnique()
                 .HasFilter(SqlOSModelSql.IsNotNull(providerName, "ConnectionId"));
+            entity.HasIndex(x => new { x.SsoConnectionId, x.UserId })
+                .IsUnique()
+                .HasFilter(SqlOSModelSql.IsNotNull(providerName, "ConnectionId"));
             entity.HasIndex(x => new { x.OidcConnectionId, x.Subject })
                 .IsUnique()
                 .HasFilter(SqlOSModelSql.IsNotNull(providerName, "OidcConnectionId"));

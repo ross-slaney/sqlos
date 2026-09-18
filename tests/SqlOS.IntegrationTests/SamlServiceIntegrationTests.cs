@@ -22,7 +22,7 @@ using SqlOS.IntegrationTests.Infrastructure;
 namespace SqlOS.IntegrationTests;
 
 [TestClass]
-public sealed class SamlServiceIntegrationTests
+public sealed partial class SamlServiceIntegrationTests
 {
     private const string TrustedSamlMfaContext =
         "urn:oasis:names:tc:SAML:2.0:ac:classes:TimeSyncToken";
@@ -246,7 +246,8 @@ public sealed class SamlServiceIntegrationTests
             new FakeOidcProviderHttpClientFactory(),
             NullLogger<SqlOSOidcAuthService>.Instance);
         var saml = CreateSamlService(AspireFixture.SharedContext, options, admin, crypto);
-        var email = $"inactive-federated-{Guid.NewGuid():N}@example.com";
+        var domain = $"{Guid.NewGuid():N}.inactive.test";
+        var email = $"inactive-federated@{domain}";
         var user = await admin.CreateUserAsync(new SqlOSCreateUserRequest(
             "Inactive Federated User",
             email,
@@ -290,7 +291,8 @@ public sealed class SamlServiceIntegrationTests
 
         var organization = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest(
             $"Inactive SAML {Guid.NewGuid():N}",
-            null));
+            null,
+            domain));
         var samlClient = await CreateSamlClientAsync(admin, "inactive-user");
         using var rsa = RSA.Create(2048);
         var certificateRequest = new CertificateRequest(
@@ -401,7 +403,7 @@ public sealed class SamlServiceIntegrationTests
             "last_name"));
 
         var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
-        var samlResponse = BuildSignedSamlResponse(cert, "urn:test:idp", "user@example.com", "Saml", "User", flow);
+        var samlResponse = BuildSignedSamlResponse(cert, "urn:test:idp", $"user-{Guid.NewGuid():N}@example.com", "Saml", "User", flow);
         var redirectUrl = await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, default);
         redirectUrl.Should().StartWith("https://client.example.local/callback?code=");
 
@@ -780,7 +782,7 @@ public sealed class SamlServiceIntegrationTests
     }
 
     [TestMethod]
-    public async Task SignedSamlResponse_WithExistingEmail_ReusesUserWhenAutoProvisioning()
+    public async Task SignedSamlResponse_WithExistingEmail_DoesNotLinkWithoutOwnedDomain()
     {
         var options = Options.Create(AspireFixture.Options);
         var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, AspireFixture.DataProtectionProvider);
@@ -814,27 +816,23 @@ public sealed class SamlServiceIntegrationTests
 
         var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
         var samlResponse = BuildSignedSamlResponse(certificate, "urn:existing:idp", email, "Existing", "User", flow);
-        var redirectUrl = await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, default);
-        redirectUrl.Should().StartWith("https://client.example.local/callback?code=");
+        var action = async () => await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, default);
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("No user could be resolved from the SAML assertion.");
 
-        var normalizedEmail = SqlOSAdminService.NormalizeEmail(email);
-        var matchingEmails = await AspireFixture.SharedContext.Set<SqlOSUserEmail>()
-            .Where(x => x.NormalizedEmail == normalizedEmail)
-            .ToListAsync();
-        matchingEmails.Should().ContainSingle();
-        matchingEmails.Single().UserId.Should().Be(existingUser.Id);
-
-        var externalIdentity = await AspireFixture.SharedContext.Set<SqlOSExternalIdentity>()
-            .SingleAsync(x => x.SsoConnectionId == connection.Id && x.Subject == email);
-        externalIdentity.UserId.Should().Be(existingUser.Id);
-
-        (await AspireFixture.SharedContext.Set<SqlOSMembership>()
-            .AnyAsync(x => x.OrganizationId == org.Id && x.UserId == existingUser.Id && x.IsActive))
-            .Should().BeTrue();
+        await AssertNoFirstLinkSideEffectsAsync(
+            AspireFixture.SharedContext,
+            org.Id,
+            existingUser.Id,
+            connection.Id,
+            email,
+            email,
+            flow.RelayState,
+            emailWasVerified: false);
     }
 
     [TestMethod]
-    public async Task SignedSamlResponse_WithExistingOrgMemberAndRequireSso_LinksExternalIdentityWithoutCreatingUser()
+    public async Task SignedSamlResponse_WithExistingOrgMemberAndRequireSso_DoesNotLinkWithoutOwnedDomain()
     {
         var (_, admin, saml) = CreateSamlServices();
         var email = $"existing-member-{Guid.NewGuid():N}@example.com";
@@ -869,21 +867,26 @@ public sealed class SamlServiceIntegrationTests
 
         var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
         var samlResponse = BuildSignedSamlResponse(certificate, "urn:existing-member:idp", email, "Existing", "Member", flow);
-        var redirectUrl = await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, default);
+        var action = async () => await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, default);
 
-        redirectUrl.Should().StartWith("https://client.example.local/callback?code=");
-        var normalizedEmail = SqlOSAdminService.NormalizeEmail(email);
-        (await AspireFixture.SharedContext.Set<SqlOSUserEmail>().CountAsync(x => x.NormalizedEmail == normalizedEmail))
-            .Should().Be(1);
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("No user could be resolved from the SAML assertion.");
         (await AspireFixture.SharedContext.Set<SqlOSMembership>().CountAsync(x => x.OrganizationId == org.Id && x.UserId == existingUser.Id))
             .Should().Be(1);
-        var externalIdentity = await AspireFixture.SharedContext.Set<SqlOSExternalIdentity>()
-            .SingleAsync(x => x.SsoConnectionId == connection.Id && x.Subject == email);
-        externalIdentity.UserId.Should().Be(existingUser.Id);
+        await AssertNoFirstLinkSideEffectsAsync(
+            AspireFixture.SharedContext,
+            org.Id,
+            existingUser.Id,
+            connection.Id,
+            email,
+            email,
+            flow.RelayState,
+            emailWasVerified: true,
+            expectExistingMembership: true);
     }
 
     [TestMethod]
-    public async Task SignedSamlResponse_WithActiveScimProvisioning_LinksExistingMemberWithoutBroadEmailLinking()
+    public async Task SignedSamlResponse_WithActiveScimProvisioning_DoesNotLinkWithoutOwnedDomain()
     {
         var (_, admin, saml) = CreateSamlServices();
         var email = $"scim-saml-{Guid.NewGuid():N}@example.com";
@@ -901,18 +904,23 @@ public sealed class SamlServiceIntegrationTests
 
         var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
         var samlResponse = BuildSignedSamlResponse(certificate, connection.IdentityProviderEntityId, email, "SCIM", "Member", flow);
-        var redirectUrl = await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, default);
+        var action = async () => await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, default);
 
-        redirectUrl.Should().StartWith("https://client.example.local/callback?code=");
-        var externalIdentity = await AspireFixture.SharedContext.Set<SqlOSExternalIdentity>()
-            .SingleAsync(x => x.SsoConnectionId == connection.Id && x.Subject == email);
-        externalIdentity.UserId.Should().Be(existingUser.Id);
-        (await AspireFixture.SharedContext.Set<SqlOSUserEmail>()
-                .CountAsync(x => x.NormalizedEmail == SqlOSAdminService.NormalizeEmail(email)))
-            .Should().Be(1);
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("No user could be resolved from the SAML assertion.");
         (await AspireFixture.SharedContext.Set<SqlOSMembership>()
                 .CountAsync(x => x.OrganizationId == org.Id && x.UserId == existingUser.Id))
             .Should().Be(1);
+        await AssertNoFirstLinkSideEffectsAsync(
+            AspireFixture.SharedContext,
+            org.Id,
+            existingUser.Id,
+            connection.Id,
+            email,
+            email,
+            flow.RelayState,
+            emailWasVerified: true,
+            expectExistingMembership: true);
     }
 
     [TestMethod]
@@ -1553,6 +1561,60 @@ public sealed class SamlServiceIntegrationTests
         await action.Should().ThrowAsync<XmlException>();
     }
 
+    private static async Task AssertNoFirstLinkSideEffectsAsync(
+        TestSqlOSDbContext context,
+        string organizationId,
+        string victimUserId,
+        string connectionId,
+        string subject,
+        string email,
+        string authorizationRequestId,
+        bool emailWasVerified,
+        bool expectExistingMembership = false)
+    {
+        (await context.Set<SqlOSExternalIdentity>()
+                .AnyAsync(x => x.SsoConnectionId == connectionId && (x.Subject == subject || x.UserId == victimUserId)))
+            .Should().BeFalse();
+        (await context.Set<SqlOSMembership>()
+                .AnyAsync(x => x.OrganizationId == organizationId && x.UserId == victimUserId))
+            .Should().Be(expectExistingMembership);
+        var storedEmail = await context.Set<SqlOSUserEmail>()
+            .SingleAsync(x => x.UserId == victimUserId && x.NormalizedEmail == SqlOSAdminService.NormalizeEmail(email));
+        storedEmail.IsVerified.Should().Be(emailWasVerified);
+        if (!emailWasVerified)
+        {
+            storedEmail.VerifiedAt.Should().BeNull();
+        }
+
+        var authorizationRequest = await context.Set<SqlOSAuthorizationRequest>()
+            .SingleAsync(x => x.Id == authorizationRequestId);
+        authorizationRequest.CompletedAt.Should().BeNull();
+        (await context.Set<SqlOSAuthorizationCode>()
+                .AnyAsync(x => x.AuthorizationRequestId == authorizationRequestId))
+            .Should().BeFalse();
+        (await context.Set<SqlOSSession>().AnyAsync(x => x.UserId == victimUserId))
+            .Should().BeFalse();
+        (await context.Set<SqlOSRefreshToken>()
+                .AnyAsync(token => context.Set<SqlOSSession>()
+                    .Any(session => session.Id == token.SessionId && session.UserId == victimUserId)))
+            .Should().BeFalse();
+        (await context.Set<SqlOSAuditEvent>()
+                .AnyAsync(x => x.EventType == "user.login.saml" && x.UserId == victimUserId))
+            .Should().BeFalse();
+
+        var denial = await context.Set<SqlOSAuditEvent>()
+            .Where(x => x.EventType == "user.login.saml.link_denied" && x.OrganizationId == organizationId)
+            .OrderByDescending(x => x.OccurredAt)
+            .FirstOrDefaultAsync();
+        denial.Should().NotBeNull();
+        denial!.UserId.Should().BeNull();
+        denial.DataJson.Should().NotBeNull();
+        denial.DataJson.Should().Contain(connectionId);
+        denial.DataJson.Should().NotContain(email);
+        denial.DataJson.Should().NotContain(subject);
+        denial.MetadataJson.Should().NotContain(email);
+    }
+
     private static (SqlOSCryptoService Crypto, SqlOSAdminService Admin, SqlOSSamlService Saml) CreateSamlServices()
     {
         var options = Options.Create(AspireFixture.Options);
@@ -1563,9 +1625,12 @@ public sealed class SamlServiceIntegrationTests
     }
 
     private static TestSqlOSDbContext CreateIsolatedContext()
+        => CreateContext(AspireFixture.SqlConnectionString);
+
+    private static TestSqlOSDbContext CreateContext(string connectionString)
     {
         var dbOptions = new DbContextOptionsBuilder<TestSqlOSDbContext>()
-            .UseTestProvider(AspireFixture.SqlConnectionString)
+            .UseTestProvider(connectionString)
             .Options;
         return new TestSqlOSDbContext(dbOptions);
     }
@@ -1630,10 +1695,14 @@ public sealed class SamlServiceIntegrationTests
             new List<string> { "https://client.example.local/callback" },
             IsFirstParty: true));
 
-    private static async Task<SamlFlow> StartSamlRequestAsync(SqlOSSamlService saml, string connectionId, string clientId)
+    private static async Task<SamlFlow> StartSamlRequestAsync(
+        SqlOSSamlService saml,
+        string connectionId,
+        string clientId,
+        ISqlOSAuthServerDbContext? context = null)
     {
         var options = Options.Create(AspireFixture.Options);
-        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, AspireFixture.DataProtectionProvider);
+        var crypto = new SqlOSCryptoService(context ?? AspireFixture.SharedContext, options, AspireFixture.DataProtectionProvider);
         var codeVerifier = crypto.GenerateOpaqueToken();
         var authUrl = await saml.CreateAuthorizationUrlAsync(new SqlOSAuthorizationUrlRequest(
             connectionId,
@@ -1771,10 +1840,12 @@ public sealed class SamlServiceIntegrationTests
         Action<XmlDocument, XmlElement, XmlElement>? mutateBeforeSigning = null,
         Action<XmlDocument, XmlElement>? mutateAfterSigning = null,
         string? authnContextClassRef = null,
-        DateTime? authnInstant = null)
+        DateTime? authnInstant = null,
+        string? nameId = null)
     {
         responseId ??= $"_{Guid.NewGuid():N}";
         assertionId ??= $"_{Guid.NewGuid():N}";
+        var effectiveNameId = string.IsNullOrWhiteSpace(nameId) ? email : nameId;
         var issueInstant = DateTime.UtcNow.ToString("o");
         var effectiveAudience = audience ?? AspireFixture.Options.Issuer;
         var effectiveRecipient = recipient ?? flow.AssertionConsumerServiceUrl;
@@ -1808,7 +1879,7 @@ public sealed class SamlServiceIntegrationTests
           <saml:Assertion ID="{assertionId}" Version="2.0" IssueInstant="{issueInstant}">
             <saml:Issuer>{SecurityElement.Escape(issuer)}</saml:Issuer>
             <saml:Subject>
-              <saml:NameID>{SecurityElement.Escape(email)}</saml:NameID>
+              <saml:NameID>{SecurityElement.Escape(effectiveNameId)}</saml:NameID>
               <saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">
                 <saml:SubjectConfirmationData InResponseTo="{effectiveInResponseTo}" Recipient="{effectiveRecipient}" NotOnOrAfter="{effectiveNotOnOrAfter}" />
               </saml:SubjectConfirmation>

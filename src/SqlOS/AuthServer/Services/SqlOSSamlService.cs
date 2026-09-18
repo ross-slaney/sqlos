@@ -830,15 +830,106 @@ public sealed class SqlOSSamlService
             return null;
         }
 
-        var externalIdentity = await _context.Set<SqlOSExternalIdentity>()
-            .FirstOrDefaultAsync(x => x.SsoConnectionId == connection.Id && x.Subject == principal.Subject, cancellationToken);
-        SqlOSUser? user = externalIdentity == null
-            ? null
-            : await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == externalIdentity.UserId, cancellationToken);
-        string? normalizedEmail = null;
-
-        if (user != null)
+        var bound = await TryResolveBoundSubjectAsync(
+            connection.Id,
+            principal.Subject,
+            organizationId,
+            connection.AutoProvisionUsers,
+            cancellationToken);
+        if (bound.Resolved)
         {
+            return bound.User;
+        }
+
+        return await ResolveFirstLinkAsync(
+            connection,
+            principal,
+            email,
+            hasAssertedEmail,
+            organizationId,
+            cancellationToken);
+    }
+
+    private async Task<(bool Resolved, SqlOSUser? User)> TryResolveBoundSubjectAsync(
+        string connectionId,
+        string subject,
+        string organizationId,
+        bool autoProvisionUsers,
+        CancellationToken cancellationToken)
+    {
+        var externalIdentity = await _context.Set<SqlOSExternalIdentity>()
+            .FirstOrDefaultAsync(
+                x => x.SsoConnectionId == connectionId && x.Subject == subject,
+                cancellationToken);
+        if (externalIdentity == null)
+        {
+            return (false, null);
+        }
+
+        var user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == externalIdentity.UserId, cancellationToken);
+        if (!await IsActiveFederatedUserAsync(user.Id, organizationId, cancellationToken))
+        {
+            return (true, null);
+        }
+
+        var membership = await FindMembershipAsync(user.Id, organizationId, cancellationToken);
+        if (membership is { IsActive: false })
+        {
+            await RecordFederatedLifecycleDenialAsync(
+                SqlOSAuthLifecycleDecision.Denied("membership_inactive"),
+                user.Id,
+                organizationId,
+                cancellationToken);
+            return (true, null);
+        }
+
+        if (membership == null)
+        {
+            if (!autoProvisionUsers)
+            {
+                return (true, null);
+            }
+
+            await EnsureMembershipAsync(organizationId, user.Id, cancellationToken);
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+
+        return (true, user);
+    }
+
+    private async Task<SqlOSUser?> ResolveFirstLinkAsync(
+        SqlOSSsoConnection connection,
+        SqlOSSamlPrincipal principal,
+        string? email,
+        bool hasAssertedEmail,
+        string organizationId,
+        CancellationToken cancellationToken)
+    {
+        if (!hasAssertedEmail || string.IsNullOrWhiteSpace(email))
+        {
+            await RecordLinkDeniedAsync(connection.Id, organizationId, "email_not_asserted", cancellationToken);
+            return null;
+        }
+
+        var normalizedEmail = SqlOSAdminService.NormalizeEmail(email);
+        var existingEmail = await _context.Set<SqlOSUserEmail>()
+            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
+        SqlOSUser? user = null;
+        SqlOSUser? pendingUser = null;
+        SqlOSUserEmail? pendingEmail = null;
+        SqlOSMembership? pendingMembership = null;
+        var emailWasVerified = existingEmail?.IsVerified ?? false;
+        var emailVerifiedAt = existingEmail?.VerifiedAt;
+
+        if (existingEmail != null)
+        {
+            if (!await OrganizationOwnsAssertedEmailDomainAsync(organizationId, normalizedEmail, cancellationToken))
+            {
+                await RecordLinkDeniedAsync(connection.Id, organizationId, "untrusted_email_domain", cancellationToken);
+                return null;
+            }
+
+            user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == existingEmail.UserId, cancellationToken);
             if (!await IsActiveFederatedUserAsync(user.Id, organizationId, cancellationToken))
             {
                 return null;
@@ -859,96 +950,71 @@ public sealed class SqlOSSamlService
             {
                 if (!connection.AutoProvisionUsers)
                 {
+                    await RecordLinkDeniedAsync(connection.Id, organizationId, "auto_provision_disabled", cancellationToken);
                     return null;
                 }
 
-                await EnsureMembershipAsync(organizationId, user.Id, cancellationToken);
+                if (!existingEmail.IsVerified)
+                {
+                    existingEmail.IsVerified = true;
+                    existingEmail.VerifiedAt = DateTime.UtcNow;
+                }
+
+                pendingMembership = await EnsureMembershipAsync(organizationId, user.Id, cancellationToken);
+            }
+            else if (!existingEmail.IsVerified)
+            {
+                existingEmail.IsVerified = true;
+                existingEmail.VerifiedAt = DateTime.UtcNow;
+            }
+
+            var existingBinding = await _context.Set<SqlOSExternalIdentity>()
+                .FirstOrDefaultAsync(
+                    x => x.SsoConnectionId == connection.Id && x.UserId == user.Id,
+                    cancellationToken);
+            if (existingBinding != null)
+            {
+                RestoreEmailVerification(existingEmail, emailWasVerified, emailVerifiedAt);
+                await RecordLinkDeniedAsync(connection.Id, organizationId, "connection_already_linked", cancellationToken);
+                return null;
             }
         }
-        else if (hasAssertedEmail && !string.IsNullOrWhiteSpace(email))
+        else if (connection.AutoProvisionUsers)
         {
-            normalizedEmail = SqlOSAdminService.NormalizeEmail(email);
-            var existingEmail = await _context.Set<SqlOSUserEmail>().FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
-            if (existingEmail != null)
+            var displayName = $"{principal.Attributes.GetValueOrDefault(connection.FirstNameAttributeName, string.Empty)} {principal.Attributes.GetValueOrDefault(connection.LastNameAttributeName, string.Empty)}".Trim();
+            if (string.IsNullOrWhiteSpace(displayName))
             {
-                user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == existingEmail.UserId, cancellationToken);
-                if (!await IsActiveFederatedUserAsync(user.Id, organizationId, cancellationToken))
-                {
-                    return null;
-                }
-
-                var membership = await FindMembershipAsync(user.Id, organizationId, cancellationToken);
-                if (membership is { IsActive: false })
-                {
-                    await RecordFederatedLifecycleDenialAsync(
-                        SqlOSAuthLifecycleDecision.Denied("membership_inactive"),
-                        user.Id,
-                        organizationId,
-                        cancellationToken);
-                    return null;
-                }
-
-                if (membership != null)
-                {
-                    var mayLinkExistingMember = existingEmail.IsVerified
-                        && (connection.AutoLinkByEmail
-                            || (hasAssertedEmail
-                                && await HasMatchingActiveScimProvisioningAsync(
-                                    user.Id,
-                                    organizationId,
-                                    normalizedEmail,
-                                    cancellationToken)));
-                    if (!mayLinkExistingMember)
-                    {
-                        return null;
-                    }
-                }
-                else
-                {
-                    if (!connection.AutoProvisionUsers)
-                    {
-                        return null;
-                    }
-
-                    if (!existingEmail.IsVerified)
-                    {
-                        existingEmail.IsVerified = true;
-                        existingEmail.VerifiedAt = DateTime.UtcNow;
-                    }
-
-                    await EnsureMembershipAsync(organizationId, user.Id, cancellationToken);
-                }
+                displayName = email;
             }
-            else if (connection.AutoProvisionUsers)
+
+            pendingUser = new SqlOSUser
             {
-                var displayName = $"{principal.Attributes.GetValueOrDefault(connection.FirstNameAttributeName, string.Empty)} {principal.Attributes.GetValueOrDefault(connection.LastNameAttributeName, string.Empty)}".Trim();
-                if (string.IsNullOrWhiteSpace(displayName))
-                {
-                    displayName = email;
-                }
-
-                user = new SqlOSUser
-                {
-                    Id = _cryptoService.GenerateId("usr"),
-                    DisplayName = displayName,
-                    DefaultEmail = email,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
-                };
-                _context.Set<SqlOSUser>().Add(user);
-                _context.Set<SqlOSUserEmail>().Add(new SqlOSUserEmail
-                {
-                    Id = _cryptoService.GenerateId("eml"),
-                    UserId = user.Id,
-                    Email = email,
-                    NormalizedEmail = normalizedEmail ?? SqlOSAdminService.NormalizeEmail(email),
-                    IsPrimary = true,
-                    IsVerified = true,
-                    VerifiedAt = DateTime.UtcNow,
-                    CreatedAt = DateTime.UtcNow
-                });
-                await EnsureMembershipAsync(organizationId, user.Id, cancellationToken);
-            }
+                Id = _cryptoService.GenerateId("usr"),
+                DisplayName = displayName,
+                DefaultEmail = email,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            pendingEmail = new SqlOSUserEmail
+            {
+                Id = _cryptoService.GenerateId("eml"),
+                UserId = pendingUser.Id,
+                Email = email,
+                NormalizedEmail = normalizedEmail,
+                IsPrimary = true,
+                IsVerified = true,
+                VerifiedAt = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow
+            };
+            _context.Set<SqlOSUser>().Add(pendingUser);
+            _context.Set<SqlOSUserEmail>().Add(pendingEmail);
+            pendingMembership = await EnsureMembershipAsync(organizationId, pendingUser.Id, cancellationToken);
+            user = pendingUser;
+        }
+        else
+        {
+            await RecordLinkDeniedAsync(connection.Id, organizationId, "auto_provision_disabled", cancellationToken);
+            return null;
         }
 
         if (user == null)
@@ -956,22 +1022,116 @@ public sealed class SqlOSSamlService
             return null;
         }
 
-        if (externalIdentity == null)
+        var pendingIdentity = new SqlOSExternalIdentity
         {
-            _context.Set<SqlOSExternalIdentity>().Add(new SqlOSExternalIdentity
+            Id = _cryptoService.GenerateId("ext"),
+            UserId = user.Id,
+            SsoConnectionId = connection.Id,
+            Issuer = principal.Issuer,
+            Subject = principal.Subject,
+            Email = email,
+            CreatedAt = DateTime.UtcNow
+        };
+        _context.Set<SqlOSExternalIdentity>().Add(pendingIdentity);
+
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+            return user;
+        }
+        catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+        {
+            DetachAdded(pendingIdentity);
+            DetachAdded(pendingUser);
+            DetachAdded(pendingEmail);
+            DetachAdded(pendingMembership);
+            if (existingEmail != null)
             {
-                Id = _cryptoService.GenerateId("ext"),
-                UserId = user.Id,
-                SsoConnectionId = connection.Id,
-                Issuer = principal.Issuer,
-                Subject = principal.Subject,
-                Email = email,
-                CreatedAt = DateTime.UtcNow
-            });
+                RestoreEmailVerification(existingEmail, emailWasVerified, emailVerifiedAt);
+            }
+
+            var recovered = await TryResolveBoundSubjectAsync(
+                connection.Id,
+                principal.Subject,
+                organizationId,
+                connection.AutoProvisionUsers,
+                cancellationToken);
+            if (recovered.Resolved)
+            {
+                return recovered.User;
+            }
+
+            await RecordLinkDeniedAsync(connection.Id, organizationId, "concurrent_binding_conflict", cancellationToken);
+            return null;
+        }
+    }
+
+    private async Task RecordLinkDeniedAsync(
+        string connectionId,
+        string organizationId,
+        string reason,
+        CancellationToken cancellationToken)
+    {
+        await _adminService.RecordAuditAsync(
+            "user.login.saml.link_denied",
+            "sso_connection",
+            connectionId,
+            organizationId: organizationId,
+            data: new
+            {
+                connectionId,
+                reason
+            },
+            cancellationToken: cancellationToken);
+    }
+
+    private async Task<bool> OrganizationOwnsAssertedEmailDomainAsync(
+        string organizationId,
+        string normalizedEmail,
+        CancellationToken cancellationToken)
+    {
+        var domain = SqlOSAdminService.NormalizeDomain(normalizedEmail);
+        if (string.IsNullOrWhiteSpace(domain))
+        {
+            return false;
         }
 
-        await _context.SaveChangesAsync(cancellationToken);
-        return user;
+        var hasVerifiedDomain = await _context.Set<SqlOSOrganizationDomain>()
+            .AsNoTracking()
+            .AnyAsync(
+                x => x.OrganizationId == organizationId
+                    && x.Domain == domain
+                    && x.Status == SqlOSOrganizationDomainStatuses.Active
+                    && x.RevokedAt == null,
+                cancellationToken);
+        if (hasVerifiedDomain)
+        {
+            return true;
+        }
+
+        return await _context.Set<SqlOSOrganization>()
+            .AsNoTracking()
+            .AnyAsync(x => x.Id == organizationId && x.PrimaryDomain == domain, cancellationToken);
+    }
+
+    private void DetachAdded(object? entity)
+    {
+        if (entity == null || _context is not DbContext dbContext)
+        {
+            return;
+        }
+
+        var entry = dbContext.Entry(entity);
+        if (entry.State == EntityState.Added)
+        {
+            entry.State = EntityState.Detached;
+        }
+    }
+
+    private static void RestoreEmailVerification(SqlOSUserEmail email, bool wasVerified, DateTime? verifiedAt)
+    {
+        email.IsVerified = wasVerified;
+        email.VerifiedAt = verifiedAt;
     }
 
     private async Task<SqlOSMembership?> FindMembershipAsync(
@@ -981,41 +1141,6 @@ public sealed class SqlOSSamlService
         => await _context.Set<SqlOSMembership>()
             .AsNoTracking()
             .FirstOrDefaultAsync(x => x.UserId == userId && x.OrganizationId == organizationId, cancellationToken);
-
-    private async Task<bool> HasMatchingActiveScimProvisioningAsync(
-        string userId,
-        string organizationId,
-        string normalizedEmail,
-        CancellationToken cancellationToken)
-    {
-        // An active SCIM record is a narrow, organization-scoped authorization
-        // to bind the corresponding SAML identity. Keep the asserted email tied
-        // to the current SCIM primary email so stale aliases cannot broaden the
-        // normal AutoLinkByEmail policy.
-        var provisionedPrimaryEmails = await _context.Set<SqlOSScimExternalId>()
-            .AsNoTracking()
-            .Where(link => link.ResourceType == "User"
-                && link.EntityId == userId
-                && link.IsActive
-                && link.DeletedAt == null
-                && _context.Set<SqlOSScimConnection>().Any(scimConnection =>
-                    scimConnection.Id == link.ConnectionId
-                    && scimConnection.OrganizationId == organizationId
-                    && scimConnection.IsEnabled)
-                && _context.Set<SqlOSMembership>().Any(membership =>
-                    membership.UserId == userId
-                    && membership.OrganizationId == organizationId
-                    && membership.IsActive))
-            .Select(link => link.PrimaryEmail)
-            .ToListAsync(cancellationToken);
-
-        return provisionedPrimaryEmails.Any(primaryEmail =>
-            !string.IsNullOrWhiteSpace(primaryEmail)
-            && string.Equals(
-                SqlOSAdminService.NormalizeEmail(primaryEmail),
-                normalizedEmail,
-                StringComparison.Ordinal));
-    }
 
     private async Task<bool> IsActiveFederatedUserAsync(
         string userId,
@@ -1059,7 +1184,7 @@ public sealed class SqlOSSamlService
         await _context.SaveChangesAsync(cancellationToken);
     }
 
-    private async Task EnsureMembershipAsync(
+    private async Task<SqlOSMembership?> EnsureMembershipAsync(
         string organizationId,
         string userId,
         CancellationToken cancellationToken)
@@ -1073,17 +1198,19 @@ public sealed class SqlOSSamlService
                 throw new InvalidOperationException("No user could be resolved from the SAML assertion.");
             }
 
-            return;
+            return null;
         }
 
-        _context.Set<SqlOSMembership>().Add(new SqlOSMembership
+        var membership = new SqlOSMembership
         {
             OrganizationId = organizationId,
             UserId = userId,
             Role = "member",
             CreatedAt = DateTime.UtcNow,
             IsActive = true
-        });
+        };
+        _context.Set<SqlOSMembership>().Add(membership);
+        return membership;
     }
 
     private sealed record SamlAuthnRequest(string Id, string AssertionConsumerServiceUrl, string EncodedRequest);

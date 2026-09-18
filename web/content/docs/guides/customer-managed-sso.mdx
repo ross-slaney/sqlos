@@ -175,16 +175,17 @@ Portal-created connections default to:
 - **Require SSO for existing members**: on (`AutoLinkByEmail = true`)
 - **Allow JIT provisioning**: off (`AutoProvisionUsers = false`)
 
-The policy affects both home realm discovery and SAML identity resolution:
+The policy affects home realm discovery. First-time binding of an existing global user still requires the organization to own the asserted email domain through an active verified domain or operator-managed `PrimaryDomain`.
 
 | Identity state | Conservative defaults | With JIT provisioning on |
 | --- | --- | --- |
-| Existing active member with a verified matching email | HRD routes to SSO; the first valid assertion links the IdP subject to the existing user without creating another user or membership | Same result |
-| Existing active SqlOS user who is not a member | HRD does not route to this SSO connection, and a connection-directed assertion is denied | A valid assertion may add the missing organization membership |
-| Unknown user | HRD does not route to this SSO connection, and a connection-directed assertion is denied | A valid assertion may create the user, verified email, and membership |
+| Existing active member with a matching email on an owned domain | HRD routes to SSO; the first valid assertion links the IdP subject to the existing user without creating another user or membership | Same result |
+| Existing active SqlOS user who is not a member | HRD does not route to this SSO connection, and a connection-directed assertion is denied unless the organization owns the email domain | A valid assertion may add the missing organization membership only when the organization owns that exact email domain |
+| Unknown user | HRD does not route to this SSO connection, and a connection-directed assertion is denied | A valid assertion may create a new user, verified email, and membership. It never attaches to a different existing global user by email alone |
 | Inactive user, organization, or membership | Denied; JIT does not reactivate offboarded access | Still denied until a separate trusted workflow reactivates it |
+| Contractor or external-domain identity | Not auto-linked. Use invitation plus a local first factor, or an already-bound subject | Same: domain ownership, not membership, is the first-link proof |
 
-Turn JIT on only when the customer's IdP assignment is authoritative for tenant membership. Keep it off for invitation- or admin-managed onboarding. Turning **Require SSO for existing members** off leaves existing unlinked members on another configured login method; it does not silently email-link them during SAML sign-in.
+Turn JIT on only when the customer's IdP assignment is authoritative for tenant membership. Keep it off for invitation- or admin-managed onboarding. Turning **Require SSO for existing members** off leaves existing unlinked members on another configured login method; it does not let a tenant IdP take over a global user by email.
 
 ## 6. Verify domain ownership
 

@@ -183,12 +183,12 @@ var draft = await adminService.CreateSsoConnectionDraftAsync(
         AutoLinkByEmail: true));
 ```
 
-In the dashboard or delegated SSO portal, the equivalent policy is **Require SSO for existing members = on** and **Allow JIT provisioning = off**. Provision the test user through SCIM before attempting the first SAML sign-in. SqlOS marks the SCIM primary email verified; the SAML callback can then link the IdP subject to that existing user without creating a new user or membership.
+In the dashboard or delegated SSO portal, the equivalent policy is **Require SSO for existing members = on** and **Allow JIT provisioning = off**. Provision the test user through SCIM before attempting the first SAML sign-in. SqlOS can then bind the IdP subject to that existing member when the organization owns the asserted email domain; it does not treat SCIM or membership as proof of global identity.
 
-That setting gives the smoothest email-first routing for a trusted organization domain. For a narrower policy, leave `AutoLinkByEmail` / **Require SSO for existing members** off and have the application start the organization's SAML connection explicitly. SqlOS can still complete the first subject link when the signed assertion email exactly matches an active, same-organization SCIM record; it does not treat this as general email auto-linking.
+That setting gives the smoothest email-first routing for a trusted organization domain. For a narrower routing policy, leave `AutoLinkByEmail` / **Require SSO for existing members** off and have the application start the organization's SAML connection explicitly. First subject link still requires domain ownership.
 
 <Callout type="warning" title="Keep SCIM authoritative">
-  Do not enable SAML JIT provisioning when IdP assignment and SCIM deprovisioning are supposed to control access. Otherwise a valid SAML assertion for a not-yet-provisioned person can create a user or membership outside the SCIM assignment lifecycle. Enable email linking only for a trusted enterprise connection whose email claim is controlled by the same organization.
+  Do not enable SAML JIT provisioning when IdP assignment and SCIM deprovisioning are supposed to control access. Otherwise a valid SAML assertion for a not-yet-provisioned person can create a user or membership outside the SCIM assignment lifecycle. First-time SAML linking of an existing global user still requires the organization to own that email domain; SCIM assignment alone is not enough.
 </Callout>
 
 ## What SqlOS creates

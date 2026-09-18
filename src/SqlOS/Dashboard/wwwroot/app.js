@@ -2022,7 +2022,7 @@
                                 <input name="displayName" placeholder="Display name" value="${esc(organization.name)} SSO" required>
                                 <input name="primaryDomain" placeholder="Primary domain" value="${esc(organization.primaryDomain || "")}">
                                 <label class="checkbox-row"><input type="checkbox" name="autoProvisionUsers" checked> Auto provision users</label>
-                                <label class="checkbox-row"><input type="checkbox" name="autoLinkByEmail"> Auto link by email</label>
+                                <label class="checkbox-row"><input type="checkbox" name="autoLinkByEmail"> Require SSO for existing members</label>
                                 <button type="submit">Create SSO draft</button>
                             </form>
                         </section>
@@ -4271,7 +4271,7 @@
                             <input name="displayName" placeholder="Display name" required>
                             <input name="primaryDomain" placeholder="Primary domain (example.com)">
                             <label class="checkbox-row"><input type="checkbox" name="autoProvisionUsers" checked> Auto provision users</label>
-                            <label class="checkbox-row"><input type="checkbox" name="autoLinkByEmail"> Auto link by email</label>
+                            <label class="checkbox-row"><input type="checkbox" name="autoLinkByEmail"> Require SSO for existing members</label>
                             <button type="submit">Create SSO draft</button>
                         </form>
                     </section>
