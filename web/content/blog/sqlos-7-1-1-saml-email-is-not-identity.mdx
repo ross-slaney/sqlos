@@ -1,0 +1,26 @@
+---
+title: "SqlOS 7.1.1: A tenant IdP cannot steal a global user by email"
+description: "SAML first-link of an existing SqlOS user now requires the organization to own that exact email domain."
+date: "2026-09-19"
+author: "Ross Slaney"
+tags: ["AuthServer", "SAML", "Security", "SqlOS"]
+---
+
+SqlOS users are host-global. A SAML connection is not. 7.1.1 closes the gap where a tenant-controlled IdP could bind an existing global account just by asserting that user's email.
+
+A signed assertion still proves the IdP subject. It does not prove the tenant owns every mailbox it names. First-time linking of an existing user now requires an independently established domain claim: an active verified organization domain, or the operator-managed `PrimaryDomain`, covering the asserted address exactly. Pending or revoked claims do not count. A sibling or parent domain does not count. Membership and SCIM still decide who is in the organization; they do not authorize takeover of an unbound global identity.
+
+Already-bound connection + issuer + subject pairs keep working. JIT of a never-before-seen email still works when auto-provision is on. Denied first-links are audited as `user.login.saml.link_denied` with a reason and connection id — not the assertion, email, or NameID.
+
+See [SAML SSO](/docs/authserver/saml-sso#global-identity-versus-organization-access) and [SCIM and SAML access lifecycle](/docs/guides/scim-saml-access-lifecycle).
+
+## Upgrade notes
+
+```bash
+dotnet add package SqlOS --version 7.1.1
+npm install @sqlos/headless@7.1.1              # if you render your own login UI
+```
+
+If existing members have not yet been linked to their IdP subject, register the organization's email domain before their next first SAML sign-in. Identities already stored in `SqlOSExternalIdentities` do not need that step.
+
+This release also ships the public docs recut, hosting quick reference, and a Next.js docs runtime upgrade. The SAML change is the operator-visible runtime behavior.
