@@ -1068,7 +1068,7 @@ await adminService.ImportSsoMetadataAsync(
 | `request.DisplayName` | `string` | Display name for the connection. |
 | `request.PrimaryDomain` | `string?` | Email domain for home-realm discovery. |
 | `request.AutoProvisionUsers` | `bool` | Create users on first SSO login. |
-| `request.AutoLinkByEmail` | `bool` | Link existing users by email during SSO. |
+| `request.AutoLinkByEmail` | `bool` | Require existing members to sign in through this SSO connection during home realm discovery. First-time binding of an existing global user still requires the organization to own the asserted email domain. |
 
 **Returns**
 

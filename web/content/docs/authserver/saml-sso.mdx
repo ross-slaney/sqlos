@@ -177,15 +177,32 @@ Internally these map to the existing connection flags:
 - `RequireSsoForExistingMembers` maps to `AutoLinkByEmail`
 - `AllowJitProvisioning` maps to `AutoProvisionUsers`
 
-When `RequireSsoForExistingMembers` is enabled, a user who already belongs to the organization and has a verified email on the SSO domain is sent to SSO. The first successful SAML sign-in links the IdP subject to that existing user. SqlOS does not create a user or membership on this path.
+When `RequireSsoForExistingMembers` is enabled, a user who already belongs to the organization and has a verified email on the SSO domain is sent to SSO. The first successful SAML sign-in can link the IdP subject to that existing user only when the connection's organization already owns that email domain. SqlOS does not create a user or membership on this path.
 
-An active SCIM-provisioned member can also complete that first subject link when `AutoLinkByEmail` is `false`. This narrow path requires an enabled SCIM connection, an active and non-deleted SCIM user record, and an active membership in the same organization, plus an exact normalized match between the signed SAML assertion's email attribute and the SCIM record's current primary email. A login hint is not sufficient. A disabled connection, a SCIM record from another organization, a stale email alias, or any deactivated/deleted SCIM state is not accepted. This does not enable general email auto-linking.
+Home realm discovery still follows `RequireSsoForExistingMembers`: when it is disabled, email-first discovery does not force an existing member into SSO. Enable it when existing members should be routed to SSO automatically.
 
-Home realm discovery still follows `RequireSsoForExistingMembers`: when it is disabled, email-first discovery does not force an existing member into SSO. The SCIM-provenance exception applies after a client explicitly starts that organization's SAML connection. Enable `RequireSsoForExistingMembers` when existing members should be routed to SSO automatically.
-
-When `AllowJitProvisioning` is enabled, a successful SAML sign-in may create the missing user or organization membership when no existing organization member matches the SAML email. Keep this disabled when access should be invitation- or admin-managed.
+When `AllowJitProvisioning` is enabled, a successful SAML sign-in may create a missing user, or add organization membership for an existing user whose email domain the organization owns. Keep this disabled when access should be invitation- or admin-managed.
 
 Every first-time email link and every JIT provision requires the configured email attribute in the signed SAML assertion. The login hint used for discovery and routing is never accepted as an authenticated email claim. An already-linked IdP subject can continue to resolve its existing user without an email attribute.
+
+## Global identity versus organization access
+
+SqlOS users are host-global. A SAML connection is organization-scoped. Those layers are not interchangeable:
+
+| Layer | What it proves | What it does not prove |
+| --- | --- | --- |
+| Already-bound connection + issuer + subject | That IdP subject is this SqlOS user | Nothing about a different subject or email |
+| Active verified organization domain, or operator-managed `PrimaryDomain` | The organization owns that exact email domain | Ownership of another domain or of a global user who merely shares an address |
+| Organization membership | Authorization to enter that organization | Control of the host-global identity |
+| SCIM provisioning | Directory lifecycle for that organization | That the tenant IdP may bind an unbound global user by email |
+
+A tenant-controlled IdP may authenticate an already-bound subject. It cannot take over an existing global user just by asserting the user's email, even when auto-link, auto-provision, membership, or SCIM records are present. First-time linking of an existing user requires an independently established domain claim: an active `SqlOSOrganizationDomain` for the connection's organization, or that organization's operator-managed `PrimaryDomain`, covering the canonical asserted address exactly (`alice@acme.com` matches `acme.com`, not a sibling or parent domain). Pending or revoked domain claims are ignored.
+
+SCIM remains the right control for who is in the organization. After SCIM creates the membership, the first SAML sign-in still needs that domain ownership before SqlOS will persist the IdP subject on the existing user. Contractors and other external-domain identities are not auto-linked. Keep them on invitation plus a local first factor, or use an IdP subject that is already bound. Existing subject bindings continue to sign in.
+
+Denied first-links are audited as `user.login.saml.link_denied` with a reason code and connection id. Assertion attributes, email addresses, and NameIDs are not written to the audit payload.
+
+**Migration:** identities already stored in `SqlOSExternalIdentities` keep working through subject lookup. New first-time email links of existing users fail closed until the organization owns the asserted domain. Review unexpected connection-subject bindings if a tenant admin may have linked another organization's users before this change.
 
 JIT provisioning never reactivates an existing inactive membership, and SAML callbacks reject inactive users and inactive organizations. This preserves offboarding even when the IdP still sends a valid assertion for a previously linked subject. Re-enable the user or membership through an explicit trusted workflow before allowing another SAML login.
 
