@@ -1,6 +1,7 @@
 using System.Net;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
@@ -127,6 +128,156 @@ public sealed class SqlOSSsoPortalServiceTests
         (await harness.Portal.TryGetSessionAsync(followupHttp)).Should().BeNull();
         (await harness.Context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "sso.portal.session.revoked"))
             .Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task SignOutAsync_RevokesSessionAndRejectsPredecessorLookupAndMutations()
+    {
+        using var harness = await PortalHarness.CreateAsync();
+        var org = await harness.Admin.CreateOrganizationAsync(
+            new SqlOSCreateOrganizationRequest("Sign Out Org", null, "sign-out.test"));
+        var opened = await OpenPortalCookieAsync(harness, org.Id, "microsoft-entra");
+        var session = await harness.Context.Set<SqlOSSsoPortalSession>().SingleAsync(x => x.Id == opened.SessionId);
+        var connectionId = session.ConnectionId;
+        var tokenHash = session.SessionTokenHash;
+
+        var signOut = PortalHarness.CreateHttpContext();
+        signOut.Request.Headers.Cookie = opened.Cookie;
+        await harness.Portal.SignOutAsync(signOut);
+
+        var cleared = signOut.Response.Headers.SetCookie.ToString();
+        cleared.Should().Contain("sqlos_sso_portal=");
+        cleared.ToLowerInvariant().Should().Contain("httponly").And.Contain("secure").And.Contain("samesite=lax");
+        cleared.Should().Contain("path=/sqlos/admin/auth/sso-portal");
+        cleared.Should().NotContain(opened.RawToken);
+        cleared.Should().NotContain(tokenHash);
+
+        var stored = await harness.Context.Set<SqlOSSsoPortalSession>().SingleAsync(x => x.Id == opened.SessionId);
+        stored.RevokedAt.Should().NotBeNull();
+        stored.RevokedReason.Should().Be(SqlOSSsoPortalService.SignedOutReason);
+        stored.SessionTokenHash.Should().Be(tokenHash);
+        stored.Provider.Should().Be("microsoft-entra");
+
+        var replay = PortalHarness.CreateHttpContext();
+        replay.Request.Headers.Cookie = opened.Cookie;
+        (await harness.Portal.TryGetSessionAsync(replay)).Should().BeNull();
+        var required = async () => await harness.Portal.GetRequiredSessionAsync(replay);
+        await required.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Portal session is invalid or expired.");
+
+        await AssertPortalMutationsRejectedAsync(harness, stored);
+
+        var connection = await harness.Context.Set<SqlOSSsoConnection>().SingleAsync(x => x.Id == connectionId);
+        connection.IsEnabled.Should().BeFalse();
+        connection.AutoProvisionUsers.Should().BeFalse();
+        stored.Provider.Should().Be("microsoft-entra");
+        stored.LastTestedAt.Should().BeNull();
+
+        var listed = JsonSerializer.Serialize(
+            await harness.Portal.ListOrganizationSessionsAsync(org.Id));
+        listed.Should().Contain("revoked").And.Contain("signed_out");
+        listed.Should().NotContain(opened.RawToken).And.NotContain(tokenHash);
+
+        var audit = await harness.Context.Set<SqlOSAuditEvent>()
+            .SingleAsync(x => x.EventType == "sso.portal.session.closed");
+        audit.OrganizationId.Should().Be(org.Id);
+        audit.MetadataJson.Should().Contain(opened.SessionId).And.Contain("signed_out");
+        audit.MetadataJson.Should().NotContain(opened.RawToken).And.NotContain(tokenHash);
+        audit.DataJson.Should().NotContain(opened.RawToken).And.NotContain(tokenHash);
+    }
+
+    [TestMethod]
+    public async Task SignOutAsync_IsIdempotentForRepeatedMissingInvalidExpiredAndAlreadyRevokedCookies()
+    {
+        using var harness = await PortalHarness.CreateAsync();
+        var org = await harness.Admin.CreateOrganizationAsync(
+            new SqlOSCreateOrganizationRequest("Idempotent Sign Out Org", null, "idempotent-sign-out.test"));
+        var opened = await OpenPortalCookieAsync(harness, org.Id);
+
+        var first = PortalHarness.CreateHttpContext();
+        first.Request.Headers.Cookie = opened.Cookie;
+        await harness.Portal.SignOutAsync(first);
+        var second = PortalHarness.CreateHttpContext();
+        second.Request.Headers.Cookie = opened.Cookie;
+        await harness.Portal.SignOutAsync(second);
+
+        second.Response.Headers.SetCookie.ToString().Should().Contain("sqlos_sso_portal=");
+        (await harness.Context.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == "sso.portal.session.closed"))
+            .Should().Be(1);
+        (await harness.Portal.TryGetSessionAsync(CookieContext(opened.Cookie))).Should().BeNull();
+
+        var missing = PortalHarness.CreateHttpContext();
+        await harness.Portal.SignOutAsync(missing);
+        missing.Response.Headers.SetCookie.ToString().Should().Contain("sqlos_sso_portal=");
+
+        var unrelated = await OpenPortalCookieAsync(harness, org.Id, "okta");
+        var invalid = PortalHarness.CreateHttpContext();
+        invalid.Request.Headers.Cookie = "sqlos_sso_portal=not-a-portal-token";
+        await harness.Portal.SignOutAsync(invalid);
+        invalid.Response.Headers.SetCookie.ToString().Should().Contain("sqlos_sso_portal=");
+        (await harness.Portal.TryGetSessionAsync(CookieContext(unrelated.Cookie))).Should().NotBeNull();
+        (await harness.Context.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == "sso.portal.session.closed"))
+            .Should().Be(1);
+
+        var expired = await OpenPortalCookieAsync(harness, org.Id);
+        var expiredSession = await harness.Context.Set<SqlOSSsoPortalSession>().SingleAsync(x => x.Id == expired.SessionId);
+        expiredSession.ExpiresAt = DateTime.UtcNow.AddMinutes(-5);
+        await harness.Context.SaveChangesAsync();
+        var expiredSignOut = PortalHarness.CreateHttpContext();
+        expiredSignOut.Request.Headers.Cookie = expired.Cookie;
+        await harness.Portal.SignOutAsync(expiredSignOut);
+        expiredSession.RevokedAt.Should().NotBeNull();
+        expiredSession.RevokedReason.Should().Be(SqlOSSsoPortalService.SignedOutReason);
+        expiredSession.ExpiresAt = DateTime.UtcNow.AddHours(1);
+        expiredSession.LastSeenAt = DateTime.UtcNow;
+        await harness.Context.SaveChangesAsync();
+        (await harness.Portal.TryGetSessionAsync(CookieContext(expired.Cookie))).Should().BeNull();
+
+        var revoked = await OpenPortalCookieAsync(harness, org.Id);
+        await harness.Portal.RevokeSessionAsync(
+            revoked.SessionId,
+            new SqlOSRevokeSsoPortalSessionRequest("security_review"),
+            harness.Http);
+        var alreadyRevoked = PortalHarness.CreateHttpContext();
+        alreadyRevoked.Request.Headers.Cookie = revoked.Cookie;
+        await harness.Portal.SignOutAsync(alreadyRevoked);
+        alreadyRevoked.Response.Headers.SetCookie.ToString().Should().Contain("sqlos_sso_portal=");
+        var storedRevoked = await harness.Context.Set<SqlOSSsoPortalSession>().SingleAsync(x => x.Id == revoked.SessionId);
+        storedRevoked.RevokedReason.Should().Be("security_review");
+        (await harness.Context.Set<SqlOSAuditEvent>().CountAsync(x =>
+            x.EventType == "sso.portal.session.closed" && x.MetadataJson != null && x.MetadataJson.Contains(revoked.SessionId)))
+            .Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task SignOutAsync_LeavesUnrelatedPortalSessionActive()
+    {
+        using var harness = await PortalHarness.CreateAsync();
+        var org = await harness.Admin.CreateOrganizationAsync(
+            new SqlOSCreateOrganizationRequest("Two Sessions Org", null, "two-sessions.test"));
+        var otherOrg = await harness.Admin.CreateOrganizationAsync(
+            new SqlOSCreateOrganizationRequest("Other Sessions Org", null, "other-sessions.test"));
+        var first = await OpenPortalCookieAsync(harness, org.Id, "okta");
+        var second = await OpenPortalCookieAsync(harness, org.Id, "google-workspace");
+        var other = await OpenPortalCookieAsync(harness, otherOrg.Id, "microsoft-entra");
+
+        var signOut = PortalHarness.CreateHttpContext();
+        signOut.Request.Headers.Cookie = first.Cookie;
+        await harness.Portal.SignOutAsync(signOut);
+
+        (await harness.Context.Set<SqlOSSsoPortalSession>().SingleAsync(x => x.Id == first.SessionId))
+            .RevokedReason.Should().Be(SqlOSSsoPortalService.SignedOutReason);
+        (await harness.Portal.TryGetSessionAsync(CookieContext(second.Cookie))).Should().NotBeNull();
+        (await harness.Portal.TryGetSessionAsync(CookieContext(other.Cookie))).Should().NotBeNull();
+
+        var secondSession = await harness.Context.Set<SqlOSSsoPortalSession>().SingleAsync(x => x.Id == second.SessionId);
+        var state = await harness.Portal.SetProviderAsync(
+            secondSession,
+            new SqlOSUpdateSsoPortalProviderRequest("okta"),
+            harness.Http);
+        state.Provider.Should().Be("okta");
+        (await harness.Context.Set<SqlOSSsoPortalSession>().SingleAsync(x => x.Id == other.SessionId))
+            .RevokedAt.Should().BeNull();
     }
 
     [TestMethod]
@@ -687,6 +838,7 @@ public sealed class SqlOSSsoPortalServiceTests
         html.Should().Contain("Activate connection");
         html.Should().Contain("Run test");
         html.Should().Contain("Open IdP test redirect");
+        html.Should().Contain("await request(\"/signout\", { method: \"POST\", body: \"{}\" });");
     }
 
     [TestMethod]
@@ -727,6 +879,61 @@ public sealed class SqlOSSsoPortalServiceTests
         options.SsoPortal.ResolveHeadlessApiBasePath("/sqlos/admin/auth").Should().Be("/custom/sso/setup");
         options.SsoPortal.DomainVerificationRecordPrefix.Should().Be("_custom-verify");
         options.SsoPortal.DomainVerificationRecordValuePrefix.Should().Be("custom-domain-verification");
+    }
+
+    private static DefaultHttpContext CookieContext(string cookie)
+    {
+        var http = PortalHarness.CreateHttpContext();
+        http.Request.Headers.Cookie = cookie;
+        return http;
+    }
+
+    private static async Task<(string SessionId, string Cookie, string RawToken)> OpenPortalCookieAsync(
+        PortalHarness harness,
+        string organizationId,
+        string? provider = null)
+    {
+        var created = await harness.Portal.CreateSessionAsync(
+            new SqlOSCreateSsoPortalSessionRequest(organizationId, Provider: provider),
+            harness.Http);
+        var openHttp = PortalHarness.CreateHttpContext();
+        await harness.Portal.OpenSessionAsync(ExtractToken(created.SetupUrl!), openHttp);
+        var cookie = openHttp.Response.Headers.SetCookie.ToString().Split(';', 2)[0];
+        return (created.Id, cookie, cookie["sqlos_sso_portal=".Length..]);
+    }
+
+    private static async Task AssertPortalMutationsRejectedAsync(PortalHarness harness, SqlOSSsoPortalSession session)
+    {
+        var http = harness.Http;
+        var mutations = new Func<Task>[]
+        {
+            () => harness.Portal.GetStateAsync(session),
+            () => harness.Portal.GetSetupActionAsync(session),
+            () => harness.Portal.SetProviderAsync(session, new SqlOSUpdateSsoPortalProviderRequest("okta"), http),
+            () => harness.Portal.SetProviderActionAsync(session, new SqlOSUpdateSsoPortalProviderRequest("okta"), http),
+            () => harness.Portal.UpdateEnrollmentPolicyAsync(session, new SqlOSSsoPortalEnrollmentPolicyRequest(false, true), http),
+            () => harness.Portal.UpdateEnrollmentPolicyActionAsync(session, new SqlOSSsoPortalEnrollmentPolicyRequest(false, true), http),
+            () => harness.Portal.StartDomainVerificationAsync(session, new SqlOSSsoPortalDomainRequest("sign-out.test"), http),
+            () => harness.Portal.StartDomainVerificationActionAsync(session, new SqlOSSsoPortalDomainRequest("sign-out.test"), http),
+            () => harness.Portal.ConfirmDomainOwnershipAsync(session, "dom_missing", http),
+            () => harness.Portal.ConfirmDomainOwnershipActionAsync(session, "dom_missing", http),
+            () => harness.Portal.ImportMetadataAsync(session, new SqlOSSsoPortalMetadataRequest("<EntityDescriptor />"), http),
+            () => harness.Portal.ImportMetadataActionAsync(session, new SqlOSSsoPortalMetadataRequest("<EntityDescriptor />"), http),
+            () => harness.Portal.ActivateAsync(session, http),
+            () => harness.Portal.ActivateActionAsync(session, http),
+            () => harness.Portal.DisableAsync(session, http),
+            () => harness.Portal.DisableActionAsync(session, http),
+            () => harness.Portal.RevokeOrganizationSessionsAsync(session, new SqlOSSsoPortalRevokeOrganizationSessionsRequest(true), http),
+            () => harness.Portal.RecordTestAsync(session, "ready", "should not persist", null, http),
+            () => harness.Portal.RecordTestActionAsync(session, new SqlOSSsoPortalTestRequest(null, null, null, null, null), null!, http)
+        };
+
+        foreach (var mutation in mutations)
+        {
+            var act = async () => await mutation();
+            await act.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage("Portal session is invalid or expired.");
+        }
     }
 
     private static string ExtractToken(string setupUrl)

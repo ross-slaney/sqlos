@@ -13,6 +13,8 @@ namespace SqlOS.AuthServer.Services;
 
 public sealed class SqlOSSsoPortalService
 {
+    internal const string SignedOutReason = "signed_out";
+
     private static readonly IReadOnlyList<SqlOSSsoProviderGuide> ProviderGuides =
     [
         new(
@@ -296,18 +298,91 @@ public sealed class SqlOSSsoPortalService
 
     public async Task SignOutAsync(HttpContext httpContext, CancellationToken cancellationToken = default)
     {
-        var session = await TryGetSessionAsync(httpContext, cancellationToken);
-        if (session != null)
+        if (httpContext.Request.Cookies.TryGetValue(GetCookieName(), out var rawSessionToken)
+            && !string.IsNullOrWhiteSpace(rawSessionToken))
         {
-            await RecordPortalAuditAsync(
-                "sso.portal.session.closed",
-                session,
-                httpContext,
-                new { session.Id },
-                cancellationToken);
+            await RevokePresentedSessionAsync(rawSessionToken, httpContext, cancellationToken);
         }
 
         ClearPortalCookie(httpContext);
+    }
+
+    private async Task RevokePresentedSessionAsync(
+        string rawSessionToken,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        var tokenHash = _cryptoService.HashToken(rawSessionToken.Trim());
+        var presented = await _context.Set<SqlOSSsoPortalSession>()
+            .AsNoTracking()
+            .Where(x => x.SessionTokenHash == tokenHash)
+            .Select(x => new { x.Id, x.OrganizationId })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (presented == null || string.IsNullOrWhiteSpace(presented.OrganizationId))
+        {
+            return;
+        }
+
+        if (!_context.Database.IsRelational() || _context.Database.CurrentTransaction != null)
+        {
+            await RevokePresentedSessionCoreAsync(
+                presented.Id,
+                presented.OrganizationId,
+                tokenHash,
+                httpContext,
+                cancellationToken);
+            return;
+        }
+
+        var strategy = _context.Database.CreateExecutionStrategy();
+        var attempt = 0;
+        await strategy.ExecuteAsync(async () =>
+        {
+            if (attempt++ > 0 && _context is DbContext retryContext)
+            {
+                retryContext.ChangeTracker.Clear();
+            }
+
+            await using var transaction = await _context.Database.BeginTransactionAsync(
+                SqlOSDatabase.ExclusiveWorkIsolationLevel(_context.Database),
+                cancellationToken);
+            await RevokePresentedSessionCoreAsync(
+                presented.Id,
+                presented.OrganizationId,
+                tokenHash,
+                httpContext,
+                cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        });
+    }
+
+    private async Task RevokePresentedSessionCoreAsync(
+        string sessionId,
+        string organizationId,
+        string tokenHash,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        await SqlOSSsoPortalOrganizationLock.AcquireAsync(_context, organizationId, cancellationToken);
+        var session = await _context.Set<SqlOSSsoPortalSession>()
+            .FirstOrDefaultAsync(
+                x => x.Id == sessionId
+                    && x.OrganizationId == organizationId
+                    && x.SessionTokenHash == tokenHash,
+                cancellationToken);
+        if (session == null || session.RevokedAt != null)
+        {
+            return;
+        }
+
+        session.RevokedAt = DateTime.UtcNow;
+        session.RevokedReason = SignedOutReason;
+        await RecordPortalAuditAsync(
+            "sso.portal.session.closed",
+            session,
+            httpContext,
+            new { session.Id, session.RevokedReason },
+            cancellationToken);
     }
 
     public Task<SqlOSSsoPortalStateResult> GetStateAsync(
@@ -1418,7 +1493,13 @@ public sealed class SqlOSSsoPortalService
         });
 
     private void ClearPortalCookie(HttpContext httpContext)
-        => httpContext.Response.Cookies.Delete(GetCookieName(), new CookieOptions { Path = GetPortalPath() });
+        => httpContext.Response.Cookies.Delete(GetCookieName(), new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = httpContext.Request.IsHttps,
+            SameSite = SameSiteMode.Lax,
+            Path = GetPortalPath()
+        });
 
     private string GetCookieName()
         => string.IsNullOrWhiteSpace(_portalOptions.CookieName)
