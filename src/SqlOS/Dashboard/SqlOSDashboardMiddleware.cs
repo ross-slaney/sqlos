@@ -130,6 +130,7 @@ public sealed class SqlOSDashboardMiddleware
             context,
             _isDevelopment,
             _options.AuthMode,
+            _options.Password,
             _options.AuthorizationCallback);
     }
 
@@ -146,7 +147,7 @@ public sealed class SqlOSDashboardMiddleware
             && HttpMethods.IsGet(context.Request.Method))
         {
             var authorized = await IsAuthorizedAsync(context);
-            var expiresAt = _sessionService.GetSessionExpiry(context);
+            var expiresAt = _sessionService.GetSessionExpiry(context, _options.Password);
             context.Response.ContentType = "application/json; charset=utf-8";
             await context.Response.WriteAsync(JsonSerializer.Serialize(new
             {
@@ -266,7 +267,7 @@ public sealed class SqlOSDashboardMiddleware
                 now,
                 context.RequestAborted);
             var allowInsecureCookie = _isDevelopment && !context.Request.IsHttps;
-            var expiresAt = _sessionService.CreateSession(context, _pathPrefix, _options.SessionLifetime, allowInsecureCookie);
+            var expiresAt = _sessionService.CreateSession(context, _pathPrefix, _options.SessionLifetime, allowInsecureCookie, _options.Password!);
             await RecordDashboardAuditAsync(
                 context,
                 "dashboard.login.success",

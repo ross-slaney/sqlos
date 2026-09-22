@@ -30,6 +30,8 @@ The password can come from user secrets, an environment variable, or another con
 
 Password mode includes dashboard-specific per-IP throttling, global backoff for distributed failures, temporary lockout, and audit events for login success, login failure, rate-limit rejection, lockout, and logout. Dashboard password comparisons reserve per-IP and global capacity together before hashing; successful comparisons release that generation, and abandoned reservations remain fail-closed. Treat those built-in controls as a baseline, not as the only protection for a publicly reachable admin surface.
 
+Operator sessions are bound to the configured password. Rotating `Dashboard.Password` invalidates every outstanding operator session cookie, which makes rotation the incident-response step for a leaked cookie or an unattended workstation; rotating the Data Protection key ring has the same effect. Password comparison and the session binding never write the password to the cookie, logs, or audit events.
+
 ## Authenticate operator API calls
 
 Routes under `/sqlos/admin/**` are operator surfaces, not public management APIs. The dashboard UI is the normal interactive client. For durable automation, prefer a trusted backend that injects the relevant SqlOS service and authorizes the caller, or put the routes behind your identity-aware operator boundary.

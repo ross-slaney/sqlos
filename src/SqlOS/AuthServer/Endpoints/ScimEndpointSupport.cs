@@ -232,7 +232,7 @@ public static partial class EndpointRouteBuilderExtensions
         if (options.Dashboard.AuthMode == SqlOSDashboardAuthMode.Password)
         {
             var sessionService = context.RequestServices.GetService<SqlOSDashboardSessionService>();
-            if (sessionService == null || !sessionService.HasActiveSession(context))
+            if (sessionService == null || !sessionService.HasActiveSession(context, options.Dashboard.Password))
             {
                 return false;
             }

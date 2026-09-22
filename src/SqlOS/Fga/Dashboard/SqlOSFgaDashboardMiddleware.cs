@@ -99,6 +99,7 @@ public class SqlOSFgaDashboardMiddleware
             context,
             _isDevelopment,
             _dashboardOptions.AuthMode,
+            _dashboardOptions.Password,
             _dashboardOptions.AuthorizationCallback);
     }
 
