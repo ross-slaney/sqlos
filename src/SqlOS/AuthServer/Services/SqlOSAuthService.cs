@@ -1113,7 +1113,7 @@ public sealed class SqlOSAuthService
             organizationId: null,
             "logout_all",
             DateTime.UtcNow,
-            cancellationToken);
+            cancellationToken: cancellationToken);
         await _context.SaveChangesAsync(cancellationToken);
         await _adminService.RecordAuditAsync("user.logout-all", "user", userId, userId: userId, cancellationToken: cancellationToken);
     }
@@ -1533,7 +1533,7 @@ public sealed class SqlOSAuthService
             organizationId: null,
             "password_reset",
             DateTime.UtcNow,
-            cancellationToken);
+            cancellationToken: cancellationToken);
         await _context.SaveChangesAsync(cancellationToken);
         await RecordPasswordResetAuditAsync(
             "password_reset.completed",

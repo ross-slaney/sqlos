@@ -127,6 +127,7 @@ Unassign or deactivate the test user through the IdP's provisioning control. Sql
 - sessions for that organization are revoked
 - SCIM-managed group memberships and inherited mapped access are removed
 - the user, external identity history, and unrelated organization memberships remain
+- when this was the person's last active membership, the user becomes inactive and their own [calendar connections](/docs/guides/calendar-integration#offboarding-and-revocation) are revoked with reason `scim_deprovisioned`; reactivation does not restore them
 
 Attempt SAML sign-in again. The IdP may still authenticate the person, but SqlOS must not issue access for the deprovisioned organization.
 

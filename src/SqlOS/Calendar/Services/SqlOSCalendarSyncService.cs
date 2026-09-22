@@ -95,7 +95,7 @@ public sealed class SqlOSCalendarSyncService
                     UpdatedAt = now
                 };
                 _context.Set<SqlOSCalendarSyncState>().Add(state);
-                await _context.SaveChangesAsync(cancellationToken);
+                await SaveSyncProgressAsync(connection, cancellationToken);
                 syncStates.Add(state);
             }
 
@@ -134,17 +134,26 @@ public sealed class SqlOSCalendarSyncService
             }
 
             connection.UpdatedAt = finishedAt;
-            await _context.SaveChangesAsync(cancellationToken);
+            if (!await _calendarService.TrySaveConnectionAsync(connection, cancellationToken))
+            {
+                throw new InvalidOperationException("This calendar connection has been disconnected.");
+            }
         }
         catch (Exception ex)
         {
             var now = DateTime.UtcNow;
             errors.Add(ex.Message);
-            connection.Status = SqlOSCalendarConnectionStatus.Error;
-            connection.LastError = Truncate(ex.Message, 1000);
-            connection.LastErrorAt = now;
-            connection.UpdatedAt = now;
-            await _context.SaveChangesAsync(cancellationToken);
+            // A connection revoked by offboarding mid-sync keeps its revoked state; only a
+            // still-live connection records the error.
+            if (connection.RevokedAt == null)
+            {
+                connection.Status = SqlOSCalendarConnectionStatus.Error;
+                connection.LastError = Truncate(ex.Message, 1000);
+                connection.LastErrorAt = now;
+                connection.UpdatedAt = now;
+                await _calendarService.TrySaveConnectionAsync(connection, cancellationToken);
+            }
+
             _logger.LogWarning(ex, "Calendar sync failed for connection {ConnectionId}.", connection.Id);
         }
 
@@ -356,9 +365,23 @@ public sealed class SqlOSCalendarSyncService
         state.LastSyncError = null;
         state.EventCount = existingByProviderId.Count;
         state.UpdatedAt = DateTime.UtcNow;
-        await _context.SaveChangesAsync(cancellationToken);
+        await SaveSyncProgressAsync(connection, cancellationToken);
 
         return (upserted, removed);
+    }
+
+    /// <summary>
+    /// Every intermediate write of pulled provider data goes through the connection row, so
+    /// its <see cref="SqlOSCalendarConnection.RevokedAt"/> concurrency token is checked on each
+    /// save and nothing is stored once offboarding has revoked the connection mid-sync.
+    /// </summary>
+    private async Task SaveSyncProgressAsync(SqlOSCalendarConnection connection, CancellationToken cancellationToken)
+    {
+        connection.UpdatedAt = DateTime.UtcNow;
+        if (!await _calendarService.TrySaveConnectionAsync(connection, cancellationToken))
+        {
+            throw new InvalidOperationException("This calendar connection has been disconnected.");
+        }
     }
 
     private async Task<SqlOSCalendarConflictDecision> ResolveConflictAsync(
