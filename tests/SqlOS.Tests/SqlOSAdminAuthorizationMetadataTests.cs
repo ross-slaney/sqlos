@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -14,7 +15,10 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Extensions;
+using SqlOS.AuthServer.Interfaces;
+using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
+using SqlOS.Fga.Interfaces;
 using SqlOS.Dashboard;
 using SqlOS.Extensions;
 using SqlOS.Tests.Infrastructure;
@@ -184,6 +188,106 @@ public sealed class SqlOSAdminAuthorizationMetadataTests
             new { message = "Portal session is invalid or expired." });
     }
 
+    [TestMethod]
+    public async Task HostedAndHeadlessPortalSignOut_RevokeThePresentedSession()
+    {
+        await using var app = await CreateSharedPortalAppAsync();
+        string hostedCookie;
+        string headlessCookie;
+        string hostedSessionId;
+        string headlessSessionId;
+        var context = app.Services.GetRequiredService<TestSqlOSInMemoryDbContext>();
+        await using var scope = app.Services.CreateAsyncScope();
+        var admin = scope.ServiceProvider.GetRequiredService<SqlOSAdminService>();
+        var portal = scope.ServiceProvider.GetRequiredService<SqlOSSsoPortalService>();
+        var organization = await admin.CreateOrganizationAsync(
+            new SqlOSCreateOrganizationRequest("Portal Sign Out Org", null, "portal-sign-out.test"));
+        var hosted = await portal.CreateSessionAsync(
+            new SqlOSCreateSsoPortalSessionRequest(organization.Id, Provider: "okta"));
+        var headless = await portal.CreateSessionAsync(
+            new SqlOSCreateSsoPortalSessionRequest(organization.Id, Provider: "microsoft-entra"));
+        hostedSessionId = hosted.Id;
+        headlessSessionId = headless.Id;
+        hostedCookie = await OpenCookieAsync(portal, hosted.SetupUrl!);
+        headlessCookie = await OpenCookieAsync(portal, headless.SetupUrl!);
+
+        var client = app.GetTestClient();
+        client.BaseAddress = new Uri("https://localhost");
+        using (var hostedSignOut = new HttpRequestMessage(HttpMethod.Post, $"{PortalApiPrefix}/signout"))
+        {
+            hostedSignOut.Headers.TryAddWithoutValidation("Cookie", hostedCookie);
+            var response = await client.SendAsync(hostedSignOut);
+            response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+            AssertClearedPortalCookie(response);
+        }
+
+        using (var headlessSignOut = new HttpRequestMessage(HttpMethod.Post, $"{PortalApiPrefix}/setup/signout"))
+        {
+            headlessSignOut.Headers.TryAddWithoutValidation("Cookie", headlessCookie);
+            var response = await client.SendAsync(headlessSignOut);
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+            body.GetProperty("type").GetString().Should().Be("redirect");
+            AssertClearedPortalCookie(response);
+        }
+
+        using (var replay = new HttpRequestMessage(HttpMethod.Put, $"{PortalApiPrefix}/provider"))
+        {
+            replay.Headers.TryAddWithoutValidation("Cookie", hostedCookie);
+            replay.Content = JsonContent.Create(new SqlOSUpdateSsoPortalProviderRequest("google-workspace"));
+            var response = await client.SendAsync(replay);
+            response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        }
+
+        using (var replay = new HttpRequestMessage(HttpMethod.Get, $"{PortalApiPrefix}/setup"))
+        {
+            replay.Headers.TryAddWithoutValidation("Cookie", headlessCookie);
+            var response = await client.SendAsync(replay);
+            response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        }
+
+        using (var repeat = new HttpRequestMessage(HttpMethod.Post, $"{PortalApiPrefix}/signout"))
+        {
+            repeat.Headers.TryAddWithoutValidation("Cookie", hostedCookie);
+            var response = await client.SendAsync(repeat);
+            response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+            AssertClearedPortalCookie(response);
+        }
+
+        context.ChangeTracker.Clear();
+        var sessions = await context.Set<SqlOSSsoPortalSession>().AsNoTracking().ToListAsync();
+        sessions.Should().HaveCount(2);
+        sessions.Should().OnlyContain(session =>
+            session.RevokedAt != null
+            && session.RevokedReason == SqlOSSsoPortalService.SignedOutReason);
+        sessions.Single(session => session.Id == hostedSessionId).Provider.Should().Be("okta");
+        sessions.Single(session => session.Id == headlessSessionId).Provider.Should().Be("microsoft-entra");
+        (await context.Set<SqlOSAuditEvent>().CountAsync(audit => audit.EventType == "sso.portal.session.closed"))
+            .Should().Be(2);
+        var metadata = await context.Set<SqlOSAuditEvent>()
+            .Where(audit => audit.EventType == "sso.portal.session.closed")
+            .Select(audit => audit.MetadataJson)
+            .ToListAsync();
+        metadata.Should().OnlyContain(json => json != null && !json.Contains("SessionTokenHash", StringComparison.Ordinal));
+    }
+
+    private static async Task<string> OpenCookieAsync(SqlOSSsoPortalService portal, string setupUrl)
+    {
+        var openContext = new DefaultHttpContext();
+        openContext.Request.Scheme = "https";
+        await portal.OpenSessionAsync(ExtractSetupToken(setupUrl), openContext);
+        return openContext.Response.Headers.SetCookie.ToString().Split(';', 2)[0];
+    }
+
+    private static void AssertClearedPortalCookie(HttpResponseMessage response)
+    {
+        response.Headers.TryGetValues("Set-Cookie", out var cookies).Should().BeTrue();
+        var header = string.Join("\n", cookies!).ToLowerInvariant();
+        header.Should().Contain("sqlos_sso_portal=");
+        header.Should().Contain("httponly").And.Contain("secure").And.Contain("samesite=lax");
+        header.Should().Contain("path=/sqlos/admin/auth/sso-portal");
+    }
+
     private static string ExtractSetupToken(string setupUrl)
     {
         var query = new Uri(setupUrl).Query;
@@ -206,6 +310,36 @@ public sealed class SqlOSAdminAuthorizationMetadataTests
             options.AuthServer.SsoPortal.EnableApi = true;
             options.Calendar.Enabled = true;
         });
+        builder.Services.RemoveAll<IHostedService>();
+
+        var app = builder.Build();
+        await app.StartAsync();
+        return app;
+    }
+
+    private static async Task<WebApplication> CreateSharedPortalAppAsync()
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            EnvironmentName = Environments.Production
+        });
+        builder.WebHost.UseTestServer();
+        // The in-memory provider gives each scoped context its own store. One shared
+        // context lets the hosted and headless routes see the sessions this test opens.
+        var context = new TestSqlOSInMemoryDbContext(
+            new DbContextOptionsBuilder<TestSqlOSInMemoryDbContext>()
+                .UseInMemoryDatabase($"portal-sign-out-{Guid.NewGuid():N}")
+                .Options);
+        builder.Services.AddSingleton(context);
+        builder.Services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+        {
+            options.AuthServer.Issuer = "https://auth.example.test/sqlos/auth";
+            options.AuthServer.SsoPortal.UseHostedPortal = true;
+            options.AuthServer.SsoPortal.EnableApi = true;
+            options.Calendar.Enabled = true;
+        });
+        builder.Services.AddSingleton<ISqlOSAuthServerDbContext>(context);
+        builder.Services.AddSingleton<ISqlOSFgaDbContext>(context);
         builder.Services.RemoveAll<IHostedService>();
 
         var app = builder.Build();

@@ -113,7 +113,7 @@ curl -X POST http://localhost:5062/sqlos/admin/auth/api/sso-portal/sessions \
   }'
 ```
 
-The response includes a `setupUrl`. Send that URL with your own mailer or admin workflow. The first browser open consumes the URL token and stores an HttpOnly server-side portal session cookie. Reuse requires a new setup link.
+The response includes a `setupUrl`. Send that URL with your own mailer or admin workflow. The first browser open consumes the URL token and stores an HttpOnly server-side portal session cookie. Reuse requires a new setup link. Portal sign-out revokes that server-side session before clearing the cookie, so a retained cookie cannot continue setup.
 
 The portal is scoped to one organization and supports:
 
@@ -252,7 +252,7 @@ State-machine endpoints:
 | POST | `/disable` | Disable the connection |
 | POST | `/organization-sessions/revoke` | Confirm-gated revocation for active org sessions on the verified SSO domain |
 | POST | `/test` | Record readiness or generate a test redirect |
-| POST | `/signout` | Clear the portal session |
+| POST | `/signout` | Revoke the current portal session and clear its cookie |
 
 When `/test` includes `clientId` and `redirectUri`, it must also include a fresh `state`, an S256 `codeChallenge`, and `codeChallengeMethod: "S256"`. The bundled portal generates these values with Web Crypto. A host-owned portal should do the same; first-factor or portal-session state is never a substitute for PKCE.
 

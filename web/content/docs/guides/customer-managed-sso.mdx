@@ -39,6 +39,8 @@ The setup portal is not a customer-facing copy of the global dashboard.
 
 SqlOS stores hashes of both the one-time link token and the continuation token. The first successful open consumes the link and sets the `sqlos_sso_portal` cookie. The cookie is HttpOnly, `SameSite=Lax`, scoped to `/sqlos/admin/auth/sso-portal`, marked Secure on HTTPS, bounded by the link expiration, and rejected after the configured idle timeout. Revoking the setup session invalidates its continuation cookie too.
 
+Signing out revokes that exact server-side portal session and records `sso.portal.session.closed` in the same transaction, then clears the continuation cookie with the same HttpOnly, Secure, SameSite, and path attributes. A copied cookie cannot read or change setup state after that commit. Signing out again only clears the cookie. Another portal session for the same organization stays usable until its own sign-out, an operator revoke, or organization deactivation.
+
 <Callout type="warning" title="Treat the setup URL as a credential">
   Deliver it through your authenticated admin product, a carefully addressed transactional email, or a controlled support channel. Do not put it in application logs, analytics, issue trackers, chat previews, or screenshots. A copied URL is usable until its first open, revocation, or expiration.
 </Callout>
@@ -277,6 +279,7 @@ For a local portal-only test, create the organization with a primary domain befo
 - Customer IT admins configure only their organization without global dashboard access.
 - The setup URL is single-use and replaceable through a new, independently revocable session.
 - Deactivating the organization invalidates all of its delegated setup links and cookies; reactivation requires a new link.
+- Signing out of the portal revokes that one server-side setup session immediately. The predecessor continuation cookie cannot continue setup.
 - DNS ownership, metadata readiness, enrollment policy, and PKCE test status are visible before activation.
 - Eligible matching-domain users route through SSO; other users follow the configured fallback policy.
 - Session revocation happens only through the separate confirm-gated action.

@@ -81,7 +81,7 @@ After draft or setup-link creation, SqlOS shows:
 
 These are the values you give to the customer's Entra admin.
 
-For delegated onboarding, send the setup URL to the customer IT admin through your own mailer or ticketing system. The first open consumes the URL token and stores a hardened server-side portal session in an HttpOnly cookie scoped to `/sqlos/admin/auth/sso-portal`.
+For delegated onboarding, send the setup URL to the customer IT admin through your own mailer or ticketing system. The first open consumes the URL token and stores a hardened server-side portal session in an HttpOnly cookie scoped to `/sqlos/admin/auth/sso-portal`. Signing out revokes that server-side session before the cookie is cleared. A copied portal cookie cannot continue setup after sign-out.
 
 If the customer admin claims a domain in the delegated portal, SqlOS shows a TXT record such as:
 
