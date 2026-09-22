@@ -7,14 +7,25 @@ using SqlOS.Configuration;
 
 namespace SqlOS.Dashboard;
 
+/// <summary>
+/// Issues and validates the password-mode dashboard operator session cookie.
+/// </summary>
+/// <remarks>
+/// The session ticket is protected with a Data Protection purpose derived from a
+/// non-reversible fingerprint of the currently configured dashboard password. Rotating
+/// <see cref="SqlOSDashboardOptions.Password"/> therefore invalidates every outstanding
+/// operator cookie: a ticket protected under the previous password can no longer be
+/// unprotected. The password itself is never written to the cookie, logs, or audit data.
+/// </remarks>
 public sealed class SqlOSDashboardSessionService
 {
     private const string SessionCookieName = "SqlOS.Dashboard.Session";
-    private readonly IDataProtector _protector;
+    private const string SessionProtectorPurpose = "SqlOS.Dashboard.Session.v2";
+    private readonly IDataProtectionProvider _dataProtectionProvider;
 
     public SqlOSDashboardSessionService(IDataProtectionProvider dataProtectionProvider)
     {
-        _protector = dataProtectionProvider.CreateProtector("SqlOS.Dashboard.Session.v1");
+        _dataProtectionProvider = dataProtectionProvider;
     }
 
     public bool IsPasswordMode(SqlOSDashboardAuthMode authMode)
@@ -35,6 +46,7 @@ public sealed class SqlOSDashboardSessionService
         HttpContext context,
         bool isDevelopment,
         SqlOSDashboardAuthMode authMode,
+        string? configuredPassword,
         Func<HttpContext, Task<bool>>? authorizationCallback)
     {
         // Preserve existing behavior in DevelopmentOnly mode:
@@ -49,7 +61,7 @@ public sealed class SqlOSDashboardSessionService
             return isDevelopment;
         }
 
-        if (!HasActiveSession(context))
+        if (!HasActiveSession(context, configuredPassword))
         {
             return false;
         }
@@ -66,12 +78,18 @@ public sealed class SqlOSDashboardSessionService
         HttpContext context,
         string cookiePath,
         TimeSpan sessionLifetime,
-        bool allowInsecureCookie)
+        bool allowInsecureCookie,
+        string configuredPassword)
     {
+        if (!IsPasswordConfigured(configuredPassword))
+        {
+            throw new InvalidOperationException("A dashboard session requires a configured dashboard password.");
+        }
+
         var now = DateTimeOffset.UtcNow;
         var expiresAt = now.Add(sessionLifetime);
         var payload = JsonSerializer.Serialize(new SessionTicket(expiresAt.ToUnixTimeSeconds()));
-        var protectedPayload = _protector.Protect(payload);
+        var protectedPayload = CreateProtector(configuredPassword).Protect(payload);
 
         context.Response.Cookies.Append(SessionCookieName, protectedPayload, new CookieOptions
         {
@@ -96,9 +114,13 @@ public sealed class SqlOSDashboardSessionService
         });
     }
 
-    public DateTimeOffset? GetSessionExpiry(HttpContext context)
+    /// <summary>
+    /// Returns the expiry of the operator session cookie when it was issued under the
+    /// currently configured password and has not expired; otherwise <c>null</c>.
+    /// </summary>
+    public DateTimeOffset? GetSessionExpiry(HttpContext context, string? configuredPassword)
     {
-        var ticket = TryReadSession(context);
+        var ticket = TryReadSession(context, configuredPassword);
         if (ticket == null)
         {
             return null;
@@ -113,11 +135,17 @@ public sealed class SqlOSDashboardSessionService
         return expiresAt;
     }
 
-    public bool HasActiveSession(HttpContext context)
-        => GetSessionExpiry(context).HasValue;
+    public bool HasActiveSession(HttpContext context, string? configuredPassword)
+        => GetSessionExpiry(context, configuredPassword).HasValue;
 
-    private SessionTicket? TryReadSession(HttpContext context)
+    private SessionTicket? TryReadSession(HttpContext context, string? configuredPassword)
     {
+        // Fail closed: without a configured password there is no valid password-mode session.
+        if (!IsPasswordConfigured(configuredPassword))
+        {
+            return null;
+        }
+
         if (!context.Request.Cookies.TryGetValue(SessionCookieName, out var rawCookie) || string.IsNullOrWhiteSpace(rawCookie))
         {
             return null;
@@ -125,13 +153,26 @@ public sealed class SqlOSDashboardSessionService
 
         try
         {
-            var unprotected = _protector.Unprotect(rawCookie);
+            var unprotected = CreateProtector(configuredPassword!).Unprotect(rawCookie);
             return JsonSerializer.Deserialize<SessionTicket>(unprotected);
         }
         catch
         {
+            // Covers tampering, expired Data Protection keys, and tickets issued under a
+            // previous dashboard password. All are treated identically as "no session".
             return null;
         }
+    }
+
+    private IDataProtector CreateProtector(string configuredPassword)
+        => _dataProtectionProvider.CreateProtector(SessionProtectorPurpose, ComputePasswordFingerprint(configuredPassword));
+
+    private static string ComputePasswordFingerprint(string configuredPassword)
+    {
+        // The fingerprint only ever lives in-process as a Data Protection purpose string.
+        // It is never persisted, placed in the cookie, logged, or audited.
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(configuredPassword));
+        return Convert.ToHexString(hash);
     }
 
     private sealed record SessionTicket(long ExpiresAtUnixSeconds);

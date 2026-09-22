@@ -128,6 +128,94 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
     }
 
     [TestMethod]
+    public async Task DashboardSession_SamePassword_CookieGrantsAdminAccessUntilExpiry()
+    {
+        using var harness = CreateHarness();
+        var login = await harness.PostLoginAsync("correct-password", "203.0.113.70");
+        var cookie = ExtractSessionCookie(login);
+
+        var admin = await harness.GetDashboardAsync(cookie);
+        var session = await harness.GetSessionAsync(cookie);
+
+        admin.StatusCode.Should().Be(StatusCodes.Status200OK);
+        admin.Body.Should().Contain("<html");
+        session.StatusCode.Should().Be(StatusCodes.Status200OK);
+        session.Body.Should().Contain("\"authenticated\":true");
+        session.Body.Should().NotContain("\"expiresAt\":null");
+    }
+
+    [TestMethod]
+    public async Task DashboardSession_AfterPasswordRotation_OutstandingCookieIsUnauthorized()
+    {
+        using var harness = CreateHarness();
+        var login = await harness.PostLoginAsync("correct-password", "203.0.113.71");
+        var preRotationCookie = ExtractSessionCookie(login);
+        (await harness.GetDashboardAsync(preRotationCookie)).StatusCode.Should().Be(StatusCodes.Status200OK);
+
+        harness.Options.Password = "rotated-password";
+
+        var withStaleCookie = await harness.GetDashboardAsync(preRotationCookie);
+        var withoutCookie = await harness.GetDashboardAsync();
+        var session = await harness.GetSessionAsync(preRotationCookie);
+
+        withStaleCookie.StatusCode.Should().Be(StatusCodes.Status302Found);
+        withStaleCookie.StatusCode.Should().Be(withoutCookie.StatusCode);
+        withStaleCookie.Location.Should().Be(withoutCookie.Location);
+        withStaleCookie.Body.Should().Be(withoutCookie.Body);
+        session.Body.Should().Contain("\"authenticated\":false");
+        session.Body.Should().Contain("\"expiresAt\":null");
+    }
+
+    [TestMethod]
+    public async Task DashboardSession_AfterPasswordRotation_NewLoginWorksAndOldCookieStaysRejected()
+    {
+        using var harness = CreateHarness();
+        var preRotationCookie = ExtractSessionCookie(await harness.PostLoginAsync("correct-password", "203.0.113.72"));
+
+        harness.Options.Password = "rotated-password";
+        (await harness.PostLoginAsync("correct-password", "203.0.113.73")).StatusCode.Should().Be(StatusCodes.Status401Unauthorized);
+        var relogin = await harness.PostLoginAsync("rotated-password", "203.0.113.74");
+        relogin.StatusCode.Should().Be(StatusCodes.Status200OK);
+        var postRotationCookie = ExtractSessionCookie(relogin);
+
+        (await harness.GetDashboardAsync(postRotationCookie)).StatusCode.Should().Be(StatusCodes.Status200OK);
+        (await harness.GetDashboardAsync(preRotationCookie)).StatusCode.Should().Be(StatusCodes.Status302Found);
+        postRotationCookie.Should().NotBe(preRotationCookie);
+    }
+
+    [TestMethod]
+    public async Task DashboardSession_TamperedCookie_IsIndistinguishableFromNoCookie()
+    {
+        using var harness = CreateHarness();
+        var cookie = ExtractSessionCookie(await harness.PostLoginAsync("correct-password", "203.0.113.75"));
+        var tamperedCookie = cookie[..^4] + "AAAA";
+
+        var withTamperedCookie = await harness.GetDashboardAsync(tamperedCookie);
+        var withoutCookie = await harness.GetDashboardAsync();
+
+        withTamperedCookie.StatusCode.Should().Be(withoutCookie.StatusCode);
+        withTamperedCookie.Location.Should().Be(withoutCookie.Location);
+        withTamperedCookie.Body.Should().Be(withoutCookie.Body);
+    }
+
+    [TestMethod]
+    public async Task DashboardSession_CookieAndAudit_DoNotContainPasswordMaterial()
+    {
+        using var harness = CreateHarness();
+        var login = await harness.PostLoginAsync("correct-password", "203.0.113.76");
+        var cookie = ExtractSessionCookie(login);
+        var fingerprint = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes("correct-password")));
+
+        cookie.Should().NotContain("correct-password");
+        cookie.ToUpperInvariant().Should().NotContain(fingerprint);
+        login.Body.Should().NotContain("correct-password");
+        var auditEvents = await harness.ListAuditEventsAsync();
+        auditEvents.Should().OnlyContain(x => x.DataJson == null
+            || (!x.DataJson.Contains("correct-password", StringComparison.Ordinal)
+                && !x.DataJson.Contains(fingerprint, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    [TestMethod]
     public async Task DashboardLogout_WritesAuditEvent_AndClearsSessionCookie()
     {
         using var harness = CreateHarness();
@@ -406,7 +494,13 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
             provider.GetRequiredService<SqlOSDashboardSessionService>(),
             provider.GetRequiredService<IOptions<SqlOSOptions>>());
 
-        return new DashboardMiddlewareHarness(provider, middleware);
+        return new DashboardMiddlewareHarness(provider, middleware, dashboardOptions);
+    }
+
+    private static string ExtractSessionCookie(DashboardResponse response)
+    {
+        var setCookie = response.SetCookie.Single(cookie => cookie.StartsWith("SqlOS.Dashboard.Session=", StringComparison.Ordinal));
+        return setCookie.Split(';', 2)[0];
     }
 
     private sealed class DashboardMiddlewareHarness : IDisposable
@@ -414,11 +508,21 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
         private readonly ServiceProvider _services;
         private readonly SqlOSDashboardMiddleware _middleware;
 
-        public DashboardMiddlewareHarness(ServiceProvider services, SqlOSDashboardMiddleware middleware)
+        public DashboardMiddlewareHarness(
+            ServiceProvider services,
+            SqlOSDashboardMiddleware middleware,
+            SqlOSDashboardOptions options)
         {
             _services = services;
             _middleware = middleware;
+            Options = options;
         }
+
+        /// <summary>
+        /// The live options instance the middleware reads on every request, so tests can
+        /// rotate <see cref="SqlOSDashboardOptions.Password"/> between requests.
+        /// </summary>
+        public SqlOSDashboardOptions Options { get; }
 
         public Task<DashboardResponse> PostLoginAsync(string password, string ipAddress)
             => SendAsync(
@@ -430,8 +534,11 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
         public Task<DashboardResponse> PostLogoutAsync(string ipAddress)
             => SendAsync(HttpMethods.Post, "/sqlos/dashboard-auth/logout", null, ipAddress);
 
-        public Task<DashboardResponse> GetDashboardAsync()
-            => SendAsync(HttpMethods.Get, "/sqlos/admin/auth/organizations", null, "203.0.113.60");
+        public Task<DashboardResponse> GetDashboardAsync(string? cookieHeader = null)
+            => SendAsync(HttpMethods.Get, "/sqlos/admin/auth/organizations", null, "203.0.113.60", cookieHeader: cookieHeader);
+
+        public Task<DashboardResponse> GetSessionAsync(string? cookieHeader = null)
+            => SendAsync(HttpMethods.Get, "/sqlos/dashboard-auth/session", null, "203.0.113.62", cookieHeader: cookieHeader);
 
         public Task<DashboardResponse> GetAsync(string path, string? queryString = null)
             => SendAsync(HttpMethods.Get, path, null, "203.0.113.61", queryString);
@@ -450,7 +557,8 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
             string path,
             string? body,
             string ipAddress,
-            string? queryString = null)
+            string? queryString = null,
+            string? cookieHeader = null)
         {
             using var scope = _services.CreateScope();
             var context = new DefaultHttpContext
@@ -466,6 +574,10 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
             context.Request.Scheme = Uri.UriSchemeHttps;
             context.Connection.RemoteIpAddress = IPAddress.Parse(ipAddress);
             context.Response.Body = new MemoryStream();
+            if (cookieHeader != null)
+            {
+                context.Request.Headers.Cookie = cookieHeader;
+            }
 
             if (body != null)
             {
@@ -494,6 +606,7 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
                 responseBody,
                 setCookie,
                 retryAfter,
+                context.Response.Headers.Location.ToString(),
                 context.Response.Headers["X-Frame-Options"].ToString(),
                 context.Response.Headers["X-Content-Type-Options"].ToString(),
                 context.Response.Headers["Referrer-Policy"].ToString(),
@@ -509,6 +622,7 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
         string Body,
         string[] SetCookie,
         string? RetryAfter,
+        string Location,
         string XFrameOptions,
         string ContentTypeOptions,
         string ReferrerPolicy,

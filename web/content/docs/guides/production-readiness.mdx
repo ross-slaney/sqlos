@@ -163,11 +163,14 @@ options.Dashboard.SessionLifetime = TimeSpan.FromHours(2);
 
 Password mode uses a constant-time password comparison, a Data Protection-protected `HttpOnly` session cookie, login throttling, temporary lockout, and dashboard login/logout audit events. It is a useful baseline, not a complete public admin perimeter.
 
+The operator session cookie is bound to the configured dashboard password. Rotating `Dashboard.Password` and restarting or reloading the host invalidates every outstanding operator session immediately, so password rotation is the intended incident-response step when a dashboard cookie or workstation may have been compromised. Cookies issued after the rotation work normally until `SessionLifetime` elapses. Rotating the Data Protection key ring also invalidates outstanding dashboard cookies. There is no separate "sign out all operators" control; every replica must run with the same password so sessions remain valid across instances.
+
 For production:
 
 - read the password from a secret provider, never source control or a checked-in settings file;
 - put the dashboard behind a VPN, identity-aware proxy, private ingress, or equivalent operator access layer;
 - keep the session lifetime no longer than operations require;
+- rotate `Dashboard.Password` to revoke outstanding operator sessions after a suspected cookie or workstation compromise;
 - leave dashboard login throttling enabled and add edge rate limiting;
 - use `Dashboard.AuthorizationCallback` when the host must impose an additional request-level decision;
 - verify both page and API behavior—some unauthorized admin APIs intentionally return `404`, while others return `401`.

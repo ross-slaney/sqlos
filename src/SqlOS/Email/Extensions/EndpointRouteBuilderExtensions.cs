@@ -210,7 +210,7 @@ public static class EndpointRouteBuilderExtensions
         if (options.AuthMode == SqlOSDashboardAuthMode.Password)
         {
             var sessionService = context.RequestServices.GetService<SqlOSDashboardSessionService>();
-            if (sessionService == null || !sessionService.HasActiveSession(context))
+            if (sessionService == null || !sessionService.HasActiveSession(context, options.Password))
             {
                 return false;
             }
