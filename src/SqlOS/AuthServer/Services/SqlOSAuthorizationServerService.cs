@@ -2032,8 +2032,20 @@ public sealed class SqlOSAuthorizationServerService
         throw new InvalidOperationException("Authentication session is no longer active.");
     }
 
-    public async Task<SqlOSTokenEndpointResult> ExchangeAuthorizationCodeAsync(
+    /// <remarks>
+    /// A <c>refresh_token</c> grant bound to a confidential client is rejected here
+    /// with <see cref="SqlOSClientAuthenticationException"/>; the mapped
+    /// <c>POST /token</c> endpoint authenticates the client before exchange.
+    /// </remarks>
+    public Task<SqlOSTokenEndpointResult> ExchangeAuthorizationCodeAsync(
         SqlOSTokenRequest request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+        => ExchangeAuthorizationCodeAsync(request, refreshClientAdmission: null, httpContext, cancellationToken);
+
+    internal async Task<SqlOSTokenEndpointResult> ExchangeAuthorizationCodeAsync(
+        SqlOSTokenRequest request,
+        SqlOSRefreshClientAdmission? refreshClientAdmission,
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
@@ -2056,6 +2068,7 @@ public sealed class SqlOSAuthorizationServerService
             // from the response instead of claiming an empty grant.
             var (refreshed, sessionScope) = await _authService.RefreshWithSessionScopeAsync(
                 new SqlOSRefreshRequest(request.RefreshToken, null, refreshResource, request.ClientId),
+                refreshClientAdmission,
                 cancellationToken);
             return new SqlOSTokenEndpointResult(refreshed, sessionScope);
         }

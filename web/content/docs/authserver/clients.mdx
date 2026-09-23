@@ -87,10 +87,14 @@ An empty allowlist is deny-all, not a wildcard. Seeded and dashboard-created cli
 ## Confidential server-side clients
 
 Use a confidential client when the OAuth callback and refresh-token exchange run
-in server-side code that can protect a secret. SqlOS then requires
-`client_secret_basic` authentication for both the authorization-code and refresh
-grants. Public browser, native, and CLI clients continue to use PKCE without a
-secret. Their refresh requests are identified by the refresh token itself;
+in server-side code that can protect a secret. SqlOS then requires the
+client's registered method (`client_secret_basic` by default, or
+`client_secret_post`) for both the authorization-code and refresh grants. Refresh
+a confidential client's token only at `POST /sqlos/auth/token`. The JSON
+`/token/refresh` route and in-process `RefreshAsync` reject it with
+`invalid_client` because they carry no client credentials. Public browser,
+native, and CLI clients continue to use PKCE without a secret. Their refresh
+requests are identified by the refresh token itself;
 `client_id` is optional on `grant_type=refresh_token` and is not client
 authentication.
 

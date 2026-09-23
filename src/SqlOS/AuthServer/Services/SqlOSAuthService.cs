@@ -708,8 +708,14 @@ public sealed class SqlOSAuthService
         return result with { Organizations = organizations };
     }
 
+    /// <summary>
+    /// Rotates a public client's refresh token. A refresh token issued to a
+    /// confidential client is rejected with <see cref="SqlOSClientAuthenticationException"/>
+    /// before rotation; exchange it at the OAuth token endpoint with the client's
+    /// registered authentication method.
+    /// </summary>
     public async Task<SqlOSTokenResponse> RefreshAsync(SqlOSRefreshRequest request, CancellationToken cancellationToken = default)
-        => (await RefreshWithSessionScopeAsync(request, cancellationToken)).Tokens;
+        => (await RefreshWithSessionScopeAsync(request, clientAdmission: null, cancellationToken)).Tokens;
 
     /// <summary>
     /// Refreshes tokens and also returns the session's granted scope, captured while
@@ -720,6 +726,7 @@ public sealed class SqlOSAuthService
     /// </summary>
     internal async Task<(SqlOSTokenResponse Tokens, string? SessionScope)> RefreshWithSessionScopeAsync(
         SqlOSRefreshRequest request,
+        SqlOSRefreshClientAdmission? clientAdmission,
         CancellationToken cancellationToken = default)
     {
         var securitySettings = await _settingsService.GetResolvedSecuritySettingsAsync(cancellationToken);
@@ -738,6 +745,23 @@ public sealed class SqlOSAuthService
         {
             throw new InvalidOperationException("Refresh token was not issued for this client.");
         }
+
+        // Every refresh route converges here, so this is where a confidential
+        // client's token requires proof of that client's credentials. It runs
+        // before the grace-window branch and before any write: a rejected
+        // attempt neither rotates the token nor reads its cached successor.
+        if (!SqlOSClientAuthenticationService.IsAdmittedForRefresh(session.ClientApplication, clientAdmission))
+        {
+            await _adminService.RecordAuditAsync(
+                "oauth.client_authentication.failed",
+                "oauth_client",
+                session.ClientApplication?.ClientId,
+                sessionId: session.Id,
+                data: new { clientId = session.ClientApplication?.ClientId, grantType = "refresh_token" },
+                cancellationToken: cancellationToken);
+            throw new SqlOSClientAuthenticationException();
+        }
+
         if (refreshToken.RevokedAt != null || refreshToken.ExpiresAt <= DateTime.UtcNow)
         {
             throw new InvalidOperationException("Refresh token is no longer valid.");
