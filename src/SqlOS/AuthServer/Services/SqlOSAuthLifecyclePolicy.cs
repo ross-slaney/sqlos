@@ -2,12 +2,14 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Calendar.Models;
 
 namespace SqlOS.AuthServer.Services;
 
 internal static class SqlOSAuthLifecyclePolicy
 {
     internal const string DeniedEventType = "auth.lifecycle.denied";
+    internal const string CalendarConnectionRevokedEventType = "calendar.connection.disconnected";
     internal const string IssuerSessionPurpose = "auth_page_session";
     private static readonly string[] SessionIssuanceTemporaryTokenPurposes =
     [
@@ -68,6 +70,23 @@ internal static class SqlOSAuthLifecyclePolicy
             : SqlOSAuthLifecycleDecision.Denied("membership_inactive");
     }
 
+    /// <summary>
+    /// Lifecycle decision for an organization-owned artifact that has no user subject,
+    /// such as an organization calendar connection.
+    /// </summary>
+    internal static async Task<SqlOSAuthLifecycleDecision> EvaluateOrganizationAsync(
+        ISqlOSAuthServerDbContext context,
+        string organizationId,
+        CancellationToken cancellationToken = default)
+    {
+        var organizationIsActive = await context.Set<SqlOSOrganization>()
+            .AsNoTracking()
+            .AnyAsync(x => x.Id == organizationId && x.IsActive, cancellationToken);
+        return organizationIsActive
+            ? SqlOSAuthLifecycleDecision.Active
+            : SqlOSAuthLifecycleDecision.Denied("organization_inactive");
+    }
+
     internal static void AddDeniedAudit(
         ISqlOSAuthServerDbContext context,
         string auditId,
@@ -101,11 +120,17 @@ internal static class SqlOSAuthLifecyclePolicy
         string? organizationId,
         string reason,
         DateTime now,
+        SqlOSAuthLifecycleRevocationScope scope = SqlOSAuthLifecycleRevocationScope.SessionsAndTokens,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(userId) && string.IsNullOrWhiteSpace(organizationId))
         {
             throw new ArgumentException("A user or organization scope is required for lifecycle revocation.");
+        }
+
+        if (scope == SqlOSAuthLifecycleRevocationScope.Offboarding)
+        {
+            await RevokeCalendarConnectionsAsync(context, userId, organizationId, reason, now, cancellationToken);
         }
 
         var sessionsQuery = context.Set<SqlOSSession>()
@@ -278,6 +303,7 @@ internal static class SqlOSAuthLifecyclePolicy
                 organizationId: null,
                 reason: decision.Reason!,
                 now: now,
+                scope: SqlOSAuthLifecycleRevocationScope.Offboarding,
                 cancellationToken: cancellationToken);
         }
 
@@ -289,10 +315,82 @@ internal static class SqlOSAuthLifecyclePolicy
                 organizationId: organizationId,
                 reason: decision.Reason!,
                 now: now,
+                scope: SqlOSAuthLifecycleRevocationScope.Offboarding,
                 cancellationToken: cancellationToken);
         }
 
-        return RevokeAsync(context, userId, organizationId, decision.Reason ?? "lifecycle_invalid", now, cancellationToken);
+        return RevokeAsync(context, userId, organizationId, decision.Reason ?? "lifecycle_invalid", now, cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// Revokes every calendar connection owned by the user and/or organization scope and
+    /// destroys the stored provider credential material. The change is only staged on the
+    /// context so callers commit it together with the rest of the offboarding work; the
+    /// connection's <see cref="SqlOSCalendarConnection.RevokedAt"/> concurrency token makes a
+    /// racing refresh or sync fail closed instead of writing tokens back onto a revoked row.
+    /// Already-revoked connections are skipped, so retries are idempotent and audit once.
+    /// </summary>
+    internal static async Task<IReadOnlyList<SqlOSCalendarConnection>> RevokeCalendarConnectionsAsync(
+        ISqlOSAuthServerDbContext context,
+        string? userId,
+        string? organizationId,
+        string reason,
+        DateTime now,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(userId) && string.IsNullOrWhiteSpace(organizationId))
+        {
+            throw new ArgumentException("A user or organization scope is required for lifecycle revocation.");
+        }
+
+        var query = context.Set<SqlOSCalendarConnection>()
+            .Where(x => x.RevokedAt == null);
+        if (!string.IsNullOrWhiteSpace(userId))
+        {
+            query = query.Where(x => x.UserId == userId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(organizationId))
+        {
+            query = query.Where(x => x.OrganizationId == organizationId);
+        }
+
+        var connections = await query.ToListAsync(cancellationToken);
+        foreach (var connection in connections)
+        {
+            connection.Status = SqlOSCalendarConnectionStatus.Revoked;
+            connection.AccessTokenEncrypted = null;
+            connection.RefreshTokenEncrypted = null;
+            connection.AccessTokenExpiresAt = null;
+            connection.RevokedAt = now;
+            connection.RevokedReason = reason;
+            connection.UpdatedAt = now;
+
+            // Same event type and actor shape as an explicit dashboard/service disconnect so
+            // audit consumers see one stream; the reason tells offboarding apart.
+            var metadataJson = JsonSerializer.Serialize(new
+            {
+                reason,
+                provider = connection.ProviderType.ToString(),
+                lifecycle = true
+            });
+            context.Set<SqlOSAuditEvent>().Add(new SqlOSAuditEvent
+            {
+                Id = $"evt_{Guid.NewGuid():N}"[..28],
+                EventType = CalendarConnectionRevokedEventType,
+                Source = "authserver",
+                ActorType = "calendar_connection",
+                ActorId = connection.Id,
+                UserId = connection.UserId,
+                OrganizationId = connection.OrganizationId,
+                OccurredAt = now,
+                IngestedAt = now,
+                MetadataJson = metadataJson,
+                DataJson = metadataJson
+            });
+        }
+
+        return connections;
     }
 
     internal static async Task RevokeSessionAsync(
@@ -316,6 +414,18 @@ internal static class SqlOSAuthLifecyclePolicy
             refreshToken.ReplacementAccessTokenExpiresAt = null;
         }
     }
+}
+
+/// <summary>
+/// How far a lifecycle revocation reaches. <see cref="SessionsAndTokens"/> is the sign-out
+/// shape (logout-all, password reset): the person keeps their integrations and simply
+/// re-authenticates. <see cref="Offboarding"/> is the deactivation shape: stored integration
+/// credentials such as calendar connections are revoked as well and must be reconnected explicitly.
+/// </summary>
+internal enum SqlOSAuthLifecycleRevocationScope
+{
+    SessionsAndTokens = 0,
+    Offboarding = 1
 }
 
 internal sealed record SqlOSAuthLifecycleDecision(bool IsActive, string? Reason)

@@ -377,7 +377,9 @@ internal sealed class SqlOSScimService
             await DeprovisionUserAccessAsync(connection, user.Id, link.FgaSubjectId, cancellationToken);
             if (await IsScimManagedUserLifecycleAsync(user.Id, link.OwnsUserLifecycle, cancellationToken))
             {
+                var wasActive = user.IsActive;
                 await RefreshGlobalUserActivityAsync(user, connection.OrganizationId, now, cancellationToken);
+                await RevokeOffboardedUserIntegrationsAsync(user, wasActive, now, cancellationToken);
             }
             connection.LastSyncAt = now;
             await RecordSyncEventAsync(connection, "User", user.Id, link.ExternalId, "scim.user.deleted", "success", null, null, cancellationToken);
@@ -670,8 +672,10 @@ internal sealed class SqlOSScimService
         }
         if (lifecycleIsScimManaged)
         {
+            var wasActive = user.IsActive;
             user.IsActive = request.Active || hasOtherActiveMembership;
             user.UpdatedAt = now;
+            await RevokeOffboardedUserIntegrationsAsync(user, wasActive, now, cancellationToken);
         }
 
         await UpsertMembershipAsync(connection.OrganizationId, user.Id, request.Active, now, cancellationToken);
@@ -988,6 +992,29 @@ internal sealed class SqlOSScimService
         existing.IsPrimary = true;
         existing.IsVerified = true;
         existing.VerifiedAt ??= now;
+    }
+
+    /// <summary>
+    /// A SCIM deprovision that leaves the person without any active membership is a global
+    /// offboarding: user-owned integration credentials (calendar connections) are revoked
+    /// through the shared lifecycle policy in the same atomic write. Organization-scoped
+    /// deprovisioning alone does not touch them because a user connection is not bound to
+    /// one organization.
+    /// </summary>
+    private async Task RevokeOffboardedUserIntegrationsAsync(SqlOSUser user, bool wasActive, DateTime now, CancellationToken cancellationToken)
+    {
+        if (!wasActive || user.IsActive)
+        {
+            return;
+        }
+
+        await SqlOSAuthLifecyclePolicy.RevokeCalendarConnectionsAsync(
+            _context,
+            userId: user.Id,
+            organizationId: null,
+            reason: "scim_deprovisioned",
+            now: now,
+            cancellationToken: cancellationToken);
     }
 
     private async Task RefreshGlobalUserActivityAsync(SqlOSUser user, string currentOrganizationId, DateTime now, CancellationToken cancellationToken)

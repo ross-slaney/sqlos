@@ -32,6 +32,10 @@ public static class SqlOSCalendarModelConfiguration
             entity.Property(x => x.ProviderAccountSubject).HasMaxLength(256);
             entity.Property(x => x.LastError).HasMaxLength(1000);
             entity.Property(x => x.RevokedReason).HasMaxLength(160);
+            // Lifecycle revocation races with token refresh and scheduled sync. Treating
+            // RevokedAt as a concurrency token makes a stale writer fail instead of putting
+            // provider credentials back onto a row that offboarding already cleared.
+            entity.Property(x => x.RevokedAt).IsConcurrencyToken();
             entity.HasOne(x => x.User)
                 .WithMany()
                 .HasForeignKey(x => x.UserId)

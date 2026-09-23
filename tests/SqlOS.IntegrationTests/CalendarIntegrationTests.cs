@@ -164,6 +164,103 @@ public sealed class CalendarIntegrationTests
             .Should().Be(SqlOSCalendarConnectionStatus.Error);
     }
 
+    [TestMethod]
+    public async Task OrganizationDeactivation_RevokesConnectionsAtomically_AndRacingSyncFailsClosed()
+    {
+        await ResetCalendarStateAsync();
+        var services = CreateServices();
+        var organization = await services.Admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest(
+            $"Offboarding {Guid.NewGuid():N}", null));
+        var oidc = await CreateGoogleConnectionAsync(services.Admin);
+        var readPull = await services.Calendar.CompleteConnectAsync(
+            GooglePayload(oidc.Id, SqlOSCalendarIntegrationMode.ReadPull, organizationId: organization.Id),
+            "success:offboard-a@example.com");
+        var connectionOnly = await services.Calendar.CompleteConnectAsync(
+            GooglePayload(oidc.Id, SqlOSCalendarIntegrationMode.ConnectionOnly, organizationId: organization.Id),
+            "success:offboard-b@example.com");
+
+        // Phase 1 - race: a worker already tracks both live rows when the central lifecycle
+        // policy revokes them from another context (the organization row itself stays active
+        // so the execution-time recheck passes and the concurrency token is what stops the write).
+        var syncing = await services.Calendar.RequireConnectionAsync(
+            readPull.CalendarConnectionId, null, null, includeRevoked: false, CancellationToken.None);
+        var refreshing = await services.Calendar.RequireConnectionAsync(
+            connectionOnly.CalendarConnectionId, null, null, includeRevoked: false, CancellationToken.None);
+        await using (var offboarding = CreateIsolatedContext())
+        {
+            await SqlOSAuthLifecyclePolicy.RevokeAsync(
+                offboarding, userId: null, organizationId: organization.Id, "organization_deactivated", DateTime.UtcNow,
+                scope: SqlOSAuthLifecycleRevocationScope.Offboarding);
+            await offboarding.SaveChangesAsync();
+        }
+
+        var sync = await services.Sync.SyncConnectionAsync(readPull.CalendarConnectionId);
+        sync.Errors.Should().ContainSingle(x => x.Contains("disconnected"));
+        var refresh = () => services.Calendar.EnsureFreshAccessTokenAsync(refreshing, forceRefresh: true);
+        await refresh.Should().ThrowAsync<InvalidOperationException>().WithMessage("*disconnected*");
+        syncing.RevokedAt.Should().NotBeNull("the loser reloads the committed revocation");
+        refreshing.RefreshTokenEncrypted.Should().BeNull();
+
+        await using (var verify = CreateIsolatedContext())
+        {
+            foreach (var id in new[] { readPull.CalendarConnectionId, connectionOnly.CalendarConnectionId })
+            {
+                var stored = await verify.Set<SqlOSCalendarConnection>().AsNoTracking().SingleAsync(x => x.Id == id);
+                stored.Status.Should().Be(SqlOSCalendarConnectionStatus.Revoked);
+                stored.RevokedReason.Should().Be("organization_deactivated");
+                stored.AccessTokenEncrypted.Should().BeNull("a racing refresh must not put provider tokens back");
+                stored.RefreshTokenEncrypted.Should().BeNull();
+                stored.LastSyncAt.Should().BeNull();
+                (await verify.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == "calendar.connection.disconnected" && x.ActorId == id))
+                    .Should().Be(1);
+            }
+
+            // SaveChanges is one transaction on SQL Server: the sync-state and event rows staged
+            // alongside the conflicting connection update never reach the database.
+            (await verify.Set<SqlOSCalendarSyncState>().AnyAsync(x => x.CalendarConnectionId == readPull.CalendarConnectionId)).Should().BeFalse();
+            (await verify.Set<SqlOSCalendarEvent>().AnyAsync(x => x.CalendarConnectionId == readPull.CalendarConnectionId)).Should().BeFalse();
+        }
+
+        // Phase 2 - production path: deactivating the organization through its transaction and
+        // organization lock revokes a fresh connection, and reactivation does not revive it.
+        var third = await services.Calendar.CompleteConnectAsync(
+            GooglePayload(oidc.Id, SqlOSCalendarIntegrationMode.ConnectionOnly, organizationId: organization.Id),
+            "success:offboard-c@example.com");
+        await using (var admin = CreateIsolatedContext())
+        {
+            var authOptions = Options.Create(AspireFixture.Options);
+            var adminService = new SqlOSAdminService(admin, authOptions, new SqlOSCryptoService(admin, authOptions, AspireFixture.DataProtectionProvider));
+            await adminService.UpdateOrganizationAsync(
+                organization.Id,
+                new SqlOSUpdateOrganizationRequest(organization.Name, organization.Slug, IsActive: false));
+        }
+
+        var blocked = () => services.Calendar.GetAccessTokenAsync(third.CalendarConnectionId, forOrganizationId: organization.Id);
+        await blocked.Should().ThrowAsync<InvalidOperationException>().WithMessage("*disconnected*");
+        await using (var verify = CreateIsolatedContext())
+        {
+            var stored = await verify.Set<SqlOSCalendarConnection>().AsNoTracking().SingleAsync(x => x.Id == third.CalendarConnectionId);
+            stored.Status.Should().Be(SqlOSCalendarConnectionStatus.Revoked);
+            stored.RevokedReason.Should().Be("organization_deactivated");
+            stored.RefreshTokenEncrypted.Should().BeNull();
+            (await verify.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == "calendar.connection.disconnected" && x.ActorId == third.CalendarConnectionId))
+                .Should().Be(1);
+        }
+
+        await services.Admin.UpdateOrganizationAsync(
+            organization.Id,
+            new SqlOSUpdateOrganizationRequest(organization.Name, organization.Slug, IsActive: true));
+        (await services.Calendar.ListConnectionsAsync(organizationId: organization.Id)).Should().BeEmpty();
+        var reconnected = await services.Calendar.CompleteConnectAsync(
+            GooglePayload(oidc.Id, SqlOSCalendarIntegrationMode.ConnectionOnly, organizationId: organization.Id),
+            "success:offboard-d@example.com");
+        (await services.Calendar.GetAccessTokenAsync(reconnected.CalendarConnectionId, forOrganizationId: organization.Id))
+            .AccessToken.Should().NotBeNullOrEmpty();
+    }
+
+    private static TestSqlOSDbContext CreateIsolatedContext()
+        => new(new DbContextOptionsBuilder<TestSqlOSDbContext>().UseTestProvider(AspireFixture.SqlConnectionString).Options);
+
     private static CalendarConnectRequestPayload GooglePayload(
         string oidcConnectionId,
         SqlOSCalendarIntegrationMode mode,

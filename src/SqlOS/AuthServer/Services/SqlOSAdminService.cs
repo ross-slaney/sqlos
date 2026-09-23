@@ -700,6 +700,7 @@ public sealed partial class SqlOSAdminService
                 organizationId: organization.Id,
                 reason: "organization_deactivated",
                 now: now,
+                scope: SqlOSAuthLifecycleRevocationScope.Offboarding,
                 cancellationToken: cancellationToken);
         }
 

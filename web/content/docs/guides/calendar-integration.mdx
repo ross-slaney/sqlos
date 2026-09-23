@@ -155,6 +155,19 @@ options.Calendar.OnTwoWayConflictAsync = (conflict, ct) =>
         : SqlOSCalendarConflictDecision.PreferLocal);
 ```
 
+## Offboarding and revocation
+
+Calendar credentials follow the same lifecycle policy as sessions and tokens, so offboarding never depends on an operator remembering a separate disconnect:
+
+- **Organization deactivation** (`UpdateOrganizationAsync` with `IsActive = false`, or the dashboard) revokes every connection the organization owns in the same transaction that revokes its sessions.
+- **User deactivation** revokes the user's own connections. A SCIM deprovision that removes the person's last active membership does this eagerly; a user or organization flipped inactive directly in the database is caught the next time anything touches the connection.
+- **Execution-time recheck**: the token accessor, refresh, manual and scheduled sync, and event push re-evaluate the owner's lifecycle before using credentials. A deactivated owner's connection is revoked at that point and the call fails with "disconnected"; the scheduler never picks it up again.
+- **Fail closed**: revocation clears the stored access and refresh tokens locally and does not wait on the provider. `RevokedAt` is a concurrency token, so a refresh or sync that was already in flight cannot write provider tokens or pulled events back onto a revoked connection.
+- **Reactivation** of a user or organization does not revive old credentials. The revoked connection stays revoked (visible with `includeRevoked`), and the person must reconnect explicitly, which records a new `calendar.connection.created` audit event. Connect flows are refused while the owner is inactive.
+- **Audit**: each revoked connection records `calendar.connection.disconnected` with the lifecycle reason (`organization_deactivated`, `user_inactive`, `organization_inactive`, or `scim_deprovisioned`). No token material is included.
+
+Sign-out shaped revocation (`LogoutAllAsync`, password reset, membership removal from one organization) revokes sessions only and leaves calendar connections in place.
+
 ## Verify
 
 - **Dashboard**: `/sqlos/admin/calendar/connections` shows connection status, last sync, per-calendar cursors, and errors, with force sync/refresh/disconnect actions.

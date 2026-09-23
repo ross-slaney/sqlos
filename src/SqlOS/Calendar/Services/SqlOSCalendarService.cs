@@ -92,6 +92,8 @@ public sealed class SqlOSCalendarService
                 ?? throw new InvalidOperationException("The calendar connection organization was not found.");
         }
 
+        await RequireActiveOwnerAsync(request.UserId, request.OrganizationId, cancellationToken);
+
         var oidcConnection = await RequireCalendarCapableOidcConnectionAsync(request.OidcConnectionId, cancellationToken);
         var providerType = MapProviderType(oidcConnection.ProviderType);
         var endpoints = await ResolveProviderEndpointsAsync(oidcConnection, cancellationToken);
@@ -236,6 +238,10 @@ public sealed class SqlOSCalendarService
 
         try
         {
+            // Offboarding can complete while the consent screen is open; never persist
+            // provider credentials for an owner who is no longer active.
+            await RequireActiveOwnerAsync(payload.UserId, payload.OrganizationId, cancellationToken);
+
             var providerContext = CreateProviderContext(oidcConnection, payload.TokenEndpoint);
             var tokens = await adapter.ExchangeAuthorizationCodeAsync(
                 providerContext,
@@ -489,10 +495,14 @@ public sealed class SqlOSCalendarService
             connection.RevokedAt = now;
             connection.RevokedReason = reason;
             connection.UpdatedAt = now;
-            await _context.SaveChangesAsync(cancellationToken);
+            if (!await TrySaveConnectionAsync(connection, cancellationToken))
+            {
+                // A lifecycle revocation committed first and already audited; nothing to add.
+                return ToSummary(connection);
+            }
 
             await _adminService.RecordAuditAsync(
-                "calendar.connection.disconnected",
+                SqlOSAuthLifecyclePolicy.CalendarConnectionRevokedEventType,
                 "calendar_connection",
                 connection.Id,
                 userId: connection.UserId,
@@ -537,6 +547,7 @@ public sealed class SqlOSCalendarService
         var endpoints = await ResolveProviderEndpointsAsync(oidcConnection, cancellationToken);
         var adapter = RequireAdapter(connection.ProviderType);
 
+        string? accessToken;
         try
         {
             var tokens = await adapter.RefreshAccessTokenAsync(
@@ -557,8 +568,11 @@ public sealed class SqlOSCalendarService
             connection.LastError = null;
             connection.LastErrorAt = null;
             connection.UpdatedAt = now;
-            await _context.SaveChangesAsync(cancellationToken);
-            return tokens.AccessToken;
+            // If offboarding revoked the connection while the provider call was in flight, the
+            // save loses the concurrency race and the fresh tokens are dropped, not returned.
+            accessToken = await TrySaveConnectionAsync(connection, cancellationToken)
+                ? tokens.AccessToken
+                : null;
         }
         catch (InvalidOperationException ex)
         {
@@ -567,7 +581,10 @@ public sealed class SqlOSCalendarService
             connection.LastError = ex.Message;
             connection.LastErrorAt = now;
             connection.UpdatedAt = now;
-            await _context.SaveChangesAsync(cancellationToken);
+            if (!await TrySaveConnectionAsync(connection, cancellationToken))
+            {
+                throw new InvalidOperationException("This calendar connection has been disconnected.", ex);
+            }
 
             await _adminService.RecordAuditAsync(
                 "calendar.connection.refresh_failed",
@@ -579,6 +596,9 @@ public sealed class SqlOSCalendarService
                 cancellationToken: cancellationToken);
             throw;
         }
+
+        return accessToken
+            ?? throw new InvalidOperationException("This calendar connection has been disconnected.");
     }
 
     /// <summary>Force-refreshes the access token (admin surface).</summary>
@@ -698,7 +718,107 @@ public sealed class SqlOSCalendarService
             throw new InvalidOperationException("This calendar connection has been disconnected.");
         }
 
+        if (!includeRevoked)
+        {
+            // Every credential-bearing path (token accessor, refresh, scheduled and manual sync,
+            // event push) re-evaluates the owner's lifecycle at execution time, so a user or
+            // organization deactivated directly in the database is revoked here, fail closed,
+            // instead of continuing to synchronize until someone remembers to disconnect it.
+            var decision = await EvaluateOwnerAsync(connection.UserId, connection.OrganizationId, cancellationToken);
+            if (!decision.IsActive)
+            {
+                await SqlOSAuthLifecyclePolicy.RevokeCalendarConnectionsAsync(
+                    _context,
+                    connection.UserId,
+                    connection.OrganizationId,
+                    decision.Reason!,
+                    DateTime.UtcNow,
+                    cancellationToken);
+                await TrySaveConnectionAsync(connection, cancellationToken);
+                if (connection.RevokedAt == null && _context is DbContext dbContext)
+                {
+                    // Identity resolution can hand back a tracked instance that predates a
+                    // revocation already committed elsewhere; align it with the database.
+                    await dbContext.Entry(connection).ReloadAsync(cancellationToken);
+                }
+
+                throw new InvalidOperationException("This calendar connection has been disconnected.");
+            }
+        }
+
         return connection;
+    }
+
+    private Task<SqlOSAuthLifecycleDecision> EvaluateOwnerAsync(string? userId, string? organizationId, CancellationToken cancellationToken)
+        => !string.IsNullOrWhiteSpace(userId)
+            ? SqlOSAuthLifecyclePolicy.EvaluateAsync(_context, userId, organizationId: null, cancellationToken)
+            : SqlOSAuthLifecyclePolicy.EvaluateOrganizationAsync(_context, organizationId!, cancellationToken);
+
+    private async Task RequireActiveOwnerAsync(string? userId, string? organizationId, CancellationToken cancellationToken)
+    {
+        var decision = await EvaluateOwnerAsync(userId, organizationId, cancellationToken);
+        if (!decision.IsActive)
+        {
+            throw new InvalidOperationException("The calendar connection owner is not active.");
+        }
+    }
+
+    /// <summary>
+    /// Saves staged changes for <paramref name="connection"/>. <see cref="SqlOSCalendarConnection.RevokedAt"/>
+    /// is the row's only concurrency token, so a conflict means a lifecycle revocation committed
+    /// underneath this writer. The winner's state is reloaded, pending work for connections that
+    /// turned out to be revoked is discarded (their revocation was already audited by the winner),
+    /// and the remaining changes are saved. Returns <c>false</c> when <paramref name="connection"/>
+    /// itself was revoked elsewhere so the caller fails closed.
+    /// </summary>
+    internal async Task<bool> TrySaveConnectionAsync(SqlOSCalendarConnection connection, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateConcurrencyException exception)
+        {
+            var revokedElsewhere = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var entry in exception.Entries)
+            {
+                await entry.ReloadAsync(cancellationToken);
+                if (entry.Entity is SqlOSCalendarConnection conflicting && conflicting.RevokedAt != null)
+                {
+                    revokedElsewhere.Add(conflicting.Id);
+                }
+            }
+
+            if (revokedElsewhere.Count != exception.Entries.Count)
+            {
+                throw;
+            }
+
+            if (_context is DbContext dbContext)
+            {
+                foreach (var entry in dbContext.ChangeTracker.Entries().Where(x => x.State != EntityState.Unchanged).ToList())
+                {
+                    var discard = entry.Entity switch
+                    {
+                        SqlOSAuditEvent audit => entry.State == EntityState.Added
+                            && audit.EventType == SqlOSAuthLifecyclePolicy.CalendarConnectionRevokedEventType
+                            && audit.ActorId != null
+                            && revokedElsewhere.Contains(audit.ActorId),
+                        SqlOSCalendarEvent calendarEvent => revokedElsewhere.Contains(calendarEvent.CalendarConnectionId),
+                        SqlOSCalendarSyncState syncState => revokedElsewhere.Contains(syncState.CalendarConnectionId),
+                        _ => false
+                    };
+                    if (discard)
+                    {
+                        entry.State = EntityState.Detached;
+                    }
+                }
+            }
+
+            await _context.SaveChangesAsync(cancellationToken);
+            return !revokedElsewhere.Contains(connection.Id);
+        }
     }
 
     internal async Task<SqlOSProviderEndpoints> ResolveProviderEndpointsAsync(

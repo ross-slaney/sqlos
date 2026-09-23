@@ -132,7 +132,7 @@ Revoke all sessions for a user:
 await authService.LogoutAllAsync(userId, ct);
 ```
 
-`GET /sqlos/auth/logout` ends one logical issuer session, including superseded cookies from renewal. `LogoutAllAsync` invalidates every issuer session for the user as well as OAuth sessions and refresh-token families. A successful password reset does the same. Organization deactivation invalidates organization-bound OAuth and issuer sessions, and the SSO portal's organization-session revocation action invalidates matching-domain issuer sessions along with OAuth sessions. Already-issued issuer session cookies that predate session families are consumed when that schema is applied.
+`GET /sqlos/auth/logout` ends one logical issuer session, including superseded cookies from renewal. `LogoutAllAsync` invalidates every issuer session for the user as well as OAuth sessions and refresh-token families. A successful password reset does the same. Organization deactivation invalidates organization-bound OAuth and issuer sessions and revokes organization-owned calendar connections, and the SSO portal's organization-session revocation action invalidates matching-domain issuer sessions along with OAuth sessions. Logout-all and password reset are sign-out operations: they leave [calendar connections](/docs/guides/calendar-integration#offboarding-and-revocation) in place, whereas user or organization deactivation revokes them. Already-issued issuer session cookies that predate session families are consumed when that schema is applied.
 
 ### Platform-admin revocation
 
