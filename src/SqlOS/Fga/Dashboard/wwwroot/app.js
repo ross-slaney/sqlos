@@ -73,7 +73,7 @@
         const response = await fetch(`${basePath}/api/${endpoint}`, {
             method: 'POST',
             credentials: 'same-origin',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-SqlOS-Request': '1' },
             body: JSON.stringify(body)
         });
         if (response.status === 401) {
@@ -85,7 +85,8 @@
     const apiDelete = async (endpoint) => {
         const response = await fetch(`${basePath}/api/${endpoint}`, {
             method: 'DELETE',
-            credentials: 'same-origin'
+            credentials: 'same-origin',
+            headers: { 'X-SqlOS-Request': '1' }
         });
         if (response.status === 401) {
             redirectToLogin();
@@ -1316,7 +1317,8 @@
         try {
             const trace = await fetch(`${basePath}/api/trace`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'X-SqlOS-Request': '1' },
                 body: JSON.stringify({ subjectId, permissionKey, resourceId })
             }).then(r => r.json());
 

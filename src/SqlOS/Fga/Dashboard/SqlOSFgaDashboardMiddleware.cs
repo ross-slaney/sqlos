@@ -132,6 +132,11 @@ public class SqlOSFgaDashboardMiddleware
 
     private async Task HandleApiRequest(HttpContext context, string endpoint)
     {
+        if (await SqlOSCookieMutationCsrf.RejectIfRequiredAsync(context))
+        {
+            return;
+        }
+
         context.Response.ContentType = "application/json";
         try
         {

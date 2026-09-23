@@ -21,6 +21,7 @@ using SqlOS.AuthServer.Services;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Dashboard;
 using SqlOS.Extensions;
+using SqlOS.Security;
 using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.Tests;
@@ -216,6 +217,7 @@ public sealed class SqlOSAdminAuthorizationMetadataTests
         using (var hostedSignOut = new HttpRequestMessage(HttpMethod.Post, $"{PortalApiPrefix}/signout"))
         {
             hostedSignOut.Headers.TryAddWithoutValidation("Cookie", hostedCookie);
+            AddSameOriginCsrf(hostedSignOut);
             var response = await client.SendAsync(hostedSignOut);
             response.StatusCode.Should().Be(HttpStatusCode.NoContent);
             AssertClearedPortalCookie(response);
@@ -224,6 +226,7 @@ public sealed class SqlOSAdminAuthorizationMetadataTests
         using (var headlessSignOut = new HttpRequestMessage(HttpMethod.Post, $"{PortalApiPrefix}/setup/signout"))
         {
             headlessSignOut.Headers.TryAddWithoutValidation("Cookie", headlessCookie);
+            AddSameOriginCsrf(headlessSignOut);
             var response = await client.SendAsync(headlessSignOut);
             response.StatusCode.Should().Be(HttpStatusCode.OK);
             var body = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -234,6 +237,7 @@ public sealed class SqlOSAdminAuthorizationMetadataTests
         using (var replay = new HttpRequestMessage(HttpMethod.Put, $"{PortalApiPrefix}/provider"))
         {
             replay.Headers.TryAddWithoutValidation("Cookie", hostedCookie);
+            AddSameOriginCsrf(replay);
             replay.Content = JsonContent.Create(new SqlOSUpdateSsoPortalProviderRequest("google-workspace"));
             var response = await client.SendAsync(replay);
             response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
@@ -249,6 +253,7 @@ public sealed class SqlOSAdminAuthorizationMetadataTests
         using (var repeat = new HttpRequestMessage(HttpMethod.Post, $"{PortalApiPrefix}/signout"))
         {
             repeat.Headers.TryAddWithoutValidation("Cookie", hostedCookie);
+            AddSameOriginCsrf(repeat);
             var response = await client.SendAsync(repeat);
             response.StatusCode.Should().Be(HttpStatusCode.NoContent);
             AssertClearedPortalCookie(response);
@@ -269,6 +274,12 @@ public sealed class SqlOSAdminAuthorizationMetadataTests
             .Select(audit => audit.MetadataJson)
             .ToListAsync();
         metadata.Should().OnlyContain(json => json != null && !json.Contains("SessionTokenHash", StringComparison.Ordinal));
+    }
+
+    private static void AddSameOriginCsrf(HttpRequestMessage request)
+    {
+        request.Headers.TryAddWithoutValidation(SqlOSCookieMutationCsrf.HeaderName, SqlOSCookieMutationCsrf.HeaderValue);
+        request.Headers.TryAddWithoutValidation("Origin", "https://localhost");
     }
 
     private static async Task<string> OpenCookieAsync(SqlOSSsoPortalService portal, string setupUrl)

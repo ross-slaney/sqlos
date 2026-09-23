@@ -93,7 +93,9 @@ var app = builder.Build();
 
 Use your platform's known proxy or network configuration instead of copying an “accept all proxies” snippet. Trusting arbitrary `X-Forwarded-*` headers lets a caller influence host, scheme, client IP, and any policy built on them.
 
-`AddSqlOS` installs a startup filter that runs the configured Forwarded Headers middleware before its dashboard middleware. That ordering makes dashboard login throttling and audit events use the trusted external client IP. Configure `ForwardedHeadersOptions` before building the app; you do not need a second `UseForwardedHeaders()` call solely for SqlOS.
+`AddSqlOS` installs a startup filter that runs the configured Forwarded Headers middleware before its dashboard middleware. That ordering makes dashboard login throttling, audit events, and cookie CSRF origin checks use the trusted external scheme and host. Configure `ForwardedHeadersOptions` before building the app; you do not need a second `UseForwardedHeaders()` call solely for SqlOS.
+
+Cookie-authenticated dashboard and SSO-portal mutations fail closed unless the browser `Origin` (or `Referer` when `Origin` is absent) matches the configured public origin or that trusted forwarded host. An untrusted `X-Forwarded-Host` does not make an attacker origin valid. Same-origin dashboard and portal pages send `X-SqlOS-Request: 1` with the mutation; programmatic clients that do not present the dashboard or portal session cookie do not need that header.
 
 Dashboard password failures and dynamic client registrations use the existing SqlOS database for shared rate-limit buckets. Multiple application instances therefore enforce one per-client and global state without Redis, a cloud rate-limiting service, or another production dependency. The schema is created automatically with the other SqlOS tables and stale buckets are deleted in bounded batches. Directly constructing the limiter classes outside dependency injection uses a bounded in-memory fallback intended for isolated tests and custom hosts, not multi-instance production.
 

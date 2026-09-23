@@ -31,6 +31,7 @@ public static partial class EndpointRouteBuilderExtensions
         RouteGroupBuilder portal,
         RouteGroupBuilder setupApi)
     {
+        setupApi.RequireSqlOSCookieMutationCsrf();
         setupApi.AddEndpointFilter<SqlOSSsoPortalSessionAvailabilityFilter>();
 
         adminApi.MapGet("/organizations/{organizationId}/sso-portal/sessions", async (HttpContext context, string organizationId, string? cursor, int? pageSize, int? page, SqlOSSsoPortalService portalService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
@@ -126,6 +127,7 @@ public static partial class EndpointRouteBuilderExtensions
             : Results.NotFound());
 
         var api = portal.MapGroup("/api");
+        api.RequireSqlOSCookieMutationCsrf();
         api.AddEndpointFilter<SqlOSSsoPortalSessionAvailabilityFilter>();
 
         api.MapGet("/state", async (HttpContext context, SqlOSSsoPortalService portalService, CancellationToken cancellationToken) =>

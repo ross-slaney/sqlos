@@ -98,6 +98,35 @@ public sealed class SqlOSFgaDashboardSchemaWriteTests
         (await harness.GrantExistsAsync(grantId!)).Should().BeFalse();
     }
 
+    [TestMethod]
+    public async Task GrantCreate_WithDashboardCookieAndHostileOrigin_DoesNotPersist()
+    {
+        await using var harness = await FgaDashboardHarness.CreateAsync();
+        const string cookie = "SqlOS.Dashboard.Session=ambient-dashboard-session";
+
+        var rejected = await harness.SendAsync(
+            HttpMethods.Post,
+            "/sqlos/admin/fga/api/grants",
+            """{"subjectId":"user-1","roleId":"admin","resourceId":"root"}""",
+            cookie,
+            "https://evil.example.test",
+            csrfHeader: true);
+        rejected.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        rejected.Body.Should().Contain("csrf_rejected");
+        rejected.Body.Should().NotContain("ambient-dashboard-session");
+        (await harness.CountGrantsAsync()).Should().Be(0);
+
+        var allowed = await harness.SendAsync(
+            HttpMethods.Post,
+            "/sqlos/admin/fga/api/grants",
+            """{"subjectId":"user-1","roleId":"admin","resourceId":"root"}""",
+            cookie,
+            "https://localhost",
+            csrfHeader: true);
+        allowed.StatusCode.Should().Be(StatusCodes.Status201Created);
+        (await harness.CountGrantsAsync()).Should().Be(1);
+    }
+
     private static async Task AssertSchemaWriteRejectedAsync(FgaDashboardResponse response)
     {
         response.StatusCode.Should().Be(StatusCodes.Status405MethodNotAllowed);
@@ -169,15 +198,36 @@ public sealed class SqlOSFgaDashboardSchemaWriteTests
             return new FgaDashboardHarness(provider, middleware);
         }
 
-        public async Task<FgaDashboardResponse> SendAsync(string method, string path, string? body = null)
+        public async Task<FgaDashboardResponse> SendAsync(
+            string method,
+            string path,
+            string? body = null,
+            string? cookie = null,
+            string? origin = null,
+            bool csrfHeader = false)
         {
             await using var scope = _services.CreateAsyncScope();
             var context = new DefaultHttpContext { RequestServices = scope.ServiceProvider };
             context.Request.Method = method;
             context.Request.Path = path;
             context.Request.Scheme = Uri.UriSchemeHttps;
+            context.Request.Host = new HostString("localhost");
             context.Connection.RemoteIpAddress = IPAddress.Parse("203.0.113.80");
             context.Response.Body = new MemoryStream();
+            if (cookie != null)
+            {
+                context.Request.Headers.Cookie = cookie;
+            }
+
+            if (origin != null)
+            {
+                context.Request.Headers.Origin = origin;
+            }
+
+            if (csrfHeader)
+            {
+                context.Request.Headers["X-SqlOS-Request"] = "1";
+            }
 
             if (body != null)
             {
@@ -230,6 +280,13 @@ public sealed class SqlOSFgaDashboardSchemaWriteTests
             await using var scope = _services.CreateAsyncScope();
             var context = scope.ServiceProvider.GetRequiredService<TestSqlOSInMemoryDbContext>();
             return await context.Set<SqlOSFgaGrant>().AnyAsync(x => x.Id == grantId);
+        }
+
+        public async Task<int> CountGrantsAsync()
+        {
+            await using var scope = _services.CreateAsyncScope();
+            var context = scope.ServiceProvider.GetRequiredService<TestSqlOSInMemoryDbContext>();
+            return await context.Set<SqlOSFgaGrant>().CountAsync();
         }
 
         public async ValueTask DisposeAsync()

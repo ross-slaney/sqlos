@@ -6,6 +6,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.Configuration;
+using SqlOS.Security;
 
 namespace SqlOS.Dashboard;
 
@@ -25,7 +26,15 @@ internal static class SqlOSAdminAuthorizationRouteGroupExtensions
     public static RouteGroupBuilder RequireSqlOSAdminAuthorization(this RouteGroupBuilder group)
     {
         group.WithMetadata(SqlOSAdminRequiredMetadata.Instance);
+        group.RequireSqlOSCookieMutationCsrf();
         group.AddEndpointFilter<SqlOSAdminAuthorizationFilter>();
+        return group;
+    }
+
+    public static RouteGroupBuilder RequireSqlOSCookieMutationCsrf(this RouteGroupBuilder group)
+    {
+        group.WithMetadata(SqlOSCookieMutationCsrfMetadata.Instance);
+        group.AddEndpointFilter<SqlOSCookieMutationCsrfFilter>();
         return group;
     }
 

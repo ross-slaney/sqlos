@@ -201,6 +201,8 @@ For local development, `dotnet user-secrets set "SqlOS:Dashboard:Password" "..."
 
 Treat `/sqlos` and `/sqlos/admin` as administrative endpoints — restrict network access in production.
 
+Password-mode dashboard mutations and SSO-portal mutations that present their session cookie also require a same-origin browser proof: the `X-SqlOS-Request: 1` header plus an `Origin` or `Referer` that matches `AuthServer.PublicOrigin`, the issuer origin, or the request host after trusted forwarded headers. The hosted dashboard and SSO setup portal send that header themselves and do not store it in browser storage. A missing, conflicting, or cross-origin value is rejected before the mutation or its success audit is committed. Calls that authenticate with a bearer token or `Dashboard.AuthorizationCallback` and do not send either session cookie are unchanged.
+
 ## Hosted UI security headers
 
 Hosted auth and dashboard HTML use a restrictive nonce-based Content Security Policy and deny framing automatically. No setting is required for the built-in UI. If a reviewed customization loads scripts, styles, images, or fonts from another origin, set `options.BrowserSecurity.ContentSecurityPolicy` and keep the required `{nonce}` placeholder. `frame-ancestors 'none'` is always enforced and cannot be overridden. See [Production Readiness](/docs/guides/production-readiness#keep-the-hosted-ui-browser-boundary-intact) for the default headers and a customization example.
