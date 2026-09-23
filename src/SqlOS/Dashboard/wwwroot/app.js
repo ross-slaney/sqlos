@@ -389,7 +389,8 @@
             credentials: "same-origin",
             headers: {
                 "Content-Type": "application/json",
-                ...(requestOptions.headers || {})
+                ...(requestOptions.headers || {}),
+                "X-SqlOS-Request": "1"
             }
         }).then(async response => {
             if (response.status === 401 && !skipUnauthorizedRedirect) {

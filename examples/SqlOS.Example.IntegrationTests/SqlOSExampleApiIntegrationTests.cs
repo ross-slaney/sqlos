@@ -1062,7 +1062,10 @@ public sealed class SqlOSExampleApiIntegrationTests
         var emailTemplatesResponse = await client.GetAsync("/sqlos/admin/email/api/templates");
         emailTemplatesResponse.EnsureSuccessStatusCode();
 
-        var logoutResponse = await client.PostAsync("/sqlos/dashboard-auth/logout", null);
+        using var logoutRequest = new HttpRequestMessage(HttpMethod.Post, "/sqlos/dashboard-auth/logout");
+        logoutRequest.Headers.TryAddWithoutValidation("Origin", client.BaseAddress!.GetLeftPart(UriPartial.Authority));
+        logoutRequest.Headers.TryAddWithoutValidation("X-SqlOS-Request", "1");
+        var logoutResponse = await client.SendAsync(logoutRequest);
         logoutResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.NoContent);
 
         var authStatsAfterLogout = await client.GetAsync("/sqlos/admin/auth/api/stats");
@@ -1404,6 +1407,8 @@ public sealed class SqlOSExampleApiIntegrationTests
             Content = JsonContent.Create(body)
         };
         request.Headers.Add("Cookie", cookie);
+        request.Headers.TryAddWithoutValidation("Origin", ExampleApiFixture.Client.BaseAddress!.GetLeftPart(UriPartial.Authority));
+        request.Headers.TryAddWithoutValidation("X-SqlOS-Request", "1");
         return await ExampleApiFixture.Client.SendAsync(request);
     }
 

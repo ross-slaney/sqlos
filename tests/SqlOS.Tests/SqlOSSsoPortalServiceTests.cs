@@ -839,6 +839,9 @@ public sealed class SqlOSSsoPortalServiceTests
         html.Should().Contain("Run test");
         html.Should().Contain("Open IdP test redirect");
         html.Should().Contain("await request(\"/signout\", { method: \"POST\", body: \"{}\" });");
+        html.Should().Contain("\"X-SqlOS-Request\": \"1\"");
+        html.Should().NotContain("localStorage");
+        html.Should().NotContain("sessionStorage");
     }
 
     [TestMethod]

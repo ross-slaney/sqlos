@@ -160,6 +160,11 @@ public sealed class SqlOSDashboardMiddleware
         if (endpoint.Equals("logout", StringComparison.OrdinalIgnoreCase)
             && HttpMethods.IsPost(context.Request.Method))
         {
+            if (await SqlOSCookieMutationCsrf.RejectIfRequiredAsync(context))
+            {
+                return;
+            }
+
             var clientIp = GetClientIpAddress(context);
             _sessionService.ClearSession(context, _pathPrefix);
             await RecordDashboardAuditAsync(

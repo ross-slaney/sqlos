@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using SqlOS.Configuration;
+using SqlOS.Security;
 
 namespace SqlOS.Dashboard;
 
@@ -19,7 +20,7 @@ namespace SqlOS.Dashboard;
 /// </remarks>
 public sealed class SqlOSDashboardSessionService
 {
-    private const string SessionCookieName = "SqlOS.Dashboard.Session";
+    private const string SessionCookieName = SqlOSCookieMutationCsrf.DashboardSessionCookieName;
     private const string SessionProtectorPurpose = "SqlOS.Dashboard.Session.v2";
     private readonly IDataProtectionProvider _dataProtectionProvider;
 

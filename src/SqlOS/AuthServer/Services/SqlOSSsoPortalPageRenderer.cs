@@ -214,8 +214,8 @@ public static class SqlOSSsoPortalPageRenderer
                 async function request(path, init) {
                     const response = await fetch(`${api}${path}`, {
                         credentials: "same-origin",
-                        headers: { "content-type": "application/json", ...(init?.headers || {}) },
-                        ...init
+                        ...init,
+                        headers: { "content-type": "application/json", ...(init?.headers || {}), "X-SqlOS-Request": "1" }
                     });
                     if (response.status === 401) {
                         $("app").classList.add("hidden");
