@@ -43,11 +43,21 @@ public sealed class SqlOSClientAuthenticationService
     /// (<c>token_endpoint_auth_method=none</c>) therefore do not authenticate
     /// at this gate: <c>client_id</c> is optional and, when sent, is only a
     /// consistency check in <see cref="SqlOSAuthService.RefreshAsync"/>.
-    /// Confidential clients still must present <c>client_secret_basic</c>.
-    /// Presenting a secret or Authorization header always uses the same
-    /// authentication path as authorization-code exchange.
+    /// Confidential clients still must authenticate with their registered
+    /// method. Presenting a secret or Authorization header always uses the
+    /// same authentication path as authorization-code exchange.
     /// </remarks>
     public async Task<string?> AuthenticateRefreshGrantClientAsync(
+        IFormCollection form,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+        => (await AdmitRefreshGrantClientAsync(form, httpContext, cancellationToken)).ClientId;
+
+    /// <summary>
+    /// Admits the client for a refresh-token grant and returns the admission
+    /// that refresh rotation requires for confidential-client tokens.
+    /// </summary>
+    internal async Task<SqlOSRefreshClientAdmission> AdmitRefreshGrantClientAsync(
         IFormCollection form,
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
@@ -69,12 +79,34 @@ public sealed class SqlOSClientAuthenticationService
                 throw new SqlOSClientAuthenticationException();
             }
 
-            return FirstNonEmpty(presented.BodyClientId, presented.BasicClientId);
+            return new SqlOSRefreshClientAdmission(
+                FirstNonEmpty(presented.BodyClientId, presented.BasicClientId),
+                AuthenticatedClientApplicationId: null);
         }
 
         var authenticated = await AuthenticateTokenEndpointClientAsync(form, httpContext, cancellationToken);
-        return authenticated.ClientId;
+        return new SqlOSRefreshClientAdmission(authenticated.ClientId, authenticated.Id);
     }
+
+    /// <summary>
+    /// The refresh invariant shared by every route that can rotate a grant: a
+    /// refresh token bound to a confidential client is exchangeable only with an
+    /// admission that authenticated that same client. Public clients
+    /// (<c>token_endpoint_auth_method=none</c>) hold no secret, so the refresh
+    /// token alone is their proof.
+    /// </summary>
+    internal static bool IsAdmittedForRefresh(
+        SqlOSClientApplication? boundClient,
+        SqlOSRefreshClientAdmission? admission)
+        => boundClient != null
+            && (!RequiresClientAuthentication(boundClient)
+                || string.Equals(
+                    admission?.AuthenticatedClientApplicationId,
+                    boundClient.Id,
+                    StringComparison.Ordinal));
+
+    private static bool RequiresClientAuthentication(SqlOSClientApplication client)
+        => !string.Equals(client.TokenEndpointAuthMethod, "none", StringComparison.Ordinal);
 
     public async Task<SqlOSClientApplication> AuthenticateTokenEndpointClientAsync(
         IFormCollection form,
@@ -374,7 +406,7 @@ public sealed class SqlOSClientAuthenticationService
         => client != null
             && client.IsActive
             && client.DisabledAt == null
-            && string.Equals(client.TokenEndpointAuthMethod, "none", StringComparison.Ordinal);
+            && !RequiresClientAuthentication(client);
 
     private static string? FirstNonEmpty(params string?[] values)
     {
@@ -506,6 +538,20 @@ public sealed record SqlOSClientCredentialCreated(
 public sealed record SqlOSCreateClientCredentialRequest(
     string? DisplayName = null,
     DateTime? ExpiresAt = null);
+
+/// <summary>
+/// Result of refresh-grant client admission. Only
+/// <see cref="SqlOSClientAuthenticationService"/> creates one, and
+/// <see cref="SqlOSClientAuthenticationService.IsAdmittedForRefresh"/> checks it.
+/// </summary>
+/// <param name="ClientId">The client identifier forwarded as the refresh consistency check.</param>
+/// <param name="AuthenticatedClientApplicationId">
+/// The <see cref="SqlOSClientApplication.Id"/> whose credentials were verified, or
+/// <see langword="null"/> when a public client was admitted without authentication.
+/// </param>
+internal sealed record SqlOSRefreshClientAdmission(
+    string? ClientId,
+    string? AuthenticatedClientApplicationId);
 
 public sealed class SqlOSClientAuthenticationException : Exception
 {

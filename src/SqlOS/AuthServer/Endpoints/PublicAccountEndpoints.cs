@@ -96,8 +96,22 @@ public static partial class EndpointRouteBuilderExtensions
             }
         });
 
+        // Public-client compatibility route. It carries no client credentials, so a
+        // confidential client's refresh token is rejected before rotation and must
+        // be exchanged at POST /token with the client's registered auth method.
         auth.MapPost("/token/refresh", async (SqlOSRefreshRequest request, SqlOSAuthService authService, CancellationToken cancellationToken) =>
-            Results.Ok(await authService.RefreshAsync(request, cancellationToken)));
+        {
+            try
+            {
+                return Results.Ok(await authService.RefreshAsync(request, cancellationToken));
+            }
+            catch (SqlOSClientAuthenticationException ex)
+            {
+                return Results.Json(
+                    new { error = ex.Error, error_description = ex.Message },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+        });
 
         auth.MapPost("/logout", async (HttpContext context, SqlOSAuthService authService, CancellationToken cancellationToken) =>
         {

@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using FluentAssertions;
@@ -11,6 +12,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Extensions;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
@@ -302,6 +304,199 @@ public sealed class SqlOSConfidentialClientAuthenticationEndpointTests
         (await harness.IsAuthorizationCodeConsumedAsync(code)).Should().BeFalse();
     }
 
+    [TestMethod]
+    public async Task OAuthRefresh_RejectsWrongExpiredAndRevokedCredentialsWithoutIssuingArtifacts()
+    {
+        await using var harness = await Harness.StartAsync();
+        const string ExpiredSecretA = "confidential-a-expired-secret-with-at-least-256-bits-321";
+        await harness.AddClientCredentialAsync(ConfidentialA, RotatedSecretA);
+        await harness.AddClientCredentialAsync(ConfidentialA, ExpiredSecretA, DateTime.UtcNow.AddMinutes(-1));
+        var refreshToken = await harness.CreateRefreshTokenAsync(ConfidentialA);
+        var before = await harness.CountIssuedArtifactsAsync();
+
+        var wrong = await harness.PostTokenAsync(
+            RefreshForm(refreshToken, ConfidentialA),
+            ConfidentialA,
+            "wrong-secret-with-at-least-forty-three-characters-123456");
+        await AssertGenericInvalidClientAsync(wrong);
+
+        var expired = await harness.PostTokenAsync(
+            RefreshForm(refreshToken, ConfidentialA),
+            ConfidentialA,
+            ExpiredSecretA);
+        await AssertGenericInvalidClientAsync(expired);
+
+        await harness.RevokePrimaryCredentialAsync(ConfidentialA);
+        var revoked = await harness.PostTokenAsync(
+            RefreshForm(refreshToken, ConfidentialA),
+            ConfidentialA,
+            SecretA);
+        await AssertGenericInvalidClientAsync(revoked);
+
+        var crossClientCredentials = await harness.PostTokenAsync(
+            RefreshForm(refreshToken),
+            ConfidentialB,
+            SecretB);
+        await AssertGenericInvalidGrantAsync(crossClientCredentials);
+
+        (await harness.IsRefreshTokenConsumedAsync(refreshToken)).Should().BeFalse();
+        (await harness.CountIssuedArtifactsAsync()).Should().Be(before);
+
+        var retained = await harness.PostTokenAsync(
+            RefreshForm(refreshToken, ConfidentialA),
+            ConfidentialA,
+            RotatedSecretA);
+        retained.StatusCode.Should().Be(HttpStatusCode.OK, await retained.Content.ReadAsStringAsync());
+        (await harness.IsRefreshTokenConsumedAsync(refreshToken)).Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task OAuthRefresh_ClientSecretPostUsesOnlyItsRegisteredMethod()
+    {
+        await using var harness = await Harness.StartAsync();
+        var refreshToken = await harness.CreateRefreshTokenAsync(ConfidentialPost);
+
+        var missing = await harness.PostTokenAsync(RefreshForm(refreshToken, ConfidentialPost));
+        await AssertGenericInvalidClientAsync(missing);
+
+        var basic = await harness.PostTokenAsync(
+            RefreshForm(refreshToken, ConfidentialPost),
+            ConfidentialPost,
+            SecretPost);
+        await AssertGenericInvalidClientAsync(basic);
+
+        var wrong = await harness.PostTokenAsync(RefreshForm(
+            refreshToken,
+            ConfidentialPost,
+            "wrong-secret-with-at-least-forty-three-characters-123456"));
+        await AssertGenericInvalidClientAsync(wrong);
+        (await harness.IsRefreshTokenConsumedAsync(refreshToken)).Should().BeFalse();
+
+        var accepted = await harness.PostTokenAsync(RefreshForm(refreshToken, ConfidentialPost, SecretPost));
+        accepted.StatusCode.Should().Be(HttpStatusCode.OK, await accepted.Content.ReadAsStringAsync());
+        (await harness.IsRefreshTokenConsumedAsync(refreshToken)).Should().BeTrue();
+    }
+
+    [TestMethod]
+    [DataRow(ConfidentialA)]
+    [DataRow(ConfidentialPost)]
+    public async Task JsonRefresh_ConfidentialClientToken_IsInvalidClientBeforeRotation(string clientId)
+    {
+        await using var harness = await Harness.StartAsync();
+        var refreshToken = await harness.CreateRefreshTokenAsync(clientId);
+        var before = await harness.CountIssuedArtifactsAsync();
+
+        var missing = await harness.PostJsonRefreshAsync(new { refreshToken });
+        await AssertJsonInvalidClientAsync(missing);
+
+        var claimedClient = await harness.PostJsonRefreshAsync(new { refreshToken, clientId });
+        await AssertJsonInvalidClientAsync(claimedClient);
+
+        // The compatibility route has no credential channel. Valid credentials in
+        // either transport are ignored rather than half-honored.
+        var basicHeader = await harness.PostJsonRefreshAsync(
+            new { refreshToken, clientId },
+            ConfidentialA,
+            SecretA);
+        await AssertJsonInvalidClientAsync(basicHeader);
+        var bodySecret = await harness.PostJsonRefreshAsync(
+            new { refreshToken, clientId, clientSecret = SecretPost, client_secret = SecretPost });
+        await AssertJsonInvalidClientAsync(bodySecret);
+
+        (await harness.IsRefreshTokenConsumedAsync(refreshToken)).Should().BeFalse();
+        (await harness.CountIssuedArtifactsAsync()).Should().Be(before);
+        var auditJson = await harness.GetClientAuthenticationAuditJsonAsync();
+        auditJson.Should().Contain(clientId);
+        auditJson.Should().NotContain(SecretA);
+        auditJson.Should().NotContain(SecretPost);
+    }
+
+    [TestMethod]
+    public async Task JsonRefresh_CrossClientIdOnConfidentialToken_FailsWithoutRotation()
+    {
+        await using var harness = await Harness.StartAsync();
+        var refreshToken = await harness.CreateRefreshTokenAsync(ConfidentialA);
+
+        // Client-id substitution keeps its existing consistency failure, which
+        // this route lets flow to the host's exception pipeline.
+        var substituted = async () => await harness.PostJsonRefreshAsync(
+            new { refreshToken, clientId = ConfidentialB },
+            ConfidentialB,
+            SecretB);
+        await substituted.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Refresh token was not issued for this client.");
+
+        (await harness.IsRefreshTokenConsumedAsync(refreshToken)).Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task JsonRefresh_ConsumedConfidentialTokenInsideGraceWindow_DoesNotReleaseCachedTokens()
+    {
+        await using var harness = await Harness.StartAsync();
+        var refreshToken = await harness.CreateRefreshTokenAsync(ConfidentialA);
+        var rotated = await harness.PostTokenAsync(
+            RefreshForm(refreshToken, ConfidentialA),
+            ConfidentialA,
+            SecretA);
+        var rotatedBody = await rotated.Content.ReadAsStringAsync();
+        rotated.StatusCode.Should().Be(HttpStatusCode.OK, rotatedBody);
+        using var rotatedJson = JsonDocument.Parse(rotatedBody);
+        var successor = rotatedJson.RootElement.GetProperty("refresh_token").GetString()!;
+        var before = await harness.CountIssuedArtifactsAsync();
+
+        var replay = await harness.PostJsonRefreshAsync(new { refreshToken });
+        await AssertJsonInvalidClientAsync(replay);
+        var replayBody = await replay.Content.ReadAsStringAsync();
+        replayBody.Should().NotContain(successor);
+        replayBody.Should().NotContain(rotatedJson.RootElement.GetProperty("access_token").GetString()!);
+        (await harness.CountIssuedArtifactsAsync()).Should().Be(before);
+
+        // A rejected attempt is not an authenticated replay, so the healthy
+        // successor is not revoked.
+        var next = await harness.PostTokenAsync(
+            RefreshForm(successor, ConfidentialA),
+            ConfidentialA,
+            SecretA);
+        next.StatusCode.Should().Be(HttpStatusCode.OK, await next.Content.ReadAsStringAsync());
+    }
+
+    [TestMethod]
+    public async Task JsonRefresh_PublicClientTokenStillRotatesWithoutSecret()
+    {
+        await using var harness = await Harness.StartAsync();
+        var refreshToken = await harness.CreateRefreshTokenAsync(PublicClient);
+
+        var refreshed = await harness.PostJsonRefreshAsync(new { refreshToken });
+        var body = await refreshed.Content.ReadAsStringAsync();
+        refreshed.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        using var json = JsonDocument.Parse(body);
+        var successor = json.RootElement.GetProperty("refreshToken").GetString()!;
+        json.RootElement.GetProperty("accessToken").GetString().Should().NotBeNullOrWhiteSpace();
+        (await harness.IsRefreshTokenConsumedAsync(refreshToken)).Should().BeTrue();
+
+        var withClientId = await harness.PostJsonRefreshAsync(new { refreshToken = successor, clientId = PublicClient });
+        withClientId.StatusCode.Should().Be(HttpStatusCode.OK, await withClientId.Content.ReadAsStringAsync());
+    }
+
+    [TestMethod]
+    public async Task InProcessRefreshServices_RejectConfidentialClientTokenWithoutAdmission()
+    {
+        await using var harness = await Harness.StartAsync();
+        var refreshToken = await harness.CreateRefreshTokenAsync(ConfidentialA);
+        var before = await harness.CountIssuedArtifactsAsync();
+
+        await harness.Invoking(x => x.RefreshInProcessAsync(refreshToken, ConfidentialA))
+            .Should().ThrowAsync<SqlOSClientAuthenticationException>();
+        await harness.Invoking(x => x.ExchangeRefreshWithoutAdmissionAsync(refreshToken, ConfidentialA))
+            .Should().ThrowAsync<SqlOSClientAuthenticationException>();
+
+        (await harness.IsRefreshTokenConsumedAsync(refreshToken)).Should().BeFalse();
+        (await harness.CountIssuedArtifactsAsync()).Should().Be(before);
+
+        var publicToken = await harness.CreateRefreshTokenAsync(PublicClient);
+        (await harness.RefreshInProcessAsync(publicToken, null)).RefreshToken.Should().NotBeNullOrWhiteSpace();
+    }
+
     private static IEnumerable<KeyValuePair<string, string>> AuthorizationCodeForm(string code, string clientId)
         =>
         [
@@ -312,7 +507,10 @@ public sealed class SqlOSConfidentialClientAuthenticationEndpointTests
             new("code_verifier", Verifier)
         ];
 
-    private static IEnumerable<KeyValuePair<string, string>> RefreshForm(string refreshToken, string? clientId = null)
+    private static IEnumerable<KeyValuePair<string, string>> RefreshForm(
+        string refreshToken,
+        string? clientId = null,
+        string? clientSecret = null)
     {
         yield return new("grant_type", "refresh_token");
         yield return new("refresh_token", refreshToken);
@@ -320,6 +518,23 @@ public sealed class SqlOSConfidentialClientAuthenticationEndpointTests
         {
             yield return new("client_id", clientId);
         }
+        if (clientSecret != null)
+        {
+            yield return new("client_secret", clientSecret);
+        }
+    }
+
+    private static async Task AssertJsonInvalidClientAsync(HttpResponseMessage response)
+    {
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized, body);
+        using var json = JsonDocument.Parse(body);
+        json.RootElement.GetProperty("error").GetString().Should().Be("invalid_client");
+        json.RootElement.GetProperty("error_description").GetString().Should().Be("Client authentication failed.");
+        json.RootElement.TryGetProperty("accessToken", out _).Should().BeFalse();
+        json.RootElement.TryGetProperty("refreshToken", out _).Should().BeFalse();
+        body.Should().NotContain(SecretA);
+        body.Should().NotContain(SecretPost);
     }
 
     private static async Task AssertGenericInvalidClientAsync(HttpResponseMessage response)
@@ -460,7 +675,7 @@ public sealed class SqlOSConfidentialClientAuthenticationEndpointTests
             return tokens.RefreshToken;
         }
 
-        public async Task AddClientCredentialAsync(string clientId, string secret)
+        public async Task AddClientCredentialAsync(string clientId, string secret, DateTime? expiresAt = null)
         {
             using var scope = _host.Services.CreateScope();
             var context = scope.ServiceProvider.GetRequiredService<TestSqlOSInMemoryDbContext>();
@@ -472,7 +687,8 @@ public sealed class SqlOSConfidentialClientAuthenticationEndpointTests
                 ClientApplicationId = client.Id,
                 SecretHash = crypto.HashPassword(secret),
                 DisplayName = "Rotation overlap",
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.UtcNow,
+                ExpiresAt = expiresAt
             });
             await context.SaveChangesAsync();
         }
@@ -519,6 +735,54 @@ public sealed class SqlOSConfidentialClientAuthenticationEndpointTests
                 .Where(x => x.TokenHash == crypto.HashToken(rawToken))
                 .Select(x => x.ConsumedAt != null)
                 .SingleAsync();
+        }
+
+        public async Task<SqlOSTokenResponse> RefreshInProcessAsync(string refreshToken, string? clientId)
+        {
+            using var scope = _host.Services.CreateScope();
+            var auth = scope.ServiceProvider.GetRequiredService<SqlOSAuthService>();
+            return await auth.RefreshAsync(new SqlOSRefreshRequest(refreshToken, null, ClientId: clientId));
+        }
+
+        public async Task<SqlOSTokenEndpointResult> ExchangeRefreshWithoutAdmissionAsync(string refreshToken, string clientId)
+        {
+            using var scope = _host.Services.CreateScope();
+            var authorizationServer = scope.ServiceProvider.GetRequiredService<SqlOSAuthorizationServerService>();
+            return await authorizationServer.ExchangeAuthorizationCodeAsync(
+                new SqlOSTokenRequest("refresh_token", null, null, clientId, null, refreshToken, null),
+                new DefaultHttpContext());
+        }
+
+        /// <summary>
+        /// Counts every artifact a refresh could issue, so a rejected attempt can
+        /// prove it minted nothing.
+        /// </summary>
+        public async Task<(int RefreshTokens, int Sessions, int AuthorizationCodes)> CountIssuedArtifactsAsync()
+        {
+            using var scope = _host.Services.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<TestSqlOSInMemoryDbContext>();
+            return (
+                await context.Set<SqlOSRefreshToken>().CountAsync(),
+                await context.Set<SqlOSSession>().CountAsync(),
+                await context.Set<SqlOSAuthorizationCode>().CountAsync());
+        }
+
+        public async Task<HttpResponseMessage> PostJsonRefreshAsync(
+            object body,
+            string? basicClientId = null,
+            string? basicSecret = null)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, "/sqlos/auth/token/refresh")
+            {
+                Content = JsonContent.Create(body)
+            };
+            if (basicClientId != null)
+            {
+                request.Headers.Authorization = new AuthenticationHeaderValue(
+                    "Basic",
+                    Convert.ToBase64String(Encoding.UTF8.GetBytes($"{basicClientId}:{basicSecret}")));
+            }
+            return await _client.SendAsync(request);
         }
 
         public async Task<string> GetClientAuthenticationAuditJsonAsync()

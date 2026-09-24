@@ -9,6 +9,8 @@ order: 4
 
 Refresh uses the old refresh token. SqlOS returns a new pair. Idle timeout extends.
 
+`RefreshAsync` and the JSON `POST /sqlos/auth/token/refresh` route rotate **public** clients' refresh tokens (`token_endpoint_auth_method=none`). A refresh token issued to a confidential client also needs that client's secret. Exchange it at the OAuth token endpoint, described below. `RefreshAsync` throws `SqlOSClientAuthenticationException`, and the JSON route returns `401 invalid_client`, before rotation.
+
 ```csharp
 var tokens = await authService.RefreshAsync(
     new SqlOSRefreshRequest(refreshToken, OrganizationId: null), ct);
@@ -30,9 +32,9 @@ Keep refresh tokens out of browser JavaScript. Store them in a server-side sessi
 
 ### OAuth `/token` refresh
 
-In-process `RefreshAsync` already takes only the refresh token. The public OAuth token endpoint does the same for public clients: `grant_type=refresh_token` plus `refresh_token` is enough. The token is bound to a client and session, so SqlOS does not treat `client_id` as client authentication for this grant. Sending `client_id` is still allowed and must match the token's client.
+`POST /sqlos/auth/token` with `grant_type=refresh_token` is the canonical refresh flow for every client. For public clients, `grant_type=refresh_token` plus `refresh_token` is enough. The token is bound to a client and session, so SqlOS does not treat `client_id` as client authentication for this grant. Sending `client_id` is still allowed and must match the token's client.
 
-Confidential clients are different. Their refresh exchange still requires `client_secret_basic`. A missing or wrong secret returns generic `invalid_client` and does not consume the refresh token. See [Clients](/docs/authserver/clients) and the [HTTP Protocol API](/docs/reference/api-reference#authorization-code-and-refresh-tokens).
+Confidential clients are different. Their refresh exchange must authenticate with the client's registered method, `client_secret_basic` or `client_secret_post`, and the token endpoint is the only route that accepts it. A missing, wrong, expired, revoked, or wrong-client secret returns `invalid_client` or `invalid_grant` and does not consume the refresh token. See [Clients](/docs/authserver/clients) and the [HTTP Protocol API](/docs/reference/api-reference#authorization-code-and-refresh-tokens).
 
 The refresh response's `scope` field echoes the scope originally granted when the session was established (RFC 6749 §5.1). Sessions created before SqlOS recorded granted scope omit the field instead of claiming an empty grant.
 

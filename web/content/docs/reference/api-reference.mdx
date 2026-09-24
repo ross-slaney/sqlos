@@ -91,7 +91,7 @@ On success, SqlOS redirects to the exact registered `redirect_uri` with `code`, 
 | `grant_type` | Required fields | Notes |
 | --- | --- | --- |
 | `authorization_code` | `code`, `client_id`; `code_verifier` when PKCE-bound | `redirect_uri`, when supplied, must match. `resource` must match the original request. |
-| `refresh_token` | `refresh_token` | The refresh token identifies the client through its session. Public clients (`token_endpoint_auth_method=none`) do not authenticate at this gate; `client_id` is optional and, when sent, must match the token's client. Confidential clients still require `client_secret_basic`. `resource` is optional but cannot change the original resource binding. |
+| `refresh_token` | `refresh_token` | The refresh token identifies the client through its session. Public clients (`token_endpoint_auth_method=none`) do not authenticate at this gate; `client_id` is optional and, when sent, must match the token's client. Confidential clients must authenticate with their registered method (`client_secret_basic` or `client_secret_post`); this is the only route that can refresh a confidential client's token. `resource` is optional but cannot change the original resource binding. |
 | `urn:ietf:params:oauth:grant-type:device_code` | `client_id`, `device_code` | `resource` must match the device request. |
 
 Authorization-code exchange:
@@ -115,7 +115,7 @@ curl -X POST https://app.example.com/sqlos/auth/token \
   --data-urlencode 'refresh_token=...'
 ```
 
-Confidential refresh still authenticates the client:
+Confidential refresh still authenticates the client with its registered method. For `client_secret_basic`:
 
 ```bash
 curl -X POST https://app.example.com/sqlos/auth/token \
@@ -255,7 +255,7 @@ These routes expose the same strongly typed contracts used by `SqlOSAuthService`
 | `POST /sqlos/auth/mfa/challenge/totp/enroll/start` | `SqlOSTotpChallengeEnrollmentStartRequest` | `200 SqlOSTotpEnrollmentStartResult` |
 | `POST /sqlos/auth/mfa/challenge/totp/enroll/verify` | `SqlOSTotpEnrollmentVerifyRequest` | `200 SqlOSTotpEnrollmentVerifyResult` |
 | `POST /sqlos/auth/token/exchange` | `SqlOSExchangeCodeRequest` | `200 SqlOSTokenResponse` |
-| `POST /sqlos/auth/token/refresh` | `SqlOSRefreshRequest` | `200 SqlOSTokenResponse` |
+| `POST /sqlos/auth/token/refresh` | `SqlOSRefreshRequest` | `200 SqlOSTokenResponse` for a public client's refresh token; `401` `invalid_client` for a confidential client's (see below) |
 | `POST /sqlos/auth/logout` | `{ refreshToken? }` | `204 No Content`; unknown or missing tokens are idempotent no-ops |
 | `POST /sqlos/auth/logout-all` | `{ refreshToken }` | `204 No Content`; `401` when the refresh token is missing, inactive, expired, or already consumed |
 | `POST /sqlos/auth/account/grants` | `{ refreshToken }` | `200` with `data`: the user's active [consent grants](/docs/authserver/consent). The refresh token must belong to a first-party client's session; `401` when it resolves no active session or the session's client is not first-party |
@@ -267,6 +267,8 @@ These routes expose the same strongly typed contracts used by `SqlOSAuthService`
 | `POST /sqlos/auth/email/verification-token` | `SqlOSCreateVerificationTokenRequest` | Compatibility alias for `/email/verification-email`; it sends email and never returns a token |
 | `GET /sqlos/auth/email/verify?token=...` | Query-string token from the verification email | One-time browser verification page |
 | `POST /sqlos/auth/email/verify` | `SqlOSVerifyEmailRequest` | `204 No Content` |
+
+`POST /token/refresh` is a public-client compatibility route. It has no client-authentication channel, so it ignores any `Authorization` header or secret field. When the refresh token belongs to a confidential client, it returns `401` with `{ "error": "invalid_client", "error_description": "Client authentication failed." }` before rotation. The token is not consumed, no cached grace-window response is released, and SqlOS records an `oauth.client_authentication.failed` audit event. Confidential clients refresh through `POST /sqlos/auth/token` with `grant_type=refresh_token`, the canonical refresh flow for every client. In-process `SqlOSAuthService.RefreshAsync` enforces the same rule and throws `SqlOSClientAuthenticationException`.
 
 `POST /token/exchange` consumes the temporary code created by the direct SAML request-token flow. An OAuth authorization-code client must use the form-encoded `POST /token` endpoint, which enforces the OAuth redirect URI, PKCE verifier, and optional resource binding.
 

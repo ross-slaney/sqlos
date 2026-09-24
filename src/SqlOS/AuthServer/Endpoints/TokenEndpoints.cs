@@ -111,11 +111,14 @@ public static partial class EndpointRouteBuilderExtensions
                     throw new InvalidOperationException("Unsupported grant type.");
                 }
 
-                var clientId = string.Equals(grantType, SqlOSOAuthGrantTypes.RefreshToken, StringComparison.Ordinal)
-                    ? await clientAuthenticationService.AuthenticateRefreshGrantClientAsync(
+                var refreshAdmission = string.Equals(grantType, SqlOSOAuthGrantTypes.RefreshToken, StringComparison.Ordinal)
+                    ? await clientAuthenticationService.AdmitRefreshGrantClientAsync(
                         form,
                         context,
                         cancellationToken)
+                    : null;
+                var clientId = refreshAdmission != null
+                    ? refreshAdmission.ClientId
                     : (await clientAuthenticationService.AuthenticateTokenEndpointClientAsync(
                         form,
                         context,
@@ -129,6 +132,7 @@ public static partial class EndpointRouteBuilderExtensions
                         form["code_verifier"].ToString(),
                         form["refresh_token"].ToString(),
                         form["resource"].ToString()),
+                    refreshAdmission,
                     context,
                     cancellationToken);
 
