@@ -123,15 +123,17 @@ From CI calibration runs (4 vCPU runner, warm cache, median ms). Current numbers
 | `fn_IsResourceAccessible`, one product | 6.6 → 6.0 | 2.6 → 2.7 |
 | `Allows`, product at depth 9 | 37.7 → 34.4 | 56.0 → 55.8 |
 
-Per-page cost does not grow with N on either engine across 100 times the data: every ratio is between ×0.72
+Per-page cost does not grow with N on either engine across 100 times the data: every ratio is between ×0.71
 and ×1.13. What sets the cost is the number of rows the scan examines, k / σ, times a per-row constant. That
-constant is about 90–110 µs of server execution on PostgreSQL. On SQL Server it is 150–200 µs on current
-runners and 400–540 µs on older ones.
+constant is about 90–130 µs of server execution on PostgreSQL. On SQL Server it is about 165 µs on one runner
+CPU and about 420 µs on the AMD EPYC 7763.
 
-Hosted runners come from a mixed pool. The SQL Server numbers above ran on a slow one: on a faster runner the
-identical plans (same operators, same execution counts) took 2.5 times less CPU. For example, the admin page
-took 11.6 ms and the region page 251 ms. The report records the CPU model, and the scale gate compares
-within one job on one machine. The ceilings were set from the slower hardware.
+Hosted runners come from a mixed pool of CPU models, and the engines respond to it differently. On SQL Server,
+identical plans (same operators, same execution counts) have used 2.5 times more CPU on one runner than on
+another. The SQL Server column above ran on AMD EPYC 7763 runners; a faster runner gave 11.6 ms for the admin
+page and 251 ms for the region page. PostgreSQL varies about 1.3 times: the admin page ran in 10–11 ms on
+earlier runs and 13 ms on an Intel Xeon Platinum 8370C. The report records the CPU model, and the scale gate
+compares within one job on one machine. The ceilings were set from the slower hardware for each engine.
 
 ## Findings
 
