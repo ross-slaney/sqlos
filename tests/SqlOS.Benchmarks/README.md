@@ -96,7 +96,7 @@ repositories.
 
 | Tier | When | Scales | Time per job |
 |---|---|---|---|
-| Pull request | Every pull request that touches `src/SqlOS` | 1M → 10M, without the sparse scan | about 5 min (PostgreSQL), 8 min (SQL Server) |
+| Pull request | Every pull request that touches `src/SqlOS` | 1M → 10M, without the sparse scan | under 4 min per engine |
 | Full | Every merge to `main`, weekly, on demand, and on a pull request labelled `benchmark-100m` | 1M → 10M → 100M, every scenario | about 30 min (PostgreSQL), 55 min (SQL Server) |
 
 Most of the full run is loading: 90M new rows in each of two tables, then rebuilding indexes. PostgreSQL
