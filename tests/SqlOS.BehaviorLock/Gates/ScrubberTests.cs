@@ -205,6 +205,20 @@ public sealed class ScrubberTests
     }
 
     [TestMethod]
+    public void Canonical_json_sorts_unordered_arrays_by_content_not_by_generated_ids()
+    {
+        var sink = new TranscriptValueSink(new Scrubber());
+        using var document = JsonDocument.Parse(
+            """{"organizationSelection":[{"id":"org_00000000000000000000000000000000","name":"Globex"},{"id":"org_ffffffffffffffffffffffffffffffff","name":"Acme"}]}""");
+
+        var rendered = CanonicalJson.Render(document.RootElement, sink);
+
+        Assert.IsTrue(
+            rendered.IndexOf("Acme", StringComparison.Ordinal) < rendered.IndexOf("Globex", StringComparison.Ordinal),
+            $"Unordered arrays must sort by their stable content, not by random IDs:\n{rendered}");
+    }
+
+    [TestMethod]
     public void Jwt_lifetimes_are_exact_relative_seconds()
     {
         using var claims = JsonDocument.Parse("""{"iat":1790000000,"nbf":1790000000,"exp":1790000600}""");

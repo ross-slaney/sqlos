@@ -12,7 +12,7 @@ namespace SqlOS.BehaviorLock.Infrastructure.Transcripts;
 /// rendering it registers role-bearing values (see <see cref="ValueRoles"/>) with the scrubber and
 /// collects JWTs for decoding. Integers in the Unix-epoch range render as <c>{epoch}</c>.
 /// </summary>
-public static class CanonicalJson
+public static partial class CanonicalJson
 {
     /// <summary>
     /// Fields holding "seconds from now", computed from the clock during the request, so they can
@@ -32,7 +32,10 @@ public static class CanonicalJson
     private static readonly Dictionary<string, string> UnorderedArrayFields = new(StringComparer.Ordinal)
     {
         // SqlOSPasswordLoginAbuseService builds it from an EF Include with no ORDER BY.
-        ["resetScopes"] = "password-login bucket scopes"
+        ["resetScopes"] = "password-login bucket scopes",
+        // SqlOSAdminService.GetUserOrganizationsAsync selects memberships with no ORDER BY, so rows
+        // come back in (random) organization-ID order. The headless view model's organization picker.
+        ["organizationSelection"] = "a user's organizations"
     };
 
     private static readonly JsonSerializerOptions StringEscaping = new()
@@ -101,7 +104,8 @@ public static class CanonicalJson
 
                 if (propertyName != null && UnorderedArrayFields.ContainsKey(propertyName))
                 {
-                    items = items.OrderBy(item => item.GetRawText(), StringComparer.Ordinal).ToList();
+                    // Generated IDs are random per run, so they must not decide the order.
+                    items = items.OrderBy(item => GeneratedId().Replace(item.GetRawText(), "id"), StringComparer.Ordinal).ToList();
                 }
 
                 var elementKind = propertyName == null ? null : ValueRoles.ElementKindFor(propertyName);
@@ -226,4 +230,8 @@ public static class CanonicalJson
 
         return $"{sign}{magnitude.ToString(CultureInfo.InvariantCulture)}s";
     }
+
+    /// <summary>A SqlOS-generated ID such as <c>org_…</c> (the prefixes the scrubber detects).</summary>
+    [System.Text.RegularExpressions.GeneratedRegex("[a-z][a-z0-9]{0,11}_[0-9a-f]{16,32}")]
+    private static partial System.Text.RegularExpressions.Regex GeneratedId();
 }
