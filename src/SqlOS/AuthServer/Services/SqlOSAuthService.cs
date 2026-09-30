@@ -2103,7 +2103,8 @@ public sealed class SqlOSAuthService
         IReadOnlyList<string> permittedEnrollmentFactors,
         string? authorizationRequestId = null,
         string? resource = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool credentialSignIn = false)
     {
         if (await _mfaAttemptAdmissionService.IsUserCapacityExhaustedAsync(user.Id, cancellationToken))
         {
@@ -2129,7 +2130,8 @@ public sealed class SqlOSAuthService
                 authorizationRequestId,
                 resource,
                 enrollmentRequired,
-                permittedEnrollmentFactors),
+                permittedEnrollmentFactors,
+                CredentialSignIn: credentialSignIn),
             _options.Mfa.Totp.ChallengeTokenLifetime,
             cancellationToken);
     }

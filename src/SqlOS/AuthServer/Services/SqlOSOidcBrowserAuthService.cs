@@ -359,7 +359,7 @@ public sealed class SqlOSOidcBrowserAuthService
             // A silently reused upstream session must stamp the upstream auth_time
             // as the authentication moment, not the callback time. When the provider
             // did not assert auth_time this is null and local resolution applies.
-            var completion = await _authorizationServerService.CompleteAuthorizationRequestLoginAsync(
+            var completion = await _authorizationServerService.CompleteCredentialSignInAsync(
                 authorizationRequest,
                 user,
                 result.AuthenticationMethod,

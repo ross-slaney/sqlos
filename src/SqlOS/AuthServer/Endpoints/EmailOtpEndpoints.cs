@@ -207,7 +207,7 @@ public static partial class EndpointRouteBuilderExtensions
                     throw new InvalidOperationException("The sign-in code is invalid or expired.");
                 }
 
-                var completion = await authorizationServerService.CompleteAuthorizationRequestLoginAsync(
+                var completion = await authorizationServerService.CompleteCredentialSignInAsync(
                     authorizationRequest,
                     verification.User,
                     verification.AuthenticationMethod,

@@ -460,6 +460,15 @@ public static partial class EndpointRouteBuilderExtensions
                 }
             }
 
+            if (existingSession == null)
+            {
+                // A presented issuer cookie that resolved no session (revoked family,
+                // cleaned-up row, inactive user, or a logout that raced silent reuse) counts
+                // as signed out. Delete it so the browser stops presenting it; signing in
+                // again sets a new cookie.
+                issuerSessionService.ClearPresentedSessionCookie(context);
+            }
+
             if (promptRequestsNone)
             {
                 return Results.Redirect(await authorizationServerService.BuildAuthorizationErrorRedirectAsync(

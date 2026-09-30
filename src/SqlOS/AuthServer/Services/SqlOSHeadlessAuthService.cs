@@ -543,7 +543,7 @@ public sealed class SqlOSHeadlessAuthService
                 clientKey: authorizationRequest.ClientApplication?.ClientId ?? authorizationRequest.ClientApplicationId,
                 authorizationRequestId: authorizationRequest.Id,
                 surface: "headless");
-            var completion = await _authorizationServerService.CompleteAuthorizationRequestLoginAsync(
+            var completion = await _authorizationServerService.CompleteCredentialSignInAsync(
                 authorizationRequest,
                 authentication.User,
                 authentication.AuthenticationMethod,
@@ -788,7 +788,7 @@ public sealed class SqlOSHeadlessAuthService
                 throw new InvalidOperationException("The sign-in code is invalid or expired.");
             }
 
-            var completion = await _authorizationServerService.CompleteAuthorizationRequestLoginAsync(
+            var completion = await _authorizationServerService.CompleteCredentialSignInAsync(
                 authorizationRequest,
                 verification.User,
                 verification.AuthenticationMethod,
@@ -841,7 +841,7 @@ public sealed class SqlOSHeadlessAuthService
             throw new InvalidOperationException("The sign-in link is invalid or expired.");
         }
 
-        var completion = await _authorizationServerService.CompleteAuthorizationRequestLoginAsync(
+        var completion = await _authorizationServerService.CompleteCredentialSignInAsync(
             authorizationRequest,
             verification.User,
             verification.AuthenticationMethod,
@@ -908,7 +908,7 @@ public sealed class SqlOSHeadlessAuthService
                     cancellationToken);
             }
 
-            var completion = await _authorizationServerService.CompleteAuthorizationRequestLoginAsync(
+            var completion = await _authorizationServerService.CompleteCredentialSignInAsync(
                 authorizationRequest,
                 signup.User,
                 signup.AuthenticationMethod,
@@ -1054,7 +1054,7 @@ public sealed class SqlOSHeadlessAuthService
                 requireAuthorizationRequestMatch: true,
                 cancellationToken);
 
-            var completion = await _authorizationServerService.CompleteAuthorizationRequestLoginAsync(
+            var completion = await _authorizationServerService.CompleteCredentialSignInAsync(
                 authorizationRequest,
                 verification.User,
                 verification.AuthenticationMethod,
@@ -1194,7 +1194,7 @@ public sealed class SqlOSHeadlessAuthService
                     cancellationToken);
             }
 
-            var completion = await _authorizationServerService.CompleteAuthorizationRequestLoginAsync(
+            var completion = await _authorizationServerService.CompleteCredentialSignInAsync(
                 authorizationRequest,
                 signup.User,
                 signup.AuthenticationMethod,
@@ -1311,7 +1311,7 @@ public sealed class SqlOSHeadlessAuthService
                     cancellationToken);
             }
 
-            var completion = await _authorizationServerService.CompleteAuthorizationRequestLoginAsync(
+            var completion = await _authorizationServerService.CompleteCredentialSignInAsync(
                 authorizationRequest,
                 signup.User,
                 signup.AuthenticationMethod,
@@ -1449,7 +1449,7 @@ public sealed class SqlOSHeadlessAuthService
                     cancellationToken);
             }
 
-            var completion = await _authorizationServerService.CompleteAuthorizationRequestLoginAsync(
+            var completion = await _authorizationServerService.CompleteCredentialSignInAsync(
                 authorizationRequest,
                 signup.User,
                 signup.AuthenticationMethod,

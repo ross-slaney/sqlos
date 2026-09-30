@@ -210,7 +210,7 @@ public static partial class EndpointRouteBuilderExtensions
                 }
 
                 authorizationRequest.OrganizationId ??= invitation?.OrganizationId ?? signup.Organizations.FirstOrDefault()?.Id;
-                var completion = await authorizationServerService.CompleteAuthorizationRequestLoginAsync(
+                var completion = await authorizationServerService.CompleteCredentialSignInAsync(
                     authorizationRequest,
                     signup.User,
                     signup.AuthenticationMethod,
@@ -332,7 +332,7 @@ public static partial class EndpointRouteBuilderExtensions
                 }
 
                 authorizationRequest.OrganizationId ??= invitation.OrganizationId;
-                var completion = await authorizationServerService.CompleteAuthorizationRequestLoginAsync(
+                var completion = await authorizationServerService.CompleteCredentialSignInAsync(
                     authorizationRequest,
                     signup.User,
                     signup.AuthenticationMethod,
@@ -530,7 +530,7 @@ public static partial class EndpointRouteBuilderExtensions
                 }
 
                 authorizationRequest.OrganizationId ??= invitation?.OrganizationId ?? signup.Organizations.FirstOrDefault()?.Id;
-                var completion = await authorizationServerService.CompleteAuthorizationRequestLoginAsync(
+                var completion = await authorizationServerService.CompleteCredentialSignInAsync(
                     authorizationRequest,
                     signup.User,
                     signup.AuthenticationMethod,
@@ -721,7 +721,7 @@ public static partial class EndpointRouteBuilderExtensions
                 }
 
                 authorizationRequest.OrganizationId ??= signup.Organizations.FirstOrDefault()?.Id;
-                var completion = await authorizationServerService.CompleteAuthorizationRequestLoginAsync(
+                var completion = await authorizationServerService.CompleteCredentialSignInAsync(
                     authorizationRequest,
                     signup.User,
                     signup.AuthenticationMethod,

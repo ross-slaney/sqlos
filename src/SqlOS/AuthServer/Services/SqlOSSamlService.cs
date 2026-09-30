@@ -274,7 +274,7 @@ public sealed class SqlOSSamlService
         {
             authorizationRequest.ResolvedConnectionId = connection.Id;
             authorizationRequest.OrganizationId ??= organizationId;
-            var completion = await _authorizationServerService.CompleteAuthorizationRequestLoginAsync(
+            var completion = await _authorizationServerService.CompleteCredentialSignInAsync(
                 authorizationRequest,
                 user,
                 authenticationMethod,
