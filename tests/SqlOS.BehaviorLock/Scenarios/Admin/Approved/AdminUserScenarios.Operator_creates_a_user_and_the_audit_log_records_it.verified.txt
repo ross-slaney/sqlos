@@ -1,0 +1,65 @@
+# SqlOS behavior lock transcript
+scenario: AdminUserScenarios.Operator_creates_a_user_and_the_audit_log_records_it
+profile: dashboard-callback
+
+## 1. operator: without operator credentials the admin API is not found
+> POST /sqlos/admin/auth/api/users
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "displayName": "Dana",
+>     "email": "{email:dana}",
+>     "password": "{password:dana}"
+>   }
+< 404 Not Found
+
+## 2. operator: create a user
+> POST /sqlos/admin/auth/api/users
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Dana",
+>     "email": "{email:dana}",
+>     "password": "{password:dana}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "defaultEmail": "{email:dana}",
+      "displayName": "Dana",
+      "id": "{usr#1}",
+      "isActive": true,
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## audit: user creation events
+  (no new events)
+
+## 3. operator: the user as the admin API reads it
+> GET /sqlos/admin/auth/api/users/{usr#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "defaultEmail": "{email:dana}",
+      "displayName": "Dana",
+      "externalIdentityCount": 0,
+      "id": "{usr#1}",
+      "isActive": true,
+      "membershipCount": 0,
+      "sessionCount": 0,
+      "updatedAt": "{datetime:unspecified}"
+    }
+
+## 4. operator: the audit API filtered to events targeting the new user
+> GET /sqlos/admin/audit/api/events?targetId={usr#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }

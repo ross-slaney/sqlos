@@ -126,6 +126,13 @@ public static class CanonicalJson
 
             case JsonValueKind.String:
                 var value = element.GetString() ?? string.Empty;
+                if (value.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Same rule as HTML: data URIs can embed per-run secrets (a TOTP QR code).
+                    builder.Append(Quote(DataUri(value)));
+                    return;
+                }
+
                 if (propertyName != null)
                 {
                     sink.RegisterRole(propertyName, value);
@@ -180,6 +187,13 @@ public static class CanonicalJson
             ? (long)Math.Round(seconds / 60.0, MidpointRounding.AwayFromZero) * 60
             : (long)Math.Round(seconds / 10.0, MidpointRounding.AwayFromZero) * 10;
         return "~" + rounded.ToString(CultureInfo.InvariantCulture);
+    }
+
+    /// <summary><c>data:image/png;base64,…</c> becomes <c>{data-uri:image/png}</c>.</summary>
+    internal static string DataUri(string value)
+    {
+        var mime = value[5..].Split(';', ',')[0];
+        return $"{{data-uri:{(string.IsNullOrWhiteSpace(mime) ? "unknown" : mime.ToLowerInvariant())}}}";
     }
 
     internal static string Quote(string value)

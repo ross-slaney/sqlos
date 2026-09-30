@@ -82,9 +82,10 @@ public sealed partial class TranscriptValueSink
         }
     }
 
+    /// <summary>Queues a JWT for decoding once per identity (see <see cref="JwtRendering.Identity"/>).</summary>
     public void AddJwt(string jwt)
     {
-        if (_seenJwts.Add(jwt))
+        if (_seenJwts.Add(JwtRendering.Identity(jwt)))
         {
             _jwts.Add(jwt);
         }

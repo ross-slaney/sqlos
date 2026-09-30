@@ -134,8 +134,7 @@ public static partial class HtmlCanonicalizer
 
         if (value.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
         {
-            var mime = value[5..].Split(';', ',')[0];
-            return $"{{data-uri:{(string.IsNullOrWhiteSpace(mime) ? "unknown" : mime.ToLowerInvariant())}}}";
+            return CanonicalJson.DataUri(value);
         }
 
         if (attribute.Name is "href" or "action" or "src" or "content" or "formaction")

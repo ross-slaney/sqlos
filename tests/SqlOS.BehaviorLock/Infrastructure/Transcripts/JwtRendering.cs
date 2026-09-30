@@ -15,7 +15,49 @@ public static partial class JwtRendering
 {
     private static readonly string[] LifetimeClaims = ["iat", "nbf", "exp"];
 
+    /// <summary>
+    /// Claims that only record when a token was minted, or hash a sibling token minted at the
+    /// same moment. They are left out of a token's identity.
+    /// </summary>
+    private static readonly HashSet<string> TimingClaims = new(StringComparer.Ordinal)
+    {
+        "iat", "nbf", "exp", "auth_time", "at_hash", "c_hash", "s_hash"
+    };
+
     public static bool LooksLikeJwt(string value) => WholeJwt().IsMatch(value);
+
+    /// <summary>
+    /// A JWT's identity for placeholder purposes: its header and claims without timing claims.
+    /// RS256 signatures are deterministic and SqlOS access tokens carry no <c>jti</c>, so two
+    /// tokens with the same claims are byte-identical when minted in the same second and differ
+    /// when minted a second apart. Keying placeholders on identity keeps transcripts independent
+    /// of that timing: tokens that differ only in when they were minted share a placeholder.
+    /// </summary>
+    public static string Identity(string jwt)
+    {
+        var parts = jwt.Split('.');
+        if (parts.Length < 2 || !TryDecode(parts[0], out var header) || !TryDecode(parts[1], out var claims))
+        {
+            return jwt;
+        }
+
+        using (header)
+        using (claims)
+        {
+            var identity = new StringBuilder("jwt|").Append(header.RootElement.GetRawText()).Append('|');
+            if (claims.RootElement.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var claim in claims.RootElement.EnumerateObject()
+                             .Where(claim => !TimingClaims.Contains(claim.Name))
+                             .OrderBy(claim => claim.Name, StringComparer.Ordinal))
+                {
+                    identity.Append(claim.Name).Append('=').Append(claim.Value.GetRawText()).Append(';');
+                }
+            }
+
+            return identity.ToString();
+        }
+    }
 
     public static string Render(string jwt, TranscriptValueSink sink, string indent)
     {

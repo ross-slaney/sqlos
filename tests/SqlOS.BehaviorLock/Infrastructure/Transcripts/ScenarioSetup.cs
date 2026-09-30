@@ -62,6 +62,30 @@ public sealed class ScenarioSetup
         return new ScenarioScimConnection(created.JsonString("connectionId"), token);
     }
 
+    /// <summary>
+    /// Signs <paramref name="user"/> in through the hosted password page and redeems the code, as a
+    /// precondition (nothing is recorded). Works in profiles that serve the hosted AuthPage.
+    /// </summary>
+    public async Task<SignedInSession> SignInWithPasswordAsync(ScenarioUser user, AuthorizationRequest? request = null, HttpActor? browser = null)
+    {
+        request ??= _transcript.Urls.Authorize(extra: new Dictionary<string, string?> { ["view"] = "password" });
+        browser ??= _transcript.Browser;
+        var page = _transcript.Discard(await browser.GetAsync(request.Url));
+        EnsureSucceeded(page);
+        var login = _transcript.Discard(await browser.SubmitAsync(page.Form("/login/password")
+            .With("email", user.Email)
+            .With("password", user.Password)));
+        var code = login.NextUrlParameter("code");
+        var token = _transcript.Discard(await _transcript.Api.PostFormAsync("/sqlos/auth/token", request.TokenRequest(code)));
+        EnsureSucceeded(token);
+        await _transcript.SkipAuditAsync();
+        return new SignedInSession(
+            token.JsonString("access_token"),
+            token.JsonString("refresh_token"),
+            token.Json?["id_token"]?.GetValue<string>(),
+            request);
+    }
+
     /// <summary>Publishes a DNS TXT record in the host's fake DNS.</summary>
     public void PublishDnsTxt(string recordName, string value) => _transcript.Fakes.Dns.Publish(recordName, value);
 
@@ -105,6 +129,8 @@ public sealed record ScenarioUser(string Id, string Email, string Password, stri
 public sealed record ScenarioOrganization(string Id, string Slug, string Name);
 
 public sealed record ScenarioScimConnection(string Id, string Token);
+
+public sealed record SignedInSession(string AccessToken, string RefreshToken, string? IdToken, AuthorizationRequest Request);
 
 /// <summary>
 /// Per-run unique values. Each is registered with the scrubber under a fixed name, so the

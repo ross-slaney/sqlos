@@ -84,6 +84,24 @@ public sealed class ScrubberTests
     }
 
     [TestMethod]
+    public void Jwts_that_differ_only_in_when_they_were_minted_share_a_placeholder()
+    {
+        static string Jwt(string claims)
+            => $"{Encode("""{"alg":"RS256","typ":"at+jwt"}""")}.{Encode(claims)}.c2ln";
+        static string Encode(string json)
+            => Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(json)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
+        var first = Jwt("""{"sub":"usr_1","iat":1790000000,"exp":1790000600,"at_hash":"aaaa"}""");
+        var secondLater = Jwt("""{"sub":"usr_1","iat":1790000001,"exp":1790000601,"at_hash":"bbbb"}""");
+        var otherSubject = Jwt("""{"sub":"usr_2","iat":1790000000,"exp":1790000600}""");
+        var scrubber = new Scrubber();
+        scrubber.Register(first, "access-token");
+        scrubber.Register(secondLater, "access-token");
+
+        Assert.AreEqual("{access-token#1} {access-token#1} {jwt#1}", scrubber.Scrub($"{first} {secondLater} {otherSubject}"));
+    }
+
+    [TestMethod]
     public void Timestamps_are_scrubbed_by_format_class_so_format_changes_stay_visible()
     {
         var scrubber = new Scrubber();
@@ -157,7 +175,7 @@ public sealed class ScrubberTests
     {
         var sink = new TranscriptValueSink(new Scrubber());
         using var document = JsonDocument.Parse(
-            """{"z":1,"a":[3,1,2],"iat":1790000000,"expires_in":599,"resetScopes":["user","email"],"m":{"b":true,"a":null}}""");
+            """{"z":1,"a":[3,1,2],"iat":1790000000,"expires_in":599,"resetScopes":["user","email"],"m":{"b":true,"a":null},"logo":"data:image/png;base64,iVBORw0KGgo="}""");
 
         var rendered = CanonicalJson.Render(document.RootElement, sink);
 
@@ -171,6 +189,7 @@ public sealed class ScrubberTests
               ],
               "expires_in": ~600,
               "iat": {epoch},
+              "logo": "{data-uri:image/png}",
               "m": {
                 "a": null,
                 "b": true

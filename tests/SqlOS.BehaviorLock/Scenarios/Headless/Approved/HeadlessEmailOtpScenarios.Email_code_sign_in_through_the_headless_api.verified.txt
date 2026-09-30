@@ -1,0 +1,437 @@
+# SqlOS behavior lock transcript
+scenario: HeadlessEmailOtpScenarios.Email_code_sign_in_through_the_headless_api
+profile: headless
+
+## 1. browser: authorize redirects to the app's own sign-in UI
+> GET /sqlos/auth/authorize?response_type=code&client_id=behavior-lock-app&redirect_uri=https%3A%2F%2Fsqlos.example.test%2Fauth%2Fcallback&scope=openid%20profile%20email%20offline_access&state={state#1}&nonce={nonce#1}&code_challenge={pkce-challenge#1}&code_challenge_method=S256
+< 302 Found
+< Location: https://sqlos.example.test/auth/authorize?request={req#1}&view=login&email=
+
+## 2. browser: the UI loads the request
+> GET /sqlos/auth/headless/requests/{req#1}
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "authBasePath": "/sqlos/auth",
+      "challengeToken": null,
+      "clientId": "behavior-lock-app",
+      "clientName": "Behavior Lock",
+      "consentScopes": null,
+      "consentToken": null,
+      "deviceAuthorization": null,
+      "displayName": null,
+      "email": "",
+      "error": null,
+      "fieldErrors": {},
+      "headlessApiBasePath": "/sqlos/auth/headless",
+      "info": null,
+      "invitation": null,
+      "mfaMethods": [],
+      "mfaToken": null,
+      "omittedOpenId": false,
+      "organizationSelection": [],
+      "pendingToken": null,
+      "phoneNumber": null,
+      "providers": [
+        {
+          "connectionId": "{oidc#1}",
+          "displayName": "Example OIDC",
+          "logoDataUrl": null,
+          "providerType": "Custom"
+        },
+        {
+          "connectionId": "{oidc#2}",
+          "displayName": "Google",
+          "logoDataUrl": "{data-uri:image/svg+xml}",
+          "providerType": "Google"
+        }
+      ],
+      "requestId": "{req#1}",
+      "requiresMfaEnrollment": false,
+      "scope": "openid profile email offline_access",
+      "settings": {
+        "accentColor": "#0f172a",
+        "backgroundColor": "#f8fafc",
+        "emailOtpRuntimeConfigured": true,
+        "enablePasswordSignup": true,
+        "enabledCredentialTypes": [
+          "password",
+          "email_otp",
+          "magic_link",
+          "phone_otp"
+        ],
+        "headlessCapabilityRegistered": true,
+        "layout": "split",
+        "localPasswordRuntimeEnabled": true,
+        "logoBase64": null,
+        "magicLinkRuntimeConfigured": true,
+        "managedByStartupSeed": true,
+        "ownership": {
+          "canEmergencyDisable": false,
+          "configurationFingerprint": "{hex#1}",
+          "isEditable": false,
+          "isOrphaned": false,
+          "lastReconciledAt": "{datetime:unspecified}",
+          "owner": "code",
+          "sourceKey": "auth-page:default"
+        },
+        "pageSubtitle": "Secure your app-owned AI and MCP experiences with SqlOS.",
+        "pageTitle": "Sign in to Behavior Lock",
+        "phoneOtpRuntimeConfigured": true,
+        "primaryColor": "#2563eb",
+        "updatedAt": "{datetime:unspecified}"
+      },
+      "signupToken": null,
+      "totpEnrollment": null,
+      "uiContext": null,
+      "view": "login"
+    }
+
+## 3. browser: request an email code
+> POST /sqlos/auth/headless/email-otp/start
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "email": "{email:alice}",
+>     "requestId": "{req#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "redirectUrl": null,
+      "type": "view",
+      "viewModel": {
+        "authBasePath": "/sqlos/auth",
+        "challengeToken": "{challenge-token#1}",
+        "clientId": "behavior-lock-app",
+        "clientName": "Behavior Lock",
+        "consentScopes": null,
+        "consentToken": null,
+        "deviceAuthorization": null,
+        "displayName": null,
+        "email": "{email:alice}",
+        "error": null,
+        "fieldErrors": {},
+        "headlessApiBasePath": "/sqlos/auth/headless",
+        "info": "If an account exists for al***@example.test, check your email for a sign-in code.",
+        "invitation": null,
+        "mfaMethods": [],
+        "mfaToken": null,
+        "omittedOpenId": false,
+        "organizationSelection": [],
+        "pendingToken": null,
+        "phoneNumber": null,
+        "providers": [
+          {
+            "connectionId": "{oidc#1}",
+            "displayName": "Example OIDC",
+            "logoDataUrl": null,
+            "providerType": "Custom"
+          },
+          {
+            "connectionId": "{oidc#2}",
+            "displayName": "Google",
+            "logoDataUrl": "{data-uri:image/svg+xml}",
+            "providerType": "Google"
+          }
+        ],
+        "requestId": "{req#1}",
+        "requiresMfaEnrollment": false,
+        "scope": "openid profile email offline_access",
+        "settings": {
+          "accentColor": "#0f172a",
+          "backgroundColor": "#f8fafc",
+          "emailOtpRuntimeConfigured": true,
+          "enablePasswordSignup": true,
+          "enabledCredentialTypes": [
+            "password",
+            "email_otp",
+            "magic_link",
+            "phone_otp"
+          ],
+          "headlessCapabilityRegistered": true,
+          "layout": "split",
+          "localPasswordRuntimeEnabled": true,
+          "logoBase64": null,
+          "magicLinkRuntimeConfigured": true,
+          "managedByStartupSeed": true,
+          "ownership": {
+            "canEmergencyDisable": false,
+            "configurationFingerprint": "{hex#1}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "auth-page:default"
+          },
+          "pageSubtitle": "Secure your app-owned AI and MCP experiences with SqlOS.",
+          "pageTitle": "Sign in to Behavior Lock",
+          "phoneOtpRuntimeConfigured": true,
+          "primaryColor": "#2563eb",
+          "updatedAt": "{datetime:unspecified}"
+        },
+        "signupToken": null,
+        "totpEnrollment": null,
+        "uiContext": null,
+        "view": "email-otp-verify"
+      }
+    }
+  ~ email (transactional) to {email:alice}
+      subject: Your Behavior Lock sign-in code
+      text:
+        Your Behavior Lock sign-in code is {otp#1}. It expires in 10 minute(s).
+      html:
+        <!DOCTYPE html>
+        <html lang="en">
+          <head></head>
+          <body style="margin:0;padding:24px;background:#f8fafc;font-family:Segoe UI,Arial,sans-serif;color:#0f172a;">
+            <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:20px;padding:32px;">
+              <img src="" alt="Behavior Lock" style="max-height:42px;max-width:180px;display:none;margin:0 0 16px;" />
+              <p style="display:block;margin:0 0 12px;font-size:14px;color:#475569;font-weight:600;">Behavior Lock</p>
+              <h1 style="margin:0 0 12px;font-size:28px;line-height:1.1;color:#0f172a;">Your sign-in code</h1>
+              <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">Use this one-time code to finish signing in as al***@example.test. It expires in 10 minute(s).</p>
+              <div style="margin:0 0 20px;padding:18px 20px;border-radius:16px;background:#eff6ff;border:1px solid #bfdbfe;font-size:34px;letter-spacing:0.24em;font-weight:700;text-align:center;color:#2563eb;">{otp#1}</div>
+              <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">If you did not request this code, you can ignore this email.</p>
+            </div>
+          </body>
+        </html>
+
+## 4. browser: verify the code
+> POST /sqlos/auth/headless/email-otp/verify
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "challengeToken": "{challenge-token#1}",
+>     "code": "{otp#1}",
+>     "requestId": "{req#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+< Set-Cookie: sqlos_auth_page={cookie#1}; expires=+7d; path=/; secure; samesite=lax; httponly
+    {
+      "redirectUrl": "https://sqlos.example.test/auth/callback?code={code#1}&state={state#1}&scope=openid%20profile%20email%20offline_access",
+      "type": "redirect",
+      "viewModel": null
+    }
+
+## 5. client: redeem the authorization code
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=authorization_code
+>   code={code#1}
+>   client_id=behavior-lock-app
+>   redirect_uri=https://sqlos.example.test/auth/callback
+>   code_verifier={pkce-verifier#1}
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "access_token": "{access-token#1}",
+      "expires_in": ~600,
+      "id_token": "{id-token#1}",
+      "refresh_token": "{refresh-token#1}",
+      "scope": "openid profile email offline_access",
+      "token_type": "Bearer"
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "email_otp"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "scope": "openid profile email offline_access",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+  jwt {id-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "JWT"
+    }
+    claims: {
+      "amr": [
+        "email_otp"
+      ],
+      "at_hash": "{hash#1}",
+      "aud": "behavior-lock-app",
+      "auth_time": {epoch},
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nonce": "{nonce#1}",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=5m
+
+## audit: email-code sign-in events
+  - {
+      "action": "email.send.queued",
+      "actor": {
+        "displayName": null,
+        "id": "{edl#1}",
+        "type": "email_delivery"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "email.send.queued",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "deliveryId": "{edl#1}",
+        "providerMessageId": "behavior-lock-email-1",
+        "templateKey": "auth.email-otp",
+        "templateVersion": 1
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "email_otp.challenge_started",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "email_otp.challenge_started",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "details": {
+          "authorizationRequestId": "[redacted]",
+          "clientApplicationId": "{cli#1}",
+          "requestedOrganizationId": null,
+          "sent": true
+        },
+        "maskedEmail": "al***@example.test",
+        "purpose": "login"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "user.email.claimed",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "user.email.claimed",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "emailId": "{eml#1}",
+        "proof": "email_otp",
+        "revoked": {
+          "authenticatorIds": [],
+          "calendarConnectionIds": [],
+          "consentGrantIds": [],
+          "externalIdentities": [],
+          "passwordCredentialIds": [
+            "{cred#1}"
+          ],
+          "phoneNumberIds": [],
+          "recoveryCodes": 0
+        }
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr#1}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "email_otp.verify_succeeded",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "email_otp.verify_succeeded",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "details": {
+          "AuthorizationRequestId": "[redacted]",
+          "ClientApplicationId": "{cli#1}",
+          "UserId": "{usr#1}"
+        },
+        "maskedEmail": "al***@example.test",
+        "purpose": "login"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

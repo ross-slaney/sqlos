@@ -76,10 +76,11 @@ public sealed partial class Scrubber
         }
 
         var registration = new Registration(value, kind, name);
+        var canonical = JwtRendering.LooksLikeJwt(value) ? JwtRendering.Identity(value) : value;
         foreach (var variant in Variants(value))
         {
             // First registration wins: a value keeps the role it was first seen in.
-            if (_registrations.TryAdd(variant, registration with { Canonical = value }))
+            if (_registrations.TryAdd(variant, registration with { Canonical = canonical }))
             {
                 _registeredPattern = null;
             }
@@ -171,7 +172,7 @@ public sealed partial class Scrubber
 
         if (match.Groups["jwt"].Success)
         {
-            return Placeholder(new Registration(match.Value, "jwt", null));
+            return Placeholder(new Registration(match.Value, "jwt", null) { Canonical = JwtRendering.Identity(match.Value) });
         }
 
         if (match.Groups["sqlosid"].Success)
