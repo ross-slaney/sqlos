@@ -1,0 +1,103 @@
+# SqlOS behavior lock transcript
+scenario: BrowserSessionScenarios.A_dynamically_registered_redirect_origin_becomes_an_allowed_post_logout_target
+profile: dcr
+
+## 1. victim-browser: before any registration the foreign origin is refused
+> GET /sqlos/auth/logout?returnTo=https%3A%2F%2Fattacker.example%2Fphish
+< 302 Found
+< Location: /sqlos/auth/logged-out
+< Set-Cookie: sqlos_auth_page=; expires={unix-epoch}; path=/; secure; samesite=lax; httponly
+
+## 2. attacker: an unauthenticated caller registers a client whose redirect URI is on the attacker's origin
+> POST /sqlos/auth/register
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "client_name": "Totally Legit",
+>     "grant_types": [
+>       "authorization_code",
+>       "refresh_token"
+>     ],
+>     "redirect_uris": [
+>       "https://attacker.example/callback"
+>     ],
+>     "response_types": [
+>       "code"
+>     ],
+>     "scope": "openid profile email offline_access",
+>     "token_endpoint_auth_method": "none"
+>   }
+< 201 Created
+< Content-Type: application/json; charset=utf-8
+    {
+      "client_id": "{dcrcli#1}",
+      "client_id_issued_at": {epoch},
+      "client_name": "Totally Legit",
+      "grant_types": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "redirect_uris": [
+        "https://attacker.example/callback"
+      ],
+      "response_types": [
+        "code"
+      ],
+      "scope": "openid profile email offline_access",
+      "token_endpoint_auth_method": "none"
+    }
+
+## audit
+  - {
+      "action": "client.dcr.registered",
+      "actor": {
+        "displayName": null,
+        "id": "{dcrcli#1}",
+        "type": "client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "client.dcr.registered",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "client_id": "{dcrcli#1}",
+        "client_name": "Totally Legit",
+        "grant_types": [
+          "authorization_code",
+          "refresh_token"
+        ],
+        "redirect_uris": [
+          "https://attacker.example/callback"
+        ],
+        "response_types": [
+          "code"
+        ],
+        "scope": "openid profile email offline_access",
+        "software_id": null,
+        "software_version": null,
+        "token_endpoint_auth_method": "[redacted]"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 3. victim-browser: now SqlOS redirects a signed-out user to any path on that origin
+> GET /sqlos/auth/logout?returnTo=https%3A%2F%2Fattacker.example%2Fphish
+< 302 Found
+< Location: https://attacker.example/phish
+< Set-Cookie: sqlos_auth_page=; expires={unix-epoch}; path=/; secure; samesite=lax; httponly

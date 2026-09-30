@@ -1,0 +1,18 @@
+# SqlOS behavior lock transcript
+scenario: AuthorizeScenarios.A_request_without_redirect_uri_is_accepted_and_every_redirect_it_makes_is_relative
+profile: hosted
+
+## 1. browser: prompt=none without a session and without redirect_uri
+> GET /sqlos/auth/authorize?response_type=code&client_id=behavior-lock-app&scope=openid%20profile%20email%20offline_access&state={state#1}&nonce={nonce#1}&code_challenge={pkce-challenge#1}&code_challenge_method=S256&prompt=none
+< 302 Found
+< Location: ?error=login_required&state={state#1}&error_description=The%20user%20is%20not%20signed%20in.
+
+## 2. browser: a signed-in browser: the code goes to a relative Location on SqlOS itself
+> GET /sqlos/auth/authorize?response_type=code&client_id=behavior-lock-app&scope=openid%20profile%20email%20offline_access&state={state#2}&nonce={nonce#2}&code_challenge={pkce-challenge#2}&code_challenge_method=S256
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}; sqlos_auth_page={cookie#2}
+< 302 Found
+< Location: ?code={code#1}&state={state#2}&scope=openid%20profile%20email%20offline_access
+< Set-Cookie: sqlos_auth_page={cookie#3}; expires=+7d; path=/; secure; samesite=lax; httponly
+
+## audit
+  (no new events)
