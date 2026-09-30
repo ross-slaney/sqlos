@@ -6,7 +6,7 @@ namespace SqlOS.BehaviorLock.Infrastructure;
 
 /// <summary>
 /// Reads <c>docs/architecture/8.0-behavior-ledger.md</c>. An approved file is "listed" when its
-/// repository-relative path appears in backticks inside a ledger entry (a <c>### BL-…</c> section).
+/// repository-relative path appears in backticks inside a ledger entry (a <c>### BL-NNNN: summary</c> section).
 /// The same rule drives <c>scripts/check-behavior-ledger.sh</c>.
 /// </summary>
 public sealed partial class BehaviorLedger
@@ -64,7 +64,7 @@ public sealed partial class BehaviorLedger
     public bool Lists(string approvedFile)
         => _listedPaths.Contains(Path.IsPathRooted(approvedFile) ? RepositoryPaths.Relative(approvedFile) : approvedFile);
 
-    [GeneratedRegex(@"^###\s+BL-\d+")]
+    [GeneratedRegex(@"^### BL-[0-9]{4}: \S")]
     private static partial Regex EntryHeading();
 
     [GeneratedRegex(@"`(?<path>[^`\s]+\.(?:txt|md|snap|json))`")]
