@@ -329,14 +329,20 @@ public static class HostProfiles
             [
                 "UseSingleApplication(\"Behavior Lock\", app => { Origin, ClientId = \"behavior-lock-app\", Api = \"/api\", Authorization(workspace model) })",
                 "ConfigureCalendar(calendar => { Enabled = true; SyncScheduler.Enabled = false })",
-                "ConfigureEmail(email => { FromAddress = no-reply@sqlos.example.test })",
+                "ConfigureEmail(email => { AzureCommunicationServicesConnectionString = placeholder, FromAddress = no-reply@sqlos.example.test })",
                 "AuthServer.SeedGoogleConnection / SeedMicrosoftConnection (calendar reuses them)",
                 "Dashboard.AuthorizationCallback = operator header"
             ],
             ConfigureSqlOS = (options, context) =>
             {
                 ConfigureMinimalSingleApplication(options);
-                options.ConfigureEmail(email => email.FromAddress = "no-reply@sqlos.example.test");
+                options.ConfigureEmail(email =>
+                {
+                    // A configured Azure Communication Services deployment. The host replaces the
+                    // sender with a capturing fake, so the connection string is never used.
+                    email.AzureCommunicationServicesConnectionString = "endpoint=https://behavior-lock.communication.azure.com/;accesskey=YmVoYXZpb3ItbG9jaw==";
+                    email.FromAddress = "no-reply@sqlos.example.test";
+                });
                 options.AuthServer.SeedGoogleConnection("google-client-id", "google-client-secret", SocialCallbackUri);
                 options.AuthServer.SeedMicrosoftConnection("microsoft-client-id", "microsoft-client-secret", tenant: null, SocialCallbackUri);
             },

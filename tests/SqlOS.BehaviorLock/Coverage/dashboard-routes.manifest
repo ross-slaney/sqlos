@@ -1,0 +1,58 @@
+# String-routed dashboard routes.
+#
+# The dashboard and FGA dashboard middleware answer these paths by string matching inside
+# src/SqlOS/Dashboard/SqlOSDashboardMiddleware.cs and
+# src/SqlOS/Fga/Dashboard/SqlOSFgaDashboardMiddleware.cs, so EndpointDataSource cannot see them.
+# The coverage gate requires a [Covers] scenario for each line, exactly as for mapped endpoints,
+# and the dashboard JavaScript scan fails if app.js calls a path that is neither listed here nor
+# a mapped endpoint. Add a line whenever the middleware learns a new path.
+#
+# Format: METHOD /template  description. {name} matches one segment; {*name} matches the rest.
+
+# SqlOSDashboardMiddleware: operator session (Password mode) and the dashboard shell.
+GET /sqlos  redirects to /sqlos/
+GET /sqlos/  dashboard shell (or 404 / login redirect when unauthorized)
+GET /sqlos/login  dashboard shell on the login route
+GET /sqlos/dashboard-auth/session  operator session state
+POST /sqlos/dashboard-auth/login  Password-mode sign-in with login throttling
+POST /sqlos/dashboard-auth/logout  clears the operator session
+GET /sqlos/app.js  dashboard script
+GET /sqlos/style.css  dashboard stylesheet
+GET /sqlos/admin/auth/{*page}  dashboard shell for the auth admin pages
+GET /sqlos/admin/audit/{*page}  dashboard shell for the audit pages
+GET /sqlos/admin/email/{*page}  dashboard shell for the email pages
+GET /sqlos/admin/calendar/{*page}  dashboard shell for the calendar pages
+GET /sqlos/admin/fga/{*page}  dashboard shell for the FGA pages
+
+# SqlOSFgaDashboardMiddleware: FGA dashboard assets and API (/sqlos/admin/fga/api/*).
+GET /sqlos/admin/fga/app.js  FGA dashboard script
+GET /sqlos/admin/fga/style.css  FGA dashboard stylesheet
+GET /sqlos/admin/fga/api/stats  FGA summary counts
+GET /sqlos/admin/fga/api/resources/tree  root resources, paginated
+GET /sqlos/admin/fga/api/resources  searchable resource list
+GET /sqlos/admin/fga/api/resources/{resourceId}  resource detail
+GET /sqlos/admin/fga/api/resources/{resourceId}/children  child resources, paginated
+GET /sqlos/admin/fga/api/resources/{resourceId}/access  effective access on a resource
+GET /sqlos/admin/fga/api/resources/{resourceId}/grants  direct grants on a resource
+GET /sqlos/admin/fga/api/subjects  subject list
+GET /sqlos/admin/fga/api/subjects/{subjectId}  subject detail
+GET /sqlos/admin/fga/api/subjects/{subjectId}/grants  a subject's grants
+GET /sqlos/admin/fga/api/users  FGA user subjects
+GET /sqlos/admin/fga/api/agents  FGA agent subjects
+GET /sqlos/admin/fga/api/service-accounts  FGA service-account subjects
+GET /sqlos/admin/fga/api/user-groups  FGA user groups
+GET /sqlos/admin/fga/api/grants  grant list
+POST /sqlos/admin/fga/api/grants  create a grant
+DELETE /sqlos/admin/fga/api/grants/{grantId}  delete a grant
+GET /sqlos/admin/fga/api/roles  role list
+POST /sqlos/admin/fga/api/roles  rejected: roles are schema, seeded in code
+GET /sqlos/admin/fga/api/roles/{roleId}  role detail
+PUT /sqlos/admin/fga/api/roles/{roleId}  rejected: roles are schema, seeded in code
+DELETE /sqlos/admin/fga/api/roles/{roleId}  rejected: roles are schema, seeded in code
+GET /sqlos/admin/fga/api/roles/{roleId}/permissions  a role's permissions
+POST /sqlos/admin/fga/api/roles/{roleId}/permissions  rejected: role permissions are schema
+DELETE /sqlos/admin/fga/api/roles/{roleId}/permissions/{permissionId}  rejected: role permissions are schema
+GET /sqlos/admin/fga/api/permissions  permission list
+POST /sqlos/admin/fga/api/permissions  rejected: permissions are schema, seeded in code
+GET /sqlos/admin/fga/api/resource-types  resource type list
+POST /sqlos/admin/fga/api/trace  explain an access decision
