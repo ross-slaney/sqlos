@@ -1,0 +1,106 @@
+# SqlOS behavior lock transcript
+scenario: AuditLogAdminScenarios.Operator_reads_one_audit_event_and_exports_a_window_as_csv
+profile: modules
+
+# The host recorded invoice.paid ({date}, with a quoted display name, two targets, and a multi-line note) and invoice.voided ({date}), both from source billing.
+
+## 1. operator: without operator credentials an event is not found
+> GET /sqlos/admin/audit/api/events/{evt#1}
+< 404 Not Found
+
+## 2. operator: read one event
+> GET /sqlos/admin/audit/api/events/{evt#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "action": "invoice.paid",
+      "actor": {
+        "displayName": "Billing, \"nightly\"",
+        "id": "billing-worker",
+        "type": "service"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": "corr-1001",
+        "ipAddress": "198.51.100.7",
+        "requestId": "req-1001",
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": "corr-1001",
+      "eventType": "invoice.paid",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "198.51.100.7",
+      "metadata": {
+        "amount": 42,
+        "note": "line one\nline two"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": "req-1001",
+      "sessionId": null,
+      "source": "billing",
+      "targets": [
+        {
+          "displayName": "Invoice 1001",
+          "id": "inv-1001",
+          "type": "invoice"
+        },
+        {
+          "displayName": null,
+          "id": "cus-9",
+          "type": "customer"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 3. operator: an unknown event is not found
+> GET /sqlos/admin/audit/api/events/{evt#2}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 404 Not Found
+
+## 4. operator: without operator credentials there is no export
+> GET /sqlos/admin/audit/api/events/export.csv?source=billing
+< 404 Not Found
+
+## 5. operator: export a window: one CSV row per event, quoted where needed
+> GET /sqlos/admin/audit/api/events/export.csv?source=billing&occurredAtFrom={datetime:utc-z}&occurredAtTo={datetime:utc-z}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Disposition: attachment; filename="sqlos-audit-{export-time:yyyyMMddHHmmss}.csv"
+< Content-Type: text/csv; charset=utf-8
+    id,occurred_at,ingested_at,organization_id,application_id,application_key,source,action,actor_type,actor_id,actor_display_name,target_summary,ip_address,request_id,correlation_id,metadata_json
+    {evt#1},{datetime:utc-z},{datetime:utc-z},,,,billing,invoice.paid,service,billing-worker,"Billing, ""nightly""",invoice:inv-1001 (Invoice 1001); customer:cus-9,198.51.100.7,req-1001,corr-1001,"{""amount"":42,""note"":""line one\nline two""}"
+
+## 6. operator: the from and to aliases select a wider window
+> GET /sqlos/admin/audit/api/events/export.csv?source=billing&from={datetime:utc-z}&to={datetime:utc-z}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Disposition: attachment; filename="sqlos-audit-{export-time:yyyyMMddHHmmss}.csv"
+< Content-Type: text/csv; charset=utf-8
+    id,occurred_at,ingested_at,organization_id,application_id,application_key,source,action,actor_type,actor_id,actor_display_name,target_summary,ip_address,request_id,correlation_id,metadata_json
+    {evt#1},{datetime:utc-z},{datetime:utc-z},,,,billing,invoice.paid,service,billing-worker,"Billing, ""nightly""",invoice:inv-1001 (Invoice 1001); customer:cus-9,198.51.100.7,req-1001,corr-1001,"{""amount"":42,""note"":""line one\nline two""}"
+    {evt#3},{datetime:utc-z},{datetime:utc-z},,,,billing,invoice.voided,system,,,,,,,
+
+## 7. operator: an export window that ends before it starts
+> GET /sqlos/admin/audit/api/events/export.csv?occurredAtFrom={datetime:utc-z}&occurredAtTo={datetime:utc-z}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "Audit log export end date must be after the start date."
+    }
+
+## 8. operator: an export window longer than 366 days
+> GET /sqlos/admin/audit/api/events/export.csv?occurredAtFrom={datetime:utc-z}&occurredAtTo={datetime:utc-z}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "Audit log export date range cannot exceed 366 days."
+    }
