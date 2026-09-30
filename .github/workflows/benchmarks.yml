@@ -3,14 +3,15 @@ name: Benchmarks
 # SHRBAC list filtering and point checks on the shipped schema and fn_IsResourceAccessible, one job per
 # engine, beside Pull Request CI. See tests/SqlOS.Benchmarks/README.md.
 #
-# Pull requests grow the catalog 1M -> 10M and skip the 30-second sparse scan, so the check finishes well
-# inside the PR CI envelope. The full run, 1M -> 10M -> 100M with every scenario, happens on every merge to
-# main, weekly, on demand, and on a pull request labelled `benchmark-100m`.
+# Pull requests grow the catalog 1M -> 10M and skip the sparse scan (30 s a page on PostgreSQL, 160 s on SQL
+# Server), so both jobs finish well inside the PR CI envelope. The full run, 1M -> 10M -> 100M with every
+# scenario, takes about 30 minutes on PostgreSQL and an hour on SQL Server (loading 200M rows through the
+# clustered keys is the bulk of it); it runs on every merge to main, weekly, on demand, and on a pull request
+# labelled `benchmark-100m`. Standard runners are free for public repositories.
 
 on:
   push:
-    # CALIBRATION ONLY: remove the feature branch before opening the PR.
-    branches: [main, benchmarks-scale-100m]
+    branches: [main]
     paths:
       - "src/SqlOS/**"
       - "tests/SqlOS.Benchmarks/**"
@@ -44,7 +45,7 @@ jobs:
     # Adding some other label to a pull request should not re-run the benchmarks.
     if: github.event.action != 'labeled' || github.event.label.name == 'benchmark-100m'
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'benchmark-100m')) && 120 || 30 }}
+    timeout-minutes: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'benchmark-100m')) && 90 || 30 }}
     strategy:
       fail-fast: false
       matrix:

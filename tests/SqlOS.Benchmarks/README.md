@@ -53,6 +53,10 @@ The data is a pure function of the seed, so it grows in place (1M → 10M → 10
 | `list.store.by-store` | The same person listing their store with `WHERE StoreId = …` on a `(StoreId, Id)` index: a normal page again |
 | `point.function.*` | `fn_IsResourceAccessible` for one product at depth 4 and 9, and a denial that walks to the root |
 | `point.api.*` | `Allows` (`CheckAccessAsync`), which resolves and explains the decision in several round trips |
+| `density.*` | At the first scale only: the region page and the denied check re-run while 100 other people hold grants on the root. Only the caller's own grants should matter. Reported, not gated |
+
+The sparse scan is independent of N and costs minutes, so it runs only at the first and last scales, which
+are the two the scale gate compares.
 
 ## Gates (`gates.json`)
 
@@ -87,10 +91,70 @@ correctness but not for timings.
 ## CI
 
 `.github/workflows/benchmarks.yml` runs one job per engine beside Pull Request CI, when `src/SqlOS`, this
-project, or the workflow changes. Standard GitHub-hosted runners are free for public repositories.
+project, or the workflow changes. Standard GitHub-hosted runners (4 vCPU, 16 GB) are free for public
+repositories.
 
-Database files go on the runner's temporary disk (`/mnt`), since the OS disk is too small at 100M. The
-Markdown summary is on the run page, and the JSON results and plans are uploaded as artifacts.
+| Tier | When | Scales | Time per job |
+|---|---|---|---|
+| Pull request | Every pull request that touches `src/SqlOS` | 1M → 10M, without the sparse scan | about 5 min (PostgreSQL), 8 min (SQL Server) |
+| Full | Every merge to `main`, weekly, on demand, and on a pull request labelled `benchmark-100m` | 1M → 10M → 100M, every scenario | about 30 min (PostgreSQL), 55 min (SQL Server) |
+
+Most of the full run is loading: 90M new rows in each of two tables, then rebuilding indexes. PostgreSQL
+loads in parallel `COPY` streams. SQL Server takes the table lock that minimal logging needs, so it has one
+bulk stream per table. The 100M database is 37 GB on PostgreSQL and 45 GB on SQL Server (`nvarchar` doubles
+the text). SQL Server's data, log, and tempdb files are capped below the disk's free space, so overflowing
+fails the benchmark with a SQL error instead of taking down the runner.
+
+The Markdown summary is on the run page, and the JSON results and plans are uploaded as artifacts.
+
+## Results
+
+From CI calibration runs (4 vCPU runner, warm cache, median ms). Current numbers are in each run's summary.
+
+| Scenario | PostgreSQL 16, 1M → 100M | SQL Server 2022, 1M → 100M |
+|---|---|---|
+| Company admin, first page (k = 20) | 10.1 → 10.6 | 25.9 → 27.0 |
+| Company admin, page from the middle | 10.1 → 10.6 | 25.6 → 28.9 |
+| Chain manager, σ = 7.1% | 33 → 27 | 108 → 116 |
+| Region manager, σ = 0.97% (1,592 rows examined) | 189 → 137 | 645 → 679 |
+| Chain manager at D = 10 | 31 → 26 | 112 → 118 |
+| Store manager, sparse, σ = 0.0065% (399,129 rows examined) | 31.8 s → 33.3 s | 160.7 s → 161.8 s |
+| Store manager, filtered to the store | 10.5 → 9.7 | 27.5 → 26.6 |
+| `fn_IsResourceAccessible`, one product | 6.6 → 6.0 | 2.6 → 2.7 |
+| `Allows`, product at depth 9 | 37.7 → 34.4 | 56.0 → 55.8 |
+
+Per-page cost does not grow with N on either engine across 100 times the data: every ratio is between ×0.72
+and ×1.13. What sets the cost is the number of rows the scan examines, k / σ, times a per-row constant: about
+90–110 µs of server execution on PostgreSQL and 410–540 µs on SQL Server.
+
+## Findings
+
+- **Sparse access is the real cost, as Theorem 3 predicts.** A manager of a median store who lists "every
+  product I can see" examines about 400K rows per page: 33 s on PostgreSQL, 161 s on SQL Server, at every
+  scale. Scoping the query by the store (`WHERE StoreId = …` on a `(StoreId, Id)` index) brings the same
+  person back to 10 ms and 27 ms. Applications should filter by the scope key whenever the screen already
+  knows it.
+- **On PostgreSQL, a caller pays for other people's grants.** With 100 other users' grants added to the root,
+  the region manager's page goes from 189 ms to 1,126 ms (×6.0) with the same rows examined. The plan probes
+  grants by `ResourceId` alone, joins every grant it finds to the subject tables, and applies
+  `SubjectId IN (jsonb_array_elements_text(…))` last. SQL Server seeks on `(ResourceId, SubjectId)` and is
+  unaffected (×1.0). The model's per-row bound depends only on the caller's own grants.
+- **On PostgreSQL, planning is half of a small page.** EF Core and Npgsql do not prepare statements by
+  default, so PostgreSQL plans the inlined function body on every query: about 5.3 ms, against about 2 ms of
+  execution for a 21-row page.
+- **The shipped SQL Server function costs several times the paper's.** The paper reported 3.47 ms for a
+  k = 20 page at D = 5. The same page through the shipped function takes 26 ms, and a single row about 400 µs.
+  Since the paper, the function has gained subject-type validation, cycle detection over `NVARCHAR(MAX)`
+  paths, a caller-validation `EXISTS`, and `OPENJSON` parsing, all evaluated per candidate row.
+- **`Allows` costs several times the function.** `CheckAccessAsync` resolves and explains the decision in
+  several round trips: 19–37 ms on PostgreSQL and 30–56 ms on SQL Server, against 2–7 ms for the function
+  itself.
+- **The resource table carries a duplicate index.** `IX_SqlOSFgaResources_ParentId` and
+  `IX_SqlOSFgaResources_ParentId_Id` (`ParentId` with `Id` included) are the same index on SQL Server, where
+  the clustered key is already carried. At 100M rows that is several gigabytes and an extra rebuild.
+- **PostgreSQL chooses a different plan at 1M.** At 1M products, the chain and region pages run about 35%
+  slower than at 10M and 100M. The captured plans show a different join order inside the inlined function
+  at that size, so the scale gate is somewhat lenient for those two scenarios; their ceilings still apply.
 
 ## Loading
 

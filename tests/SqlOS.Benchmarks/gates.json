@@ -6,32 +6,34 @@
   },
   "ceilingsMilliseconds": {
     "postgresql": {
-      "list.admin.first-page": 250,
-      "list.admin.k100": 1000,
-      "list.admin.mid-cursor": 250,
-      "list.chain.first-page": 1000,
-      "list.region.first-page": 5000,
-      "list.deep-chain.first-page": 1000,
-      "list.store.by-store": 250,
-      "point.function.product": 100,
-      "point.function.deep-product": 100,
-      "point.function.denied": 100,
-      "point.api.product": 1000,
-      "point.api.deep-product": 1000
+      "list.admin.first-page": 45,
+      "list.admin.k100": 75,
+      "list.admin.mid-cursor": 45,
+      "list.chain.first-page": 130,
+      "list.region.first-page": 750,
+      "list.deep-chain.first-page": 125,
+      "list.store.first-page": 120000,
+      "list.store.by-store": 45,
+      "point.function.product": 25,
+      "point.function.deep-product": 25,
+      "point.function.denied": 25,
+      "point.api.product": 85,
+      "point.api.deep-product": 150
     },
     "sqlserver": {
-      "list.admin.first-page": 250,
-      "list.admin.k100": 1000,
-      "list.admin.mid-cursor": 250,
-      "list.chain.first-page": 1000,
-      "list.region.first-page": 5000,
-      "list.deep-chain.first-page": 1000,
-      "list.store.by-store": 250,
-      "point.function.product": 100,
-      "point.function.deep-product": 100,
-      "point.function.denied": 100,
-      "point.api.product": 1000,
-      "point.api.deep-product": 1000
+      "list.admin.first-page": 110,
+      "list.admin.k100": 460,
+      "list.admin.mid-cursor": 115,
+      "list.chain.first-page": 470,
+      "list.region.first-page": 2700,
+      "list.deep-chain.first-page": 475,
+      "list.store.first-page": 650000,
+      "list.store.by-store": 115,
+      "point.function.product": 11,
+      "point.function.deep-product": 14,
+      "point.function.denied": 8,
+      "point.api.product": 125,
+      "point.api.deep-product": 230
     }
   }
 }

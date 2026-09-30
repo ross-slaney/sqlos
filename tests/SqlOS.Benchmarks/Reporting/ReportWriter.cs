@@ -59,15 +59,23 @@ internal static class ReportWriter
             text.Append(CultureInfo.InvariantCulture, $"| {scenario.Title} | {Selectivity(scenario.Selectivity, scenario.Kind)} |");
             foreach (var step in steps)
             {
-                var match = step.Scenarios.First(s => s.Id == scenario.Id);
+                var match = step.Scenarios.FirstOrDefault(s => s.Id == scenario.Id);
+                if (match is null)
+                {
+                    text.Append(" – |");
+                    continue;
+                }
+
                 var mark = !match.Correct ? " ❌" : !match.FullPage ? "†" : "";
                 text.Append(CultureInfo.InvariantCulture, $" {Milliseconds(match.MedianMs)}{mark} |");
             }
 
             if (steps.Count > 1)
             {
-                var baseline = smallest.Scenarios.First(s => s.Id == scenario.Id);
-                text.Append(CultureInfo.InvariantCulture, $" ×{scenario.MedianMs / baseline.MedianMs:F2} |");
+                var baseline = smallest.Scenarios.FirstOrDefault(s => s.Id == scenario.Id);
+                text.Append(baseline is null
+                    ? " – |"
+                    : string.Create(CultureInfo.InvariantCulture, $" ×{scenario.MedianMs / baseline.MedianMs:F2} |"));
             }
 
             text.Append(CultureInfo.InvariantCulture, $" {(scenario.ProductRowsExamined is { } rows ? rows.ToString("N0", CultureInfo.InvariantCulture) : "–")} |");
@@ -93,7 +101,7 @@ internal static class ReportWriter
             {
                 var plain = smallest.Scenarios.First(s => "density." + s.Id == dense.Id);
                 text.Append(CultureInfo.InvariantCulture,
-                    $" {plain.Title}: {Milliseconds(plain.MedianMs)} → {Milliseconds(dense.MedianMs)} ms (×{dense.MedianMs / plain.MedianMs:F1});");
+                    $" {plain.Title}: {WithUnit(plain.MedianMs)} → {WithUnit(dense.MedianMs)} (×{dense.MedianMs / plain.MedianMs:F1});");
             }
 
             text.Length -= 1;
@@ -156,6 +164,9 @@ internal static class ReportWriter
             >= 100 => value.ToString("F0", CultureInfo.InvariantCulture),
             _ => value.ToString("F2", CultureInfo.InvariantCulture),
         };
+
+    private static string WithUnit(double milliseconds)
+        => milliseconds >= 10_000 ? Milliseconds(milliseconds) : Milliseconds(milliseconds) + " ms";
 
     private static string Seconds(double seconds)
         => seconds >= 60

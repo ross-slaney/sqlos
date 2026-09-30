@@ -141,7 +141,12 @@ foreach (var target in options.Scales)
     log.Info(
         $"Measuring at {RetailTree.Count(target)} products ({tree.TotalResources(target):N0} resources, {size / 1e9:F1} GB)" +
         (FreeBytes() is { } left ? $", {left / 1e9:F0} GB free on the data disk..." : "..."));
-    var scenarios = ScenarioCatalog.Build(tree, people, target).Where(s => !options.Exclude.Contains(s.Id)).ToList();
+    // The sparse scan is independent of N and costs minutes, so it runs at the first and last scales only:
+    // the two the scale gate compares.
+    var intermediate = target != options.Scales[0] && target != options.Scales[^1];
+    var scenarios = ScenarioCatalog.Build(tree, people, target)
+        .Where(s => !options.Exclude.Contains(s.Id) && !(intermediate && ScenarioRunner.IsSparseScan(s)))
+        .ToList();
     var results = await runner.RunAsync(scenarios, target, cancellation);
 
     // Grant density does not depend on N, so it is measured once, at the first scale.

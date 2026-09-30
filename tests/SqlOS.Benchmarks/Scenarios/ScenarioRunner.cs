@@ -42,7 +42,7 @@ internal sealed class ScenarioRunner(
         return results;
     }
 
-    private static bool IsSparseScan(Scenario scenario)
+    internal static bool IsSparseScan(Scenario scenario)
         => scenario.Kind == ScenarioKind.List && scenario.StoreId is null && scenario.Selectivity < 0.001;
 
     private async Task<ScenarioResult> RunAsync(Scenario scenario, long productCount, CancellationToken cancellationToken)
@@ -62,7 +62,9 @@ internal sealed class ScenarioRunner(
             await ExecuteAsync(scenario, cancellationToken);
         }
 
-        var iterations = estimate switch { < 250 => 25, < 2_000 => 7, < 10_000 => 3, _ => 2 };
+        // Queries that take tens of seconds (the sparse scan) are timed once; their spread is small relative to
+        // their length, and each run costs minutes of CI time on SQL Server.
+        var iterations = estimate switch { < 250 => 25, < 2_000 => 7, < 10_000 => 3, _ => 1 };
         var timings = new double[iterations];
         for (var i = 0; i < iterations; i++)
         {
