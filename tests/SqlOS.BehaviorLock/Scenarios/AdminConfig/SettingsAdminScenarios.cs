@@ -37,7 +37,7 @@ public sealed class SettingsAdminScenarios
         t.Observe(
             await t.Operator.PutJsonAsync(SecurityRoute, new
             {
-                refreshTokenLifetimeMinutes = 43200,
+                refreshTokenLifetimeMinutes = 20160,
                 sessionIdleTimeoutMinutes = 1440,
                 sessionAbsoluteLifetimeMinutes = 20160,
                 signingKeyRotationIntervalDays = 30,
@@ -45,7 +45,7 @@ public sealed class SettingsAdminScenarios
                 signingKeyRetiredCleanupDays = 5,
                 refreshTokenGraceWindowSeconds = 0
             }),
-            "shorten every lifetime; a zero refresh grace window turns the grace window off");
+            "shorten every lifetime and turn the refresh-token grace window off with 0");
         t.Observe(await t.Operator.GetAsync(SecurityRoute), "the stored lifetimes");
         t.Observe(await t.Operator.GetAsync("/sqlos/admin/auth/api/signing-keys"), "the signing-key view reports the new rotation schedule");
 

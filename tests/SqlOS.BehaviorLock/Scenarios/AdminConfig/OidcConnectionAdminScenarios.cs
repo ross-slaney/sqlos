@@ -127,7 +127,7 @@ public sealed class OidcConnectionAdminScenarios
                 applePrivateKeyPem = "-----BEGIN PRIVATE KEY-----\r\nbehavior-lock-apple-key\r\n-----END PRIVATE KEY-----",
                 clientAuthMethod = "ClientSecretBasic"
             }),
-            "Apple: signs its own client secret from the team, key, and private key; the key is never returned");
+            "Apple: a team ID, key ID, and private key replace the client secret; the key is never returned");
         t.Observe(
             await t.Operator.PostJsonAsync(ConnectionsRoute, new
             {

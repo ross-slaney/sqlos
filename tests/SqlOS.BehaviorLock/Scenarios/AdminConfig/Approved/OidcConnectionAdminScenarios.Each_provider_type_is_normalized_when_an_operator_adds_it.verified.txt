@@ -117,7 +117,7 @@ profile: dashboard-callback
       "userInfoEndpoint": "https://api.github.com/user"
     }
 
-## 3. operator: Apple: signs its own client secret from the team, key, and private key; the key is never returned
+## 3. operator: Apple: a team ID, key ID, and private key replace the client secret; the key is never returned
 > POST /sqlos/admin/auth/api/oidc-connections
 > Content-Type: application/json; charset=utf-8
 > X-BehaviorLock-Operator: behavior-lock-operator

@@ -22,13 +22,13 @@ profile: dashboard-callback
       "updatedAt": "{datetime:unspecified}"
     }
 
-## 3. operator: shorten every lifetime; a zero refresh grace window turns the grace window off
+## 3. operator: shorten every lifetime and turn the refresh-token grace window off with 0
 > PUT /sqlos/admin/auth/api/settings/security
 > Content-Type: application/json; charset=utf-8
 > X-BehaviorLock-Operator: behavior-lock-operator
 >   {
 >     "refreshTokenGraceWindowSeconds": 0,
->     "refreshTokenLifetimeMinutes": 43200,
+>     "refreshTokenLifetimeMinutes": 20160,
 >     "sessionAbsoluteLifetimeMinutes": 20160,
 >     "sessionIdleTimeoutMinutes": 1440,
 >     "signingKeyGraceWindowDays": 5,
@@ -39,7 +39,7 @@ profile: dashboard-callback
 < Content-Type: application/json; charset=utf-8
     {
       "refreshTokenGraceWindowSeconds": 0,
-      "refreshTokenLifetimeMinutes": 43200,
+      "refreshTokenLifetimeMinutes": 20160,
       "sessionAbsoluteLifetimeMinutes": 20160,
       "sessionIdleTimeoutMinutes": 1440,
       "signingKeyGraceWindowDays": 5,
@@ -55,7 +55,7 @@ profile: dashboard-callback
 < Content-Type: application/json; charset=utf-8
     {
       "refreshTokenGraceWindowSeconds": 0,
-      "refreshTokenLifetimeMinutes": 43200,
+      "refreshTokenLifetimeMinutes": 20160,
       "sessionAbsoluteLifetimeMinutes": 20160,
       "sessionIdleTimeoutMinutes": 1440,
       "signingKeyGraceWindowDays": 5,
