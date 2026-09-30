@@ -1320,7 +1320,7 @@ public sealed class SqlOSAuthorizationServerService
             cancellationToken);
     }
 
-    public async Task<SqlOSAuthorizationRequestLoginResult> CompleteAuthorizationRequestLoginAsync(
+    public Task<SqlOSAuthorizationRequestLoginResult> CompleteAuthorizationRequestLoginAsync(
         SqlOSAuthorizationRequest authorizationRequest,
         SqlOSUser user,
         string authenticationMethod,
@@ -1328,6 +1328,51 @@ public sealed class SqlOSAuthorizationServerService
         CancellationToken cancellationToken = default,
         bool consentGranted = false,
         DateTime? knownAuthenticatedAt = null)
+        => CompleteAuthorizationRequestLoginCoreAsync(
+            authorizationRequest,
+            user,
+            authenticationMethod,
+            httpContext,
+            approverOrganizationId: null,
+            cancellationToken,
+            consentGranted,
+            knownAuthenticatedAt);
+
+    /// <summary>
+    /// Completes sign-in for a device authorization request on the approval surface.
+    /// The organization the approver picked is authorized by the same membership check as
+    /// a request-bound organization, but it is never assigned to the tracked request: a
+    /// pick the user is not a member of fails without changing the request.
+    /// </summary>
+    internal Task<SqlOSAuthorizationRequestLoginResult> CompleteDeviceApprovalLoginAsync(
+        SqlOSAuthorizationRequest authorizationRequest,
+        SqlOSUser user,
+        string authenticationMethod,
+        HttpContext httpContext,
+        string? selectedOrganizationId,
+        CancellationToken cancellationToken = default)
+    {
+        SqlOSDeviceAuthorizationService.RequireDeviceAuthorizationRequest(authorizationRequest);
+        return CompleteAuthorizationRequestLoginCoreAsync(
+            authorizationRequest,
+            user,
+            authenticationMethod,
+            httpContext,
+            string.IsNullOrWhiteSpace(selectedOrganizationId) ? null : selectedOrganizationId,
+            cancellationToken,
+            consentGranted: false,
+            knownAuthenticatedAt: null);
+    }
+
+    private async Task<SqlOSAuthorizationRequestLoginResult> CompleteAuthorizationRequestLoginCoreAsync(
+        SqlOSAuthorizationRequest authorizationRequest,
+        SqlOSUser user,
+        string authenticationMethod,
+        HttpContext httpContext,
+        string? approverOrganizationId,
+        CancellationToken cancellationToken,
+        bool consentGranted,
+        DateTime? knownAuthenticatedAt)
     {
         // Consent is the first interstitial: it runs before invitation acceptance,
         // organization selection, and MFA so a denied request never advances state.
@@ -1418,10 +1463,11 @@ public sealed class SqlOSAuthorizationServerService
         }
 
         var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
+        var boundOrganizationId = approverOrganizationId ?? authorizationRequest.OrganizationId;
 
-        if (!string.IsNullOrWhiteSpace(authorizationRequest.OrganizationId))
+        if (!string.IsNullOrWhiteSpace(boundOrganizationId))
         {
-            if (organizations.All(x => x.Id != authorizationRequest.OrganizationId))
+            if (organizations.All(x => x.Id != boundOrganizationId))
             {
                 throw new InvalidOperationException("The selected organization is not available to this user.");
             }
@@ -1429,7 +1475,7 @@ public sealed class SqlOSAuthorizationServerService
             return await CompleteAssuredLoginAsync(
                 authorizationRequest,
                 user,
-                authorizationRequest.OrganizationId,
+                boundOrganizationId,
                 authenticationMethod,
                 organizations,
                 httpContext,

@@ -74,3 +74,5 @@ Or for an SSO user:
 ## Usage in the login UI
 
 The example apps use discovery as the first step of login. The user enters their email, the app calls discover, and then shows the configured local credential method or redirects to SSO. If the mode is `password`, the UI can show password, [Email OTP](/docs/authserver/email-otp), [Magic Link](/docs/authserver/magic-link), and configured [OIDC providers](/docs/authserver/oidc-auth), depending on AuthPage settings.
+
+When SqlOS runs discovery for an authorization request during sign-in, an `sso` result binds the connection and that connection's organization to the request together. If the user re-identifies with an address that returns `password`, SqlOS clears that pair, so the next sign-in does not inherit an organization or connection from the earlier address.

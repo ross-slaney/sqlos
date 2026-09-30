@@ -24,6 +24,7 @@ public sealed class SqlOSSamlService
     private const string SamlAssertionNs = "urn:oasis:names:tc:SAML:2.0:assertion";
     private const string SamlBearerConfirmationMethod = "urn:oasis:names:tc:SAML:2.0:cm:bearer";
     private const string SamlStatePropertyName = "__sqlosSaml";
+    internal const string RequestDeniedAuditEvent = "user.login.saml.request_denied";
     private static readonly TimeSpan SamlClockSkew = TimeSpan.FromMinutes(5);
     private static readonly HashSet<string> AllowedSignatureMethods = new(StringComparer.Ordinal)
     {
@@ -166,6 +167,27 @@ public sealed class SqlOSSamlService
                 throw new InvalidOperationException("Authorization request is no longer active.");
             }
 
+            // A SAML connection only ever signs users into its own organization. A
+            // request bound to any other organization is rejected before the assertion
+            // is consumed, so nothing is resolved, linked, provisioned, or completed.
+            if (!string.IsNullOrWhiteSpace(authorizationRequest.OrganizationId)
+                && !string.Equals(authorizationRequest.OrganizationId, connection.OrganizationId, StringComparison.Ordinal))
+            {
+                await _adminService.RecordAuditAsync(
+                    RequestDeniedAuditEvent,
+                    "sso_connection",
+                    connection.Id,
+                    organizationId: connection.OrganizationId,
+                    data: new
+                    {
+                        connectionId = connection.Id,
+                        reason = "organization_mismatch",
+                        requestOrganizationId = authorizationRequest.OrganizationId
+                    },
+                    cancellationToken: cancellationToken);
+                throw new InvalidOperationException("SAML authorization request is bound to another organization.");
+            }
+
             var samlState = ReadSamlRequestState(authorizationRequest.UiContextJson)
                 ?? throw new InvalidOperationException("SAML request state is missing.");
             var assertion = ParseAndValidateAssertion(
@@ -212,7 +234,10 @@ public sealed class SqlOSSamlService
         // Only a signed assertion attribute can drive first-time email linking
         // or JIT provisioning. Already-bound subjects do not depend on email.
         var email = hasAssertedEmail ? emailValue : null;
-        var organizationId = authorizationRequest.OrganizationId ?? connection.OrganizationId;
+        // Resolution, linking, JIT, domain ownership, and completion all run in the
+        // connection's organization. HandleAcsAsync has already rejected a request
+        // bound to any other organization.
+        var organizationId = connection.OrganizationId;
         var user = await ResolveUserAsync(connection, principal, email, hasAssertedEmail, organizationId, cancellationToken)
             ?? throw new InvalidOperationException("No user could be resolved from the SAML assertion.");
 

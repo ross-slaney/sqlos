@@ -599,18 +599,7 @@ public static partial class EndpointRouteBuilderExtensions
 
         var discovery = await discoveryService.DiscoverAsync(new SqlOSHomeRealmDiscoveryRequest(email), cancellationToken);
         authorizationRequest.LoginHintEmail = email;
-        if (!string.IsNullOrWhiteSpace(discovery.OrganizationId))
-        {
-            authorizationRequest.OrganizationId = discovery.OrganizationId;
-            authorizationRequest.ResolvedOrganizationId = discovery.OrganizationId;
-        }
-
-        if (!string.IsNullOrWhiteSpace(discovery.ConnectionId))
-        {
-            authorizationRequest.ConnectionId = discovery.ConnectionId;
-            authorizationRequest.ResolvedConnectionId = discovery.ConnectionId;
-        }
-
+        SqlOSHomeRealmDiscoveryService.BindToAuthorizationRequest(authorizationRequest, discovery);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return string.Equals(discovery.Mode, "sso", StringComparison.Ordinal)

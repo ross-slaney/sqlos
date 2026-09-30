@@ -105,6 +105,36 @@ public sealed class SqlOSHomeRealmDiscoveryService
         return new SqlOSHomeRealmDiscoveryResult("sso", match.Id, match.Name, match.PrimaryDomain, match.Connection.Id);
     }
 
+    /// <summary>
+    /// Binds a discovery result to an authorization request. An SSO match binds the
+    /// connection together with that connection's organization. Any other result clears the
+    /// connection an earlier discovery bound, together with its organization, so a request
+    /// never pairs one discovery's connection with an organization from somewhere else.
+    /// </summary>
+    internal static void BindToAuthorizationRequest(
+        SqlOSAuthorizationRequest authorizationRequest,
+        SqlOSHomeRealmDiscoveryResult discovery)
+    {
+        if (string.Equals(discovery.Mode, "sso", StringComparison.Ordinal)
+            && !string.IsNullOrWhiteSpace(discovery.ConnectionId)
+            && !string.IsNullOrWhiteSpace(discovery.OrganizationId))
+        {
+            authorizationRequest.OrganizationId = discovery.OrganizationId;
+            authorizationRequest.ResolvedOrganizationId = discovery.OrganizationId;
+            authorizationRequest.ConnectionId = discovery.ConnectionId;
+            authorizationRequest.ResolvedConnectionId = discovery.ConnectionId;
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(authorizationRequest.ConnectionId))
+        {
+            authorizationRequest.OrganizationId = null;
+            authorizationRequest.ResolvedOrganizationId = null;
+            authorizationRequest.ConnectionId = null;
+            authorizationRequest.ResolvedConnectionId = null;
+        }
+    }
+
     private async Task<bool> ShouldRouteToSsoAsync(
         string organizationId,
         string? normalizedEmail,
