@@ -1,0 +1,100 @@
+# SqlOS behavior lock transcript
+scenario: AdminIdentityClientScenarios.An_operator_registered_third_party_client_cannot_skip_consent_through_direct_login
+profile: dashboard-callback
+
+# The 7.2.1 fix for #419: direct-login routes refuse clients that are not first party, so they cannot skip the consent screen.
+
+## 1. operator: register a client that is not first party (the default)
+> POST /sqlos/admin/auth/api/clients
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "allowedScopes": [
+>       "openid",
+>       "profile",
+>       "email",
+>       "offline_access"
+>     ],
+>     "audience": "https://partner.example.test/api",
+>     "clientId": "partner",
+>     "name": "Partner",
+>     "redirectUris": [
+>       "https://partner.example.test/callback"
+>     ]
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "all_organizations",
+      "allowDeviceAuthorization": false,
+      "allowNativeHeadlessAuth": false,
+      "audience": "https://partner.example.test/api",
+      "clientId": "partner",
+      "clientType": "public_pkce",
+      "createdAt": "{datetime:utc-z}",
+      "id": "{cli#1}",
+      "isActive": true,
+      "name": "Partner",
+      "redirectUris": [
+        "https://partner.example.test/callback"
+      ],
+      "tokenEndpointAuthMethod": "none"
+    }
+
+## 2. client: direct password login for it is refused
+> POST /sqlos/auth/password/login
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "partner",
+>     "email": "{email:alice}",
+>     "password": "{password:alice}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_client",
+      "message": "This client must use the authorization endpoint to sign users in."
+    }
+
+## 3. alice-browser: a silent authorization from a signed-in browser needs consent
+> GET /sqlos/auth/authorize?response_type=code&client_id=partner&redirect_uri=https%3A%2F%2Fpartner.example.test%2Fcallback&scope=openid%20profile%20email%20offline_access&state={state#1}&nonce={nonce#1}&code_challenge={pkce-challenge#1}&code_challenge_method=S256&prompt=none
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}; sqlos_auth_page={cookie#2}
+< 302 Found
+< Location: https://partner.example.test/callback?error=consent_required&state={state#1}&error_description=User%20interaction%20is%20required%20for%20this%20client.
+
+## audit: audit events
+  - {
+      "action": "oauth.direct_login.rejected",
+      "actor": {
+        "displayName": null,
+        "id": "{cli#1}",
+        "type": "client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.direct_login.rejected",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "client_application_id": "{cli#1}",
+        "client_id": "partner",
+        "route": "/sqlos/auth/password/login"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

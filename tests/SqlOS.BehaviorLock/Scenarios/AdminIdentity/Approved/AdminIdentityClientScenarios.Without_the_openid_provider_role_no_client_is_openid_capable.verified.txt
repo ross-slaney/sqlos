@@ -1,0 +1,162 @@
+# SqlOS behavior lock transcript
+scenario: AdminIdentityClientScenarios.Without_the_openid_provider_role_no_client_is_openid_capable
+profile: oauth-only
+
+## 1. operator: the application client is not OpenID-capable and has no discovery URL
+> GET /sqlos/admin/auth/api/clients/behavior-lock-app
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "all_organizations",
+      "allowDeviceAuthorization": false,
+      "allowNativeHeadlessAuth": false,
+      "allowedScopes": [
+        "openid",
+        "profile",
+        "email",
+        "offline_access"
+      ],
+      "audience": "https://sqlos.example.test/api",
+      "clientId": "behavior-lock-app",
+      "clientType": "public_pkce",
+      "clientUri": null,
+      "coreMetadataEditable": true,
+      "description": null,
+      "disabledAt": null,
+      "disabledReason": null,
+      "duplicateCount": 0,
+      "duplicateFingerprint": null,
+      "emptyAllowlistWarning": null,
+      "grantTypes": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "id": "{cli#1}",
+      "isActive": true,
+      "isFirstParty": true,
+      "lastSeenAt": null,
+      "lifecycleState": "active",
+      "logoUri": null,
+      "managedByStartupSeed": true,
+      "metadataCacheState": null,
+      "metadataDocumentUrl": null,
+      "metadataExpiresAt": null,
+      "metadataFetchedAt": null,
+      "metadataJson": null,
+      "name": "Behavior Lock",
+      "oidcCapable": false,
+      "oidcDiscoveryUrl": null,
+      "omittedOpenIdWarning": null,
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": "{hex#1}",
+        "isEditable": false,
+        "isOrphaned": false,
+        "lastReconciledAt": "{datetime:unspecified}",
+        "owner": "code",
+        "sourceKey": "behavior-lock-app"
+      },
+      "recentAuditEvents": [
+        {
+          "actorId": "startup",
+          "actorType": "system",
+          "dataJson": "{\"resourceType\":\"oauth_client\",\"resourceId\":\"behavior-lock-app\",\"owner\":\"code\",\"sourceKey\":\"behavior-lock-app\",\"outcome\":\"created\",\"fingerprint\":\"{hex#1}\"}",
+          "eventType": "configuration.reconciled",
+          "id": "{evt#1}",
+          "occurredAt": "{datetime:unspecified}"
+        }
+      ],
+      "redirectUris": [
+        "https://sqlos.example.test/auth/callback"
+      ],
+      "registrationSource": "seeded",
+      "requirePkce": true,
+      "responseTypes": [
+        "code"
+      ],
+      "softwareId": null,
+      "softwareVersion": null,
+      "sourceLabel": "Seeded",
+      "tokenEndpointAuthMethod": "none"
+    }
+
+## 2. operator: the list agrees
+> GET /sqlos/admin/auth/api/clients?search=behavior
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "accessMode": "all_organizations",
+          "allowDeviceAuthorization": false,
+          "allowNativeHeadlessAuth": false,
+          "allowedScopes": [
+            "openid",
+            "profile",
+            "email",
+            "offline_access"
+          ],
+          "audience": "https://sqlos.example.test/api",
+          "clientId": "behavior-lock-app",
+          "clientType": "public_pkce",
+          "clientUri": null,
+          "coreMetadataEditable": true,
+          "description": null,
+          "disabledAt": null,
+          "disabledReason": null,
+          "duplicateCount": 0,
+          "duplicateFingerprint": null,
+          "emptyAllowlistWarning": null,
+          "grantTypes": [
+            "authorization_code",
+            "refresh_token"
+          ],
+          "id": "{cli#1}",
+          "isActive": true,
+          "isFirstParty": true,
+          "lastSeenAt": null,
+          "lifecycleState": "active",
+          "logoUri": null,
+          "managedByStartupSeed": true,
+          "metadataCacheState": null,
+          "metadataDocumentUrl": null,
+          "metadataExpiresAt": null,
+          "metadataFetchedAt": null,
+          "name": "Behavior Lock",
+          "oidcCapable": false,
+          "omittedOpenIdWarning": null,
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": "{hex#1}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "behavior-lock-app"
+          },
+          "redirectUris": [
+            "https://sqlos.example.test/auth/callback"
+          ],
+          "registrationSource": "seeded",
+          "requirePkce": true,
+          "responseTypes": [
+            "code"
+          ],
+          "softwareId": null,
+          "softwareVersion": null,
+          "sourceLabel": "Seeded",
+          "tokenEndpointAuthMethod": "none"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10,
+      "summary": {
+        "activeCount": 1,
+        "disabledCount": 0,
+        "discoveredCount": 0,
+        "registeredCount": 0
+      }
+    }
