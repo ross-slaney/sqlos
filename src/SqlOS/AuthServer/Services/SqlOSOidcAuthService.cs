@@ -726,11 +726,15 @@ public sealed class SqlOSOidcAuthService
             return new ProvisionedProviderUser(existingUser, Created: false);
         }
 
+        if (!SqlOSEmailAddress.TryCanonicalize(providerUser.Email, out var providerAddress, out var normalizedEmail))
+        {
+            throw new InvalidOperationException("The social login provider did not return a usable email address.");
+        }
+
         SqlOSUser? user = null;
         var created = false;
-        var normalizedEmail = SqlOSAdminService.NormalizeEmail(providerUser.Email);
         var existingEmail = await _context.Set<SqlOSUserEmail>()
-            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
+            .FindByNormalizedEmailAsync(normalizedEmail, providerUser.Email, cancellationToken);
 
         if (existingEmail != null)
         {
@@ -761,8 +765,8 @@ public sealed class SqlOSOidcAuthService
             user = new SqlOSUser
             {
                 Id = _cryptoService.GenerateId("usr"),
-                DisplayName = string.IsNullOrWhiteSpace(providerUser.DisplayName) ? providerUser.Email : providerUser.DisplayName,
-                DefaultEmail = providerUser.Email,
+                DisplayName = string.IsNullOrWhiteSpace(providerUser.DisplayName) ? providerAddress : providerUser.DisplayName,
+                DefaultEmail = providerAddress,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
@@ -772,7 +776,7 @@ public sealed class SqlOSOidcAuthService
             {
                 Id = _cryptoService.GenerateId("eml"),
                 UserId = user.Id,
-                Email = providerUser.Email,
+                Email = providerAddress,
                 NormalizedEmail = normalizedEmail,
                 IsPrimary = true,
                 IsVerified = providerUser.EmailVerified,

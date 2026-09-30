@@ -140,6 +140,8 @@ options.AuthServer.ConfigureMagicLink(link =>
 
 Magic-link tokens are stored only as hashes in `SqlOSTemporaryTokens`. The token payload binds each link to the normalized email, user email id when one exists, client id, optional organization id, optional authorization request id, source IP, user agent, and sent status.
 
+A link for an existing account is sent only to the address stored on that account, never to the typed spelling, and completing it requires that bound email row to still carry the same address. Accounts are matched with SqlOS's [canonical email key](/docs/authserver/users-and-credentials#email-addresses-and-lookup-keys), so a look-alike address never selects another account.
+
 ```csharp
 options.AuthServer.ConfigureMagicLink(link =>
 {

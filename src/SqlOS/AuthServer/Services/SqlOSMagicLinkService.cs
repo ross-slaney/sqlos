@@ -150,9 +150,16 @@ public sealed class SqlOSMagicLinkService
             .FirstOrDefaultAsync(x => x.Id == consumed.UserId && x.IsActive, cancellationToken)
             ?? throw new InvalidOperationException(InvalidLinkMessage);
 
-        var userEmail = await _context.Set<SqlOSUserEmail>()
-            .FirstOrDefaultAsync(x => x.UserId == user.Id && x.NormalizedEmail == payload.NormalizedEmail, cancellationToken)
-            ?? throw new InvalidOperationException(InvalidLinkMessage);
+        // The link was delivered to one stored address; it signs in only while that exact
+        // address still belongs to this account.
+        var userEmail = string.IsNullOrWhiteSpace(payload.UserEmailId)
+            ? null
+            : await _context.Set<SqlOSUserEmail>()
+                .FirstOrDefaultAsync(x => x.Id == payload.UserEmailId && x.UserId == user.Id, cancellationToken);
+        if (userEmail == null || !SqlOSEmailAddress.MatchesStoredEmail(userEmail, payload.NormalizedEmail))
+        {
+            throw new InvalidOperationException(InvalidLinkMessage);
+        }
 
         if (!userEmail.IsVerified)
         {
@@ -196,14 +203,18 @@ public sealed class SqlOSMagicLinkService
         HttpContext? httpContext,
         CancellationToken cancellationToken)
     {
-        var trimmedEmail = email?.Trim()
-            ?? throw new InvalidOperationException("Email address is required.");
+        var trimmedEmail = email?.Trim();
         if (string.IsNullOrWhiteSpace(trimmedEmail))
         {
             throw new InvalidOperationException("Email address is required.");
         }
 
-        var normalizedEmail = SqlOSAdminService.NormalizeEmail(trimmedEmail);
+        if (!SqlOSEmailAddress.TryCanonicalize(trimmedEmail, out var typedAddress, out var normalizedEmail))
+        {
+            throw new InvalidOperationException(SqlOSEmailAddress.InvalidEmailMessage);
+        }
+
+        trimmedEmail = typedAddress;
         var now = DateTime.UtcNow;
         var ipAddress = httpContext?.Connection.RemoteIpAddress?.ToString();
         var maskedEmail = MaskEmail(trimmedEmail);
@@ -262,12 +273,15 @@ public sealed class SqlOSMagicLinkService
 
         var emailRecord = await _context.Set<SqlOSUserEmail>()
             .Include(x => x.User)
-            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
+            .FindByNormalizedEmailAsync(normalizedEmail, email, cancellationToken);
         var shouldSend = emailRecord?.User != null && emailRecord.User.IsActive;
         var expiresAt = now.Add(_options.TokenLifetime);
 
+        // A link for an existing account is only ever delivered to the address stored on that
+        // account, never to the typed spelling.
+        var deliveryAddress = emailRecord?.Email.Trim() ?? typedAddress;
         var payload = new MagicLinkPayload(
-            trimmedEmail,
+            deliveryAddress,
             normalizedEmail,
             maskedEmail,
             emailRecord?.Id,
@@ -290,7 +304,7 @@ public sealed class SqlOSMagicLinkService
         {
             try
             {
-                var context = await BuildMessageContextAsync(trimmedEmail, maskedEmail, rawToken, expiresAt, httpContext, cancellationToken);
+                var context = await BuildMessageContextAsync(deliveryAddress, MaskEmail(deliveryAddress), rawToken, expiresAt, httpContext, cancellationToken);
                 await SendEmailAsync(context, rawToken, cancellationToken);
             }
             catch

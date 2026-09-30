@@ -73,10 +73,7 @@ internal static class SqlOSSignupOrchestration
             return;
         }
 
-        if (!string.Equals(
-                SqlOSAdminService.NormalizeEmail(invitationEmail),
-                SqlOSAdminService.NormalizeEmail(requestedEmail),
-                StringComparison.Ordinal))
+        if (!SqlOSEmailAddress.IsSameMailbox(invitationEmail, requestedEmail))
         {
             throw new InvalidOperationException(InvitationEmailMismatchMessage);
         }

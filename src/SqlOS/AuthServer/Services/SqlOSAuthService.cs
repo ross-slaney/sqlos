@@ -175,7 +175,7 @@ public sealed class SqlOSAuthService
 
         var email = await _context.Set<SqlOSUserEmail>()
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
+            .FindByEmailAsync(request.Email, cancellationToken);
         attempt = attempt with { UserId = email?.UserId };
 
         if (email != null && _options.RequireVerifiedEmailForPasswordLogin && !email.IsVerified)
@@ -1217,10 +1217,9 @@ public sealed class SqlOSAuthService
 
     public async Task<string> CreatePasswordResetTokenAsync(SqlOSForgotPasswordRequest request, CancellationToken cancellationToken = default)
     {
-        var normalizedEmail = SqlOSAdminService.NormalizeEmail(request.Email);
         var email = await _context.Set<SqlOSUserEmail>()
             .Include(x => x.User)
-            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken)
+            .FindByEmailAsync(request.Email, cancellationToken)
             ?? throw new InvalidOperationException("Unknown email address.");
 
         var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
@@ -1249,7 +1248,7 @@ public sealed class SqlOSAuthService
 
         var email = await _context.Set<SqlOSUserEmail>()
             .Include(x => x.User)
-            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
+            .FindByEmailAsync(trimmedEmail, cancellationToken);
 
         var rateLimit = await _deliveryAdmission.ReservePasswordResetAsync(
             normalizedEmail,
@@ -1330,10 +1329,9 @@ public sealed class SqlOSAuthService
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
     {
-        var normalizedEmail = SqlOSAdminService.NormalizeEmail(request.Email);
         var email = await _context.Set<SqlOSUserEmail>()
             .Include(x => x.User)
-            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken)
+            .FindByEmailAsync(request.Email, cancellationToken)
             ?? throw new InvalidOperationException("Unknown email address.");
 
         var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
@@ -1617,8 +1615,7 @@ public sealed class SqlOSAuthService
 
     public async Task<string> CreateEmailVerificationTokenAsync(SqlOSCreateVerificationTokenRequest request, CancellationToken cancellationToken = default)
     {
-        var normalizedEmail = SqlOSAdminService.NormalizeEmail(request.Email);
-        var email = await _context.Set<SqlOSUserEmail>().FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken)
+        var email = await _context.Set<SqlOSUserEmail>().FindByEmailAsync(request.Email, cancellationToken)
             ?? throw new InvalidOperationException("Unknown email address.");
 
         var token = await _cryptoService.CreateTemporaryTokenAsync(
@@ -1640,11 +1637,10 @@ public sealed class SqlOSAuthService
         CancellationToken cancellationToken = default)
     {
         var trimmedEmail = NormalizeEmailInput(request.Email);
-        var normalizedEmail = SqlOSAdminService.NormalizeEmail(trimmedEmail);
         var maskedEmail = MaskEmail(trimmedEmail);
         var now = DateTime.UtcNow;
         var email = await _context.Set<SqlOSUserEmail>()
-            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
+            .FindByEmailAsync(trimmedEmail, cancellationToken);
 
         await _adminService.RecordAuditAsync(
             "user.email-verification-requested",

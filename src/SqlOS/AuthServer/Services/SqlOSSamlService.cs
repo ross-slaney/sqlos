@@ -936,9 +936,14 @@ public sealed class SqlOSSamlService
             return null;
         }
 
-        var normalizedEmail = SqlOSAdminService.NormalizeEmail(email);
+        if (!SqlOSEmailAddress.TryCanonicalize(email, out var assertedAddress, out var normalizedEmail))
+        {
+            await RecordLinkDeniedAsync(connection.Id, organizationId, "invalid_email", cancellationToken);
+            return null;
+        }
+
         var existingEmail = await _context.Set<SqlOSUserEmail>()
-            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
+            .FindByNormalizedEmailAsync(normalizedEmail, email, cancellationToken);
         SqlOSUser? user = null;
         SqlOSUser? pendingUser = null;
         SqlOSUserEmail? pendingEmail = null;
@@ -1009,14 +1014,14 @@ public sealed class SqlOSSamlService
             var displayName = $"{principal.Attributes.GetValueOrDefault(connection.FirstNameAttributeName, string.Empty)} {principal.Attributes.GetValueOrDefault(connection.LastNameAttributeName, string.Empty)}".Trim();
             if (string.IsNullOrWhiteSpace(displayName))
             {
-                displayName = email;
+                displayName = assertedAddress;
             }
 
             pendingUser = new SqlOSUser
             {
                 Id = _cryptoService.GenerateId("usr"),
                 DisplayName = displayName,
-                DefaultEmail = email,
+                DefaultEmail = assertedAddress,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
@@ -1024,7 +1029,7 @@ public sealed class SqlOSSamlService
             {
                 Id = _cryptoService.GenerateId("eml"),
                 UserId = pendingUser.Id,
-                Email = email,
+                Email = assertedAddress,
                 NormalizedEmail = normalizedEmail,
                 IsPrimary = true,
                 IsVerified = true,
@@ -1115,28 +1120,19 @@ public sealed class SqlOSSamlService
         string normalizedEmail,
         CancellationToken cancellationToken)
     {
-        var domain = SqlOSAdminService.NormalizeDomain(normalizedEmail);
-        if (string.IsNullOrWhiteSpace(domain))
-        {
-            return false;
-        }
-
-        var hasVerifiedDomain = await _context.Set<SqlOSOrganizationDomain>()
-            .AsNoTracking()
-            .AnyAsync(
-                x => x.OrganizationId == organizationId
-                    && x.Domain == domain
-                    && x.Status == SqlOSOrganizationDomainStatuses.Active
-                    && x.RevokedAt == null,
-                cancellationToken);
-        if (hasVerifiedDomain)
+        if (await SqlOSOrganizationEmailDomains.IsAtVerifiedDomainAsync(_context, organizationId, normalizedEmail, cancellationToken))
         {
             return true;
         }
 
-        return await _context.Set<SqlOSOrganization>()
+        // Existing-email linking still honors the operator-set PrimaryDomain until #410 retires it
+        // as a trust input. The comparison uses canonical ASCII domains in code, never collation.
+        var primaryDomain = await _context.Set<SqlOSOrganization>()
             .AsNoTracking()
-            .AnyAsync(x => x.Id == organizationId && x.PrimaryDomain == domain, cancellationToken);
+            .Where(x => x.Id == organizationId)
+            .Select(x => x.PrimaryDomain)
+            .FirstOrDefaultAsync(cancellationToken);
+        return SqlOSOrganizationEmailDomains.SameDomain(primaryDomain, SqlOSEmailAddress.GetDomain(normalizedEmail));
     }
 
     private void DetachAdded(object? entity)

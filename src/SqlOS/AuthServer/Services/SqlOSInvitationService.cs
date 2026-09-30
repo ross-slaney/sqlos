@@ -53,8 +53,11 @@ public sealed class SqlOSInvitationService
         CancellationToken cancellationToken = default)
     {
         var organization = await RequireActiveOrganizationAsync(request.OrganizationId, cancellationToken);
-        var normalizedEmail = SqlOSAdminService.NormalizeEmail(request.Email);
-        var invitedEmail = request.Email.Trim();
+        if (!SqlOSEmailAddress.TryCanonicalize(request.Email, out var invitedEmail, out var normalizedEmail))
+        {
+            throw new InvalidOperationException(SqlOSEmailAddress.InvalidEmailMessage);
+        }
+
         var role = NormalizeRole(request.Role);
         var now = DateTime.UtcNow;
         var ipAddress = httpContext?.Connection.RemoteIpAddress?.ToString();
@@ -79,7 +82,7 @@ public sealed class SqlOSInvitationService
                 && x.RevokedAt == null
                 && x.ExpiresAt > now)
             .ToListAsync(cancellationToken);
-        foreach (var supersededInvitation in superseded)
+        foreach (var supersededInvitation in superseded.Where(x => string.Equals(x.NormalizedEmail, normalizedEmail, StringComparison.Ordinal)))
         {
             supersededInvitation.RevokedAt = now;
             supersededInvitation.RevokedReason = "superseded";
@@ -359,7 +362,10 @@ public sealed class SqlOSInvitationService
             throw new InvalidOperationException("User is not active.");
         }
 
-        var email = user.Emails.FirstOrDefault(x => x.NormalizedEmail == invitation.NormalizedEmail)
+        var invitedKey = SqlOSEmailAddress.TryNormalize(invitation.InvitedEmail, out var canonicalInvitedKey)
+            ? canonicalInvitedKey
+            : invitation.NormalizedEmail;
+        var email = user.Emails.FirstOrDefault(x => SqlOSEmailAddress.MatchesStoredEmail(x, invitedKey))
             ?? throw new InvalidOperationException("This invitation was sent to another email address.");
 
         var emailVerified = false;

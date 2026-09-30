@@ -609,22 +609,16 @@ internal sealed class SqlOSScimService
 
         if (user == null && !string.IsNullOrWhiteSpace(request.PrimaryEmail))
         {
-            var normalizedEmail = SqlOSAdminService.NormalizeEmail(request.PrimaryEmail);
-            user = await _context.Set<SqlOSUserEmail>()
+            user = (await _context.Set<SqlOSUserEmail>()
                 .Include(x => x.User)
-                .Where(x => x.NormalizedEmail == normalizedEmail)
-                .Select(x => x.User)
-                .FirstOrDefaultAsync(cancellationToken);
+                .FindByEmailAsync(request.PrimaryEmail, cancellationToken))?.User;
         }
 
         if (user == null && LooksLikeEmail(request.UserName))
         {
-            var normalizedUserName = SqlOSAdminService.NormalizeEmail(request.UserName);
-            user = await _context.Set<SqlOSUserEmail>()
+            user = (await _context.Set<SqlOSUserEmail>()
                 .Include(x => x.User)
-                .Where(x => x.NormalizedEmail == normalizedUserName)
-                .Select(x => x.User)
-                .FirstOrDefaultAsync(cancellationToken);
+                .FindByEmailAsync(request.UserName, cancellationToken))?.User;
         }
 
         if (user != null)
@@ -961,9 +955,13 @@ internal sealed class SqlOSScimService
 
     private async Task UpsertPrimaryEmailAsync(SqlOSUser user, string email, DateTime now, CancellationToken cancellationToken)
     {
-        var normalized = SqlOSAdminService.NormalizeEmail(email);
+        if (!SqlOSEmailAddress.TryCanonicalize(email, out var address, out var normalized))
+        {
+            throw new SqlOSScimException(StatusCodes.Status400BadRequest, "SCIM email value is not a valid email address.", "invalidValue");
+        }
+
         var existing = await _context.Set<SqlOSUserEmail>()
-            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalized, cancellationToken);
+            .FindByNormalizedEmailAsync(normalized, email, cancellationToken);
         if (existing != null && existing.UserId != user.Id)
         {
             throw new SqlOSScimException(StatusCodes.Status409Conflict, $"Email '{email}' already belongs to another user.", "uniqueness");
@@ -981,14 +979,14 @@ internal sealed class SqlOSScimService
         }
 
         var previousPrimaryEmails = await _context.Set<SqlOSUserEmail>()
-            .Where(x => x.UserId == user.Id && x.IsPrimary && x.NormalizedEmail != normalized)
+            .Where(x => x.UserId == user.Id && x.IsPrimary)
             .ToListAsync(cancellationToken);
-        foreach (var previous in previousPrimaryEmails)
+        foreach (var previous in previousPrimaryEmails.Where(x => x.Id != existing.Id))
         {
             previous.IsPrimary = false;
         }
 
-        existing.Email = email;
+        existing.Email = address;
         existing.NormalizedEmail = normalized;
         existing.IsPrimary = true;
         existing.IsVerified = true;
