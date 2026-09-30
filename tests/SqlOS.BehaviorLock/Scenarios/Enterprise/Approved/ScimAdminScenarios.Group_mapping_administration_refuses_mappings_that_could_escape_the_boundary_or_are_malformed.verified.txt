@@ -1,0 +1,529 @@
+# SqlOS behavior lock transcript
+scenario: ScimAdminScenarios.Group_mapping_administration_refuses_mappings_that_could_escape_the_boundary_or_are_malformed
+profile: enterprise-scim-path
+
+## 1. operator: no role key
+> POST /sqlos/admin/auth/api/scim-connections/{scim#1}/mappings
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "enabled": true,
+>     "groupDisplayName": "Engineering",
+>     "groupExternalId": null,
+>     "groupPattern": null,
+>     "matchType": "display_name",
+>     "resourceId": "workspace::acme-projects",
+>     "resourceIdTemplate": null,
+>     "roleKey": " "
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "SCIM mapping role key is required."
+    }
+
+## 2. operator: neither a resource ID nor a template
+> POST /sqlos/admin/auth/api/scim-connections/{scim#1}/mappings
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "enabled": true,
+>     "groupDisplayName": "Engineering",
+>     "groupExternalId": null,
+>     "groupPattern": null,
+>     "matchType": "display_name",
+>     "resourceId": null,
+>     "resourceIdTemplate": null,
+>     "roleKey": "workspace_reader"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "SCIM mapping requires a resource ID or resource ID template."
+    }
+
+## 3. operator: an unknown match type
+> POST /sqlos/admin/auth/api/scim-connections/{scim#1}/mappings
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "enabled": true,
+>     "groupDisplayName": "Engineering",
+>     "groupExternalId": null,
+>     "groupPattern": null,
+>     "matchType": "prefix",
+>     "resourceId": "workspace::acme-projects",
+>     "resourceIdTemplate": null,
+>     "roleKey": "workspace_reader"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Unsupported SCIM mapping match type."
+    }
+
+## 4. operator: a display-name mapping without a display name
+> POST /sqlos/admin/auth/api/scim-connections/{scim#1}/mappings
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "enabled": true,
+>     "groupDisplayName": null,
+>     "groupExternalId": null,
+>     "groupPattern": null,
+>     "matchType": "display_name",
+>     "resourceId": "workspace::acme-projects",
+>     "resourceIdTemplate": null,
+>     "roleKey": "workspace_reader"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Display-name SCIM mappings require a group display name."
+    }
+
+## 5. operator: an externalId mapping without an externalId
+> POST /sqlos/admin/auth/api/scim-connections/{scim#1}/mappings
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "enabled": true,
+>     "groupDisplayName": null,
+>     "groupExternalId": null,
+>     "groupPattern": null,
+>     "matchType": "external_id",
+>     "resourceId": "workspace::acme-projects",
+>     "resourceIdTemplate": null,
+>     "roleKey": "workspace_reader"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "External-id SCIM mappings require a group external ID."
+    }
+
+## 6. operator: a pattern mapping without a pattern
+> POST /sqlos/admin/auth/api/scim-connections/{scim#1}/mappings
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "enabled": true,
+>     "groupDisplayName": null,
+>     "groupExternalId": null,
+>     "groupPattern": null,
+>     "matchType": "pattern",
+>     "resourceId": "workspace::acme-projects",
+>     "resourceIdTemplate": null,
+>     "roleKey": "workspace_reader"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Pattern SCIM mappings require a group pattern."
+    }
+
+## 7. operator: a pattern that is not a valid regular expression
+> POST /sqlos/admin/auth/api/scim-connections/{scim#1}/mappings
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "enabled": true,
+>     "groupDisplayName": null,
+>     "groupExternalId": null,
+>     "groupPattern": "^Team-(?<team>[a-z+$",
+>     "matchType": "pattern",
+>     "resourceId": "workspace::acme-projects",
+>     "resourceIdTemplate": null,
+>     "roleKey": "workspace_reader"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "SCIM group mapping pattern is not a valid regular expression."
+    }
+
+## 8. operator: a fixed resource outside the boundary
+> POST /sqlos/admin/auth/api/scim-connections/{scim#1}/mappings
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "enabled": true,
+>     "groupDisplayName": "Engineering",
+>     "groupExternalId": null,
+>     "groupPattern": null,
+>     "matchType": "display_name",
+>     "resourceId": "workspace::globex",
+>     "resourceIdTemplate": null,
+>     "roleKey": "workspace_reader"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "resource_outside_grant_boundary",
+      "grantBoundaryResourceId": "workspace::acme",
+      "message": "SCIM mapping resource 'workspace::globex' is not grant boundary 'workspace::acme' or one of its descendants in the FGA resource tree.",
+      "resourceId": "workspace::globex"
+    }
+
+## 9. operator: a template with no captures is a fixed resource, checked the same way
+> POST /sqlos/admin/auth/api/scim-connections/{scim#1}/mappings
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "enabled": true,
+>     "groupDisplayName": "Engineering",
+>     "groupExternalId": null,
+>     "groupPattern": null,
+>     "matchType": "display_name",
+>     "resourceId": null,
+>     "resourceIdTemplate": "workspace::globex",
+>     "roleKey": "workspace_reader"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "resource_outside_grant_boundary",
+      "grantBoundaryResourceId": "workspace::acme",
+      "message": "SCIM mapping resource 'workspace::globex' is not grant boundary 'workspace::acme' or one of its descendants in the FGA resource tree.",
+      "resourceId": "workspace::globex"
+    }
+
+## 10. operator: a fixed resource that does not exist yet is accepted
+> POST /sqlos/admin/auth/api/scim-connections/{scim#1}/mappings
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "enabled": true,
+>     "groupDisplayName": "Engineering",
+>     "groupExternalId": null,
+>     "groupPattern": null,
+>     "matchType": "display_name",
+>     "resourceId": "workspace::acme-later",
+>     "resourceIdTemplate": null,
+>     "roleKey": "workspace_reader"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "connectionId": "{scim#1}",
+      "createdAt": "{datetime:utc-z}",
+      "description": null,
+      "groupDisplayName": "Engineering",
+      "groupExternalId": null,
+      "groupPattern": null,
+      "id": "{scmap#1}",
+      "isEnabled": true,
+      "matchType": "display_name",
+      "resourceId": "workspace::acme-later",
+      "resourceIdTemplate": null,
+      "roleKey": "workspace_reader",
+      "source": "dashboard",
+      "sourceKey": null,
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 11. operator: an unknown connection
+> POST /sqlos/admin/auth/api/scim-connections/{scim#2}/mappings
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "enabled": true,
+>     "groupDisplayName": "Engineering",
+>     "groupExternalId": null,
+>     "groupPattern": null,
+>     "matchType": "display_name",
+>     "resourceId": "workspace::acme-projects",
+>     "resourceIdTemplate": null,
+>     "roleKey": "workspace_reader"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "SCIM connection not found."
+    }
+
+## 12. operator: an enabled mapping on a connection without a boundary
+> POST /sqlos/admin/auth/api/scim-connections/{scim#3}/mappings
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "enabled": true,
+>     "groupDisplayName": "Engineering",
+>     "groupExternalId": null,
+>     "groupPattern": null,
+>     "matchType": "display_name",
+>     "resourceId": "workspace::globex",
+>     "resourceIdTemplate": null,
+>     "roleKey": "workspace_reader"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "grant_boundary_required",
+      "grantBoundaryResourceId": null,
+      "message": "Set the SCIM connection's grant boundary resource before enabling group mappings. Mapped grants must target the boundary or one of its descendants.",
+      "resourceId": null
+    }
+
+## 13. operator: a disabled mapping may be staged without a boundary
+> POST /sqlos/admin/auth/api/scim-connections/{scim#3}/mappings
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "enabled": false,
+>     "groupDisplayName": "Engineering",
+>     "groupExternalId": null,
+>     "groupPattern": null,
+>     "matchType": "display_name",
+>     "resourceId": "workspace::globex",
+>     "resourceIdTemplate": null,
+>     "roleKey": "workspace_reader"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "connectionId": "{scim#3}",
+      "createdAt": "{datetime:utc-z}",
+      "description": null,
+      "groupDisplayName": "Engineering",
+      "groupExternalId": null,
+      "groupPattern": null,
+      "id": "{scmap:staged}",
+      "isEnabled": false,
+      "matchType": "display_name",
+      "resourceId": "workspace::globex",
+      "resourceIdTemplate": null,
+      "roleKey": "workspace_reader",
+      "source": "dashboard",
+      "sourceKey": null,
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 14. operator: enabling it needs the boundary
+> POST /sqlos/admin/auth/api/scim-mappings/{scmap:staged}/enable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "grant_boundary_required",
+      "grantBoundaryResourceId": null,
+      "message": "Set the SCIM connection's grant boundary resource before enabling group mappings. Mapped grants must target the boundary or one of its descendants.",
+      "resourceId": null
+    }
+
+## 15. operator: so does enabling it through an edit
+> PUT /sqlos/admin/auth/api/scim-mappings/{scmap:staged}
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "enabled": true,
+>     "groupDisplayName": "Engineering",
+>     "groupExternalId": null,
+>     "groupPattern": null,
+>     "matchType": "display_name",
+>     "resourceId": "workspace::globex",
+>     "resourceIdTemplate": null,
+>     "roleKey": "workspace_reader"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "grant_boundary_required",
+      "grantBoundaryResourceId": null,
+      "message": "Set the SCIM connection's grant boundary resource before enabling group mappings. Mapped grants must target the boundary or one of its descendants.",
+      "resourceId": null
+    }
+
+## 16. operator: an edit still validates the shape
+> PUT /sqlos/admin/auth/api/scim-mappings/{scmap:staged}
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "enabled": false,
+>     "groupDisplayName": "Engineering",
+>     "groupExternalId": null,
+>     "groupPattern": null,
+>     "matchType": "display_name",
+>     "resourceId": null,
+>     "resourceIdTemplate": null,
+>     "roleKey": "workspace_reader"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "SCIM mapping requires a resource ID or resource ID template."
+    }
+
+## 17. operator: disabling a disabled mapping
+> POST /sqlos/admin/auth/api/scim-mappings/{scmap:staged}/disable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "connectionId": "{scim#3}",
+      "createdAt": "{datetime:unspecified}",
+      "description": null,
+      "groupDisplayName": "Engineering",
+      "groupExternalId": null,
+      "groupPattern": null,
+      "id": "{scmap:staged}",
+      "isEnabled": false,
+      "matchType": "display_name",
+      "resourceId": "workspace::globex",
+      "resourceIdTemplate": null,
+      "roleKey": "workspace_reader",
+      "source": "dashboard",
+      "sourceKey": null,
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 18. operator: editing an unknown mapping
+> PUT /sqlos/admin/auth/api/scim-mappings/{scmap#2}
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "enabled": true,
+>     "groupDisplayName": "Engineering",
+>     "groupExternalId": null,
+>     "groupPattern": null,
+>     "matchType": "display_name",
+>     "resourceId": "workspace::acme-projects",
+>     "resourceIdTemplate": null,
+>     "roleKey": "workspace_reader"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "SCIM mapping not found."
+    }
+
+## 19. operator: enabling an unknown mapping
+> POST /sqlos/admin/auth/api/scim-mappings/{scmap#2}/enable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "SCIM mapping not found."
+    }
+
+## 20. operator: disabling an unknown mapping
+> POST /sqlos/admin/auth/api/scim-mappings/{scmap#2}/disable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "SCIM mapping not found."
+    }
+
+## audit: only the accepted mappings were recorded
+  - {
+      "action": "scim.mapping.created",
+      "actor": {
+        "displayName": null,
+        "id": "{scmap#1}",
+        "type": "scim_group_mapping"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "scim.mapping.created",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "MatchType": "display_name",
+        "ResourceId": "workspace::acme-later",
+        "ResourceIdTemplate": null,
+        "RoleKey": "workspace_reader"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.mapping.created",
+      "actor": {
+        "displayName": null,
+        "id": "{scmap:staged}",
+        "type": "scim_group_mapping"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "scim.mapping.created",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "MatchType": "display_name",
+        "ResourceId": "workspace::globex",
+        "ResourceIdTemplate": null,
+        "RoleKey": "workspace_reader"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#2}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.mapping.disabled",
+      "actor": {
+        "displayName": null,
+        "id": "{scmap:staged}",
+        "type": "scim_group_mapping"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "scim.mapping.disabled",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#2}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

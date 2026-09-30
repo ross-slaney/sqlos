@@ -1,0 +1,376 @@
+# SqlOS behavior lock transcript
+scenario: ScimAdminScenarios.Moving_or_disabling_a_connection_revokes_the_grants_its_mappings_made
+profile: enterprise-scim-path
+
+# Team-projects and Team-finance were pushed; each holds a workspace_reader grant under workspace::acme.
+
+## 1. operator: dashboard: two active grants
+> GET /sqlos/admin/auth/api/scim-connections/{scim#1}/mappings
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "activeGrantCount": 2,
+          "connectionId": "{scim#1}",
+          "createdAt": "{datetime:unspecified}",
+          "description": null,
+          "grantBoundaryStatus": "checked_at_grant_time",
+          "groupDisplayName": null,
+          "groupExternalId": null,
+          "groupPattern": "^Team-(?<team>[a-z]+)$",
+          "id": "{scmap:teams}",
+          "isEnabled": true,
+          "matchType": "pattern",
+          "resourceId": null,
+          "resourceIdTemplate": "workspace::acme-{team}",
+          "roleKey": "workspace_reader",
+          "source": "dashboard",
+          "sourceKey": null,
+          "updatedAt": "{datetime:unspecified}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 2. operator: narrow the boundary to the projects workspace: the finance grant falls outside and is revoked
+> PUT /sqlos/admin/auth/api/scim-connections/{scim#1}
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Directory",
+>     "enabled": true,
+>     "grantBoundaryResourceId": "workspace::acme-projects"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "displayName": "Directory",
+      "grantBoundaryResourceId": "workspace::acme-projects",
+      "id": "{scim#1}",
+      "isEnabled": true,
+      "lastSyncAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "seedKey": null,
+      "source": "dashboard",
+      "tokenLastUsedAt": "{datetime:unspecified}",
+      "tokenPrefix": "{token-prefix#1}",
+      "tokenRotatedAt": "{datetime:unspecified}",
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 3. operator: dashboard: one active grant
+> GET /sqlos/admin/auth/api/scim-connections/{scim#1}/mappings
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "activeGrantCount": 1,
+          "connectionId": "{scim#1}",
+          "createdAt": "{datetime:unspecified}",
+          "description": null,
+          "grantBoundaryStatus": "checked_at_grant_time",
+          "groupDisplayName": null,
+          "groupExternalId": null,
+          "groupPattern": "^Team-(?<team>[a-z]+)$",
+          "id": "{scmap:teams}",
+          "isEnabled": true,
+          "matchType": "pattern",
+          "resourceId": null,
+          "resourceIdTemplate": "workspace::acme-{team}",
+          "roleKey": "workspace_reader",
+          "source": "dashboard",
+          "sourceKey": null,
+          "updatedAt": "{datetime:unspecified}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 4. operator: disable the connection: every managed grant is revoked
+> POST /sqlos/admin/auth/api/scim-connections/{scim#1}/disable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "displayName": "Directory",
+      "grantBoundaryResourceId": "workspace::acme-projects",
+      "id": "{scim#1}",
+      "isEnabled": false,
+      "lastSyncAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "seedKey": null,
+      "source": "dashboard",
+      "tokenLastUsedAt": "{datetime:unspecified}",
+      "tokenPrefix": "{token-prefix#1}",
+      "tokenRotatedAt": "{datetime:unspecified}",
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 5. operator: dashboard: no active grants
+> GET /sqlos/admin/auth/api/scim-connections/{scim#1}/mappings
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "activeGrantCount": 0,
+          "connectionId": "{scim#1}",
+          "createdAt": "{datetime:unspecified}",
+          "description": null,
+          "grantBoundaryStatus": "checked_at_grant_time",
+          "groupDisplayName": null,
+          "groupExternalId": null,
+          "groupPattern": "^Team-(?<team>[a-z]+)$",
+          "id": "{scmap:teams}",
+          "isEnabled": true,
+          "matchType": "pattern",
+          "resourceId": null,
+          "resourceIdTemplate": "workspace::acme-{team}",
+          "roleKey": "workspace_reader",
+          "source": "dashboard",
+          "sourceKey": null,
+          "updatedAt": "{datetime:unspecified}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## audit: boundary change and revocation events
+  - {
+      "action": "scim.grant.revoked",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.grant.revoked",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "connectionId": "{scim#1}",
+        "deletedGrantCount": 1,
+        "evidence": [
+          {
+            "grantId": "{grant#1}",
+            "groupExternalId": "directory-team-finance",
+            "groupId": "{grp#1}",
+            "managedGrantId": "{scgrant#1}",
+            "mappingId": "{scmap:teams}",
+            "resourceId": "workspace::acme-finance",
+            "roleId": "workspace_reader"
+          }
+        ],
+        "evidenceTruncated": false,
+        "reason": "grant_boundary_changed",
+        "requestedMappingId": null,
+        "revokedManagedGrantCount": 1
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{scim#1}",
+          "type": "scim_connection"
+        },
+        {
+          "displayName": null,
+          "id": "{scmap:teams}",
+          "type": "scim_group_mapping"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.connection.grant_boundary_changed",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "scim.connection.grant_boundary_changed",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "connectionId": "{scim#1}",
+        "grantBoundaryResourceId": "workspace::acme-projects",
+        "previousGrantBoundaryResourceId": "workspace::acme",
+        "revokedManagedGrantCount": 1
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.connection.enabled",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "scim.connection.enabled",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.grant.revoked",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.grant.revoked",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "connectionId": "{scim#1}",
+        "deletedGrantCount": 1,
+        "evidence": [
+          {
+            "grantId": "{grant#2}",
+            "groupExternalId": "directory-team-projects",
+            "groupId": "{grp#2}",
+            "managedGrantId": "{scgrant#2}",
+            "mappingId": "{scmap:teams}",
+            "resourceId": "workspace::acme-projects",
+            "roleId": "workspace_reader"
+          }
+        ],
+        "evidenceTruncated": false,
+        "requestedMappingId": null,
+        "revokedManagedGrantCount": 1
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{scim#1}",
+          "type": "scim_connection"
+        },
+        {
+          "displayName": null,
+          "id": "{scmap:teams}",
+          "type": "scim_group_mapping"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.connection.disabled",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "scim.connection.disabled",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

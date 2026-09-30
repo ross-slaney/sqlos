@@ -1,0 +1,910 @@
+# SqlOS behavior lock transcript
+scenario: ScimAdminScenarios.An_operator_maps_directory_groups_to_roles_and_toggles_the_mappings
+profile: enterprise-scim-path
+
+## 1. operator: map the Engineering group to workspace_reader on the projects workspace
+> POST /sqlos/admin/auth/api/scim-connections/{scim#1}/mappings
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "description": "Engineering reads projects",
+>     "groupDisplayName": "Engineering",
+>     "matchType": "display_name",
+>     "resourceId": "workspace::acme-projects",
+>     "roleKey": "workspace_reader"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "connectionId": "{scim#1}",
+      "createdAt": "{datetime:utc-z}",
+      "description": "Engineering reads projects",
+      "groupDisplayName": "Engineering",
+      "groupExternalId": null,
+      "groupPattern": null,
+      "id": "{scmap:engineering}",
+      "isEnabled": true,
+      "matchType": "display_name",
+      "resourceId": "workspace::acme-projects",
+      "resourceIdTemplate": null,
+      "roleKey": "workspace_reader",
+      "source": "dashboard",
+      "sourceKey": null,
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 2. operator: map a group by externalId (the legacy spelling of the match type)
+> POST /sqlos/admin/auth/api/scim-connections/{scim#1}/mappings
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "groupExternalId": "directory-admins",
+>     "matchType": "externalId",
+>     "resourceId": "workspace::acme",
+>     "roleKey": "workspace_admin"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "connectionId": "{scim#1}",
+      "createdAt": "{datetime:utc-z}",
+      "description": null,
+      "groupDisplayName": null,
+      "groupExternalId": "directory-admins",
+      "groupPattern": null,
+      "id": "{scmap:admins}",
+      "isEnabled": true,
+      "matchType": "external_id",
+      "resourceId": "workspace::acme",
+      "resourceIdTemplate": null,
+      "roleKey": "workspace_admin",
+      "source": "dashboard",
+      "sourceKey": null,
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 3. operator: map a pattern whose template is checked when a group is pushed
+> POST /sqlos/admin/auth/api/scim-connections/{scim#1}/mappings
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "groupPattern": "^Team-(?<team>[a-z]+)$",
+>     "matchType": "regex",
+>     "resourceIdTemplate": "workspace::acme-{team}",
+>     "roleKey": "workspace_reader"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "connectionId": "{scim#1}",
+      "createdAt": "{datetime:utc-z}",
+      "description": null,
+      "groupDisplayName": null,
+      "groupExternalId": null,
+      "groupPattern": "^Team-(?<team>[a-z]+)$",
+      "id": "{scmap:teams}",
+      "isEnabled": true,
+      "matchType": "pattern",
+      "resourceId": null,
+      "resourceIdTemplate": "workspace::acme-{team}",
+      "roleKey": "workspace_reader",
+      "source": "dashboard",
+      "sourceKey": null,
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 4. operator: list mappings, newest first, with each one's boundary status
+> GET /sqlos/admin/auth/api/scim-connections/{scim#1}/mappings
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "activeGrantCount": 0,
+          "connectionId": "{scim#1}",
+          "createdAt": "{datetime:unspecified}",
+          "description": null,
+          "grantBoundaryStatus": "checked_at_grant_time",
+          "groupDisplayName": null,
+          "groupExternalId": null,
+          "groupPattern": "^Team-(?<team>[a-z]+)$",
+          "id": "{scmap:teams}",
+          "isEnabled": true,
+          "matchType": "pattern",
+          "resourceId": null,
+          "resourceIdTemplate": "workspace::acme-{team}",
+          "roleKey": "workspace_reader",
+          "source": "dashboard",
+          "sourceKey": null,
+          "updatedAt": "{datetime:unspecified}"
+        },
+        {
+          "activeGrantCount": 0,
+          "connectionId": "{scim#1}",
+          "createdAt": "{datetime:unspecified}",
+          "description": null,
+          "grantBoundaryStatus": "within",
+          "groupDisplayName": null,
+          "groupExternalId": "directory-admins",
+          "groupPattern": null,
+          "id": "{scmap:admins}",
+          "isEnabled": true,
+          "matchType": "external_id",
+          "resourceId": "workspace::acme",
+          "resourceIdTemplate": null,
+          "roleKey": "workspace_admin",
+          "source": "dashboard",
+          "sourceKey": null,
+          "updatedAt": "{datetime:unspecified}"
+        },
+        {
+          "activeGrantCount": 0,
+          "connectionId": "{scim#1}",
+          "createdAt": "{datetime:unspecified}",
+          "description": "Engineering reads projects",
+          "grantBoundaryStatus": "within",
+          "groupDisplayName": "Engineering",
+          "groupExternalId": null,
+          "groupPattern": null,
+          "id": "{scmap:engineering}",
+          "isEnabled": true,
+          "matchType": "display_name",
+          "resourceId": "workspace::acme-projects",
+          "resourceIdTemplate": null,
+          "roleKey": "workspace_reader",
+          "source": "dashboard",
+          "sourceKey": null,
+          "updatedAt": "{datetime:unspecified}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 5. directory: the directory pushes Engineering: the mapping grants
+> POST /scim/v2/Groups
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "displayName": "Engineering",
+>     "externalId": "directory-engineering",
+>     "members": [
+>       {
+>         "value": "{usr:ann}"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:Group"
+>     ]
+>   }
+< 201 Created
+< Content-Location: /scim/v2/Groups/{grp:engineering}
+< Content-Type: application/scim+json
+< Location: /scim/v2/Groups/{grp:engineering}
+    {
+      "displayName": "Engineering",
+      "externalId": "directory-engineering",
+      "id": "{grp:engineering}",
+      "members": [
+        {
+          "$ref": "/scim/v2/Users/{usr:ann}",
+          "display": "Ann Archer",
+          "value": "{usr:ann}"
+        }
+      ],
+      "meta": {
+        "created": "{datetime:utc-z}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Groups/{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:Group"
+      ]
+    }
+
+## 6. operator: change the mapped role: the existing grant is revoked
+> PUT /sqlos/admin/auth/api/scim-mappings/{scmap:engineering}
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "description": "Engineering administers projects",
+>     "enabled": true,
+>     "groupDisplayName": "Engineering",
+>     "matchType": "display_name",
+>     "resourceId": "workspace::acme-projects",
+>     "roleKey": "workspace_admin"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "connectionId": "{scim#1}",
+      "createdAt": "{datetime:unspecified}",
+      "description": "Engineering administers projects",
+      "groupDisplayName": "Engineering",
+      "groupExternalId": null,
+      "groupPattern": null,
+      "id": "{scmap:engineering}",
+      "isEnabled": true,
+      "matchType": "display_name",
+      "resourceId": "workspace::acme-projects",
+      "resourceIdTemplate": null,
+      "roleKey": "workspace_admin",
+      "source": "dashboard",
+      "sourceKey": null,
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 7. directory: the next push grants the new role
+> PATCH /scim/v2/Groups/{grp:engineering}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "externalId",
+>         "value": "directory-engineering-2"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 204 No Content
+
+## 8. operator: disable the mapping: its grant is revoked
+> POST /sqlos/admin/auth/api/scim-mappings/{scmap:engineering}/disable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "connectionId": "{scim#1}",
+      "createdAt": "{datetime:unspecified}",
+      "description": "Engineering administers projects",
+      "groupDisplayName": "Engineering",
+      "groupExternalId": null,
+      "groupPattern": null,
+      "id": "{scmap:engineering}",
+      "isEnabled": false,
+      "matchType": "display_name",
+      "resourceId": "workspace::acme-projects",
+      "resourceIdTemplate": null,
+      "roleKey": "workspace_admin",
+      "source": "dashboard",
+      "sourceKey": null,
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 9. operator: enable it again: grants return on the next push
+> POST /sqlos/admin/auth/api/scim-mappings/{scmap:engineering}/enable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "connectionId": "{scim#1}",
+      "createdAt": "{datetime:unspecified}",
+      "description": "Engineering administers projects",
+      "groupDisplayName": "Engineering",
+      "groupExternalId": null,
+      "groupPattern": null,
+      "id": "{scmap:engineering}",
+      "isEnabled": true,
+      "matchType": "display_name",
+      "resourceId": "workspace::acme-projects",
+      "resourceIdTemplate": null,
+      "roleKey": "workspace_admin",
+      "source": "dashboard",
+      "sourceKey": null,
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 10. operator: the mapping list after the changes
+> GET /sqlos/admin/auth/api/scim-connections/{scim#1}/mappings
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "activeGrantCount": 0,
+          "connectionId": "{scim#1}",
+          "createdAt": "{datetime:unspecified}",
+          "description": null,
+          "grantBoundaryStatus": "checked_at_grant_time",
+          "groupDisplayName": null,
+          "groupExternalId": null,
+          "groupPattern": "^Team-(?<team>[a-z]+)$",
+          "id": "{scmap:teams}",
+          "isEnabled": true,
+          "matchType": "pattern",
+          "resourceId": null,
+          "resourceIdTemplate": "workspace::acme-{team}",
+          "roleKey": "workspace_reader",
+          "source": "dashboard",
+          "sourceKey": null,
+          "updatedAt": "{datetime:unspecified}"
+        },
+        {
+          "activeGrantCount": 0,
+          "connectionId": "{scim#1}",
+          "createdAt": "{datetime:unspecified}",
+          "description": null,
+          "grantBoundaryStatus": "within",
+          "groupDisplayName": null,
+          "groupExternalId": "directory-admins",
+          "groupPattern": null,
+          "id": "{scmap:admins}",
+          "isEnabled": true,
+          "matchType": "external_id",
+          "resourceId": "workspace::acme",
+          "resourceIdTemplate": null,
+          "roleKey": "workspace_admin",
+          "source": "dashboard",
+          "sourceKey": null,
+          "updatedAt": "{datetime:unspecified}"
+        },
+        {
+          "activeGrantCount": 0,
+          "connectionId": "{scim#1}",
+          "createdAt": "{datetime:unspecified}",
+          "description": "Engineering administers projects",
+          "grantBoundaryStatus": "within",
+          "groupDisplayName": "Engineering",
+          "groupExternalId": null,
+          "groupPattern": null,
+          "id": "{scmap:engineering}",
+          "isEnabled": true,
+          "matchType": "display_name",
+          "resourceId": "workspace::acme-projects",
+          "resourceIdTemplate": null,
+          "roleKey": "workspace_admin",
+          "source": "dashboard",
+          "sourceKey": null,
+          "updatedAt": "{datetime:unspecified}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## audit: mapping and grant events
+  - {
+      "action": "scim.mapping.created",
+      "actor": {
+        "displayName": null,
+        "id": "{scmap:engineering}",
+        "type": "scim_group_mapping"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "scim.mapping.created",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "MatchType": "display_name",
+        "ResourceId": "workspace::acme-projects",
+        "ResourceIdTemplate": null,
+        "RoleKey": "workspace_reader"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.mapping.created",
+      "actor": {
+        "displayName": null,
+        "id": "{scmap:admins}",
+        "type": "scim_group_mapping"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "scim.mapping.created",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "MatchType": "external_id",
+        "ResourceId": "workspace::acme",
+        "ResourceIdTemplate": null,
+        "RoleKey": "workspace_admin"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.mapping.created",
+      "actor": {
+        "displayName": null,
+        "id": "{scmap:teams}",
+        "type": "scim_group_mapping"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "scim.mapping.created",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "MatchType": "pattern",
+        "ResourceId": null,
+        "ResourceIdTemplate": "workspace::acme-{team}",
+        "RoleKey": "workspace_reader"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.member_added",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.member_added",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": {
+          "groupId": "{grp:engineering}",
+          "memberCount": 1,
+          "subjectIds": [
+            "{subj#1}"
+          ],
+          "truncated": false
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.grant.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.grant.mapped",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": {
+          "grantId": "{grant#1}",
+          "mappingId": "{scmap:engineering}",
+          "resourceId": "workspace::acme-projects",
+          "roleId": "workspace_reader"
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.created",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.created",
+      "id": "{evt#6}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": {
+          "displayName": "Engineering",
+          "externalId": "directory-engineering",
+          "members": [
+            {
+              "value": "{usr:ann}"
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:Group"
+          ]
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.grant.revoked",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.grant.revoked",
+      "id": "{evt#7}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "connectionId": "{scim#1}",
+        "deletedGrantCount": 1,
+        "evidence": [
+          {
+            "grantId": "{grant#1}",
+            "groupExternalId": "directory-engineering",
+            "groupId": "{grp:engineering}",
+            "managedGrantId": "{scgrant#1}",
+            "mappingId": "{scmap:engineering}",
+            "resourceId": "workspace::acme-projects",
+            "roleId": "workspace_reader"
+          }
+        ],
+        "evidenceTruncated": false,
+        "requestedMappingId": "{scmap:engineering}",
+        "revokedManagedGrantCount": 1
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{scim#1}",
+          "type": "scim_connection"
+        },
+        {
+          "displayName": null,
+          "id": "{scmap:engineering}",
+          "type": "scim_group_mapping"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.mapping.updated",
+      "actor": {
+        "displayName": null,
+        "id": "{scmap:engineering}",
+        "type": "scim_group_mapping"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "scim.mapping.updated",
+      "id": "{evt#8}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "IsEnabled": true,
+        "MatchType": "display_name",
+        "ResourceId": "workspace::acme-projects",
+        "ResourceIdTemplate": null,
+        "RoleKey": "workspace_admin"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.grant.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering-2",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.grant.mapped",
+      "id": "{evt#9}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering-2",
+        "payload": {
+          "grantId": "{grant#2}",
+          "mappingId": "{scmap:engineering}",
+          "resourceId": "workspace::acme-projects",
+          "roleId": "workspace_admin"
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.updated",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering-2",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.updated",
+      "id": "{evt#10}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering-2",
+        "payload": {
+          "Operations": [
+            {
+              "op": "replace",
+              "path": "externalId",
+              "value": "directory-engineering-2"
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ]
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.grant.revoked",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.grant.revoked",
+      "id": "{evt#11}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "connectionId": "{scim#1}",
+        "deletedGrantCount": 1,
+        "evidence": [
+          {
+            "grantId": "{grant#2}",
+            "groupExternalId": "directory-engineering-2",
+            "groupId": "{grp:engineering}",
+            "managedGrantId": "{scgrant#2}",
+            "mappingId": "{scmap:engineering}",
+            "resourceId": "workspace::acme-projects",
+            "roleId": "workspace_admin"
+          }
+        ],
+        "evidenceTruncated": false,
+        "requestedMappingId": "{scmap:engineering}",
+        "revokedManagedGrantCount": 1
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{scim#1}",
+          "type": "scim_connection"
+        },
+        {
+          "displayName": null,
+          "id": "{scmap:engineering}",
+          "type": "scim_group_mapping"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.mapping.disabled",
+      "actor": {
+        "displayName": null,
+        "id": "{scmap:engineering}",
+        "type": "scim_group_mapping"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "scim.mapping.disabled",
+      "id": "{evt#12}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.mapping.enabled",
+      "actor": {
+        "displayName": null,
+        "id": "{scmap:engineering}",
+        "type": "scim_group_mapping"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "scim.mapping.enabled",
+      "id": "{evt#13}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
