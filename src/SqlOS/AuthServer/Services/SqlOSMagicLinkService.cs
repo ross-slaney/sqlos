@@ -80,6 +80,7 @@ public sealed class SqlOSMagicLinkService
         await EnsureMagicLinkEnabledAsync(cancellationToken);
 
         var client = await _adminService.RequireClientAsync(request.ClientId, null, cancellationToken);
+        await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(_adminService, client, httpContext, userId: null, cancellationToken);
         return await CreateLinkAsync(
             request.Email,
             authorizationRequestId: null,

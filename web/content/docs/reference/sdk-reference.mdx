@@ -77,7 +77,7 @@ SqlOS services accept explicit user, organization, client, resource, and subject
 
 **Namespace:** `SqlOS.AuthServer.Services`
 
-Use named arguments for positional request records so examples stay readable when several adjacent fields have the same type. `SqlOSAuthService` combines public sign-in operations with trusted helpers such as invitation creation, raw token generation, and all-session revocation; authorize the caller before exposing the latter through an application endpoint.
+Use named arguments for positional request records so examples stay readable when several adjacent fields have the same type. `SqlOSAuthService` combines public sign-in operations with trusted helpers such as invitation creation, raw token generation, and all-session revocation; authorize the caller before exposing the latter through an application endpoint. The sign-in operations accept only [first-party clients](/docs/authserver/clients#direct-sign-in-is-first-party-only) and throw `SqlOSPublicAuthException` (`invalid_client`) for any other client.
 
 ### Password login
 

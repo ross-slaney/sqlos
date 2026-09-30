@@ -169,6 +169,7 @@ public sealed class SqlOSEmailOtpService
         await EnsureEmailOtpEnabledAsync(cancellationToken);
 
         var client = await _adminService.RequireClientAsync(request.ClientId, null, cancellationToken);
+        await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(_adminService, client, httpContext, userId: null, cancellationToken);
         var trimmedDisplayName = request.DisplayName?.Trim()
             ?? throw new InvalidOperationException("Display name is required.");
         if (string.IsNullOrWhiteSpace(trimmedDisplayName))
@@ -246,6 +247,7 @@ public sealed class SqlOSEmailOtpService
         await EnsureEmailOtpEnabledAsync(cancellationToken);
 
         var client = await _adminService.RequireClientAsync(request.ClientId, null, cancellationToken);
+        await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(_adminService, client, httpContext, userId: null, cancellationToken);
         return await CreateChallengeAsync(
             request.Email,
             authorizationRequestId: null,

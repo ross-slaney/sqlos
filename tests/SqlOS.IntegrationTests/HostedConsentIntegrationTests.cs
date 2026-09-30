@@ -6,7 +6,9 @@ using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Models;
+using SqlOS.AuthServer.Services;
 using SqlOS.IntegrationTests.Infrastructure;
 
 namespace SqlOS.IntegrationTests;
@@ -287,6 +289,88 @@ public sealed class HostedConsentIntegrationTests
             (await db.Set<SqlOSConsentGrant>().SingleAsync(x => x.Id == grantId)).RevokedAt
                 .Should().NotBeNull();
         }
+    }
+
+    [TestMethod]
+    public async Task CimdClient_GoogleSignInThroughAuthorize_ShowsConsent_AndIssuesTokensAfterApproval()
+    {
+        // Direct login is first-party only (#419); /authorize is the path for third-party social
+        // sign-in, and its consent gate still runs after the provider callback.
+        const string cimdClientId = "https://portable.example.test/clients/social.json";
+        const string cimdRedirect = "https://portable.example.test/callback";
+        await using var fixture = await HostedAuthorizeTokenFixture.CreateAsync(
+            "HostedConsentSocial",
+            options =>
+            {
+                options.AuthServer.ClientRegistration.Cimd.Enabled = true;
+                options.AuthServer.SeedGoogleConnection(
+                    "google-client",
+                    "google-secret",
+                    $"{HostedAuthorizeTokenFixture.TrustedOrigin}/sqlos/auth/oidc/callback");
+            },
+            services => services.AddSingleton<IHttpClientFactory>(new FakeCimdAndOidcHttpClientFactory(
+                new Dictionary<string, string>
+                {
+                    [cimdClientId] = JsonSerializer.Serialize(new Dictionary<string, object?>
+                    {
+                        ["client_id"] = cimdClientId,
+                        ["client_name"] = "Portable Social Client",
+                        ["redirect_uris"] = new[] { cimdRedirect },
+                        ["grant_types"] = new[] { "authorization_code", "refresh_token" },
+                        ["response_types"] = new[] { "code" },
+                        ["token_endpoint_auth_method"] = "none",
+                        ["scope"] = "openid profile"
+                    })
+                })));
+        string connectionId;
+        await using (var scope = fixture.App.Services.CreateAsyncScope())
+        {
+            connectionId = await scope.ServiceProvider.GetRequiredService<TestSqlOSDbContext>()
+                .Set<SqlOSOidcConnection>()
+                .Where(x => x.ProviderType == SqlOSOidcProviderType.Google)
+                .Select(x => x.Id)
+                .SingleAsync();
+        }
+
+        var email = $"google-consent-{Guid.NewGuid():N}@example.test";
+        var started = await fixture.StartAuthorizeAsync("openid profile", clientId: cimdClientId, redirectUri: cimdRedirect);
+        using var providerRedirect = await fixture.Client.GetAsync(
+            $"/sqlos/auth/login/oidc/{connectionId}?request={Uri.EscapeDataString(started.RequestId)}");
+        providerRedirect.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        var providerQuery = QueryHelpers.ParseQuery(providerRedirect.Headers.Location!.Query);
+
+        using var callback = await fixture.Client.GetAsync(QueryHelpers.AddQueryString(
+            "/sqlos/auth/oidc/callback",
+            new Dictionary<string, string?>
+            {
+                ["state"] = providerQuery["state"].ToString(),
+                ["code"] = $"success:{email}:{providerQuery["nonce"]}"
+            }));
+        var consentPage = await fixture.FollowContinuationToConsentAsync(callback, started);
+        consentPage.Html.Should().Contain("Portable Social Client");
+
+        using var approved = await fixture.SubmitConsentDecisionAsync(consentPage, approve: true);
+        var location = await HostedAuthorizeTokenFixture.ReadClientRedirectAsync(approved);
+        location.AbsoluteUri.Should().StartWith(cimdRedirect);
+        var code = QueryHelpers.ParseQuery(location.Query)["code"].ToString();
+        code.Should().NotBeNullOrWhiteSpace();
+
+        using var tokens = await fixture.ExchangeAuthorizationCodeAsync(code, started.CodeVerifier, cimdClientId, cimdRedirect);
+        tokens.RootElement.GetProperty("access_token").GetString().Should().NotBeNullOrWhiteSpace();
+
+        await using var verifyScope = fixture.App.Services.CreateAsyncScope();
+        var db = verifyScope.ServiceProvider.GetRequiredService<TestSqlOSDbContext>();
+        var client = await db.Set<SqlOSClientApplication>().SingleAsync(x => x.ClientId == cimdClientId);
+        var userId = await db.Set<SqlOSUserEmail>()
+            .Where(x => x.NormalizedEmail == SqlOSAdminService.NormalizeEmail(email))
+            .Select(x => x.UserId)
+            .SingleAsync();
+        (await db.Set<SqlOSConsentGrant>().CountAsync(x => x.UserId == userId && x.ClientApplicationId == client.Id && x.RevokedAt == null))
+            .Should().Be(1, "the user approved the consent screen");
+        (await db.Set<SqlOSSession>().CountAsync(x => x.UserId == userId && x.ClientApplicationId == client.Id))
+            .Should().Be(1);
+        (await db.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == "oauth.direct_login.rejected"))
+            .Should().Be(0, "/authorize is not direct login");
     }
 
     private static Task<HostedAuthorizeTokenFixture> CreateFixtureAsync()

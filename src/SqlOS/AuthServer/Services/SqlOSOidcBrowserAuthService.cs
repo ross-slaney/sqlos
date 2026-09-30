@@ -64,6 +64,9 @@ public sealed class SqlOSOidcBrowserAuthService
         }
 
         var client = await _adminService.RequireClientAsync(request.ClientId, request.RedirectUri, cancellationToken);
+        // This flow ends in /oidc/exchange, which returns tokens with no consent screen. Refuse a
+        // third-party client before the provider state (a bearer handle) exists; it uses /authorize.
+        await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(_adminService, client, httpContext, userId: null, cancellationToken);
         var callbackUri = GetProviderCallbackUri(httpContext);
         var providerNonce = _cryptoService.GenerateOpaqueToken();
         var providerCodeVerifier = _cryptoService.GenerateOpaqueToken();
@@ -215,6 +218,12 @@ public sealed class SqlOSOidcBrowserAuthService
 
         try
         {
+            // Provider state issued before the direct-login gate (or before the client lost its
+            // first-party status) must not complete the upstream login or mint a code for the client.
+            var client = await _context.Set<SqlOSClientApplication>()
+                .FirstAsync(x => x.Id == requestToken.ClientApplicationId, cancellationToken);
+            await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(_adminService, client, httpContext, userId: null, cancellationToken);
+
             var result = await _oidcAuthService.CompleteAuthorizationAsync(
                 new SqlOSCompleteOidcAuthorizationRequest(
                     payload.ConnectionId,

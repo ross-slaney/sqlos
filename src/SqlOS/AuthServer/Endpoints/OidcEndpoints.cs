@@ -30,13 +30,15 @@ public static partial class EndpointRouteBuilderExtensions
         auth.MapGet("/oidc/providers", async (SqlOSOidcAuthService oidcAuthService, CancellationToken cancellationToken) =>
             Results.Ok(await oidcAuthService.ListEnabledProvidersAsync(cancellationToken)));
 
+        // App-owned social login is direct login: authorization-url and exchange are first-party only
+        // and answer a third-party client with 400 invalid_client (see DirectLoginResultAsync).
         auth.MapPost("/oidc/authorization-url", async (SqlOSOidcAuthorizationUrlRequest request, SqlOSOidcBrowserAuthService oidcBrowserAuthService, HttpContext httpContext, CancellationToken cancellationToken) =>
-            Results.Ok(await oidcBrowserAuthService.CreateAuthorizationUrlAsync(request, httpContext, cancellationToken)));
+            await DirectLoginResultAsync(httpContext, () => oidcBrowserAuthService.CreateAuthorizationUrlAsync(request, httpContext, cancellationToken), cancellationToken));
 
         auth.MapMethods("/oidc/callback", ["GET", "POST"], async (SqlOSOidcBrowserAuthService oidcBrowserAuthService, HttpContext httpContext, CancellationToken cancellationToken) =>
             await oidcBrowserAuthService.HandleCallbackAsync(httpContext, cancellationToken));
 
         auth.MapPost("/oidc/exchange", async (SqlOSPkceExchangeRequest request, SqlOSOidcBrowserAuthService oidcBrowserAuthService, HttpContext httpContext, CancellationToken cancellationToken) =>
-            Results.Ok(await oidcBrowserAuthService.ExchangeCodeAsync(request, httpContext, cancellationToken)));
+            await DirectLoginResultAsync(httpContext, () => oidcBrowserAuthService.ExchangeCodeAsync(request, httpContext, cancellationToken), cancellationToken));
     }
 }

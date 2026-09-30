@@ -135,6 +135,8 @@ The normal application flow starts at `/sqlos/auth/authorize`; hosted AuthPage i
 
 If your app owns the social-provider chooser, use `SqlOSOidcBrowserAuthService`. It protects the provider callback with its own temporary state, returns an application authorization code, validates your PKCE verifier on exchange, and re-enters the normal organization-selection and MFA state machine. Do not compose a production flow directly from the lower-level `SqlOSOidcAuthService` unless you independently implement all of those controls.
 
+The app-owned chooser (`POST /sqlos/auth/oidc/authorization-url` and `POST /sqlos/auth/oidc/exchange`) is direct login: the exchange returns tokens with no consent screen. It accepts only a [first-party client](/docs/authserver/clients#direct-sign-in-is-first-party-only), such as one created with `SeedOwnedWebApp` or with `IsFirstParty = true`. Any other client, including DCR and CIMD clients, gets `400` `invalid_client` before SqlOS creates provider state. A third-party client offers social sign-in through `/sqlos/auth/authorize`: the hosted or headless page shows the provider buttons and runs the [consent screen](/docs/authserver/consent) after the provider callback.
+
 ### App-owned provider chooser
 
 ```csharp

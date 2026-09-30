@@ -34,6 +34,25 @@ Core authentication service. Handles login, signup, sessions, tokens, and passwo
 
 ---
 
+### Direct login requires a first-party client
+
+The sign-in methods on this page return tokens to your code instead of redirecting a browser, so no [consent screen](/docs/authserver/consent) can appear. They accept only a client with `IsFirstParty = true`:
+
+- `SignUpAsync`, `LoginWithPasswordAsync`, `SelectOrganizationForLoginAsync`, and `SelectOrganizationAsync`
+- `RequestEmailOtpAsync` / `VerifyEmailOtpAsync` and `RequestEmailOtpSignupAsync` / `VerifyEmailOtpSignupAsync`
+- `RequestMagicLinkAsync` / `CompleteMagicLinkAsync`
+- `RequestPhoneOtpAsync` / `VerifyPhoneOtpAsync` and `RequestPhoneOtpSignupAsync` / `VerifyPhoneOtpSignupAsync`
+- `AcceptEmailInvitationSignupAsync`
+- `VerifyMfaChallengeAsync`, `StartTotpEnrollmentForChallengeAsync`, and `VerifyTotpEnrollmentAsync` with an MFA token
+- `CompleteExternalLoginAsync` and `CompleteClientAuthenticationAsync`
+- `SqlOSOidcBrowserAuthService.CreateAuthorizationUrlAsync` and `ExchangeCodeAsync`
+
+For any other client, including DCR and CIMD clients, these methods throw `SqlOSPublicAuthException` with `Error = "invalid_client"` and status `400` before they check a credential, send an email or SMS, create provider state, create an account, or mint a session. SqlOS records one `oauth.direct_login.rejected` audit event with the `client_id` and the request route. Third-party clients sign users in through `/authorize`, which runs consent. `CreateSessionTokensForUserAsync` is not a sign-in method and is unaffected.
+
+`SeedBrowserClient`, `SeedOwnedWebApp`, `SeedOwnedNativeApp`, `SeedCliClient`, the single-application client, and the dashboard's owned-app templates are first-party. A client created with `SeedClient`, the Admin API, or another dashboard template defaults to `IsFirstParty = false`; set it to `true` on the client your backend passes to these methods. See [Direct sign-in is first-party only](/docs/authserver/clients#direct-sign-in-is-first-party-only).
+
+---
+
 ### Handle `SqlOSLoginResult` as a state machine
 
 Password login, password signup, invitation signup, and OTP verification do not always issue tokens immediately. Treat every `SqlOSLoginResult` as one of three states: organization selection, MFA, or complete. Reuse one response mapper so a new MFA policy cannot turn an otherwise-correct login endpoint into a null-token bug.

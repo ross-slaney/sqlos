@@ -242,7 +242,9 @@ Integrate through `/authorize`, `/token`, and the documented AuthPage configurat
 
 ## Direct JSON authentication API
 
-These routes expose the same strongly typed contracts used by `SqlOSAuthService`. They can be useful for a first-party host integration, but they are not a second OAuth protocol and they do not share one normalized error envelope. Some handlers return a plain `400` message while others allow service exceptions to flow through the host's exception pipeline.
+These routes expose the same strongly typed contracts used by `SqlOSAuthService`. They are for a first-party host integration: they are not a second OAuth protocol and they do not share one normalized error envelope. Some handlers return a plain `400` message while others allow service exceptions to flow through the host's exception pipeline.
+
+The sign-in routes (signup, password, email code, magic link, organization selection, and the MFA challenge completions) return tokens in the response body, so there is no page where a [consent screen](/docs/authserver/consent) could appear. They accept only [first-party clients](/docs/authserver/clients#direct-sign-in-is-first-party-only). Any other client, including DCR and CIMD clients, gets `400` with `{ "error": "invalid_client", "message": "..." }` before SqlOS checks a credential, sends an email, or mints a session, and SqlOS records an `oauth.direct_login.rejected` audit event. Third-party clients use `/authorize`.
 
 | Method and route | JSON request | Success response |
 | --- | --- | --- |
@@ -250,6 +252,8 @@ These routes expose the same strongly typed contracts used by `SqlOSAuthService`
 | `POST /sqlos/auth/password/login` | `SqlOSPasswordLoginRequest` | `200 SqlOSLoginResult` |
 | `POST /sqlos/auth/email-otp/start` | `SqlOSEmailOtpStartRequest` | `200 SqlOSEmailOtpStartResult` |
 | `POST /sqlos/auth/email-otp/verify` | `SqlOSEmailOtpVerifyRequest` | `200 SqlOSLoginResult` |
+| `POST /sqlos/auth/magic-link/start` | `SqlOSMagicLinkStartRequest` | `200 SqlOSMagicLinkStartResult` |
+| `POST /sqlos/auth/magic-link/complete` | `SqlOSMagicLinkCompleteRequest` | `200 SqlOSLoginResult` |
 | `POST /sqlos/auth/select-organization` | `SqlOSSelectOrganizationRequest` | `200 SqlOSLoginResult`, preserving possible MFA state |
 | `POST /sqlos/auth/mfa/challenge/verify` | `SqlOSMfaChallengeVerifyRequest` | `200 SqlOSMfaChallengeVerifyResult` |
 | `POST /sqlos/auth/mfa/challenge/totp/enroll/start` | `SqlOSTotpChallengeEnrollmentStartRequest` | `200 SqlOSTotpEnrollmentStartResult` |
@@ -386,6 +390,8 @@ For browser clients on a different origin, send credentialed requests so the reu
 | `POST` | `/sqlos/auth/oidc/exchange` | Exchange the SqlOS PKCE result |
 | `POST` | `/sqlos/auth/sso/authorization-url` | Create a state- and S256 PKCE-bound SAML authorization request |
 | `POST` | `/sqlos/auth/saml/acs/{connectionId}` | SAML assertion consumer service |
+
+`/oidc/authorization-url` and `/oidc/exchange` are the app-owned social provider chooser. Like the direct sign-in routes above, they return tokens without a consent screen and accept only [first-party clients](/docs/authserver/clients#direct-sign-in-is-first-party-only); any other client gets `400` `invalid_client` before SqlOS creates provider state. A third-party client offers social sign-in through `/authorize`, whose hosted or headless page shows the provider buttons and runs consent.
 
 Prefer canonical `/sqlos/auth/authorize` plus `/sqlos/auth/token` over invoking callback routes manually. The SAML authorization helper requires `state`, `codeChallenge`, and `codeChallengeMethod: "S256"`; its code is exchanged only at the standard token endpoint with the exact redirect URI and verifier. The former `/token/exchange` and `/saml/login/{connectionId}` compatibility routes are not mapped.
 

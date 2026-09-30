@@ -238,7 +238,7 @@ See [Build your own login and signup UI](/docs/guides/custom-login-ui) for the i
 
 ## .NET SDK sign-in
 
-Use `SqlOSAuthService` from a trusted server endpoint. Pass `HttpContext` so SqlOS can apply IP-aware limits and create the session correctly:
+Use `SqlOSAuthService` from a trusted server endpoint with a [first-party client](/docs/authserver/clients#direct-sign-in-is-first-party-only); SqlOS refuses any other client with `invalid_client` before it sends a code. Pass `HttpContext` so SqlOS can apply IP-aware limits and create the session correctly:
 
 ```csharp
 var started = await authService.RequestPhoneOtpAsync(

@@ -9,6 +9,8 @@ Non-first-party clients — dynamically registered, [CIMD](/docs/authserver/clie
 
 Consent is the first interstitial. It runs before invitation acceptance, organization selection, and MFA, so a denied request never advances authorization state.
 
+A non-first-party client cannot route around the screen through SqlOS's direct sign-in APIs (password, email code, magic link, and the app-owned `/oidc/*` social routes). Those return tokens to the caller with no page to show consent on, so they accept only [first-party clients](/docs/authserver/clients#direct-sign-in-is-first-party-only) and answer any other client with `invalid_client`.
+
 ## When the screen appears
 
 - The user has never approved this client, or a previous grant was revoked.
