@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The 8.0.0 behavior lock. Scenarios talk HTTP to tests/SqlOS.BehaviorLock.Host, which references
+    SqlOS as source (default) or as the released package:
+
+      dotnet test tests/SqlOS.BehaviorLock -p:SqlOSUnderTest=package
+
+    See README.md in this directory for the authoring guide.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>SqlOS.BehaviorLock</RootNamespace>
+    <SqlOSUnderTest Condition="'$(SqlOSUnderTest)' == ''">source</SqlOSUnderTest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AngleSharp" Version="1.8.2" />
+    <PackageReference Include="Aspire.Hosting.Testing" Version="9.4.2" />
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" Version="9.0.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="MSTest.TestAdapter" Version="3.11.1" />
+    <PackageReference Include="MSTest.TestFramework" Version="3.11.1" />
+    <PackageReference Include="PublicApiGenerator" Version="11.5.4" />
+    <PackageReference Include="Verify.MSTest" Version="30.20.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SqlOS.BehaviorLock.Host\SqlOS.BehaviorLock.Host.csproj" />
+    <ProjectReference Include="..\SqlOS.IntegrationTests.AppHost\SqlOS.IntegrationTests.AppHost.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>RepositoryRoot</_Parameter1>
+      <_Parameter2>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../..'))</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>SqlOSUnderTest</_Parameter1>
+      <_Parameter2>$(SqlOSUnderTest)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+</Project>
