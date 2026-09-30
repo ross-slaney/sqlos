@@ -1,0 +1,432 @@
+# SqlOS behavior lock transcript
+scenario: EmailTemplateAdminScenarios.A_template_that_has_sent_mail_is_deactivated_instead_of_deleted
+profile: modules
+
+## 1. host: the host sends an invitation through the transactional email service
+> POST /__probe/email/send
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "idempotencyKey": "invite-ada",
+>     "templateKey": "team.invite",
+>     "to": "{email:ada}",
+>     "variables": {
+>       "inviter": "Grace",
+>       "team": "Research"
+>     }
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "deliveryId": "{edl#1}",
+      "providerMessageId": "behavior-lock-email-1",
+      "sanitizedError": null,
+      "status": "queued",
+      "templateKey": "team.invite",
+      "templateVersion": 1
+    }
+  ~ email (transactional) to {email:ada}
+      subject: Join Research
+      text:
+        Grace invited you to Research.
+      html:
+        <html>
+          <head></head>
+          <body>
+            <p>Grace invited you to Research.</p>
+          </body>
+        </html>
+
+## 2. host: resending with the same idempotency key returns the first delivery and sends nothing
+> POST /__probe/email/send
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "idempotencyKey": "invite-ada",
+>     "templateKey": "team.invite",
+>     "to": "{email:ada}",
+>     "variables": {
+>       "inviter": "Grace",
+>       "team": "Research"
+>     }
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "deliveryId": "{edl#1}",
+      "providerMessageId": "behavior-lock-email-1",
+      "sanitizedError": null,
+      "status": "queued",
+      "templateKey": "team.invite",
+      "templateVersion": 1
+    }
+
+## 3. host: a second invitation
+> POST /__probe/email/send
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "templateKey": "team.invite",
+>     "to": "{email:grace}",
+>     "variables": {
+>       "inviter": "Ada",
+>       "team": "Research"
+>     }
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "deliveryId": "{edl#2}",
+      "providerMessageId": "behavior-lock-email-2",
+      "sanitizedError": null,
+      "status": "queued",
+      "templateKey": "team.invite",
+      "templateVersion": 1
+    }
+  ~ email (transactional) to {email:grace}
+      subject: Join Research
+      text:
+        Ada invited you to Research.
+      html:
+        <html>
+          <head></head>
+          <body>
+            <p>Ada invited you to Research.</p>
+          </body>
+        </html>
+
+## 4. operator: without operator credentials the delivery log is not found
+> GET /sqlos/admin/email/api/messages
+< 404 Not Found
+
+## 5. operator: the delivery log pages newest first
+> GET /sqlos/admin/email/api/messages?templateKey=team.invite&status=queued&pageSize=1
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "failedAt": null,
+          "id": "{edl#2}",
+          "idempotencyKey": null,
+          "providerMessageId": "behavior-lock-email-2",
+          "renderedHtmlPreview": null,
+          "renderedSubject": "Join Research",
+          "renderedTextPreview": "Ada invited you to Research.",
+          "sanitizedError": null,
+          "sentAt": "{datetime:unspecified}",
+          "status": "queued",
+          "templateKey": "team.invite",
+          "templateVersion": 1,
+          "to": "{email:grace}",
+          "updatedAt": "{datetime:unspecified}"
+        }
+      ],
+      "hasNextPage": true,
+      "nextCursor": "{cursor#1}",
+      "pageSize": 1
+    }
+
+## 6. operator: the cursor continues
+> GET /sqlos/admin/email/api/messages?templateKey=team.invite&status=queued&pageSize=1&cursor={cursor#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "failedAt": null,
+          "id": "{edl#1}",
+          "idempotencyKey": "invite-ada",
+          "providerMessageId": "behavior-lock-email-1",
+          "renderedHtmlPreview": null,
+          "renderedSubject": "Join Research",
+          "renderedTextPreview": "Grace invited you to Research.",
+          "sanitizedError": null,
+          "sentAt": "{datetime:unspecified}",
+          "status": "queued",
+          "templateKey": "team.invite",
+          "templateVersion": 1,
+          "to": "{email:ada}",
+          "updatedAt": "{datetime:unspecified}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 1
+    }
+
+## 7. operator: by recipient substring
+> GET /sqlos/admin/email/api/messages?recipient=ada-
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "failedAt": null,
+          "id": "{edl#1}",
+          "idempotencyKey": "invite-ada",
+          "providerMessageId": "behavior-lock-email-1",
+          "renderedHtmlPreview": null,
+          "renderedSubject": "Join Research",
+          "renderedTextPreview": "Grace invited you to Research.",
+          "sanitizedError": null,
+          "sentAt": "{datetime:unspecified}",
+          "status": "queued",
+          "templateKey": "team.invite",
+          "templateVersion": 1,
+          "to": "{email:ada}",
+          "updatedAt": "{datetime:unspecified}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 8. operator: by status
+> GET /sqlos/admin/email/api/messages?status=FAILED
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 9. operator: by creation window
+> GET /sqlos/admin/email/api/messages?status=all&from={datetime:utc-z}&to={datetime:utc-z}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "failedAt": null,
+          "id": "{edl#2}",
+          "idempotencyKey": null,
+          "providerMessageId": "behavior-lock-email-2",
+          "renderedHtmlPreview": null,
+          "renderedSubject": "Join Research",
+          "renderedTextPreview": "Ada invited you to Research.",
+          "sanitizedError": null,
+          "sentAt": "{datetime:unspecified}",
+          "status": "queued",
+          "templateKey": "team.invite",
+          "templateVersion": 1,
+          "to": "{email:grace}",
+          "updatedAt": "{datetime:unspecified}"
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "failedAt": null,
+          "id": "{edl#1}",
+          "idempotencyKey": "invite-ada",
+          "providerMessageId": "behavior-lock-email-1",
+          "renderedHtmlPreview": null,
+          "renderedSubject": "Join Research",
+          "renderedTextPreview": "Grace invited you to Research.",
+          "sanitizedError": null,
+          "sentAt": "{datetime:unspecified}",
+          "status": "queued",
+          "templateKey": "team.invite",
+          "templateVersion": 1,
+          "to": "{email:ada}",
+          "updatedAt": "{datetime:unspecified}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 10. operator: a window before any delivery
+> GET /sqlos/admin/email/api/messages?to={datetime:utc-z}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 11. operator: deleting the template only deactivates it, because it has deliveries
+> DELETE /sqlos/admin/email/api/templates/team.invite
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 204 No Content
+
+## 12. operator: active templates exclude it
+> GET /sqlos/admin/email/api/templates?search=team&includeInactive=false
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 13. operator: the full list shows it inactive
+> GET /sqlos/admin/email/api/templates?search=team
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "displayName": "Team invite",
+          "htmlBodyTemplate": "<p>{inviter} invited you to {team}.</p>",
+          "id": "{emt#1}",
+          "isActive": false,
+          "key": "team.invite",
+          "subjectTemplate": "Join {team}",
+          "textBodyTemplate": "{inviter} invited you to {team}.",
+          "updatedAt": "{datetime:unspecified}",
+          "variables": {},
+          "version": 1
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 14. operator: an inactive template can still be previewed
+> POST /sqlos/admin/email/api/templates/team.invite/preview
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "variables": {
+>       "inviter": "Grace",
+>       "team": "Research"
+>     }
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "htmlBody": "<p>Grace invited you to Research.</p>",
+      "subject": "Join Research",
+      "textBody": "Grace invited you to Research.",
+      "variables": [
+        "inviter",
+        "team"
+      ]
+    }
+
+## 15. host: but the host can no longer send with it
+> POST /__probe/email/send
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "templateKey": "team.invite",
+>     "to": "{email:ada}",
+>     "variables": {
+>       "inviter": "Grace",
+>       "team": "Research"
+>     }
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "Email template 'team.invite' was not found or is inactive."
+    }
+
+## audit: deliveries and the deactivation
+  - {
+      "action": "email.send.queued",
+      "actor": {
+        "displayName": null,
+        "id": "{edl#1}",
+        "type": "email_delivery"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "email.send.queued",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "deliveryId": "{edl#1}",
+        "providerMessageId": "behavior-lock-email-1",
+        "templateKey": "team.invite",
+        "templateVersion": 1
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "email.send.queued",
+      "actor": {
+        "displayName": null,
+        "id": "{edl#2}",
+        "type": "email_delivery"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "email.send.queued",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "deliveryId": "{edl#2}",
+        "providerMessageId": "behavior-lock-email-2",
+        "templateKey": "team.invite",
+        "templateVersion": 1
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "email.template.deactivated",
+      "actor": {
+        "displayName": null,
+        "id": "{emt#1}",
+        "type": "email_template"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "email.template.deactivated",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "Key": "team.invite",
+        "Version": 1,
+        "templateId": "{emt#1}"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
