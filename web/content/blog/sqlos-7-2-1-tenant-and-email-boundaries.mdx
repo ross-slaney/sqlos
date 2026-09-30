@@ -1,0 +1,108 @@
+---
+title: "SqlOS 7.2.1: Tenant and email-ownership boundaries hold"
+description: "SSO connections stay inside their organization, direct login is first-party only, SCIM grants stay inside a boundary, and unverified email addresses can no longer be used to take over accounts."
+date: "2026-09-30"
+author: "Ross Slaney"
+tags: ["AuthServer", "SAML", "SCIM", "OAuth", "FGA", "Security", "SqlOS"]
+---
+
+7.2.1 is a security release. A September 2026 audit found ways for one organization's identity provider, a self-registered OAuth client, or someone who registered another person's email address to reach accounts and resources they must not. This release closes each of them. Every fix ships with tests that reproduced the attack before the change and fail closed after it.
+
+Upgrade now. Two fixes need an operator action: SCIM grant boundaries and first-party clients. See [Upgrade notes](#upgrade-notes).
+
+## An SSO connection signs users into its own organization only
+
+A SAML response is now always resolved, linked, provisioned and completed in the **connection's** organization. If a sign-in request is bound to any other organization, the response is rejected before the assertion is consumed. The rejection is audited as `user.login.saml.request_denied`.
+
+Device approval also changed:
+
+- it accepts only real device-authorization requests
+- the organization an approver picks is checked for membership, MFA and application access
+- that choice is never written onto the tracked request
+
+Before this release, an organization admin who controlled their own IdP signing certificate could combine those two paths to sign in as a member of another organization.
+
+See [SAML SSO](/docs/authserver/saml-sso) and [Home realm discovery](/docs/authserver/home-realm-discovery).
+
+## Direct login is for first-party clients
+
+These routes return tokens straight to the caller, so no consent screen can appear:
+
+- password, email code, magic link and phone code
+- signup
+- organization selection and MFA completion
+- the `/oidc/authorization-url` and `/oidc/exchange` social-login routes
+
+They now refuse any client with `IsFirstParty = false`, with `400 invalid_client` and an `oauth.direct_login.rejected` audit event. The check runs before any credential check, email, SMS, provider state, account or session. It is also enforced where SqlOS issues sessions and tokens, so no path can skip it.
+
+Third-party, DCR and CIMD clients sign users in through `/authorize`, where consent applies. Before this release, a self-registered client could get a victim's tokens through the social-login routes without a SqlOS consent screen.
+
+See [Clients](/docs/authserver/clients) and [Consent](/docs/authserver/consent).
+
+## SCIM group mappings stay inside a grant boundary
+
+Each SCIM connection now has a **grant boundary**: the organization's root FGA resource. A mapped grant must target that resource or one of its descendants, and the check follows the actual resource tree, not resource-ID prefixes.
+
+- **When a group is pushed.** A mapping that resolves outside the boundary, or on a connection without one, creates no grant. Any previously managed grant is revoked, and SqlOS records `scim.grant.outside_boundary` or `scim.grant.boundary_missing`.
+- **When configuration is saved.** The seed, admin API and dashboard all validate the boundary, and each returns a typed error.
+
+Before this release, an organization's IdP could name a group so that a pattern mapping resolved to another organization's resource, and SqlOS granted the role.
+
+See [SCIM group mapping](/docs/fga/scim-group-mapping) and [SCIM directory sync](/docs/guides/scim-directory-sync).
+
+## Email ownership is proven, not assumed
+
+Four related fixes make an email address count as a person's only after they prove they own the mailbox:
+
+- **Codes and links go to the stored address.** Every security-relevant email lookup now confirms an exact match of the canonical address, so a look-alike address (for example `ß` instead of `ss` on a case-insensitive SQL Server collation) never selects someone else's account.
+- **A proof of ownership claims an unverified address.** Signing in with an email code, magic link, upstream provider, SAML, invitation or password reset proves the mailbox. That proof revokes everything attached to the account before it, except the credential used now:
+  - passwords, authenticators, recovery codes, phone numbers and other identities
+  - remembered consent grants
+  - calendar connections
+  - all sessions and tokens
+
+  SqlOS records this as `user.email.claimed`. Someone who registered your address first can no longer keep access after you sign in.
+- **The verification link isn't a claim.** It only confirms the address, so an owner who verifies first keeps their password.
+- **SCIM and SAML JIT stay inside verified domains.** They create or verify emails only inside the organization's verified domains. SCIM stops controlling a person once that person has an independent sign-in or another membership.
+
+See [Users and credentials](/docs/authserver/users-and-credentials#unverified-email-addresses-and-claims).
+
+## A dead sign-in cookie no longer blocks sign-in
+
+Logout-all, password reset and organization deactivation can revoke a browser's auth-page session. Before this release, the cookie for that revoked session stayed in the browser and blocked every later sign-in, often for days.
+
+A fresh sign-in with a password, code, link, SAML or OIDC now starts a new session and replaces the cookie. `/authorize` deletes a dead cookie. Silent sign-in, `prompt=none` and device approval still fail closed on a revoked session.
+
+See [Sessions and tokens](/docs/authserver/sessions-and-tokens).
+
+## Upgrade notes
+
+```bash
+dotnet add package SqlOS --version 7.2.1
+npm install @sqlos/headless@7.2.1              # if you render your own login UI
+```
+
+**SCIM operators: set a grant boundary.** Existing SCIM connections have no boundary and fail closed. Their mapped grants are revoked at each group's next push.
+
+1. Set `GrantBoundaryResourceId` to each organization's root FGA resource. Use `SeedScimConnection` for code-owned connections, and the dashboard or `UpdateScimConnectionAsync` for the rest. Setting it immediately revokes any managed grant outside the boundary, including any planted before the upgrade.
+2. Push or resync groups to recreate grants inside the boundary.
+3. Review earlier `scim.grant.mapped` audit events for resources outside each organization's subtree.
+
+Don't use the global FGA root as a boundary in a multi-tenant app.
+
+**Hosts using direct login: mark your own clients first-party.** Clients created with `SeedClient`, the Admin API or non-owned dashboard templates default to `IsFirstParty = false`. If your own app calls the direct-login APIs or routes with one of these clients, set it first-party:
+
+- `client.IsFirstParty = true` in the seed
+- `"isFirstParty": true` in the Admin API
+- or use the owned-app dashboard template
+
+`SeedBrowserClient`, `SeedOwnedWebApp`, `SeedOwnedNativeApp`, `SeedCliClient` and single-application clients are already first-party.
+
+If you suspect a third-party client used direct login before this release, revoke that client's sessions:
+
+- `POST /sqlos/admin/auth/api/sessions/revocation/preview`
+- then `POST /sqlos/admin/auth/api/sessions/revocation`, with its `clientApplicationId`
+
+**Accounts that claim an email.** A user who signed up with a password and never used the verification link loses that password the first time they sign in with an email code, a magic link or a provider. They set a new one with **Forgot password?**. The claim keeps organization memberships, so an organization admin should review the memberships of a claimed account. The `user.email.claimed` audit event marks the moment.
+
+No public API was removed. The additions are the SCIM grant-boundary fields, a typed boundary exception, and new response fields. One additive schema migration (047) runs for both SQL Server and PostgreSQL.
