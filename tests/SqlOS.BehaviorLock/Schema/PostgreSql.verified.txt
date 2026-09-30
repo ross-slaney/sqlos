@@ -1,0 +1,1411 @@
+# SqlOS schema (PostgreSql) after bootstrap
+
+## Schema version
+auth: 47
+fga: 10
+
+## Applied migrations
+001 SqlOS.AuthServer.Schema.PostgreSql.001_Initial.sql
+002 SqlOS.AuthServer.Schema.PostgreSql.002_WebAuth.sql
+003 SqlOS.AuthServer.Schema.PostgreSql.003_SocialAuth.sql
+004 SqlOS.AuthServer.Schema.PostgreSql.004_OidcExpansion.sql
+005 SqlOS.AuthServer.Schema.PostgreSql.005_AuthPageAndOauthSurface.sql
+006 SqlOS.AuthServer.Schema.PostgreSql.006_SigningKeyRotation.sql
+007 SqlOS.AuthServer.Schema.PostgreSql.007_HeadlessAuth.sql
+008 SqlOS.AuthServer.Schema.PostgreSql.008_OidcProviderLogos.sql
+009 SqlOS.AuthServer.Schema.PostgreSql.009_ClientRegistrationAndResourceBinding.sql
+010 SqlOS.AuthServer.Schema.PostgreSql.010_RefreshTokenGraceWindow.sql
+011 SqlOS.AuthServer.Schema.PostgreSql.011_NativeHeadlessAuth.sql
+012 SqlOS.AuthServer.Schema.PostgreSql.012_EmailOtp.sql
+013 SqlOS.AuthServer.Schema.PostgreSql.013_Invitations.sql
+014 SqlOS.AuthServer.Schema.PostgreSql.014_EmailBranding.sql
+015 SqlOS.AuthServer.Schema.PostgreSql.015_DeviceAuthorization.sql
+016 SqlOS.AuthServer.Schema.PostgreSql.016_DeviceAuthorizationRequestBinding.sql
+017 SqlOS.AuthServer.Schema.PostgreSql.017_ApplicationAssignments.sql
+017 SqlOS.AuthServer.Schema.PostgreSql.017_PasswordLoginAbuse.sql
+017 SqlOS.AuthServer.Schema.PostgreSql.017_TransactionalEmail.sql
+018 SqlOS.AuthServer.Schema.PostgreSql.018_PhoneOtp.sql
+019 SqlOS.AuthServer.Schema.PostgreSql.019_MfaTotp.sql
+020 SqlOS.AuthServer.Schema.PostgreSql.020_GitHubSocialProvider.sql
+021 SqlOS.AuthServer.Schema.PostgreSql.021_SsoPortalSessions.sql
+022 SqlOS.AuthServer.Schema.PostgreSql.022_OrganizationDomains.sql
+023 SqlOS.AuthServer.Schema.PostgreSql.023_AuditLogs.sql
+024 SqlOS.AuthServer.Schema.PostgreSql.024_RepairApplicationAssignments.sql
+025 SqlOS.AuthServer.Schema.PostgreSql.025_AtomicOAuthArtifacts.sql
+026 SqlOS.AuthServer.Schema.PostgreSql.026_CalendarIntegration.sql
+027 SqlOS.AuthServer.Schema.PostgreSql.027_OAuthStateLength.sql
+028 SqlOS.AuthServer.Schema.PostgreSql.028_SigningKeyCustody.sql
+029 SqlOS.AuthServer.Schema.PostgreSql.029_ScimDirectorySync.sql
+030 SqlOS.AuthServer.Schema.PostgreSql.030_ScimDirectorySyncHardening.sql
+031 SqlOS.AuthServer.Schema.PostgreSql.031_SamlReplayProtection.sql
+032 SqlOS.AuthServer.Schema.PostgreSql.032_DistributedRateLimits.sql
+033 SqlOS.AuthServer.Schema.PostgreSql.033_UpstreamMfaTrust.sql
+034 SqlOS.AuthServer.Schema.PostgreSql.034_ConfigurationOwnership.sql
+035 SqlOS.AuthServer.Schema.PostgreSql.035_ApplicationAssignmentOwnership.sql
+036 SqlOS.AuthServer.Schema.PostgreSql.036_SamlConnectionOwnership.sql
+037 SqlOS.AuthServer.Schema.PostgreSql.037_ClientCredentials.sql
+038 SqlOS.AuthServer.Schema.PostgreSql.038_ScopedAuditIdempotency.sql
+039 SqlOS.AuthServer.Schema.PostgreSql.039_AtomicPasswordLoginAdmission.sql
+040 SqlOS.AuthServer.Schema.PostgreSql.040_MfaAttemptAdmission.sql
+041 SqlOS.AuthServer.Schema.PostgreSql.041_AdminCursorIndexes.sql
+042 SqlOS.AuthServer.Schema.PostgreSql.042_AuthPageBrandingOwnership.sql
+043 SqlOS.AuthServer.Schema.PostgreSql.043_OidcCodeAndSessionPlumbing.sql
+044 SqlOS.AuthServer.Schema.PostgreSql.044_ConsentAndScopeDisplayNames.sql
+045 SqlOS.AuthServer.Schema.PostgreSql.045_AuthPageSessionFamilies.sql
+046 SqlOS.AuthServer.Schema.PostgreSql.046_SamlExternalIdentityUserUniqueness.sql
+047 SqlOS.AuthServer.Schema.PostgreSql.047_ScimGrantBoundary.sql
+
+## Tables
+
+### SqlOSApplicationAssignments
+  Id character varying(64) NOT NULL
+  ClientApplicationId character varying(64) NOT NULL
+  OrganizationId character varying(64) NULL
+  PrincipalType character varying(40) NOT NULL
+  PrincipalId character varying(128) NULL
+  RoleKey character varying(80) NULL
+  Access character varying(20) NOT NULL
+  Reason character varying(500) NULL
+  CreatedAt timestamp without time zone NOT NULL
+  CreatedByActorType character varying(80) NULL
+  CreatedByActorId character varying(128) NULL
+  RevokedAt timestamp without time zone NULL
+  RevokedByActorType character varying(80) NULL
+  RevokedByActorId character varying(128) NULL
+  ConfigurationOwner character varying(40) NOT NULL DEFAULT 'dashboard'::character varying
+  ConfigurationSourceKey character varying(160) NULL
+  ConfigurationFingerprint character varying(64) NULL
+  LastReconciledAt timestamp without time zone NULL
+  ConfigurationOrphanedAt timestamp without time zone NULL
+  FOREIGN KEY FK_SqlOSApplicationAssignments_ClientApplication FOREIGN KEY ("ClientApplicationId") REFERENCES dbo."SqlOSClientApplications"("Id")
+  FOREIGN KEY FK_SqlOSApplicationAssignments_Organization FOREIGN KEY ("OrganizationId") REFERENCES dbo."SqlOSOrganizations"("Id")
+  PRIMARY KEY PK_SqlOSApplicationAssignments PRIMARY KEY ("Id")
+  INDEX IX_SqlOSApplicationAssignments_ClientApplicationId_RevokedAt CREATE INDEX "IX_SqlOSApplicationAssignments_ClientApplicationId_RevokedAt" ON dbo."SqlOSApplicationAssignments" USING btree ("ClientApplicationId", "RevokedAt")
+  INDEX IX_SqlOSApplicationAssignments_Client_CreatedAt_Id CREATE INDEX "IX_SqlOSApplicationAssignments_Client_CreatedAt_Id" ON dbo."SqlOSApplicationAssignments" USING btree ("ClientApplicationId", "CreatedAt" DESC, "Id" DESC)
+  INDEX IX_SqlOSApplicationAssignments_OrganizationId_RevokedAt CREATE INDEX "IX_SqlOSApplicationAssignments_OrganizationId_RevokedAt" ON dbo."SqlOSApplicationAssignments" USING btree ("OrganizationId", "RevokedAt")
+  INDEX IX_SqlOSApplicationAssignments_Target CREATE INDEX "IX_SqlOSApplicationAssignments_Target" ON dbo."SqlOSApplicationAssignments" USING btree ("ClientApplicationId", "PrincipalType", "PrincipalId", "OrganizationId", "RoleKey", "RevokedAt")
+  INDEX UX_SqlOSApplicationAssignments_Client_Owner_SourceKey CREATE UNIQUE INDEX "UX_SqlOSApplicationAssignments_Client_Owner_SourceKey" ON dbo."SqlOSApplicationAssignments" USING btree ("ClientApplicationId", "ConfigurationOwner", "ConfigurationSourceKey") WHERE ("ConfigurationSourceKey" IS NOT NULL)
+
+### SqlOSAppliedMigrations
+  Sequence bigint NOT NULL IDENTITY
+  ScriptName character varying(450) NOT NULL
+  Version integer NOT NULL
+  AppliedAt timestamp without time zone NOT NULL
+  PRIMARY KEY PK_SqlOSAppliedMigrations PRIMARY KEY ("ScriptName")
+  UNIQUE UX_SqlOSAppliedMigrations_Sequence UNIQUE ("Sequence")
+
+### SqlOSAuditEvents
+  Id character varying(64) NOT NULL
+  OrganizationId character varying(64) NULL
+  ApplicationId character varying(64) NULL
+  ApplicationKey character varying(200) NULL
+  UserId character varying(64) NULL
+  SessionId character varying(64) NULL
+  EventType character varying(160) NOT NULL
+  Source character varying(80) NOT NULL DEFAULT 'authserver'::character varying
+  Action character varying(160) NOT NULL DEFAULT ''::character varying
+  ActorType character varying(80) NOT NULL
+  ActorId character varying(128) NULL
+  ActorDisplayName character varying(320) NULL
+  TargetsJson text NOT NULL DEFAULT '[]'::text
+  ContextJson text NULL
+  MetadataJson text NULL
+  OccurredAt timestamp without time zone NOT NULL
+  IngestedAt timestamp without time zone NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'::text)
+  IpAddress character varying(128) NULL
+  UserAgent character varying(512) NULL
+  RequestId character varying(128) NULL
+  CorrelationId character varying(128) NULL
+  IdempotencyKeyHash character varying(128) NULL
+  DataJson text NULL
+  IdempotencyScopeHash character varying(128) NULL
+  PRIMARY KEY SqlOSAuditEvents_pkey PRIMARY KEY ("Id")
+  INDEX IX_SqlOSAuditEvents_Action_OccurredAt CREATE INDEX "IX_SqlOSAuditEvents_Action_OccurredAt" ON dbo."SqlOSAuditEvents" USING btree ("Action", "OccurredAt" DESC)
+  INDEX IX_SqlOSAuditEvents_Actor_OccurredAt CREATE INDEX "IX_SqlOSAuditEvents_Actor_OccurredAt" ON dbo."SqlOSAuditEvents" USING btree ("ActorType", "ActorId", "OccurredAt" DESC)
+  INDEX IX_SqlOSAuditEvents_ApplicationId_OccurredAt CREATE INDEX "IX_SqlOSAuditEvents_ApplicationId_OccurredAt" ON dbo."SqlOSAuditEvents" USING btree ("ApplicationId", "OccurredAt" DESC)
+  INDEX IX_SqlOSAuditEvents_ApplicationKey_OccurredAt CREATE INDEX "IX_SqlOSAuditEvents_ApplicationKey_OccurredAt" ON dbo."SqlOSAuditEvents" USING btree ("ApplicationKey", "OccurredAt" DESC)
+  INDEX IX_SqlOSAuditEvents_OccurredAt CREATE INDEX "IX_SqlOSAuditEvents_OccurredAt" ON dbo."SqlOSAuditEvents" USING btree ("OccurredAt" DESC)
+  INDEX IX_SqlOSAuditEvents_OccurredAt_IngestedAt_Id CREATE INDEX "IX_SqlOSAuditEvents_OccurredAt_IngestedAt_Id" ON dbo."SqlOSAuditEvents" USING btree ("OccurredAt" DESC, "IngestedAt" DESC, "Id" DESC)
+  INDEX IX_SqlOSAuditEvents_OrganizationId_OccurredAt CREATE INDEX "IX_SqlOSAuditEvents_OrganizationId_OccurredAt" ON dbo."SqlOSAuditEvents" USING btree ("OrganizationId", "OccurredAt" DESC)
+  INDEX IX_SqlOSAuditEvents_Source_OccurredAt CREATE INDEX "IX_SqlOSAuditEvents_Source_OccurredAt" ON dbo."SqlOSAuditEvents" USING btree ("Source", "OccurredAt" DESC)
+  INDEX UX_SqlOSAuditEvents_IdempotencyKeyHash CREATE UNIQUE INDEX "UX_SqlOSAuditEvents_IdempotencyKeyHash" ON dbo."SqlOSAuditEvents" USING btree ("IdempotencyKeyHash") WHERE ("IdempotencyKeyHash" IS NOT NULL)
+  INDEX UX_SqlOSAuditEvents_IdempotencyScopeHash CREATE UNIQUE INDEX "UX_SqlOSAuditEvents_IdempotencyScopeHash" ON dbo."SqlOSAuditEvents" USING btree ("IdempotencyScopeHash") WHERE ("IdempotencyScopeHash" IS NOT NULL)
+
+### SqlOSAuthOidcConnections
+  Id character varying(64) NOT NULL
+  ProviderType character varying(40) NOT NULL
+  DisplayName character varying(200) NOT NULL
+  ClientId character varying(300) NOT NULL
+  ClientSecretEncrypted text NULL
+  AllowedCallbackUrisJson text NOT NULL
+  UseDiscovery boolean NOT NULL
+  DiscoveryUrl character varying(500) NULL
+  Issuer character varying(500) NULL
+  AuthorizationEndpoint character varying(1000) NULL
+  TokenEndpoint character varying(1000) NULL
+  UserInfoEndpoint character varying(1000) NULL
+  JwksUri character varying(1000) NULL
+  MicrosoftTenant character varying(200) NULL
+  ScopesJson text NOT NULL
+  ClaimMappingJson text NOT NULL
+  ClientAuthMethod character varying(40) NOT NULL
+  UseUserInfo boolean NOT NULL
+  AppleTeamId character varying(100) NULL
+  AppleKeyId character varying(100) NULL
+  ApplePrivateKeyEncrypted text NULL
+  IsEnabled boolean NOT NULL
+  CreatedAt timestamp without time zone NOT NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  LogoDataUrl text NULL
+  Protocol character varying(40) NOT NULL DEFAULT 'Oidc'::character varying
+  TrustUpstreamMfa boolean NOT NULL DEFAULT false
+  AcceptedAmrValuesJson text NOT NULL DEFAULT '[]'::text
+  AcceptedAcrValuesJson text NOT NULL DEFAULT '[]'::text
+  ConfigurationOwner character varying(40) NOT NULL DEFAULT 'dashboard'::character varying
+  ConfigurationSourceKey character varying(160) NULL
+  ConfigurationFingerprint character varying(64) NULL
+  LastReconciledAt timestamp without time zone NULL
+  ConfigurationOrphanedAt timestamp without time zone NULL
+  PRIMARY KEY SqlOSAuthOidcConnections_pkey PRIMARY KEY ("Id")
+  INDEX IX_SqlOSAuthOidcConnections_DisplayName_Id CREATE INDEX "IX_SqlOSAuthOidcConnections_DisplayName_Id" ON dbo."SqlOSAuthOidcConnections" USING btree ("DisplayName", "Id")
+  INDEX UX_SqlOSAuthOidcConnections_ConfigurationOwner_SourceKey CREATE UNIQUE INDEX "UX_SqlOSAuthOidcConnections_ConfigurationOwner_SourceKey" ON dbo."SqlOSAuthOidcConnections" USING btree ("ConfigurationOwner", "ConfigurationSourceKey") WHERE ("ConfigurationSourceKey" IS NOT NULL)
+
+### SqlOSAuthPageSessionFamilies
+  Id character varying(64) NOT NULL
+  UserId character varying(64) NOT NULL
+  OrganizationId character varying(64) NULL
+  CreatedAt timestamp without time zone NOT NULL
+  RevokedAt timestamp without time zone NULL
+  RevocationReason character varying(200) NULL
+  FOREIGN KEY FK_SqlOSAuthPageSessionFamilies_Organization FOREIGN KEY ("OrganizationId") REFERENCES dbo."SqlOSOrganizations"("Id")
+  FOREIGN KEY FK_SqlOSAuthPageSessionFamilies_User FOREIGN KEY ("UserId") REFERENCES dbo."SqlOSUsers"("Id")
+  PRIMARY KEY PK_SqlOSAuthPageSessionFamilies PRIMARY KEY ("Id")
+  INDEX IX_SqlOSAuthPageSessionFamilies_OrganizationId_RevokedAt CREATE INDEX "IX_SqlOSAuthPageSessionFamilies_OrganizationId_RevokedAt" ON dbo."SqlOSAuthPageSessionFamilies" USING btree ("OrganizationId", "RevokedAt")
+  INDEX IX_SqlOSAuthPageSessionFamilies_UserId_RevokedAt CREATE INDEX "IX_SqlOSAuthPageSessionFamilies_UserId_RevokedAt" ON dbo."SqlOSAuthPageSessionFamilies" USING btree ("UserId", "RevokedAt")
+
+### SqlOSAuthPageSettings
+  Id character varying(64) NOT NULL
+  LogoBase64 text NULL
+  PrimaryColor character varying(32) NOT NULL
+  AccentColor character varying(32) NOT NULL
+  BackgroundColor character varying(32) NOT NULL
+  Layout character varying(32) NOT NULL
+  PageTitle character varying(200) NOT NULL
+  PageSubtitle character varying(500) NOT NULL
+  EnablePasswordSignup boolean NOT NULL
+  EnabledCredentialTypesJson text NOT NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  EmailApplicationName character varying(200) NULL
+  EmailLogoBase64 text NULL
+  EmailPrimaryColor character varying(32) NOT NULL DEFAULT '#2563eb'::character varying
+  EmailAccentColor character varying(32) NOT NULL DEFAULT '#0f172a'::character varying
+  EmailBackgroundColor character varying(32) NOT NULL DEFAULT '#f8fafc'::character varying
+  AuthPageConfigurationOwner character varying(40) NOT NULL DEFAULT 'system'::character varying
+  AuthPageConfigurationSourceKey character varying(160) NULL
+  AuthPageConfigurationFingerprint character varying(64) NULL
+  AuthPageLastReconciledAt timestamp without time zone NULL
+  AuthPageConfigurationOrphanedAt timestamp without time zone NULL
+  EmailConfigurationOwner character varying(40) NOT NULL DEFAULT 'system'::character varying
+  EmailConfigurationSourceKey character varying(160) NULL
+  EmailConfigurationFingerprint character varying(64) NULL
+  EmailLastReconciledAt timestamp without time zone NULL
+  EmailConfigurationOrphanedAt timestamp without time zone NULL
+  PRIMARY KEY SqlOSAuthPageSettings_pkey PRIMARY KEY ("Id")
+
+### SqlOSAuthSocialConnections
+  Id character varying(64) NOT NULL
+  ProviderType character varying(40) NOT NULL
+  DisplayName character varying(200) NOT NULL
+  ClientId character varying(300) NOT NULL
+  ClientSecretEncrypted text NOT NULL
+  AllowedCallbackUrisJson text NOT NULL
+  MicrosoftTenant character varying(200) NULL
+  ScopesJson text NOT NULL
+  IsEnabled boolean NOT NULL
+  CreatedAt timestamp without time zone NOT NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  PRIMARY KEY SqlOSAuthSocialConnections_pkey PRIMARY KEY ("Id")
+
+### SqlOSAuthorizationCodes
+  Id character varying(64) NOT NULL
+  AuthorizationRequestId character varying(64) NOT NULL
+  UserId character varying(64) NOT NULL
+  ClientApplicationId character varying(64) NOT NULL
+  OrganizationId character varying(64) NULL
+  RedirectUri character varying(2048) NOT NULL
+  State character varying(2048) NOT NULL
+  CodeHash character varying(128) NOT NULL
+  CodeChallenge character varying(256) NOT NULL
+  CodeChallengeMethod character varying(32) NOT NULL
+  AuthenticationMethod character varying(50) NOT NULL
+  CreatedAt timestamp without time zone NOT NULL
+  ExpiresAt timestamp without time zone NOT NULL
+  ConsumedAt timestamp without time zone NULL
+  Scope character varying(1000) NOT NULL DEFAULT ''::character varying
+  Resource character varying(2048) NULL
+  Nonce character varying(256) NULL
+  AuthTime timestamp without time zone NULL
+  FOREIGN KEY FK_SqlOSAuthorizationCodes_Clients FOREIGN KEY ("ClientApplicationId") REFERENCES dbo."SqlOSClientApplications"("Id")
+  FOREIGN KEY FK_SqlOSAuthorizationCodes_Organizations FOREIGN KEY ("OrganizationId") REFERENCES dbo."SqlOSOrganizations"("Id")
+  FOREIGN KEY FK_SqlOSAuthorizationCodes_Requests FOREIGN KEY ("AuthorizationRequestId") REFERENCES dbo."SqlOSAuthorizationRequests"("Id")
+  FOREIGN KEY FK_SqlOSAuthorizationCodes_Users FOREIGN KEY ("UserId") REFERENCES dbo."SqlOSUsers"("Id")
+  PRIMARY KEY SqlOSAuthorizationCodes_pkey PRIMARY KEY ("Id")
+  UNIQUE SqlOSAuthorizationCodes_CodeHash_key UNIQUE ("CodeHash")
+  INDEX IX_SqlOSAuthorizationCodes_AuthorizationRequestId CREATE UNIQUE INDEX "IX_SqlOSAuthorizationCodes_AuthorizationRequestId" ON dbo."SqlOSAuthorizationCodes" USING btree ("AuthorizationRequestId")
+
+### SqlOSAuthorizationRequests
+  Id character varying(64) NOT NULL
+  ClientApplicationId character varying(64) NOT NULL
+  OrganizationId character varying(64) NULL
+  ConnectionId character varying(64) NULL
+  LoginHintEmail character varying(320) NULL
+  RedirectUri character varying(2048) NOT NULL
+  State character varying(2048) NOT NULL
+  CodeChallenge character varying(256) NOT NULL
+  CodeChallengeMethod character varying(32) NOT NULL
+  CreatedAt timestamp without time zone NOT NULL
+  ExpiresAt timestamp without time zone NOT NULL
+  CompletedAt timestamp without time zone NULL
+  CancelledAt timestamp without time zone NULL
+  Scope character varying(1000) NOT NULL DEFAULT ''::character varying
+  Resource character varying(2048) NULL
+  Nonce character varying(256) NULL
+  Prompt character varying(256) NULL
+  ResolvedAuthMethod character varying(50) NULL
+  ResolvedOrganizationId character varying(64) NULL
+  ResolvedConnectionId character varying(64) NULL
+  PresentationMode character varying(32) NOT NULL DEFAULT 'hosted'::character varying
+  UiContextJson text NULL
+  InvitationId character varying(64) NULL
+  DeviceAuthorizationId character varying(64) NULL
+  MaxAgeSeconds bigint NULL
+  PendingConsentUserId character varying(64) NULL
+  FOREIGN KEY FK_SqlOSAuthorizationRequests_Clients FOREIGN KEY ("ClientApplicationId") REFERENCES dbo."SqlOSClientApplications"("Id")
+  FOREIGN KEY FK_SqlOSAuthorizationRequests_DeviceAuthorization FOREIGN KEY ("DeviceAuthorizationId") REFERENCES dbo."SqlOSDeviceAuthorizations"("Id")
+  FOREIGN KEY FK_SqlOSAuthorizationRequests_Invitations_InvitationId FOREIGN KEY ("InvitationId") REFERENCES dbo."SqlOSInvitations"("Id")
+  FOREIGN KEY FK_SqlOSAuthorizationRequests_Organizations FOREIGN KEY ("OrganizationId") REFERENCES dbo."SqlOSOrganizations"("Id")
+  FOREIGN KEY FK_SqlOSAuthorizationRequests_SsoConnections FOREIGN KEY ("ConnectionId") REFERENCES dbo."SqlOSSsoConnections"("Id")
+  PRIMARY KEY SqlOSAuthorizationRequests_pkey PRIMARY KEY ("Id")
+  INDEX IX_SqlOSAuthorizationRequests_DeviceAuthorizationId CREATE UNIQUE INDEX "IX_SqlOSAuthorizationRequests_DeviceAuthorizationId" ON dbo."SqlOSAuthorizationRequests" USING btree ("DeviceAuthorizationId") WHERE ("DeviceAuthorizationId" IS NOT NULL)
+
+### SqlOSCalendarConnections
+  Id character varying(64) NOT NULL
+  ProviderType character varying(40) NOT NULL
+  Mode character varying(40) NOT NULL
+  Status character varying(40) NOT NULL
+  OidcConnectionId character varying(64) NOT NULL
+  UserId character varying(64) NULL
+  OrganizationId character varying(64) NULL
+  DisplayName character varying(200) NOT NULL
+  ProviderAccountEmail character varying(320) NULL
+  ProviderAccountSubject character varying(256) NULL
+  ScopesJson text NOT NULL
+  AccessTokenEncrypted text NULL
+  RefreshTokenEncrypted text NULL
+  AccessTokenExpiresAt timestamp without time zone NULL
+  LastSyncAt timestamp without time zone NULL
+  LastError character varying(1000) NULL
+  LastErrorAt timestamp without time zone NULL
+  CreatedAt timestamp without time zone NOT NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  RevokedAt timestamp without time zone NULL
+  RevokedReason character varying(160) NULL
+  FOREIGN KEY FK_SqlOSCalendarConnections_OidcConnections FOREIGN KEY ("OidcConnectionId") REFERENCES dbo."SqlOSAuthOidcConnections"("Id")
+  FOREIGN KEY FK_SqlOSCalendarConnections_Organizations FOREIGN KEY ("OrganizationId") REFERENCES dbo."SqlOSOrganizations"("Id")
+  FOREIGN KEY FK_SqlOSCalendarConnections_Users FOREIGN KEY ("UserId") REFERENCES dbo."SqlOSUsers"("Id")
+  PRIMARY KEY SqlOSCalendarConnections_pkey PRIMARY KEY ("Id")
+  INDEX IX_SqlOSCalendarConnections_CreatedAt_Id CREATE INDEX "IX_SqlOSCalendarConnections_CreatedAt_Id" ON dbo."SqlOSCalendarConnections" USING btree ("CreatedAt" DESC, "Id" DESC)
+  INDEX IX_SqlOSCalendarConnections_Mode_Status CREATE INDEX "IX_SqlOSCalendarConnections_Mode_Status" ON dbo."SqlOSCalendarConnections" USING btree ("Mode", "Status")
+  INDEX IX_SqlOSCalendarConnections_OrganizationId_RevokedAt CREATE INDEX "IX_SqlOSCalendarConnections_OrganizationId_RevokedAt" ON dbo."SqlOSCalendarConnections" USING btree ("OrganizationId", "RevokedAt")
+  INDEX IX_SqlOSCalendarConnections_UserId_RevokedAt CREATE INDEX "IX_SqlOSCalendarConnections_UserId_RevokedAt" ON dbo."SqlOSCalendarConnections" USING btree ("UserId", "RevokedAt")
+
+### SqlOSCalendarEvents
+  Id character varying(64) NOT NULL
+  CalendarConnectionId character varying(64) NOT NULL
+  ProviderCalendarId character varying(256) NOT NULL
+  ProviderEventId character varying(512) NOT NULL
+  Subject character varying(500) NULL
+  StartsAtUtc timestamp without time zone NOT NULL
+  EndsAtUtc timestamp without time zone NOT NULL
+  IsAllDay boolean NOT NULL
+  ShowAs character varying(20) NOT NULL
+  Status character varying(20) NOT NULL
+  Location character varying(500) NULL
+  Origin character varying(20) NOT NULL
+  CreatedAt timestamp without time zone NOT NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  FOREIGN KEY FK_SqlOSCalendarEvents_Connections FOREIGN KEY ("CalendarConnectionId") REFERENCES dbo."SqlOSCalendarConnections"("Id") ON DELETE CASCADE
+  PRIMARY KEY SqlOSCalendarEvents_pkey PRIMARY KEY ("Id")
+  INDEX IX_SqlOSCalendarEvents_Connection_StartsAtUtc CREATE INDEX "IX_SqlOSCalendarEvents_Connection_StartsAtUtc" ON dbo."SqlOSCalendarEvents" USING btree ("CalendarConnectionId", "StartsAtUtc")
+  INDEX IX_SqlOSCalendarEvents_ProviderEvent CREATE UNIQUE INDEX "IX_SqlOSCalendarEvents_ProviderEvent" ON dbo."SqlOSCalendarEvents" USING btree ("CalendarConnectionId", "ProviderCalendarId", "ProviderEventId")
+
+### SqlOSCalendarSyncStates
+  Id character varying(64) NOT NULL
+  CalendarConnectionId character varying(64) NOT NULL
+  ProviderCalendarId character varying(256) NOT NULL
+  DisplayName character varying(200) NULL
+  IsSyncEnabled boolean NOT NULL
+  SyncCursor text NULL
+  LastSyncStartedAt timestamp without time zone NULL
+  LastSyncCompletedAt timestamp without time zone NULL
+  LastSyncStatus character varying(40) NULL
+  LastSyncError character varying(1000) NULL
+  EventCount integer NOT NULL DEFAULT 0
+  CreatedAt timestamp without time zone NOT NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  FOREIGN KEY FK_SqlOSCalendarSyncStates_Connections FOREIGN KEY ("CalendarConnectionId") REFERENCES dbo."SqlOSCalendarConnections"("Id") ON DELETE CASCADE
+  PRIMARY KEY SqlOSCalendarSyncStates_pkey PRIMARY KEY ("Id")
+  INDEX IX_SqlOSCalendarSyncStates_Connection_Calendar CREATE UNIQUE INDEX "IX_SqlOSCalendarSyncStates_Connection_Calendar" ON dbo."SqlOSCalendarSyncStates" USING btree ("CalendarConnectionId", "ProviderCalendarId")
+
+### SqlOSClientApplications
+  Id character varying(64) NOT NULL
+  ClientId character varying(850) NOT NULL
+  Name character varying(200) NOT NULL
+  Audience character varying(850) NOT NULL
+  RedirectUrisJson text NOT NULL
+  IsActive boolean NOT NULL
+  CreatedAt timestamp without time zone NOT NULL
+  Description character varying(500) NULL
+  ClientType character varying(40) NOT NULL DEFAULT 'public_pkce'::character varying
+  RequirePkce boolean NOT NULL DEFAULT true
+  AllowedScopesJson text NOT NULL DEFAULT '[]'::text
+  IsFirstParty boolean NOT NULL DEFAULT false
+  AllowNativeHeadlessAuth boolean NOT NULL DEFAULT false
+  RegistrationSource character varying(20) NOT NULL DEFAULT 'manual'::character varying
+  TokenEndpointAuthMethod character varying(60) NOT NULL DEFAULT 'none'::character varying
+  GrantTypesJson text NOT NULL DEFAULT '"""authorization_code"",""refresh_token"""'::text
+  ResponseTypesJson text NOT NULL DEFAULT '"""code"""'::text
+  MetadataDocumentUrl character varying(850) NULL
+  ClientUri character varying(850) NULL
+  LogoUri character varying(850) NULL
+  SoftwareId character varying(200) NULL
+  SoftwareVersion character varying(120) NULL
+  MetadataJson text NULL
+  MetadataFetchedAt timestamp without time zone NULL
+  MetadataExpiresAt timestamp without time zone NULL
+  MetadataEtag character varying(256) NULL
+  MetadataLastModifiedAt timestamp without time zone NULL
+  LastSeenAt timestamp without time zone NULL
+  DisabledAt timestamp without time zone NULL
+  DisabledReason character varying(500) NULL
+  AllowDeviceAuthorization boolean NOT NULL DEFAULT false
+  AccessMode character varying(40) NOT NULL DEFAULT 'all_organizations'::character varying
+  ConfigurationOwner character varying(40) NOT NULL DEFAULT 'dashboard'::character varying
+  ConfigurationSourceKey character varying(160) NULL
+  ConfigurationFingerprint character varying(64) NULL
+  LastReconciledAt timestamp without time zone NULL
+  ConfigurationOrphanedAt timestamp without time zone NULL
+  PRIMARY KEY SqlOSClientApplications_pkey PRIMARY KEY ("Id")
+  UNIQUE SqlOSClientApplications_ClientId_key UNIQUE ("ClientId")
+  INDEX IX_SqlOSClientApplications_AccessMode CREATE INDEX "IX_SqlOSClientApplications_AccessMode" ON dbo."SqlOSClientApplications" USING btree ("AccessMode")
+  INDEX IX_SqlOSClientApplications_IsActive_RegistrationSource CREATE INDEX "IX_SqlOSClientApplications_IsActive_RegistrationSource" ON dbo."SqlOSClientApplications" USING btree ("IsActive", "RegistrationSource")
+  INDEX IX_SqlOSClientApplications_LastSeenAt CREATE INDEX "IX_SqlOSClientApplications_LastSeenAt" ON dbo."SqlOSClientApplications" USING btree ("LastSeenAt")
+  INDEX IX_SqlOSClientApplications_MetadataDocumentUrl CREATE INDEX "IX_SqlOSClientApplications_MetadataDocumentUrl" ON dbo."SqlOSClientApplications" USING btree ("MetadataDocumentUrl")
+  INDEX IX_SqlOSClientApplications_Name_Id CREATE INDEX "IX_SqlOSClientApplications_Name_Id" ON dbo."SqlOSClientApplications" USING btree ("Name", "Id")
+  INDEX IX_SqlOSClientApplications_RegistrationSource CREATE INDEX "IX_SqlOSClientApplications_RegistrationSource" ON dbo."SqlOSClientApplications" USING btree ("RegistrationSource")
+  INDEX UX_SqlOSClientApplications_ConfigurationOwner_SourceKey CREATE UNIQUE INDEX "UX_SqlOSClientApplications_ConfigurationOwner_SourceKey" ON dbo."SqlOSClientApplications" USING btree ("ConfigurationOwner", "ConfigurationSourceKey") WHERE ("ConfigurationSourceKey" IS NOT NULL)
+
+### SqlOSClientCredentials
+  Id character varying(64) NOT NULL
+  ClientApplicationId character varying(64) NOT NULL
+  SecretHash text NOT NULL
+  DisplayName character varying(200) NULL
+  CreatedAt timestamp without time zone NOT NULL
+  ExpiresAt timestamp without time zone NULL
+  RevokedAt timestamp without time zone NULL
+  LastUsedAt timestamp without time zone NULL
+  ConfigurationOwner character varying(40) NOT NULL DEFAULT 'dashboard'::character varying
+  ConfigurationSourceKey character varying(160) NULL
+  LastReconciledAt timestamp without time zone NULL
+  FOREIGN KEY FK_SqlOSClientCredentials_ClientApplications FOREIGN KEY ("ClientApplicationId") REFERENCES dbo."SqlOSClientApplications"("Id")
+  PRIMARY KEY PK_SqlOSClientCredentials PRIMARY KEY ("Id")
+  INDEX IX_SqlOSClientCredentials_Active CREATE INDEX "IX_SqlOSClientCredentials_Active" ON dbo."SqlOSClientCredentials" USING btree ("ClientApplicationId", "RevokedAt", "ExpiresAt")
+  INDEX IX_SqlOSClientCredentials_Client_CreatedAt_Id CREATE INDEX "IX_SqlOSClientCredentials_Client_CreatedAt_Id" ON dbo."SqlOSClientCredentials" USING btree ("ClientApplicationId", "CreatedAt" DESC, "Id" DESC)
+  INDEX UX_SqlOSClientCredentials_Client_Owner_SourceKey CREATE UNIQUE INDEX "UX_SqlOSClientCredentials_Client_Owner_SourceKey" ON dbo."SqlOSClientCredentials" USING btree ("ClientApplicationId", "ConfigurationOwner", "ConfigurationSourceKey") WHERE ("ConfigurationSourceKey" IS NOT NULL)
+
+### SqlOSConsentGrants
+  Id character varying(64) NOT NULL
+  UserId character varying(64) NOT NULL
+  ClientApplicationId character varying(64) NOT NULL
+  Scope character varying(4000) NOT NULL DEFAULT ''::character varying
+  GrantedAt timestamp without time zone NOT NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  RevokedAt timestamp without time zone NULL
+  RevocationReason character varying(200) NULL
+  ClientMetadataFingerprint character varying(64) NULL
+  FOREIGN KEY FK_SqlOSConsentGrants_ClientApplication FOREIGN KEY ("ClientApplicationId") REFERENCES dbo."SqlOSClientApplications"("Id")
+  FOREIGN KEY FK_SqlOSConsentGrants_User FOREIGN KEY ("UserId") REFERENCES dbo."SqlOSUsers"("Id")
+  PRIMARY KEY PK_SqlOSConsentGrants PRIMARY KEY ("Id")
+  INDEX IX_SqlOSConsentGrants_ClientApplicationId CREATE INDEX "IX_SqlOSConsentGrants_ClientApplicationId" ON dbo."SqlOSConsentGrants" USING btree ("ClientApplicationId")
+  INDEX UX_SqlOSConsentGrants_ActiveUserClient CREATE UNIQUE INDEX "UX_SqlOSConsentGrants_ActiveUserClient" ON dbo."SqlOSConsentGrants" USING btree ("UserId", "ClientApplicationId") WHERE ("RevokedAt" IS NULL)
+
+### SqlOSCredentials
+  Id character varying(64) NOT NULL
+  UserId character varying(64) NOT NULL
+  Type character varying(50) NOT NULL
+  SecretHash text NOT NULL
+  SecretVersion integer NOT NULL
+  LastUsedAt timestamp without time zone NULL
+  CreatedAt timestamp without time zone NOT NULL
+  RevokedAt timestamp without time zone NULL
+  FOREIGN KEY FK_SqlOSCredentials_Users FOREIGN KEY ("UserId") REFERENCES dbo."SqlOSUsers"("Id")
+  PRIMARY KEY SqlOSCredentials_pkey PRIMARY KEY ("Id")
+
+### SqlOSDeviceAuthorizations
+  Id character varying(64) NOT NULL
+  DeviceCodeHash character varying(512) NOT NULL
+  UserCodeHash character varying(512) NOT NULL
+  UserCode character varying(32) NOT NULL
+  ClientApplicationId character varying(64) NOT NULL
+  Scope character varying(1000) NOT NULL
+  Resource character varying(2048) NULL
+  Status character varying(32) NOT NULL
+  PollingIntervalSeconds integer NOT NULL
+  CreatedAt timestamp without time zone NOT NULL
+  ExpiresAt timestamp without time zone NOT NULL
+  LastPolledAt timestamp without time zone NULL
+  PollCount integer NOT NULL
+  SlowDownCount integer NOT NULL
+  ApprovedUserId character varying(64) NULL
+  ApprovedOrganizationId character varying(64) NULL
+  AuthenticationMethod character varying(50) NULL
+  ApprovedAt timestamp without time zone NULL
+  DeniedAt timestamp without time zone NULL
+  ConsumedAt timestamp without time zone NULL
+  IpAddress character varying(64) NULL
+  UserAgent character varying(500) NULL
+  AuthTime timestamp without time zone NULL
+  FOREIGN KEY FK_SqlOSDeviceAuthorizations_ClientApplication FOREIGN KEY ("ClientApplicationId") REFERENCES dbo."SqlOSClientApplications"("Id")
+  FOREIGN KEY FK_SqlOSDeviceAuthorizations_Organization FOREIGN KEY ("ApprovedOrganizationId") REFERENCES dbo."SqlOSOrganizations"("Id")
+  FOREIGN KEY FK_SqlOSDeviceAuthorizations_User FOREIGN KEY ("ApprovedUserId") REFERENCES dbo."SqlOSUsers"("Id")
+  PRIMARY KEY PK_SqlOSDeviceAuthorizations PRIMARY KEY ("Id")
+  INDEX IX_SqlOSDeviceAuthorizations_ClientCreatedAt CREATE INDEX "IX_SqlOSDeviceAuthorizations_ClientCreatedAt" ON dbo."SqlOSDeviceAuthorizations" USING btree ("ClientApplicationId", "CreatedAt")
+  INDEX IX_SqlOSDeviceAuthorizations_ClientStatusExpiresAt CREATE INDEX "IX_SqlOSDeviceAuthorizations_ClientStatusExpiresAt" ON dbo."SqlOSDeviceAuthorizations" USING btree ("ClientApplicationId", "Status", "ExpiresAt")
+  INDEX IX_SqlOSDeviceAuthorizations_DeviceCodeHash CREATE UNIQUE INDEX "IX_SqlOSDeviceAuthorizations_DeviceCodeHash" ON dbo."SqlOSDeviceAuthorizations" USING btree ("DeviceCodeHash")
+  INDEX IX_SqlOSDeviceAuthorizations_ExpiresAt CREATE INDEX "IX_SqlOSDeviceAuthorizations_ExpiresAt" ON dbo."SqlOSDeviceAuthorizations" USING btree ("ExpiresAt")
+  INDEX IX_SqlOSDeviceAuthorizations_IpCreatedAt CREATE INDEX "IX_SqlOSDeviceAuthorizations_IpCreatedAt" ON dbo."SqlOSDeviceAuthorizations" USING btree ("IpAddress", "CreatedAt")
+  INDEX IX_SqlOSDeviceAuthorizations_UserCodeHash CREATE UNIQUE INDEX "IX_SqlOSDeviceAuthorizations_UserCodeHash" ON dbo."SqlOSDeviceAuthorizations" USING btree ("UserCodeHash")
+
+### SqlOSEmailDeliveries
+  Id character varying(64) NOT NULL
+  TemplateId character varying(64) NULL
+  TemplateKey character varying(120) NOT NULL
+  TemplateVersion integer NOT NULL
+  To character varying(320) NOT NULL
+  Status character varying(32) NOT NULL
+  ProviderMessageId character varying(200) NULL
+  SanitizedError character varying(500) NULL
+  RenderedSubject character varying(500) NOT NULL
+  RenderedTextPreview text NOT NULL
+  RenderedHtmlPreview text NULL
+  IdempotencyKey character varying(200) NULL
+  CreatedAt timestamp without time zone NOT NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  SentAt timestamp without time zone NULL
+  FailedAt timestamp without time zone NULL
+  FOREIGN KEY FK_SqlOSEmailDeliveries_SqlOSEmailTemplates_TemplateId FOREIGN KEY ("TemplateId") REFERENCES dbo."SqlOSEmailTemplates"("Id") ON DELETE SET NULL
+  PRIMARY KEY SqlOSEmailDeliveries_pkey PRIMARY KEY ("Id")
+  INDEX IX_SqlOSEmailDeliveries_CreatedAt CREATE INDEX "IX_SqlOSEmailDeliveries_CreatedAt" ON dbo."SqlOSEmailDeliveries" USING btree ("CreatedAt")
+  INDEX IX_SqlOSEmailDeliveries_CreatedAt_Id CREATE INDEX "IX_SqlOSEmailDeliveries_CreatedAt_Id" ON dbo."SqlOSEmailDeliveries" USING btree ("CreatedAt" DESC, "Id" DESC)
+  INDEX IX_SqlOSEmailDeliveries_IdempotencyKey CREATE UNIQUE INDEX "IX_SqlOSEmailDeliveries_IdempotencyKey" ON dbo."SqlOSEmailDeliveries" USING btree ("IdempotencyKey") WHERE ("IdempotencyKey" IS NOT NULL)
+  INDEX IX_SqlOSEmailDeliveries_StatusCreatedAt CREATE INDEX "IX_SqlOSEmailDeliveries_StatusCreatedAt" ON dbo."SqlOSEmailDeliveries" USING btree ("Status", "CreatedAt")
+  INDEX IX_SqlOSEmailDeliveries_TemplateKeyCreatedAt CREATE INDEX "IX_SqlOSEmailDeliveries_TemplateKeyCreatedAt" ON dbo."SqlOSEmailDeliveries" USING btree ("TemplateKey", "CreatedAt")
+  INDEX IX_SqlOSEmailDeliveries_ToCreatedAt CREATE INDEX "IX_SqlOSEmailDeliveries_ToCreatedAt" ON dbo."SqlOSEmailDeliveries" USING btree ("To", "CreatedAt")
+
+### SqlOSEmailOtpChallenges
+  Id character varying(64) NOT NULL
+  ChallengeTokenHash character varying(128) NOT NULL
+  CodeHash character varying(128) NOT NULL
+  Email character varying(320) NOT NULL
+  NormalizedEmail character varying(320) NOT NULL
+  UserId character varying(64) NULL
+  UserEmailId character varying(64) NULL
+  AuthorizationRequestId character varying(64) NULL
+  ClientApplicationId character varying(64) NULL
+  RequestedOrganizationId character varying(64) NULL
+  AttemptCount integer NOT NULL DEFAULT 0
+  MaxAttempts integer NOT NULL DEFAULT 5
+  CreatedAt timestamp without time zone NOT NULL
+  ExpiresAt timestamp without time zone NOT NULL
+  LastSentAt timestamp without time zone NOT NULL
+  ConsumedAt timestamp without time zone NULL
+  InvalidatedAt timestamp without time zone NULL
+  InvalidatedReason character varying(120) NULL
+  IpAddress character varying(128) NULL
+  UserAgent character varying(512) NULL
+  FOREIGN KEY FK_SqlOSEmailOtpChallenges_AuthorizationRequests_AuthorizationR FOREIGN KEY ("AuthorizationRequestId") REFERENCES dbo."SqlOSAuthorizationRequests"("Id")
+  FOREIGN KEY FK_SqlOSEmailOtpChallenges_ClientApplications_ClientApplication FOREIGN KEY ("ClientApplicationId") REFERENCES dbo."SqlOSClientApplications"("Id")
+  FOREIGN KEY FK_SqlOSEmailOtpChallenges_UserEmails_UserEmailId FOREIGN KEY ("UserEmailId") REFERENCES dbo."SqlOSUserEmails"("Id")
+  FOREIGN KEY FK_SqlOSEmailOtpChallenges_Users_UserId FOREIGN KEY ("UserId") REFERENCES dbo."SqlOSUsers"("Id")
+  PRIMARY KEY SqlOSEmailOtpChallenges_pkey PRIMARY KEY ("Id")
+  INDEX IX_SqlOSEmailOtpChallenges_ChallengeTokenHash CREATE UNIQUE INDEX "IX_SqlOSEmailOtpChallenges_ChallengeTokenHash" ON dbo."SqlOSEmailOtpChallenges" USING btree ("ChallengeTokenHash")
+  INDEX IX_SqlOSEmailOtpChallenges_ClientApplicationId_CreatedAt CREATE INDEX "IX_SqlOSEmailOtpChallenges_ClientApplicationId_CreatedAt" ON dbo."SqlOSEmailOtpChallenges" USING btree ("ClientApplicationId", "CreatedAt")
+  INDEX IX_SqlOSEmailOtpChallenges_IpAddress_CreatedAt CREATE INDEX "IX_SqlOSEmailOtpChallenges_IpAddress_CreatedAt" ON dbo."SqlOSEmailOtpChallenges" USING btree ("IpAddress", "CreatedAt")
+  INDEX IX_SqlOSEmailOtpChallenges_NormalizedEmail_CreatedAt CREATE INDEX "IX_SqlOSEmailOtpChallenges_NormalizedEmail_CreatedAt" ON dbo."SqlOSEmailOtpChallenges" USING btree ("NormalizedEmail", "CreatedAt")
+
+### SqlOSEmailTemplates
+  Id character varying(64) NOT NULL
+  Key character varying(120) NOT NULL
+  DisplayName character varying(200) NOT NULL
+  SubjectTemplate character varying(500) NOT NULL
+  HtmlBodyTemplate text NOT NULL
+  TextBodyTemplate text NOT NULL
+  VariablesJson text NOT NULL DEFAULT '{}'::text
+  IsActive boolean NOT NULL DEFAULT true
+  Version integer NOT NULL DEFAULT 1
+  CreatedAt timestamp without time zone NOT NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  PRIMARY KEY SqlOSEmailTemplates_pkey PRIMARY KEY ("Id")
+  INDEX IX_SqlOSEmailTemplates_Key CREATE UNIQUE INDEX "IX_SqlOSEmailTemplates_Key" ON dbo."SqlOSEmailTemplates" USING btree ("Key")
+  INDEX IX_SqlOSEmailTemplates_Key_Id CREATE INDEX "IX_SqlOSEmailTemplates_Key_Id" ON dbo."SqlOSEmailTemplates" USING btree ("Key", "Id")
+
+### SqlOSExternalIdentities
+  Id character varying(64) NOT NULL
+  UserId character varying(64) NOT NULL
+  ConnectionId character varying(64) NULL
+  Issuer character varying(400) NOT NULL
+  Subject character varying(400) NOT NULL
+  Email character varying(320) NULL
+  CreatedAt timestamp without time zone NOT NULL
+  SocialConnectionId character varying(64) NULL
+  OidcConnectionId character varying(64) NULL
+  FOREIGN KEY FK_SqlOSExternalIdentities_OidcConnections FOREIGN KEY ("OidcConnectionId") REFERENCES dbo."SqlOSAuthOidcConnections"("Id")
+  FOREIGN KEY FK_SqlOSExternalIdentities_SsoConnections FOREIGN KEY ("ConnectionId") REFERENCES dbo."SqlOSSsoConnections"("Id")
+  FOREIGN KEY FK_SqlOSExternalIdentities_Users FOREIGN KEY ("UserId") REFERENCES dbo."SqlOSUsers"("Id")
+  PRIMARY KEY SqlOSExternalIdentities_pkey PRIMARY KEY ("Id")
+  INDEX IX_SqlOSExternalIdentities_OidcConnectionId_Subject CREATE UNIQUE INDEX "IX_SqlOSExternalIdentities_OidcConnectionId_Subject" ON dbo."SqlOSExternalIdentities" USING btree ("OidcConnectionId", "Subject") WHERE ("OidcConnectionId" IS NOT NULL)
+  INDEX IX_SqlOSExternalIdentities_SsoConnectionId_Subject CREATE UNIQUE INDEX "IX_SqlOSExternalIdentities_SsoConnectionId_Subject" ON dbo."SqlOSExternalIdentities" USING btree ("ConnectionId", "Subject") WHERE ("ConnectionId" IS NOT NULL)
+  INDEX IX_SqlOSExternalIdentities_SsoConnectionId_UserId CREATE UNIQUE INDEX "IX_SqlOSExternalIdentities_SsoConnectionId_UserId" ON dbo."SqlOSExternalIdentities" USING btree ("ConnectionId", "UserId") WHERE ("ConnectionId" IS NOT NULL)
+
+### SqlOSFgaAgents
+  Id character varying(450) NOT NULL
+  SubjectId character varying(450) NOT NULL
+  AgentType character varying(450) NULL
+  Description text NULL
+  LastRunAt timestamp without time zone NULL
+  CreatedAt timestamp without time zone NOT NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  FOREIGN KEY FK_SqlOSFgaAgents_SqlOSFgaSubjects_SubjectId FOREIGN KEY ("SubjectId") REFERENCES dbo."SqlOSFgaSubjects"("Id")
+  PRIMARY KEY PK_SqlOSFgaAgents PRIMARY KEY ("Id")
+  UNIQUE UQ_SqlOSFgaAgents_SubjectId UNIQUE ("SubjectId")
+
+### SqlOSFgaGrants
+  Id character varying(450) NOT NULL
+  SubjectId character varying(450) NOT NULL
+  ResourceId character varying(450) NOT NULL
+  RoleId character varying(450) NOT NULL
+  EffectiveFrom timestamp without time zone NULL
+  EffectiveTo timestamp without time zone NULL
+  CreatedAt timestamp without time zone NOT NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  Description text NULL
+  FOREIGN KEY FK_SqlOSFgaGrants_SqlOSFgaResources_ResourceId FOREIGN KEY ("ResourceId") REFERENCES dbo."SqlOSFgaResources"("Id")
+  FOREIGN KEY FK_SqlOSFgaGrants_SqlOSFgaRoles_RoleId FOREIGN KEY ("RoleId") REFERENCES dbo."SqlOSFgaRoles"("Id")
+  FOREIGN KEY FK_SqlOSFgaGrants_SqlOSFgaSubjects_SubjectId FOREIGN KEY ("SubjectId") REFERENCES dbo."SqlOSFgaSubjects"("Id")
+  PRIMARY KEY PK_SqlOSFgaGrants PRIMARY KEY ("Id")
+  INDEX IX_SqlOSFgaGrants_CreatedAt_Id CREATE INDEX "IX_SqlOSFgaGrants_CreatedAt_Id" ON dbo."SqlOSFgaGrants" USING btree ("CreatedAt" DESC, "Id" DESC)
+  INDEX IX_SqlOSFgaGrants_ResourceId_CreatedAt_Id CREATE INDEX "IX_SqlOSFgaGrants_ResourceId_CreatedAt_Id" ON dbo."SqlOSFgaGrants" USING btree ("ResourceId", "CreatedAt" DESC) INCLUDE ("Id")
+  INDEX IX_SqlOSFgaGrants_ResourceId_SubjectId CREATE INDEX "IX_SqlOSFgaGrants_ResourceId_SubjectId" ON dbo."SqlOSFgaGrants" USING btree ("ResourceId") INCLUDE ("SubjectId", "RoleId", "EffectiveFrom", "EffectiveTo")
+  INDEX IX_SqlOSFgaGrants_SubjectId CREATE INDEX "IX_SqlOSFgaGrants_SubjectId" ON dbo."SqlOSFgaGrants" USING btree ("SubjectId")
+  INDEX IX_SqlOSFgaGrants_SubjectId_CreatedAt_Id CREATE INDEX "IX_SqlOSFgaGrants_SubjectId_CreatedAt_Id" ON dbo."SqlOSFgaGrants" USING btree ("SubjectId", "CreatedAt" DESC) INCLUDE ("Id")
+
+### SqlOSFgaPermissions
+  Id character varying(450) NOT NULL
+  ResourceTypeId character varying(450) NULL
+  Key character varying(450) NOT NULL
+  Name text NOT NULL
+  Description text NULL
+  FOREIGN KEY FK_SqlOSFgaPermissions_SqlOSFgaResourceTypes_ResourceTypeId FOREIGN KEY ("ResourceTypeId") REFERENCES dbo."SqlOSFgaResourceTypes"("Id")
+  PRIMARY KEY PK_SqlOSFgaPermissions PRIMARY KEY ("Id")
+  INDEX UX_SqlOSFgaPermissions_Key CREATE UNIQUE INDEX "UX_SqlOSFgaPermissions_Key" ON dbo."SqlOSFgaPermissions" USING btree ("Key")
+
+### SqlOSFgaResourceTypes
+  Id character varying(450) NOT NULL
+  Name text NOT NULL
+  Description text NULL
+  PRIMARY KEY PK_SqlOSFgaResourceTypes PRIMARY KEY ("Id")
+
+### SqlOSFgaResources
+  Id character varying(450) NOT NULL
+  ParentId character varying(450) NULL
+  Name text NOT NULL
+  Description text NULL
+  ResourceTypeId character varying(450) NOT NULL
+  IsActive boolean NOT NULL DEFAULT true
+  CreatedAt timestamp without time zone NOT NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  FOREIGN KEY FK_SqlOSFgaResources_SqlOSFgaResourceTypes_ResourceTypeId FOREIGN KEY ("ResourceTypeId") REFERENCES dbo."SqlOSFgaResourceTypes"("Id")
+  FOREIGN KEY FK_SqlOSFgaResources_SqlOSFgaResources_ParentId FOREIGN KEY ("ParentId") REFERENCES dbo."SqlOSFgaResources"("Id")
+  PRIMARY KEY PK_SqlOSFgaResources PRIMARY KEY ("Id")
+  INDEX IX_SqlOSFgaResources_ParentId CREATE INDEX "IX_SqlOSFgaResources_ParentId" ON dbo."SqlOSFgaResources" USING btree ("ParentId")
+  INDEX IX_SqlOSFgaResources_ParentId_Id CREATE INDEX "IX_SqlOSFgaResources_ParentId_Id" ON dbo."SqlOSFgaResources" USING btree ("ParentId") INCLUDE ("Id")
+
+### SqlOSFgaRolePermissions
+  RoleId character varying(450) NOT NULL
+  PermissionId character varying(450) NOT NULL
+  FOREIGN KEY FK_SqlOSFgaRolePermissions_SqlOSFgaPermissions_PermissionId FOREIGN KEY ("PermissionId") REFERENCES dbo."SqlOSFgaPermissions"("Id")
+  FOREIGN KEY FK_SqlOSFgaRolePermissions_SqlOSFgaRoles_RoleId FOREIGN KEY ("RoleId") REFERENCES dbo."SqlOSFgaRoles"("Id")
+  PRIMARY KEY PK_SqlOSFgaRolePermissions PRIMARY KEY ("RoleId", "PermissionId")
+  INDEX IX_SqlOSFgaRolePermissions_PermissionId_RoleId CREATE INDEX "IX_SqlOSFgaRolePermissions_PermissionId_RoleId" ON dbo."SqlOSFgaRolePermissions" USING btree ("PermissionId") INCLUDE ("RoleId")
+
+### SqlOSFgaRoles
+  Id character varying(450) NOT NULL
+  Key text NOT NULL
+  Name text NOT NULL
+  Description text NULL
+  IsVirtual boolean NOT NULL DEFAULT false
+  PRIMARY KEY PK_SqlOSFgaRoles PRIMARY KEY ("Id")
+
+### SqlOSFgaSchema
+  Version integer NOT NULL
+
+### SqlOSFgaServiceAccounts
+  Id character varying(450) NOT NULL
+  SubjectId character varying(450) NOT NULL
+  ClientId character varying(450) NOT NULL
+  ClientSecretHash text NOT NULL
+  Description text NULL
+  LastUsedAt timestamp without time zone NULL
+  ExpiresAt timestamp without time zone NULL
+  CreatedAt timestamp without time zone NOT NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  ConfigurationOwner character varying(32) NOT NULL DEFAULT 'dashboard'::character varying
+  ConfigurationSourceKey character varying(200) NULL
+  ConfigurationFingerprint character varying(128) NULL
+  LastReconciledAt timestamp without time zone NULL
+  ConfigurationOrphanedAt timestamp without time zone NULL
+  FOREIGN KEY FK_SqlOSFgaServiceAccounts_SqlOSFgaSubjects_SubjectId FOREIGN KEY ("SubjectId") REFERENCES dbo."SqlOSFgaSubjects"("Id")
+  PRIMARY KEY PK_SqlOSFgaServiceAccounts PRIMARY KEY ("Id")
+  UNIQUE UQ_SqlOSFgaServiceAccounts_SubjectId UNIQUE ("SubjectId")
+  INDEX UX_SqlOSFgaServiceAccounts_ClientId CREATE UNIQUE INDEX "UX_SqlOSFgaServiceAccounts_ClientId" ON dbo."SqlOSFgaServiceAccounts" USING btree ("ClientId")
+  INDEX UX_SqlOSFgaServiceAccounts_ConfigurationSource CREATE UNIQUE INDEX "UX_SqlOSFgaServiceAccounts_ConfigurationSource" ON dbo."SqlOSFgaServiceAccounts" USING btree ("ConfigurationOwner", "ConfigurationSourceKey") WHERE ("ConfigurationSourceKey" IS NOT NULL)
+
+### SqlOSFgaSubjectTypes
+  Id character varying(450) NOT NULL
+  Name text NOT NULL
+  Description text NULL
+  PRIMARY KEY PK_SqlOSFgaSubjectTypes PRIMARY KEY ("Id")
+
+### SqlOSFgaSubjects
+  Id character varying(450) NOT NULL
+  SubjectTypeId character varying(450) NOT NULL
+  OrganizationId character varying(450) NULL
+  ExternalRef character varying(450) NULL
+  DisplayName text NOT NULL
+  CreatedAt timestamp without time zone NOT NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  FOREIGN KEY FK_SqlOSFgaSubjects_SqlOSFgaSubjectTypes_SubjectTypeId FOREIGN KEY ("SubjectTypeId") REFERENCES dbo."SqlOSFgaSubjectTypes"("Id")
+  PRIMARY KEY PK_SqlOSFgaSubjects PRIMARY KEY ("Id")
+
+### SqlOSFgaUserGroupMemberships
+  SubjectId character varying(450) NOT NULL
+  UserGroupId character varying(450) NOT NULL
+  CreatedAt timestamp without time zone NOT NULL
+  FOREIGN KEY FK_SqlOSFgaUserGroupMemberships_SqlOSFgaSubjects_SubjectId FOREIGN KEY ("SubjectId") REFERENCES dbo."SqlOSFgaSubjects"("Id")
+  FOREIGN KEY FK_SqlOSFgaUserGroupMemberships_SqlOSFgaUserGroups_UserGroupId FOREIGN KEY ("UserGroupId") REFERENCES dbo."SqlOSFgaUserGroups"("Id")
+  PRIMARY KEY PK_SqlOSFgaUserGroupMemberships PRIMARY KEY ("SubjectId", "UserGroupId")
+
+### SqlOSFgaUserGroups
+  Id character varying(450) NOT NULL
+  Name text NOT NULL
+  Description text NULL
+  GroupType text NULL
+  SubjectId character varying(450) NOT NULL
+  IsActive boolean NOT NULL DEFAULT true
+  CreatedAt timestamp without time zone NOT NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  FOREIGN KEY FK_SqlOSFgaUserGroups_SqlOSFgaSubjects_SubjectId FOREIGN KEY ("SubjectId") REFERENCES dbo."SqlOSFgaSubjects"("Id")
+  PRIMARY KEY PK_SqlOSFgaUserGroups PRIMARY KEY ("Id")
+  UNIQUE UQ_SqlOSFgaUserGroups_SubjectId UNIQUE ("SubjectId")
+
+### SqlOSFgaUsers
+  Id character varying(450) NOT NULL
+  SubjectId character varying(450) NOT NULL
+  Email character varying(450) NULL
+  LastLoginAt timestamp without time zone NULL
+  IsActive boolean NOT NULL DEFAULT true
+  CreatedAt timestamp without time zone NOT NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  FOREIGN KEY FK_SqlOSFgaUsers_SqlOSFgaSubjects_SubjectId FOREIGN KEY ("SubjectId") REFERENCES dbo."SqlOSFgaSubjects"("Id")
+  PRIMARY KEY PK_SqlOSFgaUsers PRIMARY KEY ("Id")
+  UNIQUE UQ_SqlOSFgaUsers_SubjectId UNIQUE ("SubjectId")
+
+### SqlOSInvitations
+  Id character varying(64) NOT NULL
+  OrganizationId character varying(64) NOT NULL
+  InvitedEmail character varying(320) NOT NULL
+  NormalizedEmail character varying(320) NOT NULL
+  Role character varying(50) NOT NULL
+  TokenHash character varying(128) NOT NULL
+  InvitedByUserId character varying(64) NULL
+  ClientApplicationId character varying(64) NULL
+  RedirectUri character varying(2048) NULL
+  Scope character varying(1000) NULL
+  Resource character varying(2048) NULL
+  CustomFieldsJson text NULL
+  CreatedAt timestamp without time zone NOT NULL
+  ExpiresAt timestamp without time zone NOT NULL
+  LastSentAt timestamp without time zone NULL
+  LastSendError character varying(500) NULL
+  AcceptedAt timestamp without time zone NULL
+  AcceptedByUserId character varying(64) NULL
+  RevokedAt timestamp without time zone NULL
+  RevokedReason character varying(120) NULL
+  IpAddress character varying(128) NULL
+  UserAgent character varying(512) NULL
+  FOREIGN KEY FK_SqlOSInvitations_ClientApplications_ClientApplicationId FOREIGN KEY ("ClientApplicationId") REFERENCES dbo."SqlOSClientApplications"("Id")
+  FOREIGN KEY FK_SqlOSInvitations_Organizations_OrganizationId FOREIGN KEY ("OrganizationId") REFERENCES dbo."SqlOSOrganizations"("Id")
+  FOREIGN KEY FK_SqlOSInvitations_Users_AcceptedByUserId FOREIGN KEY ("AcceptedByUserId") REFERENCES dbo."SqlOSUsers"("Id")
+  FOREIGN KEY FK_SqlOSInvitations_Users_InvitedByUserId FOREIGN KEY ("InvitedByUserId") REFERENCES dbo."SqlOSUsers"("Id")
+  PRIMARY KEY SqlOSInvitations_pkey PRIMARY KEY ("Id")
+  INDEX IX_SqlOSInvitations_ExpiresAt CREATE INDEX "IX_SqlOSInvitations_ExpiresAt" ON dbo."SqlOSInvitations" USING btree ("ExpiresAt")
+  INDEX IX_SqlOSInvitations_InvitedByUserId_CreatedAt CREATE INDEX "IX_SqlOSInvitations_InvitedByUserId_CreatedAt" ON dbo."SqlOSInvitations" USING btree ("InvitedByUserId", "CreatedAt")
+  INDEX IX_SqlOSInvitations_IpAddress_CreatedAt CREATE INDEX "IX_SqlOSInvitations_IpAddress_CreatedAt" ON dbo."SqlOSInvitations" USING btree ("IpAddress", "CreatedAt")
+  INDEX IX_SqlOSInvitations_NormalizedEmail_CreatedAt CREATE INDEX "IX_SqlOSInvitations_NormalizedEmail_CreatedAt" ON dbo."SqlOSInvitations" USING btree ("NormalizedEmail", "CreatedAt")
+  INDEX IX_SqlOSInvitations_OrganizationId_CreatedAt_Id CREATE INDEX "IX_SqlOSInvitations_OrganizationId_CreatedAt_Id" ON dbo."SqlOSInvitations" USING btree ("OrganizationId", "CreatedAt" DESC, "Id" DESC)
+  INDEX IX_SqlOSInvitations_Organization_NormalizedEmail_CreatedAt CREATE INDEX "IX_SqlOSInvitations_Organization_NormalizedEmail_CreatedAt" ON dbo."SqlOSInvitations" USING btree ("OrganizationId", "NormalizedEmail", "CreatedAt")
+  INDEX IX_SqlOSInvitations_TokenHash CREATE UNIQUE INDEX "IX_SqlOSInvitations_TokenHash" ON dbo."SqlOSInvitations" USING btree ("TokenHash")
+
+### SqlOSMemberships
+  OrganizationId character varying(64) NOT NULL
+  UserId character varying(64) NOT NULL
+  Role character varying(50) NOT NULL
+  IsActive boolean NOT NULL
+  CreatedAt timestamp without time zone NOT NULL
+  FOREIGN KEY FK_SqlOSMemberships_Organizations FOREIGN KEY ("OrganizationId") REFERENCES dbo."SqlOSOrganizations"("Id")
+  FOREIGN KEY FK_SqlOSMemberships_Users FOREIGN KEY ("UserId") REFERENCES dbo."SqlOSUsers"("Id")
+  PRIMARY KEY PK_SqlOSMemberships PRIMARY KEY ("OrganizationId", "UserId")
+  INDEX IX_SqlOSMemberships_UserId CREATE INDEX "IX_SqlOSMemberships_UserId" ON dbo."SqlOSMemberships" USING btree ("UserId", "OrganizationId")
+
+### SqlOSMfaAttemptBuckets
+  Id character varying(64) NOT NULL
+  Scope character varying(40) NOT NULL
+  BucketKey character varying(512) NOT NULL
+  AttemptCount integer NOT NULL DEFAULT 0
+  WindowStartedAt timestamp without time zone NULL
+  CreatedAt timestamp without time zone NOT NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  PRIMARY KEY SqlOSMfaAttemptBuckets_pkey PRIMARY KEY ("Id")
+  INDEX IX_SqlOSMfaAttemptBuckets_Scope_BucketKey CREATE UNIQUE INDEX "IX_SqlOSMfaAttemptBuckets_Scope_BucketKey" ON dbo."SqlOSMfaAttemptBuckets" USING btree ("Scope", "BucketKey")
+
+### SqlOSMfaAttemptReservationBuckets
+  ReservationId character varying(64) NOT NULL
+  BucketId character varying(64) NOT NULL
+  FOREIGN KEY FK_SqlOSMfaAttemptReservationBuckets_Buckets_BucketId FOREIGN KEY ("BucketId") REFERENCES dbo."SqlOSMfaAttemptBuckets"("Id") ON DELETE CASCADE
+  FOREIGN KEY FK_SqlOSMfaAttemptReservationBuckets_Reservations_ReservationId FOREIGN KEY ("ReservationId") REFERENCES dbo."SqlOSMfaAttemptReservations"("Id") ON DELETE CASCADE
+  PRIMARY KEY PK_SqlOSMfaAttemptReservationBuckets PRIMARY KEY ("ReservationId", "BucketId")
+  INDEX IX_SqlOSMfaAttemptReservationBuckets_BucketId CREATE INDEX "IX_SqlOSMfaAttemptReservationBuckets_BucketId" ON dbo."SqlOSMfaAttemptReservationBuckets" USING btree ("BucketId")
+
+### SqlOSMfaAttemptReservations
+  Id character varying(64) NOT NULL
+  CreatedAt timestamp without time zone NOT NULL
+  ExpiresAt timestamp without time zone NOT NULL
+  PRIMARY KEY SqlOSMfaAttemptReservations_pkey PRIMARY KEY ("Id")
+  INDEX IX_SqlOSMfaAttemptReservations_ExpiresAt CREATE INDEX "IX_SqlOSMfaAttemptReservations_ExpiresAt" ON dbo."SqlOSMfaAttemptReservations" USING btree ("ExpiresAt")
+
+### SqlOSMfaSettings
+  Id character varying(64) NOT NULL
+  Enabled boolean NOT NULL
+  TotpEnabled boolean NOT NULL
+  UserSelfEnrollmentEnabled boolean NOT NULL
+  RecoveryCodesEnabled boolean NOT NULL
+  RequireForAllUsers boolean NOT NULL
+  RequireForOwnersAndAdmins boolean NOT NULL
+  RequiredRolesJson text NOT NULL
+  AvailableFactorsJson text NOT NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  ConfigurationOwner character varying(40) NOT NULL DEFAULT 'system'::character varying
+  ConfigurationSourceKey character varying(160) NULL
+  ConfigurationFingerprint character varying(64) NULL
+  LastReconciledAt timestamp without time zone NULL
+  ConfigurationOrphanedAt timestamp without time zone NULL
+  PRIMARY KEY PK_SqlOSMfaSettings PRIMARY KEY ("Id")
+
+### SqlOSOrganizationDomains
+  Id character varying(64) NOT NULL
+  OrganizationId character varying(64) NOT NULL
+  Domain character varying(320) NOT NULL
+  Status character varying(50) NOT NULL
+  VerificationToken character varying(160) NULL
+  CreatedByUserId character varying(64) NULL
+  CreatedAt timestamp without time zone NOT NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  VerifiedAt timestamp without time zone NULL
+  LastCheckedAt timestamp without time zone NULL
+  RevokedAt timestamp without time zone NULL
+  LastError character varying(1000) NULL
+  FOREIGN KEY FK_SqlOSOrganizationDomains_Organizations_OrganizationId FOREIGN KEY ("OrganizationId") REFERENCES dbo."SqlOSOrganizations"("Id")
+  PRIMARY KEY SqlOSOrganizationDomains_pkey PRIMARY KEY ("Id")
+  INDEX IX_SqlOSOrganizationDomains_Domain_Status CREATE INDEX "IX_SqlOSOrganizationDomains_Domain_Status" ON dbo."SqlOSOrganizationDomains" USING btree ("Domain", "Status")
+  INDEX IX_SqlOSOrganizationDomains_OrganizationId_Domain CREATE UNIQUE INDEX "IX_SqlOSOrganizationDomains_OrganizationId_Domain" ON dbo."SqlOSOrganizationDomains" USING btree ("OrganizationId", "Domain") WHERE ("RevokedAt" IS NULL)
+  INDEX IX_SqlOSOrganizationDomains_OrganizationId_Status CREATE INDEX "IX_SqlOSOrganizationDomains_OrganizationId_Status" ON dbo."SqlOSOrganizationDomains" USING btree ("OrganizationId", "Status")
+
+### SqlOSOrganizationMfaPolicies
+  OrganizationId character varying(64) NOT NULL
+  IsEnabled boolean NOT NULL
+  RequireMfaForAllUsers boolean NOT NULL
+  RequireMfaForOwnersAndAdmins boolean NOT NULL
+  UserSelfEnrollmentEnabled boolean NOT NULL
+  RecoveryCodesEnabled boolean NOT NULL
+  RequiredRolesJson text NOT NULL
+  AvailableFactorsJson text NOT NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  FOREIGN KEY FK_SqlOSOrganizationMfaPolicies_Organizations_OrganizationId FOREIGN KEY ("OrganizationId") REFERENCES dbo."SqlOSOrganizations"("Id")
+  PRIMARY KEY PK_SqlOSOrganizationMfaPolicies PRIMARY KEY ("OrganizationId")
+
+### SqlOSOrganizations
+  Id character varying(64) NOT NULL
+  Slug character varying(120) NOT NULL
+  Name character varying(200) NOT NULL
+  IsActive boolean NOT NULL
+  CreatedAt timestamp without time zone NOT NULL
+  PrimaryDomain character varying(320) NULL
+  PRIMARY KEY SqlOSOrganizations_pkey PRIMARY KEY ("Id")
+  UNIQUE SqlOSOrganizations_Slug_key UNIQUE ("Slug")
+  INDEX IX_SqlOSOrganizations_Name_Id CREATE INDEX "IX_SqlOSOrganizations_Name_Id" ON dbo."SqlOSOrganizations" USING btree ("Name", "Id")
+  INDEX IX_SqlOSOrganizations_PrimaryDomain CREATE UNIQUE INDEX "IX_SqlOSOrganizations_PrimaryDomain" ON dbo."SqlOSOrganizations" USING btree ("PrimaryDomain") WHERE ("PrimaryDomain" IS NOT NULL)
+
+### SqlOSPasswordLoginBuckets
+  Id character varying(64) NOT NULL
+  Scope character varying(40) NOT NULL
+  BucketKey character varying(512) NOT NULL
+  NormalizedEmail character varying(320) NULL
+  UserId character varying(64) NULL
+  ClientKey character varying(850) NULL
+  IpAddress character varying(128) NULL
+  UserAgentHash character varying(128) NULL
+  FailureCount integer NOT NULL DEFAULT 0
+  WindowStartedAt timestamp without time zone NULL
+  LastFailureAt timestamp without time zone NULL
+  LastSuccessAt timestamp without time zone NULL
+  LockedUntil timestamp without time zone NULL
+  LockoutReason character varying(120) NULL
+  CreatedAt timestamp without time zone NOT NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  FOREIGN KEY FK_SqlOSPasswordLoginBuckets_Users_UserId FOREIGN KEY ("UserId") REFERENCES dbo."SqlOSUsers"("Id")
+  PRIMARY KEY SqlOSPasswordLoginBuckets_pkey PRIMARY KEY ("Id")
+  INDEX IX_SqlOSPasswordLoginBuckets_IpAddress_UpdatedAt CREATE INDEX "IX_SqlOSPasswordLoginBuckets_IpAddress_UpdatedAt" ON dbo."SqlOSPasswordLoginBuckets" USING btree ("IpAddress", "UpdatedAt")
+  INDEX IX_SqlOSPasswordLoginBuckets_LockedUntil CREATE INDEX "IX_SqlOSPasswordLoginBuckets_LockedUntil" ON dbo."SqlOSPasswordLoginBuckets" USING btree ("LockedUntil")
+  INDEX IX_SqlOSPasswordLoginBuckets_NormalizedEmail_UpdatedAt CREATE INDEX "IX_SqlOSPasswordLoginBuckets_NormalizedEmail_UpdatedAt" ON dbo."SqlOSPasswordLoginBuckets" USING btree ("NormalizedEmail", "UpdatedAt")
+  INDEX IX_SqlOSPasswordLoginBuckets_Scope_BucketKey CREATE UNIQUE INDEX "IX_SqlOSPasswordLoginBuckets_Scope_BucketKey" ON dbo."SqlOSPasswordLoginBuckets" USING btree ("Scope", "BucketKey")
+  INDEX IX_SqlOSPasswordLoginBuckets_UserId_UpdatedAt CREATE INDEX "IX_SqlOSPasswordLoginBuckets_UserId_UpdatedAt" ON dbo."SqlOSPasswordLoginBuckets" USING btree ("UserId", "UpdatedAt")
+
+### SqlOSPasswordLoginReservationBuckets
+  ReservationId character varying(64) NOT NULL
+  BucketId character varying(64) NOT NULL
+  FOREIGN KEY FK_SqlOSPasswordLoginReservationBuckets_Buckets_BucketId FOREIGN KEY ("BucketId") REFERENCES dbo."SqlOSPasswordLoginBuckets"("Id") ON DELETE CASCADE
+  FOREIGN KEY FK_SqlOSPasswordLoginReservationBuckets_Reservations_Reservatio FOREIGN KEY ("ReservationId") REFERENCES dbo."SqlOSPasswordLoginReservations"("Id") ON DELETE CASCADE
+  PRIMARY KEY PK_SqlOSPasswordLoginReservationBuckets PRIMARY KEY ("ReservationId", "BucketId")
+  INDEX IX_SqlOSPasswordLoginReservationBuckets_BucketId CREATE INDEX "IX_SqlOSPasswordLoginReservationBuckets_BucketId" ON dbo."SqlOSPasswordLoginReservationBuckets" USING btree ("BucketId")
+
+### SqlOSPasswordLoginReservations
+  Id character varying(64) NOT NULL
+  CreatedAt timestamp without time zone NOT NULL
+  ExpiresAt timestamp without time zone NOT NULL
+  PRIMARY KEY SqlOSPasswordLoginReservations_pkey PRIMARY KEY ("Id")
+  INDEX IX_SqlOSPasswordLoginReservations_ExpiresAt CREATE INDEX "IX_SqlOSPasswordLoginReservations_ExpiresAt" ON dbo."SqlOSPasswordLoginReservations" USING btree ("ExpiresAt")
+
+### SqlOSPhoneOtpChallenges
+  Id character varying(64) NOT NULL
+  ChallengeTokenHash character varying(128) NOT NULL
+  PhoneNumberHash character varying(128) NOT NULL
+  PhoneNumberEncrypted character varying(2048) NOT NULL
+  MaskedPhoneNumber character varying(32) NOT NULL
+  Purpose character varying(32) NOT NULL
+  UserId character varying(64) NULL
+  UserPhoneNumberId character varying(64) NULL
+  AuthorizationRequestId character varying(64) NULL
+  ClientApplicationId character varying(64) NULL
+  RequestedOrganizationId character varying(64) NULL
+  ProviderStarted boolean NOT NULL DEFAULT false
+  Provider character varying(40) NOT NULL
+  ProviderChallengeId character varying(128) NULL
+  ProviderStatus character varying(80) NULL
+  AttemptCount integer NOT NULL DEFAULT 0
+  CreatedAt timestamp without time zone NOT NULL
+  ExpiresAt timestamp without time zone NOT NULL
+  LastSentAt timestamp without time zone NOT NULL
+  ConsumedAt timestamp without time zone NULL
+  InvalidatedAt timestamp without time zone NULL
+  InvalidatedReason character varying(120) NULL
+  IpAddress character varying(128) NULL
+  UserAgent character varying(512) NULL
+  FOREIGN KEY FK_SqlOSPhoneOtpChallenges_AuthorizationRequests_AuthorizationR FOREIGN KEY ("AuthorizationRequestId") REFERENCES dbo."SqlOSAuthorizationRequests"("Id")
+  FOREIGN KEY FK_SqlOSPhoneOtpChallenges_ClientApplications_ClientApplication FOREIGN KEY ("ClientApplicationId") REFERENCES dbo."SqlOSClientApplications"("Id")
+  FOREIGN KEY FK_SqlOSPhoneOtpChallenges_UserPhoneNumbers_UserPhoneNumberId FOREIGN KEY ("UserPhoneNumberId") REFERENCES dbo."SqlOSUserPhoneNumbers"("Id")
+  FOREIGN KEY FK_SqlOSPhoneOtpChallenges_Users_UserId FOREIGN KEY ("UserId") REFERENCES dbo."SqlOSUsers"("Id")
+  PRIMARY KEY SqlOSPhoneOtpChallenges_pkey PRIMARY KEY ("Id")
+  INDEX IX_SqlOSPhoneOtpChallenges_ChallengeTokenHash CREATE UNIQUE INDEX "IX_SqlOSPhoneOtpChallenges_ChallengeTokenHash" ON dbo."SqlOSPhoneOtpChallenges" USING btree ("ChallengeTokenHash")
+  INDEX IX_SqlOSPhoneOtpChallenges_ClientApplicationId_CreatedAt CREATE INDEX "IX_SqlOSPhoneOtpChallenges_ClientApplicationId_CreatedAt" ON dbo."SqlOSPhoneOtpChallenges" USING btree ("ClientApplicationId", "CreatedAt")
+  INDEX IX_SqlOSPhoneOtpChallenges_IpAddress_CreatedAt CREATE INDEX "IX_SqlOSPhoneOtpChallenges_IpAddress_CreatedAt" ON dbo."SqlOSPhoneOtpChallenges" USING btree ("IpAddress", "CreatedAt")
+  INDEX IX_SqlOSPhoneOtpChallenges_PhoneNumberHash_CreatedAt CREATE INDEX "IX_SqlOSPhoneOtpChallenges_PhoneNumberHash_CreatedAt" ON dbo."SqlOSPhoneOtpChallenges" USING btree ("PhoneNumberHash", "CreatedAt")
+  INDEX IX_SqlOSPhoneOtpChallenges_UserId_CreatedAt CREATE INDEX "IX_SqlOSPhoneOtpChallenges_UserId_CreatedAt" ON dbo."SqlOSPhoneOtpChallenges" USING btree ("UserId", "CreatedAt")
+
+### SqlOSRateLimitBuckets
+  Scope character varying(64) NOT NULL
+  BucketKey character varying(384) NOT NULL
+  WindowStartedAt timestamp without time zone NOT NULL
+  Count integer NOT NULL
+  LockedUntil timestamp without time zone NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  CHECK CK_SqlOSRateLimitBuckets_Count CHECK (("Count" >= 0))
+  PRIMARY KEY PK_SqlOSRateLimitBuckets PRIMARY KEY ("Scope", "BucketKey")
+  INDEX IX_SqlOSRateLimitBuckets_UpdatedAt CREATE INDEX "IX_SqlOSRateLimitBuckets_UpdatedAt" ON dbo."SqlOSRateLimitBuckets" USING btree ("UpdatedAt")
+
+### SqlOSRecoveryCodes
+  Id character varying(64) NOT NULL
+  UserId character varying(64) NOT NULL
+  CodeHash character varying(128) NOT NULL
+  CreatedAt timestamp without time zone NOT NULL
+  ConsumedAt timestamp without time zone NULL
+  RevokedAt timestamp without time zone NULL
+  FOREIGN KEY FK_SqlOSRecoveryCodes_Users_UserId FOREIGN KEY ("UserId") REFERENCES dbo."SqlOSUsers"("Id")
+  PRIMARY KEY PK_SqlOSRecoveryCodes PRIMARY KEY ("Id")
+  INDEX IX_SqlOSRecoveryCodes_CodeHash CREATE UNIQUE INDEX "IX_SqlOSRecoveryCodes_CodeHash" ON dbo."SqlOSRecoveryCodes" USING btree ("CodeHash")
+  INDEX IX_SqlOSRecoveryCodes_User_Consumed_Revoked CREATE INDEX "IX_SqlOSRecoveryCodes_User_Consumed_Revoked" ON dbo."SqlOSRecoveryCodes" USING btree ("UserId", "ConsumedAt", "RevokedAt")
+
+### SqlOSRefreshTokens
+  Id character varying(64) NOT NULL
+  SessionId character varying(64) NOT NULL
+  TokenHash character varying(128) NOT NULL
+  FamilyId character varying(64) NOT NULL
+  CreatedAt timestamp without time zone NOT NULL
+  ExpiresAt timestamp without time zone NOT NULL
+  ConsumedAt timestamp without time zone NULL
+  RevokedAt timestamp without time zone NULL
+  ReplacedByTokenId character varying(64) NULL
+  ReplacementAccessToken text NULL
+  ReplacementOrganizationId character varying(64) NULL
+  ReplacementAccessTokenExpiresAt timestamp without time zone NULL
+  FOREIGN KEY FK_SqlOSRefreshTokens_Sessions FOREIGN KEY ("SessionId") REFERENCES dbo."SqlOSSessions"("Id")
+  PRIMARY KEY SqlOSRefreshTokens_pkey PRIMARY KEY ("Id")
+  UNIQUE SqlOSRefreshTokens_TokenHash_key UNIQUE ("TokenHash")
+
+### SqlOSSamlReplays
+  Id character varying(64) NOT NULL
+  ConnectionId character varying(64) NOT NULL
+  ResponseId character varying(450) NOT NULL
+  AssertionId character varying(450) NOT NULL
+  ConsumedAt timestamp without time zone NOT NULL
+  ExpiresAt timestamp without time zone NOT NULL
+  PRIMARY KEY PK_SqlOSSamlReplays PRIMARY KEY ("Id")
+  INDEX IX_SqlOSSamlReplays_ExpiresAt CREATE INDEX "IX_SqlOSSamlReplays_ExpiresAt" ON dbo."SqlOSSamlReplays" USING btree ("ExpiresAt")
+  INDEX UX_SqlOSSamlReplays_Connection_Assertion CREATE UNIQUE INDEX "UX_SqlOSSamlReplays_Connection_Assertion" ON dbo."SqlOSSamlReplays" USING btree ("ConnectionId", "AssertionId")
+  INDEX UX_SqlOSSamlReplays_Connection_Response CREATE UNIQUE INDEX "UX_SqlOSSamlReplays_Connection_Response" ON dbo."SqlOSSamlReplays" USING btree ("ConnectionId", "ResponseId")
+
+### SqlOSSchema
+  Version integer NOT NULL
+
+### SqlOSScimConnections
+  Id character varying(64) NOT NULL
+  OrganizationId character varying(64) NOT NULL
+  SeedKey character varying(160) NULL
+  DisplayName character varying(200) NOT NULL
+  IsEnabled boolean NOT NULL
+  TokenHash character varying(128) NULL
+  TokenPrefix character varying(24) NULL
+  TokenRotatedAt timestamp without time zone NULL
+  TokenLastUsedAt timestamp without time zone NULL
+  LastSyncAt timestamp without time zone NULL
+  Source character varying(40) NOT NULL
+  CreatedAt timestamp without time zone NOT NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  ConfigurationOwner character varying(40) NOT NULL DEFAULT 'dashboard'::character varying
+  ConfigurationSourceKey character varying(160) NULL
+  ConfigurationFingerprint character varying(64) NULL
+  LastReconciledAt timestamp without time zone NULL
+  ConfigurationOrphanedAt timestamp without time zone NULL
+  GrantBoundaryResourceId character varying(256) NULL
+  FOREIGN KEY FK_SqlOSScimConnections_Organizations_OrganizationId FOREIGN KEY ("OrganizationId") REFERENCES dbo."SqlOSOrganizations"("Id")
+  PRIMARY KEY SqlOSScimConnections_pkey PRIMARY KEY ("Id")
+  INDEX IX_SqlOSScimConnections_OrganizationId_DisplayName_Id CREATE INDEX "IX_SqlOSScimConnections_OrganizationId_DisplayName_Id" ON dbo."SqlOSScimConnections" USING btree ("OrganizationId", "DisplayName", "Id")
+  INDEX IX_SqlOSScimConnections_OrganizationId_IsEnabled CREATE INDEX "IX_SqlOSScimConnections_OrganizationId_IsEnabled" ON dbo."SqlOSScimConnections" USING btree ("OrganizationId", "IsEnabled")
+  INDEX IX_SqlOSScimConnections_OrganizationId_SeedKey CREATE UNIQUE INDEX "IX_SqlOSScimConnections_OrganizationId_SeedKey" ON dbo."SqlOSScimConnections" USING btree ("OrganizationId", "SeedKey") WHERE ("SeedKey" IS NOT NULL)
+  INDEX IX_SqlOSScimConnections_TokenHash CREATE UNIQUE INDEX "IX_SqlOSScimConnections_TokenHash" ON dbo."SqlOSScimConnections" USING btree ("TokenHash") WHERE ("TokenHash" IS NOT NULL)
+  INDEX UX_SqlOSScimConnections_OneEnabledPerOrganization CREATE UNIQUE INDEX "UX_SqlOSScimConnections_OneEnabledPerOrganization" ON dbo."SqlOSScimConnections" USING btree ("OrganizationId") WHERE ("IsEnabled" = true)
+  INDEX UX_SqlOSScimConnections_Organization_Owner_SourceKey CREATE UNIQUE INDEX "UX_SqlOSScimConnections_Organization_Owner_SourceKey" ON dbo."SqlOSScimConnections" USING btree ("OrganizationId", "ConfigurationOwner", "ConfigurationSourceKey") WHERE ("ConfigurationSourceKey" IS NOT NULL)
+
+### SqlOSScimExternalIds
+  Id character varying(64) NOT NULL
+  ConnectionId character varying(64) NOT NULL
+  ResourceType character varying(20) NOT NULL
+  ExternalId character varying(450) NULL COLLATE C
+  EntityId character varying(128) NOT NULL
+  FgaSubjectId character varying(128) NULL
+  DisplayName character varying(300) NULL
+  IsActive boolean NOT NULL
+  CreatedAt timestamp without time zone NOT NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  LastSyncedAt timestamp without time zone NOT NULL
+  UserName character varying(450) NULL
+  PrimaryEmail character varying(320) NULL
+  GivenName character varying(150) NULL
+  FormattedName character varying(300) NULL
+  FamilyName character varying(150) NULL
+  DeletedAt timestamp without time zone NULL
+  OwnsUserLifecycle boolean NOT NULL DEFAULT false
+  FOREIGN KEY FK_SqlOSScimExternalIds_Connections_ConnectionId FOREIGN KEY ("ConnectionId") REFERENCES dbo."SqlOSScimConnections"("Id")
+  PRIMARY KEY SqlOSScimExternalIds_pkey PRIMARY KEY ("Id")
+  INDEX IX_SqlOSScimExternalIds_Connection_Resource_Entity CREATE UNIQUE INDEX "IX_SqlOSScimExternalIds_Connection_Resource_Entity" ON dbo."SqlOSScimExternalIds" USING btree ("ConnectionId", "ResourceType", "EntityId")
+  INDEX IX_SqlOSScimExternalIds_Connection_Resource_External CREATE UNIQUE INDEX "IX_SqlOSScimExternalIds_Connection_Resource_External" ON dbo."SqlOSScimExternalIds" USING btree ("ConnectionId", "ResourceType", "ExternalId") WHERE ("ExternalId" IS NOT NULL)
+  INDEX IX_SqlOSScimExternalIds_Connection_Resource_UserName CREATE UNIQUE INDEX "IX_SqlOSScimExternalIds_Connection_Resource_UserName" ON dbo."SqlOSScimExternalIds" USING btree ("ConnectionId", "ResourceType", "UserName") WHERE ("UserName" IS NOT NULL)
+
+### SqlOSScimGroupMappings
+  Id character varying(64) NOT NULL
+  ConnectionId character varying(64) NOT NULL
+  SourceKey character varying(300) NULL
+  Source character varying(40) NOT NULL
+  MatchType character varying(40) NOT NULL
+  GroupDisplayName character varying(300) NULL
+  GroupExternalId character varying(450) NULL
+  GroupPattern character varying(500) NULL
+  RoleKey character varying(120) NOT NULL
+  ResourceId character varying(256) NULL
+  ResourceIdTemplate character varying(500) NULL
+  Description character varying(500) NULL
+  IsEnabled boolean NOT NULL
+  CreatedAt timestamp without time zone NOT NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  FOREIGN KEY FK_SqlOSScimGroupMappings_Connections_ConnectionId FOREIGN KEY ("ConnectionId") REFERENCES dbo."SqlOSScimConnections"("Id")
+  PRIMARY KEY SqlOSScimGroupMappings_pkey PRIMARY KEY ("Id")
+  INDEX IX_SqlOSScimGroupMappings_ConnectionId_CreatedAt_Id CREATE INDEX "IX_SqlOSScimGroupMappings_ConnectionId_CreatedAt_Id" ON dbo."SqlOSScimGroupMappings" USING btree ("ConnectionId", "CreatedAt" DESC, "Id" DESC)
+  INDEX IX_SqlOSScimGroupMappings_ConnectionId_IsEnabled CREATE INDEX "IX_SqlOSScimGroupMappings_ConnectionId_IsEnabled" ON dbo."SqlOSScimGroupMappings" USING btree ("ConnectionId", "IsEnabled")
+  INDEX IX_SqlOSScimGroupMappings_ConnectionId_SourceKey CREATE UNIQUE INDEX "IX_SqlOSScimGroupMappings_ConnectionId_SourceKey" ON dbo."SqlOSScimGroupMappings" USING btree ("ConnectionId", "SourceKey") WHERE ("SourceKey" IS NOT NULL)
+
+### SqlOSScimManagedGrants
+  Id character varying(64) NOT NULL
+  ConnectionId character varying(64) NOT NULL
+  MappingId character varying(64) NOT NULL
+  GroupExternalId character varying(450) NOT NULL
+  FgaGroupId character varying(128) NOT NULL
+  FgaGroupSubjectId character varying(128) NOT NULL
+  GrantId character varying(128) NOT NULL
+  RoleId character varying(128) NOT NULL
+  ResourceId character varying(256) NOT NULL
+  CreatedAt timestamp without time zone NOT NULL
+  RevokedAt timestamp without time zone NULL
+  FOREIGN KEY FK_SqlOSScimManagedGrants_Connections_ConnectionId FOREIGN KEY ("ConnectionId") REFERENCES dbo."SqlOSScimConnections"("Id")
+  FOREIGN KEY FK_SqlOSScimManagedGrants_Mappings_MappingId FOREIGN KEY ("MappingId") REFERENCES dbo."SqlOSScimGroupMappings"("Id")
+  PRIMARY KEY SqlOSScimManagedGrants_pkey PRIMARY KEY ("Id")
+  INDEX IX_SqlOSScimManagedGrants_GrantId CREATE INDEX "IX_SqlOSScimManagedGrants_GrantId" ON dbo."SqlOSScimManagedGrants" USING btree ("GrantId")
+  INDEX IX_SqlOSScimManagedGrants_Reconcile CREATE INDEX "IX_SqlOSScimManagedGrants_Reconcile" ON dbo."SqlOSScimManagedGrants" USING btree ("ConnectionId", "MappingId", "GroupExternalId", "ResourceId", "RoleId")
+
+### SqlOSScimOperationCommits
+  Id character varying(64) NOT NULL
+  OccurredAt timestamp without time zone NOT NULL
+  PRIMARY KEY PK_SqlOSScimOperationCommits PRIMARY KEY ("Id")
+  INDEX IX_SqlOSScimOperationCommits_OccurredAt CREATE INDEX "IX_SqlOSScimOperationCommits_OccurredAt" ON dbo."SqlOSScimOperationCommits" USING btree ("OccurredAt")
+
+### SqlOSScimSyncEvents
+  Id character varying(64) NOT NULL
+  ConnectionId character varying(64) NOT NULL
+  OrganizationId character varying(64) NOT NULL
+  ResourceType character varying(20) NOT NULL
+  ResourceId character varying(128) NULL
+  ExternalId character varying(450) NULL
+  Action character varying(80) NOT NULL
+  Result character varying(40) NOT NULL
+  Error character varying(1000) NULL
+  DataJson text NULL
+  RequestId character varying(128) NULL
+  OccurredAt timestamp without time zone NOT NULL
+  FOREIGN KEY FK_SqlOSScimSyncEvents_Connections_ConnectionId FOREIGN KEY ("ConnectionId") REFERENCES dbo."SqlOSScimConnections"("Id")
+  FOREIGN KEY FK_SqlOSScimSyncEvents_Organizations_OrganizationId FOREIGN KEY ("OrganizationId") REFERENCES dbo."SqlOSOrganizations"("Id")
+  PRIMARY KEY SqlOSScimSyncEvents_pkey PRIMARY KEY ("Id")
+  INDEX IX_SqlOSScimSyncEvents_ConnectionId_OccurredAt CREATE INDEX "IX_SqlOSScimSyncEvents_ConnectionId_OccurredAt" ON dbo."SqlOSScimSyncEvents" USING btree ("ConnectionId", "OccurredAt" DESC)
+  INDEX IX_SqlOSScimSyncEvents_ConnectionId_OccurredAt_Id CREATE INDEX "IX_SqlOSScimSyncEvents_ConnectionId_OccurredAt_Id" ON dbo."SqlOSScimSyncEvents" USING btree ("ConnectionId", "OccurredAt" DESC, "Id" DESC)
+  INDEX IX_SqlOSScimSyncEvents_OrganizationId_OccurredAt CREATE INDEX "IX_SqlOSScimSyncEvents_OrganizationId_OccurredAt" ON dbo."SqlOSScimSyncEvents" USING btree ("OrganizationId", "OccurredAt" DESC)
+
+### SqlOSScopeDisplayNames
+  Id character varying(64) NOT NULL
+  Scope character varying(200) NOT NULL COLLATE C
+  DisplayName character varying(200) NOT NULL
+  Description character varying(1000) NULL
+  ConfigurationOwner character varying(40) NOT NULL DEFAULT 'dashboard'::character varying
+  ConfigurationSourceKey character varying(200) NULL COLLATE C
+  ConfigurationFingerprint character varying(64) NULL
+  LastReconciledAt timestamp without time zone NULL
+  ConfigurationOrphanedAt timestamp without time zone NULL
+  CreatedAt timestamp without time zone NOT NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  PRIMARY KEY PK_SqlOSScopeDisplayNames PRIMARY KEY ("Id")
+  INDEX UX_SqlOSScopeDisplayNames_Scope CREATE UNIQUE INDEX "UX_SqlOSScopeDisplayNames_Scope" ON dbo."SqlOSScopeDisplayNames" USING btree ("Scope")
+
+### SqlOSSessions
+  Id character varying(64) NOT NULL
+  UserId character varying(64) NOT NULL
+  AuthenticationMethod character varying(50) NULL
+  ClientApplicationId character varying(64) NULL
+  CreatedAt timestamp without time zone NOT NULL
+  LastSeenAt timestamp without time zone NOT NULL
+  IdleExpiresAt timestamp without time zone NOT NULL
+  AbsoluteExpiresAt timestamp without time zone NOT NULL
+  RevokedAt timestamp without time zone NULL
+  RevocationReason character varying(200) NULL
+  UserAgent character varying(1024) NULL
+  IpAddress character varying(128) NULL
+  Resource character varying(2048) NULL
+  EffectiveAudience character varying(2048) NULL
+  OrganizationId character varying(64) NULL
+  Scope character varying(1000) NULL
+  AuthenticatedAt timestamp without time zone NULL
+  FOREIGN KEY FK_SqlOSSessions_Clients FOREIGN KEY ("ClientApplicationId") REFERENCES dbo."SqlOSClientApplications"("Id")
+  FOREIGN KEY FK_SqlOSSessions_Organizations FOREIGN KEY ("OrganizationId") REFERENCES dbo."SqlOSOrganizations"("Id")
+  FOREIGN KEY FK_SqlOSSessions_Users FOREIGN KEY ("UserId") REFERENCES dbo."SqlOSUsers"("Id")
+  PRIMARY KEY SqlOSSessions_pkey PRIMARY KEY ("Id")
+  INDEX IX_SqlOSSessions_CreatedAt_Id CREATE INDEX "IX_SqlOSSessions_CreatedAt_Id" ON dbo."SqlOSSessions" USING btree ("CreatedAt" DESC, "Id" DESC)
+  INDEX IX_SqlOSSessions_UserId_CreatedAt_Id CREATE INDEX "IX_SqlOSSessions_UserId_CreatedAt_Id" ON dbo."SqlOSSessions" USING btree ("UserId", "CreatedAt" DESC, "Id" DESC)
+
+### SqlOSSettings
+  Id character varying(64) NOT NULL
+  RefreshTokenLifetimeMinutes integer NOT NULL
+  SessionIdleTimeoutMinutes integer NOT NULL
+  SessionAbsoluteLifetimeMinutes integer NOT NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  SigningKeyRotationIntervalDays integer NOT NULL DEFAULT 90
+  SigningKeyGraceWindowDays integer NOT NULL DEFAULT 7
+  SigningKeyRetiredCleanupDays integer NOT NULL DEFAULT 30
+  RefreshTokenGraceWindowSeconds integer NOT NULL DEFAULT 30
+  PRIMARY KEY SqlOSSettings_pkey PRIMARY KEY ("Id")
+
+### SqlOSSigningKeys
+  Id character varying(64) NOT NULL
+  Kid character varying(120) NOT NULL
+  Algorithm character varying(20) NOT NULL
+  PublicKeyPem text NOT NULL
+  CustodyProvider character varying(120) NOT NULL
+  KeyReference text NOT NULL
+  IsActive boolean NOT NULL
+  ActivatedAt timestamp without time zone NOT NULL
+  RetiredAt timestamp without time zone NULL
+  CHECK CK_SqlOSSigningKeys_Lifecycle CHECK (((("IsActive" = true) AND ("RetiredAt" IS NULL)) OR (("IsActive" = false) AND ("RetiredAt" IS NOT NULL))))
+  PRIMARY KEY SqlOSSigningKeys_pkey PRIMARY KEY ("Id")
+  UNIQUE SqlOSSigningKeys_Kid_key UNIQUE ("Kid")
+  INDEX UX_SqlOSSigningKeys_OneActive CREATE UNIQUE INDEX "UX_SqlOSSigningKeys_OneActive" ON dbo."SqlOSSigningKeys" USING btree ("IsActive") WHERE ("IsActive" = true)
+
+### SqlOSSsoConnections
+  Id character varying(64) NOT NULL
+  OrganizationId character varying(64) NOT NULL
+  DisplayName character varying(200) NOT NULL
+  IsEnabled boolean NOT NULL
+  IdentityProviderEntityId character varying(400) NOT NULL
+  SingleSignOnUrl character varying(1024) NOT NULL
+  X509CertificatePem text NOT NULL
+  NameIdFormat character varying(256) NULL
+  EmailAttributeName character varying(128) NOT NULL
+  FirstNameAttributeName character varying(128) NOT NULL
+  LastNameAttributeName character varying(128) NOT NULL
+  AutoProvisionUsers boolean NOT NULL
+  AutoLinkByEmail boolean NOT NULL
+  CreatedAt timestamp without time zone NOT NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  TrustUpstreamMfa boolean NOT NULL DEFAULT false
+  AcceptedAuthnContextClassRefsJson text NOT NULL DEFAULT '[]'::text
+  ConfigurationOwner character varying(40) NOT NULL DEFAULT 'dashboard'::character varying
+  ConfigurationSourceKey character varying(160) NULL
+  ConfigurationFingerprint character varying(64) NULL
+  LastReconciledAt timestamp without time zone NULL
+  ConfigurationOrphanedAt timestamp without time zone NULL
+  FOREIGN KEY FK_SqlOSSsoConnections_Organizations FOREIGN KEY ("OrganizationId") REFERENCES dbo."SqlOSOrganizations"("Id")
+  PRIMARY KEY SqlOSSsoConnections_pkey PRIMARY KEY ("Id")
+  INDEX IX_SqlOSSsoConnections_DisplayName_Id CREATE INDEX "IX_SqlOSSsoConnections_DisplayName_Id" ON dbo."SqlOSSsoConnections" USING btree ("DisplayName", "Id")
+  INDEX IX_SqlOSSsoConnections_OrganizationId_DisplayName_Id CREATE INDEX "IX_SqlOSSsoConnections_OrganizationId_DisplayName_Id" ON dbo."SqlOSSsoConnections" USING btree ("OrganizationId", "DisplayName", "Id")
+  INDEX UX_SqlOSSsoConnections_ConfigurationOwner_SourceKey CREATE UNIQUE INDEX "UX_SqlOSSsoConnections_ConfigurationOwner_SourceKey" ON dbo."SqlOSSsoConnections" USING btree ("ConfigurationOwner", "ConfigurationSourceKey") WHERE ("ConfigurationSourceKey" IS NOT NULL)
+
+### SqlOSSsoPortalSessions
+  Id character varying(64) NOT NULL
+  OrganizationId character varying(64) NOT NULL
+  ConnectionId character varying(64) NULL
+  LinkTokenHash character varying(128) NOT NULL
+  SessionTokenHash character varying(128) NULL
+  Provider character varying(40) NULL
+  ReturnUrl character varying(1000) NULL
+  ActorType character varying(80) NOT NULL
+  CreatedByUserId character varying(64) NULL
+  CreatedAt timestamp without time zone NOT NULL
+  ExpiresAt timestamp without time zone NOT NULL
+  OpenedAt timestamp without time zone NULL
+  LastSeenAt timestamp without time zone NULL
+  RevokedAt timestamp without time zone NULL
+  RevokedReason character varying(160) NULL
+  IpAddress character varying(128) NULL
+  UserAgent character varying(512) NULL
+  LastTestedAt timestamp without time zone NULL
+  LastTestStatus character varying(40) NULL
+  LastTestMessage character varying(500) NULL
+  FOREIGN KEY FK_SqlOSSsoPortalSessions_Organizations_OrganizationId FOREIGN KEY ("OrganizationId") REFERENCES dbo."SqlOSOrganizations"("Id")
+  FOREIGN KEY FK_SqlOSSsoPortalSessions_SsoConnections_ConnectionId FOREIGN KEY ("ConnectionId") REFERENCES dbo."SqlOSSsoConnections"("Id")
+  PRIMARY KEY SqlOSSsoPortalSessions_pkey PRIMARY KEY ("Id")
+  INDEX IX_SqlOSSsoPortalSessions_LinkTokenHash CREATE UNIQUE INDEX "IX_SqlOSSsoPortalSessions_LinkTokenHash" ON dbo."SqlOSSsoPortalSessions" USING btree ("LinkTokenHash")
+  INDEX IX_SqlOSSsoPortalSessions_OrganizationId_CreatedAt CREATE INDEX "IX_SqlOSSsoPortalSessions_OrganizationId_CreatedAt" ON dbo."SqlOSSsoPortalSessions" USING btree ("OrganizationId", "CreatedAt")
+  INDEX IX_SqlOSSsoPortalSessions_OrganizationId_CreatedAt_Id CREATE INDEX "IX_SqlOSSsoPortalSessions_OrganizationId_CreatedAt_Id" ON dbo."SqlOSSsoPortalSessions" USING btree ("OrganizationId", "CreatedAt" DESC, "Id" DESC)
+  INDEX IX_SqlOSSsoPortalSessions_OrganizationId_RevokedAt_ExpiresAt CREATE INDEX "IX_SqlOSSsoPortalSessions_OrganizationId_RevokedAt_ExpiresAt" ON dbo."SqlOSSsoPortalSessions" USING btree ("OrganizationId", "RevokedAt", "ExpiresAt")
+  INDEX IX_SqlOSSsoPortalSessions_SessionTokenHash CREATE UNIQUE INDEX "IX_SqlOSSsoPortalSessions_SessionTokenHash" ON dbo."SqlOSSsoPortalSessions" USING btree ("SessionTokenHash") WHERE ("SessionTokenHash" IS NOT NULL)
+
+### SqlOSTemporaryTokens
+  Id character varying(64) NOT NULL
+  Purpose character varying(80) NOT NULL
+  TokenHash character varying(128) NOT NULL
+  UserId character varying(64) NULL
+  ClientApplicationId character varying(64) NULL
+  OrganizationId character varying(64) NULL
+  PayloadJson text NULL
+  CreatedAt timestamp without time zone NOT NULL
+  ExpiresAt timestamp without time zone NOT NULL
+  ConsumedAt timestamp without time zone NULL
+  AuthPageSessionFamilyId character varying(64) NULL
+  FOREIGN KEY FK_SqlOSTemporaryTokens_AuthPageSessionFamily FOREIGN KEY ("AuthPageSessionFamilyId") REFERENCES dbo."SqlOSAuthPageSessionFamilies"("Id")
+  PRIMARY KEY SqlOSTemporaryTokens_pkey PRIMARY KEY ("Id")
+  UNIQUE SqlOSTemporaryTokens_TokenHash_key UNIQUE ("TokenHash")
+  INDEX IX_SqlOSTemporaryTokens_AuthPageSessionFamilyId CREATE INDEX "IX_SqlOSTemporaryTokens_AuthPageSessionFamilyId" ON dbo."SqlOSTemporaryTokens" USING btree ("AuthPageSessionFamilyId")
+
+### SqlOSUserAuthenticators
+  Id character varying(64) NOT NULL
+  UserId character varying(64) NOT NULL
+  Type character varying(40) NOT NULL
+  DisplayName character varying(120) NOT NULL
+  SecretProtected character varying(2048) NOT NULL
+  SecretVersion integer NOT NULL
+  Algorithm character varying(20) NOT NULL
+  Digits integer NOT NULL
+  PeriodSeconds integer NOT NULL
+  IsConfirmed boolean NOT NULL
+  CreatedAt timestamp without time zone NOT NULL
+  ConfirmedAt timestamp without time zone NULL
+  LastUsedAt timestamp without time zone NULL
+  RevokedAt timestamp without time zone NULL
+  RevocationReason character varying(120) NULL
+  LastAcceptedTimeStep bigint NULL
+  FOREIGN KEY FK_SqlOSUserAuthenticators_Users_UserId FOREIGN KEY ("UserId") REFERENCES dbo."SqlOSUsers"("Id")
+  PRIMARY KEY PK_SqlOSUserAuthenticators PRIMARY KEY ("Id")
+  INDEX IX_SqlOSUserAuthenticators_User_Confirmed_Revoked CREATE INDEX "IX_SqlOSUserAuthenticators_User_Confirmed_Revoked" ON dbo."SqlOSUserAuthenticators" USING btree ("UserId", "IsConfirmed", "RevokedAt")
+  INDEX IX_SqlOSUserAuthenticators_User_Type_Revoked CREATE INDEX "IX_SqlOSUserAuthenticators_User_Type_Revoked" ON dbo."SqlOSUserAuthenticators" USING btree ("UserId", "Type", "RevokedAt")
+
+### SqlOSUserEmails
+  Id character varying(64) NOT NULL
+  UserId character varying(64) NOT NULL
+  Email character varying(320) NOT NULL
+  NormalizedEmail character varying(320) NOT NULL
+  IsPrimary boolean NOT NULL
+  IsVerified boolean NOT NULL
+  VerifiedAt timestamp without time zone NULL
+  CreatedAt timestamp without time zone NOT NULL
+  FOREIGN KEY FK_SqlOSUserEmails_Users FOREIGN KEY ("UserId") REFERENCES dbo."SqlOSUsers"("Id")
+  PRIMARY KEY SqlOSUserEmails_pkey PRIMARY KEY ("Id")
+  UNIQUE SqlOSUserEmails_NormalizedEmail_key UNIQUE ("NormalizedEmail")
+
+### SqlOSUserMfaPolicyOverrides
+  UserId character varying(64) NOT NULL
+  RequireMfa boolean NULL
+  UserSelfEnrollmentEnabled boolean NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  FOREIGN KEY FK_SqlOSUserMfaPolicyOverrides_Users_UserId FOREIGN KEY ("UserId") REFERENCES dbo."SqlOSUsers"("Id")
+  PRIMARY KEY PK_SqlOSUserMfaPolicyOverrides PRIMARY KEY ("UserId")
+
+### SqlOSUserPhoneNumbers
+  Id character varying(64) NOT NULL
+  UserId character varying(64) NOT NULL
+  PhoneNumber character varying(32) NOT NULL
+  PhoneNumberHash character varying(128) NOT NULL
+  DisplayValueEncrypted character varying(2048) NULL
+  IsPrimary boolean NOT NULL DEFAULT false
+  IsVerified boolean NOT NULL DEFAULT false
+  VerifiedAt timestamp without time zone NULL
+  CreatedAt timestamp without time zone NOT NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  LastUsedAt timestamp without time zone NULL
+  RemovedAt timestamp without time zone NULL
+  RemovalReason character varying(120) NULL
+  FOREIGN KEY FK_SqlOSUserPhoneNumbers_Users_UserId FOREIGN KEY ("UserId") REFERENCES dbo."SqlOSUsers"("Id")
+  PRIMARY KEY SqlOSUserPhoneNumbers_pkey PRIMARY KEY ("Id")
+  INDEX IX_SqlOSUserPhoneNumbers_PhoneNumberHash CREATE UNIQUE INDEX "IX_SqlOSUserPhoneNumbers_PhoneNumberHash" ON dbo."SqlOSUserPhoneNumbers" USING btree ("PhoneNumberHash") WHERE ("RemovedAt" IS NULL)
+  INDEX IX_SqlOSUserPhoneNumbers_UserId_RemovedAt CREATE INDEX "IX_SqlOSUserPhoneNumbers_UserId_RemovedAt" ON dbo."SqlOSUserPhoneNumbers" USING btree ("UserId", "RemovedAt")
+
+### SqlOSUsers
+  Id character varying(64) NOT NULL
+  DisplayName character varying(200) NOT NULL
+  DefaultEmail character varying(320) NULL
+  IsActive boolean NOT NULL
+  CreatedAt timestamp without time zone NOT NULL
+  UpdatedAt timestamp without time zone NOT NULL
+  PRIMARY KEY SqlOSUsers_pkey PRIMARY KEY ("Id")
+  INDEX IX_SqlOSUsers_DisplayName_Id CREATE INDEX "IX_SqlOSUsers_DisplayName_Id" ON dbo."SqlOSUsers" USING btree ("DisplayName", "Id")
+
+## Routines
+
+### fn_IsResourceAccessible(p_resource_id character varying, p_subject_ids text, p_permission_id character varying)
+    CREATE OR REPLACE FUNCTION dbo."fn_IsResourceAccessible"(p_resource_id character varying, p_subject_ids text, p_permission_id character varying)
+     RETURNS TABLE("Id" character varying)
+     LANGUAGE sql
+     STABLE
+    AS $function$
+    WITH RECURSIVE ancestors AS (
+        SELECT
+            "Id",
+            "ParentId",
+            0 AS "Depth",
+            ('|' || "Id" || '|')::text AS "VisitedPath",
+            FALSE AS "CycleDetected"
+        FROM "dbo"."SqlOSFgaResources"
+        WHERE "Id" = p_resource_id AND "IsActive" = TRUE
+
+        UNION ALL
+
+        SELECT
+            r."Id",
+            r."ParentId",
+            a."Depth" + 1,
+            (a."VisitedPath" || r."Id" || '|')::text,
+            (strpos(a."VisitedPath", '|' || r."Id" || '|') > 0)
+        FROM "dbo"."SqlOSFgaResources" r
+        INNER JOIN ancestors a ON r."Id" = a."ParentId"
+        WHERE a."Depth" < 10
+          AND a."CycleDetected" = FALSE
+          AND r."IsActive" = TRUE
+    )
+    SELECT a."Id"
+    FROM ancestors a
+    INNER JOIN "dbo"."SqlOSFgaGrants" g ON a."Id" = g."ResourceId"
+    INNER JOIN "dbo"."SqlOSFgaRolePermissions" rp ON g."RoleId" = rp."RoleId"
+    INNER JOIN "dbo"."SqlOSFgaSubjects" s ON g."SubjectId" = s."Id"
+    LEFT JOIN "dbo"."SqlOSFgaUsers" u ON s."Id" = u."SubjectId"
+    LEFT JOIN "dbo"."SqlOSFgaServiceAccounts" sa ON s."Id" = sa."SubjectId"
+    LEFT JOIN "dbo"."SqlOSFgaUserGroups" ug ON s."Id" = ug."SubjectId"
+    LEFT JOIN "dbo"."SqlOSFgaAgents" ag ON s."Id" = ag."SubjectId"
+    WHERE g."SubjectId" IN (SELECT jsonb_array_elements_text(p_subject_ids::jsonb))
+      AND rp."PermissionId" = p_permission_id
+      AND NOT EXISTS (SELECT 1 FROM ancestors malformed WHERE malformed."CycleDetected" = TRUE)
+      AND NOT EXISTS (
+          SELECT 1
+          FROM ancestors truncated
+          WHERE truncated."Depth" = 10
+            AND truncated."ParentId" IS NOT NULL
+      )
+      AND EXISTS (
+          SELECT 1
+          FROM "dbo"."SqlOSFgaResources" target
+          INNER JOIN "dbo"."SqlOSFgaPermissions" permission ON permission."Id" = p_permission_id
+          WHERE target."Id" = p_resource_id
+            AND (permission."ResourceTypeId" IS NULL OR permission."ResourceTypeId" = target."ResourceTypeId")
+      )
+      AND (s."SubjectTypeId" <> 'user' OR u."IsActive" = TRUE)
+      AND (s."SubjectTypeId" <> 'service_account' OR (sa."SubjectId" IS NOT NULL AND (sa."ExpiresAt" IS NULL OR sa."ExpiresAt" > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))))
+      AND (s."SubjectTypeId" <> 'group' OR ug."IsActive" = TRUE)
+      AND (s."SubjectTypeId" <> 'agent' OR ag."SubjectId" IS NOT NULL)
+      AND EXISTS (
+          SELECT 1
+          FROM "dbo"."SqlOSFgaSubjects" caller
+          LEFT JOIN "dbo"."SqlOSFgaUsers" callerUser ON caller."Id" = callerUser."SubjectId"
+          LEFT JOIN "dbo"."SqlOSFgaServiceAccounts" callerSa ON caller."Id" = callerSa."SubjectId"
+          LEFT JOIN "dbo"."SqlOSFgaUserGroups" callerGroup ON caller."Id" = callerGroup."SubjectId"
+          LEFT JOIN "dbo"."SqlOSFgaAgents" callerAgent ON caller."Id" = callerAgent."SubjectId"
+          WHERE caller."Id" = (p_subject_ids::jsonb ->> 0)
+            AND (caller."SubjectTypeId" <> 'user' OR callerUser."IsActive" = TRUE)
+            AND (caller."SubjectTypeId" <> 'service_account' OR (callerSa."SubjectId" IS NOT NULL AND (callerSa."ExpiresAt" IS NULL OR callerSa."ExpiresAt" > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))))
+            AND (caller."SubjectTypeId" <> 'group' OR callerGroup."IsActive" = TRUE)
+            AND (caller."SubjectTypeId" <> 'agent' OR callerAgent."SubjectId" IS NOT NULL)
+      )
+      AND (g."EffectiveFrom" IS NULL OR g."EffectiveFrom" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))
+      AND (g."EffectiveTo" IS NULL OR g."EffectiveTo" >= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))
+    LIMIT 1
+    $function$

@@ -1,0 +1,1249 @@
+# SqlOS EF Core model (Npgsql.EntityFrameworkCore.PostgreSQL)
+
+## SqlOSApplicationAssignment -> dbo.SqlOSApplicationAssignments [excluded from migrations]
+  Access: Access character varying(20) NOT NULL maxLength=20
+  ClientApplicationId: ClientApplicationId character varying(64) NOT NULL maxLength=64
+  ConfigurationFingerprint: ConfigurationFingerprint character varying(64) NULL maxLength=64
+  ConfigurationOrphanedAt: ConfigurationOrphanedAt timestamp without time zone NULL
+  ConfigurationOwner: ConfigurationOwner character varying(40) NOT NULL maxLength=40
+  ConfigurationSourceKey: ConfigurationSourceKey character varying(160) NULL maxLength=160
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedByActorId: CreatedByActorId character varying(128) NULL maxLength=128
+  CreatedByActorType: CreatedByActorType character varying(80) NULL maxLength=80
+  Id: Id text NOT NULL
+  LastReconciledAt: LastReconciledAt timestamp without time zone NULL
+  OrganizationId: OrganizationId character varying(64) NULL maxLength=64
+  PrincipalId: PrincipalId character varying(128) NULL maxLength=128
+  PrincipalType: PrincipalType character varying(40) NOT NULL maxLength=40
+  Reason: Reason character varying(500) NULL maxLength=500
+  RevokedAt: RevokedAt timestamp without time zone NULL
+  RevokedByActorId: RevokedByActorId character varying(128) NULL maxLength=128
+  RevokedByActorType: RevokedByActorType character varying(80) NULL maxLength=80
+  RoleKey: RoleKey character varying(80) NULL maxLength=80
+  PRIMARY KEY PK_SqlOSApplicationAssignments (Id)
+  FOREIGN KEY FK_SqlOSApplicationAssignments_SqlOSClientApplications_ClientA~ (ClientApplicationId) -> SqlOSClientApplication (Id) delete=Restrict required
+  FOREIGN KEY FK_SqlOSApplicationAssignments_SqlOSOrganizations_Organization~ (OrganizationId) -> SqlOSOrganization (Id) delete=Restrict optional
+  INDEX IX_SqlOSApplicationAssignments_ClientApplicationId_RevokedAt (ClientApplicationId, RevokedAt)
+  INDEX IX_SqlOSApplicationAssignments_OrganizationId_RevokedAt (OrganizationId, RevokedAt)
+  INDEX IX_SqlOSApplicationAssignments_Target (ClientApplicationId, PrincipalType, PrincipalId, OrganizationId, RoleKey, RevokedAt)
+  INDEX UX_SqlOSApplicationAssignments_Client_Owner_SourceKey UNIQUE (ClientApplicationId, ConfigurationOwner, ConfigurationSourceKey) WHERE "ConfigurationSourceKey" IS NOT NULL
+
+## SqlOSAuditEvent -> dbo.SqlOSAuditEvents [excluded from migrations]
+  Action: Action character varying(160) NOT NULL maxLength=160
+  ActorDisplayName: ActorDisplayName character varying(320) NULL maxLength=320
+  ActorId: ActorId character varying(128) NULL maxLength=128
+  ActorType: ActorType character varying(80) NOT NULL maxLength=80
+  ApplicationId: ApplicationId character varying(64) NULL maxLength=64
+  ApplicationKey: ApplicationKey character varying(200) NULL maxLength=200
+  ContextJson: ContextJson text NULL
+  CorrelationId: CorrelationId character varying(128) NULL maxLength=128
+  DataJson: DataJson text NULL
+  EventType: EventType character varying(160) NOT NULL maxLength=160
+  Id: Id text NOT NULL
+  IdempotencyKeyHash: IdempotencyKeyHash character varying(128) NULL maxLength=128
+  IdempotencyScopeHash: IdempotencyScopeHash character varying(128) NULL maxLength=128
+  IngestedAt: IngestedAt timestamp without time zone NOT NULL
+  IpAddress: IpAddress text NULL
+  MetadataJson: MetadataJson text NULL
+  OccurredAt: OccurredAt timestamp without time zone NOT NULL
+  OrganizationId: OrganizationId text NULL
+  RequestId: RequestId character varying(128) NULL maxLength=128
+  SessionId: SessionId text NULL
+  Source: Source character varying(80) NOT NULL maxLength=80
+  TargetsJson: TargetsJson text NOT NULL
+  UserAgent: UserAgent character varying(512) NULL maxLength=512
+  UserId: UserId text NULL
+  PRIMARY KEY PK_SqlOSAuditEvents (Id)
+  INDEX IX_SqlOSAuditEvents_Action_OccurredAt (Action, OccurredAt)
+  INDEX IX_SqlOSAuditEvents_ActorType_ActorId_OccurredAt (ActorType, ActorId, OccurredAt)
+  INDEX IX_SqlOSAuditEvents_ApplicationId_OccurredAt (ApplicationId, OccurredAt)
+  INDEX IX_SqlOSAuditEvents_ApplicationKey_OccurredAt (ApplicationKey, OccurredAt)
+  INDEX IX_SqlOSAuditEvents_IdempotencyKeyHash UNIQUE (IdempotencyKeyHash) WHERE "IdempotencyKeyHash" IS NOT NULL
+  INDEX IX_SqlOSAuditEvents_IdempotencyScopeHash UNIQUE (IdempotencyScopeHash) WHERE "IdempotencyScopeHash" IS NOT NULL
+  INDEX IX_SqlOSAuditEvents_OccurredAt (OccurredAt)
+  INDEX IX_SqlOSAuditEvents_OrganizationId_OccurredAt (OrganizationId, OccurredAt)
+  INDEX IX_SqlOSAuditEvents_Source_OccurredAt (Source, OccurredAt)
+
+## SqlOSAuthPageSettings -> dbo.SqlOSAuthPageSettings [excluded from migrations]
+  AccentColor: AccentColor character varying(32) NOT NULL maxLength=32
+  AuthPageConfigurationFingerprint: AuthPageConfigurationFingerprint character varying(64) NULL maxLength=64
+  AuthPageConfigurationOrphanedAt: AuthPageConfigurationOrphanedAt timestamp without time zone NULL
+  AuthPageConfigurationOwner: AuthPageConfigurationOwner character varying(40) NOT NULL maxLength=40
+  AuthPageConfigurationSourceKey: AuthPageConfigurationSourceKey character varying(160) NULL maxLength=160
+  AuthPageLastReconciledAt: AuthPageLastReconciledAt timestamp without time zone NULL
+  BackgroundColor: BackgroundColor character varying(32) NOT NULL maxLength=32
+  EmailAccentColor: EmailAccentColor character varying(32) NOT NULL maxLength=32
+  EmailApplicationName: EmailApplicationName character varying(200) NULL maxLength=200
+  EmailBackgroundColor: EmailBackgroundColor character varying(32) NOT NULL maxLength=32
+  EmailConfigurationFingerprint: EmailConfigurationFingerprint character varying(64) NULL maxLength=64
+  EmailConfigurationOrphanedAt: EmailConfigurationOrphanedAt timestamp without time zone NULL
+  EmailConfigurationOwner: EmailConfigurationOwner character varying(40) NOT NULL maxLength=40
+  EmailConfigurationSourceKey: EmailConfigurationSourceKey character varying(160) NULL maxLength=160
+  EmailLastReconciledAt: EmailLastReconciledAt timestamp without time zone NULL
+  EmailLogoBase64: EmailLogoBase64 text NULL
+  EmailPrimaryColor: EmailPrimaryColor character varying(32) NOT NULL maxLength=32
+  EnablePasswordSignup: EnablePasswordSignup boolean NOT NULL
+  EnabledCredentialTypesJson: EnabledCredentialTypesJson text NOT NULL
+  Id: Id text NOT NULL
+  Layout: Layout character varying(32) NOT NULL maxLength=32
+  LogoBase64: LogoBase64 text NULL
+  PageSubtitle: PageSubtitle character varying(500) NOT NULL maxLength=500
+  PageTitle: PageTitle character varying(200) NOT NULL maxLength=200
+  PrimaryColor: PrimaryColor character varying(32) NOT NULL maxLength=32
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  PRIMARY KEY PK_SqlOSAuthPageSettings (Id)
+
+## SqlOSAuthorizationCode -> dbo.SqlOSAuthorizationCodes [excluded from migrations]
+  AuthTime: AuthTime timestamp without time zone NULL
+  AuthenticationMethod: AuthenticationMethod character varying(50) NOT NULL maxLength=50
+  AuthorizationRequestId: AuthorizationRequestId text NOT NULL
+  ClientApplicationId: ClientApplicationId text NOT NULL
+  CodeChallenge: CodeChallenge character varying(256) NOT NULL maxLength=256
+  CodeChallengeMethod: CodeChallengeMethod character varying(32) NOT NULL maxLength=32
+  CodeHash: CodeHash character varying(128) NOT NULL maxLength=128
+  ConsumedAt: ConsumedAt timestamp without time zone NULL concurrency
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL
+  Id: Id text NOT NULL
+  Nonce: Nonce character varying(256) NULL maxLength=256
+  OrganizationId: OrganizationId text NULL
+  RedirectUri: RedirectUri character varying(2048) NOT NULL maxLength=2048
+  Resource: Resource character varying(2048) NULL maxLength=2048
+  Scope: Scope character varying(1000) NOT NULL maxLength=1000
+  State: State character varying(2048) NOT NULL maxLength=2048
+  UserId: UserId text NOT NULL
+  PRIMARY KEY PK_SqlOSAuthorizationCodes (Id)
+  FOREIGN KEY FK_SqlOSAuthorizationCodes_SqlOSAuthorizationRequests_Authoriz~ (AuthorizationRequestId) -> SqlOSAuthorizationRequest (Id) delete=Restrict required
+  FOREIGN KEY FK_SqlOSAuthorizationCodes_SqlOSClientApplications_ClientAppli~ (ClientApplicationId) -> SqlOSClientApplication (Id) delete=Restrict required
+  FOREIGN KEY FK_SqlOSAuthorizationCodes_SqlOSOrganizations_OrganizationId (OrganizationId) -> SqlOSOrganization (Id) delete=Restrict optional
+  FOREIGN KEY FK_SqlOSAuthorizationCodes_SqlOSUsers_UserId (UserId) -> SqlOSUser (Id) delete=Restrict required
+  INDEX IX_SqlOSAuthorizationCodes_AuthorizationRequestId UNIQUE (AuthorizationRequestId)
+  INDEX IX_SqlOSAuthorizationCodes_ClientApplicationId (ClientApplicationId)
+  INDEX IX_SqlOSAuthorizationCodes_CodeHash UNIQUE (CodeHash)
+  INDEX IX_SqlOSAuthorizationCodes_OrganizationId (OrganizationId)
+  INDEX IX_SqlOSAuthorizationCodes_UserId (UserId)
+
+## SqlOSAuthorizationRequest -> dbo.SqlOSAuthorizationRequests [excluded from migrations]
+  CancelledAt: CancelledAt timestamp without time zone NULL concurrency
+  ClientApplicationId: ClientApplicationId text NOT NULL
+  CodeChallenge: CodeChallenge character varying(256) NOT NULL maxLength=256
+  CodeChallengeMethod: CodeChallengeMethod character varying(32) NOT NULL maxLength=32
+  CompletedAt: CompletedAt timestamp without time zone NULL concurrency
+  ConnectionId: ConnectionId text NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  DeviceAuthorizationId: DeviceAuthorizationId character varying(64) NULL maxLength=64
+  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL
+  Id: Id text NOT NULL
+  InvitationId: InvitationId text NULL
+  LoginHintEmail: LoginHintEmail character varying(320) NULL maxLength=320
+  MaxAgeSeconds: MaxAgeSeconds bigint NULL
+  Nonce: Nonce character varying(256) NULL maxLength=256
+  OrganizationId: OrganizationId text NULL
+  PendingConsentUserId: PendingConsentUserId character varying(64) NULL maxLength=64
+  PresentationMode: PresentationMode character varying(32) NOT NULL maxLength=32
+  Prompt: Prompt character varying(256) NULL maxLength=256
+  RedirectUri: RedirectUri character varying(2048) NOT NULL maxLength=2048
+  ResolvedAuthMethod: ResolvedAuthMethod character varying(50) NULL maxLength=50
+  ResolvedConnectionId: ResolvedConnectionId text NULL
+  ResolvedOrganizationId: ResolvedOrganizationId text NULL
+  Resource: Resource character varying(2048) NULL maxLength=2048
+  Scope: Scope character varying(1000) NOT NULL maxLength=1000
+  State: State character varying(2048) NOT NULL maxLength=2048
+  UiContextJson: UiContextJson text NULL
+  PRIMARY KEY PK_SqlOSAuthorizationRequests (Id)
+  FOREIGN KEY FK_SqlOSAuthorizationRequests_SqlOSClientApplications_ClientAp~ (ClientApplicationId) -> SqlOSClientApplication (Id) delete=Restrict required
+  FOREIGN KEY FK_SqlOSAuthorizationRequests_SqlOSDeviceAuthorizations_Device~ (DeviceAuthorizationId) -> SqlOSDeviceAuthorization (Id) delete=Restrict optional
+  FOREIGN KEY FK_SqlOSAuthorizationRequests_SqlOSInvitations_InvitationId (InvitationId) -> SqlOSInvitation (Id) delete=Restrict optional
+  FOREIGN KEY FK_SqlOSAuthorizationRequests_SqlOSOrganizations_OrganizationId (OrganizationId) -> SqlOSOrganization (Id) delete=Restrict optional
+  FOREIGN KEY FK_SqlOSAuthorizationRequests_SqlOSSsoConnections_ConnectionId (ConnectionId) -> SqlOSSsoConnection (Id) delete=Restrict optional
+  INDEX IX_SqlOSAuthorizationRequests_ClientApplicationId (ClientApplicationId)
+  INDEX IX_SqlOSAuthorizationRequests_ConnectionId (ConnectionId)
+  INDEX IX_SqlOSAuthorizationRequests_DeviceAuthorizationId UNIQUE (DeviceAuthorizationId) WHERE "DeviceAuthorizationId" IS NOT NULL
+  INDEX IX_SqlOSAuthorizationRequests_InvitationId (InvitationId)
+  INDEX IX_SqlOSAuthorizationRequests_OrganizationId (OrganizationId)
+
+## SqlOSClientApplication -> dbo.SqlOSClientApplications [excluded from migrations]
+  AccessMode: AccessMode character varying(40) NOT NULL maxLength=40
+  AllowDeviceAuthorization: AllowDeviceAuthorization boolean NOT NULL
+  AllowNativeHeadlessAuth: AllowNativeHeadlessAuth boolean NOT NULL
+  AllowedScopesJson: AllowedScopesJson text NOT NULL
+  Audience: Audience character varying(850) NOT NULL maxLength=850
+  ClientId: ClientId character varying(850) NOT NULL maxLength=850
+  ClientType: ClientType character varying(40) NOT NULL maxLength=40
+  ClientUri: ClientUri character varying(850) NULL maxLength=850
+  ConfigurationFingerprint: ConfigurationFingerprint character varying(64) NULL maxLength=64
+  ConfigurationOrphanedAt: ConfigurationOrphanedAt timestamp without time zone NULL
+  ConfigurationOwner: ConfigurationOwner character varying(40) NOT NULL maxLength=40
+  ConfigurationSourceKey: ConfigurationSourceKey character varying(160) NULL maxLength=160
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  Description: Description character varying(500) NULL maxLength=500
+  DisabledAt: DisabledAt timestamp without time zone NULL
+  DisabledReason: DisabledReason character varying(500) NULL maxLength=500
+  GrantTypesJson: GrantTypesJson text NOT NULL
+  Id: Id text NOT NULL
+  IsActive: IsActive boolean NOT NULL
+  IsFirstParty: IsFirstParty boolean NOT NULL
+  LastReconciledAt: LastReconciledAt timestamp without time zone NULL
+  LastSeenAt: LastSeenAt timestamp without time zone NULL
+  LogoUri: LogoUri character varying(850) NULL maxLength=850
+  MetadataDocumentUrl: MetadataDocumentUrl character varying(850) NULL maxLength=850
+  MetadataEtag: MetadataEtag character varying(256) NULL maxLength=256
+  MetadataExpiresAt: MetadataExpiresAt timestamp without time zone NULL
+  MetadataFetchedAt: MetadataFetchedAt timestamp without time zone NULL
+  MetadataJson: MetadataJson text NULL
+  MetadataLastModifiedAt: MetadataLastModifiedAt timestamp without time zone NULL
+  Name: Name character varying(200) NOT NULL maxLength=200
+  RedirectUrisJson: RedirectUrisJson text NOT NULL
+  RegistrationSource: RegistrationSource character varying(20) NOT NULL maxLength=20
+  RequirePkce: RequirePkce boolean NOT NULL
+  ResponseTypesJson: ResponseTypesJson text NOT NULL
+  SoftwareId: SoftwareId character varying(200) NULL maxLength=200
+  SoftwareVersion: SoftwareVersion character varying(120) NULL maxLength=120
+  TokenEndpointAuthMethod: TokenEndpointAuthMethod character varying(60) NOT NULL maxLength=60
+  PRIMARY KEY PK_SqlOSClientApplications (Id)
+  INDEX IX_SqlOSClientApplications_AccessMode (AccessMode)
+  INDEX IX_SqlOSClientApplications_ClientId UNIQUE (ClientId)
+  INDEX IX_SqlOSClientApplications_ConfigurationOwner_ConfigurationSou~ UNIQUE (ConfigurationOwner, ConfigurationSourceKey) WHERE "ConfigurationSourceKey" IS NOT NULL
+  INDEX IX_SqlOSClientApplications_IsActive_RegistrationSource (IsActive, RegistrationSource)
+  INDEX IX_SqlOSClientApplications_LastSeenAt (LastSeenAt)
+  INDEX IX_SqlOSClientApplications_MetadataDocumentUrl (MetadataDocumentUrl)
+  INDEX IX_SqlOSClientApplications_RegistrationSource (RegistrationSource)
+
+## SqlOSClientCredential -> dbo.SqlOSClientCredentials [excluded from migrations]
+  ClientApplicationId: ClientApplicationId character varying(64) NOT NULL maxLength=64
+  ConfigurationOwner: ConfigurationOwner character varying(40) NOT NULL maxLength=40
+  ConfigurationSourceKey: ConfigurationSourceKey character varying(160) NULL maxLength=160
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  DisplayName: DisplayName character varying(200) NULL maxLength=200
+  ExpiresAt: ExpiresAt timestamp without time zone NULL
+  Id: Id text NOT NULL
+  LastReconciledAt: LastReconciledAt timestamp without time zone NULL
+  LastUsedAt: LastUsedAt timestamp without time zone NULL
+  RevokedAt: RevokedAt timestamp without time zone NULL
+  SecretHash: SecretHash text NOT NULL
+  PRIMARY KEY PK_SqlOSClientCredentials (Id)
+  FOREIGN KEY FK_SqlOSClientCredentials_SqlOSClientApplications_ClientApplic~ (ClientApplicationId) -> SqlOSClientApplication (Id) delete=Restrict required
+  INDEX IX_SqlOSClientCredentials_ClientApplicationId_RevokedAt_Expire~ (ClientApplicationId, RevokedAt, ExpiresAt)
+  INDEX UX_SqlOSClientCredentials_Client_Owner_SourceKey UNIQUE (ClientApplicationId, ConfigurationOwner, ConfigurationSourceKey) WHERE "ConfigurationSourceKey" IS NOT NULL
+
+## SqlOSConsentGrant -> dbo.SqlOSConsentGrants [excluded from migrations]
+  ClientApplicationId: ClientApplicationId character varying(64) NOT NULL maxLength=64
+  ClientMetadataFingerprint: ClientMetadataFingerprint character varying(64) NULL maxLength=64
+  GrantedAt: GrantedAt timestamp without time zone NOT NULL
+  Id: Id text NOT NULL
+  RevocationReason: RevocationReason character varying(200) NULL maxLength=200
+  RevokedAt: RevokedAt timestamp without time zone NULL
+  Scope: Scope character varying(4000) NOT NULL maxLength=4000
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL concurrency
+  UserId: UserId character varying(64) NOT NULL maxLength=64
+  PRIMARY KEY PK_SqlOSConsentGrants (Id)
+  FOREIGN KEY FK_SqlOSConsentGrants_SqlOSClientApplications_ClientApplicatio~ (ClientApplicationId) -> SqlOSClientApplication (Id) delete=Restrict required
+  FOREIGN KEY FK_SqlOSConsentGrants_SqlOSUsers_UserId (UserId) -> SqlOSUser (Id) delete=Restrict required
+  INDEX IX_SqlOSConsentGrants_ClientApplicationId (ClientApplicationId)
+  INDEX UX_SqlOSConsentGrants_ActiveUserClient UNIQUE (UserId, ClientApplicationId) WHERE "RevokedAt" IS NULL
+
+## SqlOSCredential -> dbo.SqlOSCredentials [excluded from migrations]
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  Id: Id text NOT NULL
+  LastUsedAt: LastUsedAt timestamp without time zone NULL
+  RevokedAt: RevokedAt timestamp without time zone NULL
+  SecretHash: SecretHash text NOT NULL
+  SecretVersion: SecretVersion integer NOT NULL
+  Type: Type character varying(50) NOT NULL maxLength=50
+  UserId: UserId text NOT NULL
+  PRIMARY KEY PK_SqlOSCredentials (Id)
+  FOREIGN KEY FK_SqlOSCredentials_SqlOSUsers_UserId (UserId) -> SqlOSUser (Id) delete=Restrict required
+  INDEX IX_SqlOSCredentials_UserId (UserId)
+
+## SqlOSDeviceAuthorization -> dbo.SqlOSDeviceAuthorizations [excluded from migrations]
+  ApprovedAt: ApprovedAt timestamp without time zone NULL
+  ApprovedOrganizationId: ApprovedOrganizationId text NULL
+  ApprovedUserId: ApprovedUserId text NULL
+  AuthTime: AuthTime timestamp without time zone NULL
+  AuthenticationMethod: AuthenticationMethod character varying(50) NULL maxLength=50
+  ClientApplicationId: ClientApplicationId character varying(64) NOT NULL maxLength=64
+  ConsumedAt: ConsumedAt timestamp without time zone NULL concurrency
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  DeniedAt: DeniedAt timestamp without time zone NULL
+  DeviceCodeHash: DeviceCodeHash text NOT NULL
+  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL
+  Id: Id text NOT NULL
+  IpAddress: IpAddress character varying(64) NULL maxLength=64
+  LastPolledAt: LastPolledAt timestamp without time zone NULL
+  PollCount: PollCount integer NOT NULL
+  PollingIntervalSeconds: PollingIntervalSeconds integer NOT NULL
+  Resource: Resource character varying(2048) NULL maxLength=2048
+  Scope: Scope character varying(1000) NOT NULL maxLength=1000
+  SlowDownCount: SlowDownCount integer NOT NULL
+  Status: Status character varying(32) NOT NULL maxLength=32
+  UserAgent: UserAgent character varying(500) NULL maxLength=500
+  UserCode: UserCode character varying(32) NOT NULL maxLength=32
+  UserCodeHash: UserCodeHash text NOT NULL
+  PRIMARY KEY PK_SqlOSDeviceAuthorizations (Id)
+  FOREIGN KEY FK_SqlOSDeviceAuthorizations_SqlOSClientApplications_ClientApp~ (ClientApplicationId) -> SqlOSClientApplication (Id) delete=Restrict required
+  FOREIGN KEY FK_SqlOSDeviceAuthorizations_SqlOSOrganizations_ApprovedOrgani~ (ApprovedOrganizationId) -> SqlOSOrganization (Id) delete=Restrict optional
+  FOREIGN KEY FK_SqlOSDeviceAuthorizations_SqlOSUsers_ApprovedUserId (ApprovedUserId) -> SqlOSUser (Id) delete=Restrict optional
+  INDEX IX_SqlOSDeviceAuthorizations_ApprovedOrganizationId (ApprovedOrganizationId)
+  INDEX IX_SqlOSDeviceAuthorizations_ApprovedUserId (ApprovedUserId)
+  INDEX IX_SqlOSDeviceAuthorizations_ClientApplicationId_CreatedAt (ClientApplicationId, CreatedAt)
+  INDEX IX_SqlOSDeviceAuthorizations_ClientApplicationId_Status_Expire~ (ClientApplicationId, Status, ExpiresAt)
+  INDEX IX_SqlOSDeviceAuthorizations_DeviceCodeHash UNIQUE (DeviceCodeHash)
+  INDEX IX_SqlOSDeviceAuthorizations_ExpiresAt (ExpiresAt)
+  INDEX IX_SqlOSDeviceAuthorizations_IpAddress_CreatedAt (IpAddress, CreatedAt)
+  INDEX IX_SqlOSDeviceAuthorizations_UserCodeHash UNIQUE (UserCodeHash)
+
+## SqlOSEmailOtpChallenge -> dbo.SqlOSEmailOtpChallenges [excluded from migrations]
+  AttemptCount: AttemptCount integer NOT NULL
+  AuthorizationRequestId: AuthorizationRequestId text NULL
+  ChallengeTokenHash: ChallengeTokenHash character varying(128) NOT NULL maxLength=128
+  ClientApplicationId: ClientApplicationId text NULL
+  CodeHash: CodeHash character varying(128) NOT NULL maxLength=128
+  ConsumedAt: ConsumedAt timestamp without time zone NULL concurrency
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  Email: Email character varying(320) NOT NULL maxLength=320
+  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL
+  Id: Id text NOT NULL
+  InvalidatedAt: InvalidatedAt timestamp without time zone NULL
+  InvalidatedReason: InvalidatedReason character varying(120) NULL maxLength=120
+  IpAddress: IpAddress character varying(128) NULL maxLength=128
+  LastSentAt: LastSentAt timestamp without time zone NOT NULL
+  MaxAttempts: MaxAttempts integer NOT NULL
+  NormalizedEmail: NormalizedEmail character varying(320) NOT NULL maxLength=320
+  RequestedOrganizationId: RequestedOrganizationId text NULL
+  UserAgent: UserAgent character varying(512) NULL maxLength=512
+  UserEmailId: UserEmailId text NULL
+  UserId: UserId text NULL
+  PRIMARY KEY PK_SqlOSEmailOtpChallenges (Id)
+  FOREIGN KEY FK_SqlOSEmailOtpChallenges_SqlOSAuthorizationRequests_Authoriz~ (AuthorizationRequestId) -> SqlOSAuthorizationRequest (Id) delete=Restrict optional
+  FOREIGN KEY FK_SqlOSEmailOtpChallenges_SqlOSClientApplications_ClientAppli~ (ClientApplicationId) -> SqlOSClientApplication (Id) delete=Restrict optional
+  FOREIGN KEY FK_SqlOSEmailOtpChallenges_SqlOSUserEmails_UserEmailId (UserEmailId) -> SqlOSUserEmail (Id) delete=Restrict optional
+  FOREIGN KEY FK_SqlOSEmailOtpChallenges_SqlOSUsers_UserId (UserId) -> SqlOSUser (Id) delete=Restrict optional
+  INDEX IX_SqlOSEmailOtpChallenges_AuthorizationRequestId (AuthorizationRequestId)
+  INDEX IX_SqlOSEmailOtpChallenges_ChallengeTokenHash UNIQUE (ChallengeTokenHash)
+  INDEX IX_SqlOSEmailOtpChallenges_ClientApplicationId_CreatedAt (ClientApplicationId, CreatedAt)
+  INDEX IX_SqlOSEmailOtpChallenges_IpAddress_CreatedAt (IpAddress, CreatedAt)
+  INDEX IX_SqlOSEmailOtpChallenges_NormalizedEmail_CreatedAt (NormalizedEmail, CreatedAt)
+  INDEX IX_SqlOSEmailOtpChallenges_UserEmailId (UserEmailId)
+  INDEX IX_SqlOSEmailOtpChallenges_UserId (UserId)
+
+## SqlOSExternalIdentity -> dbo.SqlOSExternalIdentities [excluded from migrations]
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  Email: Email text NULL
+  Id: Id text NOT NULL
+  Issuer: Issuer text NOT NULL
+  OidcConnectionId: OidcConnectionId text NULL
+  SsoConnectionId: ConnectionId text NULL
+  Subject: Subject text NOT NULL
+  UserId: UserId text NOT NULL
+  PRIMARY KEY PK_SqlOSExternalIdentities (Id)
+  FOREIGN KEY FK_SqlOSExternalIdentities_SqlOSAuthOidcConnections_OidcConnec~ (OidcConnectionId) -> SqlOSOidcConnection (Id) delete=Restrict optional
+  FOREIGN KEY FK_SqlOSExternalIdentities_SqlOSSsoConnections_ConnectionId (SsoConnectionId) -> SqlOSSsoConnection (Id) delete=Restrict optional
+  FOREIGN KEY FK_SqlOSExternalIdentities_SqlOSUsers_UserId (UserId) -> SqlOSUser (Id) delete=Restrict required
+  INDEX IX_SqlOSExternalIdentities_ConnectionId_Subject UNIQUE (SsoConnectionId, Subject) WHERE "ConnectionId" IS NOT NULL
+  INDEX IX_SqlOSExternalIdentities_ConnectionId_UserId UNIQUE (SsoConnectionId, UserId) WHERE "ConnectionId" IS NOT NULL
+  INDEX IX_SqlOSExternalIdentities_OidcConnectionId_Subject UNIQUE (OidcConnectionId, Subject) WHERE "OidcConnectionId" IS NOT NULL
+  INDEX IX_SqlOSExternalIdentities_UserId (UserId)
+
+## SqlOSInvitation -> dbo.SqlOSInvitations [excluded from migrations]
+  AcceptedAt: AcceptedAt timestamp without time zone NULL concurrency
+  AcceptedByUserId: AcceptedByUserId text NULL
+  ClientApplicationId: ClientApplicationId text NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CustomFieldsJson: CustomFieldsJson text NULL
+  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL
+  Id: Id text NOT NULL
+  InvitedByUserId: InvitedByUserId text NULL
+  InvitedEmail: InvitedEmail character varying(320) NOT NULL maxLength=320
+  IpAddress: IpAddress character varying(128) NULL maxLength=128
+  LastSendError: LastSendError character varying(500) NULL maxLength=500
+  LastSentAt: LastSentAt timestamp without time zone NULL
+  NormalizedEmail: NormalizedEmail character varying(320) NOT NULL maxLength=320
+  OrganizationId: OrganizationId text NOT NULL
+  RedirectUri: RedirectUri character varying(2048) NULL maxLength=2048
+  Resource: Resource character varying(2048) NULL maxLength=2048
+  RevokedAt: RevokedAt timestamp without time zone NULL
+  RevokedReason: RevokedReason character varying(120) NULL maxLength=120
+  Role: Role character varying(50) NOT NULL maxLength=50
+  Scope: Scope character varying(1000) NULL maxLength=1000
+  TokenHash: TokenHash character varying(128) NOT NULL maxLength=128
+  UserAgent: UserAgent character varying(512) NULL maxLength=512
+  PRIMARY KEY PK_SqlOSInvitations (Id)
+  FOREIGN KEY FK_SqlOSInvitations_SqlOSClientApplications_ClientApplicationId (ClientApplicationId) -> SqlOSClientApplication (Id) delete=Restrict optional
+  FOREIGN KEY FK_SqlOSInvitations_SqlOSOrganizations_OrganizationId (OrganizationId) -> SqlOSOrganization (Id) delete=Restrict required
+  FOREIGN KEY FK_SqlOSInvitations_SqlOSUsers_AcceptedByUserId (AcceptedByUserId) -> SqlOSUser (Id) delete=Restrict optional
+  FOREIGN KEY FK_SqlOSInvitations_SqlOSUsers_InvitedByUserId (InvitedByUserId) -> SqlOSUser (Id) delete=Restrict optional
+  INDEX IX_SqlOSInvitations_AcceptedByUserId (AcceptedByUserId)
+  INDEX IX_SqlOSInvitations_ClientApplicationId (ClientApplicationId)
+  INDEX IX_SqlOSInvitations_ExpiresAt (ExpiresAt)
+  INDEX IX_SqlOSInvitations_InvitedByUserId_CreatedAt (InvitedByUserId, CreatedAt)
+  INDEX IX_SqlOSInvitations_IpAddress_CreatedAt (IpAddress, CreatedAt)
+  INDEX IX_SqlOSInvitations_NormalizedEmail_CreatedAt (NormalizedEmail, CreatedAt)
+  INDEX IX_SqlOSInvitations_OrganizationId_NormalizedEmail_CreatedAt (OrganizationId, NormalizedEmail, CreatedAt)
+  INDEX IX_SqlOSInvitations_TokenHash UNIQUE (TokenHash)
+
+## SqlOSIssuerSessionFamily -> dbo.SqlOSAuthPageSessionFamilies [excluded from migrations]
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  Id: Id text NOT NULL
+  OrganizationId: OrganizationId character varying(64) NULL maxLength=64
+  RevocationReason: RevocationReason character varying(200) NULL maxLength=200
+  RevokedAt: RevokedAt timestamp without time zone NULL concurrency
+  UserId: UserId text NOT NULL
+  PRIMARY KEY PK_SqlOSAuthPageSessionFamilies (Id)
+  FOREIGN KEY FK_SqlOSAuthPageSessionFamilies_SqlOSOrganizations_Organizatio~ (OrganizationId) -> SqlOSOrganization (Id) delete=Restrict optional
+  FOREIGN KEY FK_SqlOSAuthPageSessionFamilies_SqlOSUsers_UserId (UserId) -> SqlOSUser (Id) delete=Restrict required
+  INDEX IX_SqlOSAuthPageSessionFamilies_OrganizationId_RevokedAt (OrganizationId, RevokedAt)
+  INDEX IX_SqlOSAuthPageSessionFamilies_UserId_RevokedAt (UserId, RevokedAt)
+
+## SqlOSMembership -> dbo.SqlOSMemberships [excluded from migrations]
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  IsActive: IsActive boolean NOT NULL
+  OrganizationId: OrganizationId text NOT NULL
+  Role: Role character varying(50) NOT NULL maxLength=50
+  UserId: UserId text NOT NULL
+  PRIMARY KEY PK_SqlOSMemberships (OrganizationId, UserId)
+  FOREIGN KEY FK_SqlOSMemberships_SqlOSOrganizations_OrganizationId (OrganizationId) -> SqlOSOrganization (Id) delete=Restrict required
+  FOREIGN KEY FK_SqlOSMemberships_SqlOSUsers_UserId (UserId) -> SqlOSUser (Id) delete=Restrict required
+  INDEX IX_SqlOSMemberships_UserId (UserId)
+
+## SqlOSMfaAttemptBucket -> dbo.SqlOSMfaAttemptBuckets [excluded from migrations]
+  AttemptCount: AttemptCount integer NOT NULL
+  BucketKey: BucketKey character varying(512) NOT NULL maxLength=512
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  Id: Id text NOT NULL
+  Scope: Scope character varying(40) NOT NULL maxLength=40
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  WindowStartedAt: WindowStartedAt timestamp without time zone NULL
+  PRIMARY KEY PK_SqlOSMfaAttemptBuckets (Id)
+  INDEX IX_SqlOSMfaAttemptBuckets_Scope_BucketKey UNIQUE (Scope, BucketKey)
+
+## SqlOSMfaAttemptReservation -> dbo.SqlOSMfaAttemptReservations [excluded from migrations]
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL
+  Id: Id text NOT NULL
+  PRIMARY KEY PK_SqlOSMfaAttemptReservations (Id)
+  INDEX IX_SqlOSMfaAttemptReservations_ExpiresAt (ExpiresAt)
+
+## SqlOSMfaAttemptReservationBucket -> dbo.SqlOSMfaAttemptReservationBuckets [excluded from migrations]
+  BucketId: BucketId text NOT NULL
+  ReservationId: ReservationId text NOT NULL
+  PRIMARY KEY PK_SqlOSMfaAttemptReservationBuckets (ReservationId, BucketId)
+  FOREIGN KEY FK_SqlOSMfaAttemptReservationBuckets_SqlOSMfaAttemptBuckets_Bu~ (BucketId) -> SqlOSMfaAttemptBucket (Id) delete=Cascade required
+  FOREIGN KEY FK_SqlOSMfaAttemptReservationBuckets_SqlOSMfaAttemptReservatio~ (ReservationId) -> SqlOSMfaAttemptReservation (Id) delete=Cascade required
+  INDEX IX_SqlOSMfaAttemptReservationBuckets_BucketId (BucketId)
+
+## SqlOSMfaSettings -> dbo.SqlOSMfaSettings [excluded from migrations]
+  AvailableFactorsJson: AvailableFactorsJson text NOT NULL
+  ConfigurationFingerprint: ConfigurationFingerprint character varying(64) NULL maxLength=64
+  ConfigurationOrphanedAt: ConfigurationOrphanedAt timestamp without time zone NULL
+  ConfigurationOwner: ConfigurationOwner character varying(40) NOT NULL maxLength=40
+  ConfigurationSourceKey: ConfigurationSourceKey character varying(160) NULL maxLength=160
+  Enabled: Enabled boolean NOT NULL
+  Id: Id character varying(64) NOT NULL maxLength=64
+  LastReconciledAt: LastReconciledAt timestamp without time zone NULL
+  RecoveryCodesEnabled: RecoveryCodesEnabled boolean NOT NULL
+  RequireForAllUsers: RequireForAllUsers boolean NOT NULL
+  RequireForOwnersAndAdmins: RequireForOwnersAndAdmins boolean NOT NULL
+  RequiredRolesJson: RequiredRolesJson text NOT NULL
+  TotpEnabled: TotpEnabled boolean NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UserSelfEnrollmentEnabled: UserSelfEnrollmentEnabled boolean NOT NULL
+  PRIMARY KEY PK_SqlOSMfaSettings (Id)
+
+## SqlOSOidcConnection -> dbo.SqlOSAuthOidcConnections [excluded from migrations]
+  AcceptedAcrValuesJson: AcceptedAcrValuesJson text NOT NULL
+  AcceptedAmrValuesJson: AcceptedAmrValuesJson text NOT NULL
+  AllowedCallbackUrisJson: AllowedCallbackUrisJson text NOT NULL
+  AppleKeyId: AppleKeyId character varying(100) NULL maxLength=100
+  ApplePrivateKeyEncrypted: ApplePrivateKeyEncrypted text NULL
+  AppleTeamId: AppleTeamId character varying(100) NULL maxLength=100
+  AuthorizationEndpoint: AuthorizationEndpoint character varying(1000) NULL maxLength=1000
+  ClaimMappingJson: ClaimMappingJson text NOT NULL
+  ClientAuthMethod: ClientAuthMethod character varying(40) NOT NULL maxLength=40
+  ClientId: ClientId character varying(300) NOT NULL maxLength=300
+  ClientSecretEncrypted: ClientSecretEncrypted text NULL
+  ConfigurationFingerprint: ConfigurationFingerprint character varying(64) NULL maxLength=64
+  ConfigurationOrphanedAt: ConfigurationOrphanedAt timestamp without time zone NULL
+  ConfigurationOwner: ConfigurationOwner character varying(40) NOT NULL maxLength=40
+  ConfigurationSourceKey: ConfigurationSourceKey character varying(160) NULL maxLength=160
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  DiscoveryUrl: DiscoveryUrl character varying(500) NULL maxLength=500
+  DisplayName: DisplayName character varying(200) NOT NULL maxLength=200
+  Id: Id text NOT NULL
+  IsEnabled: IsEnabled boolean NOT NULL
+  Issuer: Issuer character varying(500) NULL maxLength=500
+  JwksUri: JwksUri character varying(1000) NULL maxLength=1000
+  LastReconciledAt: LastReconciledAt timestamp without time zone NULL
+  LogoDataUrl: LogoDataUrl text NULL
+  MicrosoftTenant: MicrosoftTenant character varying(200) NULL maxLength=200
+  Protocol: Protocol character varying(40) NOT NULL maxLength=40
+  ProviderType: ProviderType character varying(40) NOT NULL maxLength=40
+  ScopesJson: ScopesJson text NOT NULL
+  TokenEndpoint: TokenEndpoint character varying(1000) NULL maxLength=1000
+  TrustUpstreamMfa: TrustUpstreamMfa boolean NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UseDiscovery: UseDiscovery boolean NOT NULL
+  UseUserInfo: UseUserInfo boolean NOT NULL
+  UserInfoEndpoint: UserInfoEndpoint character varying(1000) NULL maxLength=1000
+  PRIMARY KEY PK_SqlOSAuthOidcConnections (Id)
+  INDEX IX_SqlOSAuthOidcConnections_ConfigurationOwner_ConfigurationSo~ UNIQUE (ConfigurationOwner, ConfigurationSourceKey) WHERE "ConfigurationSourceKey" IS NOT NULL
+
+## SqlOSOrganization -> dbo.SqlOSOrganizations [excluded from migrations]
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  Id: Id text NOT NULL
+  IsActive: IsActive boolean NOT NULL
+  Name: Name character varying(200) NOT NULL maxLength=200
+  PrimaryDomain: PrimaryDomain character varying(320) NULL maxLength=320
+  Slug: Slug character varying(120) NOT NULL maxLength=120
+  PRIMARY KEY PK_SqlOSOrganizations (Id)
+  INDEX IX_SqlOSOrganizations_PrimaryDomain UNIQUE (PrimaryDomain) WHERE "PrimaryDomain" IS NOT NULL
+  INDEX IX_SqlOSOrganizations_Slug UNIQUE (Slug)
+
+## SqlOSOrganizationDomain -> dbo.SqlOSOrganizationDomains [excluded from migrations]
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedByUserId: CreatedByUserId character varying(64) NULL maxLength=64
+  Domain: Domain character varying(320) NOT NULL maxLength=320
+  Id: Id text NOT NULL
+  LastCheckedAt: LastCheckedAt timestamp without time zone NULL
+  LastError: LastError character varying(1000) NULL maxLength=1000
+  OrganizationId: OrganizationId text NOT NULL
+  RevokedAt: RevokedAt timestamp without time zone NULL
+  Status: Status character varying(50) NOT NULL maxLength=50
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  VerificationToken: VerificationToken character varying(160) NULL maxLength=160
+  VerifiedAt: VerifiedAt timestamp without time zone NULL
+  PRIMARY KEY PK_SqlOSOrganizationDomains (Id)
+  FOREIGN KEY FK_SqlOSOrganizationDomains_SqlOSOrganizations_OrganizationId (OrganizationId) -> SqlOSOrganization (Id) delete=Restrict required
+  INDEX IX_SqlOSOrganizationDomains_Domain_Status (Domain, Status)
+  INDEX IX_SqlOSOrganizationDomains_OrganizationId_Domain UNIQUE (OrganizationId, Domain) WHERE "RevokedAt" IS NULL
+  INDEX IX_SqlOSOrganizationDomains_OrganizationId_Status (OrganizationId, Status)
+
+## SqlOSOrganizationMfaPolicy -> dbo.SqlOSOrganizationMfaPolicies [excluded from migrations]
+  AvailableFactorsJson: AvailableFactorsJson text NOT NULL
+  IsEnabled: IsEnabled boolean NOT NULL
+  OrganizationId: OrganizationId character varying(64) NOT NULL maxLength=64
+  RecoveryCodesEnabled: RecoveryCodesEnabled boolean NOT NULL
+  RequireMfaForAllUsers: RequireMfaForAllUsers boolean NOT NULL
+  RequireMfaForOwnersAndAdmins: RequireMfaForOwnersAndAdmins boolean NOT NULL
+  RequiredRolesJson: RequiredRolesJson text NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UserSelfEnrollmentEnabled: UserSelfEnrollmentEnabled boolean NOT NULL
+  PRIMARY KEY PK_SqlOSOrganizationMfaPolicies (OrganizationId)
+  FOREIGN KEY FK_SqlOSOrganizationMfaPolicies_SqlOSOrganizations_Organizatio~ (OrganizationId) -> SqlOSOrganization (Id) delete=Restrict required unique
+
+## SqlOSPasswordLoginBucket -> dbo.SqlOSPasswordLoginBuckets [excluded from migrations]
+  BucketKey: BucketKey character varying(512) NOT NULL maxLength=512
+  ClientKey: ClientKey character varying(850) NULL maxLength=850
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  FailureCount: FailureCount integer NOT NULL
+  Id: Id text NOT NULL
+  IpAddress: IpAddress character varying(128) NULL maxLength=128
+  LastFailureAt: LastFailureAt timestamp without time zone NULL
+  LastSuccessAt: LastSuccessAt timestamp without time zone NULL
+  LockedUntil: LockedUntil timestamp without time zone NULL
+  LockoutReason: LockoutReason character varying(120) NULL maxLength=120
+  NormalizedEmail: NormalizedEmail character varying(320) NULL maxLength=320
+  Scope: Scope character varying(40) NOT NULL maxLength=40
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UserAgentHash: UserAgentHash character varying(128) NULL maxLength=128
+  UserId: UserId character varying(64) NULL maxLength=64
+  WindowStartedAt: WindowStartedAt timestamp without time zone NULL
+  PRIMARY KEY PK_SqlOSPasswordLoginBuckets (Id)
+  FOREIGN KEY FK_SqlOSPasswordLoginBuckets_SqlOSUsers_UserId (UserId) -> SqlOSUser (Id) delete=Restrict optional
+  INDEX IX_SqlOSPasswordLoginBuckets_IpAddress_UpdatedAt (IpAddress, UpdatedAt)
+  INDEX IX_SqlOSPasswordLoginBuckets_LockedUntil (LockedUntil)
+  INDEX IX_SqlOSPasswordLoginBuckets_NormalizedEmail_UpdatedAt (NormalizedEmail, UpdatedAt)
+  INDEX IX_SqlOSPasswordLoginBuckets_Scope_BucketKey UNIQUE (Scope, BucketKey)
+  INDEX IX_SqlOSPasswordLoginBuckets_UserId_UpdatedAt (UserId, UpdatedAt)
+
+## SqlOSPasswordLoginReservation -> dbo.SqlOSPasswordLoginReservations [excluded from migrations]
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL
+  Id: Id text NOT NULL
+  PRIMARY KEY PK_SqlOSPasswordLoginReservations (Id)
+  INDEX IX_SqlOSPasswordLoginReservations_ExpiresAt (ExpiresAt)
+
+## SqlOSPasswordLoginReservationBucket -> dbo.SqlOSPasswordLoginReservationBuckets [excluded from migrations]
+  BucketId: BucketId text NOT NULL
+  ReservationId: ReservationId text NOT NULL
+  PRIMARY KEY PK_SqlOSPasswordLoginReservationBuckets (ReservationId, BucketId)
+  FOREIGN KEY FK_SqlOSPasswordLoginReservationBuckets_SqlOSPasswordLoginBuck~ (BucketId) -> SqlOSPasswordLoginBucket (Id) delete=Cascade required
+  FOREIGN KEY FK_SqlOSPasswordLoginReservationBuckets_SqlOSPasswordLoginRese~ (ReservationId) -> SqlOSPasswordLoginReservation (Id) delete=Cascade required
+  INDEX IX_SqlOSPasswordLoginReservationBuckets_BucketId (BucketId)
+
+## SqlOSPhoneOtpChallenge -> dbo.SqlOSPhoneOtpChallenges [excluded from migrations]
+  AttemptCount: AttemptCount integer NOT NULL
+  AuthorizationRequestId: AuthorizationRequestId text NULL
+  ChallengeTokenHash: ChallengeTokenHash character varying(128) NOT NULL maxLength=128
+  ClientApplicationId: ClientApplicationId text NULL
+  ConsumedAt: ConsumedAt timestamp without time zone NULL concurrency
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL
+  Id: Id text NOT NULL
+  InvalidatedAt: InvalidatedAt timestamp without time zone NULL
+  InvalidatedReason: InvalidatedReason character varying(120) NULL maxLength=120
+  IpAddress: IpAddress character varying(128) NULL maxLength=128
+  LastSentAt: LastSentAt timestamp without time zone NOT NULL
+  MaskedPhoneNumber: MaskedPhoneNumber character varying(32) NOT NULL maxLength=32
+  PhoneNumberEncrypted: PhoneNumberEncrypted character varying(2048) NOT NULL maxLength=2048
+  PhoneNumberHash: PhoneNumberHash character varying(128) NOT NULL maxLength=128
+  Provider: Provider character varying(40) NOT NULL maxLength=40
+  ProviderChallengeId: ProviderChallengeId character varying(128) NULL maxLength=128
+  ProviderStarted: ProviderStarted boolean NOT NULL
+  ProviderStatus: ProviderStatus character varying(80) NULL maxLength=80
+  Purpose: Purpose character varying(32) NOT NULL maxLength=32
+  RequestedOrganizationId: RequestedOrganizationId text NULL
+  UserAgent: UserAgent character varying(512) NULL maxLength=512
+  UserId: UserId text NULL
+  UserPhoneNumberId: UserPhoneNumberId text NULL
+  PRIMARY KEY PK_SqlOSPhoneOtpChallenges (Id)
+  FOREIGN KEY FK_SqlOSPhoneOtpChallenges_SqlOSAuthorizationRequests_Authoriz~ (AuthorizationRequestId) -> SqlOSAuthorizationRequest (Id) delete=Restrict optional
+  FOREIGN KEY FK_SqlOSPhoneOtpChallenges_SqlOSClientApplications_ClientAppli~ (ClientApplicationId) -> SqlOSClientApplication (Id) delete=Restrict optional
+  FOREIGN KEY FK_SqlOSPhoneOtpChallenges_SqlOSUserPhoneNumbers_UserPhoneNumb~ (UserPhoneNumberId) -> SqlOSUserPhoneNumber (Id) delete=Restrict optional
+  FOREIGN KEY FK_SqlOSPhoneOtpChallenges_SqlOSUsers_UserId (UserId) -> SqlOSUser (Id) delete=Restrict optional
+  INDEX IX_SqlOSPhoneOtpChallenges_AuthorizationRequestId (AuthorizationRequestId)
+  INDEX IX_SqlOSPhoneOtpChallenges_ChallengeTokenHash UNIQUE (ChallengeTokenHash)
+  INDEX IX_SqlOSPhoneOtpChallenges_ClientApplicationId_CreatedAt (ClientApplicationId, CreatedAt)
+  INDEX IX_SqlOSPhoneOtpChallenges_IpAddress_CreatedAt (IpAddress, CreatedAt)
+  INDEX IX_SqlOSPhoneOtpChallenges_PhoneNumberHash_CreatedAt (PhoneNumberHash, CreatedAt)
+  INDEX IX_SqlOSPhoneOtpChallenges_UserId_CreatedAt (UserId, CreatedAt)
+  INDEX IX_SqlOSPhoneOtpChallenges_UserPhoneNumberId (UserPhoneNumberId)
+
+## SqlOSRecoveryCode -> dbo.SqlOSRecoveryCodes [excluded from migrations]
+  CodeHash: CodeHash character varying(128) NOT NULL maxLength=128
+  ConsumedAt: ConsumedAt timestamp without time zone NULL concurrency
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  Id: Id character varying(64) NOT NULL maxLength=64
+  RevokedAt: RevokedAt timestamp without time zone NULL
+  UserId: UserId character varying(64) NOT NULL maxLength=64
+  PRIMARY KEY PK_SqlOSRecoveryCodes (Id)
+  FOREIGN KEY FK_SqlOSRecoveryCodes_SqlOSUsers_UserId (UserId) -> SqlOSUser (Id) delete=Restrict required
+  INDEX IX_SqlOSRecoveryCodes_CodeHash UNIQUE (CodeHash)
+  INDEX IX_SqlOSRecoveryCodes_UserId_ConsumedAt_RevokedAt (UserId, ConsumedAt, RevokedAt)
+
+## SqlOSRefreshToken -> dbo.SqlOSRefreshTokens [excluded from migrations]
+  ConsumedAt: ConsumedAt timestamp without time zone NULL concurrency
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL
+  FamilyId: FamilyId text NOT NULL
+  Id: Id text NOT NULL
+  ReplacedByTokenId: ReplacedByTokenId text NULL
+  ReplacementAccessTokenExpiresAt: ReplacementAccessTokenExpiresAt timestamp without time zone NULL
+  ReplacementOrganizationId: ReplacementOrganizationId text NULL
+  ReplacementTokenResponse: ReplacementAccessToken text NULL
+  RevokedAt: RevokedAt timestamp without time zone NULL
+  SessionId: SessionId text NOT NULL
+  TokenHash: TokenHash text NOT NULL
+  PRIMARY KEY PK_SqlOSRefreshTokens (Id)
+  FOREIGN KEY FK_SqlOSRefreshTokens_SqlOSSessions_SessionId (SessionId) -> SqlOSSession (Id) delete=Restrict required
+  INDEX IX_SqlOSRefreshTokens_SessionId (SessionId)
+  INDEX IX_SqlOSRefreshTokens_TokenHash UNIQUE (TokenHash)
+
+## SqlOSSamlReplay -> dbo.SqlOSSamlReplays [excluded from migrations]
+  AssertionId: AssertionId character varying(450) NOT NULL maxLength=450
+  ConnectionId: ConnectionId text NOT NULL
+  ConsumedAt: ConsumedAt timestamp without time zone NOT NULL
+  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL
+  Id: Id text NOT NULL
+  ResponseId: ResponseId character varying(450) NOT NULL maxLength=450
+  PRIMARY KEY PK_SqlOSSamlReplays (Id)
+  INDEX IX_SqlOSSamlReplays_ConnectionId_AssertionId UNIQUE (ConnectionId, AssertionId)
+  INDEX IX_SqlOSSamlReplays_ConnectionId_ResponseId UNIQUE (ConnectionId, ResponseId)
+  INDEX IX_SqlOSSamlReplays_ExpiresAt (ExpiresAt)
+
+## SqlOSScimConnection -> dbo.SqlOSScimConnections [excluded from migrations]
+  ConfigurationFingerprint: ConfigurationFingerprint character varying(64) NULL maxLength=64
+  ConfigurationOrphanedAt: ConfigurationOrphanedAt timestamp without time zone NULL
+  ConfigurationOwner: ConfigurationOwner character varying(40) NOT NULL maxLength=40
+  ConfigurationSourceKey: ConfigurationSourceKey character varying(160) NULL maxLength=160
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  DisplayName: DisplayName character varying(200) NOT NULL maxLength=200
+  GrantBoundaryResourceId: GrantBoundaryResourceId character varying(256) NULL maxLength=256
+  Id: Id text NOT NULL
+  IsEnabled: IsEnabled boolean NOT NULL
+  LastReconciledAt: LastReconciledAt timestamp without time zone NULL
+  LastSyncAt: LastSyncAt timestamp without time zone NULL
+  OrganizationId: OrganizationId text NOT NULL
+  SeedKey: SeedKey character varying(160) NULL maxLength=160
+  Source: Source character varying(40) NOT NULL maxLength=40
+  TokenHash: TokenHash character varying(128) NULL maxLength=128
+  TokenLastUsedAt: TokenLastUsedAt timestamp without time zone NULL
+  TokenPrefix: TokenPrefix character varying(24) NULL maxLength=24
+  TokenRotatedAt: TokenRotatedAt timestamp without time zone NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  PRIMARY KEY PK_SqlOSScimConnections (Id)
+  FOREIGN KEY FK_SqlOSScimConnections_SqlOSOrganizations_OrganizationId (OrganizationId) -> SqlOSOrganization (Id) delete=Restrict required
+  INDEX IX_SqlOSScimConnections_OrganizationId_ConfigurationOwner_Conf~ UNIQUE (OrganizationId, ConfigurationOwner, ConfigurationSourceKey) WHERE "ConfigurationSourceKey" IS NOT NULL
+  INDEX IX_SqlOSScimConnections_OrganizationId_IsEnabled (OrganizationId, IsEnabled)
+  INDEX IX_SqlOSScimConnections_OrganizationId_SeedKey UNIQUE (OrganizationId, SeedKey) WHERE "SeedKey" IS NOT NULL
+  INDEX IX_SqlOSScimConnections_TokenHash UNIQUE (TokenHash) WHERE "TokenHash" IS NOT NULL
+  INDEX UX_SqlOSScimConnections_OneEnabledPerOrganization UNIQUE (OrganizationId) WHERE "IsEnabled" = TRUE
+
+## SqlOSScimExternalId -> dbo.SqlOSScimExternalIds [excluded from migrations]
+  ConnectionId: ConnectionId text NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  DeletedAt: DeletedAt timestamp without time zone NULL
+  DisplayName: DisplayName character varying(300) NULL maxLength=300 collation=Latin1_General_100_CI_AS
+  EntityId: EntityId character varying(128) NOT NULL maxLength=128
+  ExternalId: ExternalId character varying(450) NULL maxLength=450 collation=Latin1_General_100_BIN2
+  FamilyName: FamilyName character varying(150) NULL maxLength=150
+  FgaSubjectId: FgaSubjectId character varying(128) NULL maxLength=128
+  FormattedName: FormattedName character varying(300) NULL maxLength=300
+  GivenName: GivenName character varying(150) NULL maxLength=150
+  Id: Id text NOT NULL
+  IsActive: IsActive boolean NOT NULL
+  LastSyncedAt: LastSyncedAt timestamp without time zone NOT NULL
+  OwnsUserLifecycle: OwnsUserLifecycle boolean NOT NULL
+  PrimaryEmail: PrimaryEmail character varying(320) NULL maxLength=320 collation=Latin1_General_100_CI_AS
+  ResourceType: ResourceType character varying(20) NOT NULL maxLength=20
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UserName: UserName character varying(450) NULL maxLength=450 collation=Latin1_General_100_CI_AS
+  PRIMARY KEY PK_SqlOSScimExternalIds (Id)
+  FOREIGN KEY FK_SqlOSScimExternalIds_SqlOSScimConnections_ConnectionId (ConnectionId) -> SqlOSScimConnection (Id) delete=Restrict required
+  INDEX IX_SqlOSScimExternalIds_ConnectionId_ResourceType_EntityId UNIQUE (ConnectionId, ResourceType, EntityId)
+  INDEX IX_SqlOSScimExternalIds_ConnectionId_ResourceType_ExternalId UNIQUE (ConnectionId, ResourceType, ExternalId) WHERE "ExternalId" IS NOT NULL
+  INDEX IX_SqlOSScimExternalIds_ConnectionId_ResourceType_UserName UNIQUE (ConnectionId, ResourceType, UserName) WHERE "UserName" IS NOT NULL
+
+## SqlOSScimGroupMapping -> dbo.SqlOSScimGroupMappings [excluded from migrations]
+  ConnectionId: ConnectionId text NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  Description: Description character varying(500) NULL maxLength=500
+  GroupDisplayName: GroupDisplayName character varying(300) NULL maxLength=300
+  GroupExternalId: GroupExternalId character varying(450) NULL maxLength=450
+  GroupPattern: GroupPattern character varying(500) NULL maxLength=500
+  Id: Id text NOT NULL
+  IsEnabled: IsEnabled boolean NOT NULL
+  MatchType: MatchType character varying(40) NOT NULL maxLength=40
+  ResourceId: ResourceId character varying(256) NULL maxLength=256
+  ResourceIdTemplate: ResourceIdTemplate character varying(500) NULL maxLength=500
+  RoleKey: RoleKey character varying(120) NOT NULL maxLength=120
+  Source: Source character varying(40) NOT NULL maxLength=40
+  SourceKey: SourceKey character varying(300) NULL maxLength=300
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  PRIMARY KEY PK_SqlOSScimGroupMappings (Id)
+  FOREIGN KEY FK_SqlOSScimGroupMappings_SqlOSScimConnections_ConnectionId (ConnectionId) -> SqlOSScimConnection (Id) delete=Restrict required
+  INDEX IX_SqlOSScimGroupMappings_ConnectionId_IsEnabled (ConnectionId, IsEnabled)
+  INDEX IX_SqlOSScimGroupMappings_ConnectionId_SourceKey UNIQUE (ConnectionId, SourceKey) WHERE "SourceKey" IS NOT NULL
+
+## SqlOSScimManagedGrant -> dbo.SqlOSScimManagedGrants [excluded from migrations]
+  ConnectionId: ConnectionId text NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  FgaGroupId: FgaGroupId character varying(128) NOT NULL maxLength=128
+  FgaGroupSubjectId: FgaGroupSubjectId character varying(128) NOT NULL maxLength=128
+  GrantId: GrantId character varying(128) NOT NULL maxLength=128
+  GroupExternalId: GroupExternalId character varying(450) NOT NULL maxLength=450
+  Id: Id text NOT NULL
+  MappingId: MappingId text NOT NULL
+  ResourceId: ResourceId character varying(256) NOT NULL maxLength=256
+  RevokedAt: RevokedAt timestamp without time zone NULL
+  RoleId: RoleId character varying(128) NOT NULL maxLength=128
+  PRIMARY KEY PK_SqlOSScimManagedGrants (Id)
+  FOREIGN KEY FK_SqlOSScimManagedGrants_SqlOSScimConnections_ConnectionId (ConnectionId) -> SqlOSScimConnection (Id) delete=Restrict required
+  FOREIGN KEY FK_SqlOSScimManagedGrants_SqlOSScimGroupMappings_MappingId (MappingId) -> SqlOSScimGroupMapping (Id) delete=Restrict required
+  INDEX IX_SqlOSScimManagedGrants_GrantId (GrantId)
+  INDEX IX_SqlOSScimManagedGrants_MappingId (MappingId)
+  INDEX IX_SqlOSScimManagedGrants_Reconcile (ConnectionId, MappingId, GroupExternalId, ResourceId, RoleId)
+
+## SqlOSScimOperationCommit -> dbo.SqlOSScimOperationCommits [excluded from migrations]
+  Id: Id text NOT NULL
+  OccurredAt: OccurredAt timestamp without time zone NOT NULL
+  PRIMARY KEY PK_SqlOSScimOperationCommits (Id)
+  INDEX IX_SqlOSScimOperationCommits_OccurredAt (OccurredAt)
+
+## SqlOSScimSyncEvent -> dbo.SqlOSScimSyncEvents [excluded from migrations]
+  Action: Action character varying(80) NOT NULL maxLength=80
+  ConnectionId: ConnectionId text NOT NULL
+  DataJson: DataJson text NULL
+  Error: Error character varying(1000) NULL maxLength=1000
+  ExternalId: ExternalId character varying(450) NULL maxLength=450
+  Id: Id text NOT NULL
+  OccurredAt: OccurredAt timestamp without time zone NOT NULL
+  OrganizationId: OrganizationId text NOT NULL
+  RequestId: RequestId character varying(128) NULL maxLength=128
+  ResourceId: ResourceId character varying(128) NULL maxLength=128
+  ResourceType: ResourceType character varying(20) NOT NULL maxLength=20
+  Result: Result character varying(40) NOT NULL maxLength=40
+  PRIMARY KEY PK_SqlOSScimSyncEvents (Id)
+  FOREIGN KEY FK_SqlOSScimSyncEvents_SqlOSOrganizations_OrganizationId (OrganizationId) -> SqlOSOrganization (Id) delete=Restrict required
+  FOREIGN KEY FK_SqlOSScimSyncEvents_SqlOSScimConnections_ConnectionId (ConnectionId) -> SqlOSScimConnection (Id) delete=Restrict required
+  INDEX IX_SqlOSScimSyncEvents_ConnectionId_OccurredAt (ConnectionId, OccurredAt)
+  INDEX IX_SqlOSScimSyncEvents_OrganizationId_OccurredAt (OrganizationId, OccurredAt)
+
+## SqlOSScopeDisplayName -> dbo.SqlOSScopeDisplayNames [excluded from migrations]
+  ConfigurationFingerprint: ConfigurationFingerprint character varying(64) NULL maxLength=64
+  ConfigurationOrphanedAt: ConfigurationOrphanedAt timestamp without time zone NULL
+  ConfigurationOwner: ConfigurationOwner character varying(40) NOT NULL maxLength=40
+  ConfigurationSourceKey: ConfigurationSourceKey character varying(200) NULL maxLength=200 collation=Latin1_General_100_BIN2
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  Description: Description character varying(1000) NULL maxLength=1000
+  DisplayName: DisplayName character varying(200) NOT NULL maxLength=200
+  Id: Id text NOT NULL
+  LastReconciledAt: LastReconciledAt timestamp without time zone NULL
+  Scope: Scope character varying(200) NOT NULL maxLength=200 collation=Latin1_General_100_BIN2
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  PRIMARY KEY PK_SqlOSScopeDisplayNames (Id)
+  INDEX IX_SqlOSScopeDisplayNames_Scope UNIQUE (Scope)
+
+## SqlOSSession -> dbo.SqlOSSessions [excluded from migrations]
+  AbsoluteExpiresAt: AbsoluteExpiresAt timestamp without time zone NOT NULL
+  AuthenticatedAt: AuthenticatedAt timestamp without time zone NULL
+  AuthenticationMethod: AuthenticationMethod character varying(50) NULL maxLength=50
+  ClientApplicationId: ClientApplicationId text NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  EffectiveAudience: EffectiveAudience character varying(2048) NULL maxLength=2048
+  Id: Id text NOT NULL
+  IdleExpiresAt: IdleExpiresAt timestamp without time zone NOT NULL
+  IpAddress: IpAddress text NULL
+  LastSeenAt: LastSeenAt timestamp without time zone NOT NULL
+  OrganizationId: OrganizationId character varying(64) NULL maxLength=64
+  Resource: Resource character varying(2048) NULL maxLength=2048
+  RevocationReason: RevocationReason text NULL
+  RevokedAt: RevokedAt timestamp without time zone NULL concurrency
+  Scope: Scope character varying(1000) NULL maxLength=1000
+  UserAgent: UserAgent text NULL
+  UserId: UserId text NOT NULL
+  PRIMARY KEY PK_SqlOSSessions (Id)
+  FOREIGN KEY FK_SqlOSSessions_SqlOSClientApplications_ClientApplicationId (ClientApplicationId) -> SqlOSClientApplication (Id) delete=Restrict optional
+  FOREIGN KEY FK_SqlOSSessions_SqlOSOrganizations_OrganizationId (OrganizationId) -> SqlOSOrganization (Id) delete=Restrict optional
+  FOREIGN KEY FK_SqlOSSessions_SqlOSUsers_UserId (UserId) -> SqlOSUser (Id) delete=Restrict required
+  INDEX IX_SqlOSSessions_ClientApplicationId (ClientApplicationId)
+  INDEX IX_SqlOSSessions_OrganizationId (OrganizationId)
+  INDEX IX_SqlOSSessions_UserId (UserId)
+
+## SqlOSSettings -> dbo.SqlOSSettings [excluded from migrations]
+  Id: Id text NOT NULL
+  RefreshTokenGraceWindowSeconds: RefreshTokenGraceWindowSeconds integer NOT NULL
+  RefreshTokenLifetimeMinutes: RefreshTokenLifetimeMinutes integer NOT NULL
+  SessionAbsoluteLifetimeMinutes: SessionAbsoluteLifetimeMinutes integer NOT NULL
+  SessionIdleTimeoutMinutes: SessionIdleTimeoutMinutes integer NOT NULL
+  SigningKeyGraceWindowDays: SigningKeyGraceWindowDays integer NOT NULL
+  SigningKeyRetiredCleanupDays: SigningKeyRetiredCleanupDays integer NOT NULL
+  SigningKeyRotationIntervalDays: SigningKeyRotationIntervalDays integer NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  PRIMARY KEY PK_SqlOSSettings (Id)
+
+## SqlOSSigningKey -> dbo.SqlOSSigningKeys [excluded from migrations]
+  ActivatedAt: ActivatedAt timestamp without time zone NOT NULL
+  Algorithm: Algorithm character varying(20) NOT NULL maxLength=20
+  CustodyProvider: CustodyProvider character varying(120) NOT NULL maxLength=120
+  Id: Id text NOT NULL
+  IsActive: IsActive boolean NOT NULL
+  KeyReference: KeyReference text NOT NULL
+  Kid: Kid character varying(120) NOT NULL maxLength=120
+  PublicKeyPem: PublicKeyPem text NOT NULL
+  RetiredAt: RetiredAt timestamp without time zone NULL
+  PRIMARY KEY PK_SqlOSSigningKeys (Id)
+  INDEX IX_SqlOSSigningKeys_IsActive UNIQUE (IsActive) WHERE "IsActive" = TRUE
+  INDEX IX_SqlOSSigningKeys_Kid UNIQUE (Kid)
+
+## SqlOSSsoConnection -> dbo.SqlOSSsoConnections [excluded from migrations]
+  AcceptedAuthnContextClassRefsJson: AcceptedAuthnContextClassRefsJson text NOT NULL
+  AutoLinkByEmail: AutoLinkByEmail boolean NOT NULL
+  AutoProvisionUsers: AutoProvisionUsers boolean NOT NULL
+  ConfigurationFingerprint: ConfigurationFingerprint character varying(64) NULL maxLength=64
+  ConfigurationOrphanedAt: ConfigurationOrphanedAt timestamp without time zone NULL
+  ConfigurationOwner: ConfigurationOwner character varying(40) NOT NULL maxLength=40
+  ConfigurationSourceKey: ConfigurationSourceKey character varying(160) NULL maxLength=160
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  DisplayName: DisplayName character varying(200) NOT NULL maxLength=200
+  EmailAttributeName: EmailAttributeName text NOT NULL
+  FirstNameAttributeName: FirstNameAttributeName text NOT NULL
+  Id: Id text NOT NULL
+  IdentityProviderEntityId: IdentityProviderEntityId character varying(500) NOT NULL maxLength=500
+  IsEnabled: IsEnabled boolean NOT NULL
+  LastNameAttributeName: LastNameAttributeName text NOT NULL
+  LastReconciledAt: LastReconciledAt timestamp without time zone NULL
+  NameIdFormat: NameIdFormat text NULL
+  OrganizationId: OrganizationId text NOT NULL
+  SingleSignOnUrl: SingleSignOnUrl character varying(2000) NOT NULL maxLength=2000
+  TrustUpstreamMfa: TrustUpstreamMfa boolean NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  X509CertificatePem: X509CertificatePem text NOT NULL
+  PRIMARY KEY PK_SqlOSSsoConnections (Id)
+  FOREIGN KEY FK_SqlOSSsoConnections_SqlOSOrganizations_OrganizationId (OrganizationId) -> SqlOSOrganization (Id) delete=Restrict required
+  INDEX IX_SqlOSSsoConnections_ConfigurationOwner_ConfigurationSourceK~ UNIQUE (ConfigurationOwner, ConfigurationSourceKey) WHERE "ConfigurationSourceKey" IS NOT NULL
+  INDEX IX_SqlOSSsoConnections_OrganizationId (OrganizationId)
+
+## SqlOSSsoPortalSession -> dbo.SqlOSSsoPortalSessions [excluded from migrations]
+  ActorType: ActorType character varying(80) NOT NULL maxLength=80
+  ConnectionId: ConnectionId text NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedByUserId: CreatedByUserId text NULL
+  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL
+  Id: Id text NOT NULL
+  IpAddress: IpAddress character varying(128) NULL maxLength=128
+  LastSeenAt: LastSeenAt timestamp without time zone NULL
+  LastTestMessage: LastTestMessage character varying(500) NULL maxLength=500
+  LastTestStatus: LastTestStatus character varying(40) NULL maxLength=40
+  LastTestedAt: LastTestedAt timestamp without time zone NULL
+  LinkTokenHash: LinkTokenHash text NOT NULL
+  OpenedAt: OpenedAt timestamp without time zone NULL
+  OrganizationId: OrganizationId text NOT NULL
+  Provider: Provider character varying(40) NULL maxLength=40
+  ReturnUrl: ReturnUrl character varying(1000) NULL maxLength=1000
+  RevokedAt: RevokedAt timestamp without time zone NULL
+  RevokedReason: RevokedReason character varying(160) NULL maxLength=160
+  SessionTokenHash: SessionTokenHash text NULL
+  UserAgent: UserAgent character varying(512) NULL maxLength=512
+  PRIMARY KEY PK_SqlOSSsoPortalSessions (Id)
+  FOREIGN KEY FK_SqlOSSsoPortalSessions_SqlOSOrganizations_OrganizationId (OrganizationId) -> SqlOSOrganization (Id) delete=Restrict required
+  FOREIGN KEY FK_SqlOSSsoPortalSessions_SqlOSSsoConnections_ConnectionId (ConnectionId) -> SqlOSSsoConnection (Id) delete=Restrict optional
+  INDEX IX_SqlOSSsoPortalSessions_ConnectionId (ConnectionId)
+  INDEX IX_SqlOSSsoPortalSessions_LinkTokenHash UNIQUE (LinkTokenHash)
+  INDEX IX_SqlOSSsoPortalSessions_OrganizationId_CreatedAt (OrganizationId, CreatedAt)
+  INDEX IX_SqlOSSsoPortalSessions_OrganizationId_RevokedAt_ExpiresAt (OrganizationId, RevokedAt, ExpiresAt)
+  INDEX IX_SqlOSSsoPortalSessions_SessionTokenHash UNIQUE (SessionTokenHash) WHERE "SessionTokenHash" IS NOT NULL
+
+## SqlOSTemporaryToken -> dbo.SqlOSTemporaryTokens [excluded from migrations]
+  ClientApplicationId: ClientApplicationId text NULL
+  ConsumedAt: ConsumedAt timestamp without time zone NULL concurrency
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL
+  Id: Id text NOT NULL
+  IssuerSessionFamilyId: AuthPageSessionFamilyId character varying(64) NULL maxLength=64
+  OrganizationId: OrganizationId text NULL
+  PayloadJson: PayloadJson text NULL concurrency
+  Purpose: Purpose character varying(80) NOT NULL maxLength=80
+  TokenHash: TokenHash text NOT NULL
+  UserId: UserId text NULL
+  PRIMARY KEY PK_SqlOSTemporaryTokens (Id)
+  FOREIGN KEY FK_SqlOSTemporaryTokens_SqlOSAuthPageSessionFamilies_AuthPageS~ (IssuerSessionFamilyId) -> SqlOSIssuerSessionFamily (Id) delete=Restrict optional
+  INDEX IX_SqlOSTemporaryTokens_AuthPageSessionFamilyId (IssuerSessionFamilyId)
+  INDEX IX_SqlOSTemporaryTokens_TokenHash UNIQUE (TokenHash)
+
+## SqlOSUser -> dbo.SqlOSUsers [excluded from migrations]
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  DefaultEmail: DefaultEmail character varying(320) NULL maxLength=320
+  DisplayName: DisplayName character varying(200) NOT NULL maxLength=200
+  Id: Id text NOT NULL
+  IsActive: IsActive boolean NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  PRIMARY KEY PK_SqlOSUsers (Id)
+
+## SqlOSUserAuthenticator -> dbo.SqlOSUserAuthenticators [excluded from migrations]
+  Algorithm: Algorithm character varying(20) NOT NULL maxLength=20
+  ConfirmedAt: ConfirmedAt timestamp without time zone NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  Digits: Digits integer NOT NULL
+  DisplayName: DisplayName character varying(120) NOT NULL maxLength=120
+  Id: Id character varying(64) NOT NULL maxLength=64
+  IsConfirmed: IsConfirmed boolean NOT NULL
+  LastAcceptedTimeStep: LastAcceptedTimeStep bigint NULL concurrency
+  LastUsedAt: LastUsedAt timestamp without time zone NULL
+  PeriodSeconds: PeriodSeconds integer NOT NULL
+  RevocationReason: RevocationReason character varying(120) NULL maxLength=120
+  RevokedAt: RevokedAt timestamp without time zone NULL
+  SecretProtected: SecretProtected character varying(2048) NOT NULL maxLength=2048
+  SecretVersion: SecretVersion integer NOT NULL
+  Type: Type character varying(40) NOT NULL maxLength=40
+  UserId: UserId character varying(64) NOT NULL maxLength=64
+  PRIMARY KEY PK_SqlOSUserAuthenticators (Id)
+  FOREIGN KEY FK_SqlOSUserAuthenticators_SqlOSUsers_UserId (UserId) -> SqlOSUser (Id) delete=Restrict required
+  INDEX IX_SqlOSUserAuthenticators_UserId_IsConfirmed_RevokedAt (UserId, IsConfirmed, RevokedAt)
+  INDEX IX_SqlOSUserAuthenticators_UserId_Type_RevokedAt (UserId, Type, RevokedAt)
+
+## SqlOSUserEmail -> dbo.SqlOSUserEmails [excluded from migrations]
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  Email: Email character varying(320) NOT NULL maxLength=320
+  Id: Id text NOT NULL
+  IsPrimary: IsPrimary boolean NOT NULL
+  IsVerified: IsVerified boolean NOT NULL
+  NormalizedEmail: NormalizedEmail character varying(320) NOT NULL maxLength=320
+  UserId: UserId text NOT NULL
+  VerifiedAt: VerifiedAt timestamp without time zone NULL
+  PRIMARY KEY PK_SqlOSUserEmails (Id)
+  FOREIGN KEY FK_SqlOSUserEmails_SqlOSUsers_UserId (UserId) -> SqlOSUser (Id) delete=Restrict required
+  INDEX IX_SqlOSUserEmails_NormalizedEmail UNIQUE (NormalizedEmail)
+  INDEX IX_SqlOSUserEmails_UserId (UserId)
+
+## SqlOSUserMfaPolicyOverride -> dbo.SqlOSUserMfaPolicyOverrides [excluded from migrations]
+  RequireMfa: RequireMfa boolean NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UserId: UserId character varying(64) NOT NULL maxLength=64
+  UserSelfEnrollmentEnabled: UserSelfEnrollmentEnabled boolean NULL
+  PRIMARY KEY PK_SqlOSUserMfaPolicyOverrides (UserId)
+  FOREIGN KEY FK_SqlOSUserMfaPolicyOverrides_SqlOSUsers_UserId (UserId) -> SqlOSUser (Id) delete=Restrict required unique
+
+## SqlOSUserPhoneNumber -> dbo.SqlOSUserPhoneNumbers [excluded from migrations]
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  DisplayValueEncrypted: DisplayValueEncrypted character varying(2048) NULL maxLength=2048
+  Id: Id text NOT NULL
+  IsPrimary: IsPrimary boolean NOT NULL
+  IsVerified: IsVerified boolean NOT NULL
+  LastUsedAt: LastUsedAt timestamp without time zone NULL
+  PhoneNumber: PhoneNumber character varying(32) NOT NULL maxLength=32
+  PhoneNumberHash: PhoneNumberHash character varying(128) NOT NULL maxLength=128
+  RemovalReason: RemovalReason character varying(120) NULL maxLength=120
+  RemovedAt: RemovedAt timestamp without time zone NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UserId: UserId text NOT NULL
+  VerifiedAt: VerifiedAt timestamp without time zone NULL
+  PRIMARY KEY PK_SqlOSUserPhoneNumbers (Id)
+  FOREIGN KEY FK_SqlOSUserPhoneNumbers_SqlOSUsers_UserId (UserId) -> SqlOSUser (Id) delete=Restrict required
+  INDEX IX_SqlOSUserPhoneNumbers_PhoneNumberHash UNIQUE (PhoneNumberHash) WHERE "RemovedAt" IS NULL
+  INDEX IX_SqlOSUserPhoneNumbers_UserId_RemovedAt (UserId, RemovedAt)
+
+## SqlOSCalendarConnection -> dbo.SqlOSCalendarConnections [excluded from migrations]
+  AccessTokenEncrypted: AccessTokenEncrypted text NULL
+  AccessTokenExpiresAt: AccessTokenExpiresAt timestamp without time zone NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  DisplayName: DisplayName character varying(200) NOT NULL maxLength=200
+  Id: Id character varying(64) NOT NULL maxLength=64
+  LastError: LastError character varying(1000) NULL maxLength=1000
+  LastErrorAt: LastErrorAt timestamp without time zone NULL
+  LastSyncAt: LastSyncAt timestamp without time zone NULL
+  Mode: Mode character varying(40) NOT NULL maxLength=40
+  OidcConnectionId: OidcConnectionId character varying(64) NOT NULL maxLength=64
+  OrganizationId: OrganizationId character varying(64) NULL maxLength=64
+  ProviderAccountEmail: ProviderAccountEmail character varying(320) NULL maxLength=320
+  ProviderAccountSubject: ProviderAccountSubject character varying(256) NULL maxLength=256
+  ProviderType: ProviderType character varying(40) NOT NULL maxLength=40
+  RefreshTokenEncrypted: RefreshTokenEncrypted text NULL
+  RevokedAt: RevokedAt timestamp without time zone NULL concurrency
+  RevokedReason: RevokedReason character varying(160) NULL maxLength=160
+  ScopesJson: ScopesJson text NOT NULL
+  Status: Status character varying(40) NOT NULL maxLength=40
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UserId: UserId character varying(64) NULL maxLength=64
+  PRIMARY KEY PK_SqlOSCalendarConnections (Id)
+  FOREIGN KEY FK_SqlOSCalendarConnections_SqlOSAuthOidcConnections_OidcConne~ (OidcConnectionId) -> SqlOSOidcConnection (Id) delete=Restrict required
+  FOREIGN KEY FK_SqlOSCalendarConnections_SqlOSOrganizations_OrganizationId (OrganizationId) -> SqlOSOrganization (Id) delete=Restrict optional
+  FOREIGN KEY FK_SqlOSCalendarConnections_SqlOSUsers_UserId (UserId) -> SqlOSUser (Id) delete=Restrict optional
+  INDEX IX_SqlOSCalendarConnections_Mode_Status (Mode, Status)
+  INDEX IX_SqlOSCalendarConnections_OidcConnectionId (OidcConnectionId)
+  INDEX IX_SqlOSCalendarConnections_OrganizationId_RevokedAt (OrganizationId, RevokedAt)
+  INDEX IX_SqlOSCalendarConnections_UserId_RevokedAt (UserId, RevokedAt)
+
+## SqlOSCalendarEvent -> dbo.SqlOSCalendarEvents [excluded from migrations]
+  CalendarConnectionId: CalendarConnectionId character varying(64) NOT NULL maxLength=64
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  EndsAtUtc: EndsAtUtc timestamp without time zone NOT NULL
+  Id: Id character varying(64) NOT NULL maxLength=64
+  IsAllDay: IsAllDay boolean NOT NULL
+  Location: Location character varying(500) NULL maxLength=500
+  Origin: Origin character varying(20) NOT NULL maxLength=20
+  ProviderCalendarId: ProviderCalendarId character varying(256) NOT NULL maxLength=256
+  ProviderEventId: ProviderEventId character varying(512) NOT NULL maxLength=512
+  ShowAs: ShowAs character varying(20) NOT NULL maxLength=20
+  StartsAtUtc: StartsAtUtc timestamp without time zone NOT NULL
+  Status: Status character varying(20) NOT NULL maxLength=20
+  Subject: Subject character varying(500) NULL maxLength=500
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  PRIMARY KEY PK_SqlOSCalendarEvents (Id)
+  FOREIGN KEY FK_SqlOSCalendarEvents_SqlOSCalendarConnections_CalendarConnec~ (CalendarConnectionId) -> SqlOSCalendarConnection (Id) delete=Cascade required
+  INDEX IX_SqlOSCalendarEvents_CalendarConnectionId_StartsAtUtc (CalendarConnectionId, StartsAtUtc)
+  INDEX IX_SqlOSCalendarEvents_ProviderEvent UNIQUE (CalendarConnectionId, ProviderCalendarId, ProviderEventId)
+
+## SqlOSCalendarSyncState -> dbo.SqlOSCalendarSyncStates [excluded from migrations]
+  CalendarConnectionId: CalendarConnectionId character varying(64) NOT NULL maxLength=64
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  DisplayName: DisplayName character varying(200) NULL maxLength=200
+  EventCount: EventCount integer NOT NULL
+  Id: Id character varying(64) NOT NULL maxLength=64
+  IsSyncEnabled: IsSyncEnabled boolean NOT NULL
+  LastSyncCompletedAt: LastSyncCompletedAt timestamp without time zone NULL
+  LastSyncError: LastSyncError character varying(1000) NULL maxLength=1000
+  LastSyncStartedAt: LastSyncStartedAt timestamp without time zone NULL
+  LastSyncStatus: LastSyncStatus character varying(40) NULL maxLength=40
+  ProviderCalendarId: ProviderCalendarId character varying(256) NOT NULL maxLength=256
+  SyncCursor: SyncCursor text NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  PRIMARY KEY PK_SqlOSCalendarSyncStates (Id)
+  FOREIGN KEY FK_SqlOSCalendarSyncStates_SqlOSCalendarConnections_CalendarCo~ (CalendarConnectionId) -> SqlOSCalendarConnection (Id) delete=Cascade required
+  INDEX IX_SqlOSCalendarSyncStates_CalendarConnectionId_ProviderCalend~ UNIQUE (CalendarConnectionId, ProviderCalendarId)
+
+## SqlOSEmailDelivery -> dbo.SqlOSEmailDeliveries [excluded from migrations]
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  FailedAt: FailedAt timestamp without time zone NULL
+  Id: Id character varying(64) NOT NULL maxLength=64
+  IdempotencyKey: IdempotencyKey character varying(200) NULL maxLength=200
+  ProviderMessageId: ProviderMessageId character varying(200) NULL maxLength=200
+  RenderedHtmlPreview: RenderedHtmlPreview text NULL
+  RenderedSubject: RenderedSubject character varying(500) NOT NULL maxLength=500
+  RenderedTextPreview: RenderedTextPreview text NOT NULL
+  SanitizedError: SanitizedError character varying(500) NULL maxLength=500
+  SentAt: SentAt timestamp without time zone NULL
+  Status: Status character varying(32) NOT NULL maxLength=32
+  TemplateId: TemplateId character varying(64) NULL maxLength=64
+  TemplateKey: TemplateKey character varying(120) NOT NULL maxLength=120
+  TemplateVersion: TemplateVersion integer NOT NULL
+  To: To character varying(320) NOT NULL maxLength=320
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  PRIMARY KEY PK_SqlOSEmailDeliveries (Id)
+  FOREIGN KEY FK_SqlOSEmailDeliveries_SqlOSEmailTemplates_TemplateId (TemplateId) -> SqlOSEmailTemplate (Id) delete=SetNull optional
+  INDEX IX_SqlOSEmailDeliveries_CreatedAt (CreatedAt)
+  INDEX IX_SqlOSEmailDeliveries_IdempotencyKey UNIQUE (IdempotencyKey) WHERE "IdempotencyKey" IS NOT NULL
+  INDEX IX_SqlOSEmailDeliveries_Status_CreatedAt (Status, CreatedAt)
+  INDEX IX_SqlOSEmailDeliveries_TemplateId (TemplateId)
+  INDEX IX_SqlOSEmailDeliveries_TemplateKey_CreatedAt (TemplateKey, CreatedAt)
+  INDEX IX_SqlOSEmailDeliveries_To_CreatedAt (To, CreatedAt)
+
+## SqlOSEmailTemplate -> dbo.SqlOSEmailTemplates [excluded from migrations]
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  DisplayName: DisplayName character varying(200) NOT NULL maxLength=200
+  HtmlBodyTemplate: HtmlBodyTemplate text NOT NULL
+  Id: Id character varying(64) NOT NULL maxLength=64
+  IsActive: IsActive boolean NOT NULL
+  Key: Key character varying(120) NOT NULL maxLength=120
+  SubjectTemplate: SubjectTemplate character varying(500) NOT NULL maxLength=500
+  TextBodyTemplate: TextBodyTemplate text NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  VariablesJson: VariablesJson text NOT NULL
+  Version: Version integer NOT NULL
+  PRIMARY KEY PK_SqlOSEmailTemplates (Id)
+  INDEX IX_SqlOSEmailTemplates_Key UNIQUE (Key)
+
+## SqlOSFgaAccessibleResource (no table)
+  Id: Id text NULL
+
+## SqlOSFgaAgent -> dbo.SqlOSFgaAgents [excluded from migrations]
+  AgentType: AgentType text NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  Description: Description text NULL
+  Id: Id text NOT NULL
+  LastRunAt: LastRunAt timestamp without time zone NULL
+  SubjectId: SubjectId text NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  PRIMARY KEY PK_SqlOSFgaAgents (Id)
+  FOREIGN KEY FK_SqlOSFgaAgents_SqlOSFgaSubjects_SubjectId (SubjectId) -> SqlOSFgaSubject (Id) delete=Restrict required unique
+  INDEX IX_SqlOSFgaAgents_SubjectId UNIQUE (SubjectId)
+
+## SqlOSFgaGrant -> dbo.SqlOSFgaGrants [excluded from migrations]
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  Description: Description text NULL
+  EffectiveFrom: EffectiveFrom timestamp without time zone NULL
+  EffectiveTo: EffectiveTo timestamp without time zone NULL
+  Id: Id text NOT NULL
+  ResourceId: ResourceId text NOT NULL
+  RoleId: RoleId text NOT NULL
+  SubjectId: SubjectId text NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  PRIMARY KEY PK_SqlOSFgaGrants (Id)
+  FOREIGN KEY FK_SqlOSFgaGrants_SqlOSFgaResources_ResourceId (ResourceId) -> SqlOSFgaResource (Id) delete=Restrict required
+  FOREIGN KEY FK_SqlOSFgaGrants_SqlOSFgaRoles_RoleId (RoleId) -> SqlOSFgaRole (Id) delete=Restrict required
+  FOREIGN KEY FK_SqlOSFgaGrants_SqlOSFgaSubjects_SubjectId (SubjectId) -> SqlOSFgaSubject (Id) delete=Restrict required
+  INDEX IX_SqlOSFgaGrants_ResourceId (ResourceId)
+  INDEX IX_SqlOSFgaGrants_RoleId (RoleId)
+  INDEX IX_SqlOSFgaGrants_SubjectId (SubjectId)
+
+## SqlOSFgaPermission -> dbo.SqlOSFgaPermissions [excluded from migrations]
+  Description: Description text NULL
+  Id: Id text NOT NULL
+  Key: Key character varying(450) NOT NULL maxLength=450
+  Name: Name text NOT NULL
+  ResourceTypeId: ResourceTypeId text NULL
+  PRIMARY KEY PK_SqlOSFgaPermissions (Id)
+  FOREIGN KEY FK_SqlOSFgaPermissions_SqlOSFgaResourceTypes_ResourceTypeId (ResourceTypeId) -> SqlOSFgaResourceType (Id) delete=Restrict optional
+  INDEX IX_SqlOSFgaPermissions_Key UNIQUE (Key)
+  INDEX IX_SqlOSFgaPermissions_ResourceTypeId (ResourceTypeId)
+
+## SqlOSFgaResource -> dbo.SqlOSFgaResources [excluded from migrations]
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  Description: Description text NULL
+  Id: Id text NOT NULL
+  IsActive: IsActive boolean NOT NULL
+  Name: Name text NOT NULL
+  ParentId: ParentId text NULL
+  ResourceTypeId: ResourceTypeId text NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  PRIMARY KEY PK_SqlOSFgaResources (Id)
+  FOREIGN KEY FK_SqlOSFgaResources_SqlOSFgaResourceTypes_ResourceTypeId (ResourceTypeId) -> SqlOSFgaResourceType (Id) delete=Restrict required
+  FOREIGN KEY FK_SqlOSFgaResources_SqlOSFgaResources_ParentId (ParentId) -> SqlOSFgaResource (Id) delete=Restrict optional
+  INDEX IX_SqlOSFgaResources_ParentId (ParentId)
+  INDEX IX_SqlOSFgaResources_ResourceTypeId (ResourceTypeId)
+
+## SqlOSFgaResourceType -> dbo.SqlOSFgaResourceTypes [excluded from migrations]
+  Description: Description text NULL
+  Id: Id text NOT NULL
+  Name: Name text NOT NULL
+  PRIMARY KEY PK_SqlOSFgaResourceTypes (Id)
+
+## SqlOSFgaRole -> dbo.SqlOSFgaRoles [excluded from migrations]
+  Description: Description text NULL
+  Id: Id text NOT NULL
+  IsVirtual: IsVirtual boolean NOT NULL
+  Key: Key text NOT NULL
+  Name: Name text NOT NULL
+  PRIMARY KEY PK_SqlOSFgaRoles (Id)
+
+## SqlOSFgaRolePermission -> dbo.SqlOSFgaRolePermissions [excluded from migrations]
+  PermissionId: PermissionId text NOT NULL
+  RoleId: RoleId text NOT NULL
+  PRIMARY KEY PK_SqlOSFgaRolePermissions (RoleId, PermissionId)
+  FOREIGN KEY FK_SqlOSFgaRolePermissions_SqlOSFgaPermissions_PermissionId (PermissionId) -> SqlOSFgaPermission (Id) delete=Restrict required
+  FOREIGN KEY FK_SqlOSFgaRolePermissions_SqlOSFgaRoles_RoleId (RoleId) -> SqlOSFgaRole (Id) delete=Restrict required
+  INDEX IX_SqlOSFgaRolePermissions_PermissionId (PermissionId)
+
+## SqlOSFgaServiceAccount -> dbo.SqlOSFgaServiceAccounts [excluded from migrations]
+  ClientId: ClientId character varying(450) NOT NULL maxLength=450
+  ClientSecretHash: ClientSecretHash text NOT NULL
+  ConfigurationFingerprint: ConfigurationFingerprint character varying(128) NULL maxLength=128
+  ConfigurationOrphanedAt: ConfigurationOrphanedAt timestamp without time zone NULL
+  ConfigurationOwner: ConfigurationOwner character varying(32) NOT NULL maxLength=32
+  ConfigurationSourceKey: ConfigurationSourceKey character varying(200) NULL maxLength=200
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  Description: Description text NULL
+  ExpiresAt: ExpiresAt timestamp without time zone NULL
+  Id: Id text NOT NULL
+  LastReconciledAt: LastReconciledAt timestamp without time zone NULL
+  LastUsedAt: LastUsedAt timestamp without time zone NULL
+  SubjectId: SubjectId text NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  PRIMARY KEY PK_SqlOSFgaServiceAccounts (Id)
+  FOREIGN KEY FK_SqlOSFgaServiceAccounts_SqlOSFgaSubjects_SubjectId (SubjectId) -> SqlOSFgaSubject (Id) delete=Restrict required unique
+  INDEX IX_SqlOSFgaServiceAccounts_ClientId UNIQUE (ClientId)
+  INDEX IX_SqlOSFgaServiceAccounts_ConfigurationOwner_ConfigurationSou~ UNIQUE (ConfigurationOwner, ConfigurationSourceKey)
+  INDEX IX_SqlOSFgaServiceAccounts_SubjectId UNIQUE (SubjectId)
+
+## SqlOSFgaSubject -> dbo.SqlOSFgaSubjects [excluded from migrations]
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  DisplayName: DisplayName text NOT NULL
+  ExternalRef: ExternalRef text NULL
+  Id: Id text NOT NULL
+  OrganizationId: OrganizationId text NULL
+  SubjectTypeId: SubjectTypeId text NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  PRIMARY KEY PK_SqlOSFgaSubjects (Id)
+  FOREIGN KEY FK_SqlOSFgaSubjects_SqlOSFgaSubjectTypes_SubjectTypeId (SubjectTypeId) -> SqlOSFgaSubjectType (Id) delete=Restrict required
+  INDEX IX_SqlOSFgaSubjects_SubjectTypeId (SubjectTypeId)
+
+## SqlOSFgaSubjectType -> dbo.SqlOSFgaSubjectTypes [excluded from migrations]
+  Description: Description text NULL
+  Id: Id text NOT NULL
+  Name: Name text NOT NULL
+  PRIMARY KEY PK_SqlOSFgaSubjectTypes (Id)
+
+## SqlOSFgaUser -> dbo.SqlOSFgaUsers [excluded from migrations]
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  Email: Email text NULL
+  Id: Id text NOT NULL
+  IsActive: IsActive boolean NOT NULL
+  LastLoginAt: LastLoginAt timestamp without time zone NULL
+  SubjectId: SubjectId text NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  PRIMARY KEY PK_SqlOSFgaUsers (Id)
+  FOREIGN KEY FK_SqlOSFgaUsers_SqlOSFgaSubjects_SubjectId (SubjectId) -> SqlOSFgaSubject (Id) delete=Restrict required unique
+  INDEX IX_SqlOSFgaUsers_SubjectId UNIQUE (SubjectId)
+
+## SqlOSFgaUserGroup -> dbo.SqlOSFgaUserGroups [excluded from migrations]
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  Description: Description text NULL
+  GroupType: GroupType text NULL
+  Id: Id text NOT NULL
+  IsActive: IsActive boolean NOT NULL
+  Name: Name text NOT NULL
+  SubjectId: SubjectId text NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  PRIMARY KEY PK_SqlOSFgaUserGroups (Id)
+  FOREIGN KEY FK_SqlOSFgaUserGroups_SqlOSFgaSubjects_SubjectId (SubjectId) -> SqlOSFgaSubject (Id) delete=Restrict required unique
+  INDEX IX_SqlOSFgaUserGroups_SubjectId UNIQUE (SubjectId)
+
+## SqlOSFgaUserGroupMembership -> dbo.SqlOSFgaUserGroupMemberships [excluded from migrations]
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  SubjectId: SubjectId text NOT NULL
+  UserGroupId: UserGroupId text NOT NULL
+  PRIMARY KEY PK_SqlOSFgaUserGroupMemberships (SubjectId, UserGroupId)
+  FOREIGN KEY FK_SqlOSFgaUserGroupMemberships_SqlOSFgaSubjects_SubjectId (SubjectId) -> SqlOSFgaSubject (Id) delete=Restrict required
+  FOREIGN KEY FK_SqlOSFgaUserGroupMemberships_SqlOSFgaUserGroups_UserGroupId (UserGroupId) -> SqlOSFgaUserGroup (Id) delete=Restrict required
+  INDEX IX_SqlOSFgaUserGroupMemberships_UserGroupId (UserGroupId)
+
+## function dbo.fn_IsResourceAccessible(resourceId text, subjectIds text, permissionId text) returns IQueryable`1
