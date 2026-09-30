@@ -1,0 +1,19 @@
+# SqlOS behavior lock transcript
+scenario: ScimUserScenarios.A_directory_client_cannot_reach_scim_under_the_dashboard_prefix
+profile: enterprise
+
+## 1. scim: a valid directory token still gets the dashboard's 404
+> POST /sqlos/scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "blocked@example.test"
+>   }
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY

@@ -213,7 +213,7 @@ public sealed class ScrubberTests
     }
 
     [TestMethod]
-    public void Cookie_expiry_is_a_relative_lifetime_and_deletion_dates_stay_literal()
+    public void Cookie_expiry_is_a_relative_lifetime_and_deletion_is_marked()
     {
         var started = new DateTimeOffset(2026, 9, 30, 18, 2, 5, 400, TimeSpan.Zero);
         var completed = started.AddMilliseconds(900);
@@ -231,7 +231,7 @@ public sealed class ScrubberTests
             sink);
 
         Assert.AreEqual("sqlos_auth_page=abc; expires=+15m; max-age=900; path=/sqlos/auth; secure; samesite=strict; httponly", lifetime);
-        Assert.AreEqual("sqlos_auth_page=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/", deletion);
+        Assert.AreEqual("sqlos_auth_page=; expires={unix-epoch}; path=/", deletion);
     }
 
     [TestMethod]

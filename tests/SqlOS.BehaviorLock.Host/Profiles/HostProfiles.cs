@@ -30,6 +30,7 @@ public static class HostProfiles
     public const string DashboardDevelopment = "dashboard-dev";
     public const string DashboardOff = "dashboard-off";
     public const string Enterprise = "enterprise";
+    public const string EnterpriseScimPath = "enterprise-scim-path";
     public const string Modules = "modules";
     public const string OAuthOnly = "oauth-only";
     public const string LegacyHost = "legacy-host";
@@ -317,6 +318,26 @@ public static class HostProfiles
                 ConfigureMinimalSingleApplication(options);
                 options.AuthServer.EnableSaml = true;
                 options.AuthServer.EnableScim = true;
+            },
+            MapApplication = MapFirstPartyApi
+        },
+        new HostProfile
+        {
+            Name = EnterpriseScimPath,
+            DeploymentModel = "Enterprise federation with SCIM served outside the dashboard prefix (AuthServer.ScimBasePath = /scim/v2), the documented way to give directories a different public path.",
+            Documentation = ["web/content/docs/guides/scim-directory-sync.mdx", "web/content/docs/reference/authserver-api.mdx"],
+            OptionsSummary =
+            [
+                "UseSingleApplication(\"Behavior Lock\", app => { Origin, ClientId = \"behavior-lock-app\", Api = \"/api\", Authorization(workspace model) })",
+                "AuthServer.EnableSaml = true, AuthServer.EnableScim = true, AuthServer.ScimBasePath = /scim/v2",
+                "Dashboard.AuthorizationCallback = operator header"
+            ],
+            ConfigureSqlOS = (options, context) =>
+            {
+                ConfigureMinimalSingleApplication(options);
+                options.AuthServer.EnableSaml = true;
+                options.AuthServer.EnableScim = true;
+                options.AuthServer.ScimBasePath = "/scim/v2";
             },
             MapApplication = MapFirstPartyApi
         },

@@ -48,6 +48,7 @@ public sealed class Transcript : IAsyncDisposable
         Setup = new ScenarioSetup(this);
         Unique = new UniqueValues(this);
         Urls = new ScenarioUrls(this);
+        Scrubber.RegisterNamed(BehaviorLockConstants.DashboardPassword, "password", "dashboard");
     }
 
     public ScenarioContext Scenario { get; }
@@ -152,6 +153,13 @@ public sealed class Transcript : IAsyncDisposable
 
     /// <summary>Adds a free-form line to the transcript, for context a reviewer needs.</summary>
     public void Note(string text) => _entries.Add(TranscriptEntry.ForNote(text));
+
+    /// <summary>
+    /// Records a document the journey decoded, such as the SAML AuthnRequest SqlOS sent to an
+    /// identity provider. XML is pretty-printed; everything is scrubbed like the rest of the transcript.
+    /// </summary>
+    public void ObserveDocument(string caption, string content)
+        => _entries.Add(TranscriptEntry.ForDocument(caption, DocumentText.Normalize(content)));
 
     /// <summary>Records the audit events written since the last audit observation, oldest first.</summary>
     public async Task ObserveAuditAsync(string? caption = null)
@@ -346,6 +354,8 @@ internal sealed record TranscriptEntry(
     public static TranscriptEntry ForEffects(string caption, IReadOnlyList<OutboundEffect> effects) => new("effects", caption, null, null, effects, null);
 
     public static TranscriptEntry ForNote(string note) => new("note", null, null, null, null, note);
+
+    public static TranscriptEntry ForDocument(string caption, string content) => new("document", caption, null, null, null, content);
 }
 
 /// <summary>

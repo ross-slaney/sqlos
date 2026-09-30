@@ -1,0 +1,258 @@
+# SqlOS behavior lock transcript
+scenario: FgaProbeScenarios.Checks_and_list_filters_follow_a_role_grant_on_a_synced_entity
+profile: hosted
+
+## 1. probe: provision the user as an FGA subject
+> POST /__probe/fga/subjects
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "displayName": "Alice",
+>     "subjectId": "{usr#1}",
+>     "type": "user"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "record": "SqlOSFgaUser",
+      "subjectId": "{usr#1}",
+      "type": "user"
+    }
+
+## 2. probe: saving an ISqlOSResourceEntity syncs its FGA resource
+> POST /__probe/fga/workspaces
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "id": "alpha",
+>     "name": "Alpha"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "resource": {
+        "id": "workspace::alpha",
+        "isActive": true,
+        "name": "Alpha",
+        "parentId": null,
+        "resourceTypeId": "workspace"
+      },
+      "workspace": {
+        "id": "alpha",
+        "isActive": true,
+        "name": "Alpha",
+        "parentResourceId": null,
+        "resourceId": "workspace::alpha"
+      }
+    }
+
+## 3. probe: a second workspace
+> POST /__probe/fga/workspaces
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "id": "beta",
+>     "name": "Beta"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "resource": {
+        "id": "workspace::beta",
+        "isActive": true,
+        "name": "Beta",
+        "parentId": null,
+        "resourceTypeId": "workspace"
+      },
+      "workspace": {
+        "id": "beta",
+        "isActive": true,
+        "name": "Beta",
+        "parentResourceId": null,
+        "resourceId": "workspace::beta"
+      }
+    }
+
+## 4. probe: grant the reader role on Alpha
+> POST /__probe/fga/grants
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "resourceId": "workspace::alpha",
+>     "role": "workspace_reader",
+>     "subjectId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "id": "grant::{hex#1}",
+      "resourceId": "workspace::alpha",
+      "roleId": "workspace_reader",
+      "subjectId": "{usr#1}"
+    }
+
+## 5. probe: read is allowed on Alpha
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::alpha",
+>     "subjectId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": true,
+      "error": null,
+      "trace": [
+        {
+          "detail": "Checking access to Alpha (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Read workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"Alice\" + 0 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": "Alice"
+        },
+        {
+          "detail": "Checking 1 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Alpha",
+          "grantId": null,
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Role \"Workspace reader\" provides permission \"Read workspace\" via grant at Alpha",
+          "grantId": "grant::{hex#1}",
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleName": "Workspace reader",
+          "step": "Access Granted",
+          "subjectName": "Alice"
+        }
+      ]
+    }
+
+## 6. probe: write is denied on Alpha
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.write",
+>     "resourceId": "workspace::alpha",
+>     "subjectId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": false,
+      "error": null,
+      "trace": [
+        {
+          "detail": "Checking access to Alpha (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Write workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"Alice\" + 0 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": "Alice"
+        },
+        {
+          "detail": "Checking 1 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Alpha",
+          "grantId": null,
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Role \"Workspace reader\" does not provide permission \"Write workspace\"",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": "Workspace reader",
+          "step": "Role Checked",
+          "subjectName": null
+        },
+        {
+          "detail": "No matching grants found that provide permission \"Write workspace\"",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Access Denied",
+          "subjectName": null
+        }
+      ]
+    }
+
+## 7. probe: BuildFilterAsync lists only Alpha
+> POST /__probe/fga/filter
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "subjectId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "count": 1,
+      "workspaces": [
+        {
+          "name": "Alpha",
+          "resourceId": "workspace::alpha"
+        }
+      ]
+    }

@@ -86,6 +86,70 @@ public sealed class ScenarioSetup
             request);
     }
 
+    /// <summary>
+    /// Verifies ownership of a unique domain (<c>{domain:name}</c>) for the organization the way a
+    /// customer would: an operator issues an SSO setup link, the portal starts DNS verification,
+    /// the TXT record is published in the fake DNS, and the portal confirms it.
+    /// </summary>
+    public async Task<string> VerifyDomainAsync(ScenarioOrganization organization, string name)
+    {
+        var domain = _transcript.Unique.Domain(name);
+        var session = await SendOperatorAsync(
+            $"/sqlos/admin/auth/api/organizations/{organization.Id}/sso-portal/sessions",
+            new { organizationId = organization.Id });
+        var portal = _transcript.NewBrowser("sso-portal-setup");
+        var opened = _transcript.Discard(await portal.GetAsync(new Uri(session.JsonString("setupUrl")).PathAndQuery));
+        if (opened.StatusCode is not (302 or 200))
+        {
+            throw new InvalidOperationException($"Opening the SSO setup link failed: {opened.Describe()} {opened.Preview()}");
+        }
+
+        var started = _transcript.Discard(await portal.PostJsonAsync(
+            "/sqlos/admin/auth/sso-portal/api/domain",
+            new { domain },
+            options => options.Header("X-SqlOS-Request", "1")));
+        EnsureSucceeded(started);
+        PublishDnsTxt(
+            started.JsonString("domain.ownershipRecord.name"),
+            started.JsonString("domain.ownershipRecord.value"));
+        var confirmed = _transcript.Discard(await portal.PostJsonAsync(
+            $"/sqlos/admin/auth/sso-portal/api/domains/{started.JsonString("domain.id")}/confirm",
+            new { },
+            options => options.Header("X-SqlOS-Request", "1")));
+        EnsureSucceeded(confirmed);
+        if (confirmed.JsonString("domain.status") != "active")
+        {
+            throw new InvalidOperationException($"Domain verification did not activate the domain: {confirmed.Preview()}");
+        }
+
+        await _transcript.SkipAuditAsync();
+        return domain;
+    }
+
+    /// <summary>Creates an enabled SAML connection for the organization, trusting <paramref name="identityProvider"/>.</summary>
+    public async Task<string> CreateSamlConnectionAsync(
+        ScenarioOrganization organization,
+        Fakes.TestSamlIdentityProvider identityProvider,
+        bool autoProvisionUsers = true,
+        bool autoLinkByEmail = false)
+    {
+        identityProvider.RegisterWith(_transcript);
+        var created = await SendOperatorAsync("/sqlos/admin/auth/api/sso-connections", new
+        {
+            organizationId = organization.Id,
+            displayName = $"{organization.Name} SAML",
+            identityProviderEntityId = identityProvider.EntityId,
+            singleSignOnUrl = identityProvider.SingleSignOnUrl,
+            x509CertificatePem = identityProvider.CertificatePem,
+            autoProvisionUsers,
+            autoLinkByEmail,
+            emailAttributeName = "email",
+            firstNameAttributeName = "first_name",
+            lastNameAttributeName = "last_name"
+        });
+        return created.JsonString("id");
+    }
+
     /// <summary>Publishes a DNS TXT record in the host's fake DNS.</summary>
     public void PublishDnsTxt(string recordName, string value) => _transcript.Fakes.Dns.Publish(recordName, value);
 
@@ -147,10 +211,19 @@ public sealed class UniqueValues
 
     public string Email(string name, string domain = "example.test")
     {
-        var value = $"{name}-{Suffix()}@{domain}";
+        // At a scenario's own (already unique) domain the local part needs no suffix.
+        var value = domain == "example.test" ? $"{name}-{Suffix()}@{domain}" : $"{name}@{domain}";
         _transcript.Scrubber.RegisterNamed(value, "email", name);
         // SqlOS stores and audits normalized (upper-case) addresses; name that form too.
         _transcript.Scrubber.RegisterNamed(value.ToUpperInvariant(), "email", name.ToUpperInvariant());
+        return value;
+    }
+
+    /// <summary>A unique domain under <c>example.test</c>, named <c>{domain:name}</c> in transcripts.</summary>
+    public string Domain(string name)
+    {
+        var value = $"{name}-{Suffix()}.example.test";
+        _transcript.Scrubber.RegisterNamed(value, "domain", name);
         return value;
     }
 

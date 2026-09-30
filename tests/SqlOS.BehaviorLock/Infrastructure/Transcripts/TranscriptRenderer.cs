@@ -66,6 +66,14 @@ internal static partial class TranscriptRenderer
                 case "note":
                     builder.Append("# ").Append(entry.Note).Append('\n');
                     break;
+                case "document":
+                    builder.Append("## document: ").Append(entry.Caption).Append('\n');
+                    foreach (var line in entry.Note!.Split('\n'))
+                    {
+                        builder.Append("    ").Append(line).Append('\n');
+                    }
+
+                    break;
             }
         }
 

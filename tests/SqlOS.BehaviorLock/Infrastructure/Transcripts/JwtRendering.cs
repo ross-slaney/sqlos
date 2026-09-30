@@ -155,7 +155,8 @@ public static partial class JwtRendering
 /// Renders one <c>Set-Cookie</c> header: the name, the value registered as a <c>{cookie#n}</c>
 /// placeholder, and every attribute in the order and spelling the server sent. An
 /// <c>expires</c> date is recorded as a duration relative to the response (<c>expires=+15m</c>)
-/// when it is a lifetime; the fixed past date used to delete a cookie stays literal.
+/// when it is a lifetime; the fixed past date used to delete a cookie renders as
+/// <c>{unix-epoch}</c> (or <c>{past}</c> for any other past date).
 /// </summary>
 public static class SetCookieRendering
 {
@@ -208,8 +209,8 @@ public static class SetCookieRendering
         var seconds = (expires.AddSeconds(0.5) - middle).TotalSeconds;
         if (seconds < -86_400)
         {
-            // A fixed date in the past: the cookie is being deleted. Keep it literal.
-            return literal;
+            // A fixed date in the past deletes the cookie; say which one, without a timestamp.
+            return expires == DateTimeOffset.UnixEpoch ? "{unix-epoch}" : "{past}";
         }
 
         var rounded = Math.Abs(seconds) >= 120
