@@ -548,9 +548,13 @@ public sealed partial class SqlOSAdminService
 
     public async Task<SqlOSUser> CreateUserAsync(SqlOSCreateUserRequest request, CancellationToken cancellationToken = default)
     {
-        var normalizedEmail = NormalizeEmail(request.Email);
+        if (!SqlOSEmailAddress.TryCanonicalize(request.Email, out var address, out var normalizedEmail))
+        {
+            throw new InvalidOperationException(SqlOSEmailAddress.InvalidEmailMessage);
+        }
+
         var existingEmail = await _context.Set<SqlOSUserEmail>()
-            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
+            .FindByNormalizedEmailAsync(normalizedEmail, request.Email, cancellationToken);
         if (existingEmail != null)
         {
             throw new InvalidOperationException($"Email '{request.Email}' already exists.");
@@ -560,7 +564,7 @@ public sealed partial class SqlOSAdminService
         {
             Id = _cryptoService.GenerateId("usr"),
             DisplayName = request.DisplayName,
-            DefaultEmail = request.Email,
+            DefaultEmail = address,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -569,7 +573,7 @@ public sealed partial class SqlOSAdminService
         {
             Id = _cryptoService.GenerateId("eml"),
             UserId = user.Id,
-            Email = request.Email,
+            Email = address,
             NormalizedEmail = normalizedEmail,
             IsPrimary = true,
             IsVerified = false,
@@ -2815,7 +2819,17 @@ public sealed partial class SqlOSAdminService
             _ => throw new InvalidOperationException("Unsupported application access mode.")
         };
 
-    public static string NormalizeEmail(string email) => email.Trim().ToUpperInvariant();
+    /// <summary>
+    /// Returns SqlOS's canonical email key: NFC, an IDNA ASCII domain, and ASCII-only case
+    /// folding (non-ASCII local-part characters are kept as written). For input that is not a
+    /// valid address it returns a key that can never equal the key of a valid address. SQL
+    /// equality on this key is only a candidate filter; SqlOS confirms every security-relevant
+    /// match by ordinal comparison of canonical keys in code.
+    /// </summary>
+    public static string NormalizeEmail(string email)
+        => SqlOSEmailAddress.TryNormalize(email, out var normalizedEmail)
+            ? normalizedEmail
+            : SqlOSEmailAddress.FallbackKey(email);
 
     public static string? NormalizeDomain(string? value)
     {

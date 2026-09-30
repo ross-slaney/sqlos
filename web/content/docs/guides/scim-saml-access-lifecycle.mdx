@@ -74,7 +74,7 @@ The first row is the most seamless common enterprise setup when the IdP controls
 In the delegated setup portal, **Allow JIT provisioning from SSO** maps to `AutoProvisionUsers`; keep it off. **Require SSO for existing members** maps to `AutoLinkByEmail`.
 
 <Callout type="warning" title="SCIM and membership are not identity proof">
-  SqlOS users are host-global. A SAML connection may authenticate an already-bound subject, and it may first-link an existing user only when the connection's organization owns that exact email domain through an active verified domain or operator-managed `PrimaryDomain`. An unsigned `login_hint`, SCIM record, or organization membership cannot authorize takeover of an unbound global user.
+  SqlOS users are host-global. A SAML connection may authenticate an already-bound subject, and it may first-link an existing user only when the connection's organization owns that exact email domain through an active verified domain or operator-managed `PrimaryDomain`. An unsigned `login_hint`, SCIM record, or organization membership cannot authorize takeover of an unbound global user. SCIM and SAML JIT can create or re-point a verified email only inside the organization's active verified domains, a directory stops owning a person once they have an independent login or another organization's membership, and only the owning link can change a person's global active state. See [Email and lifecycle ownership](/docs/guides/scim-directory-sync#email-and-lifecycle-ownership).
 </Callout>
 
 ## 3. Provision before the first SAML sign-in
@@ -127,7 +127,7 @@ Unassign or deactivate the test user through the IdP's provisioning control. Sql
 - sessions for that organization are revoked
 - SCIM-managed group memberships and inherited mapped access are removed
 - the user, external identity history, and unrelated organization memberships remain
-- when this was the person's last active membership, the user becomes inactive and their own [calendar connections](/docs/guides/calendar-integration#offboarding-and-revocation) are revoked with reason `scim_deprovisioned`; reactivation does not restore them
+- when the connection owns the person's lifecycle (it created them and they have no independent anchor), the user becomes inactive and their own [calendar connections](/docs/guides/calendar-integration#offboarding-and-revocation) are revoked with reason `scim_deprovisioned`; reactivation does not restore them. A person with another active membership, a password, an authenticator, a phone number, or a social or other organization's SAML identity stays globally active
 
 Attempt SAML sign-in again. The IdP may still authenticate the person, but SqlOS must not issue access for the deprovisioned organization.
 
@@ -138,7 +138,7 @@ Then reassign or reactivate the user through SCIM. Confirm the existing membersh
 When the canonical work email changes:
 
 1. Update the directory source.
-2. Let SCIM update the current primary email in SqlOS.
+2. Let SCIM update the current primary email in SqlOS. The new address must be at one of the organization's verified domains, and the directory must still own the person's lifecycle; otherwise the change applies only to the directory's own link.
 3. Update the SAML attribute from the same source.
 4. Test sign-in before removing any transitional IdP alias.
 

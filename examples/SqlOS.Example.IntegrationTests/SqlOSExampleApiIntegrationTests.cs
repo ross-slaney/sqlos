@@ -634,6 +634,24 @@ public sealed class SqlOSExampleApiIntegrationTests
         orgResponse.EnsureSuccessStatusCode();
         var orgJson = JsonDocument.Parse(await orgResponse.Content.ReadAsStringAsync());
         var organizationId = orgJson.RootElement.GetProperty("id").GetString();
+        // JIT provisioning only creates emails inside the organization's verified domains.
+        var samlDomain = $"saml-{Guid.NewGuid():N}.example.com";
+        using (var domainFactory = ExampleApiFixture.CreateFactory())
+        using (var domainScope = domainFactory.Services.CreateScope())
+        {
+            var db = domainScope.ServiceProvider.GetRequiredService<ExampleAppDbContext>();
+            db.Set<SqlOSOrganizationDomain>().Add(new SqlOSOrganizationDomain
+            {
+                Id = $"dom_{Guid.NewGuid():N}"[..28],
+                OrganizationId = organizationId!,
+                Domain = samlDomain,
+                Status = SqlOSOrganizationDomainStatuses.Active,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+                VerifiedAt = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
 
         using var rsa = RSA.Create(2048);
         var request = new CertificateRequest("CN=SqlOSExampleIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
@@ -714,7 +732,7 @@ public sealed class SqlOSExampleApiIntegrationTests
         var authUrl = authUrlJson.RootElement.GetProperty("authorizationUrl").GetString()!;
         var flow = ParseSamlFlow(authUrl);
 
-        var samlResponse = BuildSignedSamlResponse(certificate, "urn:example:idp", "saml-user@example.com", "Saml", "User", flow);
+        var samlResponse = BuildSignedSamlResponse(certificate, "urn:example:idp", $"saml-user@{samlDomain}", "Saml", "User", flow);
         var acsResponse = await ExampleApiFixture.Client.PostAsync(
             $"/sqlos/auth/saml/acs/{connectionId}",
             new FormUrlEncodedContent(new Dictionary<string, string>

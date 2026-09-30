@@ -16,18 +16,18 @@ public sealed class SqlOSHomeRealmDiscoveryService
 
     public async Task<SqlOSHomeRealmDiscoveryResult> DiscoverAsync(SqlOSHomeRealmDiscoveryRequest request, CancellationToken cancellationToken = default)
     {
-        var normalizedDomain = SqlOSAdminService.NormalizeDomain(request.Email);
-        if (string.IsNullOrWhiteSpace(normalizedDomain))
+        if (!SqlOSEmailAddress.TryNormalize(request.Email, out var normalizedEmail))
         {
             return new SqlOSHomeRealmDiscoveryResult("password", null, null, null, null);
         }
 
-        var normalizedEmail = string.IsNullOrWhiteSpace(request.Email)
-            ? null
-            : SqlOSAdminService.NormalizeEmail(request.Email);
+        // Domains are matched as canonical IDNA ASCII strings and confirmed in code, so a
+        // look-alike domain can never route to another organization's SSO.
+        var asciiDomain = SqlOSEmailAddress.GetDomain(normalizedEmail);
+        var legacyDomain = SqlOSAdminService.NormalizeDomain(request.Email) ?? asciiDomain;
 
-        var verifiedMatches = await _context.Set<SqlOSOrganizationDomain>()
-            .Where(domain => domain.Domain == normalizedDomain
+        var verifiedMatches = (await _context.Set<SqlOSOrganizationDomain>()
+            .Where(domain => domain.Domain == asciiDomain
                 && domain.Status == SqlOSOrganizationDomainStatuses.Active
                 && domain.RevokedAt == null)
             .Join(
@@ -52,13 +52,14 @@ public sealed class SqlOSHomeRealmDiscoveryService
                     connection.AutoLinkByEmail,
                     connection.AutoProvisionUsers
                 })
-            .ToListAsync(cancellationToken);
+            .ToListAsync(cancellationToken))
+            .Where(match => SqlOSOrganizationEmailDomains.SameDomain(match.PrimaryDomain, asciiDomain));
 
         foreach (var verifiedMatch in verifiedMatches)
         {
             if (await ShouldRouteToSsoAsync(
                 verifiedMatch.OrganizationId,
-                normalizedEmail,
+                request.Email,
                 verifiedMatch.AutoLinkByEmail,
                 verifiedMatch.AutoProvisionUsers,
                 cancellationToken))
@@ -72,8 +73,8 @@ public sealed class SqlOSHomeRealmDiscoveryService
             }
         }
 
-        var match = await _context.Set<SqlOSOrganization>()
-            .Where(x => x.PrimaryDomain == normalizedDomain && x.IsActive)
+        var primaryMatches = await _context.Set<SqlOSOrganization>()
+            .Where(x => (x.PrimaryDomain == asciiDomain || x.PrimaryDomain == legacyDomain) && x.IsActive)
             .Select(x => new
             {
                 x.Id,
@@ -89,12 +90,13 @@ public sealed class SqlOSHomeRealmDiscoveryService
                     })
                     .FirstOrDefault()
             })
-            .FirstOrDefaultAsync(cancellationToken);
+            .ToListAsync(cancellationToken);
+        var match = primaryMatches.FirstOrDefault(x => SqlOSOrganizationEmailDomains.SameDomain(x.PrimaryDomain, asciiDomain));
 
         if (match?.Connection == null
             || !await ShouldRouteToSsoAsync(
                 match.Id,
-                normalizedEmail,
+                request.Email,
                 match.Connection.AutoLinkByEmail,
                 match.Connection.AutoProvisionUsers,
                 cancellationToken))
@@ -137,20 +139,21 @@ public sealed class SqlOSHomeRealmDiscoveryService
 
     private async Task<bool> ShouldRouteToSsoAsync(
         string organizationId,
-        string? normalizedEmail,
+        string? email,
         bool requireSsoForExistingMembers,
         bool allowJitProvisioning,
         CancellationToken cancellationToken)
     {
-        var hasExistingMember = !string.IsNullOrWhiteSpace(normalizedEmail)
-            && await _context.Set<SqlOSUserEmail>()
-                .Where(email => email.NormalizedEmail == normalizedEmail && email.IsVerified)
-                .Join(
-                    _context.Set<SqlOSMembership>().Where(membership => membership.OrganizationId == organizationId && membership.IsActive),
-                    email => email.UserId,
-                    membership => membership.UserId,
-                    (_, _) => true)
-                .AnyAsync(cancellationToken);
+        var existingEmail = await _context.Set<SqlOSUserEmail>()
+            .AsNoTracking()
+            .FindByEmailAsync(email, cancellationToken);
+        var hasExistingMember = existingEmail is { IsVerified: true }
+            && await _context.Set<SqlOSMembership>()
+                .AnyAsync(
+                    membership => membership.OrganizationId == organizationId
+                        && membership.IsActive
+                        && membership.UserId == existingEmail.UserId,
+                    cancellationToken);
 
         return hasExistingMember
             ? requireSsoForExistingMembers

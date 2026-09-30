@@ -50,6 +50,7 @@ public sealed partial class ScimProtocolIntegrationTests
             var other = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Other Tenant", null));
             await admin.CreateMembershipAsync(server.OrganizationId, new SqlOSCreateMembershipRequest(shared.Id, "member"));
             await admin.CreateMembershipAsync(other.Id, new SqlOSCreateMembershipRequest(shared.Id, "member"));
+            await MarkEmailsVerifiedAsync(context, shared.Id);
             context.Set<SqlOSSession>().AddRange(
                 NewSession("sess_scim_tenant", shared.Id, server.OrganizationId),
                 NewSession("sess_other_tenant", shared.Id, other.Id));
@@ -109,6 +110,8 @@ public sealed partial class ScimProtocolIntegrationTests
             suspended.IsActive = false;
             suspendedUserId = suspended.Id;
             await context.SaveChangesAsync();
+            // Directory linking needs a proven mailbox; an unverified address is never linked.
+            await MarkEmailsVerifiedAsync(context, activeUserId, suspendedUserId);
         }
 
         using var activeCreate = await server.SendAsync(HttpMethod.Post, "/Users", UserPayload(
@@ -155,9 +158,9 @@ public sealed partial class ScimProtocolIntegrationTests
     }
 
     [TestMethod]
-    public async Task ScimOwnedUserLifecycle_AggregatesAcrossOrganizationsRegardlessOfUpdateOrder()
+    public async Task ScimLifecycle_OnlyTheOwningLinkChangesGlobalActivity_AndOwnershipEndsWithAnotherMembership()
     {
-        await using var server = await ScimSqlServer.CreateAsync("ScimLifecycleAggregate");
+        await using var server = await ScimSqlServer.CreateAsync("ScimLifecycleOwner");
         using var ownerCreate = await server.SendAsync(HttpMethod.Post, "/Users", UserPayload(
             "owner-directory-user",
             "owner-directory-user@example.test",
@@ -199,6 +202,8 @@ public sealed partial class ScimProtocolIntegrationTests
         });
         secondCreate["id"]!.GetValue<string>().Should().Be(userId);
 
+        // The person now has an active membership in another organization, so the owning
+        // directory releases ownership on its next write and only deprovisions its own access.
         using var ownerDeactivate = await server.SendAsync(HttpMethod.Patch, $"/Users/{userId}", new JsonObject
         {
             ["schemas"] = new JsonArray(PatchSchema),
@@ -212,8 +217,12 @@ public sealed partial class ScimProtocolIntegrationTests
         ownerDeactivate.StatusCode.Should().Be(HttpStatusCode.OK, await ownerDeactivate.Content.ReadAsStringAsync());
         await using (var afterOwnerDeactivate = server.Services.CreateAsyncScope())
         {
-            (await afterOwnerDeactivate.ServiceProvider.GetRequiredService<TestSqlOSDbContext>()
-                .Set<SqlOSUser>().SingleAsync(item => item.Id == userId)).IsActive.Should().BeTrue();
+            var context = afterOwnerDeactivate.ServiceProvider.GetRequiredService<TestSqlOSDbContext>();
+            (await context.Set<SqlOSUser>().SingleAsync(item => item.Id == userId)).IsActive.Should().BeTrue();
+            (await context.Set<SqlOSScimExternalId>().SingleAsync(item => item.ConnectionId == server.ConnectionId && item.EntityId == userId))
+                .OwnsUserLifecycle.Should().BeFalse();
+            (await context.Set<SqlOSAuditEvent>().AnyAsync(item => item.Action == "scim.user.lifecycle_released" && item.OrganizationId == server.OrganizationId))
+                .Should().BeTrue();
         }
 
         await secondScim.PatchUserAsync(secondConnectionEntity, userId, new JsonObject
@@ -228,22 +237,11 @@ public sealed partial class ScimProtocolIntegrationTests
         });
         await using var verify = server.Services.CreateAsyncScope();
         var verifyContext = verify.ServiceProvider.GetRequiredService<TestSqlOSDbContext>();
-        (await verifyContext.Set<SqlOSUser>().SingleAsync(item => item.Id == userId)).IsActive.Should().BeFalse();
+        (await verifyContext.Set<SqlOSUser>().SingleAsync(item => item.Id == userId)).IsActive
+            .Should().BeTrue("a link that does not own the lifecycle only deprovisions its own organization");
         (await verifyContext.Set<SqlOSScimExternalId>().SingleAsync(item => item.ConnectionId == secondConnectionId)).OwnsUserLifecycle.Should().BeFalse();
-
-        await secondScim.PatchUserAsync(secondConnectionEntity, userId, new JsonObject
-        {
-            ["schemas"] = new JsonArray(PatchSchema),
-            ["Operations"] = new JsonArray(new JsonObject
-            {
-                ["op"] = "replace",
-                ["path"] = "active",
-                ["value"] = true
-            })
-        });
-        verifyContext.ChangeTracker.Clear();
-        (await verifyContext.Set<SqlOSUser>().SingleAsync(item => item.Id == userId)).IsActive.Should().BeTrue(
-            "a non-owner SCIM link must reactivate a lifecycle that is SCIM-managed by another connection");
+        (await verifyContext.Set<SqlOSMembership>().Where(item => item.UserId == userId).ToListAsync())
+            .Should().OnlyContain(item => !item.IsActive);
     }
 
     [TestMethod]
@@ -716,6 +714,36 @@ public sealed partial class ScimProtocolIntegrationTests
             AbsoluteExpiresAt = DateTime.UtcNow.AddHours(1)
         };
 
+    private static async Task AddVerifiedDomainsAsync(TestSqlOSDbContext context, string organizationId, params string[] domains)
+    {
+        foreach (var domain in domains)
+        {
+            context.Set<SqlOSOrganizationDomain>().Add(new SqlOSOrganizationDomain
+            {
+                Id = $"dom_{Guid.NewGuid():N}"[..28],
+                OrganizationId = organizationId,
+                Domain = domain,
+                Status = SqlOSOrganizationDomainStatuses.Active,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+                VerifiedAt = DateTime.UtcNow
+            });
+        }
+
+        await context.SaveChangesAsync();
+    }
+
+    private static async Task MarkEmailsVerifiedAsync(TestSqlOSDbContext context, params string[] userIds)
+    {
+        foreach (var email in await context.Set<SqlOSUserEmail>().Where(x => userIds.Contains(x.UserId)).ToListAsync())
+        {
+            email.IsVerified = true;
+            email.VerifiedAt = DateTime.UtcNow;
+        }
+
+        await context.SaveChangesAsync();
+    }
+
     private static JsonObject UserPayload(string externalId, string userName, string email, string displayName)
         => new()
         {
@@ -797,6 +825,8 @@ public sealed partial class ScimProtocolIntegrationTests
             await using var scope = app.Services.CreateAsyncScope();
             var admin = scope.ServiceProvider.GetRequiredService<SqlOSAdminService>();
             var organization = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"SCIM {Guid.NewGuid():N}", null));
+            // SCIM may only create or re-point verified emails inside the organization's verified domains.
+            await AddVerifiedDomainsAsync(scope.ServiceProvider.GetRequiredService<TestSqlOSDbContext>(), organization.Id, "example.test", "mail.example.test");
             var connection = await admin.CreateScimConnectionAsync(new SqlOSCreateScimConnectionRequest(
                 organization.Id,
                 "Integration Directory",

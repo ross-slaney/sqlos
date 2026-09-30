@@ -2024,11 +2024,10 @@ public sealed class SqlOSHeadlessAuthService
         string email,
         CancellationToken cancellationToken)
     {
-        var normalizedEmail = SqlOSAdminService.NormalizeEmail(email);
         var emailRecord = await _context.Set<SqlOSUserEmail>()
             .Include(x => x.User)
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
+            .FindByEmailAsync(email, cancellationToken);
 
         return emailRecord == null
             ? null

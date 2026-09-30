@@ -177,11 +177,11 @@ Internally these map to the existing connection flags:
 - `RequireSsoForExistingMembers` maps to `AutoLinkByEmail`
 - `AllowJitProvisioning` maps to `AutoProvisionUsers`
 
-When `RequireSsoForExistingMembers` is enabled, a user who already belongs to the organization and has a verified email on the SSO domain is sent to SSO. The first successful SAML sign-in can link the IdP subject to that existing user only when the connection's organization already owns that email domain. SqlOS does not create a user or membership on this path.
+When `RequireSsoForExistingMembers` is enabled, a user who already belongs to the organization and has a verified email on the SSO domain is sent to SSO. The first successful SAML sign-in can link the IdP subject to that existing user only when the connection's organization already owns that email domain. SqlOS does not create a user or membership on this path. If that existing account's email is still unverified, the first link [claims](/docs/authserver/users-and-credentials#unverified-email-addresses-and-claims) it and revokes the credentials attached before it.
 
 Home realm discovery still follows `RequireSsoForExistingMembers`: when it is disabled, email-first discovery does not force an existing member into SSO. Enable it when existing members should be routed to SSO automatically.
 
-When `AllowJitProvisioning` is enabled, a successful SAML sign-in may create a missing user, or add organization membership for an existing user whose email domain the organization owns. Keep this disabled when access should be invitation- or admin-managed.
+When `AllowJitProvisioning` is enabled, a successful SAML sign-in may create a missing user, or add organization membership for an existing user whose email domain the organization owns. It creates new users only for email addresses at the organization's active verified domains; an operator-managed `PrimaryDomain` alone is not enough, and any other address is denied with nothing created. Keep this disabled when access should be invitation- or admin-managed.
 
 Every first-time email link and every JIT provision requires the configured email attribute in the signed SAML assertion. The login hint used for discovery and routing is never accepted as an authenticated email claim. An already-linked IdP subject can continue to resolve its existing user without an email attribute.
 

@@ -637,7 +637,7 @@ public sealed class SqlOSAuthorizationServerService
 
         var emailRecord = await _context.Set<SqlOSUserEmail>()
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
+            .FindByEmailAsync(email, cancellationToken);
         attempt = attempt with { UserId = emailRecord?.UserId };
 
         if (emailRecord != null
@@ -1505,6 +1505,7 @@ public sealed class SqlOSAuthorizationServerService
             var invitationAcceptance = await RequireInvitationService().AcceptBoundInvitationAsync(
                 authorizationRequest.InvitationId,
                 user.Id,
+                authenticationMethod,
                 saveChanges: true,
                 httpContext,
                 cancellationToken);
@@ -1862,6 +1863,7 @@ public sealed class SqlOSAuthorizationServerService
             invitationAcceptance = await RequireInvitationService().AcceptBoundInvitationAsync(
                 authorizationRequest.InvitationId,
                 user.Id,
+                authenticationMethod,
                 saveChanges: false,
                 httpContext,
                 cancellationToken);

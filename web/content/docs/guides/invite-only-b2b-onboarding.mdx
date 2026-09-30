@@ -210,7 +210,7 @@ With this guide's configuration, AuthPage fixes the invited email and offers:
 - **Email me a sign-in code** for an existing account.
 - **Create account** for a new passwordless user.
 
-Acceptance is transactional. SqlOS compares normalized email before it creates access, marks the matching email verified, creates or reactivates membership, consumes the invitation, and completes the OAuth redirect.
+Acceptance is transactional. SqlOS compares normalized email before it creates access, verifies the matching email, creates or reactivates membership, consumes the invitation, and completes the OAuth redirect. If the matching email was still unverified, acceptance [claims](/docs/authserver/users-and-credentials#unverified-email-addresses-and-claims) it and revokes credentials attached before the claim, keeping only the one the invitee signed in with. Hosts that accept invitations through `AcceptEmailInvitationAsync` should set `AuthenticationMethod` on the request to the method the user just signed in with, for example `password`.
 
 Membership behavior is intentionally idempotent:
 

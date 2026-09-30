@@ -53,8 +53,11 @@ public sealed class SqlOSInvitationService
         CancellationToken cancellationToken = default)
     {
         var organization = await RequireActiveOrganizationAsync(request.OrganizationId, cancellationToken);
-        var normalizedEmail = SqlOSAdminService.NormalizeEmail(request.Email);
-        var invitedEmail = request.Email.Trim();
+        if (!SqlOSEmailAddress.TryCanonicalize(request.Email, out var invitedEmail, out var normalizedEmail))
+        {
+            throw new InvalidOperationException(SqlOSEmailAddress.InvalidEmailMessage);
+        }
+
         var role = NormalizeRole(request.Role);
         var now = DateTime.UtcNow;
         var ipAddress = httpContext?.Connection.RemoteIpAddress?.ToString();
@@ -79,7 +82,7 @@ public sealed class SqlOSInvitationService
                 && x.RevokedAt == null
                 && x.ExpiresAt > now)
             .ToListAsync(cancellationToken);
-        foreach (var supersededInvitation in superseded)
+        foreach (var supersededInvitation in superseded.Where(x => string.Equals(x.NormalizedEmail, normalizedEmail, StringComparison.Ordinal)))
         {
             supersededInvitation.RevokedAt = now;
             supersededInvitation.RevokedReason = "superseded";
@@ -256,6 +259,7 @@ public sealed class SqlOSInvitationService
                 request.UserId,
                 saveChanges: true,
                 httpContext,
+                SqlOSEmailClaimPresentation.FromAuthenticationMethod(request.AuthenticationMethod),
                 cancellationToken);
 
             if (transaction != null)
@@ -287,12 +291,28 @@ public sealed class SqlOSInvitationService
             request.UserId,
             saveChanges: false,
             httpContext,
+            SqlOSEmailClaimPresentation.FromAuthenticationMethod(request.AuthenticationMethod),
             cancellationToken);
     }
 
+    public Task<SqlOSInvitationAcceptanceResult?> AcceptBoundInvitationAsync(
+        string? invitationId,
+        string userId,
+        bool saveChanges,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+        => AcceptBoundInvitationAsync(invitationId, userId, authenticationMethod: null, saveChanges, httpContext, cancellationToken);
+
+    /// <summary>
+    /// Accepts the invitation bound to an authorization request for the user who just signed in
+    /// with <paramref name="authenticationMethod"/>. When the invited address is still
+    /// unverified, the invitation token proves the mailbox and claims it; the credential used to
+    /// sign in to this same flow is the one kept.
+    /// </summary>
     public async Task<SqlOSInvitationAcceptanceResult?> AcceptBoundInvitationAsync(
         string? invitationId,
         string userId,
+        string? authenticationMethod,
         bool saveChanges,
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
@@ -338,7 +358,13 @@ public sealed class SqlOSInvitationService
                 EmailVerified: false);
         }
 
-        return await AcceptInvitationForUserAsync(invitation, userId, saveChanges, httpContext, cancellationToken);
+        return await AcceptInvitationForUserAsync(
+            invitation,
+            userId,
+            saveChanges,
+            httpContext,
+            SqlOSEmailClaimPresentation.FromAuthenticationMethod(authenticationMethod),
+            cancellationToken);
     }
 
     private async Task<SqlOSInvitationAcceptanceResult> AcceptInvitationForUserAsync(
@@ -346,6 +372,7 @@ public sealed class SqlOSInvitationService
         string userId,
         bool saveChanges,
         HttpContext? httpContext,
+        SqlOSEmailClaimPresentation presented,
         CancellationToken cancellationToken)
     {
         EnsureInvitationPending(invitation);
@@ -359,14 +386,25 @@ public sealed class SqlOSInvitationService
             throw new InvalidOperationException("User is not active.");
         }
 
-        var email = user.Emails.FirstOrDefault(x => x.NormalizedEmail == invitation.NormalizedEmail)
+        var invitedKey = SqlOSEmailAddress.TryNormalize(invitation.InvitedEmail, out var canonicalInvitedKey)
+            ? canonicalInvitedKey
+            : invitation.NormalizedEmail;
+        var email = user.Emails.FirstOrDefault(x => SqlOSEmailAddress.MatchesStoredEmail(x, invitedKey))
             ?? throw new InvalidOperationException("This invitation was sent to another email address.");
 
         var emailVerified = false;
         if (!email.IsVerified)
         {
-            email.IsVerified = true;
-            email.VerifiedAt = now;
+            // The invitation token was delivered to this address, so accepting it proves the
+            // mailbox and claims the unverified address: everything attached before the owner
+            // proved it is evicted, except the credential used to sign in to this same flow.
+            await SqlOSEmailOwnershipClaim.ClaimAsync(
+                _context,
+                email,
+                "invitation",
+                presented,
+                now,
+                cancellationToken);
             user.DefaultEmail = email.Email;
             user.UpdatedAt = now;
             emailVerified = true;

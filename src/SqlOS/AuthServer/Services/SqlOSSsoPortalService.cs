@@ -699,12 +699,18 @@ public sealed class SqlOSSsoPortalService
 
         var now = DateTime.UtcNow;
         var normalizedDomainSuffix = "@" + domain.Domain.ToUpperInvariant();
-        var eligibleUserIds = await _context.Set<SqlOSUserEmail>()
-            .AsNoTracking()
-            .Where(x => x.IsVerified && x.NormalizedEmail.EndsWith(normalizedDomainSuffix))
+        // SQL narrows candidates by key suffix; the domain is confirmed in code so a collation
+        // that equates look-alike domains cannot sign out another domain's users.
+        var eligibleUserIds = (await _context.Set<SqlOSUserEmail>()
+                .AsNoTracking()
+                .Where(x => x.IsVerified && x.NormalizedEmail.EndsWith(normalizedDomainSuffix))
+                .Select(x => new { x.UserId, x.Email })
+                .ToListAsync(cancellationToken))
+            .Where(x => SqlOSEmailAddress.TryNormalize(x.Email, out var key)
+                && SqlOSOrganizationEmailDomains.SameDomain(SqlOSEmailAddress.GetDomain(key), domain.Domain))
             .Select(x => x.UserId)
-            .Distinct()
-            .ToListAsync(cancellationToken);
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
 
         // Refresh-based organization switching keeps the session's original
         // organization as its default. Consumed refresh rows are therefore the

@@ -187,7 +187,7 @@ public static partial class EndpointRouteBuilderExtensions
                     if (!string.IsNullOrWhiteSpace(invitationToken))
                     {
                         var acceptance = await invitationService.AcceptEmailInvitationAsync(
-                            new SqlOSAcceptEmailInvitationRequest(invitationToken, verification.User.Id),
+                            new SqlOSAcceptEmailInvitationRequest(invitationToken, verification.User.Id) { AuthenticationMethod = verification.AuthenticationMethod },
                             context,
                             cancellationToken);
                         organizationId = acceptance.OrganizationId;

@@ -90,17 +90,10 @@ public sealed class SqlOSEmailOtpService
             throw new InvalidOperationException("Display name is required.");
         }
 
-        var trimmedEmail = email?.Trim()
-            ?? throw new InvalidOperationException("Email address is required.");
-        if (string.IsNullOrWhiteSpace(trimmedEmail))
-        {
-            throw new InvalidOperationException("Email address is required.");
-        }
-
-        var normalizedEmail = SqlOSAdminService.NormalizeEmail(trimmedEmail);
+        var trimmedEmail = RequireValidEmail(email);
         var existingEmail = await _context.Set<SqlOSUserEmail>()
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
+            .FindByEmailAsync(trimmedEmail, cancellationToken);
         if (existingEmail != null)
         {
             await RecordExistingEmailSignupAuditAsync(
@@ -177,17 +170,10 @@ public sealed class SqlOSEmailOtpService
             throw new InvalidOperationException("Display name is required.");
         }
 
-        var trimmedEmail = request.Email?.Trim()
-            ?? throw new InvalidOperationException("Email address is required.");
-        if (string.IsNullOrWhiteSpace(trimmedEmail))
-        {
-            throw new InvalidOperationException("Email address is required.");
-        }
-
-        var normalizedEmail = SqlOSAdminService.NormalizeEmail(trimmedEmail);
+        var trimmedEmail = RequireValidEmail(request.Email);
         var existingEmail = await _context.Set<SqlOSUserEmail>()
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
+            .FindByEmailAsync(trimmedEmail, cancellationToken);
         if (existingEmail != null)
         {
             await RecordExistingEmailSignupAuditAsync(
@@ -353,7 +339,7 @@ public sealed class SqlOSEmailOtpService
 
         var existingEmail = await _context.Set<SqlOSUserEmail>()
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.NormalizedEmail == challenge.NormalizedEmail, cancellationToken);
+            .FindByNormalizedEmailAsync(challenge.NormalizedEmail, challenge.Email, cancellationToken);
         if (existingEmail != null)
         {
             await RecordOtpAuditAsync(
@@ -417,6 +403,15 @@ public sealed class SqlOSEmailOtpService
             throw new InvalidOperationException("The sign-in code is invalid or expired.");
         }
 
+        if (challenge.UserId != null
+            && (challenge.UserEmail == null
+                || !string.Equals(challenge.UserEmail.UserId, challenge.UserId, StringComparison.Ordinal)
+                || !SqlOSEmailAddress.MatchesStoredEmail(challenge.UserEmail, challenge.NormalizedEmail)))
+        {
+            // The code was delivered to an address that is no longer this account's address.
+            throw new InvalidOperationException("The sign-in code is invalid or expired.");
+        }
+
         if (requireAuthorizationRequestMatch)
         {
             if (string.IsNullOrWhiteSpace(expectedAuthorizationRequestId))
@@ -457,12 +452,20 @@ public sealed class SqlOSEmailOtpService
             throw new InvalidOperationException("The sign-in code is invalid or expired.");
         }
 
-        challenge.ConsumedAt = DateTime.UtcNow;
+        var now = DateTime.UtcNow;
+        challenge.ConsumedAt = now;
 
-        if (challenge.UserEmail != null && !challenge.UserEmail.IsVerified)
+        if (challenge.UserEmail != null && challenge.User is { IsActive: true })
         {
-            challenge.UserEmail.IsVerified = true;
-            challenge.UserEmail.VerifiedAt = DateTime.UtcNow;
+            // The code proved the mailbox. An unverified address is claimed: whatever was
+            // attached before the owner proved it is evicted in this same save.
+            await SqlOSEmailOwnershipClaim.ClaimAsync(
+                _context,
+                challenge.UserEmail,
+                "email_otp",
+                SqlOSEmailClaimPresentation.None,
+                now,
+                cancellationToken);
         }
 
         if (challenge.User != null)
@@ -509,21 +512,17 @@ public sealed class SqlOSEmailOtpService
         bool sendWhenNoUser = false,
         string purpose = "login")
     {
-        var trimmedEmail = email?.Trim()
-            ?? throw new InvalidOperationException("Email address is required.");
-        if (string.IsNullOrWhiteSpace(trimmedEmail))
-        {
-            throw new InvalidOperationException("Email address is required.");
-        }
-
-        var normalizedEmail = SqlOSAdminService.NormalizeEmail(trimmedEmail);
+        var trimmedEmail = RequireValidEmail(email);
+        SqlOSEmailAddress.TryCanonicalize(trimmedEmail, out var typedAddress, out var normalizedEmail);
         var now = DateTime.UtcNow;
         var ipAddress = httpContext?.Connection.RemoteIpAddress?.ToString();
 
-        var recentChallenges = await _context.Set<SqlOSEmailOtpChallenge>()
-            .Where(x => x.NormalizedEmail == normalizedEmail && x.CreatedAt >= now.AddHours(-1))
-            .OrderByDescending(x => x.CreatedAt)
-            .ToListAsync(cancellationToken);
+        var recentChallenges = (await _context.Set<SqlOSEmailOtpChallenge>()
+                .Where(x => x.NormalizedEmail == normalizedEmail && x.CreatedAt >= now.AddHours(-1))
+                .OrderByDescending(x => x.CreatedAt)
+                .ToListAsync(cancellationToken))
+            .Where(x => string.Equals(x.NormalizedEmail, normalizedEmail, StringComparison.Ordinal))
+            .ToList();
 
         if (recentChallenges.Count >= _options.MaxChallengesPerHour)
         {
@@ -584,7 +583,7 @@ public sealed class SqlOSEmailOtpService
 
         var emailRecord = await _context.Set<SqlOSUserEmail>()
             .Include(x => x.User)
-            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
+            .FindByNormalizedEmailAsync(normalizedEmail, email, cancellationToken);
 
         var activeChallenges = await _context.Set<SqlOSEmailOtpChallenge>()
             .Where(x => x.NormalizedEmail == normalizedEmail
@@ -596,12 +595,16 @@ public sealed class SqlOSEmailOtpService
                 && x.RequestedOrganizationId == requestedOrganizationId)
             .ToListAsync(cancellationToken);
 
-        foreach (var activeChallenge in activeChallenges)
+        foreach (var activeChallenge in activeChallenges.Where(x => string.Equals(x.NormalizedEmail, normalizedEmail, StringComparison.Ordinal)))
         {
             activeChallenge.InvalidatedAt = now;
             activeChallenge.InvalidatedReason = "superseded";
         }
 
+        // A code for an existing account is only ever delivered to the address stored on that
+        // account, never to the typed spelling. Without an account, the typed address is the
+        // address being signed up.
+        var deliveryAddress = emailRecord?.Email.Trim() ?? typedAddress;
         var rawChallengeToken = _cryptoService.GenerateOpaqueToken();
         var code = GenerateCode(_options.CodeLength);
         var maskedEmail = MaskEmail(trimmedEmail);
@@ -610,7 +613,7 @@ public sealed class SqlOSEmailOtpService
             Id = _cryptoService.GenerateId("otp"),
             ChallengeTokenHash = _cryptoService.HashToken(rawChallengeToken),
             CodeHash = ComputeCodeHash(rawChallengeToken, code),
-            Email = trimmedEmail,
+            Email = deliveryAddress,
             NormalizedEmail = normalizedEmail,
             UserId = emailRecord?.UserId,
             UserEmailId = emailRecord?.Id,
@@ -634,8 +637,8 @@ public sealed class SqlOSEmailOtpService
             try
             {
                 await SendEmailAsync(
-                    trimmedEmail,
-                    maskedEmail,
+                    deliveryAddress,
+                    MaskEmail(deliveryAddress),
                     code,
                     challenge.ExpiresAt,
                     purpose,
@@ -681,6 +684,22 @@ public sealed class SqlOSEmailOtpService
                 : $"If an account exists for {maskedEmail}, check your email for a sign-in code.",
             challenge.ExpiresAt,
             challenge.LastSentAt.Add(_options.ResendCooldown));
+    }
+
+    private static string RequireValidEmail(string? email)
+    {
+        var trimmedEmail = email?.Trim();
+        if (string.IsNullOrWhiteSpace(trimmedEmail))
+        {
+            throw new InvalidOperationException("Email address is required.");
+        }
+
+        if (!SqlOSEmailAddress.TryCanonicalize(trimmedEmail, out var address, out _))
+        {
+            throw new InvalidOperationException(SqlOSEmailAddress.InvalidEmailMessage);
+        }
+
+        return address;
     }
 
     private async Task EnsureEmailOtpEnabledAsync(CancellationToken cancellationToken)

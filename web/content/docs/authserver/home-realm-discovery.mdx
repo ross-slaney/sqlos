@@ -10,8 +10,8 @@ Home realm discovery inspects an email address and returns the appropriate login
 
 ## How it works
 
-1. Extract the email domain
-2. Check active verified organization-domain claims with active SSO connections
+1. Extract the email domain in its canonical IDNA ASCII form. An address that is not a valid email returns `password`
+2. Check active verified organization-domain claims with active SSO connections. Domains are compared as canonical ASCII strings in code, so a look-alike domain never routes to another organization's SSO
 3. If no verified claim matches, check the legacy operator-managed organization `PrimaryDomain`
 4. If a match has enabled SSO metadata, check the connection enrollment policy
 5. Return `sso` when either the email belongs to an existing verified organization member and existing-member SSO is required, or no existing member matches and JIT provisioning is enabled

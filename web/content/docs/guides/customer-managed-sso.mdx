@@ -183,11 +183,11 @@ The policy affects home realm discovery. First-time binding of an existing globa
 | --- | --- | --- |
 | Existing active member with a matching email on an owned domain | HRD routes to SSO; the first valid assertion links the IdP subject to the existing user without creating another user or membership | Same result |
 | Existing active SqlOS user who is not a member | HRD does not route to this SSO connection, and a connection-directed assertion is denied unless the organization owns the email domain | A valid assertion may add the missing organization membership only when the organization owns that exact email domain |
-| Unknown user | HRD does not route to this SSO connection, and a connection-directed assertion is denied | A valid assertion may create a new user, verified email, and membership. It never attaches to a different existing global user by email alone |
+| Unknown user | HRD does not route to this SSO connection, and a connection-directed assertion is denied | A valid assertion may create a new user, verified email, and membership only when the email is at one of the organization's active verified domains; an unverified `PrimaryDomain` does not count. Otherwise it is denied with a `user.login.saml.link_denied` audit (`untrusted_email_domain`) and nothing is created. It never attaches to a different existing global user by email alone |
 | Inactive user, organization, or membership | Denied; JIT does not reactivate offboarded access | Still denied until a separate trusted workflow reactivates it |
 | Contractor or external-domain identity | Not auto-linked. Use invitation plus a local first factor, or an already-bound subject | Same: domain ownership, not membership, is the first-link proof |
 
-Turn JIT on only when the customer's IdP assignment is authoritative for tenant membership. Keep it off for invitation- or admin-managed onboarding. Turning **Require SSO for existing members** off leaves existing unlinked members on another configured login method; it does not let a tenant IdP take over a global user by email.
+Turn JIT on only when the customer's IdP assignment is authoritative for tenant membership, and verify every email domain the IdP should be able to create users for. Keep it off for invitation- or admin-managed onboarding. Turning **Require SSO for existing members** off leaves existing unlinked members on another configured login method; it does not let a tenant IdP take over a global user by email.
 
 ## 6. Verify domain ownership
 

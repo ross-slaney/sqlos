@@ -112,15 +112,15 @@ public static class SqlOSBuiltInEmailTemplates
                 <img src="{logoBase64}" alt="{applicationName}" style="max-height:42px;max-width:180px;display:{logoImageDisplay};margin:0 0 16px;" />
                 <p style="display:{logoTextDisplay};margin:0 0 12px;font-size:14px;color:#475569;font-weight:600;">{applicationName}</p>
                 <h1 style="margin:0 0 12px;font-size:28px;line-height:1.1;color:{accentColor};">Verify your email</h1>
-                <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">Use this link to verify {maskedEmail}. It expires in {expiresInHours} hour(s).</p>
+                <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">Use this link to confirm that {maskedEmail} belongs to your {applicationName} account. It expires in {expiresInHours} hour(s).</p>
                 <p style="margin:0 0 20px;"><a href="{verificationUrl}" style="display:inline-block;background:{primaryColor};color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Verify email</a></p>
                 <p style="margin:0 0 12px;font-size:13px;line-height:1.6;color:#64748b;">If the button does not work, open this link: {verificationUrl}</p>
-                <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">If you did not request this verification, you can ignore this email.</p>
+                <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">If you did not sign up for {applicationName} with this address, ignore this email. The address stays unverified.</p>
               </div>
             </body>
             </html>
             """,
-            "Verify your {applicationName} email for {maskedEmail}: {verificationUrl}. This link expires in {expiresInHours} hour(s).",
+            "Confirm that {maskedEmail} belongs to your {applicationName} account: {verificationUrl}. This link expires in {expiresInHours} hour(s). If you did not sign up for {applicationName} with this address, ignore this email.",
             """{"applicationName":"SqlOS","logoBase64":"","logoImageDisplay":"none","logoTextDisplay":"block","maskedEmail":"us***@example.com","verificationUrl":"https://app.example.test/sqlos/auth/email/verify?token=sample","expiresInHours":"24","primaryColor":"#2563eb","accentColor":"#0f172a","backgroundColor":"#f8fafc"}""",
             SuppressRenderedContentStorage: true)
     ];

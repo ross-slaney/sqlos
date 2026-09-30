@@ -936,15 +936,19 @@ public sealed class SqlOSSamlService
             return null;
         }
 
-        var normalizedEmail = SqlOSAdminService.NormalizeEmail(email);
+        if (!SqlOSEmailAddress.TryCanonicalize(email, out var assertedAddress, out var normalizedEmail))
+        {
+            await RecordLinkDeniedAsync(connection.Id, organizationId, "invalid_email", cancellationToken);
+            return null;
+        }
+
         var existingEmail = await _context.Set<SqlOSUserEmail>()
-            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
+            .FindByNormalizedEmailAsync(normalizedEmail, email, cancellationToken);
         SqlOSUser? user = null;
         SqlOSUser? pendingUser = null;
         SqlOSUserEmail? pendingEmail = null;
         SqlOSMembership? pendingMembership = null;
-        var emailWasVerified = existingEmail?.IsVerified ?? false;
-        var emailVerifiedAt = existingEmail?.VerifiedAt;
+        var claim = SqlOSEmailClaimOutcome.NotClaimed;
 
         if (existingEmail != null)
         {
@@ -971,26 +975,10 @@ public sealed class SqlOSSamlService
                 return null;
             }
 
-            if (membership == null)
+            if (membership == null && !connection.AutoProvisionUsers)
             {
-                if (!connection.AutoProvisionUsers)
-                {
-                    await RecordLinkDeniedAsync(connection.Id, organizationId, "auto_provision_disabled", cancellationToken);
-                    return null;
-                }
-
-                if (!existingEmail.IsVerified)
-                {
-                    existingEmail.IsVerified = true;
-                    existingEmail.VerifiedAt = DateTime.UtcNow;
-                }
-
-                pendingMembership = await EnsureMembershipAsync(organizationId, user.Id, cancellationToken);
-            }
-            else if (!existingEmail.IsVerified)
-            {
-                existingEmail.IsVerified = true;
-                existingEmail.VerifiedAt = DateTime.UtcNow;
+                await RecordLinkDeniedAsync(connection.Id, organizationId, "auto_provision_disabled", cancellationToken);
+                return null;
             }
 
             var existingBinding = await _context.Set<SqlOSExternalIdentity>()
@@ -999,24 +987,46 @@ public sealed class SqlOSSamlService
                     cancellationToken);
             if (existingBinding != null)
             {
-                RestoreEmailVerification(existingEmail, emailWasVerified, emailVerifiedAt);
                 await RecordLinkDeniedAsync(connection.Id, organizationId, "connection_already_linked", cancellationToken);
                 return null;
+            }
+
+            // The assertion from an organization that owns the email's domain proves the mailbox.
+            // Linking to an address nobody has proven yet goes through the claim, which evicts
+            // everything attached before it; a verified address is linked as-is.
+            claim = await SqlOSEmailOwnershipClaim.ClaimAsync(
+                _context,
+                existingEmail,
+                "saml",
+                SqlOSEmailClaimPresentation.None,
+                DateTime.UtcNow,
+                cancellationToken);
+            if (membership == null)
+            {
+                pendingMembership = await EnsureMembershipAsync(organizationId, user.Id, cancellationToken);
             }
         }
         else if (connection.AutoProvisionUsers)
         {
+            // Just-in-time provisioning creates a verified global email, so the tenant's IdP may
+            // only create addresses inside domains the organization has proven it owns.
+            if (!await SqlOSOrganizationEmailDomains.IsAtVerifiedDomainAsync(_context, organizationId, normalizedEmail, cancellationToken))
+            {
+                await RecordLinkDeniedAsync(connection.Id, organizationId, SqlOSOrganizationEmailDomains.UntrustedDomainReason, cancellationToken);
+                return null;
+            }
+
             var displayName = $"{principal.Attributes.GetValueOrDefault(connection.FirstNameAttributeName, string.Empty)} {principal.Attributes.GetValueOrDefault(connection.LastNameAttributeName, string.Empty)}".Trim();
             if (string.IsNullOrWhiteSpace(displayName))
             {
-                displayName = email;
+                displayName = assertedAddress;
             }
 
             pendingUser = new SqlOSUser
             {
                 Id = _cryptoService.GenerateId("usr"),
                 DisplayName = displayName,
-                DefaultEmail = email,
+                DefaultEmail = assertedAddress,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
@@ -1024,7 +1034,7 @@ public sealed class SqlOSSamlService
             {
                 Id = _cryptoService.GenerateId("eml"),
                 UserId = pendingUser.Id,
-                Email = email,
+                Email = assertedAddress,
                 NormalizedEmail = normalizedEmail,
                 IsPrimary = true,
                 IsVerified = true,
@@ -1066,14 +1076,11 @@ public sealed class SqlOSSamlService
         }
         catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
         {
+            claim.Revert(_context);
             DetachAdded(pendingIdentity);
             DetachAdded(pendingUser);
             DetachAdded(pendingEmail);
             DetachAdded(pendingMembership);
-            if (existingEmail != null)
-            {
-                RestoreEmailVerification(existingEmail, emailWasVerified, emailVerifiedAt);
-            }
 
             var recovered = await TryResolveBoundSubjectAsync(
                 connection.Id,
@@ -1115,28 +1122,19 @@ public sealed class SqlOSSamlService
         string normalizedEmail,
         CancellationToken cancellationToken)
     {
-        var domain = SqlOSAdminService.NormalizeDomain(normalizedEmail);
-        if (string.IsNullOrWhiteSpace(domain))
-        {
-            return false;
-        }
-
-        var hasVerifiedDomain = await _context.Set<SqlOSOrganizationDomain>()
-            .AsNoTracking()
-            .AnyAsync(
-                x => x.OrganizationId == organizationId
-                    && x.Domain == domain
-                    && x.Status == SqlOSOrganizationDomainStatuses.Active
-                    && x.RevokedAt == null,
-                cancellationToken);
-        if (hasVerifiedDomain)
+        if (await SqlOSOrganizationEmailDomains.IsAtVerifiedDomainAsync(_context, organizationId, normalizedEmail, cancellationToken))
         {
             return true;
         }
 
-        return await _context.Set<SqlOSOrganization>()
+        // Existing-email linking still honors the operator-set PrimaryDomain until #410 retires it
+        // as a trust input. The comparison uses canonical ASCII domains in code, never collation.
+        var primaryDomain = await _context.Set<SqlOSOrganization>()
             .AsNoTracking()
-            .AnyAsync(x => x.Id == organizationId && x.PrimaryDomain == domain, cancellationToken);
+            .Where(x => x.Id == organizationId)
+            .Select(x => x.PrimaryDomain)
+            .FirstOrDefaultAsync(cancellationToken);
+        return SqlOSOrganizationEmailDomains.SameDomain(primaryDomain, SqlOSEmailAddress.GetDomain(normalizedEmail));
     }
 
     private void DetachAdded(object? entity)
@@ -1151,12 +1149,6 @@ public sealed class SqlOSSamlService
         {
             entry.State = EntityState.Detached;
         }
-    }
-
-    private static void RestoreEmailVerification(SqlOSUserEmail email, bool wasVerified, DateTime? verifiedAt)
-    {
-        email.IsVerified = wasVerified;
-        email.VerifiedAt = verifiedAt;
     }
 
     private async Task<SqlOSMembership?> FindMembershipAsync(

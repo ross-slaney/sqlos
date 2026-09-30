@@ -175,7 +175,7 @@ public sealed class SqlOSAuthService
 
         var email = await _context.Set<SqlOSUserEmail>()
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
+            .FindByEmailAsync(request.Email, cancellationToken);
         attempt = attempt with { UserId = email?.UserId };
 
         if (email != null && _options.RequireVerifiedEmailForPasswordLogin && !email.IsVerified)
@@ -343,7 +343,7 @@ public sealed class SqlOSAuthService
             }
 
             var acceptance = await RequireInvitationService().AcceptEmailInvitationInCurrentTransactionAsync(
-                new SqlOSAcceptEmailInvitationRequest(request.InvitationToken, signup.User.Id),
+                new SqlOSAcceptEmailInvitationRequest(request.InvitationToken, signup.User.Id) { AuthenticationMethod = signup.AuthenticationMethod },
                 httpContext,
                 cancellationToken);
 
@@ -1217,10 +1217,9 @@ public sealed class SqlOSAuthService
 
     public async Task<string> CreatePasswordResetTokenAsync(SqlOSForgotPasswordRequest request, CancellationToken cancellationToken = default)
     {
-        var normalizedEmail = SqlOSAdminService.NormalizeEmail(request.Email);
         var email = await _context.Set<SqlOSUserEmail>()
             .Include(x => x.User)
-            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken)
+            .FindByEmailAsync(request.Email, cancellationToken)
             ?? throw new InvalidOperationException("Unknown email address.");
 
         var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
@@ -1249,7 +1248,7 @@ public sealed class SqlOSAuthService
 
         var email = await _context.Set<SqlOSUserEmail>()
             .Include(x => x.User)
-            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
+            .FindByEmailAsync(trimmedEmail, cancellationToken);
 
         var rateLimit = await _deliveryAdmission.ReservePasswordResetAsync(
             normalizedEmail,
@@ -1330,10 +1329,9 @@ public sealed class SqlOSAuthService
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
     {
-        var normalizedEmail = SqlOSAdminService.NormalizeEmail(request.Email);
         var email = await _context.Set<SqlOSUserEmail>()
             .Include(x => x.User)
-            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken)
+            .FindByEmailAsync(request.Email, cancellationToken)
             ?? throw new InvalidOperationException("Unknown email address.");
 
         var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
@@ -1574,15 +1572,41 @@ public sealed class SqlOSAuthService
             throw new InvalidOperationException("Password reset token is invalid or expired.");
         }
 
+        var now = DateTime.UtcNow;
+        var claim = SqlOSEmailClaimOutcome.NotClaimed;
+        var payload = _cryptoService.DeserializePayload<PasswordResetPayload>(token);
+        var resetEmail = payload == null
+            ? null
+            : await _context.Set<SqlOSUserEmail>()
+                .FirstOrDefaultAsync(x => x.Id == payload.EmailId && x.UserId == user.Id, cancellationToken);
+        if (resetEmail != null && SqlOSEmailAddress.MatchesStoredEmail(resetEmail, payload!.NormalizedEmail))
+        {
+            // The reset link went to this address, so completing it proves the mailbox. An
+            // unverified address is claimed: everything attached before the owner proved it is
+            // evicted except the password being reset now.
+            claim = await SqlOSEmailOwnershipClaim.ClaimAsync(
+                _context,
+                resetEmail,
+                "password_reset",
+                new SqlOSEmailClaimPresentation { PasswordCredentialId = credential.Id },
+                now,
+                cancellationToken,
+                sessionRevocationReason: "password_reset");
+        }
+
         credential.SecretHash = _cryptoService.HashPassword(request.NewPassword);
         credential.LastUsedAt = null;
-        await SqlOSAuthLifecyclePolicy.RevokeAsync(
-            _context,
-            user.Id,
-            organizationId: null,
-            "password_reset",
-            DateTime.UtcNow,
-            cancellationToken: cancellationToken);
+        if (!claim.Claimed)
+        {
+            await SqlOSAuthLifecyclePolicy.RevokeAsync(
+                _context,
+                user.Id,
+                organizationId: null,
+                "password_reset",
+                now,
+                cancellationToken: cancellationToken);
+        }
+
         await _context.SaveChangesAsync(cancellationToken);
         await RecordPasswordResetAuditAsync(
             "password_reset.completed",
@@ -1617,8 +1641,7 @@ public sealed class SqlOSAuthService
 
     public async Task<string> CreateEmailVerificationTokenAsync(SqlOSCreateVerificationTokenRequest request, CancellationToken cancellationToken = default)
     {
-        var normalizedEmail = SqlOSAdminService.NormalizeEmail(request.Email);
-        var email = await _context.Set<SqlOSUserEmail>().FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken)
+        var email = await _context.Set<SqlOSUserEmail>().FindByEmailAsync(request.Email, cancellationToken)
             ?? throw new InvalidOperationException("Unknown email address.");
 
         var token = await _cryptoService.CreateTemporaryTokenAsync(
@@ -1640,11 +1663,10 @@ public sealed class SqlOSAuthService
         CancellationToken cancellationToken = default)
     {
         var trimmedEmail = NormalizeEmailInput(request.Email);
-        var normalizedEmail = SqlOSAdminService.NormalizeEmail(trimmedEmail);
         var maskedEmail = MaskEmail(trimmedEmail);
         var now = DateTime.UtcNow;
         var email = await _context.Set<SqlOSUserEmail>()
-            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
+            .FindByEmailAsync(trimmedEmail, cancellationToken);
 
         await _adminService.RecordAuditAsync(
             "user.email-verification-requested",
