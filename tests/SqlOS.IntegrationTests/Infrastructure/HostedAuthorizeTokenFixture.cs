@@ -388,6 +388,44 @@ public sealed class HostedAuthorizeTokenFixture : IAsyncDisposable
     }
 
     /// <summary>
+    /// Follows the <c>/continue</c> redirect a browser receives when an interaction outside the
+    /// login form (for example a social-provider callback) reaches the consent interstitial, and
+    /// returns the consent page it renders.
+    /// </summary>
+    public async Task<HostedConsentPage> FollowContinuationToConsentAsync(
+        HttpResponseMessage interactionResponse,
+        HostedAuthorizeStart started)
+    {
+        var location = interactionResponse.Headers.Location;
+        if (interactionResponse.StatusCode != HttpStatusCode.Redirect
+            || location is null
+            || !location.OriginalString.Contains("/continue", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Expected a continuation redirect. Status {(int)interactionResponse.StatusCode}, location {location}.");
+        }
+
+        var continuationCookie = TryExtractCookie(interactionResponse, "sqlos_auth_continue_")
+            ?? throw new InvalidOperationException("The continuation redirect did not set its continuation cookie.");
+        using var request = new HttpRequestMessage(HttpMethod.Get, location);
+        request.Headers.TryAddWithoutValidation("Cookie", $"{continuationCookie}; {started.AntiforgeryCookie}");
+        using var response = await Client.SendAsync(request);
+        var html = await response.Content.ReadAsStringAsync();
+        if (response.StatusCode != HttpStatusCode.OK || !html.Contains("/consent/approve", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"The continuation did not render the consent page. Status {(int)response.StatusCode}: {html}");
+        }
+
+        return new HostedConsentPage(
+            ExtractInputValue(html, "requestId"),
+            ExtractInputValue(html, "consentToken"),
+            ExtractInputValue(html, "__RequestVerificationToken"),
+            TryExtractCookie(response, "sqlos_auth_page_csrf_") ?? started.AntiforgeryCookie,
+            html);
+    }
+
+    /// <summary>
     /// Resolves the client redirect a browser would follow from a hosted-form response.
     /// Hosted POST completions do not 302 straight to the relying party — browsers
     /// enforce the page CSP's <c>form-action 'self'</c> against a form submission's
@@ -621,13 +659,13 @@ public sealed class HostedAuthorizeTokenFixture : IAsyncDisposable
             .FirstOrDefault(value => value.StartsWith(prefix, StringComparison.Ordinal));
     }
 
-    private static string CreateCodeVerifier()
+    public static string CreateCodeVerifier()
         => Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
             .Replace("+", "-", StringComparison.Ordinal)
             .Replace("/", "_", StringComparison.Ordinal)
             .TrimEnd('=');
 
-    private static string CreateCodeChallenge(string verifier)
+    public static string CreateCodeChallenge(string verifier)
         => WebEncoders.Base64UrlEncode(SHA256.HashData(Encoding.UTF8.GetBytes(verifier)));
 }
 

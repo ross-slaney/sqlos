@@ -128,7 +128,7 @@ The complete program above registers these applications:
 | `mobile-app` | `sqlos-mobile://auth-callback` | `https://api.example.com` |
 | `support-cli` | Device authorization | `https://api.example.com` |
 
-Add registrations inside the existing `AddSqlOS` callback, or use the dashboard/admin API with separate operator-owned records. Startup reconciliation preserves ownership. Use `IsFirstParty = false` for a partner application that should request consent, and resolve confidential-client secrets through the host's secret mechanism. The [multiple-applications guide](/docs/authserver/multiple-applications) links runnable retail, Todo, and standalone-provider examples.
+Add registrations inside the existing `AddSqlOS` callback, or use the dashboard/admin API with separate operator-owned records. Startup reconciliation preserves ownership. Use `IsFirstParty = false` for a partner application that should request consent (it then signs users in only through `/authorize`, because the [direct sign-in APIs are first-party only](/docs/authserver/clients#direct-sign-in-is-first-party-only)), and resolve confidential-client secrets through the host's secret mechanism. The [multiple-applications guide](/docs/authserver/multiple-applications) links runnable retail, Todo, and standalone-provider examples.
 
 <Callout type="info" title="Client and audience are different">
   Client IDs identify the app asking for login. Audience identifies the resource API that should accept the access token. Two clients can use the same audience and still have different application access policy.

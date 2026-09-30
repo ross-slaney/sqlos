@@ -40,22 +40,22 @@ public static partial class EndpointRouteBuilderExtensions
         });
 
         auth.MapPost("/password/login", async (SqlOSPasswordLoginRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
-            Results.Ok(await authService.LoginWithPasswordAsync(request, httpContext, cancellationToken)));
+            await DirectLoginResultAsync(httpContext, () => authService.LoginWithPasswordAsync(request, httpContext, cancellationToken), cancellationToken));
 
         auth.MapPost("/email-otp/start", async (SqlOSEmailOtpStartRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
-            Results.Ok(await authService.RequestEmailOtpAsync(request, httpContext, cancellationToken)));
+            await DirectLoginResultAsync(httpContext, () => authService.RequestEmailOtpAsync(request, httpContext, cancellationToken), cancellationToken));
 
         auth.MapPost("/email-otp/verify", async (SqlOSEmailOtpVerifyRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
-            Results.Ok(await authService.VerifyEmailOtpAsync(request, httpContext, cancellationToken)));
+            await DirectLoginResultAsync(httpContext, () => authService.VerifyEmailOtpAsync(request, httpContext, cancellationToken), cancellationToken));
 
         auth.MapPost("/magic-link/start", async (SqlOSMagicLinkStartRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
-            Results.Ok(await authService.RequestMagicLinkAsync(request, httpContext, cancellationToken)));
+            await DirectLoginResultAsync(httpContext, () => authService.RequestMagicLinkAsync(request, httpContext, cancellationToken), cancellationToken));
 
         auth.MapPost("/magic-link/complete", async (SqlOSMagicLinkCompleteRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
-            Results.Ok(await authService.CompleteMagicLinkAsync(request, httpContext, cancellationToken)));
+            await DirectLoginResultAsync(httpContext, () => authService.CompleteMagicLinkAsync(request, httpContext, cancellationToken), cancellationToken));
 
         auth.MapPost("/select-organization", async (SqlOSSelectOrganizationRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
-            Results.Ok(await authService.SelectOrganizationForLoginAsync(request, httpContext, cancellationToken)));
+            await DirectLoginResultAsync(httpContext, () => authService.SelectOrganizationForLoginAsync(request, httpContext, cancellationToken), cancellationToken));
 
         auth.MapPost("/mfa/challenge/verify", async (SqlOSMfaChallengeVerifyRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
         {
@@ -69,14 +69,19 @@ public static partial class EndpointRouteBuilderExtensions
             }
         });
 
-        auth.MapPost("/mfa/challenge/totp/enroll/start", async (SqlOSTotpChallengeEnrollmentStartRequest request, SqlOSAuthService authService, CancellationToken cancellationToken) =>
+        auth.MapPost("/mfa/challenge/totp/enroll/start", async (SqlOSTotpChallengeEnrollmentStartRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
         {
             try
             {
                 return Results.Ok(await authService.StartTotpEnrollmentForChallengeAsync(
                     request.MfaToken,
                     new SqlOSTotpEnrollmentStartRequest(request.DisplayName),
+                    httpContext,
                     cancellationToken));
+            }
+            catch (SqlOSPublicAuthException ex)
+            {
+                return await PublicAuthJsonErrorAsync(httpContext, ex, SqlOSPublicAuthErrorSurface.HostedPage, cancellationToken);
             }
             catch (InvalidOperationException ex)
             {
@@ -89,6 +94,10 @@ public static partial class EndpointRouteBuilderExtensions
             try
             {
                 return Results.Ok(await authService.VerifyTotpEnrollmentAsync(request, httpContext, cancellationToken));
+            }
+            catch (SqlOSPublicAuthException ex)
+            {
+                return await PublicAuthJsonErrorAsync(httpContext, ex, SqlOSPublicAuthErrorSurface.HostedPage, cancellationToken);
             }
             catch (InvalidOperationException ex)
             {
@@ -257,5 +266,25 @@ public static partial class EndpointRouteBuilderExtensions
             await authService.VerifyEmailAsync(request, cancellationToken);
             return Results.NoContent();
         });
+    }
+
+    /// <summary>
+    /// Runs a direct-login JSON route. A client refused by the first-party gate gets the same JSON
+    /// error envelope as <c>/signup</c> (<c>400 invalid_client</c>); every other failure keeps
+    /// flowing through the host's exception pipeline as before.
+    /// </summary>
+    private static async Task<IResult> DirectLoginResultAsync<T>(
+        HttpContext httpContext,
+        Func<Task<T>> action,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Results.Ok(await action());
+        }
+        catch (SqlOSPublicAuthException ex)
+        {
+            return await PublicAuthJsonErrorAsync(httpContext, ex, SqlOSPublicAuthErrorSurface.HostedPage, cancellationToken);
+        }
     }
 }

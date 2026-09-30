@@ -73,6 +73,7 @@ public sealed class SqlOSPhoneOtpService
         await EnsurePhoneOtpEnabledAsync(cancellationToken);
 
         var client = await _adminService.RequireClientAsync(request.ClientId, null, cancellationToken);
+        await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(_adminService, client, httpContext, userId: null, cancellationToken);
         return await CreateChallengeAsync(
             request.PhoneNumber,
             authorizationRequestId: null,
@@ -149,6 +150,7 @@ public sealed class SqlOSPhoneOtpService
         await EnsurePhoneOtpEnabledAsync(cancellationToken);
 
         var client = await _adminService.RequireClientAsync(request.ClientId, null, cancellationToken);
+        await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(_adminService, client, httpContext, userId: null, cancellationToken);
         var trimmedDisplayName = RequireText(request.DisplayName, "Display name is required.");
         SqlOSSignupJoinPolicy.RejectUnauthorizedOrganizationJoin(request.OrganizationId);
         var normalizedPhoneNumber = await EnsurePhoneNumberAvailableForSignupAsync(request.PhoneNumber, cancellationToken);

@@ -93,7 +93,7 @@ SqlOS runs home realm discovery before creating the link. If the email must use 
 
 ## SDK flow
 
-Backend developers can use `SqlOSAuthService` directly:
+Backend developers can use `SqlOSAuthService` directly with a [first-party client](/docs/authserver/clients#direct-sign-in-is-first-party-only); SqlOS refuses any other client with `invalid_client` before it sends a link:
 
 ```csharp
 await authService.RequestMagicLinkAsync(

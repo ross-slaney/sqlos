@@ -90,7 +90,7 @@ The flow holds `challengeToken` and, for signup, `signupToken`. The start view i
 
 ## SDK flow
 
-Backend developers can use `SqlOSAuthService` directly:
+Backend developers can use `SqlOSAuthService` directly with a [first-party client](/docs/authserver/clients#direct-sign-in-is-first-party-only); SqlOS refuses any other client with `invalid_client` before it sends a code:
 
 ```csharp
 var start = await authService.RequestEmailOtpSignupAsync(

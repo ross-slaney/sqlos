@@ -66,7 +66,8 @@ curl -X POST http://localhost:5062/sqlos/admin/auth/api/clients \
     "clientId": "my-web-app",
     "name": "My Web Application",
     "audience": "sqlos",
-    "redirectUris": ["http://localhost:3000/auth/callback"]
+    "redirectUris": ["http://localhost:3000/auth/callback"],
+    "isFirstParty": true
   }'
 ```
 
@@ -79,6 +80,7 @@ The Admin API requires an operator session; see [Authenticate operator API calls
 | `audience` | No | Token audience claim |
 | `redirectUris` | Yes | Allowed callback URIs for OAuth flows |
 | `allowedScopes` | No | Scopes this client may be granted. Set this to the same values the app sends on `/authorize`. An empty list grants nothing. |
+| `isFirstParty` | No | Defaults to `false`. Set `true` only for an app you own: first-party clients skip the [consent screen](/docs/authserver/consent) and may use the [direct sign-in APIs](#direct-sign-in-is-first-party-only). |
 
 `AllowedScopes` is an allowlist on every grant. Authorization-code, device, and client-credentials requests grant only the intersection of the requested scopes and this list. Unknown requested scopes are dropped, not rejected. The grant may be empty.
 
@@ -203,6 +205,38 @@ client-controlled-URL protection is preserved because the first grant always
 requires an explicit user gesture; an unrelated signed-in browser session alone
 never produces a code for a third-party client. Do not set `IsFirstParty` for
 an application you do not own and trust.
+
+### Direct sign-in is first-party only
+
+SqlOS's direct sign-in APIs return tokens to the caller instead of redirecting
+a browser, so there is no page where a consent screen could appear. Only
+first-party clients may use them:
+
+- `POST /sqlos/auth/password/login` and `POST /sqlos/auth/signup`
+- `POST /sqlos/auth/email-otp/start` and `/email-otp/verify`
+- `POST /sqlos/auth/magic-link/start` and `/magic-link/complete`
+- `POST /sqlos/auth/select-organization` and the `/mfa/challenge/*` completions
+- `POST /sqlos/auth/oidc/authorization-url` and `POST /sqlos/auth/oidc/exchange`,
+  the app-owned social provider chooser (`SqlOSOidcBrowserAuthService`)
+- the matching `SqlOSAuthService` methods, including the phone-code, email-code
+  signup, and invitation signup methods, `CompleteExternalLoginAsync`, and
+  `CompleteClientAuthenticationAsync`
+
+A dynamically registered, CIMD, or other non-first-party client is refused
+with `400` and `{ "error": "invalid_client" }`, and the service methods throw
+`SqlOSPublicAuthException` with the same error. The refusal happens before
+SqlOS checks a password, sends an email or SMS, creates provider state, creates
+an account, or mints a session. A code, link, or provider state issued before
+the client lost first-party status is refused when it is redeemed. SqlOS
+records one `oauth.direct_login.rejected` audit event with the `client_id` and
+the request route. Third-party clients sign users in through `/authorize`,
+where the consent screen runs, including for social and SAML sign-in.
+
+`SeedBrowserClient`, `SeedOwnedWebApp`, `SeedOwnedNativeApp`, `SeedCliClient`,
+the single-application setup, and the dashboard's owned-app and CLI templates
+create first-party clients. `SeedClient`, the Admin API, and the dashboard's
+other templates default to `IsFirstParty = false`. Set it to `true` on a client
+your own backend uses with the direct sign-in APIs.
 
 Custom headless browser UIs should forward both `PendingToken` and `MfaToken`
 from `BuildUiUrl`. The former carries organization selection; the latter carries

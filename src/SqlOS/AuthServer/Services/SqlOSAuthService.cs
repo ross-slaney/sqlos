@@ -101,6 +101,7 @@ public sealed class SqlOSAuthService
             request.OrganizationName);
         SqlOSSignupJoinPolicy.RejectUnauthorizedOrganizationJoin(request.OrganizationId);
         var client = await _adminService.RequireClientAsync(request.ClientId, null, cancellationToken);
+        await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(_adminService, client, httpContext, userId: null, cancellationToken);
 
         SqlOSPasswordAuthenticationResult? signup = null;
         try
@@ -163,6 +164,8 @@ public sealed class SqlOSAuthService
         }
 
         var client = await _adminService.RequireClientAsync(request.ClientId, null, cancellationToken);
+        // Refuse a third-party client before the password is checked: its UI must not collect credentials.
+        await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(_adminService, client, httpContext, userId: null, cancellationToken);
         var normalizedEmail = SqlOSAdminService.NormalizeEmail(request.Email);
         var attempt = _passwordLoginAbuseService.CreateAttempt(
             normalizedEmail,
@@ -300,6 +303,11 @@ public sealed class SqlOSAuthService
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
+        // Gate the client before the signup transaction: a rejected client creates no account and
+        // runs no signup hook, and its audit event is not rolled back with the transaction.
+        var client = await _adminService.RequireClientAsync(request.ClientId, null, cancellationToken);
+        await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(_adminService, client, httpContext, userId: null, cancellationToken);
+
         IDbContextTransaction? transaction = null;
         SqlOSPasswordAuthenticationResult? signup = null;
 
@@ -314,7 +322,6 @@ public sealed class SqlOSAuthService
                 request.InvitationToken,
                 httpContext,
                 cancellationToken);
-            var client = await _adminService.RequireClientAsync(request.ClientId, null, cancellationToken);
 
             signup = await CreateInvitationSignupUserAsync(
                 request.DisplayName,
@@ -462,6 +469,13 @@ public sealed class SqlOSAuthService
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
+        // Only a signup token issued before the direct-login gate can name a third-party client.
+        // Refuse it before the signup transaction so its audit event is not rolled back.
+        await EnsureArtifactClientIsFirstPartyAsync(
+            await FindSignupTokenAsync("phone_otp_signup", request.SignupToken, cancellationToken),
+            httpContext,
+            cancellationToken);
+
         IDbContextTransaction? transaction = null;
         SqlOSPasswordAuthenticationResult? signup = null;
         SqlOSPhoneOtpSignupVerificationResult? verification = null;
@@ -486,6 +500,7 @@ public sealed class SqlOSAuthService
 
             var client = await _context.Set<SqlOSClientApplication>()
                 .FirstAsync(x => x.Id == verification.ClientApplicationId, cancellationToken);
+            await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(_adminService, client, httpContext, userId: null, cancellationToken);
 
             signup = await CreatePhoneOtpSignupUserAsync(
                 verification.DisplayName,
@@ -544,6 +559,13 @@ public sealed class SqlOSAuthService
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
+        // Only a signup token issued before the direct-login gate can name a third-party client.
+        // Refuse it before the signup transaction so its audit event is not rolled back.
+        await EnsureArtifactClientIsFirstPartyAsync(
+            await FindSignupTokenAsync("email_otp_signup", request.SignupToken, cancellationToken),
+            httpContext,
+            cancellationToken);
+
         IDbContextTransaction? transaction = null;
         SqlOSPasswordAuthenticationResult? signup = null;
         SqlOSEmailOtpSignupVerificationResult? verification = null;
@@ -568,6 +590,7 @@ public sealed class SqlOSAuthService
 
             var client = await _context.Set<SqlOSClientApplication>()
                 .FirstAsync(x => x.Id == verification.ClientApplicationId, cancellationToken);
+            await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(_adminService, client, httpContext, userId: null, cancellationToken);
 
             signup = await CreateEmailOtpSignupUserAsync(
                 verification.DisplayName,
@@ -647,6 +670,8 @@ public sealed class SqlOSAuthService
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
+        // The organization pending token below is minted outside FinalizeClientLoginAsync.
+        await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(_adminService, client, httpContext, user.Id, cancellationToken);
         var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
 
         if (organizations.Count > 1)
@@ -1778,11 +1803,19 @@ public sealed class SqlOSAuthService
         string mfaToken,
         SqlOSTotpEnrollmentStartRequest request,
         CancellationToken cancellationToken = default)
+        => await StartTotpEnrollmentForChallengeAsync(mfaToken, request, httpContext: null, cancellationToken);
+
+    internal async Task<SqlOSTotpEnrollmentStartResult> StartTotpEnrollmentForChallengeAsync(
+        string mfaToken,
+        SqlOSTotpEnrollmentStartRequest request,
+        HttpContext? httpContext,
+        CancellationToken cancellationToken)
         => await StartTotpEnrollmentForChallengeCoreAsync(
             mfaToken,
             request,
             expectedFlow: "client",
             expectedAuthorizationRequestId: null,
+            httpContext,
             cancellationToken);
 
     internal async Task<SqlOSTotpEnrollmentStartResult> StartTotpEnrollmentForAuthorizationChallengeAsync(
@@ -1795,6 +1828,7 @@ public sealed class SqlOSAuthService
             request,
             expectedFlow: "authorization",
             expectedAuthorizationRequestId: authorizationRequestId,
+            httpContext: null,
             cancellationToken);
 
     private async Task<SqlOSTotpEnrollmentStartResult> StartTotpEnrollmentForChallengeCoreAsync(
@@ -1802,9 +1836,11 @@ public sealed class SqlOSAuthService
         SqlOSTotpEnrollmentStartRequest request,
         string expectedFlow,
         string? expectedAuthorizationRequestId,
+        HttpContext? httpContext,
         CancellationToken cancellationToken)
     {
         var token = await RequireTotpMfaService().GetPendingMfaTokenAsync(mfaToken, cancellationToken);
+        await EnsureClientFlowChallengeIsFirstPartyAsync(token, httpContext, cancellationToken);
         try
         {
             var payload = await ValidateEnrollmentChallengeAsync(
@@ -1834,6 +1870,12 @@ public sealed class SqlOSAuthService
         {
             return await RequireTotpMfaService().VerifyEnrollmentAsync(request, cancellationToken);
         }
+
+        // Outside the enrollment transaction, so a refused client's audit event is not rolled back.
+        await EnsureClientFlowChallengeIsFirstPartyAsync(
+            await _cryptoService.FindTemporaryTokenAsync(MfaChallengePurpose, request.MfaToken, cancellationToken),
+            httpContext,
+            cancellationToken);
 
         IDbContextTransaction? transaction = null;
         try
@@ -2003,6 +2045,7 @@ public sealed class SqlOSAuthService
             throw new InvalidOperationException("MFA enrollment must be completed with its challenge-bound enrollment proof.");
         }
 
+        await EnsureClientFlowChallengeIsFirstPartyAsync(token, httpContext, cancellationToken);
         var factorMethod = await VerifyMfaChallengeFactorAsync(token, request.Code, httpContext, cancellationToken);
         token.ConsumedAt = DateTime.UtcNow;
         return await CompleteConsumedMfaChallengeAsync(token, factorMethod, httpContext, cancellationToken);
@@ -2200,6 +2243,57 @@ public sealed class SqlOSAuthService
             evaluation.AvailableFactors);
     }
 
+    /// <summary>
+    /// A client-flow MFA challenge finishes as direct login, so it is first-party only. A third-party
+    /// client can hold one only if it was issued before the direct-login gate; refuse it before the
+    /// factor is checked or any enrollment state is written. Authorization-flow challenges pass.
+    /// </summary>
+    private async Task EnsureClientFlowChallengeIsFirstPartyAsync(
+        SqlOSTemporaryToken? token,
+        HttpContext? httpContext,
+        CancellationToken cancellationToken)
+    {
+        if (token != null
+            && string.Equals(
+                _cryptoService.DeserializePayload<SqlOSMfaChallengePayload>(token)?.Flow,
+                "client",
+                StringComparison.Ordinal))
+        {
+            await EnsureArtifactClientIsFirstPartyAsync(token, httpContext, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Refuses the third-party client bound to a direct-login artifact (a signup token or MFA
+    /// challenge issued before the direct-login gate) before the caller writes anything or opens a
+    /// transaction, so the refusal's audit event is never rolled back.
+    /// </summary>
+    private async Task EnsureArtifactClientIsFirstPartyAsync(
+        SqlOSTemporaryToken? token,
+        HttpContext? httpContext,
+        CancellationToken cancellationToken)
+    {
+        if (token?.ClientApplicationId == null)
+        {
+            return;
+        }
+
+        var client = await _context.Set<SqlOSClientApplication>()
+            .FirstOrDefaultAsync(x => x.Id == token.ClientApplicationId, cancellationToken);
+        if (client != null)
+        {
+            await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(_adminService, client, httpContext, token.UserId, cancellationToken);
+        }
+    }
+
+    private async Task<SqlOSTemporaryToken?> FindSignupTokenAsync(
+        string purpose,
+        string? signupToken,
+        CancellationToken cancellationToken)
+        => string.IsNullOrWhiteSpace(signupToken)
+            ? null
+            : await _cryptoService.FindTemporaryTokenAsync(purpose, signupToken.Trim(), cancellationToken);
+
     private async Task<SqlOSMfaChallengeVerifyResult> CompleteConsumedMfaChallengeAsync(
         SqlOSTemporaryToken token,
         string factorMethod,
@@ -2220,6 +2314,8 @@ public sealed class SqlOSAuthService
 
         var user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == token.UserId, cancellationToken);
         var client = await _context.Set<SqlOSClientApplication>().FirstAsync(x => x.Id == token.ClientApplicationId, cancellationToken);
+        // The client flow is direct login: it mints tokens here, outside FinalizeClientLoginAsync.
+        await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(_adminService, client, httpContext, user.Id, cancellationToken);
         var authenticationMethod = SqlOSMfaPolicyService.AddAuthenticationMethod(payload.AuthenticationMethod, factorMethod);
         var tokens = await CreateSessionAndTokensAsync(
             user,
@@ -3068,6 +3164,10 @@ public sealed class SqlOSAuthService
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
+        // Every direct-login completion converges here. It returns tokens to the caller with no
+        // consent screen, so it is first-party only; checked before any MFA challenge, organization
+        // pending token, or session is minted.
+        await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(_adminService, client, httpContext, user.Id, cancellationToken);
         var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
 
         if (!string.IsNullOrWhiteSpace(requestedOrganizationId))

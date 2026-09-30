@@ -422,6 +422,87 @@ public sealed partial class SamlServiceIntegrationTests
     }
 
     [TestMethod]
+    public async Task SignedSamlResponse_ThirdPartyClient_RunsConsentGate_AndExchangesAfterApproval()
+    {
+        // Direct login is first-party only (#419), but the /sso authorization-request path is not
+        // direct login: the ACS runs the consent gate, and after approval the code still exchanges.
+        var options = Options.Create(AspireFixture.Options);
+        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, AspireFixture.DataProtectionProvider);
+        var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
+        var saml = CreateSamlService(AspireFixture.SharedContext, options, admin, crypto);
+        var emailSender = new TestAuthEmailSender();
+        var settings = new SqlOSSettingsService(AspireFixture.SharedContext, options, emailSender);
+        var emailOtp = new SqlOSEmailOtpService(AspireFixture.SharedContext, admin, crypto, settings, emailSender, options);
+        var auth = new SqlOSAuthService(AspireFixture.SharedContext, options, admin, crypto, settings, emailOtp);
+        var authorization = new SqlOSAuthorizationServerService(
+            AspireFixture.SharedContext,
+            admin,
+            auth,
+            crypto,
+            settings,
+            new SqlOSIssuerSessionService(AspireFixture.SharedContext, crypto, settings),
+            options);
+        var ssoAuth = new SqlOSSsoAuthorizationService(
+            AspireFixture.SharedContext,
+            admin,
+            crypto,
+            new SqlOSHomeRealmDiscoveryService(AspireFixture.SharedContext),
+            saml,
+            auth);
+
+        var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"SAML 3P {Guid.NewGuid():N}", null));
+        var client = await admin.CreateClientAsync(new SqlOSCreateClientRequest(
+            $"saml-3p-{Guid.NewGuid():N}"[..18],
+            "SAML Third Party",
+            "sqlos-tests",
+            new List<string> { "https://client.example.local/callback" },
+            IsFirstParty: false));
+
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest("CN=SqlOSThirdPartyIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        var cert = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+        var connection = await admin.CreateSsoConnectionAsync(new SqlOSCreateSsoConnectionRequest(
+            org.Id,
+            "Third Party SSO",
+            "urn:test:3p-idp",
+            "https://idp.example.test/sso",
+            cert.ExportCertificatePem(),
+            true,
+            false,
+            "email",
+            "first_name",
+            "last_name"));
+
+        var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+        var samlResponse = BuildSignedSamlResponse(cert, "urn:test:3p-idp", $"user-{Guid.NewGuid():N}@example.com", "Saml", "User", flow);
+        var acsContext = new DefaultHttpContext();
+        var acsRedirect = await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, acsContext, default);
+        acsRedirect.Should().Contain("/continue?request=", "a third-party client reaches the consent interstitial, not a code");
+        acsRedirect.Should().NotContain("code=");
+
+        var continuationHandle = Uri.UnescapeDataString(acsContext.Response.Headers.SetCookie
+            .Select(value => value?.Split(';', 2)[0] ?? string.Empty)
+            .Single(value => value.StartsWith(SqlOSAuthorizationServerService.AuthorizationContinuationCookiePrefix, StringComparison.Ordinal))
+            .Split('=', 2)[1]);
+        var requestId = QueryHelpers.ParseQuery(new Uri(new Uri("https://tests"), acsRedirect).Query)["request"].ToString();
+        var pending = await authorization.ResolveAuthorizationContinuationAsync(requestId, continuationHandle);
+        pending.RequiresConsent.Should().BeTrue();
+
+        var approved = await authorization.ApproveConsentAsync(pending.ConsentToken!, requestId, new DefaultHttpContext());
+        approved.RedirectUrl.Should().StartWith("https://client.example.local/callback?code=");
+        var code = QueryHelpers.ParseQuery(new Uri(approved.RedirectUrl!).Query)["code"].ToString();
+
+        var tokens = await ssoAuth.ExchangeCodeAsync(
+            new SqlOSPkceExchangeRequest(code, client.ClientId, "https://client.example.local/callback", flow.CodeVerifier!),
+            new DefaultHttpContext());
+        tokens.AccessToken.Should().NotBeNullOrWhiteSpace();
+        tokens.ClientId.Should().Be(client.ClientId);
+        (await AspireFixture.SharedContext.Set<SqlOSAuditEvent>()
+            .CountAsync(x => x.EventType == "oauth.direct_login.rejected" && x.ActorId == client.Id))
+            .Should().Be(0, "the /sso path is not direct login");
+    }
+
+    [TestMethod]
     public async Task SignedSamlResponse_CodeAuthTime_PinsAssertionAuthnInstant()
     {
         var (crypto, admin, saml) = CreateSamlServices();
