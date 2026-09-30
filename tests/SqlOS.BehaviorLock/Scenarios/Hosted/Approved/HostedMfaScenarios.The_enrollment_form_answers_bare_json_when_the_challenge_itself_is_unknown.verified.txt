@@ -1,0 +1,105 @@
+# SqlOS behavior lock transcript
+scenario: HostedMfaScenarios.The_enrollment_form_answers_bare_json_when_the_challenge_itself_is_unknown
+profile: hosted
+
+## 1. browser: an unknown enrollment token with a live challenge: the setup page again, with a new key
+> POST /sqlos/auth/mfa/totp/enroll/verify
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#1}
+>   mfaToken={mfa-token#1}
+>   enrollmentToken=not-an-enrollment-token
+>   code={code#1}
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#1}'; style-src 'self' 'nonce-{csp-nonce#1}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Behavior Lock</title>
+        <style nonce="{csp-nonce#1}">{style-sha256:4961352b3f23eca1}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Behavior Lock</h1>
+                <p class="brand-subtitle">Behavior lock hosted sign-in.</p>
+              </div>
+              <div class="messages">
+                <div class="callout error">
+                  <span class="callout-icon">!</span>
+                  <span>The request could not be completed.</span>
+                </div>
+              </div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <div class="panel-intro">
+                    <span class="panel-kicker">Add authenticator app</span>
+                    <p>Use an authenticator app to add a second step before continuing.</p>
+                  </div>
+                  <div class="qr-panel">
+                    <img class="qr-code" src="{data-uri:image/svg+xml}" alt="Authenticator setup QR code" />
+                    <p>Scan this QR code with your authenticator app.</p>
+                  </div>
+                  <details class="manual-setup">
+                    <summary>Use manual setup</summary>
+                    <div class="secret-panel">
+                      <span>Setup key</span>
+                      <code>{totp-secret#1}</code>
+                    </div>
+                    <div class="secret-panel">
+                      <span>Provisioning URI</span>
+                      <code>
+                        otpauth://totp/SqlOS:{email:alice}?secret={totp-secret#1}&amp;issuer=SqlOS&amp;algorithm=SHA1&amp;digits=6&amp;period=30
+                      </code>
+                    </div>
+                  </details>
+                  <form class="auth-form" method="post" action="/sqlos/auth/mfa/totp/enroll/verify">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#2}" />
+                    <input type="hidden" name="requestId" value="{req#1}" />
+                    <input type="hidden" name="mfaToken" value="{mfa-token#1}" />
+                    <input type="hidden" name="enrollmentToken" value="{enrollment-token#1}" />
+                    <label class="field">
+                      <span>Code</span>
+                      <input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="{code#1}" required="" autofocus="" />
+                    </label>
+                    <button class="primary-action" type="submit" data-loading-label="Verifying">
+                      <span class="button-label">Verify and continue</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                  </form>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#1}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+
+## 2. browser: an unknown challenge as well: a 400 whose body is a bare JSON string, not a page
+> POST /sqlos/auth/mfa/totp/enroll/verify
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#1}
+>   mfaToken=not-an-mfa-token
+>   enrollmentToken=not-an-enrollment-token
+>   code={code#1}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    "The request could not be completed."

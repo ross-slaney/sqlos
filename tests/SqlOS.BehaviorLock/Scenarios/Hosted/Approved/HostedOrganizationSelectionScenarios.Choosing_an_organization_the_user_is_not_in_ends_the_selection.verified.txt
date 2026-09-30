@@ -1,0 +1,207 @@
+# SqlOS behavior lock transcript
+scenario: HostedOrganizationSelectionScenarios.Choosing_an_organization_the_user_is_not_in_ends_the_selection
+profile: hosted
+
+## 1. browser: post an organization Alice does not belong to: refused, and the chooser comes back empty
+> POST /sqlos/auth/login/select-organization
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#1}
+>   pendingToken={pending-token#1}
+>   organizationId={org#1}
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#1}'; style-src 'self' 'nonce-{csp-nonce#1}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Behavior Lock</title>
+        <style nonce="{csp-nonce#1}">{style-sha256:4961352b3f23eca1}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Behavior Lock</h1>
+                <p class="brand-subtitle">Behavior lock hosted sign-in.</p>
+              </div>
+              <div class="messages">
+                <div class="callout error">
+                  <span class="callout-icon">!</span>
+                  <span>The selected organization is not available to this user.</span>
+                </div>
+              </div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <div class="panel-intro">
+                    <span class="panel-kicker">Organization</span>
+                    <p>Choose the workspace you want to continue into.</p>
+                  </div>
+                  <form class="auth-form organization-form" method="post" action="/sqlos/auth/login/select-organization">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#2}" />
+                    <input type="hidden" name="requestId" value="{req#1}" />
+                    <input type="hidden" name="pendingToken" value="{pending-token#1}" />
+                    <div class="organization-list">
+                      <p class="footer-links">No organizations were available for this sign-in attempt.</p>
+                    </div>
+                  </form>
+                  <div class="footer-links">
+                    <a class="secondary-link" href="/sqlos/auth/login?request={req#1}">Sign in</a>
+                  </div>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#1}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+
+## 2. browser: the selection token was already consumed, so a valid choice fails too
+> POST /sqlos/auth/login/select-organization
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#1}
+>   pendingToken={pending-token#1}
+>   organizationId={org#2}
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#2}'; style-src 'self' 'nonce-{csp-nonce#2}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Behavior Lock</title>
+        <style nonce="{csp-nonce#2}">{style-sha256:4961352b3f23eca1}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Behavior Lock</h1>
+                <p class="brand-subtitle">Behavior lock hosted sign-in.</p>
+              </div>
+              <div class="messages">
+                <div class="callout error">
+                  <span class="callout-icon">!</span>
+                  <span>The organization selection session is invalid or expired.</span>
+                </div>
+              </div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <div class="panel-intro">
+                    <span class="panel-kicker">Organization</span>
+                    <p>Choose the workspace you want to continue into.</p>
+                  </div>
+                  <form class="auth-form organization-form" method="post" action="/sqlos/auth/login/select-organization">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#3}" />
+                    <input type="hidden" name="requestId" value="{req#1}" />
+                    <input type="hidden" name="pendingToken" value="{pending-token#1}" />
+                    <div class="organization-list">
+                      <p class="footer-links">No organizations were available for this sign-in attempt.</p>
+                    </div>
+                  </form>
+                  <div class="footer-links">
+                    <a class="secondary-link" href="/sqlos/auth/login?request={req#1}">Sign in</a>
+                  </div>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#2}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+
+## 3. browser: an unknown selection token
+> POST /sqlos/auth/login/select-organization
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#1}
+>   pendingToken=not-a-selection-token
+>   organizationId={org#2}
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#3}'; style-src 'self' 'nonce-{csp-nonce#3}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Behavior Lock</title>
+        <style nonce="{csp-nonce#3}">{style-sha256:4961352b3f23eca1}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Behavior Lock</h1>
+                <p class="brand-subtitle">Behavior lock hosted sign-in.</p>
+              </div>
+              <div class="messages">
+                <div class="callout error">
+                  <span class="callout-icon">!</span>
+                  <span>The organization selection session is invalid or expired.</span>
+                </div>
+              </div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <div class="panel-intro">
+                    <span class="panel-kicker">Organization</span>
+                    <p>Choose the workspace you want to continue into.</p>
+                  </div>
+                  <form class="auth-form organization-form" method="post" action="/sqlos/auth/login/select-organization">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#4}" />
+                    <input type="hidden" name="requestId" value="{req#1}" />
+                    <input type="hidden" name="pendingToken" value="not-a-selection-token" />
+                    <div class="organization-list">
+                      <p class="footer-links">No organizations were available for this sign-in attempt.</p>
+                    </div>
+                  </form>
+                  <div class="footer-links">
+                    <a class="secondary-link" href="/sqlos/auth/login?request={req#1}">Sign in</a>
+                  </div>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#3}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+
+## audit: refusals write nothing
+  (no new events)
