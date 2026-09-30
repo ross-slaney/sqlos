@@ -1,0 +1,112 @@
+name: Benchmarks
+
+# SHRBAC list filtering and point checks on the shipped schema and fn_IsResourceAccessible, one job per
+# engine, beside Pull Request CI. See tests/SqlOS.Benchmarks/README.md.
+#
+# Pull requests grow the catalog 1M -> 10M and skip the sparse scan (30 s a page on PostgreSQL, 160 s on SQL
+# Server), so both jobs finish well inside the PR CI envelope. The full run, 1M -> 10M -> 100M with every
+# scenario, takes about 30 minutes on PostgreSQL and an hour on SQL Server (loading 200M rows through the
+# clustered keys is the bulk of it); it runs on every merge to main, weekly, on demand, and on a pull request
+# labelled `benchmark-100m`. Standard runners are free for public repositories.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/SqlOS/**"
+      - "tests/SqlOS.Benchmarks/**"
+      - ".github/workflows/benchmarks.yml"
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - "src/SqlOS/**"
+      - "tests/SqlOS.Benchmarks/**"
+      - ".github/workflows/benchmarks.yml"
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      scales:
+        description: "Product counts to grow through, comma-separated"
+        required: false
+        default: "1m,10m,100m"
+
+concurrency:
+  group: benchmarks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_VERSION: "9.0.x"
+  FULL_RUN: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'benchmark-100m') }}
+
+jobs:
+  benchmark:
+    name: SHRBAC benchmarks (${{ matrix.name }})
+    # Adding some other label to a pull request should not re-run the benchmarks.
+    if: github.event.action != 'labeled' || github.event.label.name == 'benchmark-100m'
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'benchmark-100m')) && 90 || 30 }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - provider: postgresql
+            name: PostgreSQL
+            image: postgres:16
+          - provider: sqlserver
+            name: SQL Server
+            image: mcr.microsoft.com/mssql/server:2022-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Choose the tier
+        id: tier
+        run: |
+          if [ "$FULL_RUN" = "true" ]; then
+            echo "scales=${{ inputs.scales || '1m,10m,100m' }}" >> "$GITHUB_OUTPUT"
+            echo "exclude=" >> "$GITHUB_OUTPUT"
+          else
+            echo "scales=1m,10m" >> "$GITHUB_OUTPUT"
+            echo "exclude=list.store.first-page" >> "$GITHUB_OUTPUT"
+          fi
+          sudo mkdir -p /mnt/sqlos-bench
+          sudo chmod 0777 /mnt/sqlos-bench
+          df -h /mnt/sqlos-bench
+
+      - name: Pull ${{ matrix.image }}
+        run: docker pull ${{ matrix.image }}
+
+      - name: Build
+        run: dotnet build tests/SqlOS.Benchmarks --configuration Release
+
+      - name: Run benchmarks (${{ steps.tier.outputs.scales }})
+        run: >-
+          dotnet run --project tests/SqlOS.Benchmarks --configuration Release --no-build --
+          --provider ${{ matrix.provider }}
+          --scales ${{ steps.tier.outputs.scales }}
+          ${{ steps.tier.outputs.exclude && format('--exclude {0}', steps.tier.outputs.exclude) || '' }}
+          --data-dir /mnt/sqlos-bench
+          --out artifacts/benchmarks
+          --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Disk usage
+        if: always()
+        run: df -h /mnt/sqlos-bench
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmarks-${{ matrix.provider }}
+          path: artifacts/benchmarks/${{ matrix.provider }}
