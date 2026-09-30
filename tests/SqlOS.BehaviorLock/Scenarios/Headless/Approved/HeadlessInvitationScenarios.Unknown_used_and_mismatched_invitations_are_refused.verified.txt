@@ -1,0 +1,157 @@
+# SqlOS behavior lock transcript
+scenario: HeadlessInvitationScenarios.Unknown_used_and_mismatched_invitations_are_refused
+profile: headless
+
+## 1. browser: resolve an unknown invitation token
+> POST /sqlos/auth/headless/invitations/resolve
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "invitationToken": "not-an-invitation-token"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "message": "Invitation is invalid or expired."
+    }
+
+## 2. browser: invitation signup without an invitation
+> POST /sqlos/auth/headless/invitations/signup
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "displayName": "Erin",
+>     "email": "{email:erin}",
+>     "requestId": "{req#1}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "message": "Invitation is invalid or expired."
+    }
+
+## 3. browser: password signup carrying the invitation with another address
+> POST /sqlos/auth/headless/signup
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "displayName": "Mallory",
+>     "email": "{email:mallory}",
+>     "invitationToken": "{invitation-token#1}",
+>     "password": "{password:mallory}",
+>     "requestId": "{req#1}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "message": "This invitation was sent to another email address."
+    }
+
+## 4. browser: the invitee signs up with the invitation
+> POST /sqlos/auth/headless/invitations/signup
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "displayName": "Erin",
+>     "email": "{email:erin}",
+>     "invitationToken": "{invitation-token#1}",
+>     "requestId": "{req#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+< Set-Cookie: sqlos_auth_page={cookie#1}; expires=+7d; path=/; secure; samesite=lax; httponly
+    {
+      "redirectUrl": "https://sqlos.example.test/auth/callback?code={code#1}&state={state#1}&scope=openid%20profile%20email%20offline_access",
+      "type": "redirect",
+      "viewModel": null
+    }
+
+## 5. browser: the accepted invitation no longer resolves
+> POST /sqlos/auth/headless/invitations/resolve
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "invitationToken": "{invitation-token#1}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "message": "Invitation is invalid or expired."
+    }
+
+## audit: invitation refusal events
+  - {
+      "action": "invitation.accepted",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "invitation.accepted",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "Id": "{inv#1}",
+        "emailVerified": false,
+        "inviteRole": "member",
+        "maskedEmail": "er***@example.test",
+        "membershipCreated": true,
+        "membershipReactivated": false,
+        "membershipRole": "member"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "user.signup.invitation",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.signup.invitation",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
