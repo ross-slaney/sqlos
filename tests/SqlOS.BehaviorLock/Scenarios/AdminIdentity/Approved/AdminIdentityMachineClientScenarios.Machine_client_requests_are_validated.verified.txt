@@ -1,0 +1,309 @@
+# SqlOS behavior lock transcript
+scenario: AdminIdentityMachineClientScenarios.Machine_client_requests_are_validated
+profile: multi-app
+
+## 1. operator: a client ID is required
+> POST /sqlos/admin/auth/api/machine-clients
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "audience": "https://api.example.test",
+>     "clientId": "  ",
+>     "displayName": "Worker",
+>     "grants": [],
+>     "organizationId": null,
+>     "scopes": [
+>       "workspace.read"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Client ID is required."
+    }
+
+## 2. operator: a display name is required
+> POST /sqlos/admin/auth/api/machine-clients
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "audience": "https://api.example.test",
+>     "clientId": "worker",
+>     "displayName": null,
+>     "grants": [],
+>     "organizationId": null,
+>     "scopes": [
+>       "workspace.read"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Display name is required."
+    }
+
+## 3. operator: an audience is required
+> POST /sqlos/admin/auth/api/machine-clients
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "audience": " ",
+>     "clientId": "worker",
+>     "displayName": "Worker",
+>     "grants": [],
+>     "organizationId": null,
+>     "scopes": [
+>       "workspace.read"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Audience is required."
+    }
+
+## 4. operator: the client ID is limited to two hundred characters
+> POST /sqlos/admin/auth/api/machine-clients
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "audience": "https://api.example.test",
+>     "clientId": "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+>     "displayName": "Worker",
+>     "grants": [],
+>     "organizationId": null,
+>     "scopes": [
+>       "workspace.read"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Client ID is required. Maximum length is 200."
+    }
+
+## 5. operator: at least one scope is required
+> POST /sqlos/admin/auth/api/machine-clients
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "audience": "https://api.example.test",
+>     "clientId": "worker",
+>     "displayName": "Worker",
+>     "grants": [],
+>     "organizationId": null,
+>     "scopes": [
+>       " "
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "At least one scope is required."
+    }
+
+## 6. operator: an unknown organization is refused
+> POST /sqlos/admin/auth/api/machine-clients
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "audience": "https://api.example.test",
+>     "clientId": "worker",
+>     "displayName": "Worker",
+>     "grants": [],
+>     "organizationId": "org_missing",
+>     "scopes": [
+>       "workspace.read"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Organization not found."
+    }
+
+## 7. operator: a grant on a missing resource is refused
+> POST /sqlos/admin/auth/api/machine-clients
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "audience": "https://api.example.test",
+>     "clientId": "worker",
+>     "displayName": "Worker",
+>     "grants": [
+>       {
+>         "resourceId": "workspace::missing",
+>         "roleId": "workspace_reader"
+>       }
+>     ],
+>     "organizationId": null,
+>     "scopes": [
+>       "workspace.read"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "One or more grant resources do not exist."
+    }
+
+## 8. operator: an existing OAuth client ID is refused
+> POST /sqlos/admin/auth/api/machine-clients
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "audience": "https://api.example.test",
+>     "clientId": "atlas-portal",
+>     "displayName": "Worker",
+>     "grants": [],
+>     "organizationId": null,
+>     "scopes": [
+>       "workspace.read"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "A client with that client ID already exists."
+    }
+
+## 9. operator: and so is the seeded machine client's
+> POST /sqlos/admin/auth/api/machine-clients
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "audience": "https://api.example.test",
+>     "clientId": "atlas-worker",
+>     "displayName": "Worker",
+>     "grants": [],
+>     "organizationId": null,
+>     "scopes": [
+>       "workspace.read"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "A client with that client ID already exists."
+    }
+
+## 10. operator: a request without a grants array escapes as a 500
+> POST /sqlos/admin/auth/api/machine-clients
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "audience": "https://api.example.test",
+>     "clientId": "worker",
+>     "displayName": "Worker",
+>     "scopes": [
+>       "workspace.read"
+>     ]
+>   }
+< 500 Internal Server Error
+
+## 11. operator: and one without a scopes array too
+> POST /sqlos/admin/auth/api/machine-clients
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "audience": "https://api.example.test",
+>     "clientId": "worker",
+>     "displayName": "Worker",
+>     "grants": []
+>   }
+< 500 Internal Server Error
+
+## 12. operator: rotate on an unknown machine client is refused
+> POST /sqlos/admin/auth/api/machine-clients/missing-machine/rotate
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Machine client not found."
+    }
+
+## 13. operator: revoke on an unknown machine client is refused
+> POST /sqlos/admin/auth/api/machine-clients/missing-machine/revoke
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Machine client not found."
+    }
+
+## 14. operator: emergency-disable on an unknown machine client is refused
+> POST /sqlos/admin/auth/api/machine-clients/missing-machine/emergency-disable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Machine client not found."
+    }
+
+## 15. operator: emergency-enable on an unknown machine client is refused
+> POST /sqlos/admin/auth/api/machine-clients/missing-machine/emergency-enable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Machine client not found."
+    }
+
+## 16. operator: so is a test of its secret
+> POST /sqlos/admin/auth/api/machine-clients/missing-machine/validate
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "clientSecret": "x",
+>     "resource": "https://api.example.test",
+>     "scopes": []
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Machine client not found."
+    }
+
+## 17. operator: and a grant
+> POST /sqlos/admin/auth/api/machine-clients/missing-machine/grants
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "resourceId": "workspace::alpha",
+>     "roleId": "workspace_reader"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Machine client not found."
+    }
+
+## 18. operator: and a grant removal
+> DELETE /sqlos/admin/auth/api/machine-clients/missing-machine/grants/grant_missing
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Machine client not found."
+    }
+
+## 19. operator: a test without a secret escapes as a 500
+> POST /sqlos/admin/auth/api/machine-clients/atlas-worker/validate
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "resource": "https://api.example.test",
+>     "scopes": []
+>   }
+< 500 Internal Server Error
+
+## audit: no audit event for refused requests
+  (no new events)
