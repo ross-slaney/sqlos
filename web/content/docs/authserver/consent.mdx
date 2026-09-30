@@ -73,6 +73,8 @@ Startup reconciliation is deterministic and idempotent. Code-seeded entries are 
 
 Revocation does not end existing sessions or tokens; it forces the consent screen on the user's next authorization for that client.
 
+SqlOS also revokes every grant of an account when its unverified email is claimed (reason `email_claimed`, listed in the `user.email.claimed` audit event), because someone else may have approved those clients before the owner proved the address. See [Unverified email addresses and claims](/docs/authserver/users-and-credentials#unverified-email-addresses-and-claims).
+
 ## Audit events
 
 `oauth.consent.granted`, `oauth.consent.denied`, and `oauth.consent.revoked` record the consent lifecycle. Catalog changes record `scope_display_name.created`, `scope_display_name.updated`, and `scope_display_name.deleted`.

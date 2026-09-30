@@ -11,13 +11,16 @@ namespace SqlOS.AuthServer.Services;
 /// the address. Anyone could have attached that address to the account before its owner proved
 /// it (a squatter's password, an upstream identity that never verified the address, an
 /// authenticator), so the claim evicts everything attached before it, except the credential
-/// being presented now, revokes every session and token, marks the email verified, and records
-/// one <c>user.email.claimed</c> audit event naming what was revoked. All of it is staged on the
-/// caller's unit of work so it commits atomically with the sign-in that proved the mailbox.
+/// being presented now, revokes remembered consent grants, user-owned calendar connections, and
+/// every session and token, marks the email verified, and records one <c>user.email.claimed</c>
+/// audit event naming what was revoked. All of it is staged on the caller's unit of work so it
+/// commits atomically with the sign-in that proved the mailbox.
 /// </summary>
 /// <remarks>
 /// The explicit "verify this email" link is the signup confirmation step and is deliberately not
 /// a claim: it only marks the address verified. Verified addresses are never claimed again.
+/// Organization memberships are kept: organizations control them, so an organization admin
+/// reviews the memberships of a claimed account.
 /// </remarks>
 internal static class SqlOSEmailOwnershipClaim
 {
@@ -91,6 +94,30 @@ internal static class SqlOSEmailOwnershipClaim
 
         context.Set<SqlOSExternalIdentity>().RemoveRange(identities);
 
+        // Remembered consent is an approval someone gave while signed in to this account. A
+        // squatter's approval of its own client would otherwise let that client silently get
+        // codes for the owner's session (prompt=none or a covering grant skips the consent screen).
+        var consentGrants = await context.Set<SqlOSConsentGrant>()
+            .Where(x => x.UserId == userId && x.RevokedAt == null)
+            .ToListAsync(cancellationToken);
+        foreach (var grant in consentGrants)
+        {
+            grant.RevokedAt = now;
+            grant.UpdatedAt = now;
+            grant.RevocationReason = RevocationReason;
+        }
+
+        // A calendar connection attached before the claim may point at the squatter's own
+        // calendar, so the app could sync the owner's events into it. The helper destroys the
+        // stored provider tokens and writes its own calendar.connection.disconnected audit.
+        var calendarConnections = await SqlOSAuthLifecyclePolicy.RevokeCalendarConnectionsAsync(
+            context,
+            userId,
+            organizationId: null,
+            RevocationReason,
+            now,
+            cancellationToken);
+
         await SqlOSAuthLifecyclePolicy.RevokeAsync(
             context,
             userId,
@@ -119,7 +146,9 @@ internal static class SqlOSEmailOwnershipClaim
                         kind = x.OidcConnectionId != null ? "oidc" : "saml",
                         connectionId = x.OidcConnectionId ?? x.SsoConnectionId
                     })
-                    .ToArray()
+                    .ToArray(),
+                consentGrantIds = consentGrants.Select(x => x.Id).ToArray(),
+                calendarConnectionIds = calendarConnections.Select(x => x.Id).ToArray()
             }
         });
         context.Set<SqlOSAuditEvent>().Add(new SqlOSAuditEvent

@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
+using SqlOS.Calendar.Models;
 using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.Tests;
@@ -85,6 +86,44 @@ public sealed class SqlOSEmailOwnershipClaimTests
         (await context.Set<SqlOSExternalIdentity>().CountAsync()).Should().Be(0);
     }
 
+    [TestMethod]
+    public async Task Claim_RevokesConsentGrantsAndCalendarConnections_ButKeepsMemberships()
+    {
+        await using var context = CreateContext();
+        var seeded = await SeedAccountAsync(context, verified: false);
+
+        await SqlOSEmailOwnershipClaim.ClaimAsync(
+            context,
+            seeded.Email,
+            "email_otp",
+            SqlOSEmailClaimPresentation.None,
+            DateTime.UtcNow,
+            default);
+        await context.SaveChangesAsync();
+
+        context.ChangeTracker.Clear();
+        var grant = await context.Set<SqlOSConsentGrant>().SingleAsync();
+        grant.RevokedAt.Should().NotBeNull("an approval given before the claim must not let that client skip consent");
+        grant.RevocationReason.Should().Be(SqlOSEmailOwnershipClaim.RevocationReason);
+        var calendar = await context.Set<SqlOSCalendarConnection>().SingleAsync(x => x.Id == seeded.CalendarConnectionId);
+        calendar.Status.Should().Be(SqlOSCalendarConnectionStatus.Revoked);
+        calendar.RevokedAt.Should().NotBeNull();
+        calendar.RevokedReason.Should().Be(SqlOSEmailOwnershipClaim.RevocationReason);
+        calendar.AccessTokenEncrypted.Should().BeNull();
+        calendar.RefreshTokenEncrypted.Should().BeNull();
+        (await context.Set<SqlOSCalendarConnection>().SingleAsync(x => x.Id == seeded.OrganizationCalendarConnectionId))
+            .Status.Should().Be(SqlOSCalendarConnectionStatus.Active, "the organization's own calendar connection is not the user's");
+        var membership = await context.Set<SqlOSMembership>().SingleAsync();
+        membership.IsActive.Should().BeTrue("organizations control their memberships; an admin reviews a claimed account's memberships");
+        membership.OrganizationId.Should().Be(seeded.OrganizationId);
+        (await context.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == "calendar.connection.disconnected"
+            && x.ActorId == seeded.CalendarConnectionId)).Should().Be(1);
+        var audit = await context.Set<SqlOSAuditEvent>().SingleAsync(x => x.EventType == SqlOSEmailOwnershipClaim.AuditEventType);
+        audit.DataJson.Should().Contain("consentGrantIds").And.Contain(seeded.ConsentGrantId)
+            .And.Contain("calendarConnectionIds").And.Contain(seeded.CalendarConnectionId)
+            .And.NotContain(seeded.OrganizationCalendarConnectionId);
+    }
+
     [DataTestMethod]
     [DataRow("google", true, false, false, false)]
     [DataRow("oidc", true, false, false, false)]
@@ -137,8 +176,13 @@ public sealed class SqlOSEmailOwnershipClaimTests
         (await context.Set<SqlOSCredential>().SingleAsync()).RevokedAt.Should().BeNull();
         (await context.Set<SqlOSExternalIdentity>().CountAsync()).Should().Be(2);
         (await context.Set<SqlOSSession>().SingleAsync()).RevokedAt.Should().BeNull();
-        (await context.Set<SqlOSMembership>().CountAsync()).Should().Be(0);
+        (await context.Set<SqlOSConsentGrant>().SingleAsync()).RevokedAt.Should().BeNull();
+        var calendar = await context.Set<SqlOSCalendarConnection>().SingleAsync(x => x.Id == seeded.CalendarConnectionId);
+        calendar.RevokedAt.Should().BeNull();
+        calendar.RefreshTokenEncrypted.Should().NotBeNull();
+        (await context.Set<SqlOSMembership>().CountAsync(x => x.OrganizationId == "org_x")).Should().Be(0);
         (await context.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == SqlOSEmailOwnershipClaim.AuditEventType)).Should().Be(0);
+        (await context.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == "calendar.connection.disconnected")).Should().Be(0);
     }
 
     private static TestSqlOSInMemoryDbContext CreateContext()
@@ -170,11 +214,48 @@ public sealed class SqlOSEmailOwnershipClaimTests
             new SqlOSExternalIdentity { Id = "ext_oidc", UserId = user.Id, OidcConnectionId = "oidc_1", Issuer = "https://issuer", Subject = "squatter", CreatedAt = now },
             new SqlOSExternalIdentity { Id = "ext_saml", UserId = user.Id, SsoConnectionId = "sso_1", Issuer = "urn:idp", Subject = "squatter", CreatedAt = now },
             new SqlOSSession { Id = "ses_claim", UserId = user.Id, CreatedAt = now, LastSeenAt = now, IdleExpiresAt = now.AddHours(1), AbsoluteExpiresAt = now.AddDays(1) },
-            new SqlOSRefreshToken { Id = "rt_claim", SessionId = "ses_claim", TokenHash = "rt", FamilyId = "fam", CreatedAt = now, ExpiresAt = now.AddDays(1) });
+            new SqlOSRefreshToken { Id = "rt_claim", SessionId = "ses_claim", TokenHash = "rt", FamilyId = "fam", CreatedAt = now, ExpiresAt = now.AddDays(1) },
+            new SqlOSConsentGrant { Id = "cgr_claim", UserId = user.Id, ClientApplicationId = "cli_attacker", Scope = "openid", GrantedAt = now, UpdatedAt = now },
+            new SqlOSCalendarConnection
+            {
+                Id = "cal_claim",
+                ProviderType = SqlOSCalendarProviderType.Google,
+                OidcConnectionId = "oidc_1",
+                UserId = user.Id,
+                DisplayName = "Squatter calendar",
+                AccessTokenEncrypted = "dp:access",
+                RefreshTokenEncrypted = "dp:refresh",
+                CreatedAt = now,
+                UpdatedAt = now
+            },
+            new SqlOSCalendarConnection
+            {
+                Id = "cal_org",
+                ProviderType = SqlOSCalendarProviderType.Google,
+                OidcConnectionId = "oidc_1",
+                OrganizationId = "org_member",
+                DisplayName = "Organization calendar",
+                AccessTokenEncrypted = "dp:org-access",
+                RefreshTokenEncrypted = "dp:org-refresh",
+                CreatedAt = now,
+                UpdatedAt = now
+            },
+            new SqlOSMembership { OrganizationId = "org_member", UserId = user.Id, Role = "member", IsActive = true, CreatedAt = now });
         await context.SaveChangesAsync();
         context.ChangeTracker.Clear();
         var trackedEmail = await context.Set<SqlOSUserEmail>().SingleAsync();
-        return new SeededAccount(user.Id, trackedEmail, "cred_claim", "auth_claim", "phn_claim", "ext_oidc", "ext_saml");
+        return new SeededAccount(
+            user.Id,
+            trackedEmail,
+            "cred_claim",
+            "auth_claim",
+            "phn_claim",
+            "ext_oidc",
+            "ext_saml",
+            "cgr_claim",
+            "cal_claim",
+            "cal_org",
+            "org_member");
     }
 
     private sealed record SeededAccount(
@@ -184,5 +265,9 @@ public sealed class SqlOSEmailOwnershipClaimTests
         string AuthenticatorId,
         string PhoneId,
         string OidcIdentityId,
-        string SamlIdentityId);
+        string SamlIdentityId,
+        string ConsentGrantId,
+        string CalendarConnectionId,
+        string OrganizationCalendarConnectionId,
+        string OrganizationId);
 }
