@@ -1,0 +1,92 @@
+# SqlOS behavior lock transcript
+scenario: AdminIdentityUserScenarios.A_lookalike_domain_is_a_different_mailbox_while_its_idna_form_is_the_same_one
+profile: dashboard-callback
+
+# The 7.2.1 fix for #422 keys accounts by a canonical email (NFC, IDNA ASCII domain, ASCII-only case folding) and confirms matches ordinally, so a look-alike never selects another person's account.
+
+## 1. operator: create bob at business.example.test
+> POST /sqlos/admin/auth/api/users
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Bob",
+>     "email": "bob@business.example.test"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "defaultEmail": "bob@business.example.test",
+      "displayName": "Bob",
+      "id": "{usr#1}",
+      "isActive": true,
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 2. operator: busineß is another domain, so this is a new user, not a duplicate
+> POST /sqlos/admin/auth/api/users
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Look Alike",
+>     "email": "bob@busineß.example.test"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "defaultEmail": "bob@busineß.example.test",
+      "displayName": "Look Alike",
+      "id": "{usr#2}",
+      "isActive": true,
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 3. operator: the IDNA ASCII form of busineß, in any letter case, is the look-alike user's mailbox, so it is taken (500)
+> POST /sqlos/admin/auth/api/users
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Look Alike Ascii",
+>     "email": "bob@XN--BUSINE-GTA.example.test"
+>   }
+< 500 Internal Server Error
+
+## 4. operator: and the upper-case ASCII address is bob's (500)
+> POST /sqlos/admin/auth/api/users
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Bob Shouting",
+>     "email": "BOB@BUSINESS.EXAMPLE.TEST"
+>   }
+< 500 Internal Server Error
+
+## 5. operator: exactly two users, each with the address as written
+> GET /sqlos/admin/auth/api/users?search=bob
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "defaultEmail": "bob@business.example.test",
+          "displayName": "Bob",
+          "id": "{usr#1}",
+          "isActive": true,
+          "membershipCount": 0
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "defaultEmail": "bob@busineß.example.test",
+          "displayName": "Look Alike",
+          "id": "{usr#2}",
+          "isActive": true,
+          "membershipCount": 0
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }

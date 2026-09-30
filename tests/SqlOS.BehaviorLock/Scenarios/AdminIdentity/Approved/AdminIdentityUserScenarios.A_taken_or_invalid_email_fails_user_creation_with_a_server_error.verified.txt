@@ -1,0 +1,101 @@
+# SqlOS behavior lock transcript
+scenario: AdminIdentityUserScenarios.A_taken_or_invalid_email_fails_user_creation_with_a_server_error
+profile: dashboard-callback
+
+## 1. operator: create a user
+> POST /sqlos/admin/auth/api/users
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Dana",
+>     "email": "{email:dana}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "defaultEmail": "{email:dana}",
+      "displayName": "Dana",
+      "id": "{usr#1}",
+      "isActive": true,
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 2. operator: the same email again escapes as an unhandled InvalidOperationException ('already exists'): 500
+> POST /sqlos/admin/auth/api/users
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Dana Again",
+>     "email": "{email:dana}"
+>   }
+< 500 Internal Server Error
+
+## 3. operator: the same mailbox in upper case with surrounding spaces is taken too
+> POST /sqlos/admin/auth/api/users
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Dana Shouting",
+>     "email": "  {email:DANA}  "
+>   }
+< 500 Internal Server Error
+
+## 4. operator: an address without @ is rejected as invalid, also as an unhandled 500
+> POST /sqlos/admin/auth/api/users
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "No At",
+>     "email": "not-an-email"
+>   }
+< 500 Internal Server Error
+
+## 5. operator: an ASCII look-alike character (long s) is rejected as invalid
+> POST /sqlos/admin/auth/api/users
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Long S",
+>     "email": "ſam@example.test"
+>   }
+< 500 Internal Server Error
+
+## 6. operator: a missing email is invalid
+> POST /sqlos/admin/auth/api/users
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Missing Email"
+>   }
+< 500 Internal Server Error
+
+## 7. operator: a missing display name reaches the database
+> POST /sqlos/admin/auth/api/users
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "email": "{email:nameless}"
+>   }
+< 500 Internal Server Error
+
+## 8. operator: what was created
+> GET /sqlos/admin/auth/api/users
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "defaultEmail": "{email:dana}",
+          "displayName": "Dana",
+          "id": "{usr#1}",
+          "isActive": true,
+          "membershipCount": 0
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }

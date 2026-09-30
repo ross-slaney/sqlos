@@ -1,0 +1,258 @@
+# SqlOS behavior lock transcript
+scenario: AdminIdentityUserScenarios.Operator_lists_searches_and_pages_users_with_bound_cursors
+profile: dashboard-callback
+
+## 1. operator: users are listed by display name, ten to a page by default
+> GET /sqlos/admin/auth/api/users
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "defaultEmail": "{email:alice}",
+          "displayName": "Alice",
+          "id": "{usr#1}",
+          "isActive": true,
+          "membershipCount": 0
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "defaultEmail": "{email:bob}",
+          "displayName": "Bob",
+          "id": "{usr#2}",
+          "isActive": true,
+          "membershipCount": 0
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "defaultEmail": "{email:carol}",
+          "displayName": "Carol",
+          "id": "{usr#3}",
+          "isActive": true,
+          "membershipCount": 0
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 2. operator: search matches the display name or the default email
+> GET /sqlos/admin/auth/api/users?search=ob
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "defaultEmail": "{email:bob}",
+          "displayName": "Bob",
+          "id": "{usr#2}",
+          "isActive": true,
+          "membershipCount": 0
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 3. operator: a two-user page returns a next cursor
+> GET /sqlos/admin/auth/api/users?pageSize=2
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "defaultEmail": "{email:alice}",
+          "displayName": "Alice",
+          "id": "{usr#1}",
+          "isActive": true,
+          "membershipCount": 0
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "defaultEmail": "{email:bob}",
+          "displayName": "Bob",
+          "id": "{usr#2}",
+          "isActive": true,
+          "membershipCount": 0
+        }
+      ],
+      "hasNextPage": true,
+      "nextCursor": "{cursor#1}",
+      "pageSize": 2
+    }
+
+## 4. operator: the cursor continues after the last row
+> GET /sqlos/admin/auth/api/users?pageSize=2&cursor={cursor#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "defaultEmail": "{email:carol}",
+          "displayName": "Carol",
+          "id": "{usr#3}",
+          "isActive": true,
+          "membershipCount": 0
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 2
+    }
+
+## 5. operator: page=1 is accepted as the first window
+> GET /sqlos/admin/auth/api/users?pageSize=2&page=1
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "defaultEmail": "{email:alice}",
+          "displayName": "Alice",
+          "id": "{usr#1}",
+          "isActive": true,
+          "membershipCount": 0
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "defaultEmail": "{email:bob}",
+          "displayName": "Bob",
+          "id": "{usr#2}",
+          "isActive": true,
+          "membershipCount": 0
+        }
+      ],
+      "hasNextPage": true,
+      "nextCursor": "{cursor#1}",
+      "pageSize": 2
+    }
+
+## 6. operator: deeper offset pages are rejected
+> GET /sqlos/admin/auth/api/users?page=2
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_cursor",
+      "message": "Offset pagination is no longer supported. Omit page or pass page=1 for the first window, then follow nextCursor."
+    }
+
+## 7. operator: a cursor is bound to the filters it was issued with
+> GET /sqlos/admin/auth/api/users?search=ob&cursor={cursor#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_cursor",
+      "message": "The cursor does not match the current filters."
+    }
+
+## 8. operator: and to the list that issued it
+> GET /sqlos/admin/auth/api/organizations?cursor={cursor#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_cursor",
+      "message": "The cursor does not match this list."
+    }
+
+## 9. operator: a cursor of an unknown version is not supported
+> GET /sqlos/admin/auth/api/users?cursor={crafted-cursor#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_cursor",
+      "message": "The cursor is not supported."
+    }
+
+## 10. operator: an undecodable cursor is invalid
+> GET /sqlos/admin/auth/api/users?cursor=not-a-cursor
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_cursor",
+      "message": "The cursor is invalid."
+    }
+
+## 11. operator: a cursor longer than the encoded limit is invalid
+> GET /sqlos/admin/auth/api/users?cursor={oversized-cursor#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_cursor",
+      "message": "The cursor is invalid."
+    }
+
+## 12. operator: a page size below one is raised to one
+> GET /sqlos/admin/auth/api/users?pageSize=0
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "defaultEmail": "{email:alice}",
+          "displayName": "Alice",
+          "id": "{usr#1}",
+          "isActive": true,
+          "membershipCount": 0
+        }
+      ],
+      "hasNextPage": true,
+      "nextCursor": "{cursor#2}",
+      "pageSize": 1
+    }
+
+## 13. operator: a page size above one hundred is capped at one hundred
+> GET /sqlos/admin/auth/api/users?pageSize=500
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "defaultEmail": "{email:alice}",
+          "displayName": "Alice",
+          "id": "{usr#1}",
+          "isActive": true,
+          "membershipCount": 0
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "defaultEmail": "{email:bob}",
+          "displayName": "Bob",
+          "id": "{usr#2}",
+          "isActive": true,
+          "membershipCount": 0
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "defaultEmail": "{email:carol}",
+          "displayName": "Carol",
+          "id": "{usr#3}",
+          "isActive": true,
+          "membershipCount": 0
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 100
+    }
