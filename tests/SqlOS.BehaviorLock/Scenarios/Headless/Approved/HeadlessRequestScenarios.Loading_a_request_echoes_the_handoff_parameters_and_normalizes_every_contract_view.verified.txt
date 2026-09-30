@@ -1,0 +1,223 @@
+# SqlOS behavior lock transcript
+scenario: HeadlessRequestScenarios.Loading_a_request_echoes_the_handoff_parameters_and_normalizes_every_contract_view
+profile: headless
+
+## 1. browser: reload with the parameters the package forwards: the view is trimmed and lower-cased, the rest echoed
+> GET /sqlos/auth/headless/requests/{req#1}?view=%20SIGNUP%20&error=Try%20again&email={email:paula}&displayName=Paula&pendingToken=pending-from-the-url
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "authBasePath": "/sqlos/auth",
+      "challengeToken": null,
+      "clientId": "behavior-lock-app",
+      "clientName": "Behavior Lock",
+      "consentScopes": null,
+      "consentToken": null,
+      "deviceAuthorization": null,
+      "displayName": "Paula",
+      "email": "{email:paula}",
+      "error": "Try again",
+      "fieldErrors": {},
+      "headlessApiBasePath": "/sqlos/auth/headless",
+      "info": null,
+      "invitation": null,
+      "mfaMethods": [],
+      "mfaToken": null,
+      "omittedOpenId": false,
+      "organizationSelection": [],
+      "pendingToken": "pending-from-the-url",
+      "phoneNumber": null,
+      "providers": [
+        {
+          "connectionId": "{oidc#1}",
+          "displayName": "Example OIDC",
+          "logoDataUrl": null,
+          "providerType": "Custom"
+        },
+        {
+          "connectionId": "{oidc#2}",
+          "displayName": "Google",
+          "logoDataUrl": "{data-uri:image/svg+xml}",
+          "providerType": "Google"
+        }
+      ],
+      "requestId": "{req#1}",
+      "requiresMfaEnrollment": false,
+      "scope": "openid profile email offline_access",
+      "settings": {
+        "accentColor": "#0f172a",
+        "backgroundColor": "#f8fafc",
+        "emailOtpRuntimeConfigured": true,
+        "enablePasswordSignup": true,
+        "enabledCredentialTypes": [
+          "password",
+          "email_otp",
+          "magic_link",
+          "phone_otp"
+        ],
+        "headlessCapabilityRegistered": true,
+        "layout": "split",
+        "localPasswordRuntimeEnabled": true,
+        "logoBase64": null,
+        "magicLinkRuntimeConfigured": true,
+        "managedByStartupSeed": true,
+        "ownership": {
+          "canEmergencyDisable": false,
+          "configurationFingerprint": "{hex#1}",
+          "isEditable": false,
+          "isOrphaned": false,
+          "lastReconciledAt": "{datetime:unspecified}",
+          "owner": "code",
+          "sourceKey": "auth-page:default"
+        },
+        "pageSubtitle": "Secure your app-owned AI and MCP experiences with SqlOS.",
+        "pageTitle": "Sign in to Behavior Lock",
+        "phoneOtpRuntimeConfigured": true,
+        "primaryColor": "#2563eb",
+        "updatedAt": "{datetime:unspecified}"
+      },
+      "signupToken": null,
+      "totpEnrollment": null,
+      "uiContext": null,
+      "view": "signup"
+    }
+
+## 2. browser: an unknown view name falls back to login
+> GET /sqlos/auth/headless/requests/{req#1}?view=not-a-view
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "authBasePath": "/sqlos/auth",
+      "challengeToken": null,
+      "clientId": "behavior-lock-app",
+      "clientName": "Behavior Lock",
+      "consentScopes": null,
+      "consentToken": null,
+      "deviceAuthorization": null,
+      "displayName": null,
+      "email": "",
+      "error": null,
+      "fieldErrors": {},
+      "headlessApiBasePath": "/sqlos/auth/headless",
+      "info": null,
+      "invitation": null,
+      "mfaMethods": [],
+      "mfaToken": null,
+      "omittedOpenId": false,
+      "organizationSelection": [],
+      "pendingToken": null,
+      "phoneNumber": null,
+      "providers": [
+        {
+          "connectionId": "{oidc#1}",
+          "displayName": "Example OIDC",
+          "logoDataUrl": null,
+          "providerType": "Custom"
+        },
+        {
+          "connectionId": "{oidc#2}",
+          "displayName": "Google",
+          "logoDataUrl": "{data-uri:image/svg+xml}",
+          "providerType": "Google"
+        }
+      ],
+      "requestId": "{req#1}",
+      "requiresMfaEnrollment": false,
+      "scope": "openid profile email offline_access",
+      "settings": {
+        "accentColor": "#0f172a",
+        "backgroundColor": "#f8fafc",
+        "emailOtpRuntimeConfigured": true,
+        "enablePasswordSignup": true,
+        "enabledCredentialTypes": [
+          "password",
+          "email_otp",
+          "magic_link",
+          "phone_otp"
+        ],
+        "headlessCapabilityRegistered": true,
+        "layout": "split",
+        "localPasswordRuntimeEnabled": true,
+        "logoBase64": null,
+        "magicLinkRuntimeConfigured": true,
+        "managedByStartupSeed": true,
+        "ownership": {
+          "canEmergencyDisable": false,
+          "configurationFingerprint": "{hex#1}",
+          "isEditable": false,
+          "isOrphaned": false,
+          "lastReconciledAt": "{datetime:unspecified}",
+          "owner": "code",
+          "sourceKey": "auth-page:default"
+        },
+        "pageSubtitle": "Secure your app-owned AI and MCP experiences with SqlOS.",
+        "pageTitle": "Sign in to Behavior Lock",
+        "phoneOtpRuntimeConfigured": true,
+        "primaryColor": "#2563eb",
+        "updatedAt": "{datetime:unspecified}"
+      },
+      "signupToken": null,
+      "totpEnrollment": null,
+      "uiContext": null,
+      "view": "login"
+    }
+
+# view=login -> 200 view=login
+
+# view=signup -> 200 view=signup
+
+# view=password -> 200 view=password
+
+# view=forgot-password -> 200 view=forgot-password
+
+# view=forgot-password-sent -> 200 view=forgot-password-sent
+
+# view=password-reset -> 200 view=password-reset
+
+# view=email-otp -> 200 view=email-otp
+
+# view=email-otp-verify -> 200 view=email-otp-verify
+
+# view=email-otp-signup-verify -> 200 view=email-otp-signup-verify
+
+# view=magic-link -> 200 view=magic-link
+
+# view=magic-link-sent -> 200 view=magic-link-sent
+
+# view=phone-otp -> 200 view=phone-otp
+
+# view=phone-otp-verify -> 200 view=phone-otp-verify
+
+# view=phone-otp-signup -> 200 view=phone-otp-signup
+
+# view=phone-otp-signup-verify -> 200 view=phone-otp-signup-verify
+
+# view=invite -> 200 view=invite
+
+# view=invite-login -> 200 view=invite-login
+
+# view=invite-email-otp-verify -> 200 view=invite-email-otp-verify
+
+# view=invite-accepted -> 200 view=invite-accepted
+
+# view=device -> 200 view=device
+
+# view=device-approve -> 200 view=device-approve
+
+# view=device-approved -> 200 view=device-approved
+
+# view=device-denied -> 200 view=device-denied
+
+# view=mfa -> 200 view=mfa
+
+# view=mfa-enroll -> 200 view=mfa-enroll
+
+# view=organization -> 200 view=organization
+
+# view=consent -> 200 view=consent
+
+# view=logged-out -> 200 view=logged-out

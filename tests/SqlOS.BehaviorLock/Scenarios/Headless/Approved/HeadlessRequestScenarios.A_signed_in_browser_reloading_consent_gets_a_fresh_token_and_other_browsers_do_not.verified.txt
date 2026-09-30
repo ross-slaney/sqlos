@@ -1,0 +1,374 @@
+# SqlOS behavior lock transcript
+scenario: HeadlessRequestScenarios.A_signed_in_browser_reloading_consent_gets_a_fresh_token_and_other_browsers_do_not
+profile: headless
+
+## 1. browser: alice's signed-in browser authorizes the partner: the UI's consent view, with a consent token in the URL
+> GET /sqlos/auth/authorize?response_type=code&client_id=partner-app&redirect_uri=https%3A%2F%2Fpartner.example.test%2Fcallback&scope=openid%20profile%20email%20offline_access&state={state#1}&nonce={nonce#1}&code_challenge={pkce-challenge#1}&code_challenge_method=S256
+> Cookie: sqlos_auth_page={cookie#1}
+< 302 Found
+< Location: https://sqlos.example.test/auth/authorize?request={req#1}&view=consent&email={email:alice}&consentToken={consent-token#1}
+
+## 2. browser: alice's browser reloads the consent view: a fresh consent token from her issuer session
+> GET /sqlos/auth/headless/requests/{req#1}?view=consent
+> Cookie: sqlos_auth_page={cookie#1}
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "authBasePath": "/sqlos/auth",
+      "challengeToken": null,
+      "clientId": "partner-app",
+      "clientName": "Partner App",
+      "consentScopes": [
+        {
+          "description": null,
+          "displayName": "openid",
+          "scope": "openid"
+        },
+        {
+          "description": null,
+          "displayName": "profile",
+          "scope": "profile"
+        },
+        {
+          "description": null,
+          "displayName": "email",
+          "scope": "email"
+        },
+        {
+          "description": null,
+          "displayName": "offline_access",
+          "scope": "offline_access"
+        }
+      ],
+      "consentToken": "{consent-token#2}",
+      "deviceAuthorization": null,
+      "displayName": null,
+      "email": "",
+      "error": null,
+      "fieldErrors": {},
+      "headlessApiBasePath": "/sqlos/auth/headless",
+      "info": null,
+      "invitation": null,
+      "mfaMethods": [],
+      "mfaToken": null,
+      "omittedOpenId": false,
+      "organizationSelection": [],
+      "pendingToken": null,
+      "phoneNumber": null,
+      "providers": [
+        {
+          "connectionId": "{oidc#1}",
+          "displayName": "Example OIDC",
+          "logoDataUrl": null,
+          "providerType": "Custom"
+        },
+        {
+          "connectionId": "{oidc#2}",
+          "displayName": "Google",
+          "logoDataUrl": "{data-uri:image/svg+xml}",
+          "providerType": "Google"
+        }
+      ],
+      "requestId": "{req#1}",
+      "requiresMfaEnrollment": false,
+      "scope": "openid profile email offline_access",
+      "settings": {
+        "accentColor": "#0f172a",
+        "backgroundColor": "#f8fafc",
+        "emailOtpRuntimeConfigured": true,
+        "enablePasswordSignup": true,
+        "enabledCredentialTypes": [
+          "password",
+          "email_otp",
+          "magic_link",
+          "phone_otp"
+        ],
+        "headlessCapabilityRegistered": true,
+        "layout": "split",
+        "localPasswordRuntimeEnabled": true,
+        "logoBase64": null,
+        "magicLinkRuntimeConfigured": true,
+        "managedByStartupSeed": true,
+        "ownership": {
+          "canEmergencyDisable": false,
+          "configurationFingerprint": "{hex#1}",
+          "isEditable": false,
+          "isOrphaned": false,
+          "lastReconciledAt": "{datetime:unspecified}",
+          "owner": "code",
+          "sourceKey": "auth-page:default"
+        },
+        "pageSubtitle": "Secure your app-owned AI and MCP experiences with SqlOS.",
+        "pageTitle": "Sign in to Behavior Lock",
+        "phoneOtpRuntimeConfigured": true,
+        "primaryColor": "#2563eb",
+        "updatedAt": "{datetime:unspecified}"
+      },
+      "signupToken": null,
+      "totpEnrollment": null,
+      "uiContext": null,
+      "view": "consent"
+    }
+
+## 3. bobs-browser: bob's signed-in browser loads alice's request: no consent token for another user
+> GET /sqlos/auth/headless/requests/{req#1}?view=consent
+> Cookie: sqlos_auth_page={cookie#2}
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "authBasePath": "/sqlos/auth",
+      "challengeToken": null,
+      "clientId": "partner-app",
+      "clientName": "Partner App",
+      "consentScopes": [
+        {
+          "description": null,
+          "displayName": "openid",
+          "scope": "openid"
+        },
+        {
+          "description": null,
+          "displayName": "profile",
+          "scope": "profile"
+        },
+        {
+          "description": null,
+          "displayName": "email",
+          "scope": "email"
+        },
+        {
+          "description": null,
+          "displayName": "offline_access",
+          "scope": "offline_access"
+        }
+      ],
+      "consentToken": null,
+      "deviceAuthorization": null,
+      "displayName": null,
+      "email": "",
+      "error": null,
+      "fieldErrors": {},
+      "headlessApiBasePath": "/sqlos/auth/headless",
+      "info": null,
+      "invitation": null,
+      "mfaMethods": [],
+      "mfaToken": null,
+      "omittedOpenId": false,
+      "organizationSelection": [],
+      "pendingToken": null,
+      "phoneNumber": null,
+      "providers": [
+        {
+          "connectionId": "{oidc#1}",
+          "displayName": "Example OIDC",
+          "logoDataUrl": null,
+          "providerType": "Custom"
+        },
+        {
+          "connectionId": "{oidc#2}",
+          "displayName": "Google",
+          "logoDataUrl": "{data-uri:image/svg+xml}",
+          "providerType": "Google"
+        }
+      ],
+      "requestId": "{req#1}",
+      "requiresMfaEnrollment": false,
+      "scope": "openid profile email offline_access",
+      "settings": {
+        "accentColor": "#0f172a",
+        "backgroundColor": "#f8fafc",
+        "emailOtpRuntimeConfigured": true,
+        "enablePasswordSignup": true,
+        "enabledCredentialTypes": [
+          "password",
+          "email_otp",
+          "magic_link",
+          "phone_otp"
+        ],
+        "headlessCapabilityRegistered": true,
+        "layout": "split",
+        "localPasswordRuntimeEnabled": true,
+        "logoBase64": null,
+        "magicLinkRuntimeConfigured": true,
+        "managedByStartupSeed": true,
+        "ownership": {
+          "canEmergencyDisable": false,
+          "configurationFingerprint": "{hex#1}",
+          "isEditable": false,
+          "isOrphaned": false,
+          "lastReconciledAt": "{datetime:unspecified}",
+          "owner": "code",
+          "sourceKey": "auth-page:default"
+        },
+        "pageSubtitle": "Secure your app-owned AI and MCP experiences with SqlOS.",
+        "pageTitle": "Sign in to Behavior Lock",
+        "phoneOtpRuntimeConfigured": true,
+        "primaryColor": "#2563eb",
+        "updatedAt": "{datetime:unspecified}"
+      },
+      "signupToken": null,
+      "totpEnrollment": null,
+      "uiContext": null,
+      "view": "consent"
+    }
+
+## 4. anonymous: a browser without an issuer session: no consent token
+> GET /sqlos/auth/headless/requests/{req#1}?view=consent
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "authBasePath": "/sqlos/auth",
+      "challengeToken": null,
+      "clientId": "partner-app",
+      "clientName": "Partner App",
+      "consentScopes": [
+        {
+          "description": null,
+          "displayName": "openid",
+          "scope": "openid"
+        },
+        {
+          "description": null,
+          "displayName": "profile",
+          "scope": "profile"
+        },
+        {
+          "description": null,
+          "displayName": "email",
+          "scope": "email"
+        },
+        {
+          "description": null,
+          "displayName": "offline_access",
+          "scope": "offline_access"
+        }
+      ],
+      "consentToken": null,
+      "deviceAuthorization": null,
+      "displayName": null,
+      "email": "",
+      "error": null,
+      "fieldErrors": {},
+      "headlessApiBasePath": "/sqlos/auth/headless",
+      "info": null,
+      "invitation": null,
+      "mfaMethods": [],
+      "mfaToken": null,
+      "omittedOpenId": false,
+      "organizationSelection": [],
+      "pendingToken": null,
+      "phoneNumber": null,
+      "providers": [
+        {
+          "connectionId": "{oidc#1}",
+          "displayName": "Example OIDC",
+          "logoDataUrl": null,
+          "providerType": "Custom"
+        },
+        {
+          "connectionId": "{oidc#2}",
+          "displayName": "Google",
+          "logoDataUrl": "{data-uri:image/svg+xml}",
+          "providerType": "Google"
+        }
+      ],
+      "requestId": "{req#1}",
+      "requiresMfaEnrollment": false,
+      "scope": "openid profile email offline_access",
+      "settings": {
+        "accentColor": "#0f172a",
+        "backgroundColor": "#f8fafc",
+        "emailOtpRuntimeConfigured": true,
+        "enablePasswordSignup": true,
+        "enabledCredentialTypes": [
+          "password",
+          "email_otp",
+          "magic_link",
+          "phone_otp"
+        ],
+        "headlessCapabilityRegistered": true,
+        "layout": "split",
+        "localPasswordRuntimeEnabled": true,
+        "logoBase64": null,
+        "magicLinkRuntimeConfigured": true,
+        "managedByStartupSeed": true,
+        "ownership": {
+          "canEmergencyDisable": false,
+          "configurationFingerprint": "{hex#1}",
+          "isEditable": false,
+          "isOrphaned": false,
+          "lastReconciledAt": "{datetime:unspecified}",
+          "owner": "code",
+          "sourceKey": "auth-page:default"
+        },
+        "pageSubtitle": "Secure your app-owned AI and MCP experiences with SqlOS.",
+        "pageTitle": "Sign in to Behavior Lock",
+        "phoneOtpRuntimeConfigured": true,
+        "primaryColor": "#2563eb",
+        "updatedAt": "{datetime:unspecified}"
+      },
+      "signupToken": null,
+      "totpEnrollment": null,
+      "uiContext": null,
+      "view": "consent"
+    }
+
+## 5. browser: approve with the re-minted token: a redirect to the partner with a code
+> POST /sqlos/auth/headless/consent/approve
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "consentToken": "{consent-token#2}",
+>     "requestId": "{req#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+< Set-Cookie: sqlos_auth_page={cookie#3}; expires=+7d; path=/; secure; samesite=lax; httponly
+    {
+      "redirectUrl": "https://partner.example.test/callback?code={code#1}&state={state#1}&scope=openid%20profile%20email%20offline_access",
+      "type": "redirect",
+      "viewModel": null
+    }
+
+## audit: consent reload events
+  - {
+      "action": "oauth.consent.granted",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.consent.granted",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "client_id": "partner-app",
+        "scope": "openid profile email offline_access"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
