@@ -36,6 +36,12 @@ public static class HostProfiles
     public const string LegacyHost = "legacy-host";
     public const string Upgrade = "upgrade";
 
+    /// <summary>The multi-app profile's confidential web client secret. SqlOS requires seeded secrets of 43 to 256 characters.</summary>
+    public const string ConfidentialClientSecret = "atlas-confidential-secret-for-the-behavior-lock";
+
+    /// <summary>The multi-app profile's machine client secret. SqlOS requires seeded secrets of 43 to 256 characters.</summary>
+    public const string MachineClientSecret = "atlas-worker-machine-secret-for-the-behavior-lock";
+
     private static readonly IReadOnlyList<HostProfile> Profiles =
     [
         new HostProfile
@@ -168,7 +174,7 @@ public static class HostProfiles
                     client.RedirectUris = ["https://web.example.test/signin-oidc"];
                     client.AllowedScopes = [.. scopes];
                     client.IsFirstParty = true;
-                    client.ClientSecretResolver = () => "atlas-confidential-secret";
+                    client.ClientSecretResolver = () => ConfidentialClientSecret;
                 });
                 auth.SeedOwnedNativeApp("atlas-mobile", "Atlas Mobile", allowNativeHeadlessAuth: true, "com.example.atlas:/callback");
                 auth.SeedCliClient("atlas-cli", "Atlas CLI", ResourceApiAudience, "openid", "profile", "email", "offline_access");
@@ -177,7 +183,7 @@ public static class HostProfiles
                     client.Name = "Atlas Worker";
                     client.Audience = ResourceApiAudience;
                     client.AllowedScopes = [BehaviorLockAuthorization.ReadPermission];
-                    machine.SecretResolver = () => "atlas-worker-secret";
+                    machine.SecretResolver = () => MachineClientSecret;
                 });
                 auth.SeedScopeDisplayName(BehaviorLockAuthorization.ReadPermission, "Read workspaces", "View workspaces you can access.");
             },
