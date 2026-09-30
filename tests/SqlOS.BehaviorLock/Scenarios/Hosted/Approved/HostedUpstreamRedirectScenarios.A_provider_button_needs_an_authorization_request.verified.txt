@@ -1,0 +1,79 @@
+# SqlOS behavior lock transcript
+scenario: HostedUpstreamRedirectScenarios.A_provider_button_needs_an_authorization_request
+profile: hosted
+
+## 1. browser: a provider link without a request: the sign-in page with an error
+> GET /sqlos/auth/login/oidc/{oidc#1}?email=someone%40example.test
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#1}'; style-src 'self' 'nonce-{csp-nonce#1}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Behavior Lock</title>
+        <style nonce="{csp-nonce#1}">{style-sha256:4961352b3f23eca1}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Behavior Lock</h1>
+                <p class="brand-subtitle">Behavior lock hosted sign-in.</p>
+              </div>
+              <div class="messages">
+                <div class="callout error">
+                  <span class="callout-icon">!</span>
+                  <span>OIDC sign-in requires an active authorization request.</span>
+                </div>
+              </div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <form class="auth-form" method="post" action="/sqlos/auth/login/identify" data-flow-kind="hrd">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#1}" />
+                    <label class="field">
+                      <span>Email</span>
+                      <input name="email" type="email" value="someone@example.test" placeholder="Your email address" autocomplete="email" required="" />
+                    </label>
+                    <button class="primary-action" type="submit" data-loading-label="Checking email">
+                      <span class="button-label">Continue</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                    <div class="flow-status" hidden="">
+                      <span class="loader loader-sm" aria-hidden="true"></span>
+                      <span>Checking your sign-in method...</span>
+                    </div>
+                  </form>
+                  <div class="footer-links">
+                    <a class="secondary-link" href="/sqlos/auth/login/phone-otp">Use a phone code instead</a>
+                    <a class="secondary-link" href="/sqlos/auth/login/email-otp?email=someone%40example.test">Use an email code instead</a>
+                  </div>
+                  <p class="footer-prompt">
+                    Don't have an account?
+                    <a class="secondary-link" href="/sqlos/auth/signup">Get started</a>
+                  </p>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#1}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+
+## 2. browser: the custom OIDC provider: discovery is fetched, then the browser goes to its authorization endpoint
+> GET /sqlos/auth/login/oidc/{oidc#1}?request={req#1}&email=someone%40example.test
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+< 302 Found
+< Location: https://oidc.example.local/authorize?client_id=custom-client-id&redirect_uri=https%3A%2F%2Fsqlos.example.test%2Fsqlos%2Fauth%2Foidc%2Fcallback&response_type=code&scope=openid%20email%20profile&state={state#1}&nonce={nonce#1}&code_challenge={pkce-challenge#1}&code_challenge_method=S256&login_hint=someone@example.test
+  ~ http SqlOSOidcAuthService: GET https://oidc.example.local/.well-known/openid-configuration -> 200

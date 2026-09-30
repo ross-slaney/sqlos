@@ -1,0 +1,18 @@
+# SqlOS behavior lock transcript
+scenario: HostedUpstreamRedirectScenarios.Unknown_connections_and_requests_are_unhandled_errors
+profile: hosted
+
+## 1. browser: a connection SqlOS does not have
+> GET /sqlos/auth/login/oidc/not-a-connection?request={req#1}&email=
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+< 500 Internal Server Error
+
+## 2. browser: a request SqlOS does not know
+> GET /sqlos/auth/login/oidc/{oidc#1}?request=not-a-request&email=
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+< 500 Internal Server Error
+
+## 3. browser: an invitation token SqlOS cannot resolve
+> GET /sqlos/auth/login/oidc/{oidc#1}?request={req#1}&email=&invitationToken=not-an-invitation
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+< 500 Internal Server Error
