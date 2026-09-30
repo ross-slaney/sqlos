@@ -217,6 +217,18 @@ Watch the run created by this release. If `check-release-checklist.sh` fails, th
 
 NuGet listing can lag. The package URL is `https://www.nuget.org/packages/SqlOS/<version>`.
 
+## Release a 7.x patch from `release/7.x`
+
+Feature work on `main` is paused while the 8.0.0 refactor is in progress, and `main` may hold unreleased 8.0.0 changes. A 7.x security or bug-fix patch ships from the maintenance branch `release/7.x`, cut from tag `v7.2.1`. Everything above applies, with these differences:
+
+- Branch the release from `release/7.x`, not `main`: `git fetch origin release/7.x && git checkout -b release-<version> origin/release/7.x`.
+- Bring each fix in with `git cherry-pick -x <sha>` from the merged fix PR on `main` (or open the fix PR against `release/7.x` when it does not apply to 8.0.0). Do not merge `main` into `release/7.x`.
+- Bump to the next patch (`7.2.x`) and update the same version-contract files.
+- Open the version PR with `--base release/7.x`, and create the GitHub release with `--target release/7.x`. The tag `v7.2.x` then builds and publishes that branch.
+- Auto-merge is disabled on this repository, so `gh pr merge --auto` is refused. Wait until every required check is green, then squash-merge manually with `gh pr merge --squash <number>`.
+- The npm preview check (the `Publish to npm` job in `publish-npm.yml`, which runs on PRs to `main`) is flaky. Re-run a failed attempt with `gh run rerun --failed <run-id>` before treating it as a real failure.
+- The release workflow publishes `@sqlos/headless` with the `latest` dist-tag. That is correct until 8.0.0 ships. After 8.0.0 ships, a 7.x release would move `latest` back to 7.x, so stop and ask before publishing one.
+
 ## Definition of done
 
 - `origin/main` has the new `<Version>` and matching current-contract docs.
