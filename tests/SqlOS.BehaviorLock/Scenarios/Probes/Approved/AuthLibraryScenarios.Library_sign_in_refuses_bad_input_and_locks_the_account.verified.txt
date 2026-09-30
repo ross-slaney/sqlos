@@ -1,0 +1,411 @@
+# SqlOS behavior lock transcript
+scenario: AuthLibraryScenarios.Library_sign_in_refuses_bad_input_and_locks_the_account
+profile: hosted
+
+## 1. probe: a client is required
+> POST /__probe/auth/password-login
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "email": "{email:alice}",
+>     "password": "{password:alice}"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "Client application is required."
+    }
+
+## 2. probe: an unknown client is refused
+> POST /__probe/auth/password-login
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "no-such-client",
+>     "email": "{email:alice}",
+>     "password": "{password:alice}"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "Unknown client 'no-such-client'."
+    }
+
+## 3. probe: an unknown email gets the generic failure
+> POST /__probe/auth/password-login
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "email": "{email:nobody}",
+>     "password": "{password:alice}"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "Invalid email or password."
+    }
+
+## 4. probe: the right password for an organization the user does not belong to
+> POST /__probe/auth/password-login
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "email": "{email:alice}",
+>     "organizationId": "{org#1}",
+>     "password": "{password:alice}"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "User is not a member of the selected organization."
+    }
+
+## 5. probe: wrong password, attempt 1
+> POST /__probe/auth/password-login
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "email": "{email:alice}",
+>     "password": "{password#1}"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "Invalid email or password."
+    }
+
+## 6. probe: wrong password, attempt 2
+> POST /__probe/auth/password-login
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "email": "{email:alice}",
+>     "password": "{password#1}"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "Invalid email or password."
+    }
+
+## 7. probe: wrong password, attempt 3
+> POST /__probe/auth/password-login
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "email": "{email:alice}",
+>     "password": "{password#1}"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "Invalid email or password."
+    }
+
+## 8. probe: wrong password, attempt 4
+> POST /__probe/auth/password-login
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "email": "{email:alice}",
+>     "password": "{password#1}"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "Invalid email or password."
+    }
+
+## audit: the failures so far
+  - {
+      "action": "password.login.failed",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "password.login.failed",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "AuthorizationRequestId": "[redacted]",
+        "ClientKey": "behavior-lock-app",
+        "NormalizedEmail": "{email:NOBODY}",
+        "Surface": "api",
+        "UserAgentHash": null,
+        "details": {
+          "failureReason": "unknown_email",
+          "lockedScopes": []
+        },
+        "maskedEmail": "NO***@EXAMPLE.TEST"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "password.login.succeeded",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "password.login.succeeded",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "AuthorizationRequestId": "[redacted]",
+        "ClientKey": "behavior-lock-app",
+        "NormalizedEmail": "{email:ALICE}",
+        "Surface": "api",
+        "UserAgentHash": null,
+        "details": {
+          "resetScopes": [
+            "email",
+            "user"
+          ]
+        },
+        "maskedEmail": "AL***@EXAMPLE.TEST"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "password.login.failed",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "password.login.failed",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "AuthorizationRequestId": "[redacted]",
+        "ClientKey": "behavior-lock-app",
+        "NormalizedEmail": "{email:ALICE}",
+        "Surface": "api",
+        "UserAgentHash": null,
+        "details": {
+          "failureReason": "invalid_password",
+          "lockedScopes": []
+        },
+        "maskedEmail": "AL***@EXAMPLE.TEST"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "password.login.failed",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "password.login.failed",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "AuthorizationRequestId": "[redacted]",
+        "ClientKey": "behavior-lock-app",
+        "NormalizedEmail": "{email:ALICE}",
+        "Surface": "api",
+        "UserAgentHash": null,
+        "details": {
+          "failureReason": "invalid_password",
+          "lockedScopes": []
+        },
+        "maskedEmail": "AL***@EXAMPLE.TEST"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "password.login.failed",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "password.login.failed",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "AuthorizationRequestId": "[redacted]",
+        "ClientKey": "behavior-lock-app",
+        "NormalizedEmail": "{email:ALICE}",
+        "Surface": "api",
+        "UserAgentHash": null,
+        "details": {
+          "failureReason": "invalid_password",
+          "lockedScopes": []
+        },
+        "maskedEmail": "AL***@EXAMPLE.TEST"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "password.login.failed",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "password.login.failed",
+      "id": "{evt#6}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "AuthorizationRequestId": "[redacted]",
+        "ClientKey": "behavior-lock-app",
+        "NormalizedEmail": "{email:ALICE}",
+        "Surface": "api",
+        "UserAgentHash": null,
+        "details": {
+          "failureReason": "invalid_password",
+          "lockedScopes": []
+        },
+        "maskedEmail": "AL***@EXAMPLE.TEST"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+
+## 9. probe: the fifth wrong password locks the account
+> POST /__probe/auth/password-login
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "email": "{email:alice}",
+>     "password": "{password#1}"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "Invalid email or password."
+    }
+
+## 10. probe: while locked the right password gets the same generic failure
+> POST /__probe/auth/password-login
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "email": "{email:alice}",
+>     "password": "{password:alice}"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "Invalid email or password."
+    }
+
+# The lockout's audit events are not locked here: SqlOS lists the locked scopes, and writes one password.login.locked event per locked bucket, in the order of the buckets' random IDs (an EF Include with no ORDER BY), so their order differs between runs.

@@ -1,0 +1,271 @@
+# SqlOS behavior lock transcript
+scenario: ModuleLibraryScenarios.The_audit_service_records_application_events_once_per_idempotency_key
+profile: modules
+
+## 1. probe: RecordAsync stores an application event, redacting secret-looking metadata
+> POST /__probe/audit
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "action": "invoice.paid",
+>     "actor": {
+>       "displayName": "Alice",
+>       "id": "{usr#1}",
+>       "type": "user"
+>     },
+>     "context": {
+>       "ipAddress": "198.51.100.23",
+>       "requestId": "request-1001",
+>       "userAgent": "billing-worker/1.0"
+>     },
+>     "idempotencyKey": "invoice-1001-paid",
+>     "metadata": {
+>       "amount": 4200,
+>       "currency": "USD",
+>       "gateway": {
+>         "api_key": "key-not-for-the-log",
+>         "region": "eu"
+>       },
+>       "webhookSecret": "whsec-not-for-the-log"
+>     },
+>     "targets": [
+>       {
+>         "displayName": "Invoice 1001",
+>         "id": "inv-1001",
+>         "type": "invoice"
+>       }
+>     ],
+>     "userId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "created": true,
+      "eventId": "{evt#1}"
+    }
+
+## 2. probe: the same idempotency key returns the stored event
+> POST /__probe/audit
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "action": "invoice.paid",
+>     "actor": {
+>       "displayName": "Alice",
+>       "id": "{usr#1}",
+>       "type": "user"
+>     },
+>     "context": {
+>       "ipAddress": "198.51.100.23",
+>       "requestId": "request-1001",
+>       "userAgent": "billing-worker/1.0"
+>     },
+>     "idempotencyKey": "invoice-1001-paid",
+>     "metadata": {
+>       "amount": 4200,
+>       "currency": "USD",
+>       "gateway": {
+>         "api_key": "key-not-for-the-log",
+>         "region": "eu"
+>       },
+>       "webhookSecret": "whsec-not-for-the-log"
+>     },
+>     "targets": [
+>       {
+>         "displayName": "Invoice 1001",
+>         "id": "inv-1001",
+>         "type": "invoice"
+>       }
+>     ],
+>     "userId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "created": false,
+      "eventId": "{evt#1}"
+    }
+
+## 3. probe: the same key under another action is a separate event
+> POST /__probe/audit
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "action": "invoice.refunded",
+>     "actor": {
+>       "displayName": "Alice",
+>       "id": "{usr#1}",
+>       "type": "user"
+>     },
+>     "context": {
+>       "ipAddress": "198.51.100.23",
+>       "requestId": "request-1001",
+>       "userAgent": "billing-worker/1.0"
+>     },
+>     "idempotencyKey": "invoice-1001-paid",
+>     "metadata": {
+>       "amount": 4200,
+>       "currency": "USD",
+>       "gateway": {
+>         "api_key": "key-not-for-the-log",
+>         "region": "eu"
+>       },
+>       "webhookSecret": "whsec-not-for-the-log"
+>     },
+>     "targets": [
+>       {
+>         "displayName": "Invoice 1001",
+>         "id": "inv-1001",
+>         "type": "invoice"
+>       }
+>     ],
+>     "userId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "created": true,
+      "eventId": "{evt#2}"
+    }
+
+## 4. probe: an event with its own source and occurrence time and no actor
+> POST /__probe/audit
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "action": "report.exported",
+>     "occurredAt": "{datetime:utc-z}",
+>     "source": "reports"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "created": true,
+      "eventId": "{evt#3}"
+    }
+
+## 5. probe: an action is required
+> POST /__probe/audit
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "action": " "
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "ArgumentException",
+      "message": "Action is required. (Parameter 'Action')"
+    }
+
+## audit: the recorded events as the audit API returns them
+  - {
+      "action": "report.exported",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "report.exported",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "reports",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "invoice.paid",
+      "actor": {
+        "displayName": "Alice",
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "198.51.100.23",
+        "requestId": "request-1001",
+        "sessionId": null,
+        "userAgent": "billing-worker/1.0"
+      },
+      "correlationId": null,
+      "eventType": "invoice.paid",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "198.51.100.23",
+      "metadata": {
+        "amount": 4200,
+        "currency": "USD",
+        "gateway": {
+          "api_key": "[redacted]",
+          "region": "eu"
+        },
+        "webhookSecret": "[redacted]"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": "request-1001",
+      "sessionId": null,
+      "source": "application",
+      "targets": [
+        {
+          "displayName": "Invoice 1001",
+          "id": "inv-1001",
+          "type": "invoice"
+        }
+      ],
+      "userAgent": "billing-worker/1.0",
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "invoice.refunded",
+      "actor": {
+        "displayName": "Alice",
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "198.51.100.23",
+        "requestId": "request-1001",
+        "sessionId": null,
+        "userAgent": "billing-worker/1.0"
+      },
+      "correlationId": null,
+      "eventType": "invoice.refunded",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "198.51.100.23",
+      "metadata": {
+        "amount": 4200,
+        "currency": "USD",
+        "gateway": {
+          "api_key": "[redacted]",
+          "region": "eu"
+        },
+        "webhookSecret": "[redacted]"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": "request-1001",
+      "sessionId": null,
+      "source": "application",
+      "targets": [
+        {
+          "displayName": "Invoice 1001",
+          "id": "inv-1001",
+          "type": "invoice"
+        }
+      ],
+      "userAgent": "billing-worker/1.0",
+      "userId": "{usr#1}"
+    }

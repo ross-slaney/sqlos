@@ -1,0 +1,136 @@
+# SqlOS behavior lock transcript
+scenario: FgaLibraryScenarios.List_filters_include_only_accessible_active_resources
+profile: dashboard-callback
+
+## 1. probe: read covers Alpha, its child Docs, and Gamma
+> POST /__probe/fga/filter
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "subjectId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "count": 3,
+      "workspaces": [
+        {
+          "name": "Alpha",
+          "resourceId": "workspace::alpha"
+        },
+        {
+          "name": "Docs",
+          "resourceId": "workspace::docs"
+        },
+        {
+          "name": "Gamma",
+          "resourceId": "workspace::gamma"
+        }
+      ]
+    }
+
+## 2. probe: write only Gamma, where the role grants it
+> POST /__probe/fga/filter
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.write",
+>     "subjectId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "count": 1,
+      "workspaces": [
+        {
+          "name": "Gamma",
+          "resourceId": "workspace::gamma"
+        }
+      ]
+    }
+
+## 3. probe: a subject without grants sees nothing
+> POST /__probe/fga/filter
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "subjectId": "agent-indexer"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "count": 0,
+      "workspaces": []
+    }
+
+## 4. probe: an unknown permission matches nothing
+> POST /__probe/fga/filter
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.delete",
+>     "subjectId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "count": 0,
+      "workspaces": []
+    }
+
+## 5. probe: neither does an unknown subject
+> POST /__probe/fga/filter
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "subjectId": "no-such-subject"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "count": 0,
+      "workspaces": []
+    }
+
+## 6. probe: deactivate Alpha
+> PUT /__probe/fga/workspaces/alpha
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "isActive": false,
+>     "name": "Alpha"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "resource": {
+        "id": "workspace::alpha",
+        "isActive": false,
+        "name": "Alpha",
+        "parentId": null,
+        "resourceTypeId": "workspace"
+      },
+      "workspace": {
+        "id": "alpha",
+        "isActive": false,
+        "name": "Alpha",
+        "parentResourceId": null,
+        "resourceId": "workspace::alpha"
+      }
+    }
+
+## 7. probe: an inactive resource and the children it passed access to drop out
+> POST /__probe/fga/filter
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "subjectId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "count": 1,
+      "workspaces": [
+        {
+          "name": "Gamma",
+          "resourceId": "workspace::gamma"
+        }
+      ]
+    }

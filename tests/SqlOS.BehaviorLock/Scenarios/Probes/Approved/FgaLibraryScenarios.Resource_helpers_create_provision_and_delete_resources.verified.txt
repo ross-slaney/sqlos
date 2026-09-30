@@ -1,0 +1,262 @@
+# SqlOS behavior lock transcript
+scenario: FgaLibraryScenarios.Resource_helpers_create_provision_and_delete_resources
+profile: dashboard-callback
+
+## 1. probe: CreateResource adds a resource under the given parent (the probe passes the root)
+> POST /__probe/fga/resources
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "mode": "create",
+>     "name": "Ledger",
+>     "resourceId": "workspace::ledger",
+>     "resourceTypeId": "workspace"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "id": "workspace::ledger",
+      "isActive": true,
+      "name": "Ledger",
+      "parentId": "root",
+      "resourceTypeId": "workspace"
+    }
+
+## 2. probe: without an ID CreateResource generates a GUID
+> POST /__probe/fga/resources
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "mode": "create",
+>     "name": "Unnamed",
+>     "resourceTypeId": "workspace"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "id": "{guid#1}",
+      "isActive": true,
+      "name": "Unnamed",
+      "parentId": "root",
+      "resourceTypeId": "workspace"
+    }
+
+## 3. probe: CreateResourceAsync generates a type-prefixed ID
+> POST /__probe/fga/resources
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "mode": "create-async",
+>     "name": "Generated",
+>     "parentResourceId": "workspace::ledger",
+>     "resourceTypeId": "workspace"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "id": "workspace::{hex#1}",
+      "isActive": true,
+      "name": "Generated",
+      "parentId": "workspace::ledger",
+      "resourceTypeId": "workspace"
+    }
+
+## 4. probe: CreateResourceWithIdAsync uses the given ID
+> POST /__probe/fga/resources
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "description": "Quarterly reports",
+>     "mode": "create-with-id",
+>     "name": "Reports",
+>     "parentResourceId": "workspace::ledger",
+>     "resourceId": "workspace::reports",
+>     "resourceTypeId": "workspace"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "id": "workspace::reports",
+      "isActive": true,
+      "name": "Reports",
+      "parentId": "workspace::ledger",
+      "resourceTypeId": "workspace"
+    }
+
+## 5. probe: the same ID again is refused
+> POST /__probe/fga/resources
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "mode": "create-with-id",
+>     "name": "Reports",
+>     "resourceId": "workspace::reports",
+>     "resourceTypeId": "workspace"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "FGA resource 'workspace::reports' already exists."
+    }
+
+## 6. probe: an unknown resource type is refused
+> POST /__probe/fga/resources
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "mode": "create-with-id",
+>     "name": "Folder",
+>     "resourceId": "folder::one",
+>     "resourceTypeId": "folder"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "FGA resource type 'folder' was not found. Seed or create the resource type before provisioning resources."
+    }
+
+## 7. probe: an unknown parent is refused
+> POST /__probe/fga/resources
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "mode": "create-with-id",
+>     "name": "Orphan",
+>     "parentResourceId": "workspace::missing",
+>     "resourceId": "workspace::orphan",
+>     "resourceTypeId": "workspace"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "FGA resource 'workspace::missing' was not found."
+    }
+
+## 8. probe: a resource cannot be its own parent
+> POST /__probe/fga/resources
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "mode": "create-with-id",
+>     "name": "Loop",
+>     "parentResourceId": "workspace::loop",
+>     "resourceId": "workspace::loop",
+>     "resourceTypeId": "workspace"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "FGA resource parent cannot be the resource itself."
+    }
+
+## 9. probe: a blank name is refused
+> POST /__probe/fga/resources
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "mode": "create-with-id",
+>     "name": " ",
+>     "resourceId": "workspace::blank",
+>     "resourceTypeId": "workspace"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "name is required."
+    }
+
+## 10. probe: ProvisionResourceWithIdAsync creates a missing resource
+> POST /__probe/fga/resources
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "mode": "provision-with-id",
+>     "name": "Archive",
+>     "parentResourceId": "workspace::ledger",
+>     "resourceId": "workspace::archive",
+>     "resourceTypeId": "workspace"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "id": "workspace::archive",
+      "isActive": true,
+      "name": "Archive",
+      "parentId": "workspace::ledger",
+      "resourceTypeId": "workspace"
+    }
+
+## 11. probe: and updates an existing one, keeping its parent when none is given
+> POST /__probe/fga/resources
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "mode": "provision-with-id",
+>     "name": "Archive 2026",
+>     "resourceId": "workspace::archive",
+>     "resourceTypeId": "workspace"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "id": "workspace::archive",
+      "isActive": true,
+      "name": "Archive 2026",
+      "parentId": "workspace::ledger",
+      "resourceTypeId": "workspace"
+    }
+
+## 12. probe: a parent that is already a descendant would make a cycle
+> POST /__probe/fga/resources
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "mode": "provision-with-id",
+>     "name": "Ledger",
+>     "parentResourceId": "workspace::archive",
+>     "resourceId": "workspace::ledger",
+>     "resourceTypeId": "workspace"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "FGA resource hierarchy contains a cycle."
+    }
+
+# CreateResource does not look the parent up, so the save fails in the database: no response, the request fails with an unhandled DbUpdateException
+
+## 13. probe: a resource with children cannot be deleted
+> DELETE /__probe/fga/resources/workspace::ledger
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "FGA resource 'workspace::ledger' has child resources. Delete or reparent child resources before deleting this resource."
+    }
+
+## 14. probe: DeleteResourceAsync removes a leaf resource and its grants
+> DELETE /__probe/fga/resources/workspace::reports
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "deleted": "workspace::reports"
+    }
+
+## 15. probe: the deleted resource is gone
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::reports",
+>     "subjectId": "agent-indexer"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": false,
+      "error": "Resource workspace::reports not found",
+      "trace": []
+    }
+
+## 16. probe: deleting it again is refused
+> DELETE /__probe/fga/resources/workspace::reports
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "FGA resource 'workspace::reports' was not found."
+    }

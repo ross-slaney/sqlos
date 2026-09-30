@@ -1,0 +1,145 @@
+# SqlOS behavior lock transcript
+scenario: AdminLibraryScenarios.The_admin_service_creates_identities_without_audit_events_CurrentBehavior_KnownDefect_415
+profile: dashboard-callback
+
+## 1. probe: CreateUserAsync with a password
+> POST /__probe/admin/users
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "displayName": "Alice",
+>     "email": "{email:alice}",
+>     "password": "{password:alice}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "defaultEmail": "{email:alice}",
+      "displayName": "Alice",
+      "id": "{usr#1}",
+      "isActive": true
+    }
+
+## 2. probe: and without one
+> POST /__probe/admin/users
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "displayName": "Bob",
+>     "email": "{email:bob}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "defaultEmail": "{email:bob}",
+      "displayName": "Bob",
+      "id": "{usr#2}",
+      "isActive": true
+    }
+
+## 3. probe: CreateOrganizationAsync with a slug and a primary domain
+> POST /__probe/admin/organizations
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "name": "Acme",
+>     "primaryDomain": "Acme.Example.TEST",
+>     "slug": "acme"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "id": "{org#1}",
+      "isActive": true,
+      "name": "Acme",
+      "slug": "acme"
+    }
+
+## 4. probe: without a slug, the slug comes from the name
+> POST /__probe/admin/organizations
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "name": "Beta Industries"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "id": "{org#2}",
+      "isActive": true,
+      "name": "Beta Industries",
+      "slug": "beta-industries"
+    }
+
+## 5. probe: CreateMembershipAsync
+> POST /__probe/admin/organizations/{org#1}/memberships
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "role": "member",
+>     "userId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "isActive": true,
+      "organizationId": "{org#1}",
+      "role": "member",
+      "userId": "{usr#1}"
+    }
+
+## 6. probe: adding the same membership again changes its role
+> POST /__probe/admin/organizations/{org#1}/memberships
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "role": "admin",
+>     "userId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "isActive": true,
+      "organizationId": "{org#1}",
+      "role": "admin",
+      "userId": "{usr#1}"
+    }
+
+## 7. probe: the membership as the user's organizations show it
+> GET /__probe/admin/users/{usr#1}/organizations
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    [
+      {
+        "id": "{org#1}",
+        "name": "Acme",
+        "role": "admin",
+        "slug": "acme"
+      }
+    ]
+
+## 8. probe: UserHasMembershipAsync
+> GET /__probe/admin/users/{usr#1}/memberships/{org#1}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "member": true
+    }
+
+## 9. operator: the user as the admin API reads it back
+> GET /sqlos/admin/auth/api/users/{usr#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "defaultEmail": "{email:alice}",
+      "displayName": "Alice",
+      "externalIdentityCount": 0,
+      "id": "{usr#1}",
+      "isActive": true,
+      "membershipCount": 1,
+      "sessionCount": 0,
+      "updatedAt": "{datetime:unspecified}"
+    }
+
+## audit: no audit event for any of it
+  (no new events)

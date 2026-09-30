@@ -1,0 +1,370 @@
+# SqlOS behavior lock transcript
+scenario: AuthLibraryScenarios.Library_sign_in_issues_tokens_that_validate_refresh_and_log_out
+profile: hosted
+
+## 1. probe: LoginWithPasswordAsync signs a user in for a first-party client
+> POST /__probe/auth/password-login
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "email": "{email:alice}",
+>     "password": "{password:alice}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "mfaMethods": null,
+      "mfaToken": null,
+      "organizations": [],
+      "pendingAuthToken": null,
+      "requiresMfa": false,
+      "requiresMfaEnrollment": false,
+      "requiresOrganizationSelection": false,
+      "tokens": {
+        "accessToken": "{access-token#1}",
+        "accessTokenExpiresAt": "{datetime:utc-z}",
+        "clientId": "behavior-lock-app",
+        "idToken": null,
+        "organizationId": null,
+        "refreshToken": "{refresh-token#1}",
+        "refreshTokenExpiresAt": "{datetime:utc-z}",
+        "sessionId": "{ses#1}"
+      }
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+
+## 2. probe: ValidateAccessTokenAsync accepts it for the application API
+> POST /__probe/auth/validate
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "audience": "https://sqlos.example.test/api",
+>     "token": "{access-token#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "audience": "https://sqlos.example.test/api",
+      "clientId": "behavior-lock-app",
+      "organizationId": null,
+      "scope": null,
+      "sessionId": "{ses#1}",
+      "userId": "{usr#1}",
+      "valid": true
+    }
+
+## 3. probe: but not for another audience
+> POST /__probe/auth/validate
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "audience": "https://sqlos.example.test/other",
+>     "token": "{access-token#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "valid": false
+    }
+
+## 4. probe: the expected audience is required
+> POST /__probe/auth/validate
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "audience": " ",
+>     "token": "{access-token#1}"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "ArgumentException",
+      "message": "An expected audience is required when validating an access token for a resource server. (Parameter 'expectedAudience')"
+    }
+
+## 5. probe: a malformed token is not valid
+> POST /__probe/auth/validate
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "audience": "https://sqlos.example.test/api",
+>     "token": "not-a-jwt"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "valid": false
+    }
+
+## 6. probe: a token edited to name another user fails its signature
+> POST /__probe/auth/validate
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "audience": "https://sqlos.example.test/api",
+>     "token": "{link-token#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "valid": false
+    }
+  jwt {link-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "sid": "{ses#1}",
+      "sub": "{usr#2}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+
+## 7. probe: RefreshAsync rotates the refresh token
+> POST /__probe/auth/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshToken": "{refresh-token#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessToken": "{access-token#1}",
+      "accessTokenExpiresAt": "{datetime:utc-z}",
+      "clientId": "behavior-lock-app",
+      "idToken": null,
+      "organizationId": null,
+      "refreshToken": "{refresh-token#2}",
+      "refreshTokenExpiresAt": "{datetime:utc-z}",
+      "sessionId": "{ses#1}"
+    }
+
+## 8. probe: the used token inside the grace window returns the same rotation
+> POST /__probe/auth/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshToken": "{refresh-token#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessToken": "{access-token#1}",
+      "accessTokenExpiresAt": "{datetime:unspecified}",
+      "clientId": "behavior-lock-app",
+      "idToken": null,
+      "organizationId": null,
+      "refreshToken": "{refresh-token#2}",
+      "refreshTokenExpiresAt": "{datetime:unspecified}",
+      "sessionId": "{ses#1}"
+    }
+
+## 9. probe: a refresh for another client is refused
+> POST /__probe/auth/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "another-client",
+>     "refreshToken": "{refresh-token#2}"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "Refresh token was not issued for this client."
+    }
+
+## 10. probe: an unknown refresh token is refused
+> POST /__probe/auth/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshToken": "not-a-refresh-token"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "Refresh token is invalid."
+    }
+
+## 11. probe: LogoutAsync by refresh token ends the session
+> POST /__probe/auth/logout
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshToken": "{refresh-token#2}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "loggedOut": true
+    }
+
+## 12. probe: its access token stops validating
+> POST /__probe/auth/validate
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "audience": "https://sqlos.example.test/api",
+>     "token": "{access-token#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "valid": false
+    }
+
+## 13. probe: and its refresh token is refused
+> POST /__probe/auth/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshToken": "{refresh-token#2}"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "Refresh token is no longer valid."
+    }
+
+## 14. probe: logging out an unknown token is a silent no-op
+> POST /__probe/auth/logout
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshToken": "not-a-refresh-token"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "loggedOut": true
+    }
+
+## audit: sign-in and logout events
+  - {
+      "action": "password.login.succeeded",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "password.login.succeeded",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "AuthorizationRequestId": "[redacted]",
+        "ClientKey": "behavior-lock-app",
+        "NormalizedEmail": "{email:ALICE}",
+        "Surface": "api",
+        "UserAgentHash": null,
+        "details": {
+          "resetScopes": [
+            "email",
+            "user"
+          ]
+        },
+        "maskedEmail": "AL***@EXAMPLE.TEST"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "user.login.password",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.password",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "user.logout",
+      "actor": {
+        "displayName": null,
+        "id": "{ses#1}",
+        "type": "session"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": "{ses#1}",
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.logout",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": "{ses#1}",
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }

@@ -1,0 +1,367 @@
+# SqlOS behavior lock transcript
+scenario: FgaLibraryScenarios.Subject_and_grant_helpers_are_idempotent_and_validate_their_targets
+profile: dashboard-callback
+
+## 1. probe: ProvisionUserSubjectAsync
+> POST /__probe/fga/subjects
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "displayName": "Alice",
+>     "email": "{email:alice}",
+>     "subjectId": "{usr#1}",
+>     "type": "user"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "record": "SqlOSFgaUser",
+      "subjectId": "{usr#1}",
+      "type": "user"
+    }
+
+## 2. probe: provisioning the same subject again updates it
+> POST /__probe/fga/subjects
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "displayName": "Alice Smith",
+>     "subjectId": "{usr#1}",
+>     "type": "user"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "record": "SqlOSFgaUser",
+      "subjectId": "{usr#1}",
+      "type": "user"
+    }
+
+## 3. probe: ProvisionAgentSubjectAsync
+> POST /__probe/fga/subjects
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "displayName": "Indexer",
+>     "subjectId": "agent-indexer",
+>     "type": "agent"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "record": "SqlOSFgaAgent",
+      "subjectId": "agent-indexer",
+      "type": "agent"
+    }
+
+## 4. probe: ProvisionServiceAccountSubjectAsync
+> POST /__probe/fga/subjects
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "reporter-client",
+>     "clientSecretHash": "fixture-secret-hash",
+>     "displayName": "Reporter",
+>     "subjectId": "sa-reporter",
+>     "type": "service_account"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "record": "SqlOSFgaServiceAccount",
+      "subjectId": "sa-reporter",
+      "type": "service_account"
+    }
+
+## 5. probe: a subject ID cannot change type
+> POST /__probe/fga/subjects
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "displayName": "Alice",
+>     "subjectId": "{usr#1}",
+>     "type": "agent"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "FGA subject '{usr#1}' already exists as type 'user', not 'agent'."
+    }
+
+## 6. probe: a display name is required
+> POST /__probe/fga/subjects
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "displayName": " ",
+>     "subjectId": "agent-blank",
+>     "type": "agent"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "displayName is required."
+    }
+
+## 7. probe: GrantRoleAsync derives the grant ID from subject, resource, and role
+> POST /__probe/fga/grants
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "resourceId": "workspace::alpha",
+>     "role": "workspace_reader",
+>     "subjectId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "id": "grant::{hex#1}",
+      "resourceId": "workspace::alpha",
+      "roleId": "workspace_reader",
+      "subjectId": "{usr#1}"
+    }
+
+## 8. probe: granting it again returns the same grant
+> POST /__probe/fga/grants
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "resourceId": "workspace::alpha",
+>     "role": "workspace_reader",
+>     "subjectId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "id": "grant::{hex#1}",
+      "resourceId": "workspace::alpha",
+      "roleId": "workspace_reader",
+      "subjectId": "{usr#1}"
+    }
+
+## 9. probe: the subject must be provisioned first
+> POST /__probe/fga/grants
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "resourceId": "workspace::alpha",
+>     "role": "workspace_reader",
+>     "subjectId": "no-such-subject"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "FGA subject 'no-such-subject' was not found. Provision the subject explicitly before granting roles."
+    }
+
+## 10. probe: the role must exist
+> POST /__probe/fga/grants
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "resourceId": "workspace::alpha",
+>     "role": "no-such-role",
+>     "subjectId": "{usr#1}"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "FGA role 'no-such-role' was not found."
+    }
+
+## 11. probe: the resource must exist
+> POST /__probe/fga/grants
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "resourceId": "workspace::missing",
+>     "role": "workspace_reader",
+>     "subjectId": "{usr#1}"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "FGA resource 'workspace::missing' was not found."
+    }
+
+## 12. probe: the grant allows read
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::alpha",
+>     "subjectId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": true,
+      "error": null,
+      "trace": [
+        {
+          "detail": "Checking access to Alpha (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Read workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"Alice Smith\" + 0 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": "Alice Smith"
+        },
+        {
+          "detail": "Checking 1 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Alpha",
+          "grantId": null,
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Role \"Workspace reader\" provides permission \"Read workspace\" via grant at Alpha",
+          "grantId": "grant::{hex#1}",
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleName": "Workspace reader",
+          "step": "Access Granted",
+          "subjectName": "Alice Smith"
+        }
+      ]
+    }
+
+## 13. probe: RevokeRoleAsync removes the grant
+> POST /__probe/fga/grants/revoke
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "resourceId": "workspace::alpha",
+>     "role": "workspace_reader",
+>     "subjectId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "revoked": true
+    }
+
+## 14. probe: read is denied again
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::alpha",
+>     "subjectId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": false,
+      "error": null,
+      "trace": [
+        {
+          "detail": "Checking access to Alpha (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Read workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"Alice Smith\" + 0 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": "Alice Smith"
+        },
+        {
+          "detail": "Checking 1 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Alpha",
+          "grantId": null,
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "No matching grants found that provide permission \"Read workspace\"",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Access Denied",
+          "subjectName": null
+        }
+      ]
+    }
+
+## 15. probe: revoking a grant that does not exist is a no-op
+> POST /__probe/fga/grants/revoke
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "resourceId": "workspace::alpha",
+>     "role": "workspace_reader",
+>     "subjectId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "revoked": true
+    }
+
+## 16. probe: but the subject must exist
+> POST /__probe/fga/grants/revoke
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "resourceId": "workspace::alpha",
+>     "role": "workspace_reader",
+>     "subjectId": "no-such-subject"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "FGA subject 'no-such-subject' was not found. Provision the subject explicitly before granting roles."
+    }
+
+## audit: FGA helper writes are not audited
+  (no new events)

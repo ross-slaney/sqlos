@@ -1,0 +1,276 @@
+# SqlOS behavior lock transcript
+scenario: ModuleLibraryScenarios.Calendar_connect_starts_at_the_provider_and_lists_connections
+profile: modules
+
+## 1. probe: StartConnectAsync for a user returns the Google authorization URL
+> POST /__probe/calendar/connect
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "loginHintEmail": "{email:alice}",
+>     "mode": "ReadPull",
+>     "oidcConnectionId": "{oidc#1}",
+>     "returnUri": "https://sqlos.example.test/settings/calendar",
+>     "userId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth?client_id=google-client-id&redirect_uri=https%3A%2F%2Fsqlos.example.test%2Fsqlos%2Fauth%2Fcalendar%2Fcallback&response_type=code&scope=openid%20email%20https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcalendar.readonly&state={state#1}&code_challenge={pkce-challenge#1}&code_challenge_method=S256&login_hint={email:alice}&access_type=offline&prompt=consent",
+      "mode": "ReadPull",
+      "oidcConnectionId": "{oidc#1}",
+      "providerType": "Google"
+    }
+  ~ http SqlOSCalendarService: GET https://accounts.google.com/.well-known/openid-configuration -> 200
+
+## 2. probe: and for an organization, the Microsoft one
+> POST /__probe/calendar/connect
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "displayName": "Acme rooms",
+>     "mode": "ConnectionOnly",
+>     "oidcConnectionId": "{oidc#2}",
+>     "organizationId": "{org#1}",
+>     "returnUri": "https://sqlos.example.test/settings/calendar"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "authorizationUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=microsoft-client-id&redirect_uri=https%3A%2F%2Fsqlos.example.test%2Fsqlos%2Fauth%2Fcalendar%2Fcallback&response_type=code&scope=openid%20email%20offline_access%20Calendars.Read&state={state#2}&code_challenge={pkce-challenge#2}&code_challenge_method=S256",
+      "mode": "ConnectionOnly",
+      "oidcConnectionId": "{oidc#2}",
+      "providerType": "Microsoft"
+    }
+  ~ http SqlOSCalendarService: GET https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration -> 200
+
+## 3. probe: a connection belongs to a user or an organization, not both
+> POST /__probe/calendar/connect
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "mode": "ReadPull",
+>     "oidcConnectionId": "{oidc#1}",
+>     "organizationId": "{org#1}",
+>     "returnUri": "https://sqlos.example.test/settings/calendar",
+>     "userId": "{usr#1}"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "A calendar connection must be bound to exactly one user or one organization."
+    }
+
+## 4. probe: nor neither
+> POST /__probe/calendar/connect
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "mode": "ReadPull",
+>     "oidcConnectionId": "{oidc#1}",
+>     "returnUri": "https://sqlos.example.test/settings/calendar"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "A calendar connection must be bound to exactly one user or one organization."
+    }
+
+## 5. probe: the return URI must be absolute
+> POST /__probe/calendar/connect
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "mode": "ReadPull",
+>     "oidcConnectionId": "{oidc#1}",
+>     "returnUri": "settings/calendar",
+>     "userId": "{usr#1}"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "The calendar connect return URI must be an absolute URI."
+    }
+
+## 6. probe: the user must exist
+> POST /__probe/calendar/connect
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "mode": "ReadPull",
+>     "oidcConnectionId": "{oidc#1}",
+>     "returnUri": "https://sqlos.example.test/settings/calendar",
+>     "userId": "{usr#2}"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "The calendar connection user was not found."
+    }
+
+## 7. probe: the OIDC connection must exist
+> POST /__probe/calendar/connect
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "mode": "ReadPull",
+>     "oidcConnectionId": "{oidc#3}",
+>     "returnUri": "https://sqlos.example.test/settings/calendar",
+>     "userId": "{usr#1}"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "No enabled OIDC connection was found for this calendar request."
+    }
+
+# Google redirected back to the calendar callback with an authorization code; the connection completed (not recorded).
+
+## 8. probe: ListConnectionsAsync for the user
+> GET /__probe/calendar/connections?userId={usr#1}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    [
+      {
+        "accessTokenExpiresAt": "{datetime:unspecified}",
+        "createdAt": "{datetime:unspecified}",
+        "displayName": "Google Calendar",
+        "hasRefreshToken": true,
+        "id": "{cal#1}",
+        "lastError": null,
+        "lastErrorAt": null,
+        "lastSyncAt": null,
+        "mode": "ReadPull",
+        "organizationId": null,
+        "providerAccountEmail": "{email:alice}",
+        "providerType": "Google",
+        "revokedAt": null,
+        "scopes": [
+          "openid",
+          "email",
+          "https://www.googleapis.com/auth/calendar.readonly"
+        ],
+        "status": "Active",
+        "userId": "{usr#1}"
+      }
+    ]
+
+## 9. probe: the organization has none yet
+> GET /__probe/calendar/connections?organizationId={org#1}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    []
+
+## audit: calendar connect events
+  - {
+      "action": "calendar.connect.start",
+      "actor": {
+        "displayName": null,
+        "id": "{oidc#1}",
+        "type": "oidc_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "calendar.connect.start",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "mode": "ReadPull",
+        "provider": "Google",
+        "scopes": [
+          "openid",
+          "email",
+          "https://www.googleapis.com/auth/calendar.readonly"
+        ]
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "calendar.connect.start",
+      "actor": {
+        "displayName": null,
+        "id": "{oidc#2}",
+        "type": "oidc_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "calendar.connect.start",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "mode": "ConnectionOnly",
+        "provider": "Microsoft",
+        "scopes": [
+          "openid",
+          "email",
+          "offline_access",
+          "Calendars.Read"
+        ]
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "calendar.connection.created",
+      "actor": {
+        "displayName": null,
+        "id": "{cal#1}",
+        "type": "calendar_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "calendar.connection.created",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "mode": "ReadPull",
+        "provider": "Google",
+        "providerAccountEmail": "{email:alice}"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }

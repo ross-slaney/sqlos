@@ -1,0 +1,304 @@
+# SqlOS behavior lock transcript
+scenario: AuthLibraryScenarios.A_member_of_two_organizations_chooses_one
+profile: hosted
+
+## 1. probe: without an organization the caller must choose one
+> POST /__probe/auth/password-login
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "email": "{email:alice}",
+>     "password": "{password:alice}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "mfaMethods": null,
+      "mfaToken": null,
+      "organizations": [
+        {
+          "id": "{org#1}",
+          "name": "Acme",
+          "role": "member",
+          "slug": "{slug:acme}"
+        },
+        {
+          "id": "{org#2}",
+          "name": "Beta",
+          "role": "admin",
+          "slug": "{slug:beta}"
+        }
+      ],
+      "pendingAuthToken": "{pending-token#1}",
+      "requiresMfa": false,
+      "requiresMfaEnrollment": false,
+      "requiresOrganizationSelection": true,
+      "tokens": null
+    }
+
+## 2. probe: naming a membership issues tokens for it
+> POST /__probe/auth/password-login
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "email": "{email:alice}",
+>     "organizationId": "{org#2}",
+>     "password": "{password:alice}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "mfaMethods": null,
+      "mfaToken": null,
+      "organizations": [
+        {
+          "id": "{org#1}",
+          "name": "Acme",
+          "role": "member",
+          "slug": "{slug:acme}"
+        },
+        {
+          "id": "{org#2}",
+          "name": "Beta",
+          "role": "admin",
+          "slug": "{slug:beta}"
+        }
+      ],
+      "pendingAuthToken": null,
+      "requiresMfa": false,
+      "requiresMfaEnrollment": false,
+      "requiresOrganizationSelection": false,
+      "tokens": {
+        "accessToken": "{access-token#1}",
+        "accessTokenExpiresAt": "{datetime:utc-z}",
+        "clientId": "behavior-lock-app",
+        "idToken": null,
+        "organizationId": "{org#2}",
+        "refreshToken": "{refresh-token#1}",
+        "refreshTokenExpiresAt": "{datetime:utc-z}",
+        "sessionId": "{ses#1}"
+      }
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "org_id": "{org#2}",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+
+## 3. probe: GetUserOrganizationsAsync lists both (the probe orders them by name)
+> GET /__probe/admin/users/{usr#1}/organizations
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    [
+      {
+        "id": "{org#1}",
+        "name": "Acme",
+        "role": "member",
+        "slug": "{slug:acme}"
+      },
+      {
+        "id": "{org#2}",
+        "name": "Beta",
+        "role": "admin",
+        "slug": "{slug:beta}"
+      }
+    ]
+
+## 4. probe: UserHasMembershipAsync for a membership
+> GET /__probe/admin/users/{usr#1}/memberships/{org#1}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "member": true
+    }
+
+## 5. probe: and for an organization she does not belong to
+> GET /__probe/admin/users/{usr#1}/memberships/{org#3}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "member": false
+    }
+
+## 6. probe: GetMfaStatusAsync under the default policy
+> POST /__probe/auth/mfa-status
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "userId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "availableFactors": [
+        "totp",
+        "recovery_code"
+      ],
+      "enrollmentRequired": false,
+      "hasTotp": false,
+      "mfaEnabled": true,
+      "policyReason": null,
+      "recoveryCodeCount": 0,
+      "required": false,
+      "userSelfEnrollmentEnabled": true
+    }
+
+## 7. probe: and for one of her organizations
+> POST /__probe/auth/mfa-status
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "organizationId": "{org#2}",
+>     "userId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "availableFactors": [
+        "totp",
+        "recovery_code"
+      ],
+      "enrollmentRequired": false,
+      "hasTotp": false,
+      "mfaEnabled": true,
+      "policyReason": null,
+      "recoveryCodeCount": 0,
+      "required": false,
+      "userSelfEnrollmentEnabled": true
+    }
+
+## audit: sign-in events
+  - {
+      "action": "password.login.succeeded",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "password.login.succeeded",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "AuthorizationRequestId": "[redacted]",
+        "ClientKey": "behavior-lock-app",
+        "NormalizedEmail": "{email:ALICE}",
+        "Surface": "api",
+        "UserAgentHash": null,
+        "details": {
+          "resetScopes": [
+            "email",
+            "user"
+          ]
+        },
+        "maskedEmail": "AL***@EXAMPLE.TEST"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "password.login.succeeded",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "password.login.succeeded",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "AuthorizationRequestId": "[redacted]",
+        "ClientKey": "behavior-lock-app",
+        "NormalizedEmail": "{email:ALICE}",
+        "Surface": "api",
+        "UserAgentHash": null,
+        "details": {
+          "resetScopes": [
+            "email",
+            "user"
+          ]
+        },
+        "maskedEmail": "AL***@EXAMPLE.TEST"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "user.login.password",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.password",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#2}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }

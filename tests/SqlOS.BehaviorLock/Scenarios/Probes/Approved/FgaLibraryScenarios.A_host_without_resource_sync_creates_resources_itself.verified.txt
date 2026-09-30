@@ -1,0 +1,164 @@
+# SqlOS behavior lock transcript
+scenario: FgaLibraryScenarios.A_host_without_resource_sync_creates_resources_itself
+profile: legacy-host
+
+## 1. probe: saving the workspace creates no FGA resource
+> POST /__probe/fga/workspaces
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "id": "alpha",
+>     "name": "Alpha"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "resource": null,
+      "workspace": {
+        "id": "alpha",
+        "isActive": true,
+        "name": "Alpha",
+        "parentResourceId": null,
+        "resourceId": "workspace::alpha"
+      }
+    }
+
+## 2. probe: so its resource cannot be granted on
+> POST /__probe/fga/grants
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "resourceId": "workspace::alpha",
+>     "role": "workspace_reader",
+>     "subjectId": "agent-indexer"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "FGA resource 'workspace::alpha' was not found."
+    }
+
+## 3. probe: the host creates the resource with the manual helper
+> POST /__probe/fga/resources
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "mode": "create-with-id",
+>     "name": "Alpha",
+>     "resourceId": "workspace::alpha",
+>     "resourceTypeId": "workspace"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "id": "workspace::alpha",
+      "isActive": true,
+      "name": "Alpha",
+      "parentId": null,
+      "resourceTypeId": "workspace"
+    }
+
+## 4. probe: now the grant succeeds
+> POST /__probe/fga/grants
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "resourceId": "workspace::alpha",
+>     "role": "workspace_reader",
+>     "subjectId": "agent-indexer"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "id": "grant::{hex#1}",
+      "resourceId": "workspace::alpha",
+      "roleId": "workspace_reader",
+      "subjectId": "agent-indexer"
+    }
+
+## 5. probe: and checks see it
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::alpha",
+>     "subjectId": "agent-indexer"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": true,
+      "error": null,
+      "trace": [
+        {
+          "detail": "Checking access to Alpha (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Read workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"Indexer\" + 0 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": "Indexer"
+        },
+        {
+          "detail": "Checking 1 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Alpha",
+          "grantId": null,
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Role \"Workspace reader\" provides permission \"Read workspace\" via grant at Alpha",
+          "grantId": "grant::{hex#1}",
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleName": "Workspace reader",
+          "step": "Access Granted",
+          "subjectName": "Indexer"
+        }
+      ]
+    }
+
+## 6. probe: the list filter finds the workspace through its resource
+> POST /__probe/fga/filter
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "subjectId": "agent-indexer"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "count": 1,
+      "workspaces": [
+        {
+          "name": "Alpha",
+          "resourceId": "workspace::alpha"
+        }
+      ]
+    }

@@ -1,0 +1,330 @@
+# SqlOS behavior lock transcript
+scenario: ModuleLibraryScenarios.Transactional_email_renders_and_sends_a_template
+profile: modules
+
+## 1. probe: PreviewAsync renders the active template
+> POST /__probe/email/preview
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "templateKey": "auth.invitation",
+>     "to": "{email:bob}",
+>     "variables": {
+>       "accentColor": "#0f172a",
+>       "acceptUrl": "https://sqlos.example.test/accept?invite=fixture",
+>       "applicationName": "Behavior Lock",
+>       "backgroundColor": "#f8fafc",
+>       "expiresInDays": "7",
+>       "logoBase64": "",
+>       "logoImageDisplay": "none",
+>       "logoTextDisplay": "block",
+>       "maskedEmail": "bo***@example.test",
+>       "organizationName": "Acme & Sons",
+>       "primaryColor": "#1d4ed8",
+>       "role": "member"
+>     }
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "htmlBody": "<!DOCTYPE html>\n<html lang=\"en\">\n<body style=\"margin:0;padding:24px;background:#f8fafc;font-family:Segoe UI,Arial,sans-serif;color:#0f172a;\">\n  <div style=\"max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:20px;padding:32px;\">\n    <img src=\"\" alt=\"Behavior Lock\" style=\"max-height:42px;max-width:180px;display:none;margin:0 0 16px;\" />\n    <p style=\"display:block;margin:0 0 12px;font-size:14px;color:#475569;font-weight:600;\">Behavior Lock</p>\n    <h1 style=\"margin:0 0 12px;font-size:28px;line-height:1.1;color:#0f172a;\">You're invited to Acme &amp; Sons</h1>\n    <p style=\"margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;\">Accept this invitation for bo***@example.test to join as member. This link expires in 7 day(s).</p>\n    <p style=\"margin:0 0 20px;\"><a href=\"https://sqlos.example.test/accept?invite=fixture\" style=\"display:inline-block;background:#1d4ed8;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;\">Accept invitation</a></p>\n    <p style=\"margin:0;font-size:13px;line-height:1.6;color:#64748b;\">If the button does not work, open this link: https://sqlos.example.test/accept?invite=fixture</p>\n  </div>\n</body>\n</html>",
+      "subject": "You're invited to Acme & Sons",
+      "textBody": "You're invited to Acme & Sons as member. Accept the invitation for bo***@example.test: https://sqlos.example.test/accept?invite=fixture. This link expires in 7 day(s).",
+      "variables": [
+        "accentColor",
+        "acceptUrl",
+        "applicationName",
+        "backgroundColor",
+        "expiresInDays",
+        "logoBase64",
+        "logoImageDisplay",
+        "logoTextDisplay",
+        "maskedEmail",
+        "organizationName",
+        "primaryColor",
+        "role"
+      ]
+    }
+
+## 2. probe: SendAsync renders, sends, and records the delivery
+> POST /__probe/email/send
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "idempotencyKey": "invite-bob",
+>     "templateKey": "auth.invitation",
+>     "to": "{email:bob}",
+>     "variables": {
+>       "accentColor": "#0f172a",
+>       "acceptUrl": "https://sqlos.example.test/accept?invite=fixture",
+>       "applicationName": "Behavior Lock",
+>       "backgroundColor": "#f8fafc",
+>       "expiresInDays": "7",
+>       "logoBase64": "",
+>       "logoImageDisplay": "none",
+>       "logoTextDisplay": "block",
+>       "maskedEmail": "bo***@example.test",
+>       "organizationName": "Acme & Sons",
+>       "primaryColor": "#1d4ed8",
+>       "role": "member"
+>     }
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "deliveryId": "{edl#1}",
+      "providerMessageId": "behavior-lock-email-1",
+      "sanitizedError": null,
+      "status": "queued",
+      "templateKey": "auth.invitation",
+      "templateVersion": 1
+    }
+  ~ email (transactional) to {email:bob}
+      subject: You're invited to Acme & Sons
+      text:
+        You're invited to Acme & Sons as member. Accept the invitation for bo***@example.test: https://sqlos.example.test/accept?invite=fixture. This link expires in 7 day(s).
+      html:
+        <!DOCTYPE html>
+        <html lang="en">
+          <head></head>
+          <body style="margin:0;padding:24px;background:#f8fafc;font-family:Segoe UI,Arial,sans-serif;color:#0f172a;">
+            <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:20px;padding:32px;">
+              <img src="" alt="Behavior Lock" style="max-height:42px;max-width:180px;display:none;margin:0 0 16px;" />
+              <p style="display:block;margin:0 0 12px;font-size:14px;color:#475569;font-weight:600;">Behavior Lock</p>
+              <h1 style="margin:0 0 12px;font-size:28px;line-height:1.1;color:#0f172a;">You're invited to Acme &amp; Sons</h1>
+              <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">Accept this invitation for bo***@example.test to join as member. This link expires in 7 day(s).</p>
+              <p style="margin:0 0 20px;">
+                <a href="https://sqlos.example.test/accept?invite=fixture" style="display:inline-block;background:#1d4ed8;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Accept invitation</a>
+              </p>
+              <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">If the button does not work, open this link: https://sqlos.example.test/accept?invite=fixture</p>
+            </div>
+          </body>
+        </html>
+
+## 3. probe: the same idempotency key returns the first delivery without sending again
+> POST /__probe/email/send
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "idempotencyKey": "invite-bob",
+>     "templateKey": "auth.invitation",
+>     "to": "{email:bob}",
+>     "variables": {
+>       "accentColor": "#0f172a",
+>       "acceptUrl": "https://sqlos.example.test/accept?invite=fixture",
+>       "applicationName": "Behavior Lock",
+>       "backgroundColor": "#f8fafc",
+>       "expiresInDays": "7",
+>       "logoBase64": "",
+>       "logoImageDisplay": "none",
+>       "logoTextDisplay": "block",
+>       "maskedEmail": "bo***@example.test",
+>       "organizationName": "Acme & Sons",
+>       "primaryColor": "#1d4ed8",
+>       "role": "member"
+>     }
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "deliveryId": "{edl#1}",
+      "providerMessageId": "behavior-lock-email-1",
+      "sanitizedError": null,
+      "status": "queued",
+      "templateKey": "auth.invitation",
+      "templateVersion": 1
+    }
+
+## 4. probe: a template variable left out is refused by name, and nothing is sent
+> POST /__probe/email/send
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "templateKey": "auth.invitation",
+>     "to": "{email:bob}",
+>     "variables": {
+>       "accentColor": "#0f172a",
+>       "applicationName": "Behavior Lock",
+>       "backgroundColor": "#f8fafc",
+>       "expiresInDays": "7",
+>       "logoBase64": "",
+>       "logoImageDisplay": "none",
+>       "logoTextDisplay": "block",
+>       "maskedEmail": "bo***@example.test",
+>       "organizationName": "Acme & Sons",
+>       "primaryColor": "#1d4ed8"
+>     }
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "SqlOSEmailTemplateValidationException",
+      "message": "Missing email template variables: acceptUrl, role."
+    }
+
+## 5. probe: an unknown template is refused
+> POST /__probe/email/send
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "templateKey": "no.such-template",
+>     "to": "{email:bob}",
+>     "variables": {
+>       "accentColor": "#0f172a",
+>       "acceptUrl": "https://sqlos.example.test/accept?invite=fixture",
+>       "applicationName": "Behavior Lock",
+>       "backgroundColor": "#f8fafc",
+>       "expiresInDays": "7",
+>       "logoBase64": "",
+>       "logoImageDisplay": "none",
+>       "logoTextDisplay": "block",
+>       "maskedEmail": "bo***@example.test",
+>       "organizationName": "Acme & Sons",
+>       "primaryColor": "#1d4ed8",
+>       "role": "member"
+>     }
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "Email template 'no.such-template' was not found or is inactive."
+    }
+
+## 6. probe: the recipient is not validated: an address that is not one is sent to as given
+> POST /__probe/email/send
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "templateKey": "auth.invitation",
+>     "to": "not-an-email",
+>     "variables": {
+>       "accentColor": "#0f172a",
+>       "acceptUrl": "https://sqlos.example.test/accept?invite=fixture",
+>       "applicationName": "Behavior Lock",
+>       "backgroundColor": "#f8fafc",
+>       "expiresInDays": "7",
+>       "logoBase64": "",
+>       "logoImageDisplay": "none",
+>       "logoTextDisplay": "block",
+>       "maskedEmail": "bo***@example.test",
+>       "organizationName": "Acme & Sons",
+>       "primaryColor": "#1d4ed8",
+>       "role": "member"
+>     }
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "deliveryId": "{edl#2}",
+      "providerMessageId": "behavior-lock-email-2",
+      "sanitizedError": null,
+      "status": "queued",
+      "templateKey": "auth.invitation",
+      "templateVersion": 1
+    }
+  ~ email (transactional) to not-an-email
+      subject: You're invited to Acme & Sons
+      text:
+        You're invited to Acme & Sons as member. Accept the invitation for bo***@example.test: https://sqlos.example.test/accept?invite=fixture. This link expires in 7 day(s).
+      html:
+        <!DOCTYPE html>
+        <html lang="en">
+          <head></head>
+          <body style="margin:0;padding:24px;background:#f8fafc;font-family:Segoe UI,Arial,sans-serif;color:#0f172a;">
+            <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:20px;padding:32px;">
+              <img src="" alt="Behavior Lock" style="max-height:42px;max-width:180px;display:none;margin:0 0 16px;" />
+              <p style="display:block;margin:0 0 12px;font-size:14px;color:#475569;font-weight:600;">Behavior Lock</p>
+              <h1 style="margin:0 0 12px;font-size:28px;line-height:1.1;color:#0f172a;">You're invited to Acme &amp; Sons</h1>
+              <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">Accept this invitation for bo***@example.test to join as member. This link expires in 7 day(s).</p>
+              <p style="margin:0 0 20px;">
+                <a href="https://sqlos.example.test/accept?invite=fixture" style="display:inline-block;background:#1d4ed8;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Accept invitation</a>
+              </p>
+              <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">If the button does not work, open this link: https://sqlos.example.test/accept?invite=fixture</p>
+            </div>
+          </body>
+        </html>
+
+## 7. probe: previewing an unknown template is refused
+> POST /__probe/email/preview
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "templateKey": "no.such-template",
+>     "to": "{email:bob}",
+>     "variables": {
+>       "accentColor": "#0f172a",
+>       "acceptUrl": "https://sqlos.example.test/accept?invite=fixture",
+>       "applicationName": "Behavior Lock",
+>       "backgroundColor": "#f8fafc",
+>       "expiresInDays": "7",
+>       "logoBase64": "",
+>       "logoImageDisplay": "none",
+>       "logoTextDisplay": "block",
+>       "maskedEmail": "bo***@example.test",
+>       "organizationName": "Acme & Sons",
+>       "primaryColor": "#1d4ed8",
+>       "role": "member"
+>     }
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "Email template 'no.such-template' was not found or is inactive."
+    }
+
+## audit: delivery events
+  - {
+      "action": "email.send.queued",
+      "actor": {
+        "displayName": null,
+        "id": "{edl#1}",
+        "type": "email_delivery"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "email.send.queued",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "deliveryId": "{edl#1}",
+        "providerMessageId": "behavior-lock-email-1",
+        "templateKey": "auth.invitation",
+        "templateVersion": 1
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "email.send.queued",
+      "actor": {
+        "displayName": null,
+        "id": "{edl#2}",
+        "type": "email_delivery"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "email.send.queued",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "deliveryId": "{edl#2}",
+        "providerMessageId": "behavior-lock-email-2",
+        "templateKey": "auth.invitation",
+        "templateVersion": 1
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
