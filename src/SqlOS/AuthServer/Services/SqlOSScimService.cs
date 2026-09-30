@@ -17,7 +17,7 @@ using SqlOS.Fga.Models;
 
 namespace SqlOS.AuthServer.Services;
 
-internal sealed class SqlOSScimException : InvalidOperationException
+internal class SqlOSScimException : InvalidOperationException
 {
     public SqlOSScimException(int statusCode, string message, string? scimType = null)
         : base(message)
@@ -30,6 +30,18 @@ internal sealed class SqlOSScimException : InvalidOperationException
     public string? ScimType { get; }
 }
 
+/// <summary>A user write refused by an ownership rule; recorded as a failed sync event.</summary>
+internal sealed class SqlOSScimRejectedWriteException : SqlOSScimException
+{
+    public SqlOSScimRejectedWriteException(int statusCode, string message, string scimType, string reason)
+        : base(statusCode, message, scimType)
+    {
+        Reason = reason;
+    }
+
+    public string Reason { get; }
+}
+
 internal sealed class SqlOSScimService
 {
     private const string UserSchema = "urn:ietf:params:scim:schemas:core:2.0:User";
@@ -38,6 +50,9 @@ internal sealed class SqlOSScimService
     private const string PatchOpSchema = "urn:ietf:params:scim:api:messages:2.0:PatchOp";
     private const string ErrorSchema = "urn:ietf:params:scim:api:messages:2.0:Error";
     private const int MaxAuditedMembershipSubjectIds = 100;
+    private const string LifecycleReleasedAction = "scim.user.lifecycle_released";
+    private const string RejectedAction = "scim.user.rejected";
+    private const string UnverifiedEmailMatchReason = "unverified_email_match";
     private const int ScimOperationCommitCleanupBatchSize = 256;
     private static readonly TimeSpan ScimOperationCommitRetention = TimeSpan.FromDays(1);
     private static readonly TimeSpan TokenUsageWriteInterval = TimeSpan.FromMinutes(5);
@@ -282,7 +297,7 @@ internal sealed class SqlOSScimService
         string? attributes = null,
         string? excludedAttributes = null,
         CancellationToken cancellationToken = default)
-        => RunProjectedAtomicAsync(attributes, excludedAttributes, async () =>
+        => RecordRejectionAsync(connection, "create", resourceId: null, RunProjectedAtomicAsync(attributes, excludedAttributes, async () =>
         {
             await LockAndEnsureConnectionAuthorityAsync(connection, cancellationToken);
             var request = ParseUser(payload);
@@ -302,7 +317,7 @@ internal sealed class SqlOSScimService
             }
 
             return await WriteUserCoreAsync(connection, existing, request, payload, createdResource: true, attributes, excludedAttributes, cancellationToken);
-        }, cancellationToken);
+        }, cancellationToken), cancellationToken);
 
     public Task<JsonObject> ReplaceUserAsync(
         SqlOSScimConnection connection,
@@ -311,16 +326,16 @@ internal sealed class SqlOSScimService
         string? attributes = null,
         string? excludedAttributes = null,
         CancellationToken cancellationToken = default)
-        => RunProjectedAtomicAsync(attributes, excludedAttributes, async () =>
+        => RecordRejectionAsync(connection, "replace", id, RunProjectedAtomicAsync(attributes, excludedAttributes, async () =>
         {
             await LockAndEnsureConnectionAuthorityAsync(connection, cancellationToken);
             var link = await GetRequiredUserLinkAsync(connection.Id, id, includeDeleted: false, cancellationToken);
             return await WriteUserCoreAsync(connection, link, ParseUser(payload), payload, createdResource: false, attributes, excludedAttributes, cancellationToken);
-        }, cancellationToken);
+        }, cancellationToken), cancellationToken);
 
     // Kept as an internal reconciliation helper for code-first tests and seed flows. HTTP POST uses CreateUserAsync.
     public Task<JsonObject> UpsertUserAsync(SqlOSScimConnection connection, JsonObject payload, bool replace, CancellationToken cancellationToken = default)
-        => RunAtomicAsync(async () =>
+        => RecordRejectionAsync(connection, replace ? "replace" : "create", ReadString(payload, "id"), RunAtomicAsync(async () =>
         {
             await LockAndEnsureConnectionAuthorityAsync(connection, cancellationToken);
             var request = ParseUser(payload, validateSchemas: false);
@@ -329,7 +344,7 @@ internal sealed class SqlOSScimService
                 ? await GetRequiredUserLinkAsync(connection.Id, routeId, includeDeleted: false, cancellationToken)
                 : await FindUserLinkAsync(connection.Id, request.UserName, request.ExternalId, cancellationToken);
             return await WriteUserCoreAsync(connection, link, request, payload, createdResource: link == null, null, null, cancellationToken);
-        }, cancellationToken);
+        }, cancellationToken), cancellationToken);
 
     public Task<JsonObject> PatchUserAsync(
         SqlOSScimConnection connection,
@@ -338,7 +353,7 @@ internal sealed class SqlOSScimService
         string? attributes = null,
         string? excludedAttributes = null,
         CancellationToken cancellationToken = default)
-        => RunProjectedAtomicAsync(attributes, excludedAttributes, async () =>
+        => RecordRejectionAsync(connection, "patch", id, RunProjectedAtomicAsync(attributes, excludedAttributes, async () =>
         {
             await LockAndEnsureConnectionAuthorityAsync(connection, cancellationToken);
             var link = await GetRequiredUserLinkAsync(connection.Id, id, includeDeleted: false, cancellationToken);
@@ -361,7 +376,7 @@ internal sealed class SqlOSScimService
 
             var request = state.ToRequest();
             return await WriteUserCoreAsync(connection, link, request, payload, createdResource: false, attributes, excludedAttributes, cancellationToken);
-        }, cancellationToken);
+        }, cancellationToken), cancellationToken);
 
     public Task DeleteUserAsync(SqlOSScimConnection connection, string id, CancellationToken cancellationToken = default)
         => RunAtomicAsync(async () =>
@@ -375,8 +390,18 @@ internal sealed class SqlOSScimService
             link.DeletedAt = now;
             link.UpdatedAt = now;
             link.LastSyncedAt = now;
+            if (link.OwnsUserLifecycle)
+            {
+                var anchors = await FindIndependentAnchorsAsync(user.Id, connection.OrganizationId, cancellationToken);
+                if (anchors.Count > 0)
+                {
+                    link.OwnsUserLifecycle = false;
+                    await RecordLifecycleReleasedAsync(connection, user.Id, link.ExternalId, anchors, cancellationToken);
+                }
+            }
+
             await DeprovisionUserAccessAsync(connection, user.Id, link.FgaSubjectId, cancellationToken);
-            if (await IsScimManagedUserLifecycleAsync(user.Id, link.OwnsUserLifecycle, cancellationToken))
+            if (link.OwnsUserLifecycle)
             {
                 var wasActive = user.IsActive;
                 await RefreshGlobalUserActivityAsync(user, connection.OrganizationId, now, cancellationToken);
@@ -607,18 +632,35 @@ internal sealed class SqlOSScimService
             user = await _context.Set<SqlOSUser>().FirstOrDefaultAsync(x => x.Id == link.EntityId, cancellationToken);
         }
 
-        if (user == null && !string.IsNullOrWhiteSpace(request.PrimaryEmail))
+        if (user == null)
         {
-            user = (await _context.Set<SqlOSUserEmail>()
-                .Include(x => x.User)
-                .FindByEmailAsync(request.PrimaryEmail, cancellationToken))?.User;
-        }
+            SqlOSUserEmail? matchedEmail = null;
+            if (!string.IsNullOrWhiteSpace(request.PrimaryEmail))
+            {
+                matchedEmail = await _context.Set<SqlOSUserEmail>()
+                    .Include(x => x.User)
+                    .FindByEmailAsync(request.PrimaryEmail, cancellationToken);
+            }
 
-        if (user == null && LooksLikeEmail(request.UserName))
-        {
-            user = (await _context.Set<SqlOSUserEmail>()
-                .Include(x => x.User)
-                .FindByEmailAsync(request.UserName, cancellationToken))?.User;
+            if (matchedEmail == null && LooksLikeEmail(request.UserName))
+            {
+                matchedEmail = await _context.Set<SqlOSUserEmail>()
+                    .Include(x => x.User)
+                    .FindByEmailAsync(request.UserName, cancellationToken);
+            }
+
+            if (matchedEmail is { IsVerified: false })
+            {
+                // Nobody has proven this mailbox yet, so the account may belong to someone who
+                // registered the address first. Directory access is never granted through it.
+                throw new SqlOSScimRejectedWriteException(
+                    StatusCodes.Status409Conflict,
+                    "An account with this email exists but has not verified it. The directory user can be linked after the address is verified.",
+                    "uniqueness",
+                    UnverifiedEmailMatchReason);
+            }
+
+            user = matchedEmail?.User;
         }
 
         if (user != null)
@@ -638,6 +680,35 @@ internal sealed class SqlOSScimService
         }
 
         var createdUser = user == null;
+        var ownsUserLifecycle = createdUser || link?.OwnsUserLifecycle == true;
+        IReadOnlyList<string> releasedByAnchors = [];
+        if (!createdUser && ownsUserLifecycle)
+        {
+            // Directory ownership lasts only while the person has no independent anchor; once
+            // they do, this connection only manages its own organization's view of them.
+            releasedByAnchors = await FindIndependentAnchorsAsync(user!.Id, connection.OrganizationId, cancellationToken);
+            ownsUserLifecycle = releasedByAnchors.Count == 0;
+        }
+
+        if (ownsUserLifecycle
+            && !string.IsNullOrWhiteSpace(request.PrimaryEmail)
+            && !SqlOSEmailAddress.TryNormalize(request.PrimaryEmail, out _))
+        {
+            throw new SqlOSScimException(StatusCodes.Status400BadRequest, "SCIM email value is not a valid email address.", "invalidValue");
+        }
+
+        if (ownsUserLifecycle
+            && !string.IsNullOrWhiteSpace(request.PrimaryEmail)
+            && await WritesPrimaryEmailAsync(createdUser ? null : user, request.PrimaryEmail, cancellationToken)
+            && !await SqlOSOrganizationEmailDomains.IsAtVerifiedDomainAsync(_context, connection.OrganizationId, request.PrimaryEmail, cancellationToken))
+        {
+            throw new SqlOSScimRejectedWriteException(
+                StatusCodes.Status400BadRequest,
+                "SCIM email domain is not verified for this organization.",
+                "invalidValue",
+                SqlOSOrganizationEmailDomains.UntrustedDomainReason);
+        }
+
         if (user == null)
         {
             user = new SqlOSUser
@@ -652,10 +723,9 @@ internal sealed class SqlOSScimService
             _context.Set<SqlOSUser>().Add(user);
         }
 
-        var hasOtherActiveMembership = await _context.Set<SqlOSMembership>()
-            .AnyAsync(x => x.UserId == user.Id && x.OrganizationId != connection.OrganizationId && x.IsActive, cancellationToken);
-        var ownsUserLifecycle = createdUser || link?.OwnsUserLifecycle == true;
-        var lifecycleIsScimManaged = await IsScimManagedUserLifecycleAsync(user.Id, ownsUserLifecycle, cancellationToken);
+        // Only the link that owns the person's lifecycle changes global state. Every other link
+        // (another organization's directory, or one released by an independent anchor) touches
+        // only its own membership, FGA subject, and link profile fields.
         if (ownsUserLifecycle)
         {
             user.DisplayName = request.DisplayName;
@@ -664,11 +734,9 @@ internal sealed class SqlOSScimService
             {
                 await UpsertPrimaryEmailAsync(user, request.PrimaryEmail, now, cancellationToken);
             }
-        }
-        if (lifecycleIsScimManaged)
-        {
+
             var wasActive = user.IsActive;
-            user.IsActive = request.Active || hasOtherActiveMembership;
+            user.IsActive = request.Active;
             user.UpdatedAt = now;
             await RevokeOffboardedUserIntegrationsAsync(user, wasActive, now, cancellationToken);
         }
@@ -700,6 +768,10 @@ internal sealed class SqlOSScimService
             link);
         link.OwnsUserLifecycle = ownsUserLifecycle;
         link.DeletedAt = null;
+        if (releasedByAnchors.Count > 0)
+        {
+            await RecordLifecycleReleasedAsync(connection, user.Id, link.ExternalId, releasedByAnchors, cancellationToken);
+        }
 
         if (!request.Active)
         {
@@ -946,6 +1018,24 @@ internal sealed class SqlOSScimService
         return RunAtomicAsync(action, cancellationToken);
     }
 
+    private async Task<T> RecordRejectionAsync<T>(
+        SqlOSScimConnection connection,
+        string operation,
+        string? resourceId,
+        Task<T> write,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await write;
+        }
+        catch (SqlOSScimRejectedWriteException rejection)
+        {
+            await RecordRejectedUserWriteAsync(connection, rejection, operation, resourceId, cancellationToken);
+            throw;
+        }
+    }
+
     private static SqlOSScimOperationCommit CreateScimProtocolCommitMarker(string id)
         => new()
         {
@@ -1023,17 +1113,123 @@ internal sealed class SqlOSScimService
         user.UpdatedAt = now;
     }
 
-    private async Task<bool> IsScimManagedUserLifecycleAsync(
+    /// <summary>
+    /// Anchors that make a person independent of this organization's directory: an active
+    /// membership elsewhere, a password, an enrolled authenticator, a verified phone number, a
+    /// social or OIDC identity, or a SAML identity from another organization's connection.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> FindIndependentAnchorsAsync(
         string userId,
-        bool currentLinkOwnsLifecycle,
+        string organizationId,
         CancellationToken cancellationToken)
-        => currentLinkOwnsLifecycle
-            || await _context.Set<SqlOSScimExternalId>()
-                .AsNoTracking()
-                .AnyAsync(link => link.ResourceType == "User"
-                    && link.EntityId == userId
-                    && link.OwnsUserLifecycle,
-                    cancellationToken);
+    {
+        var anchors = new List<string>();
+        if (await _context.Set<SqlOSMembership>()
+                .AnyAsync(x => x.UserId == userId && x.OrganizationId != organizationId && x.IsActive, cancellationToken))
+        {
+            anchors.Add("organization_membership");
+        }
+
+        if (await _context.Set<SqlOSCredential>()
+                .AnyAsync(x => x.UserId == userId && x.RevokedAt == null, cancellationToken))
+        {
+            anchors.Add("password");
+        }
+
+        if (await _context.Set<SqlOSUserAuthenticator>()
+                .AnyAsync(x => x.UserId == userId && x.RevokedAt == null && x.IsConfirmed, cancellationToken))
+        {
+            anchors.Add("mfa_factor");
+        }
+
+        if (await _context.Set<SqlOSUserPhoneNumber>()
+                .AnyAsync(x => x.UserId == userId && x.RemovedAt == null && x.IsVerified, cancellationToken))
+        {
+            anchors.Add("phone_number");
+        }
+
+        if (await _context.Set<SqlOSExternalIdentity>()
+                .AnyAsync(x => x.UserId == userId && x.OidcConnectionId != null, cancellationToken))
+        {
+            anchors.Add("oidc_identity");
+        }
+
+        if (await _context.Set<SqlOSExternalIdentity>()
+                .AnyAsync(x => x.UserId == userId
+                    && x.SsoConnectionId != null
+                    && x.SsoConnection!.OrganizationId != organizationId,
+                    cancellationToken))
+        {
+            anchors.Add("saml_identity");
+        }
+
+        return anchors;
+    }
+
+    /// <summary>
+    /// True when writing <paramref name="email"/> as the primary address would create an email
+    /// row or set or move the verified primary address. Re-sending the current primary address
+    /// (for example with a deactivation) writes nothing.
+    /// </summary>
+    private async Task<bool> WritesPrimaryEmailAsync(SqlOSUser? user, string email, CancellationToken cancellationToken)
+    {
+        if (user == null || !SqlOSEmailAddress.TryNormalize(email, out var normalized))
+        {
+            return true;
+        }
+
+        var primaryEmails = await _context.Set<SqlOSUserEmail>()
+            .AsNoTracking()
+            .Where(x => x.UserId == user.Id && x.IsPrimary && x.IsVerified)
+            .ToListAsync(cancellationToken);
+        return !primaryEmails.Any(x => SqlOSEmailAddress.MatchesStoredEmail(x, normalized));
+    }
+
+    private async Task RecordLifecycleReleasedAsync(
+        SqlOSScimConnection connection,
+        string userId,
+        string? externalId,
+        IReadOnlyList<string> anchors,
+        CancellationToken cancellationToken)
+    {
+        var data = new { reason = "independent_anchor", anchors };
+        await RecordSyncEventAsync(connection, "User", userId, externalId, LifecycleReleasedAction, "success", null, data, cancellationToken);
+        await RecordAuditAsync(LifecycleReleasedAction, connection.OrganizationId, "User", userId, externalId, data, cancellationToken);
+    }
+
+    /// <summary>
+    /// A rejected user write rolls back entirely; the failure is then recorded as its own sync
+    /// event so the dashboard SCIM view shows why the directory write did not apply.
+    /// </summary>
+    private async Task RecordRejectedUserWriteAsync(
+        SqlOSScimConnection connection,
+        SqlOSScimRejectedWriteException rejection,
+        string operation,
+        string? resourceId,
+        CancellationToken cancellationToken)
+    {
+        if (_context is DbContext dbContext)
+        {
+            dbContext.ChangeTracker.Clear();
+        }
+
+        _context.Set<SqlOSScimSyncEvent>().Add(new SqlOSScimSyncEvent
+        {
+            Id = _cryptoService.GenerateId("scevt"),
+            ConnectionId = connection.Id,
+            OrganizationId = connection.OrganizationId,
+            ResourceType = "User",
+            ResourceId = resourceId,
+            Action = RejectedAction,
+            Result = "failed",
+            Error = rejection.Message,
+            DataJson = JsonSerializer.Serialize(
+                new { reason = rejection.Reason, operation },
+                new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+            OccurredAt = DateTime.UtcNow
+        });
+        await _context.SaveChangesAsync(cancellationToken);
+    }
 
     private async Task UpsertMembershipAsync(string organizationId, string userId, bool active, DateTime now, CancellationToken cancellationToken)
     {

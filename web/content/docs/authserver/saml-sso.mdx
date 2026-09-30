@@ -181,7 +181,7 @@ When `RequireSsoForExistingMembers` is enabled, a user who already belongs to th
 
 Home realm discovery still follows `RequireSsoForExistingMembers`: when it is disabled, email-first discovery does not force an existing member into SSO. Enable it when existing members should be routed to SSO automatically.
 
-When `AllowJitProvisioning` is enabled, a successful SAML sign-in may create a missing user, or add organization membership for an existing user whose email domain the organization owns. Keep this disabled when access should be invitation- or admin-managed.
+When `AllowJitProvisioning` is enabled, a successful SAML sign-in may create a missing user, or add organization membership for an existing user whose email domain the organization owns. It creates new users only for email addresses at the organization's active verified domains; an operator-managed `PrimaryDomain` alone is not enough, and any other address is denied with nothing created. Keep this disabled when access should be invitation- or admin-managed.
 
 Every first-time email link and every JIT provision requires the configured email attribute in the signed SAML assertion. The login hint used for discovery and routing is never accepted as an authenticated email claim. An already-linked IdP subject can continue to resolve its existing user without an email attribute.
 

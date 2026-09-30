@@ -863,8 +863,22 @@ public sealed class SqlOSScimServiceTests
             PrimaryDomain = "acme.example",
             CreatedAt = DateTime.UtcNow
         });
+        // SCIM may only create or re-point verified emails inside the organization's verified domains.
+        context.Set<SqlOSOrganizationDomain>().Add(VerifiedDomain("org_acme", "example.test"));
         await context.SaveChangesAsync();
     }
+
+    private static SqlOSOrganizationDomain VerifiedDomain(string organizationId, string domain)
+        => new()
+        {
+            Id = $"dom_{organizationId}_{domain}",
+            OrganizationId = organizationId,
+            Domain = domain,
+            Status = SqlOSOrganizationDomainStatuses.Active,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            VerifiedAt = DateTime.UtcNow
+        };
 
     private static async Task SeedFgaRoleAndResourceAsync(TestSqlOSInMemoryDbContext context)
     {

@@ -1008,6 +1008,14 @@ public sealed class SqlOSSamlService
         }
         else if (connection.AutoProvisionUsers)
         {
+            // Just-in-time provisioning creates a verified global email, so the tenant's IdP may
+            // only create addresses inside domains the organization has proven it owns.
+            if (!await SqlOSOrganizationEmailDomains.IsAtVerifiedDomainAsync(_context, organizationId, normalizedEmail, cancellationToken))
+            {
+                await RecordLinkDeniedAsync(connection.Id, organizationId, SqlOSOrganizationEmailDomains.UntrustedDomainReason, cancellationToken);
+                return null;
+            }
+
             var displayName = $"{principal.Attributes.GetValueOrDefault(connection.FirstNameAttributeName, string.Empty)} {principal.Attributes.GetValueOrDefault(connection.LastNameAttributeName, string.Empty)}".Trim();
             if (string.IsNullOrWhiteSpace(displayName))
             {

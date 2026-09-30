@@ -1283,6 +1283,22 @@ public sealed class SqlOSScimProviderCompatibilityTests
                 var token = $"scim_http_{Guid.NewGuid():N}";
                 var crypto = scope.ServiceProvider.GetRequiredService<SqlOSCryptoService>();
                 context.Set<SqlOSOrganization>().Add(organization);
+                // SCIM may only create or re-point verified emails inside the organization's
+                // verified domains, so the provider payload domains are verified up front.
+                foreach (var domain in new[] { "example.test", "mail.example.test", "login.example.test" })
+                {
+                    context.Set<SqlOSOrganizationDomain>().Add(new SqlOSOrganizationDomain
+                    {
+                        Id = $"dom_{domain}",
+                        OrganizationId = organization.Id,
+                        Domain = domain,
+                        Status = SqlOSOrganizationDomainStatuses.Active,
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow,
+                        VerifiedAt = DateTime.UtcNow
+                    });
+                }
+
                 context.Set<SqlOSScimConnection>().Add(new SqlOSScimConnection
                 {
                     Id = "scim_http_connection",

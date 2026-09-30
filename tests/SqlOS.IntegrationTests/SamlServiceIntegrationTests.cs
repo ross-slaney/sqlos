@@ -43,6 +43,9 @@ public sealed partial class SamlServiceIntegrationTests
             var admin = new SqlOSAdminService(context, options, crypto);
             var saml = CreateSamlService(context, options, admin, crypto);
             var organization = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Seeded signed login", "seeded-signed-login"));
+            // JIT provisioning only creates emails inside the organization's verified domains.
+            context.Set<SqlOSOrganizationDomain>().Add(VerifiedDomainClaim(organization.Id, "example.test"));
+            await context.SaveChangesAsync();
             var client = await CreateSamlClientAsync(admin, "seeded-signed");
             using var rsa = RSA.Create(2048);
             var certificateRequest = new CertificateRequest("CN=SeededSamlLogin", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
@@ -86,6 +89,7 @@ public sealed partial class SamlServiceIntegrationTests
             $"SAML no trust {Guid.NewGuid():N}",
             null));
         var client = await CreateSamlClientAsync(admin, "mfa-no-trust");
+        var jitDomain = await AddUniqueVerifiedDomainAsync(organization.Id);
         using var rsa = RSA.Create(2048);
         var certificateRequest = new CertificateRequest(
             "CN=SqlOSSamlNoTrust",
@@ -106,7 +110,7 @@ public sealed partial class SamlServiceIntegrationTests
         var response = BuildSignedSamlResponse(
             certificate,
             connection.IdentityProviderEntityId,
-            $"mfa-no-trust-{Guid.NewGuid():N}@example.com",
+            $"mfa-no-trust@{jitDomain}",
             "No",
             "Trust",
             flow,
@@ -128,6 +132,7 @@ public sealed partial class SamlServiceIntegrationTests
             $"SAML trusted {Guid.NewGuid():N}",
             null));
         var client = await CreateSamlClientAsync(admin, "mfa-trusted");
+        var jitDomain = await AddUniqueVerifiedDomainAsync(organization.Id);
         using var rsa = RSA.Create(2048);
         var certificateRequest = new CertificateRequest(
             "CN=SqlOSSamlTrusted",
@@ -150,7 +155,7 @@ public sealed partial class SamlServiceIntegrationTests
         var response = BuildSignedSamlResponse(
             certificate,
             connection.IdentityProviderEntityId,
-            $"mfa-trusted-{Guid.NewGuid():N}@example.com",
+            $"mfa-trusted@{jitDomain}",
             "Trusted",
             "MFA",
             flow,
@@ -380,6 +385,7 @@ public sealed partial class SamlServiceIntegrationTests
         var ssoAuth = new SqlOSSsoAuthorizationService(AspireFixture.SharedContext, admin, crypto, discovery, saml, auth);
 
         var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"SAML {Guid.NewGuid():N}", null));
+        var jitDomain = await AddUniqueVerifiedDomainAsync(org.Id);
         var client = await admin.CreateClientAsync(new SqlOSCreateClientRequest(
             $"saml-client-{Guid.NewGuid():N}"[..18],
             "SAML Client",
@@ -403,7 +409,7 @@ public sealed partial class SamlServiceIntegrationTests
             "last_name"));
 
         var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
-        var samlResponse = BuildSignedSamlResponse(cert, "urn:test:idp", $"user-{Guid.NewGuid():N}@example.com", "Saml", "User", flow);
+        var samlResponse = BuildSignedSamlResponse(cert, "urn:test:idp", $"user@{jitDomain}", "Saml", "User", flow);
         var redirectUrl = await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, default);
         redirectUrl.Should().StartWith("https://client.example.local/callback?code=");
 
@@ -451,6 +457,7 @@ public sealed partial class SamlServiceIntegrationTests
             auth);
 
         var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"SAML 3P {Guid.NewGuid():N}", null));
+        var jitDomain = await AddUniqueVerifiedDomainAsync(org.Id);
         var client = await admin.CreateClientAsync(new SqlOSCreateClientRequest(
             $"saml-3p-{Guid.NewGuid():N}"[..18],
             "SAML Third Party",
@@ -474,7 +481,7 @@ public sealed partial class SamlServiceIntegrationTests
             "last_name"));
 
         var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
-        var samlResponse = BuildSignedSamlResponse(cert, "urn:test:3p-idp", $"user-{Guid.NewGuid():N}@example.com", "Saml", "User", flow);
+        var samlResponse = BuildSignedSamlResponse(cert, "urn:test:3p-idp", $"user@{jitDomain}", "Saml", "User", flow);
         var acsContext = new DefaultHttpContext();
         var acsRedirect = await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, acsContext, default);
         acsRedirect.Should().Contain("/continue?request=", "a third-party client reaches the consent interstitial, not a code");
@@ -507,6 +514,7 @@ public sealed partial class SamlServiceIntegrationTests
     {
         var (crypto, admin, saml) = CreateSamlServices();
         var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"SAML AuthTime {Guid.NewGuid():N}", null));
+        var jitDomain = await AddUniqueVerifiedDomainAsync(org.Id);
         var client = await CreateSamlClientAsync(admin, "authtime");
         using var rsa = RSA.Create(2048);
         var request = new CertificateRequest("CN=SqlOSAuthTimeIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
@@ -523,7 +531,7 @@ public sealed partial class SamlServiceIntegrationTests
         var samlResponse = BuildSignedSamlResponse(
             cert,
             connection.IdentityProviderEntityId,
-            $"authtime-{Guid.NewGuid():N}@example.com",
+            $"authtime@{jitDomain}",
             "Auth",
             "Time",
             flow,
@@ -550,6 +558,7 @@ public sealed partial class SamlServiceIntegrationTests
     {
         var (_, admin, saml) = CreateSamlServices();
         var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"Replay {Guid.NewGuid():N}", null));
+        var jitDomain = await AddUniqueVerifiedDomainAsync(org.Id);
         var client = await CreateSamlClientAsync(admin, "replay");
         using var rsa = RSA.Create(2048);
         var request = new CertificateRequest("CN=SqlOSReplayIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
@@ -562,13 +571,13 @@ public sealed partial class SamlServiceIntegrationTests
 
         var firstFlow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
         var firstResponse = BuildSignedSamlResponse(
-            certificate, connection.IdentityProviderEntityId, $"replay-{Guid.NewGuid():N}@example.com", "Replay", "User",
+            certificate, connection.IdentityProviderEntityId, $"replay-{Guid.NewGuid():N}@{jitDomain}", "Replay", "User",
             firstFlow, responseId: responseId, assertionId: assertionId);
         (await saml.HandleAcsAsync(connection.Id, firstResponse, firstFlow.RelayState)).Should().Contain("code=");
 
         var secondFlow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
         var duplicateResponse = BuildSignedSamlResponse(
-            certificate, connection.IdentityProviderEntityId, $"replay-{Guid.NewGuid():N}@example.com", "Replay", "User",
+            certificate, connection.IdentityProviderEntityId, $"replay-{Guid.NewGuid():N}@{jitDomain}", "Replay", "User",
             secondFlow,
             responseId: reuseResponseId ? responseId : $"_{Guid.NewGuid():N}",
             assertionId: reuseAssertionId ? assertionId : $"_{Guid.NewGuid():N}");
@@ -583,6 +592,7 @@ public sealed partial class SamlServiceIntegrationTests
     {
         var (_, admin, saml) = CreateSamlServices();
         var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"Concurrent replay {Guid.NewGuid():N}", null));
+        var jitDomain = await AddUniqueVerifiedDomainAsync(org.Id);
         var client = await CreateSamlClientAsync(admin, "concurrent-replay");
         using var rsa = RSA.Create(2048);
         var request = new CertificateRequest("CN=SqlOSConcurrentReplayIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
@@ -594,7 +604,7 @@ public sealed partial class SamlServiceIntegrationTests
         var secondFlow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
         var responseId = $"_{Guid.NewGuid():N}";
         var assertionId = $"_{Guid.NewGuid():N}";
-        var email = $"concurrent-replay-{Guid.NewGuid():N}@example.com";
+        var email = $"concurrent-replay@{jitDomain}";
         var firstResponse = BuildSignedSamlResponse(certificate, connection.IdentityProviderEntityId, email, "Replay", "User", firstFlow,
             responseId: responseId, assertionId: assertionId);
         var secondResponse = BuildSignedSamlResponse(certificate, connection.IdentityProviderEntityId, email, "Replay", "User", secondFlow,
@@ -699,6 +709,8 @@ public sealed partial class SamlServiceIntegrationTests
 
         var domain = $"contoso-{Guid.NewGuid():N}".ToLowerInvariant()[..20] + ".com";
         var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"PKCE {Guid.NewGuid():N}", null, domain));
+        // An operator PrimaryDomain alone never authorizes JIT provisioning; verify the domain.
+        await AddVerifiedDomainAsync(org.Id, domain);
         var client = await admin.CreateClientAsync(new SqlOSCreateClientRequest(
             $"pkce-client-{Guid.NewGuid():N}"[..20],
             "PKCE Client",

@@ -144,7 +144,7 @@ public static class SqlOSSsoPortalPageRenderer
                                     <input id="allow-jit" type="checkbox">
                                     <span>
                                         <strong>Allow JIT provisioning from SSO</strong><br>
-                                        Successful SSO sign-ins can create missing user access for this organization.
+                                        Successful SSO sign-ins can create missing user access for this organization. New users are created only for email addresses at this organization's verified domains.
                                     </span>
                                 </label>
                                 <div class="row">

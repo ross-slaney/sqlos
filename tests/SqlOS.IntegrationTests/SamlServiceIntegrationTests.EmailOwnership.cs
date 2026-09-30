@@ -14,8 +14,9 @@ namespace SqlOS.IntegrationTests;
 
 /// <summary>
 /// Email ownership at the SAML boundary: look-alike assertions never select another account
-/// (#422), and a SAML first link claims an unverified email only after evicting the credentials
-/// attached before verification (#423).
+/// (#422), a SAML first link claims an unverified email only after evicting the credentials
+/// attached before verification (#423), and just-in-time provisioning only creates emails inside
+/// the connection organization's verified domains (#420).
 /// </summary>
 public sealed partial class SamlServiceIntegrationTests
 {
@@ -90,9 +91,117 @@ public sealed partial class SamlServiceIntegrationTests
             .Should().BeTrue();
     }
 
+    [TestMethod]
+    public async Task SamlJit_WithEmailOutsideVerifiedDomains_IsDeniedWithoutSideEffects()
+    {
+        var (_, admin, saml) = CreateSamlServices();
+        var unique = Guid.NewGuid().ToString("N")[..12];
+        var outsideEmail = $"victim{unique}@gmail.example";
+        var subject = $"jit-outside-{unique}";
+        var organization = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"Jit Org {unique}", null));
+        await AddVerifiedDomainAsync(organization.Id, $"tenant{unique}.example");
+        await AssertJitDeniedAsync(admin, saml, organization.Id, outsideEmail, subject);
+    }
+
+    [TestMethod]
+    public async Task SamlJit_WithOnlyUnverifiedPrimaryDomain_IsDenied()
+    {
+        var (_, admin, saml) = CreateSamlServices();
+        var unique = Guid.NewGuid().ToString("N")[..12];
+        var domain = $"primary{unique}.example";
+        var organization = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"Primary Org {unique}", null, PrimaryDomain: domain));
+        await AssertJitDeniedAsync(admin, saml, organization.Id, $"user@{domain}", $"jit-primary-{unique}");
+    }
+
+    [TestMethod]
+    public async Task SamlJit_WithEmailInsideVerifiedDomain_ProvisionsAndIssuesCode()
+    {
+        var (_, admin, saml) = CreateSamlServices();
+        var unique = Guid.NewGuid().ToString("N")[..12];
+        var domain = $"jit{unique}.example";
+        var email = $"new.hire@{domain}";
+        var organization = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"Jit Inside {unique}", null));
+        await AddVerifiedDomainAsync(organization.Id, domain);
+        using var certificate = CreateCertificate("CN=SqlOSJitIdP");
+        var connection = await CreatePolicySamlConnectionAsync(admin, organization.Id, certificate, "jit-inside", autoProvisionUsers: true, autoLinkByEmail: false);
+        var client = await CreateSamlClientAsync(admin, "jitin");
+        var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+
+        var redirect = await saml.HandleAcsAsync(
+            connection.Id,
+            BuildSignedSamlResponse(certificate, connection.IdentityProviderEntityId, email, "New", "Hire", flow, nameId: $"jit-inside-{unique}"),
+            flow.RelayState,
+            default);
+
+        redirect.Should().StartWith("https://client.example.local/callback?code=");
+        var stored = await AspireFixture.SharedContext.Set<SqlOSUserEmail>()
+            .AsNoTracking()
+            .SingleAsync(x => x.NormalizedEmail == SqlOSAdminService.NormalizeEmail(email));
+        stored.IsVerified.Should().BeTrue();
+        (await AspireFixture.SharedContext.Set<SqlOSMembership>()
+                .AnyAsync(x => x.UserId == stored.UserId && x.OrganizationId == organization.Id && x.IsActive))
+            .Should().BeTrue();
+        (await AspireFixture.SharedContext.Set<SqlOSExternalIdentity>()
+                .AnyAsync(x => x.UserId == stored.UserId && x.SsoConnectionId == connection.Id))
+            .Should().BeTrue();
+    }
+
+    private static async Task AssertJitDeniedAsync(
+        SqlOSAdminService admin,
+        SqlOSSamlService saml,
+        string organizationId,
+        string email,
+        string subject)
+    {
+        using var certificate = CreateCertificate("CN=SqlOSJitDeniedIdP");
+        var connection = await CreatePolicySamlConnectionAsync(admin, organizationId, certificate, "jit-denied", autoProvisionUsers: true, autoLinkByEmail: true);
+        var client = await CreateSamlClientAsync(admin, "jitdeny");
+        var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+
+        var action = async () => await saml.HandleAcsAsync(
+            connection.Id,
+            BuildSignedSamlResponse(certificate, connection.IdentityProviderEntityId, email, "Outside", "Domain", flow, nameId: subject),
+            flow.RelayState,
+            default);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("No user could be resolved from the SAML assertion.");
+        var context = AspireFixture.SharedContext;
+        (await context.Set<SqlOSUserEmail>().AnyAsync(x => x.NormalizedEmail == SqlOSAdminService.NormalizeEmail(email)))
+            .Should().BeFalse("JIT must not create an email outside the organization's verified domains");
+        (await context.Set<SqlOSExternalIdentity>().AnyAsync(x => x.SsoConnectionId == connection.Id))
+            .Should().BeFalse();
+        (await context.Set<SqlOSMembership>().AnyAsync(x => x.OrganizationId == organizationId))
+            .Should().BeFalse();
+        var authorizationRequest = await context.Set<SqlOSAuthorizationRequest>().AsNoTracking().SingleAsync(x => x.Id == flow.RelayState);
+        authorizationRequest.CompletedAt.Should().BeNull();
+        (await context.Set<SqlOSAuthorizationCode>().AnyAsync(x => x.AuthorizationRequestId == flow.RelayState))
+            .Should().BeFalse();
+        var denial = await context.Set<SqlOSAuditEvent>()
+            .Where(x => x.EventType == "user.login.saml.link_denied" && x.OrganizationId == organizationId)
+            .OrderByDescending(x => x.OccurredAt)
+            .FirstOrDefaultAsync();
+        denial.Should().NotBeNull();
+        denial!.DataJson.Should().Contain("untrusted_email_domain");
+        denial.DataJson.Should().NotContain(email);
+    }
+
     private static async Task AddVerifiedDomainAsync(string organizationId, string domain)
     {
-        AspireFixture.SharedContext.Set<SqlOSOrganizationDomain>().Add(new SqlOSOrganizationDomain
+        AspireFixture.SharedContext.Set<SqlOSOrganizationDomain>().Add(VerifiedDomainClaim(organizationId, domain));
+        await AspireFixture.SharedContext.SaveChangesAsync();
+    }
+
+    /// <summary>A verified domain nobody else uses, so shared-database discovery is unaffected.</summary>
+    private static async Task<string> AddUniqueVerifiedDomainAsync(string organizationId)
+    {
+        var domain = $"jit-{Guid.NewGuid():N}.example";
+        await AddVerifiedDomainAsync(organizationId, domain);
+        return domain;
+    }
+
+    private static SqlOSOrganizationDomain VerifiedDomainClaim(string organizationId, string domain)
+        => new()
         {
             Id = $"dom_{Guid.NewGuid():N}"[..28],
             OrganizationId = organizationId,
@@ -101,9 +210,7 @@ public sealed partial class SamlServiceIntegrationTests
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             VerifiedAt = DateTime.UtcNow
-        });
-        await AspireFixture.SharedContext.SaveChangesAsync();
-    }
+        };
 
     private static X509Certificate2 CreateCertificate(string subjectName)
     {
