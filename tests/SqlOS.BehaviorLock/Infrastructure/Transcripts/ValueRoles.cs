@@ -48,6 +48,7 @@ public static class ValueRoles
         ["token"] = "link-token",
         ["scimToken"] = "scim-token",
         ["bearerToken"] = "scim-token",
+        ["tokenPrefix"] = "token-prefix",
         ["secret"] = "totp-secret",
         ["cursor"] = "cursor",
         ["nextCursor"] = "cursor",

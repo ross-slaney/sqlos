@@ -34,6 +34,17 @@ public sealed class HttpActor
     /// <summary>The actor's cookie jar, or null for API clients that never keep cookies.</summary>
     public CookieContainer? Cookies { get; }
 
+    /// <summary>Puts a cookie in this browser's jar, as if an earlier visit had set it.</summary>
+    public void SetCookie(string name, string value, string path = "/")
+    {
+        if (Cookies == null)
+        {
+            throw new InvalidOperationException($"{Name} is an API client and keeps no cookies.");
+        }
+
+        Cookies.Add(new Uri(BehaviorLockConstants.PublicOrigin), new Cookie(name, value, path) { Secure = true, HttpOnly = true });
+    }
+
     public Task<HttpExchange> GetAsync(string target, Action<RequestOptions>? configure = null)
         => SendAsync(HttpMethod.Get, target, content: null, configure);
 

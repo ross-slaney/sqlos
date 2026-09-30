@@ -1,0 +1,2209 @@
+# SqlOS behavior lock transcript
+scenario: UpgradeScenarios.Data_seeded_by_the_released_package_keeps_working_after_the_upgrade
+profile: upgrade
+
+# The database and data-protection keys were written by the upgrade seed with SqlOS 7.2.1; this host is the build under test.
+
+## 1. alice-returning: Alice's hosted session from before the upgrade continues without a sign-in
+> GET /sqlos/auth/authorize?response_type=code&client_id=upgrade-portal&redirect_uri=https%3A%2F%2Fportal.example.test%2Fauth%2Fcallback&scope=openid%20profile%20email%20offline_access&state={state#1}&nonce={nonce#1}&code_challenge={pkce-challenge#1}&code_challenge_method=S256
+> Cookie: sqlos_auth_page={session-cookie:alice}
+< 302 Found
+< Location: https://portal.example.test/auth/callback?code={code#1}&state={state#1}&scope=openid%20profile%20email%20offline_access
+< Set-Cookie: sqlos_auth_page={cookie#1}; expires=+7d; path=/; secure; samesite=lax; httponly
+
+## 2. client: redeem the code
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=authorization_code
+>   code={code#1}
+>   client_id=upgrade-portal
+>   redirect_uri=https://portal.example.test/auth/callback
+>   code_verifier={pkce-verifier#1}
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "access_token": "{access-token#1}",
+      "expires_in": ~600,
+      "id_token": "{id-token#1}",
+      "refresh_token": "{refresh-token#1}",
+      "scope": "openid profile email offline_access",
+      "token_type": "Bearer"
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password",
+        "totp"
+      ],
+      "aud": "sqlos",
+      "client_id": "upgrade-portal",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "org_id": "{org:acme}",
+      "scope": "openid profile email offline_access",
+      "sid": "{ses#1}",
+      "sub": "{usr:alice}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+  jwt {id-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "JWT"
+    }
+    claims: {
+      "amr": [
+        "password",
+        "totp"
+      ],
+      "at_hash": "{hash#1}",
+      "aud": "upgrade-portal",
+      "auth_time": {epoch},
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nonce": "{nonce#1}",
+      "org_id": "{org:acme}",
+      "sid": "{ses#1}",
+      "sub": "{usr:alice}"
+    }
+    lifetimes: exp-iat=5m
+
+## 3. client: rotate the portal client's refresh token
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=refresh_token
+>   refresh_token={refresh-token:portal}
+>   client_id=upgrade-portal
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "access_token": "{access-token#2}",
+      "expires_in": ~600,
+      "id_token": "{id-token#2}",
+      "refresh_token": "{refresh-token#2}",
+      "scope": "openid profile email offline_access",
+      "token_type": "Bearer"
+    }
+  jwt {access-token#2}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password",
+        "totp"
+      ],
+      "aud": "sqlos",
+      "client_id": "upgrade-portal",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "org_id": "{org:acme}",
+      "scope": "openid profile email offline_access",
+      "sid": "{ses#2}",
+      "sub": "{usr:alice}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+  jwt {id-token#2}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "JWT"
+    }
+    claims: {
+      "amr": [
+        "password",
+        "totp"
+      ],
+      "at_hash": "{hash#2}",
+      "aud": "upgrade-portal",
+      "auth_time": {epoch},
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "org_id": "{org:acme}",
+      "sid": "{ses#2}",
+      "sub": "{usr:alice}"
+    }
+    lifetimes: exp-iat=5m
+
+## 4. client: rotate the partner client's refresh token
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=refresh_token
+>   refresh_token={refresh-token:partner}
+>   client_id=upgrade-partner
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "access_token": "{access-token#3}",
+      "expires_in": ~600,
+      "id_token": "{id-token#3}",
+      "refresh_token": "{refresh-token#3}",
+      "scope": "openid profile email offline_access",
+      "token_type": "Bearer"
+    }
+  jwt {access-token#3}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password",
+        "totp"
+      ],
+      "aud": "sqlos",
+      "client_id": "upgrade-partner",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "org_id": "{org:acme}",
+      "scope": "openid profile email offline_access",
+      "sid": "{ses#3}",
+      "sub": "{usr:alice}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+  jwt {id-token#3}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "JWT"
+    }
+    claims: {
+      "amr": [
+        "password",
+        "totp"
+      ],
+      "at_hash": "{hash#3}",
+      "aud": "upgrade-partner",
+      "auth_time": {epoch},
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "org_id": "{org:acme}",
+      "sid": "{ses#3}",
+      "sub": "{usr:alice}"
+    }
+    lifetimes: exp-iat=5m
+
+## 5. client: rotate the dynamic client's refresh token
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=refresh_token
+>   refresh_token={refresh-token:dynamic}
+>   client_id={dcrcli:dynamic}
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "access_token": "{access-token#4}",
+      "expires_in": ~600,
+      "id_token": "{id-token#4}",
+      "refresh_token": "{refresh-token#4}",
+      "scope": "openid profile offline_access",
+      "token_type": "Bearer"
+    }
+  jwt {access-token#4}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password",
+        "totp"
+      ],
+      "aud": "sqlos",
+      "client_id": "{dcrcli:dynamic}",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "org_id": "{org:acme}",
+      "scope": "openid profile offline_access",
+      "sid": "{ses#4}",
+      "sub": "{usr:alice}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+  jwt {id-token#4}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "JWT"
+    }
+    claims: {
+      "amr": [
+        "password",
+        "totp"
+      ],
+      "at_hash": "{hash#4}",
+      "aud": "{dcrcli:dynamic}",
+      "auth_time": {epoch},
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "org_id": "{org:acme}",
+      "sid": "{ses#4}",
+      "sub": "{usr:alice}"
+    }
+    lifetimes: exp-iat=5m
+
+## 6. client: rotate the cimd client's refresh token
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=refresh_token
+>   refresh_token={refresh-token:cimd}
+>   client_id=https://client.example.test/upgrade-client.json
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "access_token": "{access-token#5}",
+      "expires_in": ~600,
+      "id_token": "{id-token#5}",
+      "refresh_token": "{refresh-token#5}",
+      "scope": "openid profile email offline_access",
+      "token_type": "Bearer"
+    }
+  jwt {access-token#5}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password",
+        "totp"
+      ],
+      "aud": "sqlos",
+      "client_id": "https://client.example.test/upgrade-client.json",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "org_id": "{org:acme}",
+      "scope": "openid profile email offline_access",
+      "sid": "{ses#5}",
+      "sub": "{usr:alice}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+  jwt {id-token#5}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "JWT"
+    }
+    claims: {
+      "amr": [
+        "password",
+        "totp"
+      ],
+      "at_hash": "{hash#5}",
+      "aud": "https://client.example.test/upgrade-client.json",
+      "auth_time": {epoch},
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "org_id": "{org:acme}",
+      "sid": "{ses#5}",
+      "sub": "{usr:alice}"
+    }
+    lifetimes: exp-iat=5m
+
+## 7. client: the CLI's device authorization is still pending
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=urn:ietf:params:oauth:grant-type:device_code
+>   device_code={device-code:cli}
+>   client_id=upgrade-cli
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "error": "authorization_pending",
+      "error_description": "The device authorization request is still pending.",
+      "interval": 5
+    }
+
+## 8. directory: find Bob with the existing SCIM token
+> GET /scim/v2/Users?filter=userName%20eq%20%22bob%40acme.example.test%22
+> Authorization: Bearer {scim-token:acme}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "Resources": [
+        {
+          "active": true,
+          "displayName": "Bob Builder",
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:bob}"
+            }
+          ],
+          "externalId": "directory-bob",
+          "groups": [
+            {
+              "$ref": "https://sqlos.example.test/scim/v2/Groups/{grp:engineering}",
+              "display": "Engineering",
+              "value": "{grp:engineering}"
+            }
+          ],
+          "id": "{usr:bob}",
+          "meta": {
+            "created": "{datetime:unspecified}",
+            "lastModified": "{datetime:unspecified}",
+            "location": "https://sqlos.example.test/scim/v2/Users/{usr:bob}",
+            "resourceType": "User"
+          },
+          "name": {
+            "familyName": "Builder",
+            "formatted": "Bob Builder",
+            "givenName": "Bob"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:bob}"
+        }
+      ],
+      "itemsPerPage": 1,
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+      ],
+      "startIndex": 1,
+      "totalResults": 1
+    }
+
+## 9. directory: provision Dave at the domain verified before the upgrade
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token:acme}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "emails": [
+>       {
+>         "primary": true,
+>         "type": "work",
+>         "value": "{email:dave}"
+>       }
+>     ],
+>     "externalId": "directory-dave",
+>     "name": {
+>       "familyName": "Lister",
+>       "givenName": "Dave"
+>     },
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:dave}"
+>   }
+< 201 Created
+< Content-Location: https://sqlos.example.test/scim/v2/Users/{usr:dave}
+< Content-Type: application/scim+json
+< Location: https://sqlos.example.test/scim/v2/Users/{usr:dave}
+    {
+      "active": true,
+      "displayName": "Dave Lister",
+      "emails": [
+        {
+          "primary": true,
+          "type": "work",
+          "value": "{email:dave}"
+        }
+      ],
+      "externalId": "directory-dave",
+      "groups": [],
+      "id": "{usr:dave}",
+      "meta": {
+        "created": "{datetime:utc-z}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "https://sqlos.example.test/scim/v2/Users/{usr:dave}",
+        "resourceType": "User"
+      },
+      "name": {
+        "familyName": "Lister",
+        "formatted": "Dave Lister",
+        "givenName": "Dave"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:dave}"
+    }
+
+## 10. directory: add Dave to the group the existing mapping targets
+> PATCH /scim/v2/Groups/{grp:engineering}
+> Authorization: Bearer {scim-token:acme}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "add",
+>         "path": "members",
+>         "value": [
+>           {
+>             "value": "{usr:dave}"
+>           }
+>         ]
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 204 No Content
+
+## 11. operator: dashboard: SCIM mirrored Dave into FGA
+> GET /sqlos/admin/fga/api/users?search=Dave
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "displayName": "Dave Lister",
+          "email": "{email:dave}",
+          "id": "{fusr#1}",
+          "isActive": true,
+          "lastLoginAt": null,
+          "subjectId": "{subj:dave}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 12. probe: Alice's admin grant on the root workspace reaches the child
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.write",
+>     "resourceId": "workspace::acme-projects",
+>     "subjectId": "{usr:alice}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": true,
+      "error": null,
+      "trace": [
+        {
+          "detail": "Checking access to Acme Projects (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme Projects",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Write workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"Alice\" + 0 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": "Alice"
+        },
+        {
+          "detail": "Checking 2 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Acme Projects",
+          "grantId": null,
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme Projects",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Acme",
+          "grantId": null,
+          "resourceId": "workspace::acme",
+          "resourceName": "Acme",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Role \"Workspace admin\" provides permission \"Write workspace\" via grant at Acme",
+          "grantId": "grant::{hex#1}",
+          "resourceId": "workspace::acme",
+          "resourceName": "Acme",
+          "roleName": "Workspace admin",
+          "step": "Access Granted",
+          "subjectName": "Alice"
+        }
+      ]
+    }
+
+## 13. probe: Carol's direct reader grant
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::acme-projects",
+>     "subjectId": "{usr:carol}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": true,
+      "error": null,
+      "trace": [
+        {
+          "detail": "Checking access to Acme Projects (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme Projects",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Read workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"Carol\" + 0 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": "Carol"
+        },
+        {
+          "detail": "Checking 2 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Acme Projects",
+          "grantId": null,
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme Projects",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Role \"Workspace reader\" provides permission \"Read workspace\" via grant at Acme Projects",
+          "grantId": "grant::{hex#2}",
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme Projects",
+          "roleName": "Workspace reader",
+          "step": "Access Granted",
+          "subjectName": "Carol"
+        }
+      ]
+    }
+
+## 14. probe: a reader cannot write
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.write",
+>     "resourceId": "workspace::acme-projects",
+>     "subjectId": "{usr:carol}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": false,
+      "error": null,
+      "trace": [
+        {
+          "detail": "Checking access to Acme Projects (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme Projects",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Write workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"Carol\" + 0 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": "Carol"
+        },
+        {
+          "detail": "Checking 2 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Acme Projects",
+          "grantId": null,
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme Projects",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Role \"Workspace reader\" does not provide permission \"Write workspace\"",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": "Workspace reader",
+          "step": "Role Checked",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Acme",
+          "grantId": null,
+          "resourceId": "workspace::acme",
+          "resourceName": "Acme",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "No matching grants found that provide permission \"Write workspace\"",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Access Denied",
+          "subjectName": null
+        }
+      ]
+    }
+
+## 15. probe: Bob reads the child through the SCIM group mapping
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::acme-projects",
+>     "subjectId": "{subj:bob}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": true,
+      "error": null,
+      "trace": [
+        {
+          "detail": "Checking access to Acme Projects (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme Projects",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Read workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"Bob Builder\" + 1 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": "Bob Builder"
+        },
+        {
+          "detail": "Checking 2 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Acme Projects",
+          "grantId": null,
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme Projects",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Role \"Workspace reader\" provides permission \"Read workspace\" via grant at Acme Projects",
+          "grantId": "{grant#1}",
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme Projects",
+          "roleName": "Workspace reader",
+          "step": "Access Granted",
+          "subjectName": "Engineering"
+        }
+      ]
+    }
+
+## 16. probe: the mapping grants the child only
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::acme",
+>     "subjectId": "{subj:bob}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": false,
+      "error": null,
+      "trace": [
+        {
+          "detail": "Checking access to Acme (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::acme",
+          "resourceName": "Acme",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Read workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"Bob Builder\" + 1 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": "Bob Builder"
+        },
+        {
+          "detail": "Checking 1 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Acme",
+          "grantId": null,
+          "resourceId": "workspace::acme",
+          "resourceName": "Acme",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "No matching grants found that provide permission \"Read workspace\"",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Access Denied",
+          "subjectName": null
+        }
+      ]
+    }
+
+## 17. probe: a check by Bob's user ID finds no subject: SCIM keys the subjects it creates by their own ID
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::acme-projects",
+>     "subjectId": "{usr:bob}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": false,
+      "error": "No subjects found",
+      "trace": [
+        {
+          "detail": "Checking access to Acme Projects (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme Projects",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Read workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"\" + -1 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": null
+        }
+      ]
+    }
+
+## 18. probe: the existing mapping grants Dave after the upgrade
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::acme-projects",
+>     "subjectId": "{subj:dave}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": true,
+      "error": null,
+      "trace": [
+        {
+          "detail": "Checking access to Acme Projects (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme Projects",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Read workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"Dave Lister\" + 1 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": "Dave Lister"
+        },
+        {
+          "detail": "Checking 2 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Acme Projects",
+          "grantId": null,
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme Projects",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Role \"Workspace reader\" provides permission \"Read workspace\" via grant at Acme Projects",
+          "grantId": "{grant#1}",
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme Projects",
+          "roleName": "Workspace reader",
+          "step": "Access Granted",
+          "subjectName": "Engineering"
+        }
+      ]
+    }
+
+## 19. browser: open the portal's password sign-in
+> GET /sqlos/auth/authorize?response_type=code&client_id=upgrade-portal&redirect_uri=https%3A%2F%2Fportal.example.test%2Fauth%2Fcallback&scope=openid%20profile%20email%20offline_access&state={state#2}&nonce={nonce#2}&code_challenge={pkce-challenge#2}&code_challenge_method=S256&view=password
+< 200 OK
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#1}'; style-src 'self' 'nonce-{csp-nonce#1}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+< Set-Cookie: sqlos_auth_page_csrf_{hex#3}={cookie#2}; expires=+15m; max-age=900; path=/sqlos/auth; secure; samesite=strict; httponly
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Upgrade Suite</title>
+        <style nonce="{csp-nonce#1}">{style-sha256:80d77a550f3a606a}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Upgrade Suite</h1>
+                <p class="brand-subtitle">Secure your app-owned AI and MCP experiences with SqlOS.</p>
+              </div>
+              <div class="messages"></div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <div class="panel-intro">
+                    <span class="panel-kicker">Password</span>
+                    <p>Continue with your email and password.</p>
+                  </div>
+                  <form class="auth-form" method="post" action="/sqlos/auth/login/password">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#1}" />
+                    <input type="hidden" name="requestId" value="{req#1}" />
+                    <label class="field">
+                      <span>Email</span>
+                      <input name="email" type="email" value="" placeholder="Your email address" autocomplete="email" required="" />
+                    </label>
+                    <label class="field">
+                      <span>Password</span>
+                      <input name="password" type="password" placeholder="Your password" autocomplete="current-password" required="" />
+                    </label>
+                    <button class="primary-action" type="submit" data-loading-label="Signing in">
+                      <span class="button-label">Continue</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                  </form>
+                  <div class="footer-links">
+                    <a class="secondary-link" href="/sqlos/auth/password/forgot?request={req#1}">Forgot password?</a>
+                  </div>
+                  <div class="section-divider">OR</div>
+                  <div class="providers">
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#1}?request={req#1}&amp;email=" data-loading-label="Connecting to Google">
+                      <span class="provider-badge">
+                        <img class="provider-logo" src="{data-uri:image/svg+xml}" alt="" aria-hidden="true" />
+                      </span>
+                      <span class="provider-label">Continue with Google</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                  </div>
+                  <p class="footer-prompt">
+                    Don't have an account?
+                    <a class="secondary-link" href="/sqlos/auth/signup?request={req#1}">Get started</a>
+                  </p>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#1}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+
+## 20. browser: the password step asks for the authenticator Alice enrolled before the upgrade
+> POST /sqlos/auth/login/password
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#3}={cookie#2}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#1}
+>   email={email:alice}
+>   password={password:alice}
+< 200 OK
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#2}'; style-src 'self' 'nonce-{csp-nonce#2}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Upgrade Suite</title>
+        <style nonce="{csp-nonce#2}">{style-sha256:80d77a550f3a606a}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Upgrade Suite</h1>
+                <p class="brand-subtitle">Secure your app-owned AI and MCP experiences with SqlOS.</p>
+              </div>
+              <div class="messages"></div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <div class="panel-intro">
+                    <span class="panel-kicker">Two-step verification</span>
+                    <p>Enter a code from an authenticator app or a recovery code.</p>
+                  </div>
+                  <form class="auth-form" method="post" action="/sqlos/auth/mfa/verify">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#2}" />
+                    <input type="hidden" name="requestId" value="{req#1}" />
+                    <input type="hidden" name="mfaToken" value="{mfa-token#1}" />
+                    <label class="field">
+                      <span>Code</span>
+                      <input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" required="" autofocus="" />
+                    </label>
+                    <button class="primary-action" type="submit" data-loading-label="Verifying">
+                      <span class="button-label">Verify</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                  </form>
+                  <div class="footer-links">
+                    <a class="secondary-link" href="/sqlos/auth/login?request={req#1}">Sign in</a>
+                  </div>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#2}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+
+## 21. browser: the authenticator code verifies
+> POST /sqlos/auth/mfa/verify
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#3}={cookie#2}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#2}
+>   requestId={req#1}
+>   mfaToken={mfa-token#1}
+>   code={totp#1}
+< 200 OK
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#3}'; style-src 'self' 'nonce-{csp-nonce#3}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+< Set-Cookie: sqlos_auth_page={cookie#3}; expires=+7d; path=/; secure; samesite=lax; httponly
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="refresh" content="0;url=https://portal.example.test/auth/callback?code={code#2}&amp;state={state#2}&amp;scope=openid%20profile%20email%20offline_access" />
+        <title>Continuing…</title>
+      </head>
+      <body>
+        <p>
+          Returning to the application…
+          <a href="https://portal.example.test/auth/callback?code={code#2}&amp;state={state#2}&amp;scope=openid%20profile%20email%20offline_access">Continue</a>
+        </p>
+      </body>
+    </html>
+
+## 22. client: redeem the code
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=authorization_code
+>   code={code#2}
+>   client_id=upgrade-portal
+>   redirect_uri=https://portal.example.test/auth/callback
+>   code_verifier={pkce-verifier#2}
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "access_token": "{access-token#6}",
+      "expires_in": ~600,
+      "id_token": "{id-token#6}",
+      "refresh_token": "{refresh-token#6}",
+      "scope": "openid profile email offline_access",
+      "token_type": "Bearer"
+    }
+  jwt {access-token#6}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password",
+        "totp"
+      ],
+      "aud": "sqlos",
+      "client_id": "upgrade-portal",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "org_id": "{org:acme}",
+      "scope": "openid profile email offline_access",
+      "sid": "{ses#6}",
+      "sub": "{usr:alice}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+  jwt {id-token#6}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "JWT"
+    }
+    claims: {
+      "amr": [
+        "password",
+        "totp"
+      ],
+      "at_hash": "{hash#6}",
+      "aud": "upgrade-portal",
+      "auth_time": {epoch},
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nonce": "{nonce#2}",
+      "org_id": "{org:acme}",
+      "sid": "{ses#6}",
+      "sub": "{usr:alice}"
+    }
+    lifetimes: exp-iat=5m
+
+## 23. operator: dashboard: users
+> GET /sqlos/admin/auth/api/users
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "defaultEmail": "{email:alice}",
+          "displayName": "Alice",
+          "id": "{usr:alice}",
+          "isActive": true,
+          "membershipCount": 1
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "defaultEmail": "{email:bob}",
+          "displayName": "Bob Builder",
+          "id": "{usr:bob}",
+          "isActive": true,
+          "membershipCount": 1
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "defaultEmail": "{email:carol}",
+          "displayName": "Carol",
+          "id": "{usr:carol}",
+          "isActive": true,
+          "membershipCount": 1
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "defaultEmail": "{email:dave}",
+          "displayName": "Dave Lister",
+          "id": "{usr:dave}",
+          "isActive": true,
+          "membershipCount": 1
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 24. operator: dashboard: Alice's sessions
+> GET /sqlos/admin/auth/api/users/{usr:alice}/sessions
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "absoluteExpiresAt": "{datetime:unspecified}",
+          "authenticationMethod": "password+totp",
+          "clientApplicationId": "{cli#1}",
+          "createdAt": "{datetime:unspecified}",
+          "id": "{ses#6}",
+          "idleExpiresAt": "{datetime:unspecified}",
+          "ipAddress": "203.0.113.10",
+          "lastSeenAt": "{datetime:unspecified}",
+          "revocationReason": null,
+          "revokedAt": null,
+          "user": "Alice",
+          "userAgent": "",
+          "userId": "{usr:alice}"
+        },
+        {
+          "absoluteExpiresAt": "{datetime:unspecified}",
+          "authenticationMethod": "password+totp",
+          "clientApplicationId": "{cli#1}",
+          "createdAt": "{datetime:unspecified}",
+          "id": "{ses#1}",
+          "idleExpiresAt": "{datetime:unspecified}",
+          "ipAddress": "203.0.113.10",
+          "lastSeenAt": "{datetime:unspecified}",
+          "revocationReason": null,
+          "revokedAt": null,
+          "user": "Alice",
+          "userAgent": "",
+          "userId": "{usr:alice}"
+        },
+        {
+          "absoluteExpiresAt": "{datetime:unspecified}",
+          "authenticationMethod": "password+totp",
+          "clientApplicationId": "{cli#2}",
+          "createdAt": "{datetime:unspecified}",
+          "id": "{ses#5}",
+          "idleExpiresAt": "{datetime:unspecified}",
+          "ipAddress": "203.0.113.10",
+          "lastSeenAt": "{datetime:unspecified}",
+          "revocationReason": null,
+          "revokedAt": null,
+          "user": "Alice",
+          "userAgent": "",
+          "userId": "{usr:alice}"
+        },
+        {
+          "absoluteExpiresAt": "{datetime:unspecified}",
+          "authenticationMethod": "password+totp",
+          "clientApplicationId": "{cli#3}",
+          "createdAt": "{datetime:unspecified}",
+          "id": "{ses#4}",
+          "idleExpiresAt": "{datetime:unspecified}",
+          "ipAddress": "203.0.113.10",
+          "lastSeenAt": "{datetime:unspecified}",
+          "revocationReason": null,
+          "revokedAt": null,
+          "user": "Alice",
+          "userAgent": "",
+          "userId": "{usr:alice}"
+        },
+        {
+          "absoluteExpiresAt": "{datetime:unspecified}",
+          "authenticationMethod": "password+totp",
+          "clientApplicationId": "{cli#4}",
+          "createdAt": "{datetime:unspecified}",
+          "id": "{ses#3}",
+          "idleExpiresAt": "{datetime:unspecified}",
+          "ipAddress": "203.0.113.10",
+          "lastSeenAt": "{datetime:unspecified}",
+          "revocationReason": null,
+          "revokedAt": null,
+          "user": "Alice",
+          "userAgent": "",
+          "userId": "{usr:alice}"
+        },
+        {
+          "absoluteExpiresAt": "{datetime:unspecified}",
+          "authenticationMethod": "password+totp",
+          "clientApplicationId": "{cli#1}",
+          "createdAt": "{datetime:unspecified}",
+          "id": "{ses#2}",
+          "idleExpiresAt": "{datetime:unspecified}",
+          "ipAddress": "203.0.113.10",
+          "lastSeenAt": "{datetime:unspecified}",
+          "revocationReason": null,
+          "revokedAt": null,
+          "user": "Alice",
+          "userAgent": "",
+          "userId": "{usr:alice}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 25. operator: dashboard: the organization
+> GET /sqlos/admin/auth/api/organizations/{org:acme}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "enabledSsoConnections": 1,
+      "id": "{org:acme}",
+      "isActive": true,
+      "membershipCount": 4,
+      "name": "Acme",
+      "primaryDomain": "acme.example.test",
+      "slug": "acme",
+      "ssoConnectionCount": 2
+    }
+
+## 26. operator: dashboard: memberships
+> GET /sqlos/admin/auth/api/organizations/{org:acme}/memberships
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "isActive": true,
+          "organization": "Acme",
+          "organizationId": "{org:acme}",
+          "role": "admin",
+          "user": "Alice",
+          "userEmail": "{email:alice}",
+          "userId": "{usr:alice}"
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "isActive": true,
+          "organization": "Acme",
+          "organizationId": "{org:acme}",
+          "role": "member",
+          "user": "Bob Builder",
+          "userEmail": "{email:bob}",
+          "userId": "{usr:bob}"
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "isActive": true,
+          "organization": "Acme",
+          "organizationId": "{org:acme}",
+          "role": "member",
+          "user": "Carol",
+          "userEmail": "{email:carol}",
+          "userId": "{usr:carol}"
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "isActive": true,
+          "organization": "Acme",
+          "organizationId": "{org:acme}",
+          "role": "member",
+          "user": "Dave Lister",
+          "userEmail": "{email:dave}",
+          "userId": "{usr:dave}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 27. operator: dashboard: clients
+> GET /sqlos/admin/auth/api/clients
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "accessMode": "all_organizations",
+          "allowDeviceAuthorization": true,
+          "allowNativeHeadlessAuth": false,
+          "allowedScopes": [
+            "openid",
+            "profile",
+            "offline_access"
+          ],
+          "audience": "sqlos",
+          "clientId": "upgrade-cli",
+          "clientType": "public_cli",
+          "clientUri": null,
+          "coreMetadataEditable": true,
+          "description": null,
+          "disabledAt": null,
+          "disabledReason": null,
+          "duplicateCount": 0,
+          "duplicateFingerprint": null,
+          "emptyAllowlistWarning": null,
+          "grantTypes": [
+            "urn:ietf:params:oauth:grant-type:device_code",
+            "refresh_token"
+          ],
+          "id": "{cli#5}",
+          "isActive": true,
+          "isFirstParty": true,
+          "lastSeenAt": "{datetime:unspecified}",
+          "lifecycleState": "active",
+          "logoUri": null,
+          "managedByStartupSeed": true,
+          "metadataCacheState": null,
+          "metadataDocumentUrl": null,
+          "metadataExpiresAt": null,
+          "metadataFetchedAt": null,
+          "name": "Upgrade CLI",
+          "oidcCapable": true,
+          "omittedOpenIdWarning": null,
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": "{hex#4}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "upgrade-cli"
+          },
+          "redirectUris": [],
+          "registrationSource": "seeded",
+          "requirePkce": true,
+          "responseTypes": [
+            "code"
+          ],
+          "softwareId": null,
+          "softwareVersion": null,
+          "sourceLabel": "Seeded",
+          "tokenEndpointAuthMethod": "none"
+        },
+        {
+          "accessMode": "all_organizations",
+          "allowDeviceAuthorization": false,
+          "allowNativeHeadlessAuth": false,
+          "allowedScopes": [
+            "openid",
+            "profile",
+            "email",
+            "offline_access"
+          ],
+          "audience": "sqlos",
+          "clientId": "https://client.example.test/upgrade-client.json",
+          "clientType": "public_pkce",
+          "clientUri": null,
+          "coreMetadataEditable": false,
+          "description": null,
+          "disabledAt": null,
+          "disabledReason": null,
+          "duplicateCount": 0,
+          "duplicateFingerprint": null,
+          "emptyAllowlistWarning": null,
+          "grantTypes": [
+            "authorization_code",
+            "refresh_token"
+          ],
+          "id": "{cli#2}",
+          "isActive": true,
+          "isFirstParty": false,
+          "lastSeenAt": "{datetime:unspecified}",
+          "lifecycleState": "active",
+          "logoUri": null,
+          "managedByStartupSeed": false,
+          "metadataCacheState": "fresh",
+          "metadataDocumentUrl": "https://client.example.test/upgrade-client.json",
+          "metadataExpiresAt": "{datetime:unspecified}",
+          "metadataFetchedAt": "{datetime:unspecified}",
+          "name": "Upgrade Desktop",
+          "oidcCapable": true,
+          "omittedOpenIdWarning": null,
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dynamic",
+            "sourceKey": null
+          },
+          "redirectUris": [
+            "https://client.example.test/callback"
+          ],
+          "registrationSource": "cimd",
+          "requirePkce": true,
+          "responseTypes": [
+            "code"
+          ],
+          "softwareId": null,
+          "softwareVersion": null,
+          "sourceLabel": "Discovered",
+          "tokenEndpointAuthMethod": "none"
+        },
+        {
+          "accessMode": "all_organizations",
+          "allowDeviceAuthorization": false,
+          "allowNativeHeadlessAuth": false,
+          "allowedScopes": [
+            "openid",
+            "profile",
+            "offline_access"
+          ],
+          "audience": "sqlos",
+          "clientId": "{dcrcli:dynamic}",
+          "clientType": "public_pkce",
+          "clientUri": null,
+          "coreMetadataEditable": false,
+          "description": null,
+          "disabledAt": null,
+          "disabledReason": null,
+          "duplicateCount": 1,
+          "duplicateFingerprint": "http://127.0.0.1/callback/upgrade|||",
+          "emptyAllowlistWarning": null,
+          "grantTypes": [
+            "authorization_code",
+            "refresh_token"
+          ],
+          "id": "{cli#3}",
+          "isActive": true,
+          "isFirstParty": false,
+          "lastSeenAt": "{datetime:unspecified}",
+          "lifecycleState": "active",
+          "logoUri": null,
+          "managedByStartupSeed": false,
+          "metadataCacheState": null,
+          "metadataDocumentUrl": null,
+          "metadataExpiresAt": null,
+          "metadataFetchedAt": null,
+          "name": "Upgrade Desktop (DCR)",
+          "oidcCapable": true,
+          "omittedOpenIdWarning": null,
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dynamic",
+            "sourceKey": null
+          },
+          "redirectUris": [
+            "http://127.0.0.1/callback/upgrade"
+          ],
+          "registrationSource": "dcr",
+          "requirePkce": true,
+          "responseTypes": [
+            "code"
+          ],
+          "softwareId": null,
+          "softwareVersion": null,
+          "sourceLabel": "Registered",
+          "tokenEndpointAuthMethod": "none"
+        },
+        {
+          "accessMode": "all_organizations",
+          "allowDeviceAuthorization": false,
+          "allowNativeHeadlessAuth": false,
+          "allowedScopes": [
+            "openid",
+            "profile",
+            "email",
+            "offline_access"
+          ],
+          "audience": "sqlos",
+          "clientId": "upgrade-partner",
+          "clientType": "public_pkce",
+          "clientUri": null,
+          "coreMetadataEditable": true,
+          "description": null,
+          "disabledAt": null,
+          "disabledReason": null,
+          "duplicateCount": 0,
+          "duplicateFingerprint": null,
+          "emptyAllowlistWarning": null,
+          "grantTypes": [
+            "authorization_code",
+            "refresh_token"
+          ],
+          "id": "{cli#4}",
+          "isActive": true,
+          "isFirstParty": false,
+          "lastSeenAt": "{datetime:unspecified}",
+          "lifecycleState": "active",
+          "logoUri": null,
+          "managedByStartupSeed": true,
+          "metadataCacheState": null,
+          "metadataDocumentUrl": null,
+          "metadataExpiresAt": null,
+          "metadataFetchedAt": null,
+          "name": "Upgrade Partner",
+          "oidcCapable": true,
+          "omittedOpenIdWarning": null,
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": "{hex#5}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "upgrade-partner"
+          },
+          "redirectUris": [
+            "https://partner.example.test/callback"
+          ],
+          "registrationSource": "seeded",
+          "requirePkce": true,
+          "responseTypes": [
+            "code"
+          ],
+          "softwareId": null,
+          "softwareVersion": null,
+          "sourceLabel": "Seeded",
+          "tokenEndpointAuthMethod": "none"
+        },
+        {
+          "accessMode": "all_organizations",
+          "allowDeviceAuthorization": false,
+          "allowNativeHeadlessAuth": false,
+          "allowedScopes": [
+            "openid",
+            "profile",
+            "email",
+            "offline_access"
+          ],
+          "audience": "sqlos",
+          "clientId": "upgrade-portal",
+          "clientType": "public_pkce",
+          "clientUri": null,
+          "coreMetadataEditable": true,
+          "description": null,
+          "disabledAt": null,
+          "disabledReason": null,
+          "duplicateCount": 0,
+          "duplicateFingerprint": null,
+          "emptyAllowlistWarning": null,
+          "grantTypes": [
+            "authorization_code",
+            "refresh_token"
+          ],
+          "id": "{cli#1}",
+          "isActive": true,
+          "isFirstParty": true,
+          "lastSeenAt": "{datetime:unspecified}",
+          "lifecycleState": "active",
+          "logoUri": null,
+          "managedByStartupSeed": true,
+          "metadataCacheState": null,
+          "metadataDocumentUrl": null,
+          "metadataExpiresAt": null,
+          "metadataFetchedAt": null,
+          "name": "Upgrade Portal",
+          "oidcCapable": true,
+          "omittedOpenIdWarning": null,
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": "{hex#6}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "upgrade-portal"
+          },
+          "redirectUris": [
+            "https://portal.example.test/auth/callback"
+          ],
+          "registrationSource": "seeded",
+          "requirePkce": true,
+          "responseTypes": [
+            "code"
+          ],
+          "softwareId": null,
+          "softwareVersion": null,
+          "sourceLabel": "Seeded",
+          "tokenEndpointAuthMethod": "none"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10,
+      "summary": {
+        "activeCount": 5,
+        "disabledCount": 0,
+        "discoveredCount": 1,
+        "registeredCount": 1
+      }
+    }
+
+## 28. operator: dashboard: SAML connections
+> GET /sqlos/admin/auth/api/organizations/{org:acme}/sso-connections
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "assertionConsumerServiceUrl": "https://sqlos.example.test/sqlos/auth/saml/acs/{sso:acme}",
+          "autoLinkByEmail": false,
+          "autoProvisionUsers": true,
+          "displayName": "Acme SAML",
+          "id": "{sso:acme}",
+          "identityProviderEntityId": "urn:acme:idp",
+          "isEnabled": true,
+          "organization": "Acme",
+          "organizationId": "{org:acme}",
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "primaryDomain": "acme.example.test",
+          "serviceProviderEntityId": "https://sqlos.example.test/sqlos/auth",
+          "setupStatus": "active",
+          "singleSignOnUrl": "https://idp.acme.example.test/sso"
+        },
+        {
+          "assertionConsumerServiceUrl": "https://sqlos.example.test/sqlos/auth/saml/acs/{sso#1}",
+          "autoLinkByEmail": true,
+          "autoProvisionUsers": false,
+          "displayName": "Acme SSO",
+          "id": "{sso#1}",
+          "identityProviderEntityId": "",
+          "isEnabled": false,
+          "organization": "Acme",
+          "organizationId": "{org:acme}",
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "primaryDomain": "acme.example.test",
+          "serviceProviderEntityId": "https://sqlos.example.test/sqlos/auth",
+          "setupStatus": "draft",
+          "singleSignOnUrl": ""
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 29. operator: dashboard: the SCIM connection
+> GET /sqlos/admin/auth/api/scim-connections/{scim:acme}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "baseUrl": "https://sqlos.example.test/scim/v2",
+      "createdAt": "{datetime:unspecified}",
+      "displayName": "Acme Directory",
+      "grantBoundary": {
+        "resourceId": "workspace::acme",
+        "resourceName": "Acme",
+        "resourceTypeId": "workspace",
+        "status": "configured"
+      },
+      "grantBoundaryResourceId": "workspace::acme",
+      "groupsUrl": "https://sqlos.example.test/scim/v2/Groups",
+      "id": "{scim:acme}",
+      "isEnabled": true,
+      "lastSyncAt": "{datetime:unspecified}",
+      "organizationId": "{org:acme}",
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "seedKey": null,
+      "source": "dashboard",
+      "tokenLastUsedAt": "{datetime:unspecified}",
+      "tokenPrefix": "{token-prefix#1}",
+      "tokenRotatedAt": "{datetime:unspecified}",
+      "updatedAt": "{datetime:unspecified}",
+      "usersUrl": "https://sqlos.example.test/scim/v2/Users"
+    }
+
+## 30. operator: dashboard: SCIM group mappings
+> GET /sqlos/admin/auth/api/scim-connections/{scim:acme}/mappings
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "activeGrantCount": 1,
+          "connectionId": "{scim:acme}",
+          "createdAt": "{datetime:unspecified}",
+          "description": "Engineering reads Acme projects",
+          "grantBoundaryStatus": "within",
+          "groupDisplayName": "Engineering",
+          "groupExternalId": null,
+          "groupPattern": null,
+          "id": "{scmap:engineering}",
+          "isEnabled": true,
+          "matchType": "display_name",
+          "resourceId": "workspace::acme-projects",
+          "resourceIdTemplate": null,
+          "roleKey": "workspace_reader",
+          "source": "dashboard",
+          "sourceKey": null,
+          "updatedAt": "{datetime:unspecified}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 31. operator: dashboard: calendar connections
+> GET /sqlos/admin/calendar/api/connections
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "accessTokenExpiresAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:unspecified}",
+          "displayName": "Alice's calendar",
+          "hasRefreshToken": true,
+          "id": "{cal:alice}",
+          "lastError": null,
+          "lastErrorAt": null,
+          "lastSyncAt": null,
+          "mode": "ConnectionOnly",
+          "organizationId": null,
+          "providerAccountEmail": "{email:alice}",
+          "providerType": "Google",
+          "revokedAt": null,
+          "scopes": [
+            "openid",
+            "email",
+            "https://www.googleapis.com/auth/calendar.readonly"
+          ],
+          "status": "Active",
+          "userId": "{usr:alice}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 32. operator: dashboard: Alice's grants
+> GET /sqlos/admin/fga/api/subjects/{usr:alice}/grants
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "effectiveFrom": null,
+          "effectiveTo": null,
+          "id": "grant::{hex#1}",
+          "resourceId": "workspace::acme",
+          "resourceName": "Acme",
+          "roleId": "workspace_admin",
+          "roleName": "Workspace admin"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## audit: events written after the upgrade
+  - {
+      "action": "scim.user.created",
+      "actor": {
+        "displayName": null,
+        "id": "directory-dave",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.created",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-dave",
+        "payload": {
+          "active": true,
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:dave}"
+            }
+          ],
+          "externalId": "directory-dave",
+          "name": {
+            "familyName": "Lister",
+            "givenName": "Dave"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:dave}"
+        },
+        "resourceId": "{usr:dave}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org:acme}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:dave}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.member_added",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.member_added",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": {
+          "groupId": "{grp:engineering}",
+          "memberCount": 1,
+          "subjectIds": [
+            "{subj:dave}"
+          ],
+          "truncated": false
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org:acme}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.updated",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.updated",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": {
+          "Operations": [
+            {
+              "op": "add",
+              "path": "members",
+              "value": [
+                {
+                  "value": "{usr:dave}"
+                }
+              ]
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ]
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org:acme}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "password.login.succeeded",
+      "actor": {
+        "displayName": null,
+        "id": "{usr:alice}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "password.login.succeeded",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "AuthorizationRequestId": "[redacted]",
+        "ClientKey": "upgrade-portal",
+        "NormalizedEmail": "{email:ALICE}",
+        "Surface": "hosted",
+        "UserAgentHash": null,
+        "details": {
+          "resetScopes": [
+            "email",
+            "user"
+          ]
+        },
+        "maskedEmail": "AL***@EXAMPLE.TEST"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr:alice}"
+    }
+  - {
+      "action": "user.login.mfa",
+      "actor": {
+        "displayName": null,
+        "id": "{usr:alice}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.mfa",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org:acme}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr:alice}"
+    }

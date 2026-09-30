@@ -192,6 +192,9 @@ public sealed class Transcript : IAsyncDisposable
     /// <summary>Registers a value the scrubber cannot infer (for example a code shown only in page text).</summary>
     public void Scrub(string value, string kind) => Scrubber.Register(value, kind);
 
+    /// <summary>Registers a value under a fixed, readable placeholder: <c>{kind:name}</c>.</summary>
+    public void Scrub(string value, string kind, string name) => Scrubber.RegisterNamed(value, kind, name);
+
     /// <summary>Emails the fakes captured so far, oldest first.</summary>
     public IReadOnlyList<EmailEffect> Emails => Fakes.Effects.All().OfType<EmailEffect>().ToList();
 

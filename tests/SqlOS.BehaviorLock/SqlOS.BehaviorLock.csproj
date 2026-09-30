@@ -35,12 +35,18 @@
   <ItemGroup>
     <ProjectReference Include="..\SqlOS.BehaviorLock.Host\SqlOS.BehaviorLock.Host.csproj" />
     <ProjectReference Include="..\SqlOS.IntegrationTests.AppHost\SqlOS.IntegrationTests.AppHost.csproj" />
+    <!-- Built, never referenced: the upgrade gate runs the seed (pinned to the released package) as its own process. -->
+    <ProjectReference Include="..\SqlOS.BehaviorLock.UpgradeSeed\SqlOS.BehaviorLock.UpgradeSeed.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>
     <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
       <_Parameter1>RepositoryRoot</_Parameter1>
       <_Parameter2>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../..'))</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>UpgradeSeedAssembly</_Parameter1>
+      <_Parameter2>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../SqlOS.BehaviorLock.UpgradeSeed/bin/$(Configuration)/$(TargetFramework)/SqlOS.BehaviorLock.UpgradeSeed.dll'))</_Parameter2>
     </AssemblyAttribute>
     <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
       <_Parameter1>SqlOSUnderTest</_Parameter1>
