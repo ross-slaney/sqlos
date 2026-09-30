@@ -4,6 +4,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.WebUtilities;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
@@ -456,6 +457,328 @@ public sealed class SqlOSControlPlaneParityTests
         dashboardListBody.Should().NotContain("tokenHash", "later reads expose only redacted token metadata");
     }
 
+    private const string ParityBoundary = "org::parity";
+    private const string ParityRegion = "org::parity::region::west";
+    private const string ParityStore42 = "store::42";
+    private const string ParityStore7 = "store::7";
+    private const string OtherTenantStore = "store::9001";
+    private const string ParityStorePattern = "^Store-(?<storeId>[^-]+)-Managers$";
+    private const string ParityStoreTemplate = "store::{storeId}";
+
+    [TestMethod]
+    public async Task ScimGrantBoundary_CodeServiceAndDashboard_BoundMappedGrantsEquivalently()
+    {
+        const string codeToken = "scim_parity_boundary_code_token_0123456789abcdef";
+        await using var code = await ControlPlaneParityHarness.CreateAsync();
+        await using var service = await ControlPlaneParityHarness.CreateAsync();
+        await using var dashboard = await ControlPlaneParityHarness.CreateAsync();
+        var harnesses = new[] { code, service, dashboard };
+        var organizations = new Dictionary<ControlPlaneParityHarness, string>();
+        foreach (var harness in harnesses)
+        {
+            organizations[harness] = (await harness.Admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Parity Org", "parity"))).Id;
+            await harness.Admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Other Org", "other"));
+            await SeedParityStoreTreeAsync(harness);
+        }
+
+        // Invalid boundary input fails with the same typed error on every control plane.
+        code.Options.SeedScimConnection("parity", seed =>
+        {
+            seed.OrganizationId = organizations[code];
+            seed.DisplayName = "Parity Directory";
+            seed.Token = codeToken;
+            seed.GrantBoundaryResourceId = "org::missing";
+        });
+        var codeMissing = () => code.ReconcileStartupAsync();
+        (await codeMissing.Should().ThrowAsync<SqlOSScimGrantBoundaryException>())
+            .Which.Error.Should().Be(SqlOSScimGrantBoundaryErrors.BoundaryNotFound);
+        var serviceMissing = () => service.Admin.CreateScimConnectionAsync(
+            new SqlOSCreateScimConnectionRequest(organizations[service], "Parity Directory") { GrantBoundaryResourceId = "org::missing" });
+        (await serviceMissing.Should().ThrowAsync<SqlOSScimGrantBoundaryException>())
+            .Which.Error.Should().Be(SqlOSScimGrantBoundaryErrors.BoundaryNotFound);
+        await AssertDashboardBoundaryErrorAsync(
+            dashboard.Client.PostAsJsonAsync(
+                DashboardAdminContracts.OrganizationScimConnections(organizations[dashboard]),
+                new { displayName = "Parity Directory", enabled = true, grantBoundaryResourceId = "org::missing" }),
+            SqlOSScimGrantBoundaryErrors.BoundaryNotFound);
+
+        // Service and dashboard refuse an enabled mapping on a connection without a boundary with the
+        // same typed error. (A code seed without a boundary still reconciles so existing deployments
+        // keep starting; its mappings fail closed at grant time. See SqlOSScimGrantBoundaryTests.)
+        var otherOrganizationId = async (ControlPlaneParityHarness harness)
+            => (await harness.Context.Set<SqlOSOrganization>().AsNoTracking().SingleAsync(x => x.Slug == "other")).Id;
+        var serviceUnbounded = await service.Admin.CreateScimConnectionAsync(
+            new SqlOSCreateScimConnectionRequest(await otherOrganizationId(service), "Unbounded Directory", Enabled: false));
+        var serviceRequired = () => service.Admin.CreateScimGroupMappingAsync(serviceUnbounded.ConnectionId, new SqlOSCreateScimGroupMappingRequest(
+            SqlOSScimGroupMappingMatchTypes.Pattern, null, null, ParityStorePattern, "store_manager", null, ParityStoreTemplate));
+        (await serviceRequired.Should().ThrowAsync<SqlOSScimGrantBoundaryException>())
+            .Which.Error.Should().Be(SqlOSScimGrantBoundaryErrors.BoundaryRequired);
+        var dashboardUnbounded = await dashboard.PostDashboardAsync(
+            DashboardAdminContracts.OrganizationScimConnections(await otherOrganizationId(dashboard)),
+            new { displayName = "Unbounded Directory", enabled = false });
+        await AssertDashboardBoundaryErrorAsync(
+            dashboard.Client.PostAsJsonAsync(
+                DashboardAdminContracts.ScimConnectionMappings(dashboardUnbounded.GetProperty("connectionId").GetString()!),
+                ParityMappingPayload(null, ParityStoreTemplate)),
+            SqlOSScimGrantBoundaryErrors.BoundaryRequired);
+
+        // The same intent through the production seed, the public service, and the dashboard routes.
+        var seed = code.Options.ScimConnectionSeeds.Single();
+        seed.GrantBoundaryResourceId = ParityBoundary;
+        seed.MapGroupPattern(ParityStorePattern, mapping =>
+        {
+            mapping.RoleKey = "store_manager";
+            mapping.ResourceIdTemplate = ParityStoreTemplate;
+        });
+        await code.ReconcileStartupAsync();
+        var serviceCreated = await service.Admin.CreateScimConnectionAsync(
+            new SqlOSCreateScimConnectionRequest(organizations[service], "Parity Directory") { GrantBoundaryResourceId = ParityBoundary });
+        await service.Admin.CreateScimGroupMappingAsync(serviceCreated.ConnectionId, new SqlOSCreateScimGroupMappingRequest(
+            SqlOSScimGroupMappingMatchTypes.Pattern, null, null, ParityStorePattern, "store_manager", null, ParityStoreTemplate));
+        var dashboardCreated = await dashboard.PostDashboardAsync(
+            DashboardAdminContracts.OrganizationScimConnections(organizations[dashboard]),
+            new { displayName = "Parity Directory", enabled = true, grantBoundaryResourceId = ParityBoundary });
+        var connectionIds = new Dictionary<ControlPlaneParityHarness, string>
+        {
+            [code] = (await code.Context.Set<SqlOSScimConnection>().SingleAsync()).Id,
+            [service] = serviceCreated.ConnectionId,
+            [dashboard] = dashboardCreated.GetProperty("connectionId").GetString()!
+        };
+        await dashboard.PostDashboardAsync(DashboardAdminContracts.ScimConnectionMappings(connectionIds[dashboard]), ParityMappingPayload(null, ParityStoreTemplate));
+
+        var projections = new[]
+        {
+            await code.ProjectScimAsync(organizations[code]),
+            await service.ProjectScimAsync(organizations[service]),
+            await dashboard.ProjectScimAsync(organizations[dashboard])
+        };
+        projections[1].Configuration.Should().BeEquivalentTo(projections[0].Configuration);
+        projections[2].Configuration.Should().BeEquivalentTo(projections[0].Configuration);
+        projections[0].Configuration["grantBoundaryResourceId"].Should().Be(ParityBoundary);
+        projections[0].Configuration["dashboardGrantBoundaryStatus"].Should().Be("configured");
+        projections[0].Owner.Should().Be(SqlOSConfigurationOwners.Code);
+        projections[0].IsEditable.Should().BeFalse("the boundary of a code-owned connection changes only in source control");
+        projections.Skip(1).Should().OnlyContain(x => x.Owner == SqlOSConfigurationOwners.Dashboard && x.IsEditable);
+        var codeMappings = await ProjectScimMappingsAsync(code, connectionIds[code]);
+        codeMappings.Should().ContainSingle().Which.Should().Contain("checked_at_grant_time");
+        (await ProjectScimMappingsAsync(service, connectionIds[service])).Should().BeEquivalentTo(codeMappings);
+        (await ProjectScimMappingsAsync(dashboard, connectionIds[dashboard])).Should().BeEquivalentTo(codeMappings);
+        (await code.Context.Set<SqlOSScimGroupMapping>().SingleAsync()).Source.Should().Be(SqlOSScimSources.Seeded);
+        (await dashboard.Context.Set<SqlOSScimGroupMapping>().SingleAsync()).Source.Should().Be(SqlOSScimSources.Dashboard);
+
+        // A fixed resource outside the boundary is rejected when saved, on every plane.
+        seed.MapGroup("Copied Other Managers", mapping =>
+        {
+            mapping.RoleKey = "store_manager";
+            mapping.ResourceId = OtherTenantStore;
+        });
+        var codeOutside = () => code.ReconcileStartupAsync();
+        (await codeOutside.Should().ThrowAsync<SqlOSScimGrantBoundaryException>())
+            .Which.Error.Should().Be(SqlOSScimGrantBoundaryErrors.ResourceOutsideBoundary);
+        seed.GroupMappings.RemoveAll(mapping => mapping.ResourceId == OtherTenantStore);
+        var serviceOutside = () => service.Admin.CreateScimGroupMappingAsync(connectionIds[service], new SqlOSCreateScimGroupMappingRequest(
+            SqlOSScimGroupMappingMatchTypes.DisplayName, "Copied Other Managers", null, null, "store_manager", OtherTenantStore, null));
+        (await serviceOutside.Should().ThrowAsync<SqlOSScimGrantBoundaryException>())
+            .Which.Error.Should().Be(SqlOSScimGrantBoundaryErrors.ResourceOutsideBoundary);
+        await AssertDashboardBoundaryErrorAsync(
+            dashboard.Client.PostAsJsonAsync(
+                DashboardAdminContracts.ScimConnectionMappings(connectionIds[dashboard]),
+                ParityMappingPayload(OtherTenantStore, null, "display_name", "Copied Other Managers")),
+            SqlOSScimGrantBoundaryErrors.ResourceOutsideBoundary);
+
+        // Real runtime boundary: SCIM pushes and FGA checks behave identically on every plane.
+        var tokens = new Dictionary<ControlPlaneParityHarness, string>
+        {
+            [code] = codeToken,
+            [service] = serviceCreated.Token,
+            [dashboard] = dashboardCreated.GetProperty("token").GetString()!
+        };
+        var subjects = new Dictionary<ControlPlaneParityHarness, string>();
+        foreach (var harness in harnesses)
+        {
+            var connection = await AuthenticateScimConnectionAsync(harness, tokens[harness]);
+            var user = await harness.Scim.UpsertUserAsync(connection, new JsonObject
+            {
+                ["externalId"] = "parity-ada",
+                ["userName"] = "ada@parity.test",
+                ["displayName"] = "Ada",
+                ["active"] = true
+            }, replace: false);
+            var userId = user["id"]!.GetValue<string>();
+            subjects[harness] = (await harness.Context.Set<SqlOSScimExternalId>().SingleAsync(x => x.EntityId == userId && x.ResourceType == "User")).FgaSubjectId!;
+            await PushParityGroupAsync(harness, connection, "grp-42", "Store-42-Managers", userId);
+            await PushParityGroupAsync(harness, connection, "grp-7", "Store-7-Managers", userId);
+            await PushParityGroupAsync(harness, connection, "grp-attack", "Store-9001-Managers", userId);
+
+            (await harness.Context.Set<SqlOS.Fga.Models.SqlOSFgaGrant>().Select(x => x.ResourceId).OrderBy(x => x).ToListAsync())
+                .Should().Equal(ParityStore42, ParityStore7);
+            (await harness.Fga.CheckAccessAsync(subjects[harness], "STORE_MANAGE", ParityStore42)).Allowed.Should().BeTrue();
+            (await harness.Fga.CheckAccessAsync(subjects[harness], "STORE_MANAGE", OtherTenantStore)).Allowed.Should().BeFalse();
+            (await harness.Context.Set<SqlOSScimSyncEvent>().CountAsync(x => x.Action == "scim.grant.outside_boundary" && x.Result == "failed")).Should().Be(1);
+            (await harness.Context.Set<SqlOSAuditEvent>().CountAsync(x => x.Action == "scim.grant.outside_boundary" && x.Source == "scim")).Should().Be(1);
+        }
+
+        // Disable revokes on every plane; re-enable restores nothing until the IdP pushes again,
+        // and the boundary still holds after re-enable.
+        await code.PostDashboardAsync(DashboardAdminContracts.ScimConnectionDisable(connectionIds[code]), new { });
+        await service.Admin.SetScimConnectionEnabledAsync(connectionIds[service], false);
+        await dashboard.PostDashboardAsync(DashboardAdminContracts.ScimConnectionDisable(connectionIds[dashboard]), new { });
+        foreach (var harness in harnesses)
+        {
+            (await harness.Context.Set<SqlOS.Fga.Models.SqlOSFgaGrant>().CountAsync()).Should().Be(0);
+        }
+        await code.PostDashboardAsync(DashboardAdminContracts.ScimConnectionEnable(connectionIds[code]), new { });
+        await service.Admin.SetScimConnectionEnabledAsync(connectionIds[service], true);
+        await dashboard.PostDashboardAsync(DashboardAdminContracts.ScimConnectionEnable(connectionIds[dashboard]), new { });
+        foreach (var harness in harnesses)
+        {
+            (await harness.Context.Set<SqlOS.Fga.Models.SqlOSFgaGrant>().CountAsync()).Should().Be(0, "re-enabling does not recreate revoked grants");
+            var connection = await AuthenticateScimConnectionAsync(harness, tokens[harness]);
+            var userId = (await harness.Context.Set<SqlOSScimExternalId>().SingleAsync(x => x.ResourceType == "User")).EntityId;
+            await PushParityGroupAsync(harness, connection, "grp-42", "Store-42-Managers", userId);
+            await PushParityGroupAsync(harness, connection, "grp-7", "Store-7-Managers", userId);
+            await PushParityGroupAsync(harness, connection, "grp-attack", "Store-9001-Managers", userId);
+            (await harness.Context.Set<SqlOS.Fga.Models.SqlOSFgaGrant>().CountAsync()).Should().Be(2);
+            (await harness.Context.Set<SqlOSScimSyncEvent>().CountAsync(x => x.Action == "scim.grant.outside_boundary")).Should().Be(2);
+        }
+
+        // Moving the boundary revokes the managed grants now outside it, on every plane, and a
+        // code-owned boundary cannot be changed through the dashboard route.
+        using (var codeOwnedPut = await code.Client.PutAsJsonAsync(
+            DashboardAdminContracts.ScimConnection(connectionIds[code]),
+            new { displayName = "Parity Directory", enabled = true, grantBoundaryResourceId = ParityRegion }))
+        {
+            codeOwnedPut.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            (await codeOwnedPut.Content.ReadAsStringAsync()).Should().Contain("startup configuration");
+        }
+        seed.GrantBoundaryResourceId = ParityRegion;
+        await code.ReconcileStartupAsync();
+        await service.Admin.UpdateScimConnectionAsync(connectionIds[service], new SqlOSUpdateScimConnectionRequest("Parity Directory", true)
+        {
+            GrantBoundaryResourceId = ParityRegion
+        });
+        await dashboard.PutDashboardAsync(
+            DashboardAdminContracts.ScimConnection(connectionIds[dashboard]),
+            new { displayName = "Parity Directory", enabled = true, grantBoundaryResourceId = ParityRegion });
+        foreach (var harness in harnesses)
+        {
+            (await harness.Context.Set<SqlOS.Fga.Models.SqlOSFgaGrant>().Select(x => x.ResourceId).ToListAsync())
+                .Should().Equal(ParityStore7);
+            (await harness.Fga.CheckAccessAsync(subjects[harness], "STORE_MANAGE", ParityStore42)).Allowed.Should().BeFalse();
+            (await harness.Context.Set<SqlOSScimConnection>().AsNoTracking().SingleAsync(x => x.Id == connectionIds[harness])).GrantBoundaryResourceId.Should().Be(ParityRegion);
+            (await harness.Context.Set<SqlOSAuditEvent>().CountAsync(x => x.Action == "scim.connection.grant_boundary_changed")).Should().Be(1);
+        }
+        (await code.Context.Set<SqlOSAuditEvent>().SingleAsync(x => x.Action == "scim.connection.grant_boundary_changed"))
+            .ActorId.Should().Be("startup", "code-owned boundary changes are attributed to startup reconciliation");
+        (await service.Context.Set<SqlOSAuditEvent>().SingleAsync(x => x.Action == "scim.connection.grant_boundary_changed"))
+            .ActorId.Should().Be(connectionIds[service]);
+    }
+
+    private static async Task SeedParityStoreTreeAsync(ControlPlaneParityHarness harness)
+    {
+        var now = DateTime.UtcNow;
+        harness.Context.Set<SqlOS.Fga.Models.SqlOSFgaResourceType>().AddRange(
+            new SqlOS.Fga.Models.SqlOSFgaResourceType { Id = "org", Name = "Organization" },
+            new SqlOS.Fga.Models.SqlOSFgaResourceType { Id = "region", Name = "Region" },
+            new SqlOS.Fga.Models.SqlOSFgaResourceType { Id = "store", Name = "Store" });
+        foreach (var (id, parentId, type) in new (string, string?, string)[]
+        {
+            (ParityBoundary, null, "org"),
+            (ParityStore42, ParityBoundary, "store"),
+            (ParityRegion, ParityBoundary, "region"),
+            (ParityStore7, ParityRegion, "store"),
+            ("org::other", null, "org"),
+            (OtherTenantStore, "org::other", "store")
+        })
+        {
+            harness.Context.Set<SqlOS.Fga.Models.SqlOSFgaResource>().Add(new SqlOS.Fga.Models.SqlOSFgaResource
+            {
+                Id = id,
+                ParentId = parentId,
+                ResourceTypeId = type,
+                Name = id,
+                CreatedAt = now,
+                UpdatedAt = now
+            });
+        }
+        harness.Context.Set<SqlOS.Fga.Models.SqlOSFgaPermission>().Add(new SqlOS.Fga.Models.SqlOSFgaPermission
+        {
+            Id = "perm_store_manage",
+            Key = "STORE_MANAGE",
+            Name = "Manage store",
+            ResourceTypeId = "store"
+        });
+        harness.Context.Set<SqlOS.Fga.Models.SqlOSFgaRole>().Add(new SqlOS.Fga.Models.SqlOSFgaRole
+        {
+            Id = "role_store_manager",
+            Key = "store_manager",
+            Name = "Store manager"
+        });
+        harness.Context.Set<SqlOS.Fga.Models.SqlOSFgaRolePermission>().Add(new SqlOS.Fga.Models.SqlOSFgaRolePermission
+        {
+            RoleId = "role_store_manager",
+            PermissionId = "perm_store_manage"
+        });
+        await harness.Context.SaveChangesAsync();
+    }
+
+    private static object ParityMappingPayload(string? resourceId, string? resourceIdTemplate, string matchType = "pattern", string? groupDisplayName = null) => new
+    {
+        matchType,
+        groupDisplayName,
+        groupExternalId = (string?)null,
+        groupPattern = matchType == "pattern" ? ParityStorePattern : null,
+        roleKey = "store_manager",
+        resourceId,
+        resourceIdTemplate,
+        description = (string?)null,
+        enabled = true
+    };
+
+    private static async Task<List<string>> ProjectScimMappingsAsync(ControlPlaneParityHarness harness, string connectionId)
+    {
+        var response = await harness.Client.GetFromJsonAsync<JsonElement>(DashboardAdminContracts.ScimConnectionMappings(connectionId));
+        return response.GetProperty("data").EnumerateArray()
+            .Select(item => string.Join('|',
+                item.GetProperty("matchType").GetString(),
+                item.GetProperty("groupPattern").GetString(),
+                item.GetProperty("roleKey").GetString(),
+                item.GetProperty("resourceId").GetString(),
+                item.GetProperty("resourceIdTemplate").GetString(),
+                item.GetProperty("isEnabled").GetBoolean(),
+                item.GetProperty("grantBoundaryStatus").GetString()))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private static async Task AssertDashboardBoundaryErrorAsync(Task<HttpResponseMessage> request, string expectedError)
+    {
+        using var response = await request;
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("error").GetString().Should().Be(expectedError, "the dashboard receives the same typed error as the service");
+    }
+
+    private static async Task<SqlOSScimConnection> AuthenticateScimConnectionAsync(ControlPlaneParityHarness harness, string token)
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Headers.Authorization = $"Bearer {token}";
+        return await harness.Scim.AuthenticateAsync(context);
+    }
+
+    private static Task<JsonObject> PushParityGroupAsync(
+        ControlPlaneParityHarness harness,
+        SqlOSScimConnection connection,
+        string externalId,
+        string displayName,
+        string memberId)
+        => harness.Scim.UpsertGroupAsync(connection, new JsonObject
+        {
+            ["externalId"] = externalId,
+            ["displayName"] = displayName,
+            ["members"] = new JsonArray(new JsonObject { ["value"] = memberId })
+        }, replace: false);
+
     [TestMethod]
     public async Task MfaSettings_CodeServiceAndDashboard_NormalizeAndKeepOwnershipExplicit()
     {
@@ -755,7 +1078,30 @@ public sealed class SqlOSControlPlaneParityTests
         AssertDashboardContract(
             Section(javascript, "bindForm(\"create-scim-connection-form\"", "document.querySelectorAll(\".js-rotate-scim-token\")"),
             "`${authApiBasePath}/organizations/${organizationId}/scim-connections`",
-            "displayName", "enabled");
+            "displayName", "enabled", "grantBoundaryResourceId");
+        AssertDashboardContract(
+            Section(javascript, "bindForm(`update-scim-connection-${item.connection.id}`", "bindForm(`create-scim-mapping-${item.connection.id}`"),
+            "`${authApiBasePath}/scim-connections/${encodeURIComponent(item.connection.id)}`",
+            "method: \"PUT\"",
+            "grantBoundaryResourceId",
+            "confirmScimGrantBoundaryChange()");
+        AssertDashboardContract(
+            Section(javascript, "<h2>Create SCIM Connection</h2>", "bindForm(\"create-scim-connection-form\""),
+            "name=\"grantBoundaryResourceId\"",
+            "renderScimGrantBoundary(item.connection.grantBoundary)",
+            "renderScimGrantBoundaryCallout(item.connection)",
+            "GrantBoundaryResourceId",
+            "data-scim-grant-boundary-required",
+            "item.connection.grantBoundary?.status === \"configured\"");
+        AssertDashboardContract(
+            Section(javascript, "function renderScimMappingItem(mapping)", "function renderTabLink("),
+            "mapping.grantBoundaryStatus",
+            "scim.grant.outside_boundary",
+            "scim.grant.boundary_missing",
+            "event.dataJson",
+            "grantBoundaryResourceId",
+            "data-scim-grant-boundary-warning",
+            "data-scim-grant-boundary-event");
         AssertDashboardContract(
             Section(javascript, "async function renderAuthMachineClients()", "async function renderAuthOidc()"),
             "`${authApiBasePath}/machine-clients`",

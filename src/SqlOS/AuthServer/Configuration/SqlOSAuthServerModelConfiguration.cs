@@ -239,6 +239,7 @@ public static class SqlOSAuthServerModelConfiguration
             entity.Property(x => x.SeedKey).HasMaxLength(160);
             entity.Property(x => x.TokenHash).HasMaxLength(128);
             entity.Property(x => x.TokenPrefix).HasMaxLength(24);
+            entity.Property(x => x.GrantBoundaryResourceId).HasMaxLength(256);
             entity.Property(x => x.Source).HasMaxLength(40);
             entity.Property(x => x.ConfigurationOwner).HasMaxLength(40);
             entity.Property(x => x.ConfigurationSourceKey).HasMaxLength(160);

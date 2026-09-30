@@ -413,7 +413,7 @@ The host above enables the **SCIM 2.0 server** at `/sqlos/scim/v2`. An upstream 
 
 1. Create or select the organization in the SqlOS dashboard.
 2. Open its SCIM configuration and create an enabled connection. Copy the returned SCIM base URL and one-time bearer token into the upstream provider's provisioning configuration. SqlOS stores only the token hash.
-3. Test provisioning a user and group from that provider. Inspect sync outcomes in SqlOS, then configure group mappings to application roles or FGA roles on chosen resources.
+3. Test provisioning a user and group from that provider. Inspect sync outcomes in SqlOS. To map groups to FGA roles, set the connection's grant boundary to the organization's root FGA resource, then map groups to roles on that resource or its descendants. Mapped grants can never leave the boundary's subtree, whatever group names the provider sends.
 4. Disable a provisioned user or remove a group membership upstream and synchronize again; inspect the resulting user/membership and managed-grant changes. Keep SSO and each application's access policy configured separately.
 
 For trusted server-side administration, the same creation operation is available through `SqlOSAdminService` after startup:
@@ -425,7 +425,11 @@ using SqlOS.AuthServer.Services;
 await using var scope = app.Services.CreateAsyncScope();
 var admin = scope.ServiceProvider.GetRequiredService<SqlOSAdminService>();
 var connection = await admin.CreateScimConnectionAsync(
-    new SqlOSCreateScimConnectionRequest(organizationId, "Acme directory"));
+    new SqlOSCreateScimConnectionRequest(organizationId, "Acme directory")
+    {
+        // The organization's root FGA resource; mapped grants must stay under it.
+        GrantBoundaryResourceId = "org::acme"
+    });
 // Hand connection.BaseUrl and connection.Token to the authorized operator once.
 // Do not log or persist the raw token; rotation creates a replacement.
 ```

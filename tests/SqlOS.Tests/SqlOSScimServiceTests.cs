@@ -18,6 +18,7 @@ namespace SqlOS.Tests;
 public sealed class SqlOSScimServiceTests
 {
     private const string StrongSeedToken = "scim_seed_token_0123456789abcdef";
+    private const string AcmeBoundary = "org_acme_root";
 
     [TestMethod]
     public async Task SeededScimConnections_ReconcileConnectionTokenAndMappings()
@@ -248,6 +249,7 @@ public sealed class SqlOSScimServiceTests
         {
             seed.OrganizationSlug = "acme";
             seed.Token = StrongSeedToken;
+            seed.GrantBoundaryResourceId = AcmeBoundary;
             seed.MapGroup("Store 100 Managers", mapping =>
             {
                 mapping.RoleKey = "store_manager";
@@ -417,7 +419,7 @@ public sealed class SqlOSScimServiceTests
         await SeedOrganizationAsync(context);
         await SeedFgaRoleAndResourceAsync(context);
         var harness = CreateHarness(context);
-        var connection = await CreateConnectionAsync(harness.Admin);
+        var connection = await CreateConnectionAsync(harness.Admin, AcmeBoundary);
         await harness.Admin.CreateScimGroupMappingAsync(connection.Id, new SqlOSCreateScimGroupMappingRequest(
             SqlOSScimGroupMappingMatchTypes.DisplayName,
             "Store 100 Managers",
@@ -590,7 +592,7 @@ public sealed class SqlOSScimServiceTests
         await SeedOrganizationAsync(context);
         await SeedFgaRoleAndResourceAsync(context);
         var harness = CreateHarness(context);
-        var connection = await CreateConnectionAsync(harness.Admin);
+        var connection = await CreateConnectionAsync(harness.Admin, AcmeBoundary);
         await harness.Admin.CreateScimGroupMappingAsync(connection.Id, new SqlOSCreateScimGroupMappingRequest(
             SqlOSScimGroupMappingMatchTypes.ExternalId,
             GroupDisplayName: null,
@@ -619,7 +621,7 @@ public sealed class SqlOSScimServiceTests
         await SeedOrganizationAsync(context);
         await SeedFgaRoleAndResourceAsync(context);
         var harness = CreateHarness(context);
-        var connection = await CreateConnectionAsync(harness.Admin);
+        var connection = await CreateConnectionAsync(harness.Admin, AcmeBoundary);
         await harness.Admin.CreateScimGroupMappingAsync(connection.Id, new SqlOSCreateScimGroupMappingRequest(
             SqlOSScimGroupMappingMatchTypes.Pattern,
             GroupDisplayName: null,
@@ -660,7 +662,7 @@ public sealed class SqlOSScimServiceTests
         await SeedOrganizationAsync(context);
         await SeedFgaRoleAndResourceAsync(context);
         var harness = CreateHarness(context);
-        var connection = await CreateConnectionAsync(harness.Admin);
+        var connection = await CreateConnectionAsync(harness.Admin, AcmeBoundary);
         var mapping = await harness.Admin.CreateScimGroupMappingAsync(connection.Id, new SqlOSCreateScimGroupMappingRequest(
             SqlOSScimGroupMappingMatchTypes.DisplayName,
             "Store 100 Managers",
@@ -841,9 +843,12 @@ public sealed class SqlOSScimServiceTests
         return new Harness(admin, scim);
     }
 
-    private static async Task<SqlOSScimConnection> CreateConnectionAsync(SqlOSAdminService admin)
+    private static async Task<SqlOSScimConnection> CreateConnectionAsync(SqlOSAdminService admin, string? grantBoundaryResourceId = null)
     {
-        var connection = await admin.CreateScimConnectionDraftAsync(new SqlOSCreateScimConnectionRequest("org_acme", "Acme SCIM", false));
+        var connection = await admin.CreateScimConnectionDraftAsync(new SqlOSCreateScimConnectionRequest("org_acme", "Acme SCIM", false)
+        {
+            GrantBoundaryResourceId = grantBoundaryResourceId
+        });
         await admin.RotateScimTokenAsync(connection.Id);
         return await admin.SetScimConnectionEnabledAsync(connection.Id, true);
     }
@@ -868,15 +873,30 @@ public sealed class SqlOSScimServiceTests
             Id = "store",
             Name = "Store"
         });
+        context.Set<SqlOSFgaResourceType>().Add(new SqlOSFgaResourceType
+        {
+            Id = "organization",
+            Name = "Organization"
+        });
         context.Set<SqlOSFgaRole>().Add(new SqlOSFgaRole
         {
             Id = "role_store_manager",
             Key = "store_manager",
             Name = "Store Manager"
         });
+        // The organization's root resource is the SCIM grant boundary for mapped grants.
+        context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
+        {
+            Id = AcmeBoundary,
+            ResourceTypeId = "organization",
+            Name = "Acme",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
         context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
         {
             Id = "store_100",
+            ParentId = AcmeBoundary,
             ResourceTypeId = "store",
             Name = "Store 100",
             CreatedAt = DateTime.UtcNow,

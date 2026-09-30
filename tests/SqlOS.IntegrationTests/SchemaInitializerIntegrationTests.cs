@@ -13,7 +13,7 @@ namespace SqlOS.IntegrationTests;
 [TestClass]
 public sealed class SchemaInitializerIntegrationTests
 {
-    private const int CurrentSchemaVersion = 46;
+    private const int CurrentSchemaVersion = 47;
 
     [TestMethod]
     public async Task EnsureSchema_CreatesCoreTables()
@@ -110,6 +110,10 @@ public sealed class SchemaInitializerIntegrationTests
         Assert.IsTrue(
             await ColumnExistsAsync("SqlOSTemporaryTokens", "AuthPageSessionFamilyId"),
             "Issuer-session cookie credentials must link to a revocable session family.");
+
+        Assert.IsTrue(
+            await ColumnExistsAsync("SqlOSScimConnections", "GrantBoundaryResourceId"),
+            "SCIM connections must declare the FGA subtree that bounds their mapped grants.");
 
         Assert.IsTrue(
             await IndexExistsAsync(AspireFixture.SharedContext, "SqlOSConsentGrants", "UX_SqlOSConsentGrants_ActiveUserClient"),
@@ -480,6 +484,13 @@ public sealed class SchemaInitializerIntegrationTests
             {
                 Assert.IsTrue(await ColumnExistsAsync(context, "SqlOSScimExternalIds", column));
             }
+
+            // Upgraded connections have no grant boundary, so their mappings fail closed until
+            // an operator sets one.
+            Assert.IsTrue(await ColumnExistsAsync(context, "SqlOSScimConnections", "GrantBoundaryResourceId"));
+            Assert.AreEqual(
+                0,
+                await ScalarIntAsync(context, "SELECT COUNT(*) FROM [dbo].[SqlOSScimConnections] WHERE [GrantBoundaryResourceId] IS NOT NULL"));
 
             Assert.AreEqual(1, await TestCatalog.ColumnIsNullableAsync(context, "SqlOSScimExternalIds", "ExternalId"));
             Assert.AreEqual(1, await TestCatalog.IndexIsUniqueAsync(context, "SqlOSScimExternalIds", "IX_SqlOSScimExternalIds_Connection_Resource_External"));

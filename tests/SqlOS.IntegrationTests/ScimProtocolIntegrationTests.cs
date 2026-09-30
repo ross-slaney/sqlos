@@ -27,7 +27,7 @@ using SqlOS.IntegrationTests.Infrastructure;
 namespace SqlOS.IntegrationTests;
 
 [TestClass]
-public sealed class ScimProtocolIntegrationTests
+public sealed partial class ScimProtocolIntegrationTests
 {
     private const string UserSchema = "urn:ietf:params:scim:schemas:core:2.0:User";
     private const string GroupSchema = "urn:ietf:params:scim:schemas:core:2.0:Group";
@@ -374,6 +374,7 @@ public sealed class ScimProtocolIntegrationTests
     public async Task MappingDisable_ImmediatelyRevokesManagedAuthorization()
     {
         await using var server = await ScimSqlServer.CreateAsync("ScimMapping");
+        await BoundConnectionToTenantRootAsync(server, "tenant_root");
         var user = await server.CreateUserAsync("mapping-user");
         string mappingId;
         await using (var scope = server.Services.CreateAsyncScope())
@@ -384,6 +385,7 @@ public sealed class ScimProtocolIntegrationTests
             context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
             {
                 Id = "store_123",
+                ParentId = "tenant_root",
                 ResourceTypeId = "store",
                 Name = "Store 123",
                 CreatedAt = DateTime.UtcNow,
@@ -420,6 +422,7 @@ public sealed class ScimProtocolIntegrationTests
     public async Task StartupReconciliation_RevokesGrantsForConnectionsDisabledBySchemaHardening()
     {
         await using var server = await ScimSqlServer.CreateAsync("ScimStartupReconcile");
+        await BoundConnectionToTenantRootAsync(server, "tenant_root");
         await using (var setup = server.Services.CreateAsyncScope())
         {
             var context = setup.ServiceProvider.GetRequiredService<TestSqlOSDbContext>();
@@ -428,6 +431,7 @@ public sealed class ScimProtocolIntegrationTests
             context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
             {
                 Id = "site_1",
+                ParentId = "tenant_root",
                 ResourceTypeId = "site",
                 Name = "Site 1",
                 CreatedAt = DateTime.UtcNow,
@@ -464,6 +468,7 @@ public sealed class ScimProtocolIntegrationTests
     public async Task GroupExternalIdChange_ReconcilesManagedAuthorizationByStableGroupIdentity()
     {
         await using var server = await ScimSqlServer.CreateAsync("ScimMappingIdentity");
+        await BoundConnectionToTenantRootAsync(server, "tenant_root");
         await using (var setup = server.Services.CreateAsyncScope())
         {
             var context = setup.ServiceProvider.GetRequiredService<TestSqlOSDbContext>();
@@ -472,6 +477,7 @@ public sealed class ScimProtocolIntegrationTests
             context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
             {
                 Id = "warehouse_123",
+                ParentId = "tenant_root",
                 ResourceTypeId = "warehouse",
                 Name = "Warehouse 123",
                 CreatedAt = DateTime.UtcNow,

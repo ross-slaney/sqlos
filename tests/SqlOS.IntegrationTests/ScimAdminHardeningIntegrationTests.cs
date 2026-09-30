@@ -119,8 +119,35 @@ public sealed class ScimAdminHardeningIntegrationTests
                 new SqlOSCryptoService(setupContext, setupOptions));
             var organization = await setupAdmin.CreateOrganizationAsync(
                 new SqlOSCreateOrganizationRequest("Grant batch organization", "grant-batch"));
+            // Mapped grants must stay inside the connection's grant boundary (#421).
+            setupContext.Set<SqlOSFgaResourceType>().Add(new SqlOSFgaResourceType
+            {
+                Id = "batch_resource_type",
+                Name = "Batch resource"
+            });
+            setupContext.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
+            {
+                Id = "batch_root",
+                ResourceTypeId = "batch_resource_type",
+                Name = "Batch organization root",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+            setupContext.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
+            {
+                Id = "batch_resource",
+                ParentId = "batch_root",
+                ResourceTypeId = "batch_resource_type",
+                Name = "Batch resource",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+            await setupContext.SaveChangesAsync();
             var connection = await setupAdmin.CreateScimConnectionAsync(
-                new SqlOSCreateScimConnectionRequest(organization.Id, "Grant batch directory", Enabled: true));
+                new SqlOSCreateScimConnectionRequest(organization.Id, "Grant batch directory", Enabled: true)
+                {
+                    GrantBoundaryResourceId = "batch_root"
+                });
             var mapping = await setupAdmin.CreateScimGroupMappingAsync(
                 connection.ConnectionId,
                 new SqlOSCreateScimGroupMappingRequest(
@@ -154,19 +181,6 @@ public sealed class ScimAdminHardeningIntegrationTests
                 SubjectId = "batch_group_subject",
                 Name = "Grant batch group",
                 GroupType = "scim",
-                CreatedAt = now,
-                UpdatedAt = now
-            });
-            setupContext.Set<SqlOSFgaResourceType>().Add(new SqlOSFgaResourceType
-            {
-                Id = "batch_resource_type",
-                Name = "Batch resource"
-            });
-            setupContext.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
-            {
-                Id = "batch_resource",
-                ResourceTypeId = "batch_resource_type",
-                Name = "Batch resource",
                 CreatedAt = now,
                 UpdatedAt = now
             });

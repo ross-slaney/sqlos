@@ -422,14 +422,52 @@ public static class SqlOSScimSources
     public const string Api = "api";
 }
 
+/// <summary>
+/// Stable, machine-readable codes carried by <c>SqlOSScimGrantBoundaryException.Error</c> and by
+/// the admin API's <c>error</c> field when a SCIM grant boundary rule rejects a change.
+/// </summary>
+public static class SqlOSScimGrantBoundaryErrors
+{
+    /// <summary>An enabled group mapping was saved on a connection that has no grant boundary.</summary>
+    public const string BoundaryRequired = "grant_boundary_required";
+
+    /// <summary>The grant boundary resource does not exist in the FGA resource tree.</summary>
+    public const string BoundaryNotFound = "grant_boundary_not_found";
+
+    /// <summary>The grant boundary resource ID is longer than 256 characters.</summary>
+    public const string BoundaryInvalid = "grant_boundary_invalid";
+
+    /// <summary>A mapping's fixed target resource exists but is not the boundary or one of its descendants.</summary>
+    public const string ResourceOutsideBoundary = "resource_outside_grant_boundary";
+
+    /// <summary>The target resource's ancestor chain contains a cycle or exceeds the configured maximum depth.</summary>
+    public const string HierarchyInvalid = "grant_boundary_hierarchy_invalid";
+}
+
 public sealed record SqlOSCreateScimConnectionRequest(
     string OrganizationId,
     string DisplayName,
-    bool Enabled = true);
+    bool Enabled = true)
+{
+    /// <summary>
+    /// FGA resource whose subtree bounds every grant the connection's group mappings may create,
+    /// normally the organization's root resource. It must already exist. Leave it unset for a
+    /// directory that only mirrors users and groups; mapped grants require a boundary.
+    /// </summary>
+    public string? GrantBoundaryResourceId { get; init; }
+}
 
 public sealed record SqlOSUpdateScimConnectionRequest(
     string DisplayName,
-    bool Enabled);
+    bool Enabled)
+{
+    /// <summary>
+    /// Sets or changes the grant boundary. <c>null</c> or whitespace leaves the current boundary
+    /// unchanged. Changing it revokes, in the same transaction, every managed grant that is no
+    /// longer inside the new boundary.
+    /// </summary>
+    public string? GrantBoundaryResourceId { get; init; }
+}
 
 public sealed record SqlOSRotateScimTokenResult(
     string ConnectionId,

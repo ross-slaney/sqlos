@@ -12,6 +12,7 @@ using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 using SqlOS.Database;
+using SqlOS.Fga;
 using SqlOS.Fga.Models;
 
 namespace SqlOS.AuthServer.Services;
@@ -1336,6 +1337,7 @@ internal sealed class SqlOSScimService
         var mappings = await _context.Set<SqlOSScimGroupMapping>()
             .Where(x => x.ConnectionId == connection.Id)
             .ToListAsync(cancellationToken);
+        SqlOSFgaSubtreeResolver? boundaryResolver = null;
 
         foreach (var mapping in mappings)
         {
@@ -1352,6 +1354,22 @@ internal sealed class SqlOSScimService
                 {
                     await RevokeManagedGrantEntityAsync(connection, managed, cancellationToken);
                 }
+                continue;
+            }
+
+            // The IdP chooses group names and therefore template captures. Without a boundary no
+            // mapped grant can be proven to stay inside this tenant, so the mapping fails closed.
+            if (string.IsNullOrWhiteSpace(connection.GrantBoundaryResourceId))
+            {
+                await RejectMappedGrantAsync(
+                    connection,
+                    group,
+                    externalId,
+                    activeManaged,
+                    "scim.grant.boundary_missing",
+                    "The SCIM connection has no grant boundary, so mapped grants fail closed; any previous managed grant was revoked.",
+                    new { mappingId = mapping.Id, mapping.RoleKey, resourceId, grantBoundaryResourceId = (string?)null, reason = "boundary_not_configured" },
+                    cancellationToken);
                 continue;
             }
 
@@ -1380,6 +1398,43 @@ internal sealed class SqlOSScimService
                 var data = new { mappingId = mapping.Id, mapping.RoleKey, resourceId, error = "Mapped resource was not found." };
                 await RecordSyncEventAsync(connection, "Group", group.Id, externalId, "scim.grant.resource_missing", "failed", "Mapped resource was not found; any previous managed grant was revoked.", data, cancellationToken);
                 await RecordAuditAsync("scim.grant.resource_missing", connection.OrganizationId, "Group", group.Id, externalId, data, cancellationToken);
+                continue;
+            }
+
+            // Authoritative tenant check: the resolved resource must be the boundary or one of its
+            // descendants in the FGA tree. A matching ID prefix proves nothing.
+            boundaryResolver ??= SqlOSScimGrantBoundaryPolicy.CreateResolver(_context);
+            var membership = await boundaryResolver.CheckAsync(resource.Id, connection.GrantBoundaryResourceId, cancellationToken);
+            if (membership != SqlOSFgaSubtreeMembership.Within)
+            {
+                var (action, reason, message) = membership switch
+                {
+                    SqlOSFgaSubtreeMembership.BoundaryNotFound => (
+                        "scim.grant.boundary_missing",
+                        "boundary_resource_not_found",
+                        "The SCIM connection's grant boundary resource was not found, so mapped grants fail closed; any previous managed grant was revoked."),
+                    SqlOSFgaSubtreeMembership.HierarchyCycle => (
+                        "scim.grant.outside_boundary",
+                        "hierarchy_cycle",
+                        "The mapped resource's FGA ancestor chain contains a cycle, so it cannot be proven inside the grant boundary; any previous managed grant was revoked."),
+                    SqlOSFgaSubtreeMembership.HierarchyTooDeep => (
+                        "scim.grant.outside_boundary",
+                        "hierarchy_too_deep",
+                        "The mapped resource's FGA ancestor chain exceeds the configured maximum depth, so it cannot be proven inside the grant boundary; any previous managed grant was revoked."),
+                    _ => (
+                        "scim.grant.outside_boundary",
+                        "outside_boundary",
+                        "The mapped resource is not the connection's grant boundary or one of its descendants; no grant was created and any previous managed grant was revoked.")
+                };
+                await RejectMappedGrantAsync(
+                    connection,
+                    group,
+                    externalId,
+                    activeManaged,
+                    action,
+                    message,
+                    new { mappingId = mapping.Id, mapping.RoleKey, resourceId = resource.Id, grantBoundaryResourceId = connection.GrantBoundaryResourceId, reason },
+                    cancellationToken);
                 continue;
             }
 
@@ -1488,6 +1543,27 @@ internal sealed class SqlOSScimService
         return match.Groups.Keys
             .Where(key => !int.TryParse(key, out _))
             .ToDictionary(key => key, key => match.Groups[key].Value, StringComparer.Ordinal);
+    }
+
+    private async Task RejectMappedGrantAsync(
+        SqlOSScimConnection connection,
+        SqlOSFgaUserGroup group,
+        string? externalId,
+        IReadOnlyList<SqlOSScimManagedGrant> activeManaged,
+        string action,
+        string message,
+        object data,
+        CancellationToken cancellationToken)
+    {
+        // Same shape as the missing-role and missing-resource paths: revoke what this mapping
+        // granted the group, then record why. The SCIM request itself still succeeds.
+        foreach (var managed in activeManaged)
+        {
+            await RevokeManagedGrantEntityAsync(connection, managed, cancellationToken);
+        }
+
+        await RecordSyncEventAsync(connection, "Group", group.Id, externalId, action, "failed", message, data, cancellationToken);
+        await RecordAuditAsync(action, connection.OrganizationId, "Group", group.Id, externalId, data, cancellationToken);
     }
 
     private async Task RevokeManagedGrantAsync(SqlOSScimConnection connection, string mappingId, string groupId, CancellationToken cancellationToken)

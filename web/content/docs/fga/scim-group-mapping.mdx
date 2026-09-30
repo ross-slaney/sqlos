@@ -5,7 +5,7 @@ section: "directory"
 order: 4
 ---
 
-SCIM group sync feeds the same authorization model your application already uses. The identity provider is the SCIM client: it writes Group resources and membership to SqlOS. SqlOS mirrors those groups into FGA and can optionally map selected groups to roles on existing resources.
+SCIM group sync feeds the same authorization model your application already uses. The identity provider is the SCIM client: it writes Group resources and membership to SqlOS. SqlOS mirrors those groups into FGA and can optionally map selected groups to roles on existing resources inside the organization's own part of the resource tree.
 
 ## Mirroring is the default
 
@@ -85,10 +85,34 @@ Most enterprise directory groups describe departments, mailing lists, or assignm
 
 1. Mirror every pushed directory group into an FGA user group.
 2. Match only approved groups against enabled mapping rules.
-3. Create a role grant for the matched group subject on a known resource.
-4. Track that grant as SCIM managed so SqlOS can revoke only the access it created.
+3. Confirm the target resource is inside the connection's grant boundary.
+4. Create a role grant for the matched group subject on that resource.
+5. Track that grant as SCIM managed so SqlOS can revoke only the access it created.
 
 Unmatched groups remain available for deliberate manual grants and application assignments.
+
+## Grant boundary
+
+The customer's identity provider chooses group display names, and a pattern mapping turns part of that name into a resource ID. FGA resources have no organization of their own, so without a limit a tenant could name a group after another tenant's resource and receive a role on it.
+
+Every SCIM connection therefore declares a **grant boundary**: the FGA resource that is the organization's root in your resource tree. A mapped grant may target only the boundary resource or one of its descendants.
+
+```csharp
+options.AuthServer.SeedScimConnection("acme", scim =>
+{
+    scim.OrganizationSlug = "acme";
+    scim.TokenSecretName = "ACME_SCIM_BEARER_TOKEN";
+    scim.GrantBoundaryResourceId = "org::acme";
+});
+```
+
+- SqlOS walks the resolved resource's `ParentId` chain in the FGA tree. The resource is inside the boundary only if that walk reaches the boundary resource. A resource ID that merely starts with the boundary's ID, such as `org::acme::store::9001` placed under another organization, is outside it.
+- The walk uses the same cycle and `Fga.MaxResourceHierarchyDepth` guards as access checks. A cycle, an over-deep chain, or a boundary resource that no longer exists fails closed.
+- The check runs every time a group is created, replaced, or patched, including for grants that already exist. A mapped grant whose resource is no longer inside the boundary is revoked on the group's next push.
+- A connection without a boundary still syncs users, groups, and memberships, but its mappings create no grants.
+- Changing the boundary immediately revokes, in the same transaction, every managed grant that is no longer inside it.
+
+Set the boundary to the organization's root resource, the node where you would grant an organization administrator. The boundary resource must exist before you save it. Do not use the global FGA root in a multi-tenant application; that would let every tenant's directory grant on every tenant's resources.
 
 ## Exact group mapping
 
@@ -98,10 +122,12 @@ Use an exact mapping when the IdP group has a stable display name:
 scim.MapGroup("Acme-Admins", mapping =>
 {
     mapping.RoleKey = "org_admin";
-    mapping.ResourceId = "organization::acme";
+    mapping.ResourceId = "org::acme";
     mapping.Description = "Directory-managed organization administrators";
 });
 ```
+
+A fixed `ResourceId` is checked against the boundary when the mapping is saved. The seed, the admin API, and the dashboard all reject a fixed resource outside the boundary with the `resource_outside_grant_boundary` error, so a copied or mistyped configuration cannot grant on another tenant's resource. A resource that does not exist yet is accepted and checked when it appears.
 
 Use `MapGroupExternalId` instead when the provider's group ID is stable but administrators may rename its display name.
 
@@ -112,23 +138,28 @@ The resulting FGA grant uses the mirrored group subject, not one grant per user.
 Use pattern mappings for a controlled family of resources:
 
 ```csharp
-scim.MapGroupPattern("^Store-(?<storeId>[^-]+)-Managers$", mapping =>
+scim.GrantBoundaryResourceId = "org::acme";
+scim.MapGroupPattern("^Store-(?<storeId>[^-]+)-Managers$", m =>
 {
-    mapping.RoleKey = "store_manager";
-    mapping.ResourceIdTemplate = "store::{storeId}";
+    m.RoleKey = "store_manager";
+    m.ResourceIdTemplate = "org::acme::store::{storeId}";
 });
 ```
 
-For `Store-123-Managers`, the mapping resolves `storeId` to `123` and targets `store::123`.
+For `Store-123-Managers`, the mapping resolves `storeId` to `123` and targets `org::acme::store::123`. SqlOS creates the grant only if `org::acme::store::123` is `org::acme` or one of its descendants in the FGA tree.
 
-Keep patterns anchored and narrow. SqlOS bounds regular-expression evaluation, but a broad pattern can still map an unintended group. The target role and resource must already exist; a mapping does not invent new authorization roots.
+The `org::acme::` prefix keeps resolved IDs readable, but it is not the security control; the resource tree is. A group name that resolves to a resource under another organization is refused with a `scim.grant.outside_boundary` sync event, even if that resource's ID happens to start with `org::acme`. Because a template's result depends on the group name, it is checked every time a group is pushed rather than when the mapping is saved.
+
+Keep patterns anchored and narrow. SqlOS bounds regular-expression evaluation, but a broad pattern can still map an unintended group inside the boundary. The target role and resource must already exist; a mapping does not invent new authorization roots.
 
 ## Ownership and revocation
 
 Managed-grant metadata records the connection, mapping, external group ID, FGA group, role, resource, and grant. SqlOS uses that ownership to revoke only the access it created when:
 
 - a group no longer matches the mapping during reconciliation
+- a group's resolved resource is outside the grant boundary, or the connection has no boundary, on its next push
 - a mapping is disabled or changed through the admin service
+- the connection's grant boundary is changed, for grants no longer inside it
 - its SCIM connection is disabled
 - the IdP deletes the group
 
@@ -144,18 +175,34 @@ Manual grants and non-SCIM groups remain intact. Disabling or changing a mapping
 
 When the IdP sends `active: false` or deletes a User, SqlOS removes that user's memberships from the connection's mirrored groups and deactivates the user's organization membership. The person immediately loses group-derived access in that organization.
 
-The same SqlOS user can still be active in another organization. SCIM does not remove that other tenant's membership, sessions, FGA groups, or grants. Bearer-token scope, external IDs, Group resources, and membership resolution all remain within one connection and organization.
+The same SqlOS user can still be active in another organization. SCIM does not remove that other tenant's membership, sessions, FGA groups, or grants.
+
+Tenant isolation covers both what a connection can see and what it can grant:
+
+- **Directory data.** Bearer-token scope, external IDs, Group resources, and membership resolution all remain within one connection and organization.
+- **Mapped grants.** FGA resources have no organization, so the connection's grant boundary is what ties a mapped grant to a tenant. Every mapped grant must target the boundary resource or a descendant. A group name that resolves to another tenant's resource creates no grant, and the attempt is recorded in the sync events and audit log.
+
+Manual grants and application assignments are outside SCIM and are not bounded by the connection. Review them separately.
 
 ## Dashboard workflow
 
 1. Open **Auth Server > Organizations > SCIM** and confirm the connection is receiving groups.
-2. Open **Fine-Grained Auth > User Groups** to inspect the mirrored group and members.
-3. Add an exact-name, external-ID, or pattern mapping on the organization's SCIM tab.
-4. Enter the exact existing FGA role key and resource ID, or a resource template.
-5. Push or update the group from the IdP.
-6. Use the access tester to verify the user's explanation includes the group and mapped role.
+2. Set the connection's **grant boundary** to the organization's root FGA resource ID, and confirm the connection shows the resource's name. A connection without a boundary is flagged, its mapping form is disabled, and its mappings create no grants. For a code-owned connection, the boundary is read-only and changes in `SeedScimConnection` in source control.
+3. Open **Fine-Grained Auth > User Groups** to inspect the mirrored group and members.
+4. Add an exact-name, external-ID, or pattern mapping on the organization's SCIM tab.
+5. Enter the exact existing FGA role key and a resource ID inside the boundary, or a resource template that resolves inside it.
+6. Push or update the group from the IdP.
+7. Use the access tester to verify the user's explanation includes the group and mapped role.
 
-The mapping editor shows the match mode, source group value, target role/resource, source (`seeded` or `dashboard`), enabled state, and active managed-grant count. Persisted sync events report missing roles and missing resources; patterns that exceed the bounded evaluation time are returned to the SCIM client as request errors.
+The mapping editor shows the match mode, source group value, target role/resource, source (`seeded` or `dashboard`), enabled state, active managed-grant count, and a boundary check: whether a fixed target is inside the boundary, or that a template is checked on every push. Persisted sync events report missing roles, missing resources, `scim.grant.outside_boundary`, and `scim.grant.boundary_missing`, with the resolved resource and the boundary. Patterns that exceed the bounded evaluation time are returned to the SCIM client as request errors.
+
+## Upgrading to SqlOS 7.2.1
+
+Connections created before 7.2.1 have no grant boundary, so they fail closed. Their existing managed grants stay until each group's next push, when SqlOS revokes them and records `scim.grant.boundary_missing`. The dashboard flags these connections.
+
+1. For each SCIM connection with group mappings, set `GrantBoundaryResourceId` to the organization's root FGA resource: in `SeedScimConnection` for code-owned connections, or with the dashboard or `UpdateScimConnectionAsync` for the rest. Setting it immediately revokes any managed grant outside it, including cross-tenant grants created before the upgrade.
+2. Push or resynchronize the connection's groups from the IdP so grants inside the boundary are recreated.
+3. Review the `scim.grant.mapped` audit history from before the upgrade for grants on resources outside each organization's subtree.
 
 ## Application access
 
@@ -203,7 +250,11 @@ dotnet test tests/SqlOS.IntegrationTests/SqlOS.IntegrationTests.csproj \
 | IdP cannot find a group | Use one supported exact `eq` filter and confirm the token belongs to the group's organization |
 | Member add returns `invalidValue` | Provision the user first and send that connection's User `id` or `externalId` |
 | Filtered remove fails | Use `members[value eq "..."]` with a User identifier, not `User.groups` |
-| Group mirrors but no grant appears | Confirm the mapping is enabled and its role and target resource already exist |
+| Group mirrors but no grant appears | Confirm the mapping is enabled, its role and target resource already exist, and the connection has a grant boundary |
+| Sync event `scim.grant.boundary_missing` | Set the connection's grant boundary, or recreate the boundary resource if it was deleted, then resend the group |
+| Sync event `scim.grant.outside_boundary` | The resolved resource is not the boundary or a descendant in the FGA tree, or its ancestor chain has a cycle or is too deep. Move the resource under the organization's root or correct the template |
+| Admin API returns `grant_boundary_required` | Set the connection's grant boundary before enabling a mapping |
+| Admin API returns `resource_outside_grant_boundary` | Choose a resource inside the organization's subtree |
 | Rename creates unexpected authorization | Prefer an external-ID mapping when provider group names are mutable |
 | Deprovisioned user still has access | Inspect non-SCIM groups, direct grants, application assignments, and memberships in other organizations |
 | Mapping failure appears in sync events | Correct the role, resource, or template capture, then resend the group |
@@ -218,6 +269,9 @@ dotnet test tests/SqlOS.IntegrationTests/SqlOS.IntegrationTests.csproj \
 - add and filtered remove are idempotent
 - cross-connection and cross-organization members are rejected with `invalidValue`
 - exact and pattern mappings create one tracked group grant
+- a group name that resolves to another tenant's resource creates no grant and records `scim.grant.outside_boundary`
+- a connection without a grant boundary creates no mapped grants
+- changing the grant boundary revokes managed grants outside it
 - disabling a mapping immediately revokes only its managed grant
 - disabling a connection immediately revokes all grants managed by that connection
 - re-enabling requires an affected-group push or resync before managed grants return

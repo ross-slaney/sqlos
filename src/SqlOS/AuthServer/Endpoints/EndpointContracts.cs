@@ -145,6 +145,6 @@ public static partial class EndpointRouteBuilderExtensions
         List<string>? AcceptedAcrValues = null);
 
     private sealed record ClientLifecycleRequest(string? Reason);
-    private sealed record CreateScimConnectionDashboardRequest(string DisplayName, bool Enabled = true);
-    private sealed record UpdateScimConnectionDashboardRequest(string DisplayName, bool Enabled = true);
+    private sealed record CreateScimConnectionDashboardRequest(string DisplayName, bool Enabled = true, string? GrantBoundaryResourceId = null);
+    private sealed record UpdateScimConnectionDashboardRequest(string DisplayName, bool Enabled = true, string? GrantBoundaryResourceId = null);
 }
