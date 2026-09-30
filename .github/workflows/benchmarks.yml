@@ -1,0 +1,90 @@
+name: Benchmarks
+
+# SHRBAC list filtering and point checks on the shipped schema and fn_IsResourceAccessible, grown from 1M
+# to 100M products in place, one job per engine. Runs beside Pull Request CI, only when the library, the
+# benchmark, or this workflow changes. See tests/SqlOS.Benchmarks/README.md.
+
+on:
+  # CALIBRATION ONLY: remove before opening the PR.
+  push:
+    branches: [benchmarks-scale-100m]
+  pull_request:
+    paths:
+      - "src/SqlOS/**"
+      - "tests/SqlOS.Benchmarks/**"
+      - ".github/workflows/benchmarks.yml"
+  workflow_dispatch:
+    inputs:
+      scales:
+        description: "Product counts to grow through, comma-separated"
+        required: false
+        default: "1m,10m,100m"
+
+concurrency:
+  group: benchmarks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_VERSION: "9.0.x"
+
+jobs:
+  benchmark:
+    name: SHRBAC benchmarks (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - provider: postgresql
+            name: PostgreSQL
+            image: postgres:16
+          - provider: sqlserver
+            name: SQL Server
+            image: mcr.microsoft.com/mssql/server:2022-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      # The OS disk has ~20 GB free; the temporary disk at /mnt has room for 100M rows and their indexes.
+      - name: Put database files on the temporary disk
+        run: |
+          df -h / /mnt
+          sudo mkdir -p /mnt/sqlos-bench
+          sudo chmod 0777 /mnt/sqlos-bench
+
+      - name: Pull ${{ matrix.image }}
+        run: docker pull ${{ matrix.image }}
+
+      - name: Build
+        run: dotnet build tests/SqlOS.Benchmarks --configuration Release
+
+      - name: Run benchmarks
+        run: >-
+          dotnet run --project tests/SqlOS.Benchmarks --configuration Release --no-build --
+          --provider ${{ matrix.provider }}
+          --scales ${{ inputs.scales || '1m,10m,100m' }}
+          --data-dir /mnt/sqlos-bench
+          --out artifacts/benchmarks
+          --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Disk usage
+        if: always()
+        run: df -h / /mnt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmarks-${{ matrix.provider }}
+          path: artifacts/benchmarks/${{ matrix.provider }}

@@ -1,0 +1,37 @@
+{
+  "scale": {
+    "maxRatio": 2.0,
+    "slackMilliseconds": 2.0,
+    "exempt": []
+  },
+  "ceilingsMilliseconds": {
+    "postgresql": {
+      "list.admin.first-page": 250,
+      "list.admin.k100": 1000,
+      "list.admin.mid-cursor": 250,
+      "list.chain.first-page": 1000,
+      "list.region.first-page": 5000,
+      "list.deep-chain.first-page": 1000,
+      "list.store.by-store": 250,
+      "point.function.product": 100,
+      "point.function.deep-product": 100,
+      "point.function.denied": 100,
+      "point.api.product": 1000,
+      "point.api.deep-product": 1000
+    },
+    "sqlserver": {
+      "list.admin.first-page": 250,
+      "list.admin.k100": 1000,
+      "list.admin.mid-cursor": 250,
+      "list.chain.first-page": 1000,
+      "list.region.first-page": 5000,
+      "list.deep-chain.first-page": 1000,
+      "list.store.by-store": 250,
+      "point.function.product": 100,
+      "point.function.deep-product": 100,
+      "point.function.denied": 100,
+      "point.api.product": 1000,
+      "point.api.deep-product": 1000
+    }
+  }
+}
