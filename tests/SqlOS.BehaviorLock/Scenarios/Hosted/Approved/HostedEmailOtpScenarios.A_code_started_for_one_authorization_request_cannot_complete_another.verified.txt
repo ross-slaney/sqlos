@@ -1,0 +1,135 @@
+# SqlOS behavior lock transcript
+scenario: HostedEmailOtpScenarios.A_code_started_for_one_authorization_request_cannot_complete_another
+profile: hosted
+
+## 1. browser: present the code with another authorization request
+> POST /sqlos/auth/login/email-otp/verify
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#1}
+>   challengeToken={challenge-token#1}
+>   email={email:alice}
+>   code={otp#1}
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#1}'; style-src 'self' 'nonce-{csp-nonce#1}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Behavior Lock</title>
+        <style nonce="{csp-nonce#1}">{style-sha256:4961352b3f23eca1}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Behavior Lock</h1>
+                <p class="brand-subtitle">Behavior lock hosted sign-in.</p>
+              </div>
+              <div class="messages">
+                <div class="callout error">
+                  <span class="callout-icon">!</span>
+                  <span>The sign-in code is invalid or expired.</span>
+                </div>
+              </div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <div class="panel-intro">
+                    <span class="panel-kicker">Enter Code</span>
+                    <p>Use the one-time code we sent to your email address.</p>
+                  </div>
+                  <form class="auth-form" method="post" action="/sqlos/auth/login/email-otp/verify">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#2}" />
+                    <input type="hidden" name="requestId" value="{req#1}" />
+                    <input type="hidden" name="challengeToken" value="{challenge-token#1}" />
+                    <input type="hidden" name="email" value="{email:alice}" />
+                    <label class="field">
+                      <span>Code</span>
+                      <input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" required="" autofocus="" />
+                    </label>
+                    <button class="primary-action" type="submit" data-loading-label="Verifying code">
+                      <span class="button-label">Verify code</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                  </form>
+                  <div class="footer-links">
+                    <a class="secondary-link" href="/sqlos/auth/login/email-otp?request={req#1}&amp;email={email:alice}">Send a new code</a>
+                    <a class="secondary-link" href="/sqlos/auth/login?request={req#1}&amp;email={email:alice}">Use password instead</a>
+                    <a class="secondary-link" href="/sqlos/auth/login/magic-link?request={req#1}&amp;email={email:alice}">Email me a sign-in link</a>
+                    <a class="secondary-link" href="/sqlos/auth/login/phone-otp?request={req#1}">Use a phone code instead</a>
+                  </div>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#1}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+
+## 2. browser: the code still completes its own request
+> POST /sqlos/auth/login/email-otp/verify
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#2}
+>   challengeToken={challenge-token#1}
+>   email={email:alice}
+>   code={otp#1}
+< 302 Found
+< Location: https://sqlos.example.test/auth/callback?code={code#1}&state={state#1}&scope=openid%20profile%20email%20offline_access
+< Set-Cookie: sqlos_auth_page={cookie#2}; expires=+7d; path=/; secure; samesite=lax; httponly
+
+## audit: the mismatch is not counted as a wrong code
+  - {
+      "action": "email_otp.verify_succeeded",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "email_otp.verify_succeeded",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "details": {
+          "AuthorizationRequestId": "[redacted]",
+          "ClientApplicationId": "{cli#1}",
+          "UserId": "{usr#1}"
+        },
+        "maskedEmail": "al***@example.test",
+        "purpose": "login"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
