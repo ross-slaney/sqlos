@@ -1,0 +1,90 @@
+# SqlOS behavior lock transcript
+scenario: SettingsAdminScenarios.Operator_updates_session_and_signing_key_lifetimes
+profile: dashboard-callback
+
+## 1. operator: without operator credentials the security settings are not found
+> GET /sqlos/admin/auth/api/settings/security
+< 404 Not Found
+
+## 2. operator: the default lifetimes
+> GET /sqlos/admin/auth/api/settings/security
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "refreshTokenGraceWindowSeconds": 30,
+      "refreshTokenLifetimeMinutes": 43200,
+      "sessionAbsoluteLifetimeMinutes": 43200,
+      "sessionIdleTimeoutMinutes": 10080,
+      "signingKeyGraceWindowDays": 7,
+      "signingKeyRetiredCleanupDays": 30,
+      "signingKeyRotationIntervalDays": 90,
+      "updatedAt": "{datetime:unspecified}"
+    }
+
+## 3. operator: shorten every lifetime; a zero refresh grace window turns the grace window off
+> PUT /sqlos/admin/auth/api/settings/security
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "refreshTokenGraceWindowSeconds": 0,
+>     "refreshTokenLifetimeMinutes": 43200,
+>     "sessionAbsoluteLifetimeMinutes": 20160,
+>     "sessionIdleTimeoutMinutes": 1440,
+>     "signingKeyGraceWindowDays": 5,
+>     "signingKeyRetiredCleanupDays": 5,
+>     "signingKeyRotationIntervalDays": 30
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "refreshTokenGraceWindowSeconds": 0,
+      "refreshTokenLifetimeMinutes": 43200,
+      "sessionAbsoluteLifetimeMinutes": 20160,
+      "sessionIdleTimeoutMinutes": 1440,
+      "signingKeyGraceWindowDays": 5,
+      "signingKeyRetiredCleanupDays": 5,
+      "signingKeyRotationIntervalDays": 30,
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 4. operator: the stored lifetimes
+> GET /sqlos/admin/auth/api/settings/security
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "refreshTokenGraceWindowSeconds": 0,
+      "refreshTokenLifetimeMinutes": 43200,
+      "sessionAbsoluteLifetimeMinutes": 20160,
+      "sessionIdleTimeoutMinutes": 1440,
+      "signingKeyGraceWindowDays": 5,
+      "signingKeyRetiredCleanupDays": 5,
+      "signingKeyRotationIntervalDays": 30,
+      "updatedAt": "{datetime:unspecified}"
+    }
+
+## 5. operator: the signing-key view reports the new rotation schedule
+> GET /sqlos/admin/auth/api/signing-keys
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "graceWindowDays": 5,
+      "keys": [
+        {
+          "activatedAt": "{datetime:unspecified}",
+          "ageDays": 0,
+          "algorithm": "RS256",
+          "id": "{key#1}",
+          "isActive": true,
+          "kid": "{kid#1}",
+          "retiredAt": null
+        }
+      ],
+      "nextRotationDue": "{datetime:unspecified}",
+      "rotationIntervalDays": 30
+    }
+
+## audit: security setting changes write no audit events
+  (no new events)
