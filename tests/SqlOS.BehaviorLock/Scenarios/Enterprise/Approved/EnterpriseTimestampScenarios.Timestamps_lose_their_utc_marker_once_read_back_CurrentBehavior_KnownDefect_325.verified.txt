@@ -1,0 +1,217 @@
+# SqlOS behavior lock transcript
+scenario: EnterpriseTimestampScenarios.Timestamps_lose_their_utc_marker_once_read_back_CurrentBehavior_KnownDefect_325
+profile: enterprise-scim-path
+
+## 1. directory: create Judy: meta.created and meta.lastModified carry Z
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "emails": [
+>       {
+>         "primary": true,
+>         "type": "work",
+>         "value": "{email:judy}"
+>       }
+>     ],
+>     "externalId": "directory-judy",
+>     "name": {
+>       "familyName": "Hopps",
+>       "givenName": "Judy"
+>     },
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:judy}"
+>   }
+< 201 Created
+< Content-Location: /scim/v2/Users/{usr:judy}
+< Content-Type: application/scim+json
+< Location: /scim/v2/Users/{usr:judy}
+    {
+      "active": true,
+      "displayName": "Judy Hopps",
+      "emails": [
+        {
+          "primary": true,
+          "type": "work",
+          "value": "{email:judy}"
+        }
+      ],
+      "externalId": "directory-judy",
+      "groups": [],
+      "id": "{usr:judy}",
+      "meta": {
+        "created": "{datetime:utc-z}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Users/{usr:judy}",
+        "resourceType": "User"
+      },
+      "name": {
+        "familyName": "Hopps",
+        "formatted": "Judy Hopps",
+        "givenName": "Judy"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:judy}"
+    }
+
+## 2. directory: read her back: the same instants without Z
+> GET /scim/v2/Users/{usr:judy}?attributes=meta
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Location: /scim/v2/Users/{usr:judy}
+< Content-Type: application/scim+json
+    {
+      "id": "{usr:judy}",
+      "meta": {
+        "created": "{datetime:unspecified}",
+        "lastModified": "{datetime:unspecified}",
+        "location": "/scim/v2/Users/{usr:judy}",
+        "resourceType": "User"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ]
+    }
+
+## 3. directory: the list reads them without Z too
+> GET /scim/v2/Users?attributes=meta
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "Resources": [
+        {
+          "id": "{usr:judy}",
+          "meta": {
+            "created": "{datetime:unspecified}",
+            "lastModified": "{datetime:unspecified}",
+            "location": "/scim/v2/Users/{usr:judy}",
+            "resourceType": "User"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ]
+        }
+      ],
+      "itemsPerPage": 1,
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+      ],
+      "startIndex": 1,
+      "totalResults": 1
+    }
+
+## 4. operator: rotate the token: tokenRotatedAt carries Z
+> POST /sqlos/admin/auth/api/scim-connections/{scim#1}/token/rotate
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "connectionId": "{scim#1}",
+      "token": "{scim-token#2}",
+      "tokenPrefix": "{token-prefix#1}",
+      "tokenRotatedAt": "{datetime:utc-z}"
+    }
+
+## 5. operator: the connection read back: tokenRotatedAt without Z
+> GET /sqlos/admin/auth/api/scim-connections/{scim#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "baseUrl": "/scim/v2",
+      "createdAt": "{datetime:unspecified}",
+      "displayName": "Directory",
+      "grantBoundary": {
+        "resourceId": null,
+        "resourceName": null,
+        "resourceTypeId": null,
+        "status": "missing"
+      },
+      "grantBoundaryResourceId": null,
+      "groupsUrl": "/scim/v2/Groups",
+      "id": "{scim#1}",
+      "isEnabled": true,
+      "lastSyncAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "seedKey": null,
+      "source": "dashboard",
+      "tokenLastUsedAt": "{datetime:unspecified}",
+      "tokenPrefix": "{token-prefix#1}",
+      "tokenRotatedAt": "{datetime:unspecified}",
+      "updatedAt": "{datetime:unspecified}",
+      "usersUrl": "/scim/v2/Users"
+    }
+
+## 6. operator: issue a setup link: createdAt and expiresAt carry Z
+> POST /sqlos/admin/auth/api/organizations/{org#1}/sso-portal/sessions
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "connectionId": "{sso#1}",
+      "createdAt": "{datetime:utc-z}",
+      "expiresAt": "{datetime:utc-z}",
+      "id": "{ssp#1}",
+      "lastSeenAt": null,
+      "openedAt": null,
+      "organizationId": "{org#1}",
+      "organizationName": "Acme",
+      "portalUrl": "https://sqlos.example.test/sqlos/admin/auth/sso-portal",
+      "primaryDomain": "{domain:acme}",
+      "provider": null,
+      "revokedAt": null,
+      "revokedReason": null,
+      "setupUrl": "https://sqlos.example.test/sqlos/admin/auth/sso-portal/start?token={link-token#1}",
+      "status": "pending"
+    }
+
+## 7. operator: the link read back: without Z
+> GET /sqlos/admin/auth/api/organizations/{org#1}/sso-portal/sessions?pageSize=1
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "connectionId": "{sso#1}",
+          "createdAt": "{datetime:unspecified}",
+          "expiresAt": "{datetime:unspecified}",
+          "id": "{ssp#1}",
+          "lastSeenAt": null,
+          "openedAt": null,
+          "organizationId": "{org#1}",
+          "organizationName": "Acme",
+          "portalUrl": "https://sqlos.example.test/sqlos/admin/auth/sso-portal",
+          "primaryDomain": "{domain:acme}",
+          "provider": null,
+          "revokedAt": null,
+          "revokedReason": null,
+          "setupUrl": null,
+          "status": "pending"
+        }
+      ],
+      "hasNextPage": true,
+      "nextCursor": "{cursor#1}",
+      "pageSize": 1
+    }

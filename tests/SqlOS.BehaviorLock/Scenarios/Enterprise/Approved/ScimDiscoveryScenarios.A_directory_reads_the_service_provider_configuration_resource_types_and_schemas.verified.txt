@@ -1,0 +1,755 @@
+# SqlOS behavior lock transcript
+scenario: ScimDiscoveryScenarios.A_directory_reads_the_service_provider_configuration_resource_types_and_schemas
+profile: enterprise-scim-path
+
+## 1. directory: the service provider configuration
+> GET /scim/v2/ServiceProviderConfig
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "authenticationSchemes": [
+        {
+          "description": "Opaque bearer token scoped to one SqlOS organization and directory connection.",
+          "name": "Bearer Token",
+          "primary": true,
+          "type": "oauthbearertoken"
+        }
+      ],
+      "bulk": {
+        "maxOperations": 0,
+        "maxPayloadSize": 0,
+        "supported": false
+      },
+      "changePassword": {
+        "supported": false
+      },
+      "documentationUri": "https://sqlos.dev/docs/authserver/scim-directory-sync",
+      "etag": {
+        "supported": false
+      },
+      "filter": {
+        "maxResults": 200,
+        "supported": true
+      },
+      "meta": {
+        "location": "/scim/v2/ServiceProviderConfig"
+      },
+      "patch": {
+        "supported": true
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"
+      ],
+      "sort": {
+        "supported": false
+      }
+    }
+
+## 2. directory: the resource types
+> GET /scim/v2/ResourceTypes
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "Resources": [
+        {
+          "endpoint": "/Users",
+          "id": "User",
+          "meta": {
+            "location": "/scim/v2/ResourceTypes/User",
+            "resourceType": "ResourceType"
+          },
+          "name": "User",
+          "schema": "urn:ietf:params:scim:schemas:core:2.0:User",
+          "schemaExtensions": [],
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:ResourceType"
+          ]
+        },
+        {
+          "endpoint": "/Groups",
+          "id": "Group",
+          "meta": {
+            "location": "/scim/v2/ResourceTypes/Group",
+            "resourceType": "ResourceType"
+          },
+          "name": "Group",
+          "schema": "urn:ietf:params:scim:schemas:core:2.0:Group",
+          "schemaExtensions": [],
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:ResourceType"
+          ]
+        }
+      ],
+      "itemsPerPage": 2,
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+      ],
+      "startIndex": 1,
+      "totalResults": 2
+    }
+
+## 3. directory: the User resource type
+> GET /scim/v2/ResourceTypes/User
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Location: /scim/v2/ResourceTypes/User
+< Content-Type: application/scim+json
+    {
+      "endpoint": "/Users",
+      "id": "User",
+      "meta": {
+        "location": "/scim/v2/ResourceTypes/User",
+        "resourceType": "ResourceType"
+      },
+      "name": "User",
+      "schema": "urn:ietf:params:scim:schemas:core:2.0:User",
+      "schemaExtensions": [],
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:ResourceType"
+      ]
+    }
+
+## 4. directory: resource type IDs match case-insensitively
+> GET /scim/v2/ResourceTypes/group
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Location: /scim/v2/ResourceTypes/Group
+< Content-Type: application/scim+json
+    {
+      "endpoint": "/Groups",
+      "id": "Group",
+      "meta": {
+        "location": "/scim/v2/ResourceTypes/Group",
+        "resourceType": "ResourceType"
+      },
+      "name": "Group",
+      "schema": "urn:ietf:params:scim:schemas:core:2.0:Group",
+      "schemaExtensions": [],
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:ResourceType"
+      ]
+    }
+
+## 5. directory: an unknown resource type
+> GET /scim/v2/ResourceTypes/Device
+> Authorization: Bearer {scim-token#1}
+< 404 Not Found
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM resource type not found.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "status": "404"
+    }
+
+## 6. directory: the schemas
+> GET /scim/v2/Schemas
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "Resources": [
+        {
+          "attributes": [
+            {
+              "caseExact": false,
+              "multiValued": false,
+              "mutability": "readWrite",
+              "name": "userName",
+              "required": true,
+              "returned": "default",
+              "type": "string",
+              "uniqueness": "server"
+            },
+            {
+              "caseExact": true,
+              "multiValued": false,
+              "mutability": "readWrite",
+              "name": "externalId",
+              "required": false,
+              "returned": "default",
+              "type": "string",
+              "uniqueness": "none"
+            },
+            {
+              "caseExact": false,
+              "multiValued": false,
+              "mutability": "readWrite",
+              "name": "displayName",
+              "required": false,
+              "returned": "default",
+              "type": "string",
+              "uniqueness": "none"
+            },
+            {
+              "caseExact": false,
+              "multiValued": false,
+              "mutability": "readWrite",
+              "name": "active",
+              "required": false,
+              "returned": "default",
+              "type": "boolean",
+              "uniqueness": "none"
+            },
+            {
+              "caseExact": false,
+              "multiValued": false,
+              "mutability": "readWrite",
+              "name": "name",
+              "required": false,
+              "returned": "default",
+              "subAttributes": [
+                {
+                  "caseExact": false,
+                  "multiValued": false,
+                  "mutability": "readWrite",
+                  "name": "formatted",
+                  "required": false,
+                  "returned": "default",
+                  "type": "string",
+                  "uniqueness": "none"
+                },
+                {
+                  "caseExact": false,
+                  "multiValued": false,
+                  "mutability": "readWrite",
+                  "name": "givenName",
+                  "required": false,
+                  "returned": "default",
+                  "type": "string",
+                  "uniqueness": "none"
+                },
+                {
+                  "caseExact": false,
+                  "multiValued": false,
+                  "mutability": "readWrite",
+                  "name": "familyName",
+                  "required": false,
+                  "returned": "default",
+                  "type": "string",
+                  "uniqueness": "none"
+                }
+              ],
+              "type": "complex",
+              "uniqueness": "none"
+            },
+            {
+              "caseExact": false,
+              "multiValued": true,
+              "mutability": "readWrite",
+              "name": "emails",
+              "required": false,
+              "returned": "default",
+              "subAttributes": [
+                {
+                  "caseExact": false,
+                  "multiValued": false,
+                  "mutability": "readWrite",
+                  "name": "value",
+                  "required": false,
+                  "returned": "default",
+                  "type": "string",
+                  "uniqueness": "none"
+                },
+                {
+                  "caseExact": false,
+                  "multiValued": false,
+                  "mutability": "readWrite",
+                  "name": "type",
+                  "required": false,
+                  "returned": "default",
+                  "type": "string",
+                  "uniqueness": "none"
+                },
+                {
+                  "caseExact": false,
+                  "multiValued": false,
+                  "mutability": "readWrite",
+                  "name": "primary",
+                  "required": false,
+                  "returned": "default",
+                  "type": "boolean",
+                  "uniqueness": "none"
+                }
+              ],
+              "type": "complex",
+              "uniqueness": "none"
+            },
+            {
+              "caseExact": false,
+              "multiValued": true,
+              "mutability": "readOnly",
+              "name": "groups",
+              "required": false,
+              "returned": "default",
+              "subAttributes": [
+                {
+                  "caseExact": false,
+                  "multiValued": false,
+                  "mutability": "readOnly",
+                  "name": "value",
+                  "required": false,
+                  "returned": "default",
+                  "type": "string",
+                  "uniqueness": "none"
+                },
+                {
+                  "caseExact": false,
+                  "multiValued": false,
+                  "mutability": "readOnly",
+                  "name": "$ref",
+                  "referenceTypes": [
+                    "Group"
+                  ],
+                  "required": false,
+                  "returned": "default",
+                  "type": "reference",
+                  "uniqueness": "none"
+                },
+                {
+                  "caseExact": false,
+                  "multiValued": false,
+                  "mutability": "readOnly",
+                  "name": "display",
+                  "required": false,
+                  "returned": "default",
+                  "type": "string",
+                  "uniqueness": "none"
+                }
+              ],
+              "type": "complex",
+              "uniqueness": "none"
+            }
+          ],
+          "description": "SqlOS SCIM user",
+          "id": "urn:ietf:params:scim:schemas:core:2.0:User",
+          "meta": {
+            "location": "/scim/v2/Schemas/urn%3Aietf%3Aparams%3Ascim%3Aschemas%3Acore%3A2.0%3AUser",
+            "resourceType": "Schema"
+          },
+          "name": "User",
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:Schema"
+          ]
+        },
+        {
+          "attributes": [
+            {
+              "caseExact": false,
+              "multiValued": false,
+              "mutability": "readWrite",
+              "name": "displayName",
+              "required": true,
+              "returned": "default",
+              "type": "string",
+              "uniqueness": "server"
+            },
+            {
+              "caseExact": true,
+              "multiValued": false,
+              "mutability": "readWrite",
+              "name": "externalId",
+              "required": false,
+              "returned": "default",
+              "type": "string",
+              "uniqueness": "none"
+            },
+            {
+              "caseExact": false,
+              "multiValued": true,
+              "mutability": "readWrite",
+              "name": "members",
+              "required": false,
+              "returned": "default",
+              "subAttributes": [
+                {
+                  "caseExact": false,
+                  "multiValued": false,
+                  "mutability": "immutable",
+                  "name": "value",
+                  "required": false,
+                  "returned": "default",
+                  "type": "string",
+                  "uniqueness": "none"
+                },
+                {
+                  "caseExact": false,
+                  "multiValued": false,
+                  "mutability": "immutable",
+                  "name": "$ref",
+                  "referenceTypes": [
+                    "User"
+                  ],
+                  "required": false,
+                  "returned": "default",
+                  "type": "reference",
+                  "uniqueness": "none"
+                },
+                {
+                  "caseExact": false,
+                  "multiValued": false,
+                  "mutability": "readOnly",
+                  "name": "display",
+                  "required": false,
+                  "returned": "default",
+                  "type": "string",
+                  "uniqueness": "none"
+                }
+              ],
+              "type": "complex",
+              "uniqueness": "none"
+            }
+          ],
+          "description": "SqlOS SCIM group",
+          "id": "urn:ietf:params:scim:schemas:core:2.0:Group",
+          "meta": {
+            "location": "/scim/v2/Schemas/urn%3Aietf%3Aparams%3Ascim%3Aschemas%3Acore%3A2.0%3AGroup",
+            "resourceType": "Schema"
+          },
+          "name": "Group",
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:Schema"
+          ]
+        }
+      ],
+      "itemsPerPage": 2,
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+      ],
+      "startIndex": 1,
+      "totalResults": 2
+    }
+
+## 7. directory: the core User schema
+> GET /scim/v2/Schemas/urn:ietf:params:scim:schemas:core:2.0:User
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Location: /scim/v2/Schemas/urn%3Aietf%3Aparams%3Ascim%3Aschemas%3Acore%3A2.0%3AUser
+< Content-Type: application/scim+json
+    {
+      "attributes": [
+        {
+          "caseExact": false,
+          "multiValued": false,
+          "mutability": "readWrite",
+          "name": "userName",
+          "required": true,
+          "returned": "default",
+          "type": "string",
+          "uniqueness": "server"
+        },
+        {
+          "caseExact": true,
+          "multiValued": false,
+          "mutability": "readWrite",
+          "name": "externalId",
+          "required": false,
+          "returned": "default",
+          "type": "string",
+          "uniqueness": "none"
+        },
+        {
+          "caseExact": false,
+          "multiValued": false,
+          "mutability": "readWrite",
+          "name": "displayName",
+          "required": false,
+          "returned": "default",
+          "type": "string",
+          "uniqueness": "none"
+        },
+        {
+          "caseExact": false,
+          "multiValued": false,
+          "mutability": "readWrite",
+          "name": "active",
+          "required": false,
+          "returned": "default",
+          "type": "boolean",
+          "uniqueness": "none"
+        },
+        {
+          "caseExact": false,
+          "multiValued": false,
+          "mutability": "readWrite",
+          "name": "name",
+          "required": false,
+          "returned": "default",
+          "subAttributes": [
+            {
+              "caseExact": false,
+              "multiValued": false,
+              "mutability": "readWrite",
+              "name": "formatted",
+              "required": false,
+              "returned": "default",
+              "type": "string",
+              "uniqueness": "none"
+            },
+            {
+              "caseExact": false,
+              "multiValued": false,
+              "mutability": "readWrite",
+              "name": "givenName",
+              "required": false,
+              "returned": "default",
+              "type": "string",
+              "uniqueness": "none"
+            },
+            {
+              "caseExact": false,
+              "multiValued": false,
+              "mutability": "readWrite",
+              "name": "familyName",
+              "required": false,
+              "returned": "default",
+              "type": "string",
+              "uniqueness": "none"
+            }
+          ],
+          "type": "complex",
+          "uniqueness": "none"
+        },
+        {
+          "caseExact": false,
+          "multiValued": true,
+          "mutability": "readWrite",
+          "name": "emails",
+          "required": false,
+          "returned": "default",
+          "subAttributes": [
+            {
+              "caseExact": false,
+              "multiValued": false,
+              "mutability": "readWrite",
+              "name": "value",
+              "required": false,
+              "returned": "default",
+              "type": "string",
+              "uniqueness": "none"
+            },
+            {
+              "caseExact": false,
+              "multiValued": false,
+              "mutability": "readWrite",
+              "name": "type",
+              "required": false,
+              "returned": "default",
+              "type": "string",
+              "uniqueness": "none"
+            },
+            {
+              "caseExact": false,
+              "multiValued": false,
+              "mutability": "readWrite",
+              "name": "primary",
+              "required": false,
+              "returned": "default",
+              "type": "boolean",
+              "uniqueness": "none"
+            }
+          ],
+          "type": "complex",
+          "uniqueness": "none"
+        },
+        {
+          "caseExact": false,
+          "multiValued": true,
+          "mutability": "readOnly",
+          "name": "groups",
+          "required": false,
+          "returned": "default",
+          "subAttributes": [
+            {
+              "caseExact": false,
+              "multiValued": false,
+              "mutability": "readOnly",
+              "name": "value",
+              "required": false,
+              "returned": "default",
+              "type": "string",
+              "uniqueness": "none"
+            },
+            {
+              "caseExact": false,
+              "multiValued": false,
+              "mutability": "readOnly",
+              "name": "$ref",
+              "referenceTypes": [
+                "Group"
+              ],
+              "required": false,
+              "returned": "default",
+              "type": "reference",
+              "uniqueness": "none"
+            },
+            {
+              "caseExact": false,
+              "multiValued": false,
+              "mutability": "readOnly",
+              "name": "display",
+              "required": false,
+              "returned": "default",
+              "type": "string",
+              "uniqueness": "none"
+            }
+          ],
+          "type": "complex",
+          "uniqueness": "none"
+        }
+      ],
+      "description": "SqlOS SCIM user",
+      "id": "urn:ietf:params:scim:schemas:core:2.0:User",
+      "meta": {
+        "location": "/scim/v2/Schemas/urn%3Aietf%3Aparams%3Ascim%3Aschemas%3Acore%3A2.0%3AUser",
+        "resourceType": "Schema"
+      },
+      "name": "User",
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:Schema"
+      ]
+    }
+
+## 8. directory: the core Group schema
+> GET /scim/v2/Schemas/urn:ietf:params:scim:schemas:core:2.0:Group
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Location: /scim/v2/Schemas/urn%3Aietf%3Aparams%3Ascim%3Aschemas%3Acore%3A2.0%3AGroup
+< Content-Type: application/scim+json
+    {
+      "attributes": [
+        {
+          "caseExact": false,
+          "multiValued": false,
+          "mutability": "readWrite",
+          "name": "displayName",
+          "required": true,
+          "returned": "default",
+          "type": "string",
+          "uniqueness": "server"
+        },
+        {
+          "caseExact": true,
+          "multiValued": false,
+          "mutability": "readWrite",
+          "name": "externalId",
+          "required": false,
+          "returned": "default",
+          "type": "string",
+          "uniqueness": "none"
+        },
+        {
+          "caseExact": false,
+          "multiValued": true,
+          "mutability": "readWrite",
+          "name": "members",
+          "required": false,
+          "returned": "default",
+          "subAttributes": [
+            {
+              "caseExact": false,
+              "multiValued": false,
+              "mutability": "immutable",
+              "name": "value",
+              "required": false,
+              "returned": "default",
+              "type": "string",
+              "uniqueness": "none"
+            },
+            {
+              "caseExact": false,
+              "multiValued": false,
+              "mutability": "immutable",
+              "name": "$ref",
+              "referenceTypes": [
+                "User"
+              ],
+              "required": false,
+              "returned": "default",
+              "type": "reference",
+              "uniqueness": "none"
+            },
+            {
+              "caseExact": false,
+              "multiValued": false,
+              "mutability": "readOnly",
+              "name": "display",
+              "required": false,
+              "returned": "default",
+              "type": "string",
+              "uniqueness": "none"
+            }
+          ],
+          "type": "complex",
+          "uniqueness": "none"
+        }
+      ],
+      "description": "SqlOS SCIM group",
+      "id": "urn:ietf:params:scim:schemas:core:2.0:Group",
+      "meta": {
+        "location": "/scim/v2/Schemas/urn%3Aietf%3Aparams%3Ascim%3Aschemas%3Acore%3A2.0%3AGroup",
+        "resourceType": "Schema"
+      },
+      "name": "Group",
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:Schema"
+      ]
+    }
+
+## 9. directory: the enterprise user extension is not offered
+> GET /scim/v2/Schemas/urn:ietf:params:scim:schemas:extension:enterprise:2.0:User
+> Authorization: Bearer {scim-token#1}
+< 404 Not Found
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM schema not found.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "status": "404"
+    }
+
+## 10. operator: dashboard: the connection records when its token was last used
+> GET /sqlos/admin/auth/api/scim-connections/{scim#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "baseUrl": "/scim/v2",
+      "createdAt": "{datetime:unspecified}",
+      "displayName": "Directory",
+      "grantBoundary": {
+        "resourceId": null,
+        "resourceName": null,
+        "resourceTypeId": null,
+        "status": "missing"
+      },
+      "grantBoundaryResourceId": null,
+      "groupsUrl": "/scim/v2/Groups",
+      "id": "{scim#1}",
+      "isEnabled": true,
+      "lastSyncAt": null,
+      "organizationId": "{org#1}",
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "seedKey": null,
+      "source": "dashboard",
+      "tokenLastUsedAt": "{datetime:unspecified}",
+      "tokenPrefix": "{token-prefix#1}",
+      "tokenRotatedAt": "{datetime:unspecified}",
+      "updatedAt": "{datetime:unspecified}",
+      "usersUrl": "/scim/v2/Users"
+    }
+
+## audit: discovery writes no audit events
+  (no new events)

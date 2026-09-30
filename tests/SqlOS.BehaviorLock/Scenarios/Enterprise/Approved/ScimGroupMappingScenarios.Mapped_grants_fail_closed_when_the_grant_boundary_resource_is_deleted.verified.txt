@@ -1,0 +1,252 @@
+# SqlOS behavior lock transcript
+scenario: ScimGroupMappingScenarios.Mapped_grants_fail_closed_when_the_grant_boundary_resource_is_deleted
+profile: enterprise-scim-path
+
+# The boundary was workspace::acme-temporary; the host application then deleted that resource.
+
+## 1. operator: dashboard: the boundary is reported as not found
+> GET /sqlos/admin/auth/api/scim-connections/{scim#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "baseUrl": "/scim/v2",
+      "createdAt": "{datetime:unspecified}",
+      "displayName": "Directory",
+      "grantBoundary": {
+        "resourceId": "workspace::acme-temporary",
+        "resourceName": null,
+        "resourceTypeId": null,
+        "status": "not_found"
+      },
+      "grantBoundaryResourceId": "workspace::acme-temporary",
+      "groupsUrl": "/scim/v2/Groups",
+      "id": "{scim#1}",
+      "isEnabled": true,
+      "lastSyncAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "seedKey": null,
+      "source": "dashboard",
+      "tokenLastUsedAt": "{datetime:unspecified}",
+      "tokenPrefix": "{token-prefix#1}",
+      "tokenRotatedAt": "{datetime:unspecified}",
+      "updatedAt": "{datetime:unspecified}",
+      "usersUrl": "/scim/v2/Users"
+    }
+
+## 2. operator: dashboard: the mapping reports the missing boundary
+> GET /sqlos/admin/auth/api/scim-connections/{scim#1}/mappings
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "activeGrantCount": 0,
+          "connectionId": "{scim#1}",
+          "createdAt": "{datetime:unspecified}",
+          "description": null,
+          "grantBoundaryStatus": "boundary_not_found",
+          "groupDisplayName": null,
+          "groupExternalId": null,
+          "groupPattern": "^Team-(?<team>[a-z]+)$",
+          "id": "{scmap:teams}",
+          "isEnabled": true,
+          "matchType": "pattern",
+          "resourceId": null,
+          "resourceIdTemplate": "workspace::acme-{team}",
+          "roleKey": "workspace_reader",
+          "source": "dashboard",
+          "sourceKey": null,
+          "updatedAt": "{datetime:unspecified}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 3. directory: push Team-projects: its resource exists, but no boundary can contain it
+> POST /scim/v2/Groups
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "displayName": "Team-projects",
+>     "externalId": "directory-team-projects",
+>     "members": [
+>       {
+>         "value": "{usr:ann}"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:Group"
+>     ]
+>   }
+< 201 Created
+< Content-Location: /scim/v2/Groups/{grp#1}
+< Content-Type: application/scim+json
+< Location: /scim/v2/Groups/{grp#1}
+    {
+      "displayName": "Team-projects",
+      "externalId": "directory-team-projects",
+      "id": "{grp#1}",
+      "members": [
+        {
+          "$ref": "/scim/v2/Users/{usr:ann}",
+          "display": "Ann Archer",
+          "value": "{usr:ann}"
+        }
+      ],
+      "meta": {
+        "created": "{datetime:utc-z}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Groups/{grp#1}",
+        "resourceType": "Group"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:Group"
+      ]
+    }
+
+## audit: boundary_missing
+  - {
+      "action": "scim.group.member_added",
+      "actor": {
+        "displayName": null,
+        "id": "directory-team-projects",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.member_added",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-team-projects",
+        "payload": {
+          "groupId": "{grp#1}",
+          "memberCount": 1,
+          "subjectIds": [
+            "{subj#1}"
+          ],
+          "truncated": false
+        },
+        "resourceId": "{grp#1}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp#1}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.grant.boundary_missing",
+      "actor": {
+        "displayName": null,
+        "id": "directory-team-projects",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.grant.boundary_missing",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-team-projects",
+        "payload": {
+          "grantBoundaryResourceId": "workspace::acme-temporary",
+          "mappingId": "{scmap:teams}",
+          "reason": "boundary_resource_not_found",
+          "resourceId": "workspace::acme-projects",
+          "roleKey": "workspace_reader"
+        },
+        "resourceId": "{grp#1}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp#1}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.created",
+      "actor": {
+        "displayName": null,
+        "id": "directory-team-projects",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.created",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-team-projects",
+        "payload": {
+          "displayName": "Team-projects",
+          "externalId": "directory-team-projects",
+          "members": [
+            {
+              "value": "{usr:ann}"
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:Group"
+          ]
+        },
+        "resourceId": "{grp#1}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp#1}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }

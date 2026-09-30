@@ -1,0 +1,313 @@
+# SqlOS behavior lock transcript
+scenario: ScimDiscoveryScenarios.Requests_without_a_live_connection_bearer_token_are_refused
+profile: enterprise-scim-path
+
+## 1. directory: no Authorization header
+> GET /scim/v2/ServiceProviderConfig
+< 401 Unauthorized
+< Content-Type: application/scim+json
+< WWW-Authenticate: Bearer realm="SqlOS SCIM"
+    {
+      "detail": "SCIM bearer token is required.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "status": "401"
+    }
+
+## 2. directory: a Basic credential instead of a bearer token
+> GET /scim/v2/ServiceProviderConfig
+> Authorization: Basic {credentials#1}
+< 401 Unauthorized
+< Content-Type: application/scim+json
+< WWW-Authenticate: Bearer realm="SqlOS SCIM"
+    {
+      "detail": "SCIM bearer token is required.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "status": "401"
+    }
+
+## 3. directory: a token this host never issued
+> GET /scim/v2/ServiceProviderConfig
+> Authorization: Bearer scim_not-a-token-this-host-issued
+< 401 Unauthorized
+< Content-Type: application/scim+json
+< WWW-Authenticate: Bearer realm="SqlOS SCIM"
+    {
+      "detail": "Invalid SCIM bearer token.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "status": "401"
+    }
+
+## 4. operator: the operator rotates Acme's token
+> POST /sqlos/admin/auth/api/scim-connections/{scim#1}/token/rotate
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "connectionId": "{scim#1}",
+      "token": "{scim-token#1}",
+      "tokenPrefix": "{token-prefix#1}",
+      "tokenRotatedAt": "{datetime:utc-z}"
+    }
+
+## 5. directory: the token issued before the rotation
+> GET /scim/v2/Users
+> Authorization: Bearer {scim-token#2}
+< 401 Unauthorized
+< Content-Type: application/scim+json
+< WWW-Authenticate: Bearer realm="SqlOS SCIM"
+    {
+      "detail": "Invalid SCIM bearer token.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "status": "401"
+    }
+
+## 6. directory: the rotated token
+> GET /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "Resources": [],
+      "itemsPerPage": 0,
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+      ],
+      "startIndex": 1,
+      "totalResults": 0
+    }
+
+## 7. operator: the operator disables Acme's connection
+> POST /sqlos/admin/auth/api/scim-connections/{scim#1}/disable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "displayName": "Directory",
+      "grantBoundaryResourceId": null,
+      "id": "{scim#1}",
+      "isEnabled": false,
+      "lastSyncAt": null,
+      "organizationId": "{org#1}",
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "seedKey": null,
+      "source": "dashboard",
+      "tokenLastUsedAt": "{datetime:unspecified}",
+      "tokenPrefix": "{token-prefix#1}",
+      "tokenRotatedAt": "{datetime:unspecified}",
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 8. directory: a disabled connection's token
+> GET /scim/v2/ServiceProviderConfig
+> Authorization: Bearer {scim-token#1}
+< 401 Unauthorized
+< Content-Type: application/scim+json
+< WWW-Authenticate: Bearer realm="SqlOS SCIM"
+    {
+      "detail": "Invalid SCIM bearer token.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "status": "401"
+    }
+
+## 9. directory: Globex's token while Globex is active
+> GET /scim/v2/ServiceProviderConfig
+> Authorization: Bearer {scim-token#3}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "authenticationSchemes": [
+        {
+          "description": "Opaque bearer token scoped to one SqlOS organization and directory connection.",
+          "name": "Bearer Token",
+          "primary": true,
+          "type": "oauthbearertoken"
+        }
+      ],
+      "bulk": {
+        "maxOperations": 0,
+        "maxPayloadSize": 0,
+        "supported": false
+      },
+      "changePassword": {
+        "supported": false
+      },
+      "documentationUri": "https://sqlos.dev/docs/authserver/scim-directory-sync",
+      "etag": {
+        "supported": false
+      },
+      "filter": {
+        "maxResults": 200,
+        "supported": true
+      },
+      "meta": {
+        "location": "/scim/v2/ServiceProviderConfig"
+      },
+      "patch": {
+        "supported": true
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"
+      ],
+      "sort": {
+        "supported": false
+      }
+    }
+
+## 10. operator: the operator deactivates Globex
+> PUT /sqlos/admin/auth/api/organizations/{org#2}
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "isActive": false,
+>     "name": "Globex",
+>     "slug": "{slug:globex}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "id": "{org#2}",
+      "isActive": false,
+      "name": "Globex",
+      "primaryDomain": null,
+      "slug": "{slug:globex}"
+    }
+
+## 11. directory: a deactivated organization's token
+> GET /scim/v2/ServiceProviderConfig
+> Authorization: Bearer {scim-token#3}
+< 401 Unauthorized
+< Content-Type: application/scim+json
+< WWW-Authenticate: Bearer realm="SqlOS SCIM"
+    {
+      "detail": "Invalid SCIM bearer token.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "status": "401"
+    }
+
+## audit: token rotation, disablement, and deactivation events
+  - {
+      "action": "scim.token.rotated",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "scim.token.rotated",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "TokenPrefix": "[redacted]"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.connection.disabled",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "scim.connection.disabled",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "sso.portal.sessions.revoked",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "sso.portal.sessions.revoked",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "reason": "organization_deactivated",
+        "revokedSessions": 0
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#2}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

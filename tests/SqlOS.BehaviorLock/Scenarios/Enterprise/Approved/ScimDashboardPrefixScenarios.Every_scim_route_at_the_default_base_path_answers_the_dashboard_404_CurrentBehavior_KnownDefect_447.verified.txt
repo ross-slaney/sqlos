@@ -1,0 +1,240 @@
+# SqlOS behavior lock transcript
+scenario: ScimDashboardPrefixScenarios.Every_scim_route_at_the_default_base_path_answers_the_dashboard_404_CurrentBehavior_KnownDefect_447
+profile: enterprise
+
+# Every request carries the connection's valid bearer token; none of them reaches SCIM.
+
+## 1. directory: service provider configuration
+> GET /sqlos/scim/v2/ServiceProviderConfig
+> Authorization: Bearer {scim-token#1}
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 2. directory: resource types
+> GET /sqlos/scim/v2/ResourceTypes
+> Authorization: Bearer {scim-token#1}
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 3. directory: the User resource type
+> GET /sqlos/scim/v2/ResourceTypes/User
+> Authorization: Bearer {scim-token#1}
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 4. directory: schemas
+> GET /sqlos/scim/v2/Schemas
+> Authorization: Bearer {scim-token#1}
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 5. directory: the core User schema
+> GET /sqlos/scim/v2/Schemas/urn:ietf:params:scim:schemas:core:2.0:User
+> Authorization: Bearer {scim-token#1}
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 6. directory: list users
+> GET /sqlos/scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 7. directory: create a user
+> POST /sqlos/scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "emails": [
+>       {
+>         "primary": true,
+>         "type": "work",
+>         "value": "{email:judy}"
+>       }
+>     ],
+>     "externalId": "directory-judy",
+>     "name": {
+>       "familyName": "Hopps",
+>       "givenName": "Judy"
+>     },
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:judy}"
+>   }
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 8. directory: read a user
+> GET /sqlos/scim/v2/Users/directory-user-id
+> Authorization: Bearer {scim-token#1}
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 9. directory: replace a user
+> PUT /sqlos/scim/v2/Users/directory-user-id
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "emails": [
+>       {
+>         "primary": true,
+>         "type": "work",
+>         "value": "{email:judy}"
+>       }
+>     ],
+>     "externalId": "directory-judy",
+>     "name": {
+>       "familyName": "Hopps",
+>       "givenName": "Judy"
+>     },
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:judy}"
+>   }
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 10. directory: patch a user
+> PATCH /sqlos/scim/v2/Users/directory-user-id
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy H."
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 11. directory: delete a user
+> DELETE /sqlos/scim/v2/Users/directory-user-id
+> Authorization: Bearer {scim-token#1}
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 12. directory: list groups
+> GET /sqlos/scim/v2/Groups
+> Authorization: Bearer {scim-token#1}
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 13. directory: create a group
+> POST /sqlos/scim/v2/Groups
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "displayName": "Engineering",
+>     "externalId": "directory-engineering",
+>     "members": [],
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:Group"
+>     ]
+>   }
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 14. directory: read a group
+> GET /sqlos/scim/v2/Groups/directory-group-id
+> Authorization: Bearer {scim-token#1}
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 15. directory: replace a group
+> PUT /sqlos/scim/v2/Groups/directory-group-id
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "displayName": "Engineering",
+>     "externalId": "directory-engineering",
+>     "members": [],
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:Group"
+>     ]
+>   }
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 16. directory: patch a group
+> PATCH /sqlos/scim/v2/Groups/directory-group-id
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Platform"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 17. directory: delete a group
+> DELETE /sqlos/scim/v2/Groups/directory-group-id
+> Authorization: Bearer {scim-token#1}
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 18. operator: dashboard: no directory traffic was recorded
+> GET /sqlos/admin/auth/api/scim-connections/{scim#1}/sync-events
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## audit: nothing reached SCIM, so nothing was audited
+  (no new events)

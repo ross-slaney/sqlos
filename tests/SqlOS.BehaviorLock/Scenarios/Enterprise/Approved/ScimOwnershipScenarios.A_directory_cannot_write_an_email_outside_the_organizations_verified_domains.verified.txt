@@ -1,0 +1,438 @@
+# SqlOS behavior lock transcript
+scenario: ScimOwnershipScenarios.A_directory_cannot_write_an_email_outside_the_organizations_verified_domains
+profile: enterprise-scim-path
+
+## 1. directory: provisioning an address at a domain Acme has not verified is rejected
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "emails": [
+>       {
+>         "primary": true,
+>         "type": "work",
+>         "value": "{email:victim}"
+>       }
+>     ],
+>     "externalId": "directory-victim",
+>     "name": {
+>       "familyName": "Tim",
+>       "givenName": "Vic"
+>     },
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:victim}"
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM email domain is not verified for this organization.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidValue",
+      "status": "400"
+    }
+
+## 2. directory: provisioning at Acme's verified domain works
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "emails": [
+>       {
+>         "primary": true,
+>         "type": "work",
+>         "value": "{email:judy}"
+>       }
+>     ],
+>     "externalId": "directory-judy",
+>     "name": {
+>       "familyName": "Hopps",
+>       "givenName": "Judy"
+>     },
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:judy}"
+>   }
+< 201 Created
+< Content-Location: /scim/v2/Users/{usr:judy}
+< Content-Type: application/scim+json
+< Location: /scim/v2/Users/{usr:judy}
+    {
+      "active": true,
+      "displayName": "Judy Hopps",
+      "emails": [
+        {
+          "primary": true,
+          "type": "work",
+          "value": "{email:judy}"
+        }
+      ],
+      "externalId": "directory-judy",
+      "groups": [],
+      "id": "{usr:judy}",
+      "meta": {
+        "created": "{datetime:utc-z}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Users/{usr:judy}",
+        "resourceType": "User"
+      },
+      "name": {
+        "familyName": "Hopps",
+        "formatted": "Judy Hopps",
+        "givenName": "Judy"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:judy}"
+    }
+
+## 3. directory: moving Judy's work email outside the domain is rejected
+> PATCH /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "emails[type eq \"work\"].value",
+>         "value": "{email:victim}"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM email domain is not verified for this organization.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidValue",
+      "status": "400"
+    }
+
+## 4. directory: so is a replace that carries the outside address
+> PUT /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "emails": [
+>       {
+>         "primary": true,
+>         "type": "work",
+>         "value": "{email:victim}"
+>       }
+>     ],
+>     "externalId": "directory-judy",
+>     "name": {
+>       "familyName": "Hopps",
+>       "givenName": "Judy"
+>     },
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:judy}"
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM email domain is not verified for this organization.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidValue",
+      "status": "400"
+    }
+
+## 5. directory: Judy keeps her verified address
+> GET /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Location: /scim/v2/Users/{usr:judy}
+< Content-Type: application/scim+json
+    {
+      "active": true,
+      "displayName": "Judy Hopps",
+      "emails": [
+        {
+          "primary": true,
+          "type": "work",
+          "value": "{email:judy}"
+        }
+      ],
+      "externalId": "directory-judy",
+      "groups": [],
+      "id": "{usr:judy}",
+      "meta": {
+        "created": "{datetime:unspecified}",
+        "lastModified": "{datetime:unspecified}",
+        "location": "/scim/v2/Users/{usr:judy}",
+        "resourceType": "User"
+      },
+      "name": {
+        "familyName": "Hopps",
+        "formatted": "Judy Hopps",
+        "givenName": "Judy"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:judy}"
+    }
+
+## 6. directory: a user with an email-shaped userName but no emails is created without any address
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "externalId": "directory-no-email",
+>     "name": {
+>       "familyName": "Email",
+>       "givenName": "No"
+>     },
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:victim}"
+>   }
+< 201 Created
+< Content-Location: /scim/v2/Users/{usr#1}
+< Content-Type: application/scim+json
+< Location: /scim/v2/Users/{usr#1}
+    {
+      "active": true,
+      "displayName": "No Email",
+      "emails": [],
+      "externalId": "directory-no-email",
+      "groups": [],
+      "id": "{usr#1}",
+      "meta": {
+        "created": "{datetime:utc-z}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Users/{usr#1}",
+        "resourceType": "User"
+      },
+      "name": {
+        "familyName": "Email",
+        "formatted": "No Email",
+        "givenName": "No"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:victim}"
+    }
+
+## 7. operator: dashboard: Judy's global account
+> GET /sqlos/admin/auth/api/users/{usr:judy}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "defaultEmail": "{email:judy}",
+      "displayName": "Judy Hopps",
+      "externalIdentityCount": 0,
+      "id": "{usr:judy}",
+      "isActive": true,
+      "membershipCount": 1,
+      "sessionCount": 0,
+      "updatedAt": "{datetime:unspecified}"
+    }
+
+## 8. operator: dashboard: rejected writes are recorded as failed sync events
+> GET /sqlos/admin/auth/api/scim-connections/{scim#1}/sync-events?pageSize=50
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "action": "scim.user.created",
+          "connectionId": "{scim#1}",
+          "dataJson": "{\"attributeNames\":[\"active\",\"externalId\",\"name\",\"schemas\",\"userName\"],\"operationCount\":null,\"sensitiveAttributesRedacted\":false}",
+          "error": null,
+          "externalId": "directory-no-email",
+          "id": "{scevt#1}",
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "resourceId": "{usr#1}",
+          "resourceType": "User",
+          "result": "success"
+        },
+        {
+          "action": "scim.user.rejected",
+          "connectionId": "{scim#1}",
+          "dataJson": "{\"reason\":\"untrusted_email_domain\",\"operation\":\"replace\"}",
+          "error": "SCIM email domain is not verified for this organization.",
+          "externalId": null,
+          "id": "{scevt#2}",
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "resourceId": "{usr:judy}",
+          "resourceType": "User",
+          "result": "failed"
+        },
+        {
+          "action": "scim.user.rejected",
+          "connectionId": "{scim#1}",
+          "dataJson": "{\"reason\":\"untrusted_email_domain\",\"operation\":\"patch\"}",
+          "error": "SCIM email domain is not verified for this organization.",
+          "externalId": null,
+          "id": "{scevt#3}",
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "resourceId": "{usr:judy}",
+          "resourceType": "User",
+          "result": "failed"
+        },
+        {
+          "action": "scim.user.created",
+          "connectionId": "{scim#1}",
+          "dataJson": "{\"attributeNames\":[\"active\",\"emails\",\"externalId\",\"name\",\"schemas\",\"userName\"],\"operationCount\":null,\"sensitiveAttributesRedacted\":false}",
+          "error": null,
+          "externalId": "directory-judy",
+          "id": "{scevt#4}",
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "resourceId": "{usr:judy}",
+          "resourceType": "User",
+          "result": "success"
+        },
+        {
+          "action": "scim.user.rejected",
+          "connectionId": "{scim#1}",
+          "dataJson": "{\"reason\":\"untrusted_email_domain\",\"operation\":\"create\"}",
+          "error": "SCIM email domain is not verified for this organization.",
+          "externalId": null,
+          "id": "{scevt#5}",
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "resourceId": null,
+          "resourceType": "User",
+          "result": "failed"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 50
+    }
+
+## audit: only the accepted writes are audited
+  - {
+      "action": "scim.user.created",
+      "actor": {
+        "displayName": null,
+        "id": "directory-judy",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.created",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-judy",
+        "payload": {
+          "active": true,
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:judy}"
+            }
+          ],
+          "externalId": "directory-judy",
+          "name": {
+            "familyName": "Hopps",
+            "givenName": "Judy"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:judy}"
+        },
+        "resourceId": "{usr:judy}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:judy}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.user.created",
+      "actor": {
+        "displayName": null,
+        "id": "directory-no-email",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.created",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-no-email",
+        "payload": {
+          "active": true,
+          "externalId": "directory-no-email",
+          "name": {
+            "familyName": "Email",
+            "givenName": "No"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:victim}"
+        },
+        "resourceId": "{usr#1}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr#1}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
