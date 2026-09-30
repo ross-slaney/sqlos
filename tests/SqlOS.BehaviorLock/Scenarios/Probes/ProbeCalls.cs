@@ -4,7 +4,7 @@ using SqlOS.BehaviorLock.Infrastructure.Transcripts;
 
 namespace SqlOS.BehaviorLock.Scenarios.Probes;
 
-/// <summary>Helpers for the library-probe scenarios.</summary>
+/// <summary>Helpers for the library-probe and dashboard scenarios.</summary>
 internal static class ProbeCalls
 {
     /// <summary>
@@ -21,10 +21,10 @@ internal static class ProbeCalls
     }
 
     /// <summary>
-    /// Records a call whose library API may fail with an exception the probe does not translate
-    /// (a database error, not a documented rejection). TestServer surfaces such a failure to the
-    /// caller instead of a response, as a server would answer it with a bare 500; the transcript
-    /// records the exception type, so a later change to a real response is still visible.
+    /// Records a request that may fail with an exception nothing translates into a response (a
+    /// database error from a library API, a JSON parse error in the dashboard middleware).
+    /// TestServer surfaces such a failure to the caller, where a server would answer a bare 500;
+    /// the transcript records the exception type, so a later change to a real response is visible.
     /// </summary>
     public static async Task ObserveOrUnhandledAsync(Transcript transcript, Func<Task<HttpExchange>> send, string caption)
     {
