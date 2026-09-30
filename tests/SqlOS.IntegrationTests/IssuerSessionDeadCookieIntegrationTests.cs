@@ -7,10 +7,13 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Contracts;
+using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
+using SqlOS.Email.Interfaces;
 using SqlOS.IntegrationTests.Infrastructure;
 
 namespace SqlOS.IntegrationTests;
@@ -275,6 +278,81 @@ public sealed class IssuerSessionDeadCookieIntegrationTests
         (await db.Set<SqlOSDeviceAuthorization>().AsNoTracking().SingleAsync(x => x.UserCode == userCode))
             .Status.Should().Be(SqlOSDeviceAuthorizationService.PendingStatus);
         (await db.Set<SqlOSIssuerSessionFamily>().CountAsync(x => x.RevokedAt == null)).Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task HostedEmailCode_ThatClaimsTheAccount_RevokesThePresentedCookieAndIssuesCodeInNewFamily()
+    {
+        // #423: proving the mailbox of an unverified account revokes every session attached before
+        // the proof, including the family of the cookie this browser presents. The same request
+        // must still sign in, in a new family.
+        var emails = new TestAuthEmailSender { IsConfigured = true };
+        await using var fixture = await HostedAuthorizeTokenFixture.CreateAsync(
+            "ClaimIssuerCookie",
+            configure: options => options.AuthServer.SeedAuthPage(page => page.EnabledCredentialTypes = ["password", "email_otp"]),
+            configureServices: services =>
+            {
+                services.RemoveAll<ISqlOSAuthEmailSender>();
+                services.AddSingleton<ISqlOSAuthEmailSender>(emails);
+                services.RemoveAll<ISqlOSEmailSender>();
+                services.AddSingleton<ISqlOSEmailSender>(emails);
+            });
+        // A second tab shows the sign-in page, then the first tab signs in with the password
+        // the user registered: the browser now presents a live cookie for the unverified account.
+        await fixture.SetClientAllowedScopesAsync("openid");
+        var started = await fixture.StartAuthorizeAsync("openid");
+        var liveCookie = await SignInAsync(fixture);
+        var liveFamily = await FamilyOfAsync(fixture, liveCookie);
+        liveFamily.RevokedAt.Should().BeNull();
+
+        using var start = await PostHostedFormAsync(
+            fixture,
+            "/sqlos/auth/login/email-otp/start",
+            new Dictionary<string, string>
+            {
+                ["requestId"] = started.RequestId,
+                ["email"] = fixture.Email
+            },
+            started.AntiforgeryToken,
+            started.AntiforgeryCookie,
+            liveCookie);
+        var verifyHtml = await start.Content.ReadAsStringAsync();
+        start.StatusCode.Should().Be(HttpStatusCode.OK, verifyHtml);
+        var message = emails.Messages.Last(x => string.Equals(x.To, fixture.Email, StringComparison.Ordinal));
+
+        using var verify = await PostHostedFormAsync(
+            fixture,
+            "/sqlos/auth/login/email-otp/verify",
+            new Dictionary<string, string>
+            {
+                ["requestId"] = started.RequestId,
+                ["email"] = fixture.Email,
+                ["challengeToken"] = ExtractInputValue(verifyHtml, "challengeToken"),
+                ["code"] = EmailOwnershipServer.ExtractCode(message)
+            },
+            ExtractInputValue(verifyHtml, "__RequestVerificationToken"),
+            started.AntiforgeryCookie,
+            liveCookie);
+        var code = await ReadCodeAsync(verify);
+        using var tokens = await fixture.ExchangeAuthorizationCodeAsync(code, started.CodeVerifier);
+        tokens.RootElement.GetProperty("access_token").GetString().Should().NotBeNullOrWhiteSpace();
+
+        var freshCookie = HostedAuthorizeTokenFixture.TryExtractCookie(verify, "sqlos_auth_page=");
+        freshCookie.Should().NotBeNullOrWhiteSpace();
+        freshCookie.Should().NotBe(liveCookie);
+        var freshFamily = await FamilyOfAsync(fixture, freshCookie!);
+        freshFamily.Id.Should().NotBe(liveFamily.Id);
+        freshFamily.RevokedAt.Should().BeNull();
+        var claimedFamily = await FindFamilyAsync(fixture, liveFamily.Id);
+        claimedFamily.RevokedAt.Should().NotBeNull();
+        claimedFamily.RevocationReason.Should().Be(SqlOSEmailOwnershipClaim.RevocationReason);
+
+        await using var scope = fixture.App.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<TestSqlOSDbContext>();
+        (await db.Set<SqlOSUserEmail>().AsNoTracking().SingleAsync(x => x.UserId == fixture.UserId))
+            .IsVerified.Should().BeTrue();
+        (await db.Set<SqlOSAuditEvent>().CountAsync(x => x.UserId == fixture.UserId
+            && x.EventType == SqlOSEmailOwnershipClaim.AuditEventType)).Should().Be(1);
     }
 
     private static Task<HostedAuthorizeTokenFixture> CreateFixtureAsync()

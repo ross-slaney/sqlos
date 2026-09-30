@@ -19,7 +19,16 @@ public sealed record SqlOSResendEmailInvitationRequest(string InvitationId);
 
 public sealed record SqlOSRevokeEmailInvitationRequest(string InvitationId, string? Reason = null);
 
-public sealed record SqlOSAcceptEmailInvitationRequest(string InvitationToken, string UserId);
+public sealed record SqlOSAcceptEmailInvitationRequest(string InvitationToken, string UserId)
+{
+    /// <summary>
+    /// How the user signed in to the flow that accepts the invitation (for example
+    /// <c>password</c>). When the invited address is still unverified, acceptance claims it and
+    /// revokes every credential attached before the claim except the one of this kind. Leave it
+    /// null when the user did not sign in with an existing credential of the account.
+    /// </summary>
+    public string? AuthenticationMethod { get; init; }
+}
 
 public sealed record SqlOSAcceptEmailInvitationSignupRequest(
     string InvitationToken,

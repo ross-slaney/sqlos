@@ -758,6 +758,17 @@ public sealed class SqlOSOidcAuthService
 
             user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == existingEmail.UserId, cancellationToken);
             await RequireActiveFederatedUserAsync(user, cancellationToken);
+
+            // A verified upstream email proves the mailbox. Linking to an address nobody has
+            // proven yet goes through the claim, which evicts everything attached before it
+            // (a squatter's password or an upstream identity that never verified the address).
+            await SqlOSEmailOwnershipClaim.ClaimAsync(
+                _context,
+                existingEmail,
+                "oidc",
+                SqlOSEmailClaimPresentation.None,
+                DateTime.UtcNow,
+                cancellationToken);
         }
 
         if (user == null)

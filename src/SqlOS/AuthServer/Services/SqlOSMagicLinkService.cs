@@ -161,11 +161,15 @@ public sealed class SqlOSMagicLinkService
             throw new InvalidOperationException(InvalidLinkMessage);
         }
 
-        if (!userEmail.IsVerified)
-        {
-            userEmail.IsVerified = true;
-            userEmail.VerifiedAt = DateTime.UtcNow;
-        }
+        // The link proved the mailbox. An unverified address is claimed: whatever was attached
+        // before the owner proved it is evicted in this same save.
+        await SqlOSEmailOwnershipClaim.ClaimAsync(
+            _context,
+            userEmail,
+            "magic_link",
+            SqlOSEmailClaimPresentation.None,
+            DateTime.UtcNow,
+            cancellationToken);
 
         user.UpdatedAt = DateTime.UtcNow;
         user.DefaultEmail = userEmail.Email;

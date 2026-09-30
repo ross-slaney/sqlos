@@ -134,6 +134,8 @@ SqlOS checks the limits before creating or sending a challenge and records audit
 
 When the typed address belongs to an account, SqlOS sends the code to the address stored on that account, not to the typed spelling, and binds the challenge to that stored email row. Verification fails if that row no longer carries the same address. Accounts are matched with SqlOS's [canonical email key](/docs/authserver/users-and-credentials#email-addresses-and-lookup-keys), so a look-alike address such as `bob@busineß.com` never selects `bob@business.com`. An address that is not a valid email is rejected with `Enter a valid email address.`
 
+Verifying a code for an account whose email is still unverified [claims](/docs/authserver/users-and-credentials#unverified-email-addresses-and-claims) the address: a password or other credential attached before it is revoked, so a user who signed up with a password and signs in with a code before verifying sets a new password with **Forgot password?**.
+
 ## Custom email content
 
 SqlOS creates the default `auth.email-otp` template automatically. Edit it in **Dashboard > Communications > Templates** to customize the subject, HTML, and text while keeping the same runtime variables.

@@ -948,8 +948,7 @@ public sealed class SqlOSSamlService
         SqlOSUser? pendingUser = null;
         SqlOSUserEmail? pendingEmail = null;
         SqlOSMembership? pendingMembership = null;
-        var emailWasVerified = existingEmail?.IsVerified ?? false;
-        var emailVerifiedAt = existingEmail?.VerifiedAt;
+        var claim = SqlOSEmailClaimOutcome.NotClaimed;
 
         if (existingEmail != null)
         {
@@ -976,26 +975,10 @@ public sealed class SqlOSSamlService
                 return null;
             }
 
-            if (membership == null)
+            if (membership == null && !connection.AutoProvisionUsers)
             {
-                if (!connection.AutoProvisionUsers)
-                {
-                    await RecordLinkDeniedAsync(connection.Id, organizationId, "auto_provision_disabled", cancellationToken);
-                    return null;
-                }
-
-                if (!existingEmail.IsVerified)
-                {
-                    existingEmail.IsVerified = true;
-                    existingEmail.VerifiedAt = DateTime.UtcNow;
-                }
-
-                pendingMembership = await EnsureMembershipAsync(organizationId, user.Id, cancellationToken);
-            }
-            else if (!existingEmail.IsVerified)
-            {
-                existingEmail.IsVerified = true;
-                existingEmail.VerifiedAt = DateTime.UtcNow;
+                await RecordLinkDeniedAsync(connection.Id, organizationId, "auto_provision_disabled", cancellationToken);
+                return null;
             }
 
             var existingBinding = await _context.Set<SqlOSExternalIdentity>()
@@ -1004,9 +987,23 @@ public sealed class SqlOSSamlService
                     cancellationToken);
             if (existingBinding != null)
             {
-                RestoreEmailVerification(existingEmail, emailWasVerified, emailVerifiedAt);
                 await RecordLinkDeniedAsync(connection.Id, organizationId, "connection_already_linked", cancellationToken);
                 return null;
+            }
+
+            // The assertion from an organization that owns the email's domain proves the mailbox.
+            // Linking to an address nobody has proven yet goes through the claim, which evicts
+            // everything attached before it; a verified address is linked as-is.
+            claim = await SqlOSEmailOwnershipClaim.ClaimAsync(
+                _context,
+                existingEmail,
+                "saml",
+                SqlOSEmailClaimPresentation.None,
+                DateTime.UtcNow,
+                cancellationToken);
+            if (membership == null)
+            {
+                pendingMembership = await EnsureMembershipAsync(organizationId, user.Id, cancellationToken);
             }
         }
         else if (connection.AutoProvisionUsers)
@@ -1071,14 +1068,11 @@ public sealed class SqlOSSamlService
         }
         catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
         {
+            claim.Revert(_context);
             DetachAdded(pendingIdentity);
             DetachAdded(pendingUser);
             DetachAdded(pendingEmail);
             DetachAdded(pendingMembership);
-            if (existingEmail != null)
-            {
-                RestoreEmailVerification(existingEmail, emailWasVerified, emailVerifiedAt);
-            }
 
             var recovered = await TryResolveBoundSubjectAsync(
                 connection.Id,
@@ -1147,12 +1141,6 @@ public sealed class SqlOSSamlService
         {
             entry.State = EntityState.Detached;
         }
-    }
-
-    private static void RestoreEmailVerification(SqlOSUserEmail email, bool wasVerified, DateTime? verifiedAt)
-    {
-        email.IsVerified = wasVerified;
-        email.VerifiedAt = verifiedAt;
     }
 
     private async Task<SqlOSMembership?> FindMembershipAsync(

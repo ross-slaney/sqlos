@@ -98,6 +98,8 @@ Email and `email_verified` are resolved as one provenance-bound pair:
 - otherwise the signed ID-token email and its ID-token verification claim are used together;
 - a verification flag from one response can never validate an email from another response;
 - automatic linking to an existing SqlOS account requires that same authenticated claim set to mark the email as verified.
+- when the existing account's email is still unverified, the verified login [claims](/docs/authserver/users-and-credentials#unverified-email-addresses-and-claims) it: credentials and identities attached before the claim, such as a pre-registered password or an upstream identity that never verified the address, are revoked in the same transaction.
+- a login whose email is not verified never links to an existing account. It may provision a new account whose email stays unverified until a verified sign-in claims it.
 
 The provider callback is not an identity-claim source. Callback parameters cannot replace `sub`, email, or email verification. Apple's first-authorization `user` object is the only callback profile hint SqlOS reads, and only its bounded, sanitized first and last names may contribute to the display name.
 

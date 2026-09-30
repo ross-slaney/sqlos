@@ -452,12 +452,20 @@ public sealed class SqlOSEmailOtpService
             throw new InvalidOperationException("The sign-in code is invalid or expired.");
         }
 
-        challenge.ConsumedAt = DateTime.UtcNow;
+        var now = DateTime.UtcNow;
+        challenge.ConsumedAt = now;
 
-        if (challenge.UserEmail != null && !challenge.UserEmail.IsVerified)
+        if (challenge.UserEmail != null && challenge.User is { IsActive: true })
         {
-            challenge.UserEmail.IsVerified = true;
-            challenge.UserEmail.VerifiedAt = DateTime.UtcNow;
+            // The code proved the mailbox. An unverified address is claimed: whatever was
+            // attached before the owner proved it is evicted in this same save.
+            await SqlOSEmailOwnershipClaim.ClaimAsync(
+                _context,
+                challenge.UserEmail,
+                "email_otp",
+                SqlOSEmailClaimPresentation.None,
+                now,
+                cancellationToken);
         }
 
         if (challenge.User != null)

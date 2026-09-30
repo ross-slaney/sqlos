@@ -238,13 +238,15 @@ internal static class SqlOSAuthLifecyclePolicy
 
         var phoneOtpChallenges = await phoneOtpChallengesQuery.ToListAsync(cancellationToken);
 
-        foreach (var session in sessions)
+        // Entities already consumed or revoked in memory by the caller's unit of work (for
+        // example the sign-in code being redeemed right now) keep the state the caller staged.
+        foreach (var session in sessions.Where(x => x.RevokedAt == null))
         {
             session.RevokedAt = now;
             session.RevocationReason = reason;
         }
 
-        foreach (var refreshToken in refreshTokens)
+        foreach (var refreshToken in refreshTokens.Where(x => x.RevokedAt == null))
         {
             refreshToken.RevokedAt = now;
             refreshToken.ReplacementTokenResponse = null;
@@ -252,35 +254,36 @@ internal static class SqlOSAuthLifecyclePolicy
             refreshToken.ReplacementAccessTokenExpiresAt = null;
         }
 
-        foreach (var temporaryToken in temporaryTokens)
+        foreach (var temporaryToken in temporaryTokens.Where(x => x.ConsumedAt == null))
         {
             temporaryToken.ConsumedAt = now;
         }
 
-        foreach (var family in issuerSessionFamilies)
+        foreach (var family in issuerSessionFamilies.Where(x => x.RevokedAt == null))
         {
             family.RevokedAt = now;
             family.RevocationReason = reason;
         }
 
-        foreach (var authorizationCode in authorizationCodes)
+        foreach (var authorizationCode in authorizationCodes.Where(x => x.ConsumedAt == null))
         {
             authorizationCode.ConsumedAt = now;
         }
 
-        foreach (var deviceAuthorization in deviceAuthorizations)
+        foreach (var deviceAuthorization in deviceAuthorizations.Where(x => x.ConsumedAt == null
+            && x.Status == SqlOSDeviceAuthorizationService.ApprovedStatus))
         {
             deviceAuthorization.Status = SqlOSDeviceAuthorizationService.DeniedStatus;
             deviceAuthorization.DeniedAt = now;
         }
 
-        foreach (var emailOtpChallenge in emailOtpChallenges)
+        foreach (var emailOtpChallenge in emailOtpChallenges.Where(x => x.ConsumedAt == null && x.InvalidatedAt == null))
         {
             emailOtpChallenge.InvalidatedAt = now;
             emailOtpChallenge.InvalidatedReason = reason;
         }
 
-        foreach (var phoneOtpChallenge in phoneOtpChallenges)
+        foreach (var phoneOtpChallenge in phoneOtpChallenges.Where(x => x.ConsumedAt == null && x.InvalidatedAt == null))
         {
             phoneOtpChallenge.InvalidatedAt = now;
             phoneOtpChallenge.InvalidatedReason = reason;

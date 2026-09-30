@@ -194,7 +194,7 @@ public static partial class EndpointRouteBuilderExtensions
                     if (!string.IsNullOrWhiteSpace(invitationToken))
                     {
                         var acceptance = await invitationService.AcceptEmailInvitationInCurrentTransactionAsync(
-                            new SqlOSAcceptEmailInvitationRequest(invitationToken, signup.User.Id),
+                            new SqlOSAcceptEmailInvitationRequest(invitationToken, signup.User.Id) { AuthenticationMethod = signup.AuthenticationMethod },
                             context,
                             cancellationToken);
                         organizationId = acceptance.OrganizationId;
@@ -318,7 +318,7 @@ public static partial class EndpointRouteBuilderExtensions
                 if (authorizationRequest == null)
                 {
                     var acceptance = await invitationService.AcceptEmailInvitationInCurrentTransactionAsync(
-                        new SqlOSAcceptEmailInvitationRequest(invitationToken!, signup.User.Id),
+                        new SqlOSAcceptEmailInvitationRequest(invitationToken!, signup.User.Id) { AuthenticationMethod = signup.AuthenticationMethod },
                         context,
                         cancellationToken);
 
@@ -514,7 +514,7 @@ public static partial class EndpointRouteBuilderExtensions
                     if (!string.IsNullOrWhiteSpace(invitationToken))
                     {
                         var acceptance = await invitationService.AcceptEmailInvitationInCurrentTransactionAsync(
-                            new SqlOSAcceptEmailInvitationRequest(invitationToken, signup.User.Id),
+                            new SqlOSAcceptEmailInvitationRequest(invitationToken, signup.User.Id) { AuthenticationMethod = signup.AuthenticationMethod },
                             context,
                             cancellationToken);
                         organizationId = acceptance.OrganizationId;
