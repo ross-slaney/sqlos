@@ -1,0 +1,204 @@
+# SqlOS behavior lock transcript
+scenario: HeadlessDeviceScenarios.{token#1}
+profile: headless
+
+# Known defect #325: times read back from the database serialize without Z ({datetime:unspecified}), so browsers read UTC as local time.
+
+## 1. browser: the device view's deviceAuthorization.expiresAt
+> POST /sqlos/auth/headless/device/resolve
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "userCode": "{user-code#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "authBasePath": "/sqlos/auth",
+      "challengeToken": null,
+      "clientId": "lock-cli",
+      "clientName": "Lock CLI",
+      "consentScopes": null,
+      "consentToken": null,
+      "deviceAuthorization": {
+        "clientId": "lock-cli",
+        "clientName": "Lock CLI",
+        "expiresAt": "{datetime:unspecified}",
+        "resource": null,
+        "scope": "openid profile offline_access",
+        "status": "pending",
+        "userCode": "{user-code#1}"
+      },
+      "displayName": null,
+      "email": null,
+      "error": null,
+      "fieldErrors": {},
+      "headlessApiBasePath": "/sqlos/auth/headless",
+      "info": null,
+      "invitation": null,
+      "mfaMethods": null,
+      "mfaToken": null,
+      "omittedOpenId": false,
+      "organizationSelection": [],
+      "pendingToken": null,
+      "phoneNumber": null,
+      "providers": [
+        {
+          "connectionId": "{oidc#1}",
+          "displayName": "Example OIDC",
+          "logoDataUrl": null,
+          "providerType": "Custom"
+        },
+        {
+          "connectionId": "{oidc#2}",
+          "displayName": "Google",
+          "logoDataUrl": "{data-uri:image/svg+xml}",
+          "providerType": "Google"
+        }
+      ],
+      "requestId": null,
+      "requiresMfaEnrollment": false,
+      "scope": "openid profile offline_access",
+      "settings": {
+        "accentColor": "#0f172a",
+        "backgroundColor": "#f8fafc",
+        "emailOtpRuntimeConfigured": true,
+        "enablePasswordSignup": true,
+        "enabledCredentialTypes": [
+          "password",
+          "email_otp",
+          "magic_link",
+          "phone_otp"
+        ],
+        "headlessCapabilityRegistered": true,
+        "layout": "split",
+        "localPasswordRuntimeEnabled": true,
+        "logoBase64": null,
+        "magicLinkRuntimeConfigured": true,
+        "managedByStartupSeed": true,
+        "ownership": {
+          "canEmergencyDisable": false,
+          "configurationFingerprint": "{hex#1}",
+          "isEditable": false,
+          "isOrphaned": false,
+          "lastReconciledAt": "{datetime:unspecified}",
+          "owner": "code",
+          "sourceKey": "auth-page:default"
+        },
+        "pageSubtitle": "Secure your app-owned AI and MCP experiences with SqlOS.",
+        "pageTitle": "Sign in to Behavior Lock",
+        "phoneOtpRuntimeConfigured": true,
+        "primaryColor": "#2563eb",
+        "updatedAt": "{datetime:unspecified}"
+      },
+      "signupToken": null,
+      "totpEnrollment": null,
+      "uiContext": {
+        "deviceUserCode": "{user-code#1}"
+      },
+      "view": "device"
+    }
+
+## 2. browser: the invite view's invitation.createdAt and expiresAt
+> POST /sqlos/auth/headless/invitations/resolve
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "invitationToken": "{invitation-token#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "authBasePath": "/sqlos/auth",
+      "challengeToken": null,
+      "clientId": null,
+      "clientName": null,
+      "consentScopes": null,
+      "consentToken": null,
+      "deviceAuthorization": null,
+      "displayName": null,
+      "email": "{email:erin}",
+      "error": null,
+      "fieldErrors": {},
+      "headlessApiBasePath": "/sqlos/auth/headless",
+      "info": null,
+      "invitation": {
+        "acceptedAt": null,
+        "acceptedByUserId": null,
+        "createdAt": "{datetime:unspecified}",
+        "customFields": null,
+        "email": "{email:erin}",
+        "expiresAt": "{datetime:unspecified}",
+        "id": "{inv#1}",
+        "inviteUrl": "https://sqlos.example.test/sqlos/auth/invitations/accept?token={invitation-token#1}",
+        "lastSendError": null,
+        "lastSentAt": "{datetime:unspecified}",
+        "organizationId": "{org#1}",
+        "organizationName": "Acme",
+        "revokedAt": null,
+        "revokedReason": null,
+        "role": "member",
+        "status": "pending"
+      },
+      "mfaMethods": null,
+      "mfaToken": null,
+      "omittedOpenId": false,
+      "organizationSelection": [],
+      "pendingToken": null,
+      "phoneNumber": null,
+      "providers": [
+        {
+          "connectionId": "{oidc#1}",
+          "displayName": "Example OIDC",
+          "logoDataUrl": null,
+          "providerType": "Custom"
+        },
+        {
+          "connectionId": "{oidc#2}",
+          "displayName": "Google",
+          "logoDataUrl": "{data-uri:image/svg+xml}",
+          "providerType": "Google"
+        }
+      ],
+      "requestId": null,
+      "requiresMfaEnrollment": false,
+      "scope": "",
+      "settings": {
+        "accentColor": "#0f172a",
+        "backgroundColor": "#f8fafc",
+        "emailOtpRuntimeConfigured": true,
+        "enablePasswordSignup": true,
+        "enabledCredentialTypes": [
+          "password",
+          "email_otp",
+          "magic_link",
+          "phone_otp"
+        ],
+        "headlessCapabilityRegistered": true,
+        "layout": "split",
+        "localPasswordRuntimeEnabled": true,
+        "logoBase64": null,
+        "magicLinkRuntimeConfigured": true,
+        "managedByStartupSeed": true,
+        "ownership": {
+          "canEmergencyDisable": false,
+          "configurationFingerprint": "{hex#1}",
+          "isEditable": false,
+          "isOrphaned": false,
+          "lastReconciledAt": "{datetime:unspecified}",
+          "owner": "code",
+          "sourceKey": "auth-page:default"
+        },
+        "pageSubtitle": "Secure your app-owned AI and MCP experiences with SqlOS.",
+        "pageTitle": "Sign in to Behavior Lock",
+        "phoneOtpRuntimeConfigured": true,
+        "primaryColor": "#2563eb",
+        "updatedAt": "{datetime:unspecified}"
+      },
+      "signupToken": null,
+      "totpEnrollment": null,
+      "uiContext": {
+        "invitationToken": "{invitation-token#1}"
+      },
+      "view": "invite"
+    }
