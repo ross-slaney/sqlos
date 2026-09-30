@@ -1,0 +1,233 @@
+# SqlOS behavior lock transcript
+scenario: AdminIdentityAccessScenarios.Every_admin_identity_route_is_hidden_without_the_operator_callback
+profile: dashboard-callback
+
+## 1. operator: GET /users without the operator header is not found
+> GET /sqlos/admin/auth/api/users
+< 404 Not Found
+
+## 2. operator: GET /users/{userId} without the operator header is not found
+> GET /sqlos/admin/auth/api/users/usr_missing
+< 404 Not Found
+
+## 3. operator: GET /users/{userId}/memberships without the operator header is not found
+> GET /sqlos/admin/auth/api/users/usr_missing/memberships
+< 404 Not Found
+
+## 4. operator: GET /users/{userId}/sessions without the operator header is not found
+> GET /sqlos/admin/auth/api/users/usr_missing/sessions
+< 404 Not Found
+
+## 5. operator: GET /users/{userId}/applications without the operator header is not found
+> GET /sqlos/admin/auth/api/users/usr_missing/applications
+< 404 Not Found
+
+## 6. operator: GET /users/{userId}/grants without the operator header is not found
+> GET /sqlos/admin/auth/api/users/usr_missing/grants
+< 404 Not Found
+
+## 7. operator: POST /users/{userId}/grants/{grantId}/revoke without the operator header is not found
+> POST /sqlos/admin/auth/api/users/usr_missing/grants/grant_missing/revoke
+< 404 Not Found
+
+## 8. operator: POST /users/{userId}/password-reset-email without the operator header is not found
+> POST /sqlos/admin/auth/api/users/usr_missing/password-reset-email
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 9. operator: POST /users without the operator header is not found
+> POST /sqlos/admin/auth/api/users
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 10. operator: GET /organizations without the operator header is not found
+> GET /sqlos/admin/auth/api/organizations
+< 404 Not Found
+
+## 11. operator: GET /organizations/{organizationId} without the operator header is not found
+> GET /sqlos/admin/auth/api/organizations/org_missing
+< 404 Not Found
+
+## 12. operator: GET /organizations/{organizationId}/applications without the operator header is not found
+> GET /sqlos/admin/auth/api/organizations/org_missing/applications
+< 404 Not Found
+
+## 13. operator: POST /organizations without the operator header is not found
+> POST /sqlos/admin/auth/api/organizations
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 14. operator: PUT /organizations/{organizationId} without the operator header is not found
+> PUT /sqlos/admin/auth/api/organizations/org_missing
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 15. operator: GET /memberships without the operator header is not found
+> GET /sqlos/admin/auth/api/memberships
+< 404 Not Found
+
+## 16. operator: GET /organizations/{organizationId}/memberships without the operator header is not found
+> GET /sqlos/admin/auth/api/organizations/org_missing/memberships
+< 404 Not Found
+
+## 17. operator: GET /organizations/{organizationId}/invitations without the operator header is not found
+> GET /sqlos/admin/auth/api/organizations/org_missing/invitations
+< 404 Not Found
+
+## 18. operator: POST /organizations/{organizationId}/invitations without the operator header is not found
+> POST /sqlos/admin/auth/api/organizations/org_missing/invitations
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 19. operator: POST /invitations/{invitationId}/resend without the operator header is not found
+> POST /sqlos/admin/auth/api/invitations/inv_missing/resend
+< 404 Not Found
+
+## 20. operator: POST /invitations/{invitationId}/revoke without the operator header is not found
+> POST /sqlos/admin/auth/api/invitations/inv_missing/revoke
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 21. operator: POST /memberships without the operator header is not found
+> POST /sqlos/admin/auth/api/memberships
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 22. operator: POST /organizations/{organizationId}/memberships without the operator header is not found
+> POST /sqlos/admin/auth/api/organizations/org_missing/memberships
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 23. operator: GET /clients without the operator header is not found
+> GET /sqlos/admin/auth/api/clients
+< 404 Not Found
+
+## 24. operator: GET /clients/{clientId} without the operator header is not found
+> GET /sqlos/admin/auth/api/clients/cli_missing
+< 404 Not Found
+
+## 25. operator: GET /clients/{clientId}/credentials without the operator header is not found
+> GET /sqlos/admin/auth/api/clients/cli_missing/credentials
+< 404 Not Found
+
+## 26. operator: POST /clients/{clientId}/credentials without the operator header is not found
+> POST /sqlos/admin/auth/api/clients/cli_missing/credentials
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 27. operator: DELETE /clients/{clientId}/credentials/{credentialId} without the operator header is not found
+> DELETE /sqlos/admin/auth/api/clients/cli_missing/credentials/clcred_missing
+< 404 Not Found
+
+## 28. operator: GET /applications/{applicationId}/assignments without the operator header is not found
+> GET /sqlos/admin/auth/api/applications/cli_missing/assignments
+< 404 Not Found
+
+## 29. operator: POST /applications/{applicationId}/access-mode without the operator header is not found
+> POST /sqlos/admin/auth/api/applications/cli_missing/access-mode
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 30. operator: POST /applications/{applicationId}/assignments without the operator header is not found
+> POST /sqlos/admin/auth/api/applications/cli_missing/assignments
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 31. operator: DELETE /applications/{applicationId}/assignments/{assignmentId} without the operator header is not found
+> DELETE /sqlos/admin/auth/api/applications/cli_missing/assignments/asa_missing
+< 404 Not Found
+
+## 32. operator: GET /applications/{applicationId}/access/check without the operator header is not found
+> GET /sqlos/admin/auth/api/applications/cli_missing/access/check
+< 404 Not Found
+
+## 33. operator: POST /clients without the operator header is not found
+> POST /sqlos/admin/auth/api/clients
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 34. operator: POST /clients/{clientId}/disable without the operator header is not found
+> POST /sqlos/admin/auth/api/clients/cli_missing/disable
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 35. operator: POST /clients/{clientId}/enable without the operator header is not found
+> POST /sqlos/admin/auth/api/clients/cli_missing/enable
+< 404 Not Found
+
+## 36. operator: POST /clients/{clientId}/emergency-disable without the operator header is not found
+> POST /sqlos/admin/auth/api/clients/cli_missing/emergency-disable
+< 404 Not Found
+
+## 37. operator: POST /clients/{clientId}/emergency-enable without the operator header is not found
+> POST /sqlos/admin/auth/api/clients/cli_missing/emergency-enable
+< 404 Not Found
+
+## 38. operator: POST /clients/{clientId}/revoke without the operator header is not found
+> POST /sqlos/admin/auth/api/clients/cli_missing/revoke
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 39. operator: GET /machine-clients without the operator header is not found
+> GET /sqlos/admin/auth/api/machine-clients
+< 404 Not Found
+
+## 40. operator: POST /machine-clients without the operator header is not found
+> POST /sqlos/admin/auth/api/machine-clients
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 41. operator: POST /machine-clients/{clientId}/rotate without the operator header is not found
+> POST /sqlos/admin/auth/api/machine-clients/missing-machine/rotate
+< 404 Not Found
+
+## 42. operator: POST /machine-clients/{clientId}/validate without the operator header is not found
+> POST /sqlos/admin/auth/api/machine-clients/missing-machine/validate
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 43. operator: POST /machine-clients/{clientId}/revoke without the operator header is not found
+> POST /sqlos/admin/auth/api/machine-clients/missing-machine/revoke
+< 404 Not Found
+
+## 44. operator: POST /machine-clients/{clientId}/emergency-disable without the operator header is not found
+> POST /sqlos/admin/auth/api/machine-clients/missing-machine/emergency-disable
+< 404 Not Found
+
+## 45. operator: POST /machine-clients/{clientId}/emergency-enable without the operator header is not found
+> POST /sqlos/admin/auth/api/machine-clients/missing-machine/emergency-enable
+< 404 Not Found
+
+## 46. operator: POST /machine-clients/{clientId}/grants without the operator header is not found
+> POST /sqlos/admin/auth/api/machine-clients/missing-machine/grants
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 47. operator: DELETE /machine-clients/{clientId}/grants/{grantId} without the operator header is not found
+> DELETE /sqlos/admin/auth/api/machine-clients/missing-machine/grants/grant_missing
+< 404 Not Found
+
+## 48. operator: a wrong operator header value is not found either
+> GET /sqlos/admin/auth/api/users
+> X-BehaviorLock-Operator: not-the-operator-secret
+< 404 Not Found
+
+## audit: rejected operator requests write no audit events
+  (no new events)

@@ -1,0 +1,59 @@
+# SqlOS behavior lock transcript
+scenario: AdminIdentityAccessScenarios.Request_bodies_are_bound_before_the_operator_check
+profile: dashboard-callback
+
+## 1. stranger: malformed JSON from an unauthenticated caller fails binding before the operator check
+> POST /sqlos/admin/auth/api/users
+> Content-Type: application/json; charset=utf-8
+>   {"displayName":
+< 400 Bad Request
+
+## 2. stranger: a missing body from the same caller reaches the operator check and is not found
+> POST /sqlos/admin/auth/api/users
+< 404 Not Found
+
+## 3. stranger: a form body is an unsupported media type
+> POST /sqlos/admin/auth/api/users
+> Content-Type: application/x-www-form-urlencoded; charset=utf-8
+>   displayName=Eve
+< 415 Unsupported Media Type
+
+## 4. stranger: a well-formed body from the same caller is not found
+> POST /sqlos/admin/auth/api/users
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "displayName": "Eve",
+>     "email": "{email:eve}"
+>   }
+< 404 Not Found
+
+## 5. operator: the operator's JSON null body fails binding
+> POST /sqlos/admin/auth/api/users
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   null
+< 400 Bad Request
+
+## 6. operator: a number where a string belongs fails binding
+> POST /sqlos/admin/auth/api/organizations
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "name": 42
+>   }
+< 400 Bad Request
+
+## 7. operator: a string where a boolean belongs fails binding
+> PUT /sqlos/admin/auth/api/organizations/org_missing
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "isActive": "yes",
+>     "name": "Acme"
+>   }
+< 400 Bad Request
+
+## 8. operator: a lifecycle route that binds a reason body needs one
+> POST /sqlos/admin/auth/api/clients/behavior-lock-app/disable
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request

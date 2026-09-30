@@ -1,0 +1,48 @@
+# SqlOS behavior lock transcript
+scenario: AdminIdentityAccessScenarios.A_callback_authorized_mutation_needs_no_same_origin_proof
+profile: dashboard-callback
+
+# Recorded as it behaves today: #426 proposes requiring the same-origin proof on every unsafe admin request, not only cookie-authenticated ones.
+
+## 1. operator: the callback admits a cross-site mutation with no X-SqlOS-Request header
+> POST /sqlos/admin/auth/api/users
+> Content-Type: application/json; charset=utf-8
+> Origin: https://attacker.example
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Cross",
+>     "email": "{email:cross}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "defaultEmail": "{email:cross}",
+      "displayName": "Cross",
+      "id": "{usr#1}",
+      "isActive": true,
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 2. operator: an opaque Origin and Sec-Fetch-Site: cross-site change nothing
+> POST /sqlos/admin/auth/api/organizations
+> Content-Type: application/json; charset=utf-8
+> Origin: null
+> Sec-Fetch-Site: cross-site
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "name": "Cross Site"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "id": "{org#1}",
+      "isActive": true,
+      "name": "Cross Site",
+      "primaryDomain": null,
+      "slug": "cross-site"
+    }
+
+## audit: no csrf rejection is audited
+  (no new events)
