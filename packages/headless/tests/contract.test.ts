@@ -7,6 +7,7 @@ import {
   type HeadlessFlow,
   type HeadlessViewModel,
 } from "../src/index.js";
+import { renderPublicSurface } from "./public-surface.js";
 
 // Holds flow.ts to contract.ts: every typed action must post only the fields
 // the server record for that route binds, and every route must have a typed
@@ -135,4 +136,18 @@ describe("typed actions match HEADLESS_REQUEST_FIELDS", () => {
       expect(unused, `${path} never sends these contract fields`).toEqual([]);
     });
   }
+});
+
+// Approval gate for everything the package exports (issue #435, section 8).
+// tests/public-surface.ts renders, for each entry point in package.json
+// "exports", its runtime and type exports, their normalized declarations
+// (plus package types they reach), and the runtime values of exported
+// constants. CI runs with CI=true, where vitest fails on any difference or a
+// missing snapshot instead of writing one. To approve an intended change, run
+// `npx vitest run -u` in packages/headless, review the snapshot diff, and add
+// a behavior ledger entry while the 8.0 refactor is open.
+describe("public surface", () => {
+  it("matches the approved snapshot", async () => {
+    await expect(await renderPublicSurface()).toMatchFileSnapshot("./__snapshots__/public-surface.snap.txt");
+  }, 30_000);
 });
