@@ -154,6 +154,30 @@ public sealed class PublicPasswordLoginScenarios
 
     [Scenario]
     [Covers("POST /sqlos/auth/password/login")]
+    [Covers("POST /sqlos/auth/select-organization")]
+    public async Task Choosing_an_organization_that_requires_mfa_answers_with_a_challenge()
+    {
+        await using var t = await PublicHost.StartAsync(HostProfiles.Hosted);
+        var alice = await t.Setup.CreateUserAsync("alice");
+        var organizations = await t.CreateOrganizationsInIdOrderAsync("acme", "globex");
+        var (acme, globex) = (organizations[0], organizations[1]);
+        await t.Setup.AddMembershipAsync(acme, alice);
+        await t.Setup.AddMembershipAsync(globex, alice);
+        await t.RequireOrganizationMfaAsync(globex);
+
+        var pending = t.Observe(
+            await t.Api.PostJsonAsync("/sqlos/auth/password/login", new { email = alice.Email, password = alice.Password, clientId = BehaviorLockConstants.AppClientId }),
+            "two memberships: the login stops for an organization choice");
+        t.Observe(
+            await t.Api.PostJsonAsync("/sqlos/auth/select-organization", new { pendingAuthToken = pending.JsonString("pendingAuthToken"), organizationId = globex.Id }),
+            "Globex requires MFA and Alice has no authenticator: the choice answers with an enrollment challenge, not tokens");
+
+        await t.ObserveAuditAsync("the selection is audited although no tokens were issued");
+        await t.ApproveAsync();
+    }
+
+    [Scenario]
+    [Covers("POST /sqlos/auth/password/login")]
     public async Task A_client_that_admits_only_assigned_users_refuses_an_unassigned_user()
     {
         await using var t = await PublicHost.StartAsync(HostProfiles.Hosted);

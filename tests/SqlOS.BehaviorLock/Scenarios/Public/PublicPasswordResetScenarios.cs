@@ -173,6 +173,25 @@ public sealed class PublicPasswordResetScenarios
     }
 
     [Scenario]
+    [Covers("GET /sqlos/auth/password/reset")]
+    [Covers("GET /sqlos/auth/email/verify")]
+    public async Task Hostile_link_tokens_are_not_reflected_as_markup()
+    {
+        await using var t = await PublicHost.StartAsync(HostProfiles.Hosted);
+        const string hostile = "\"><script>alert(1)</script><input name=\"newPassword\" value=\"x";
+
+        t.Observe(
+            await t.GetAsync($"/sqlos/auth/password/reset?token={Uri.EscapeDataString(hostile)}"),
+            "a crafted reset link: the token stays an encoded value of the hidden field");
+        t.Observe(
+            await t.GetAsync($"/sqlos/auth/email/verify?token={Uri.EscapeDataString(hostile)}"),
+            "a crafted verification link: the page shows a generic failure and never echoes the token");
+
+        await t.ObserveAuditAsync("the verification failure is audited with its diagnostic");
+        await t.ApproveAsync();
+    }
+
+    [Scenario]
     [Covers("GET /sqlos/auth/authorize")]
     [Covers("POST /sqlos/auth/login/password")]
     [Covers("GET /sqlos/auth/password/reset")]
