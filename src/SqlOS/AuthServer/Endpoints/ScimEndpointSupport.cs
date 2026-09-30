@@ -94,6 +94,16 @@ public static partial class EndpointRouteBuilderExtensions
         {
             return SqlOSCursorPagination.BadRequest(ex);
         }
+        catch (SqlOSScimGrantBoundaryException ex)
+        {
+            return Results.BadRequest(new
+            {
+                message = ex.Message,
+                error = ex.Error,
+                grantBoundaryResourceId = ex.GrantBoundaryResourceId,
+                resourceId = ex.ResourceId
+            });
+        }
         catch (InvalidOperationException ex)
         {
             return Results.BadRequest(new { message = ex.Message });
@@ -199,6 +209,7 @@ public static partial class EndpointRouteBuilderExtensions
         connection.IsEnabled,
         connection.Source,
         connection.SeedKey,
+        connection.GrantBoundaryResourceId,
         Ownership = SqlOSConfigurationOwnershipPolicy.ToDto(connection.ConfigurationOwner, connection.ConfigurationSourceKey, connection.LastReconciledAt, connection.ConfigurationFingerprint, connection.ConfigurationOrphanedAt),
         connection.TokenPrefix,
         connection.TokenRotatedAt,

@@ -243,6 +243,12 @@ public sealed class SqlOSScimConnection
     public DateTime? TokenRotatedAt { get; set; }
     public DateTime? TokenLastUsedAt { get; set; }
     public DateTime? LastSyncAt { get; set; }
+    /// <summary>
+    /// FGA resource whose subtree bounds every grant this connection's group mappings may create.
+    /// Mapped grants must target this resource or one of its descendants; a connection without a
+    /// boundary creates no mapped grants.
+    /// </summary>
+    public string? GrantBoundaryResourceId { get; set; }
     public string Source { get; set; } = "dashboard";
     public string ConfigurationOwner { get; set; } = "dashboard";
     public string? ConfigurationSourceKey { get; set; }

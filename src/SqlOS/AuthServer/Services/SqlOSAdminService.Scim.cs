@@ -8,6 +8,8 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Models;
 using SqlOS.Database;
+using SqlOS.Fga;
+using SqlOS.Fga.Models;
 using SqlOS.Pagination;
 
 namespace SqlOS.AuthServer.Services;
@@ -122,6 +124,7 @@ public sealed partial class SqlOSAdminService
         }
         await _context.SaveChangesAsync(cancellationToken);
 
+        SqlOSFgaSubtreeResolver? boundaryResolver = null;
         foreach (var (seed, organization, seedKey) in resolvedSeeds)
         {
             var displayName = string.IsNullOrWhiteSpace(seed.DisplayName)
@@ -142,6 +145,12 @@ public sealed partial class SqlOSAdminService
             {
                 ValidateScimMappingRequest(ToScimMappingRequest(mappingSeed));
             }
+
+            // The grant boundary follows the same domain rule as the service API and dashboard.
+            // A seed without a boundary still reconciles so existing deployments keep starting;
+            // its mappings fail closed at grant time until code declares a boundary.
+            boundaryResolver ??= SqlOSScimGrantBoundaryPolicy.CreateResolver(_context);
+            var grantBoundary = await ResolveSeededScimGrantBoundaryAsync(seed, seedKey, boundaryResolver, cancellationToken);
 
             var existing = persistedSeeds.FirstOrDefault(x =>
                 string.Equals(x.OrganizationId, organization.Id, StringComparison.Ordinal)
@@ -170,6 +179,7 @@ public sealed partial class SqlOSAdminService
                     SeedKey = seedKey,
                     DisplayName = displayName,
                     IsEnabled = seed.Enabled,
+                    GrantBoundaryResourceId = grantBoundary,
                     Source = SqlOSScimSources.Seeded,
                     ConfigurationOwner = SqlOSConfigurationOwners.Code,
                     ConfigurationSourceKey = seedKey,
@@ -199,9 +209,17 @@ public sealed partial class SqlOSAdminService
                 }
                 existing.Source = SqlOSScimSources.Seeded;
                 existing.UpdatedAt = now;
+                // Code-owned configuration is authoritative: setting, changing, or removing the
+                // seed's boundary revokes managed grants that are no longer inside it.
+                await ApplyScimGrantBoundaryAsync(existing, grantBoundary, boundaryResolver, "system", "startup", cancellationToken);
             }
 
-            existing.ConfigurationFingerprint = SqlOSConfigurationOwnershipPolicy.Fingerprint(new { OrganizationId = organization.Id, SourceKey = seedKey, DisplayName = displayName, seed.Enabled, Mappings = seed.GroupMappings.Select(mapping => new { mapping.SourceKey, mapping.MatchType, mapping.GroupDisplayName, mapping.GroupExternalId, mapping.GroupPattern, mapping.RoleKey, mapping.ResourceId, mapping.ResourceIdTemplate, mapping.Description, mapping.Enabled }).ToArray() });
+            var mappingFingerprints = seed.GroupMappings.Select(mapping => new { mapping.SourceKey, mapping.MatchType, mapping.GroupDisplayName, mapping.GroupExternalId, mapping.GroupPattern, mapping.RoleKey, mapping.ResourceId, mapping.ResourceIdTemplate, mapping.Description, mapping.Enabled }).ToArray();
+            // Seeds without a boundary keep their pre-boundary fingerprint so upgrading alone
+            // does not report configuration drift.
+            existing.ConfigurationFingerprint = grantBoundary == null
+                ? SqlOSConfigurationOwnershipPolicy.Fingerprint(new { OrganizationId = organization.Id, SourceKey = seedKey, DisplayName = displayName, seed.Enabled, Mappings = mappingFingerprints })
+                : SqlOSConfigurationOwnershipPolicy.Fingerprint(new { OrganizationId = organization.Id, SourceKey = seedKey, DisplayName = displayName, seed.Enabled, GrantBoundaryResourceId = grantBoundary, Mappings = mappingFingerprints });
             existing.LastReconciledAt = now;
             existing.ConfigurationOrphanedAt = null;
 
@@ -313,6 +331,38 @@ public sealed partial class SqlOSAdminService
 #pragma warning restore EF1002
     }
 
+    private static async Task<string?> ResolveSeededScimGrantBoundaryAsync(
+        SqlOSScimConnectionSeedOptions seed,
+        string seedKey,
+        SqlOSFgaSubtreeResolver resolver,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var grantBoundary = SqlOSScimGrantBoundaryPolicy.Normalize(seed.GrantBoundaryResourceId);
+            if (grantBoundary == null)
+            {
+                return null;
+            }
+
+            grantBoundary = await SqlOSScimGrantBoundaryPolicy.RequireExistingBoundaryAsync(resolver, grantBoundary, cancellationToken);
+            foreach (var mappingSeed in seed.GroupMappings)
+            {
+                await EnsureScimMappingWithinGrantBoundaryAsync(resolver, grantBoundary, ToScimMappingRequest(mappingSeed), cancellationToken);
+            }
+
+            return grantBoundary;
+        }
+        catch (SqlOSScimGrantBoundaryException ex)
+        {
+            throw new SqlOSScimGrantBoundaryException(
+                ex.Error,
+                $"Seeded SCIM connection '{seedKey}': {ex.Message}",
+                ex.GrantBoundaryResourceId,
+                ex.ResourceId);
+        }
+    }
+
     private static string BuildConfiguredScimConnectionKey(string organizationId, string seedKey)
         => $"{organizationId}\u001F{seedKey}";
 
@@ -365,6 +415,9 @@ public sealed partial class SqlOSAdminService
                 .GroupBy(x => x.ConnectionId)
                 .Select(g => new { g.Key, Count = g.Count() })
                 .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+        var boundaryResources = await LoadScimGrantBoundaryResourcesAsync(
+            pageResult.Data.Select(x => x.GrantBoundaryResourceId),
+            cancellationToken);
 
         return pageResult.ToResponse(x => new
         {
@@ -374,6 +427,8 @@ public sealed partial class SqlOSAdminService
             x.IsEnabled,
             x.Source,
             x.SeedKey,
+            x.GrantBoundaryResourceId,
+            GrantBoundary = ToScimGrantBoundaryView(x.GrantBoundaryResourceId, boundaryResources),
             Ownership = SqlOSConfigurationOwnershipPolicy.ToDto(
                 x.ConfigurationOwner,
                 x.ConfigurationSourceKey,
@@ -396,6 +451,9 @@ public sealed partial class SqlOSAdminService
     {
         var connection = await GetRequiredScimConnectionAsync(connectionId, cancellationToken);
         var baseUrl = BuildScimBaseUrl();
+        var boundaryResources = await LoadScimGrantBoundaryResourcesAsync(
+            [connection.GrantBoundaryResourceId],
+            cancellationToken);
         return new
         {
             connection.Id,
@@ -404,6 +462,8 @@ public sealed partial class SqlOSAdminService
             connection.IsEnabled,
             connection.Source,
             connection.SeedKey,
+            connection.GrantBoundaryResourceId,
+            GrantBoundary = ToScimGrantBoundaryView(connection.GrantBoundaryResourceId, boundaryResources),
             Ownership = SqlOSConfigurationOwnershipPolicy.ToDto(
                 connection.ConfigurationOwner,
                 connection.ConfigurationSourceKey,
@@ -450,6 +510,15 @@ public sealed partial class SqlOSAdminService
             await EnsureCanEnableScimConnectionAsync(organization.Id, null, cancellationToken);
         }
 
+        var grantBoundary = SqlOSScimGrantBoundaryPolicy.Normalize(request.GrantBoundaryResourceId);
+        if (grantBoundary != null)
+        {
+            grantBoundary = await SqlOSScimGrantBoundaryPolicy.RequireExistingBoundaryAsync(
+                SqlOSScimGrantBoundaryPolicy.CreateResolver(_context),
+                grantBoundary,
+                cancellationToken);
+        }
+
         var now = DateTime.UtcNow;
         var connection = new SqlOSScimConnection
         {
@@ -457,6 +526,7 @@ public sealed partial class SqlOSAdminService
             OrganizationId = organization.Id,
             DisplayName = RequireTrimmed(request.DisplayName, "SCIM display name is required."),
             IsEnabled = request.Enabled,
+            GrantBoundaryResourceId = grantBoundary,
             Source = SqlOSScimSources.Dashboard,
             CreatedAt = now,
             UpdatedAt = now
@@ -464,7 +534,7 @@ public sealed partial class SqlOSAdminService
 
         _context.Set<SqlOSScimConnection>().Add(connection);
         await _context.SaveChangesAsync(cancellationToken);
-        await RecordAuditAsync("scim.connection.created", "scim_connection", connection.Id, organizationId: organization.Id, data: new { connection.DisplayName }, cancellationToken: cancellationToken);
+        await RecordAuditAsync("scim.connection.created", "scim_connection", connection.Id, organizationId: organization.Id, data: new { connection.DisplayName, connection.GrantBoundaryResourceId }, cancellationToken: cancellationToken);
         return connection;
     }
 
@@ -492,10 +562,23 @@ public sealed partial class SqlOSAdminService
     public async Task<SqlOSScimConnection> UpdateScimConnectionAsync(string connectionId, SqlOSUpdateScimConnectionRequest request, CancellationToken cancellationToken = default)
     {
         var displayName = RequireTrimmed(request.DisplayName, "SCIM display name is required.");
+        // Null or whitespace keeps the current boundary, so older callers cannot clear it by omission.
+        var grantBoundary = SqlOSScimGrantBoundaryPolicy.Normalize(request.GrantBoundaryResourceId);
         return await RunScimAdminAtomicAsync(async () =>
         {
             var connection = await GetRequiredScimConnectionForUpdateAsync(connectionId, cancellationToken);
             EnsureScimConnectionIsDashboardManaged(connection);
+            if (string.Equals(grantBoundary, connection.GrantBoundaryResourceId, StringComparison.Ordinal))
+            {
+                // Re-sending the current boundary is not a change, even if its resource was deleted.
+                grantBoundary = null;
+            }
+            SqlOSFgaSubtreeResolver? boundaryResolver = null;
+            if (grantBoundary != null)
+            {
+                boundaryResolver = SqlOSScimGrantBoundaryPolicy.CreateResolver(_context);
+                grantBoundary = await SqlOSScimGrantBoundaryPolicy.RequireExistingBoundaryAsync(boundaryResolver, grantBoundary, cancellationToken);
+            }
             if (request.Enabled)
             {
                 EnsureScimConnectionHasToken(connection);
@@ -504,6 +587,10 @@ public sealed partial class SqlOSAdminService
             else if (connection.IsEnabled)
             {
                 await RevokeManagedGrantsAsync(connection.Id, mappingId: null, cancellationToken: cancellationToken);
+            }
+            if (grantBoundary != null)
+            {
+                await ApplyScimGrantBoundaryAsync(connection, grantBoundary, boundaryResolver!, "scim_connection", connection.Id, cancellationToken);
             }
             connection.DisplayName = displayName;
             connection.IsEnabled = request.Enabled;
@@ -575,6 +662,21 @@ public sealed partial class SqlOSAdminService
                 .GroupBy(x => x.MappingId)
                 .Select(g => new { g.Key, Count = g.Count() })
                 .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+        var grantBoundary = await _context.Set<SqlOSScimConnection>()
+            .AsNoTracking()
+            .Where(x => x.Id == connectionId)
+            .Select(x => x.GrantBoundaryResourceId)
+            .FirstOrDefaultAsync(cancellationToken);
+        var boundaryResolver = SqlOSScimGrantBoundaryPolicy.CreateResolver(_context);
+        var boundaryStatuses = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var mapping in pageResult.Data)
+        {
+            boundaryStatuses[mapping.Id] = await SqlOSScimGrantBoundaryPolicy.DescribeMappingAsync(
+                boundaryResolver,
+                grantBoundary,
+                new SqlOSScimGroupMappingShape(mapping.MatchType, mapping.GroupPattern, mapping.ResourceId, mapping.ResourceIdTemplate),
+                cancellationToken);
+        }
 
         return pageResult.ToResponse(x => new
         {
@@ -593,7 +695,8 @@ public sealed partial class SqlOSAdminService
             x.IsEnabled,
             x.CreatedAt,
             x.UpdatedAt,
-            ActiveGrantCount = grantCounts.GetValueOrDefault(x.Id)
+            ActiveGrantCount = grantCounts.GetValueOrDefault(x.Id),
+            GrantBoundaryStatus = boundaryStatuses[x.Id]
         });
     }
 
@@ -613,6 +716,7 @@ public sealed partial class SqlOSAdminService
         return await RunScimAdminAtomicAsync(async () =>
         {
             var connection = await GetRequiredScimConnectionForUpdateAsync(connectionId, cancellationToken);
+            await EnsureScimMappingWithinGrantBoundaryAsync(connection, updateRequest, cancellationToken);
             var now = DateTime.UtcNow;
             var mapping = new SqlOSScimGroupMapping
             {
@@ -635,16 +739,19 @@ public sealed partial class SqlOSAdminService
         return await RunScimAdminAtomicAsync(async () =>
         {
             var mapping = await _context.Set<SqlOSScimGroupMapping>()
-                .Include(x => x.Connection)
                 .FirstOrDefaultAsync(x => x.Id == mappingId, cancellationToken)
                 ?? throw new InvalidOperationException("SCIM mapping not found.");
             EnsureScimMappingIsDashboardManaged(mapping);
 
-            await GetRequiredScimConnectionForUpdateAsync(mapping.ConnectionId, cancellationToken);
+            // The boundary is read under the connection lock so a concurrent boundary change
+            // cannot be bypassed.
+            var connection = await GetRequiredScimConnectionForUpdateAsync(mapping.ConnectionId, cancellationToken);
+            // Reject before revoking so a refused change leaves existing access untouched.
+            await EnsureScimMappingWithinGrantBoundaryAsync(connection, request, cancellationToken);
             await RevokeManagedGrantsAsync(mapping.ConnectionId, mapping.Id, cancellationToken);
             ApplyScimMapping(mapping, request, mapping.Source, DateTime.UtcNow);
             await _context.SaveChangesAsync(cancellationToken);
-            await RecordAuditAsync("scim.mapping.updated", "scim_group_mapping", mapping.Id, organizationId: mapping.Connection!.OrganizationId, data: new { mapping.MatchType, mapping.RoleKey, mapping.ResourceId, mapping.ResourceIdTemplate, mapping.IsEnabled }, cancellationToken: cancellationToken);
+            await RecordAuditAsync("scim.mapping.updated", "scim_group_mapping", mapping.Id, organizationId: connection.OrganizationId, data: new { mapping.MatchType, mapping.RoleKey, mapping.ResourceId, mapping.ResourceIdTemplate, mapping.IsEnabled }, cancellationToken: cancellationToken);
             return mapping;
         }, cancellationToken);
     }
@@ -653,19 +760,29 @@ public sealed partial class SqlOSAdminService
         => await RunScimAdminAtomicAsync(async () =>
         {
             var mapping = await _context.Set<SqlOSScimGroupMapping>()
-                .Include(x => x.Connection)
                 .FirstOrDefaultAsync(x => x.Id == mappingId, cancellationToken)
                 ?? throw new InvalidOperationException("SCIM mapping not found.");
             EnsureScimMappingIsDashboardManaged(mapping);
-            await GetRequiredScimConnectionForUpdateAsync(mapping.ConnectionId, cancellationToken);
-            if (!enabled && mapping.IsEnabled)
+            var connection = await GetRequiredScimConnectionForUpdateAsync(mapping.ConnectionId, cancellationToken);
+            if (enabled)
+            {
+                await SqlOSScimGrantBoundaryPolicy.EnsureMappingWithinBoundaryAsync(
+                    SqlOSScimGrantBoundaryPolicy.CreateResolver(_context),
+                    connection.GrantBoundaryResourceId,
+                    mapping.MatchType,
+                    mapping.GroupPattern,
+                    mapping.ResourceId,
+                    mapping.ResourceIdTemplate,
+                    cancellationToken);
+            }
+            else if (mapping.IsEnabled)
             {
                 await RevokeManagedGrantsAsync(mapping.ConnectionId, mapping.Id, cancellationToken);
             }
             mapping.IsEnabled = enabled;
             mapping.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync(cancellationToken);
-            await RecordAuditAsync(enabled ? "scim.mapping.enabled" : "scim.mapping.disabled", "scim_group_mapping", mapping.Id, organizationId: mapping.Connection!.OrganizationId, cancellationToken: cancellationToken);
+            await RecordAuditAsync(enabled ? "scim.mapping.enabled" : "scim.mapping.disabled", "scim_group_mapping", mapping.Id, organizationId: connection.OrganizationId, cancellationToken: cancellationToken);
             return mapping;
         }, cancellationToken);
 
@@ -762,14 +879,114 @@ public sealed partial class SqlOSAdminService
         }
     }
 
+    /// <summary>
+    /// Save-time boundary rule for a dashboard, API, or code-seeded mapping. Disabled mappings are
+    /// inert and may be staged without a boundary; enabling them applies the same rule.
+    /// </summary>
+    private static async Task EnsureScimMappingWithinGrantBoundaryAsync(
+        SqlOSFgaSubtreeResolver resolver,
+        string? grantBoundaryResourceId,
+        SqlOSUpdateScimGroupMappingRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!request.Enabled)
+        {
+            return;
+        }
+
+        await SqlOSScimGrantBoundaryPolicy.EnsureMappingWithinBoundaryAsync(
+            resolver,
+            grantBoundaryResourceId,
+            NormalizeScimMatchType(request.MatchType),
+            NormalizeOptional(request.GroupPattern),
+            NormalizeOptional(request.ResourceId),
+            NormalizeOptional(request.ResourceIdTemplate),
+            cancellationToken);
+    }
+
+    private Task EnsureScimMappingWithinGrantBoundaryAsync(
+        SqlOSScimConnection connection,
+        SqlOSUpdateScimGroupMappingRequest request,
+        CancellationToken cancellationToken)
+        => EnsureScimMappingWithinGrantBoundaryAsync(
+            SqlOSScimGrantBoundaryPolicy.CreateResolver(_context),
+            connection.GrantBoundaryResourceId,
+            request,
+            cancellationToken);
+
+    /// <summary>
+    /// Sets, changes, or (for code-owned seeds) clears a connection's grant boundary and revokes,
+    /// in the caller's transaction, every active managed grant that is not inside the new boundary.
+    /// Every control plane goes through this method.
+    /// </summary>
+    private async Task ApplyScimGrantBoundaryAsync(
+        SqlOSScimConnection connection,
+        string? grantBoundaryResourceId,
+        SqlOSFgaSubtreeResolver resolver,
+        string actorType,
+        string? actorId,
+        CancellationToken cancellationToken)
+    {
+        var previous = connection.GrantBoundaryResourceId;
+        if (string.Equals(previous, grantBoundaryResourceId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        connection.GrantBoundaryResourceId = grantBoundaryResourceId;
+        connection.UpdatedAt = DateTime.UtcNow;
+        var activeManagedGrants = (await _context.Set<SqlOSScimManagedGrant>()
+                .Where(x => x.ConnectionId == connection.Id && x.RevokedAt == null)
+                .ToListAsync(cancellationToken))
+            .Where(x => x.RevokedAt == null)
+            .ToList();
+        var outside = new List<SqlOSScimManagedGrant>();
+        foreach (var managed in activeManagedGrants)
+        {
+            if (grantBoundaryResourceId == null
+                || await resolver.CheckAsync(managed.ResourceId, grantBoundaryResourceId, cancellationToken) != SqlOSFgaSubtreeMembership.Within)
+            {
+                outside.Add(managed);
+            }
+        }
+
+        await RevokeManagedGrantSetAsync(connection, outside, requestedMappingId: null, reason: "grant_boundary_changed", cancellationToken);
+        await RecordAuditAsync(
+            "scim.connection.grant_boundary_changed",
+            actorType,
+            actorId,
+            organizationId: connection.OrganizationId,
+            data: new
+            {
+                connectionId = connection.Id,
+                previousGrantBoundaryResourceId = previous,
+                grantBoundaryResourceId,
+                revokedManagedGrantCount = outside.Count
+            },
+            cancellationToken: cancellationToken);
+    }
+
     private async Task RevokeManagedGrantsAsync(string connectionId, string? mappingId, CancellationToken cancellationToken)
     {
         var connection = await GetRequiredScimConnectionAsync(connectionId, cancellationToken);
-        var managedGrants = await _context.Set<SqlOSScimManagedGrant>()
-            .Where(x => x.ConnectionId == connectionId
-                && (mappingId == null || x.MappingId == mappingId)
-                && x.RevokedAt == null)
-            .ToListAsync(cancellationToken);
+        var managedGrants = (await _context.Set<SqlOSScimManagedGrant>()
+                .Where(x => x.ConnectionId == connectionId
+                    && (mappingId == null || x.MappingId == mappingId)
+                    && x.RevokedAt == null)
+                .ToListAsync(cancellationToken))
+            // Tracked rows revoked earlier in this unit of work are not revoked twice.
+            .Where(x => x.RevokedAt == null)
+            .ToList();
+        await RevokeManagedGrantSetAsync(connection, managedGrants, mappingId, reason: null, cancellationToken);
+    }
+
+    private async Task RevokeManagedGrantSetAsync(
+        SqlOSScimConnection connection,
+        IReadOnlyCollection<SqlOSScimManagedGrant> managedGrants,
+        string? requestedMappingId,
+        string? reason,
+        CancellationToken cancellationToken)
+    {
         if (managedGrants.Count == 0)
         {
             return;
@@ -802,15 +1019,26 @@ public sealed partial class SqlOSAdminService
                 resourceId = managed.ResourceId
             })
             .ToList();
-        var data = new
-        {
-            connectionId = connection.Id,
-            requestedMappingId = mappingId,
-            revokedManagedGrantCount = orderedManagedGrants.Count,
-            deletedGrantCount = grants.Count,
-            evidenceTruncated = orderedManagedGrants.Count > evidence.Count,
-            evidence
-        };
+        object data = reason == null
+            ? new
+            {
+                connectionId = connection.Id,
+                requestedMappingId,
+                revokedManagedGrantCount = orderedManagedGrants.Count,
+                deletedGrantCount = grants.Count,
+                evidenceTruncated = orderedManagedGrants.Count > evidence.Count,
+                evidence
+            }
+            : new
+            {
+                connectionId = connection.Id,
+                requestedMappingId,
+                reason,
+                revokedManagedGrantCount = orderedManagedGrants.Count,
+                deletedGrantCount = grants.Count,
+                evidenceTruncated = orderedManagedGrants.Count > evidence.Count,
+                evidence
+            };
         var dataJson = JsonSerializer.Serialize(data);
         var groupIds = orderedManagedGrants
             .Select(managed => managed.FgaGroupId)
@@ -1055,6 +1283,47 @@ public sealed partial class SqlOSAdminService
             "regex" => SqlOSScimGroupMappingMatchTypes.Pattern,
             _ => throw new InvalidOperationException("Unsupported SCIM mapping match type.")
         };
+
+    private async Task<IReadOnlyList<ScimGrantBoundaryResource>> LoadScimGrantBoundaryResourcesAsync(
+        IEnumerable<string?> grantBoundaryResourceIds,
+        CancellationToken cancellationToken)
+    {
+        var ids = grantBoundaryResourceIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id!)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (ids.Count == 0)
+        {
+            return [];
+        }
+
+        return await _context.Set<SqlOSFgaResource>()
+            .AsNoTracking()
+            .Where(resource => ids.Contains(resource.Id))
+            .Select(resource => new ScimGrantBoundaryResource(resource.Id, resource.Name, resource.ResourceTypeId))
+            .ToListAsync(cancellationToken);
+    }
+
+    private static ScimGrantBoundaryView ToScimGrantBoundaryView(
+        string? grantBoundaryResourceId,
+        IReadOnlyList<ScimGrantBoundaryResource> resources)
+    {
+        if (string.IsNullOrWhiteSpace(grantBoundaryResourceId))
+        {
+            return new ScimGrantBoundaryView(null, SqlOSScimGrantBoundaryPolicy.StatusMissing, null, null);
+        }
+
+        var resource = resources.FirstOrDefault(item => string.Equals(item.Id, grantBoundaryResourceId, StringComparison.Ordinal))
+            ?? resources.FirstOrDefault(item => string.Equals(item.Id, grantBoundaryResourceId, StringComparison.OrdinalIgnoreCase));
+        return resource == null
+            ? new ScimGrantBoundaryView(grantBoundaryResourceId, SqlOSScimGrantBoundaryPolicy.StatusNotFound, null, null)
+            : new ScimGrantBoundaryView(grantBoundaryResourceId, SqlOSScimGrantBoundaryPolicy.StatusConfigured, resource.Name, resource.ResourceTypeId);
+    }
+
+    private sealed record ScimGrantBoundaryResource(string Id, string Name, string ResourceTypeId);
+
+    private sealed record ScimGrantBoundaryView(string? ResourceId, string Status, string? ResourceName, string? ResourceTypeId);
 
     private string BuildScimBaseUrl()
     {

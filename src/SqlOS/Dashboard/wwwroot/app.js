@@ -480,6 +480,12 @@
             .replaceAll("'", "&#39;");
     }
 
+    function confirmScimGrantBoundaryChange() {
+        return window.confirm(
+            "Change this connection's grant boundary? SqlOS immediately revokes every managed grant that is not the new boundary resource or one of its descendants. Push or resynchronize the affected groups to recreate grants inside it."
+        );
+    }
+
     function confirmScimConnectionDisable() {
         return window.confirm(
             "Disable this SCIM connection? Its bearer token will stop working immediately, and SqlOS will immediately revoke the FGA grants managed by this connection. Re-enabling does not restore those grants until the IdP pushes or resynchronizes the affected groups."
@@ -2143,6 +2149,8 @@
                             <p>Create an organization-scoped SCIM endpoint and initial bearer token in one step. Copy the returned setup values directly into your identity provider.</p>
                             <form id="create-scim-connection-form">
                                 <input name="displayName" placeholder="Display name" value="${esc(organization.name)} SCIM" required>
+                                <input name="grantBoundaryResourceId" placeholder="Grant boundary: this organization's root FGA resource ID">
+                                <p class="muted" style="margin-top:-4px;font-size:12px;line-height:1.5;">Group mappings can grant roles only on the grant boundary resource or its descendants in the FGA tree. Leave it empty to sync users and groups without mapped grants.</p>
                                 <label class="checkbox-row"><input name="enabled" type="checkbox" checked> Connection is enabled</label>
                                 <button type="submit">Create connection</button>
                             </form>
@@ -2187,6 +2195,7 @@
                                 </div>
                                 ${renderMetadataRows([
                                     { label: "Connection ID", value: item.connection.id },
+                                    { label: "Grant boundary", html: renderScimGrantBoundary(item.connection.grantBoundary) },
                                     { label: "Source", value: item.connection.source || "dashboard" },
                                     { label: "Configuration owner", value: item.connection.ownership?.owner || item.connection.source || "dashboard" },
                                     { label: "Source key", value: item.connection.ownership?.sourceKey },
@@ -2198,10 +2207,11 @@
                                     { label: "Token last used", value: formatDate(item.connection.tokenLastUsedAt) },
                                     { label: "Last sync", value: formatDate(item.connection.lastSyncAt) }
                                 ])}
+                                ${renderScimGrantBoundaryCallout(item.connection)}
                                 ${item.connection.source === "seeded" ? `
                                     <div class="callout">
                                         <strong>Code owned.</strong>
-                                        Change this connection's fields or token secret in <span class="inline-code">SeedScimConnection</span>. Emergency enable/disable remains available here and is preserved across restart.
+                                        Change this connection's fields, grant boundary (<span class="inline-code">GrantBoundaryResourceId</span>), or token secret in <span class="inline-code">SeedScimConnection</span> in source control. Emergency enable/disable remains available here and is preserved across restart.
                                     </div>
                                     <div class="form-actions">
                                         ${item.connection.isEnabled
@@ -2211,6 +2221,8 @@
                                 ` : `
                                     <form id="update-scim-connection-${esc(item.connection.id)}" class="nested-form">
                                         <input name="displayName" placeholder="Display name" value="${esc(item.connection.displayName)}" required>
+                                        <input name="grantBoundaryResourceId" placeholder="Grant boundary: this organization's root FGA resource ID" value="${esc(item.connection.grantBoundaryResourceId || "")}" ${item.connection.grantBoundaryResourceId ? "required" : ""}>
+                                        <p class="muted" style="margin-top:-4px;font-size:12px;line-height:1.5;">Changing the boundary immediately revokes managed grants outside it. It can be moved but not removed here; disable mappings or the connection to stop mapped grants.</p>
                                         <label class="checkbox-row"><input name="enabled" type="checkbox" ${item.connection.isEnabled ? "checked" : ""}> Connection is enabled</label>
                                         <button type="submit">Save connection</button>
                                     </form>
@@ -2223,6 +2235,9 @@
                                 `}
                                 <details class="client-explainer" open>
                                     <summary>Group mapping rules</summary>
+                                    ${item.connection.grantBoundary?.status === "configured"
+                                        ? `<p class="muted" style="font-size:12px;line-height:1.5;">Mapped resources must be <span class="inline-code">${esc(item.connection.grantBoundaryResourceId)}</span> or one of its descendants in the FGA tree. A matching ID prefix is not enough. Templates are checked every time a group is pushed.</p>`
+                                        : `<div class="callout" data-scim-grant-boundary-required="true"><strong>Set a grant boundary before enabling mapping rules.</strong> ${item.connection.source === "seeded" ? "Declare GrantBoundaryResourceId in SeedScimConnection." : "Enter this organization's root FGA resource ID in the connection form above."}</div>`}
                                     <form id="create-scim-mapping-${esc(item.connection.id)}" class="nested-form">
                                         <select name="matchType">
                                             <option value="display_name">Display name</option>
@@ -2234,10 +2249,10 @@
                                         <input name="groupPattern" placeholder="Regex pattern with named captures">
                                         <input name="roleKey" placeholder="FGA role key" required>
                                         <input name="resourceId" placeholder="FGA resource ID">
-                                        <input name="resourceIdTemplate" placeholder="Resource ID template, e.g. store_{storeId}">
+                                        <input name="resourceIdTemplate" placeholder="Resource ID template under the boundary, e.g. org::acme::store::{storeId}">
                                         <input name="description" placeholder="Grant description">
                                         <label class="checkbox-row"><input name="enabled" type="checkbox" checked> Mapping is enabled</label>
-                                        <button type="submit">Create mapping</button>
+                                        <button type="submit" ${item.connection.grantBoundary?.status === "configured" ? "" : "disabled"}>Create mapping</button>
                                     </form>
                                     <div id="scim-mappings-${esc(item.connection.id)}">
                                         ${renderList(
@@ -2564,7 +2579,8 @@
                     method: "POST",
                     body: JSON.stringify({
                         displayName: form.get("displayName"),
-                        enabled: form.get("enabled") === "on"
+                        enabled: form.get("enabled") === "on",
+                        grantBoundaryResourceId: String(form.get("grantBoundaryResourceId") || "").trim() || null
                     })
                 });
                 latestScimToken = { ...result, organizationId };
@@ -2607,11 +2623,18 @@
                     if (item.connection.isEnabled && !enabled && !confirmScimConnectionDisable()) {
                         return;
                     }
+                    const grantBoundaryResourceId = String(form.get("grantBoundaryResourceId") || "").trim();
+                    if (grantBoundaryResourceId
+                        && grantBoundaryResourceId !== (item.connection.grantBoundaryResourceId || "")
+                        && !confirmScimGrantBoundaryChange()) {
+                        return;
+                    }
                     await fetchJson(`${authApiBasePath}/scim-connections/${encodeURIComponent(item.connection.id)}`, {
                         method: "PUT",
                         body: JSON.stringify({
                             displayName: form.get("displayName"),
-                            enabled
+                            enabled,
+                            grantBoundaryResourceId: grantBoundaryResourceId || null
                         })
                     });
                     setFlash("success", "SCIM connection updated.");
@@ -2730,8 +2753,14 @@
                 { label: "Group external ID", value: mapping.groupExternalId || "n/a" },
                 { label: "Group pattern", value: mapping.groupPattern || "n/a" },
                 { label: "Managed grants", value: mapping.activeGrantCount || 0 },
+                { label: "Boundary check", value: describeScimMappingBoundaryStatus(mapping.grantBoundaryStatus) },
                 { label: "Source", value: mapping.source || "dashboard" }
             ])}
+            ${["outside", "hierarchy_invalid", "boundary_missing", "boundary_not_found"].includes(mapping.grantBoundaryStatus) ? `
+                <div class="callout" data-scim-mapping-boundary-status="${esc(mapping.grantBoundaryStatus)}">
+                    <strong>This mapping cannot grant.</strong> ${esc(describeScimMappingBoundaryStatus(mapping.grantBoundaryStatus))}. Matching group pushes record a failed boundary sync event instead.
+                </div>
+            ` : ""}
             ${mapping.source === "seeded" ? `
                 <div class="callout">
                     This mapping is managed by <span class="inline-code">SeedScimConnection</span>. Edit the seed definition and restart SqlOS to change or disable it.
@@ -2747,7 +2776,7 @@
                 <input name="groupPattern" placeholder="Regex pattern with named captures" value="${esc(mapping.groupPattern || "")}">
                 <input name="roleKey" placeholder="FGA role key" value="${esc(mapping.roleKey || "")}" required>
                 <input name="resourceId" placeholder="FGA resource ID" value="${esc(mapping.resourceId || "")}">
-                <input name="resourceIdTemplate" placeholder="Resource ID template" value="${esc(mapping.resourceIdTemplate || "")}">
+                <input name="resourceIdTemplate" placeholder="Resource ID template under the boundary" value="${esc(mapping.resourceIdTemplate || "")}">
                 <input name="description" placeholder="Grant description" value="${esc(mapping.description || "")}">
                 <label class="checkbox-row"><input name="enabled" type="checkbox" ${mapping.isEnabled ? "checked" : ""}> Mapping is enabled</label>
                 <button type="submit">Save mapping</button>
@@ -2761,19 +2790,92 @@
     }
 
     function renderScimSyncEventItem(event) {
+        const boundary = scimGrantBoundaryEventDetails(event);
         return `
             <div class="list-item-header">
                 <strong>${esc(event.action)}</strong>
                 <span class="inline-code">${esc(event.result)}</span>
             </div>
+            ${boundary ? `
+                <div class="callout" data-scim-grant-boundary-event="${esc(event.action)}">
+                    <strong>Blocked by the grant boundary.</strong> No grant was created and any previous managed grant for this group and mapping was revoked.
+                </div>
+            ` : ""}
             ${renderMetadataRows([
                 { label: "When", value: formatDate(event.occurredAt) },
                 { label: "Resource", value: `${event.resourceType || "n/a"} ${event.resourceId || ""}`.trim() },
                 { label: "External ID", value: event.externalId || "n/a" },
+                ...(boundary ? [
+                    { label: "Resolved FGA resource", value: boundary.resourceId },
+                    { label: "Grant boundary", value: boundary.grantBoundaryResourceId },
+                    { label: "Reason", value: boundary.reason }
+                ] : []),
                 { label: "Error", value: event.error || "n/a" },
                 { label: "Request ID", value: event.requestId || "n/a" }
             ])}
         `;
+    }
+
+    function scimGrantBoundaryEventDetails(event) {
+        if (event?.action !== "scim.grant.outside_boundary" && event?.action !== "scim.grant.boundary_missing") {
+            return null;
+        }
+        let data = {};
+        try {
+            data = event.dataJson ? JSON.parse(event.dataJson) : {};
+        } catch {
+            data = {};
+        }
+        return {
+            resourceId: data.resourceId || "n/a",
+            grantBoundaryResourceId: data.grantBoundaryResourceId || "not configured",
+            reason: data.reason || "n/a"
+        };
+    }
+
+    function renderScimGrantBoundary(boundary) {
+        if (!boundary?.resourceId || boundary.status === "missing") {
+            return `<span class="inline-code">not set</span>`;
+        }
+        const detail = boundary.status === "configured"
+            ? `${boundary.resourceName || ""}${boundary.resourceTypeId ? ` (${boundary.resourceTypeId})` : ""}`.trim()
+            : "resource not found";
+        return `<span class="inline-code">${esc(boundary.resourceId)}</span> ${esc(detail)}`;
+    }
+
+    function renderScimGrantBoundaryCallout(connection) {
+        const status = connection?.grantBoundary?.status || (connection?.grantBoundaryResourceId ? "configured" : "missing");
+        const fix = connection?.source === "seeded"
+            ? "Declare GrantBoundaryResourceId in SeedScimConnection and restart."
+            : "Set the boundary to this organization's root FGA resource below.";
+        if (status === "missing") {
+            return `
+                <div class="callout" data-scim-grant-boundary-warning="missing">
+                    <strong>No grant boundary. Mapped grants fail closed.</strong>
+                    Group mappings on this connection create no grants, and existing managed grants are revoked when each group is next pushed. ${esc(fix)} Then push or resynchronize the groups.
+                </div>`;
+        }
+        if (status === "not_found") {
+            return `
+                <div class="callout" data-scim-grant-boundary-warning="not_found">
+                    <strong>Grant boundary resource not found. Mapped grants fail closed.</strong>
+                    <span class="inline-code">${esc(connection.grantBoundaryResourceId)}</span> is not in the FGA resource tree. Recreate it or change the boundary.
+                </div>`;
+        }
+        return "";
+    }
+
+    function describeScimMappingBoundaryStatus(status) {
+        switch (status) {
+            case "within": return "Target is inside the grant boundary";
+            case "outside": return "Target is outside the grant boundary";
+            case "resource_not_found": return "Target resource does not exist yet; checked when it does";
+            case "boundary_missing": return "The connection has no grant boundary";
+            case "boundary_not_found": return "The grant boundary resource was not found";
+            case "hierarchy_invalid": return "Target's FGA ancestor chain has a cycle or exceeds the depth limit";
+            case "checked_at_grant_time": return "Template target is checked against the boundary on every group push";
+            default: return status || "n/a";
+        }
     }
 
     function renderTabLink(tab, label, activeTab, organizationId) {

@@ -27,6 +27,14 @@ internal static class DashboardAdminContracts
     public const string MachineClients = "/sqlos/admin/auth/api/machine-clients";
     public static string OrganizationScimConnections(string organizationId)
         => $"/sqlos/admin/auth/api/organizations/{organizationId}/scim-connections";
+    public static string ScimConnection(string connectionId)
+        => $"/sqlos/admin/auth/api/scim-connections/{Uri.EscapeDataString(connectionId)}";
+    public static string ScimConnectionMappings(string connectionId)
+        => $"{ScimConnection(connectionId)}/mappings";
+    public static string ScimConnectionDisable(string connectionId)
+        => $"{ScimConnection(connectionId)}/disable";
+    public static string ScimConnectionEnable(string connectionId)
+        => $"{ScimConnection(connectionId)}/enable";
     public static string MachineClientRevoke(string clientId)
         => $"{MachineClients}/{Uri.EscapeDataString(clientId)}/revoke";
     public static string MachineClientEmergencyDisable(string clientId)
@@ -73,6 +81,7 @@ internal sealed class ControlPlaneParityHarness : IAsyncDisposable
         AuthorizationServer = scope.ServiceProvider.GetRequiredService<SqlOSAuthorizationServerService>();
         Authorization = AuthorizationServer;
         Auth = scope.ServiceProvider.GetRequiredService<SqlOSAuthService>();
+        Fga = scope.ServiceProvider.GetRequiredService<SqlOS.Fga.Interfaces.ISqlOSFgaAuthService>();
     }
 
     public HttpClient Client { get; }
@@ -90,6 +99,7 @@ internal sealed class ControlPlaneParityHarness : IAsyncDisposable
     public SqlOSAuthorizationServerService AuthorizationServer { get; }
     public SqlOSAuthorizationServerService Authorization { get; }
     public SqlOSAuthService Auth { get; }
+    public SqlOS.Fga.Interfaces.ISqlOSFgaAuthService Fga { get; }
 
     public static async Task<ControlPlaneParityHarness> CreateAsync(Action<SqlOSAuthServerOptions>? configure = null)
     {
@@ -189,7 +199,10 @@ internal sealed class ControlPlaneParityHarness : IAsyncDisposable
         return new ParityProjection("scim_connection", new Dictionary<string, string?>
         {
             ["organization"] = item.Organization?.Slug,
-            ["displayName"] = item.DisplayName
+            ["displayName"] = item.DisplayName,
+            ["grantBoundaryResourceId"] = item.GrantBoundaryResourceId,
+            ["dashboardGrantBoundaryResourceId"] = dashboardItem.GetProperty("grantBoundaryResourceId").GetString(),
+            ["dashboardGrantBoundaryStatus"] = dashboardItem.GetProperty("grantBoundary").GetProperty("status").GetString()
         }, item.ConfigurationOwner, ReadEditable(dashboardItem), item.IsEnabled,
             item.TokenHash != null && item.TokenPrefix != null);
     }

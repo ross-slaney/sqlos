@@ -241,7 +241,10 @@ public static partial class EndpointRouteBuilderExtensions
             await HandleAdminApiAsync(context, options, environment, async () =>
             {
                 var connection = await adminService.CreateScimConnectionAsync(
-                    new SqlOSCreateScimConnectionRequest(organizationId, request.DisplayName, request.Enabled),
+                    new SqlOSCreateScimConnectionRequest(organizationId, request.DisplayName, request.Enabled)
+                    {
+                        GrantBoundaryResourceId = request.GrantBoundaryResourceId
+                    },
                     cancellationToken);
                 return SensitiveJson(context, connection);
             }));
@@ -268,7 +271,10 @@ public static partial class EndpointRouteBuilderExtensions
             {
                 var connection = await adminService.UpdateScimConnectionAsync(
                     connectionId,
-                    new SqlOSUpdateScimConnectionRequest(request.DisplayName, request.Enabled),
+                    new SqlOSUpdateScimConnectionRequest(request.DisplayName, request.Enabled)
+                    {
+                        GrantBoundaryResourceId = request.GrantBoundaryResourceId
+                    },
                     cancellationToken);
                 return Results.Ok(ToScimConnectionAdminResponse(connection));
             }));

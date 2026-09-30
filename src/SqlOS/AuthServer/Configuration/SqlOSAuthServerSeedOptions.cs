@@ -244,6 +244,17 @@ public sealed class SqlOSScimConnectionSeedOptions
     public bool Enabled { get; set; } = true;
     public string? Token { get; set; }
     public string? TokenSecretName { get; set; }
+
+    /// <summary>
+    /// FGA resource whose subtree bounds every grant this connection's group mappings may create,
+    /// normally the organization's root resource. Every mapped grant, including one whose resource
+    /// ID comes from a <see cref="SqlOSScimGroupMappingSeedOptions.ResourceIdTemplate"/>, must
+    /// target this resource or one of its descendants in the FGA tree. The resource must exist when
+    /// startup reconciles the seed (declare it with <c>Fga.Seed</c> or create it first). Without a
+    /// boundary the connection still syncs users and groups, but its mappings create no grants.
+    /// </summary>
+    public string? GrantBoundaryResourceId { get; set; }
+
     public List<SqlOSScimGroupMappingSeedOptions> GroupMappings { get; } = [];
 
     public SqlOSScimConnectionSeedOptions MapGroup(string displayName, Action<SqlOSScimGroupMappingSeedOptions> configure)

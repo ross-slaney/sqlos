@@ -1690,19 +1690,35 @@ Admin setup endpoints are available under `/sqlos/admin/auth/api`:
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /organizations/{organizationId}/scim-connections` | List organization SCIM connections |
-| `POST /organizations/{organizationId}/scim-connections` | Create the connection and return its Base URL plus initial one-time token |
-| `GET /scim-connections/{connectionId}` | Read setup URLs and token metadata; never returns the raw token |
-| `PUT /scim-connections/{connectionId}` | Update display name and enabled state |
+| `GET /organizations/{organizationId}/scim-connections` | List organization SCIM connections, including each grant boundary and its status |
+| `POST /organizations/{organizationId}/scim-connections` | Create the connection, optionally with `grantBoundaryResourceId`, and return its Base URL plus initial one-time token |
+| `GET /scim-connections/{connectionId}` | Read setup URLs, token metadata, and the grant boundary; never returns the raw token |
+| `PUT /scim-connections/{connectionId}` | Update display name, enabled state, and grant boundary; changing the boundary immediately revokes managed grants outside it |
 | `POST /scim-connections/{connectionId}/enable` | Enable a connection when no other connection is enabled for the organization |
 | `POST /scim-connections/{connectionId}/disable` | Disable a connection, reject its token, and immediately revoke its managed FGA grants |
 | `POST /scim-connections/{connectionId}/token/rotate` | Replace the token and return the new raw value once |
-| `GET /scim-connections/{connectionId}/mappings` | List group-to-grant mapping rules |
-| `POST /scim-connections/{connectionId}/mappings` | Create a mapping rule |
+| `GET /scim-connections/{connectionId}/mappings` | List group-to-grant mapping rules with each rule's `grantBoundaryStatus` |
+| `POST /scim-connections/{connectionId}/mappings` | Create a mapping rule; an enabled rule requires the connection's grant boundary |
 | `PUT /scim-mappings/{mappingId}` | Update a mapping rule and immediately revoke the grants owned by its previous state |
-| `POST /scim-mappings/{mappingId}/enable` | Enable a mapping rule |
+| `POST /scim-mappings/{mappingId}/enable` | Enable a mapping rule after checking it against the grant boundary |
 | `POST /scim-mappings/{mappingId}/disable` | Disable a mapping rule and immediately revoke its managed grants |
 | `GET /scim-connections/{connectionId}/sync-events` | Read persisted SCIM activity and reconciliation errors |
+
+#### Grant boundary
+
+Each connection's `grantBoundaryResourceId` names the FGA resource, normally the organization's root, whose subtree bounds every grant its mappings may create. Admin reads return it with a `grantBoundary` object whose `status` is `configured`, `missing`, or `not_found`. In `PUT`, omit the field or send `null` to keep the current boundary; a boundary can be changed but not removed through the API. Code-owned connections take it from `SqlOSScimConnectionSeedOptions.GrantBoundaryResourceId`.
+
+Mapping rules are checked when they are saved and again every time a group is pushed. A rejected change returns `400` with a stable `error` code, which `SqlOSAdminService` raises as `SqlOSScimGrantBoundaryException.Error`:
+
+| `error` | Meaning |
+| --- | --- |
+| `grant_boundary_required` | An enabled mapping was saved on a connection with no grant boundary |
+| `grant_boundary_not_found` | The grant boundary resource does not exist |
+| `grant_boundary_invalid` | The grant boundary ID is longer than 256 characters |
+| `resource_outside_grant_boundary` | A fixed mapping resource exists but is not the boundary or a descendant |
+| `grant_boundary_hierarchy_invalid` | The fixed resource's ancestor chain has a cycle or exceeds `Fga.MaxResourceHierarchyDepth` |
+
+When a pushed group resolves outside the boundary, or the connection has no usable boundary, the SCIM request still succeeds, but SqlOS creates no grant, revokes any previous managed grant for that group and mapping, and records a failed `scim.grant.outside_boundary` or `scim.grant.boundary_missing` sync event and audit event. Boundary changes record `scim.connection.grant_boundary_changed`.
 
 The shortest setup is: enable SCIM in AuthServer, create one enabled organization connection, copy the returned Base URL and one-time token into Okta or Entra, then validate one user before enabling group push. Google Workspace does not provide a public generic SCIM push client; its Admin SDK is a separate integration.
 
