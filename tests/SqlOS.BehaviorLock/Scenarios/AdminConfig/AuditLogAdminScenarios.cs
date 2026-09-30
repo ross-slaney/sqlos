@@ -162,7 +162,7 @@ public sealed partial class AuditLogAdminScenarios
             action = "invoice.paid",
             source = "billing",
             actor = new { type = "service", id = "billing-worker", displayName = "Billing, \"nightly\"" },
-            targets = new[] { new { type = "invoice", id = "inv-1001", displayName = "Invoice 1001" }, new { type = "customer", id = "cus-9", displayName = (string?)null } },
+            targets = new[] { new { type = "invoice", id = "inv-1001", displayName = (string?)"Invoice 1001" }, new { type = "customer", id = "cus-9", displayName = (string?)null } },
             context = new { ipAddress = "198.51.100.7", requestId = "req-1001", correlationId = "corr-1001" },
             metadata = new Dictionary<string, object?> { ["amount"] = 42, ["note"] = "line one\nline two" },
             occurredAt = "2026-01-01T10:00:00Z"
