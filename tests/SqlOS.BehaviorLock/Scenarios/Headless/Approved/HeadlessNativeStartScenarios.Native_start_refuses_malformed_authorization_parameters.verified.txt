@@ -1,0 +1,164 @@
+# SqlOS behavior lock transcript
+scenario: HeadlessNativeStartScenarios.Native_start_refuses_malformed_authorization_parameters
+profile: headless
+
+## 1. client: response type token
+> POST /sqlos/auth/headless/start
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "codeChallenge": "{pkce-challenge#1}",
+>     "codeChallengeMethod": "S256",
+>     "nonce": "{nonce#1}",
+>     "redirectUri": "https://sqlos.example.test/auth/callback",
+>     "responseType": "token",
+>     "scope": "openid profile email offline_access",
+>     "state": "{state#1}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "message": "Only authorization code requests are supported."
+    }
+
+## 2. client: no PKCE code challenge
+> POST /sqlos/auth/headless/start
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "codeChallengeMethod": "S256",
+>     "nonce": "{nonce#2}",
+>     "redirectUri": "https://sqlos.example.test/auth/callback",
+>     "responseType": "code",
+>     "scope": "openid profile email offline_access",
+>     "state": "{state#2}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "message": "A PKCE code challenge is required."
+    }
+
+## 3. client: the plain PKCE method
+> POST /sqlos/auth/headless/start
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "codeChallenge": "{pkce-challenge#2}",
+>     "codeChallengeMethod": "plain",
+>     "nonce": "{nonce#3}",
+>     "redirectUri": "https://sqlos.example.test/auth/callback",
+>     "responseType": "code",
+>     "scope": "openid profile email offline_access",
+>     "state": "{state#3}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "message": "Only S256 PKCE is supported."
+    }
+
+## 4. client: a code challenge that is not a 43-character S256 value
+> POST /sqlos/auth/headless/start
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "codeChallenge": "{pkce-challenge#3}",
+>     "codeChallengeMethod": "S256",
+>     "nonce": "{nonce#4}",
+>     "redirectUri": "https://sqlos.example.test/auth/callback",
+>     "responseType": "code",
+>     "scope": "openid profile email offline_access",
+>     "state": "{state#4}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "message": "The request could not be completed."
+    }
+
+## 5. client: prompt none combined with login
+> POST /sqlos/auth/headless/start
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "codeChallenge": "{pkce-challenge#4}",
+>     "codeChallengeMethod": "S256",
+>     "nonce": "{nonce#5}",
+>     "prompt": "none login",
+>     "redirectUri": "https://sqlos.example.test/auth/callback",
+>     "responseType": "code",
+>     "scope": "openid profile email offline_access",
+>     "state": "{state#5}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "message": "prompt cannot combine none with other values."
+    }
+
+## 6. client: a max_age that is not a number
+> POST /sqlos/auth/headless/start
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "codeChallenge": "{pkce-challenge#5}",
+>     "codeChallengeMethod": "S256",
+>     "maxAge": "soon",
+>     "nonce": "{nonce#6}",
+>     "redirectUri": "https://sqlos.example.test/auth/callback",
+>     "responseType": "code",
+>     "scope": "openid profile email offline_access",
+>     "state": "{state#6}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "message": "max_age must be a non-negative integer."
+    }
+
+## audit: refused native starts
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "PKCE code challenge must be a 43-character RFC 7636 S256 value.",
+        "error": "invalid_request",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The request could not be completed.",
+        "surface": "HeadlessApi"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

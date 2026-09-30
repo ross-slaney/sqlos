@@ -1,0 +1,63 @@
+# SqlOS behavior lock transcript
+scenario: HeadlessNativeStartScenarios.A_dynamically_registered_client_cannot_start_native_headless_auth
+profile: dcr
+
+## 1. registered-client: a client that registered itself (DCR, never first party) tries to collect credentials in its own UI (#419): refused
+> POST /sqlos/auth/headless/start
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "{client-id:registered}",
+>     "codeChallenge": "{pkce-challenge#1}",
+>     "codeChallengeMethod": "S256",
+>     "nonce": "{nonce#1}",
+>     "redirectUri": "http://127.0.0.1/callback/collector",
+>     "responseType": "code",
+>     "scope": "openid profile offline_access",
+>     "state": "{state#1}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "message": "The request could not be completed."
+    }
+
+## audit: refused native start events
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "Native headless auth is only available to first-party clients.",
+        "error": "invalid_request",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The request could not be completed.",
+        "surface": "HeadlessApi"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
