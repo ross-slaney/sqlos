@@ -1,0 +1,150 @@
+# SqlOS behavior lock transcript
+scenario: SamlAcsScenarios.Authorization_url_requests_are_validated
+profile: enterprise
+
+## 1. client: no state
+> POST /sqlos/auth/sso/authorization-url
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "codeChallenge": "{pkce-challenge#1}",
+>     "codeChallengeMethod": "S256",
+>     "connectionId": "{sso#1}",
+>     "redirectUri": "https://sqlos.example.test/auth/callback",
+>     "state": ""
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "error_description": "A state value is required."
+    }
+
+## 2. client: no PKCE challenge
+> POST /sqlos/auth/sso/authorization-url
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "codeChallenge": "",
+>     "codeChallengeMethod": "S256",
+>     "connectionId": "{sso#1}",
+>     "redirectUri": "https://sqlos.example.test/auth/callback",
+>     "state": "{state#1}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "error_description": "SAML authorization requires an S256 PKCE code challenge."
+    }
+
+## 3. client: the plain PKCE method
+> POST /sqlos/auth/sso/authorization-url
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "codeChallenge": "{pkce-challenge#1}",
+>     "codeChallengeMethod": "plain",
+>     "connectionId": "{sso#1}",
+>     "redirectUri": "https://sqlos.example.test/auth/callback",
+>     "state": "{state#1}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "error_description": "SAML authorization requires an S256 PKCE code challenge."
+    }
+
+## 4. client: a challenge that is not a SHA-256 digest
+> POST /sqlos/auth/sso/authorization-url
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "codeChallenge": "too-short",
+>     "codeChallengeMethod": "S256",
+>     "connectionId": "{sso#1}",
+>     "redirectUri": "https://sqlos.example.test/auth/callback",
+>     "state": "{state#1}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "error_description": "SAML authorization requires a valid RFC 7636 S256 PKCE code challenge."
+    }
+
+## 5. client: an unknown connection
+> POST /sqlos/auth/sso/authorization-url
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "codeChallenge": "{pkce-challenge#1}",
+>     "codeChallengeMethod": "S256",
+>     "connectionId": "{sso#2}",
+>     "redirectUri": "https://sqlos.example.test/auth/callback",
+>     "state": "{state#1}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "error_description": "SAML connection not found or disabled."
+    }
+
+## 6. client: Globex's draft connection, which is not enabled
+> POST /sqlos/auth/sso/authorization-url
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "codeChallenge": "{pkce-challenge#1}",
+>     "codeChallengeMethod": "S256",
+>     "connectionId": "{sso#3}",
+>     "redirectUri": "https://sqlos.example.test/auth/callback",
+>     "state": "{state#1}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "error_description": "SAML connection not found or disabled."
+    }
+
+## 7. client: an unknown client
+> POST /sqlos/auth/sso/authorization-url
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "unknown-client",
+>     "codeChallenge": "{pkce-challenge#1}",
+>     "codeChallengeMethod": "S256",
+>     "connectionId": "{sso#1}",
+>     "redirectUri": "https://sqlos.example.test/auth/callback",
+>     "state": "{state#1}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "error_description": "Unknown client 'unknown-client'."
+    }
+
+## 8. client: a redirect URI the client did not register
+> POST /sqlos/auth/sso/authorization-url
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "codeChallenge": "{pkce-challenge#1}",
+>     "codeChallengeMethod": "S256",
+>     "connectionId": "{sso#1}",
+>     "redirectUri": "https://attacker.example.test/callback",
+>     "state": "{state#1}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "error_description": "Redirect URI 'https://attacker.example.test/callback' is not allowed for client 'behavior-lock-app'."
+    }
+
+## audit: refusals
+  (no new events)

@@ -1,0 +1,79 @@
+# SqlOS behavior lock transcript
+scenario: SamlAcsScenarios.Just_in_time_provisioning_writes_no_user_or_membership_audit_record_CurrentBehavior_KnownDefect_415
+profile: enterprise
+
+## 1. browser: Ivan's first sign-in provisions his account and his Acme membership
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#1}
+>   RelayState={relay-state#1}
+< 302 Found
+< Location: https://sqlos.example.test/auth/callback?code={code#1}&state={state#1}&scope=openid%20profile%20email%20offline_access
+< Set-Cookie: sqlos_auth_page={cookie#2}; expires=+7d; path=/; secure; samesite=lax; httponly
+
+## audit: no user.created or membership.created record, only the sign-in records
+  - {
+      "action": "user.login.saml.assurance",
+      "actor": {
+        "displayName": null,
+        "id": "{sso#1}",
+        "type": "sso_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.saml.assurance",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "Accepted": false,
+        "AcceptedClaim": null,
+        "AcceptedValue": null,
+        "EvidencePresent": false,
+        "Reason": "evidence_missing",
+        "SamlAuthnContextClassRefs": [],
+        "assertionIssuer": "urn:behavior-lock:idp",
+        "connectionId": "{sso#1}"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+
+## 2. operator: dashboard: the membership exists
+> GET /sqlos/admin/auth/api/organizations/{org#1}/memberships
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "isActive": true,
+          "organization": "Acme",
+          "organizationId": "{org#1}",
+          "role": "member",
+          "user": "Ivan Petrov",
+          "userEmail": "{email:ivan}",
+          "userId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }

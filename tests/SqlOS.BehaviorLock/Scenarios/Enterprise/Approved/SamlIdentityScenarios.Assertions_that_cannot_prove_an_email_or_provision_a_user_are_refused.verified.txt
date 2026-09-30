@@ -1,0 +1,313 @@
+# SqlOS behavior lock transcript
+scenario: SamlIdentityScenarios.Assertions_that_cannot_prove_an_email_or_provision_a_user_are_refused
+profile: enterprise
+
+# Acme's connection reads the email from a 'mail' attribute and does not provision users just in time.
+
+## 1. client: start a sign-in at Acme's connection
+> POST /sqlos/auth/sso/authorization-url
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "codeChallenge": "{pkce-challenge#1}",
+>     "codeChallengeMethod": "S256",
+>     "connectionId": "{sso#1}",
+>     "redirectUri": "https://sqlos.example.test/auth/callback",
+>     "state": "{state#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "authorizationUrl": "https://idp.example.test/sso?SAMLRequest={saml-request#1}&RelayState={relay-state#1}"
+    }
+
+## 2. browser: the assertion has no 'mail' attribute: nothing proves an email
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#1}
+>   RelayState={relay-state#1}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "access_denied",
+      "message": "The external sign-in request could not be completed."
+    }
+
+## 3. client: start another
+> POST /sqlos/auth/sso/authorization-url
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "codeChallenge": "{pkce-challenge#2}",
+>     "codeChallengeMethod": "S256",
+>     "connectionId": "{sso#1}",
+>     "redirectUri": "https://sqlos.example.test/auth/callback",
+>     "state": "{state#2}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "authorizationUrl": "https://idp.example.test/sso?SAMLRequest={saml-request#2}&RelayState={relay-state#2}"
+    }
+
+## 4. browser: 'mail' asserts Ivan's address, but Ivan has no account and provisioning is off
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#2}
+>   RelayState={relay-state#2}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "access_denied",
+      "message": "The external sign-in request could not be completed."
+    }
+
+## 5. client: start a third
+> POST /sqlos/auth/sso/authorization-url
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "codeChallenge": "{pkce-challenge#3}",
+>     "codeChallengeMethod": "S256",
+>     "connectionId": "{sso#1}",
+>     "redirectUri": "https://sqlos.example.test/auth/callback",
+>     "state": "{state#3}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "authorizationUrl": "https://idp.example.test/sso?SAMLRequest={saml-request#3}&RelayState={relay-state#3}"
+    }
+
+## 6. browser: 'mail' carries something that is not an address
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#3}
+>   RelayState={relay-state#3}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "access_denied",
+      "message": "The external sign-in request could not be completed."
+    }
+
+## audit: each link denial names its reason
+  - {
+      "action": "user.login.saml.link_denied",
+      "actor": {
+        "displayName": null,
+        "id": "{sso#1}",
+        "type": "sso_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.saml.link_denied",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "connectionId": "{sso#1}",
+        "reason": "email_not_asserted"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "No user could be resolved from the SAML assertion.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "SamlAcs"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "user.login.saml.link_denied",
+      "actor": {
+        "displayName": null,
+        "id": "{sso#1}",
+        "type": "sso_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.saml.link_denied",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "connectionId": "{sso#1}",
+        "reason": "auto_provision_disabled"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "No user could be resolved from the SAML assertion.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "SamlAcs"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "user.login.saml.link_denied",
+      "actor": {
+        "displayName": null,
+        "id": "{sso#1}",
+        "type": "sso_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.saml.link_denied",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "connectionId": "{sso#1}",
+        "reason": "invalid_email"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#6}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "No user could be resolved from the SAML assertion.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "SamlAcs"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
