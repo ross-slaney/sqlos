@@ -1,0 +1,635 @@
+# SqlOS behavior lock transcript
+scenario: AdminIdentityApplicationAccessScenarios.User_role_and_deny_assignments_decide_access_to_a_selected_principals_application
+profile: dashboard-callback
+
+## 1. operator: restrict portal to selected principals
+> POST /sqlos/admin/auth/api/applications/portal/access-mode
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "accessMode": "selected_users_groups_roles"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "selected_users_groups_roles",
+      "clientId": "portal",
+      "disabledAt": null,
+      "disabledReason": null,
+      "id": "{cli#1}",
+      "isActive": true,
+      "name": "Portal"
+    }
+
+## 2. operator: allow alice
+> POST /sqlos/admin/auth/api/applications/portal/assignments
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "principalId": "{usr#1}",
+>     "principalType": "user"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "access": "allowed",
+      "clientApplicationId": "{cli#1}",
+      "createdAt": "{datetime:utc-z}",
+      "id": "{asa#1}",
+      "organizationId": null,
+      "ownership": {
+        "canEmergencyDisable": false,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "principalId": "{usr#1}",
+      "principalType": "user",
+      "reason": null,
+      "revokedAt": null,
+      "roleKey": null
+    }
+
+## 3. operator: allow acme's admins
+> POST /sqlos/admin/auth/api/applications/portal/assignments
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "access": "ALLOWED",
+>     "organizationId": "{org#1}",
+>     "principalType": "role",
+>     "roleKey": "admin"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "access": "allowed",
+      "clientApplicationId": "{cli#1}",
+      "createdAt": "{datetime:utc-z}",
+      "id": "{asa#2}",
+      "organizationId": "{org#1}",
+      "ownership": {
+        "canEmergencyDisable": false,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "principalId": null,
+      "principalType": "role",
+      "reason": null,
+      "revokedAt": null,
+      "roleKey": "admin"
+    }
+
+## 4. operator: deny carol explicitly
+> POST /sqlos/admin/auth/api/applications/portal/assignments
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "access": "denied",
+>     "principalId": "{usr#2}",
+>     "principalType": "user",
+>     "reason": "Contractor"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "access": "denied",
+      "clientApplicationId": "{cli#1}",
+      "createdAt": "{datetime:utc-z}",
+      "id": "{asa#3}",
+      "organizationId": null,
+      "ownership": {
+        "canEmergencyDisable": false,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "principalId": "{usr#2}",
+      "principalType": "user",
+      "reason": "Contractor",
+      "revokedAt": null,
+      "roleKey": null
+    }
+
+## 5. operator: alice matches her user assignment
+> GET /sqlos/admin/auth/api/applications/portal/access/check?userId={usr#1}&organizationId={org#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "selected_users_groups_roles",
+      "allowed": true,
+      "assignmentId": "{asa#1}",
+      "clientApplicationId": "{cli#1}",
+      "clientId": "portal",
+      "decision": "allowed",
+      "organizationId": "{org#1}",
+      "reason": null,
+      "source": "user_assignment",
+      "userId": "{usr#1}"
+    }
+
+## 6. operator: bob matches the admin role assignment
+> GET /sqlos/admin/auth/api/applications/portal/access/check?userId={usr#3}&organizationId={org#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "selected_users_groups_roles",
+      "allowed": true,
+      "assignmentId": "{asa#2}",
+      "clientApplicationId": "{cli#1}",
+      "clientId": "portal",
+      "decision": "allowed",
+      "organizationId": "{org#1}",
+      "reason": null,
+      "source": "role_assignment",
+      "userId": "{usr#3}"
+    }
+
+## 7. operator: carol is an admin, but the deny wins
+> GET /sqlos/admin/auth/api/applications/portal/access/check?userId={usr#2}&organizationId={org#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "selected_users_groups_roles",
+      "allowed": false,
+      "assignmentId": "{asa#3}",
+      "clientApplicationId": "{cli#1}",
+      "clientId": "portal",
+      "decision": "denied",
+      "organizationId": "{org#1}",
+      "reason": "Contractor",
+      "source": "assignment_denied",
+      "userId": "{usr#2}"
+    }
+
+## 8. operator: dave matches nothing
+> GET /sqlos/admin/auth/api/applications/portal/access/check?userId={usr#4}&organizationId={org#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "selected_users_groups_roles",
+      "allowed": false,
+      "assignmentId": null,
+      "clientApplicationId": "{cli#1}",
+      "clientId": "portal",
+      "decision": "denied",
+      "organizationId": "{org#1}",
+      "reason": "No user, group, role, or service assignment matched.",
+      "source": "no_principal_assignment",
+      "userId": "{usr#4}"
+    }
+
+## 9. operator: internal-only uses the same principal assignments
+> POST /sqlos/admin/auth/api/applications/portal/access-mode
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "accessMode": "internal_only"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "internal_only",
+      "clientId": "portal",
+      "disabledAt": null,
+      "disabledReason": null,
+      "id": "{cli#1}",
+      "isActive": true,
+      "name": "Portal"
+    }
+
+## 10. operator: bob is still allowed
+> GET /sqlos/admin/auth/api/applications/portal/access/check?userId={usr#3}&organizationId={org#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "internal_only",
+      "allowed": true,
+      "assignmentId": "{asa#2}",
+      "clientApplicationId": "{cli#1}",
+      "clientId": "portal",
+      "decision": "allowed",
+      "organizationId": "{org#1}",
+      "reason": null,
+      "source": "role_assignment",
+      "userId": "{usr#3}"
+    }
+
+## 11. operator: open portal to every organization
+> POST /sqlos/admin/auth/api/applications/portal/access-mode
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "accessMode": "all_organizations"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "all_organizations",
+      "clientId": "portal",
+      "disabledAt": null,
+      "disabledReason": null,
+      "id": "{cli#1}",
+      "isActive": true,
+      "name": "Portal"
+    }
+
+## 12. operator: dave is allowed by the mode
+> GET /sqlos/admin/auth/api/applications/portal/access/check?userId={usr#4}&organizationId={org#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "all_organizations",
+      "allowed": true,
+      "assignmentId": null,
+      "clientApplicationId": "{cli#1}",
+      "clientId": "portal",
+      "decision": "allowed",
+      "organizationId": "{org#1}",
+      "reason": "Application is open to all organizations.",
+      "source": "all_organizations",
+      "userId": "{usr#4}"
+    }
+
+## 13. operator: a deny assignment still wins over an open mode
+> GET /sqlos/admin/auth/api/applications/portal/access/check?userId={usr#2}&organizationId={org#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "all_organizations",
+      "allowed": false,
+      "assignmentId": "{asa#3}",
+      "clientApplicationId": "{cli#1}",
+      "clientId": "portal",
+      "decision": "denied",
+      "organizationId": "{org#1}",
+      "reason": "Contractor",
+      "source": "assignment_denied",
+      "userId": "{usr#2}"
+    }
+
+## 14. operator: assignments, newest first, two to a page
+> GET /sqlos/admin/auth/api/applications/portal/assignments?pageSize=2
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "all_organizations",
+      "clientId": "portal",
+      "data": [
+        {
+          "access": "denied",
+          "clientApplicationId": "{cli#1}",
+          "createdAt": "{datetime:unspecified}",
+          "createdByActorId": null,
+          "createdByActorType": "admin",
+          "id": "{asa#3}",
+          "organization": null,
+          "organizationId": null,
+          "ownership": {
+            "canEmergencyDisable": false,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "principalId": "{usr#2}",
+          "principalType": "user",
+          "reason": "Contractor",
+          "revokedAt": null,
+          "revokedByActorId": null,
+          "revokedByActorType": null,
+          "roleKey": null
+        },
+        {
+          "access": "allowed",
+          "clientApplicationId": "{cli#1}",
+          "createdAt": "{datetime:unspecified}",
+          "createdByActorId": null,
+          "createdByActorType": "admin",
+          "id": "{asa#2}",
+          "organization": "Acme",
+          "organizationId": "{org#1}",
+          "ownership": {
+            "canEmergencyDisable": false,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "principalId": null,
+          "principalType": "role",
+          "reason": null,
+          "revokedAt": null,
+          "revokedByActorId": null,
+          "revokedByActorType": null,
+          "roleKey": "admin"
+        }
+      ],
+      "hasNextPage": true,
+      "id": "{cli#1}",
+      "name": "Portal",
+      "nextCursor": "{cursor#1}",
+      "pageSize": 2
+    }
+
+## 15. operator: the oldest assignment
+> GET /sqlos/admin/auth/api/applications/portal/assignments?pageSize=2&cursor={cursor#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "all_organizations",
+      "clientId": "portal",
+      "data": [
+        {
+          "access": "allowed",
+          "clientApplicationId": "{cli#1}",
+          "createdAt": "{datetime:unspecified}",
+          "createdByActorId": null,
+          "createdByActorType": "admin",
+          "id": "{asa#1}",
+          "organization": null,
+          "organizationId": null,
+          "ownership": {
+            "canEmergencyDisable": false,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "principalId": "{usr#1}",
+          "principalType": "user",
+          "reason": null,
+          "revokedAt": null,
+          "revokedByActorId": null,
+          "revokedByActorType": null,
+          "roleKey": null
+        }
+      ],
+      "hasNextPage": false,
+      "id": "{cli#1}",
+      "name": "Portal",
+      "nextCursor": null,
+      "pageSize": 2
+    }
+
+## 16. operator: the cursor is bound to the includeRevoked filter
+> GET /sqlos/admin/auth/api/applications/portal/assignments?includeRevoked=true&cursor={cursor#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_cursor",
+      "message": "The cursor does not match the current filters."
+    }
+
+## audit: every mode change and assignment is audited
+  - {
+      "action": "application.access_mode.changed",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "dashboard"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "application.access_mode.changed",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "access_mode": "selected_users_groups_roles",
+        "client_application_id": "{cli#1}",
+        "client_id": "portal",
+        "previous_access_mode": "all_organizations"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "application.assignment.created",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "application.assignment.created",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "Access": "[redacted]",
+        "PrincipalId": "{usr#1}",
+        "PrincipalType": "user",
+        "RoleKey": null,
+        "assignment_id": "{asa#1}",
+        "client_application_id": "{cli#1}",
+        "client_id": "portal"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "application.assignment.created",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "application.assignment.created",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "Access": "[redacted]",
+        "PrincipalId": null,
+        "PrincipalType": "role",
+        "RoleKey": "admin",
+        "assignment_id": "{asa#2}",
+        "client_application_id": "{cli#1}",
+        "client_id": "portal"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "application.assignment.created",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "application.assignment.created",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "Access": "[redacted]",
+        "PrincipalId": "{usr#2}",
+        "PrincipalType": "user",
+        "RoleKey": null,
+        "assignment_id": "{asa#3}",
+        "client_application_id": "{cli#1}",
+        "client_id": "portal"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "application.access_mode.changed",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "dashboard"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "application.access_mode.changed",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "access_mode": "internal_only",
+        "client_application_id": "{cli#1}",
+        "client_id": "portal",
+        "previous_access_mode": "selected_users_groups_roles"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "application.access_mode.changed",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "dashboard"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "application.access_mode.changed",
+      "id": "{evt#6}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "access_mode": "all_organizations",
+        "client_application_id": "{cli#1}",
+        "client_id": "portal",
+        "previous_access_mode": "internal_only"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
