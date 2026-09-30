@@ -87,9 +87,13 @@ var dataset = new DatasetShape(
     string.Create(CultureInfo.InvariantCulture,
         $"The shipped schema, indexes, and `fn_IsResourceAccessible`, queried through `BuildFilterAsync`. The tree: {chains} retail chains ({chains - 1} at D = 5, one at D = 10) with {tree.Stores.Count:N0} stores and {tree.Nodes.Count + 1:N0} organizational nodes. Store sizes are log-normal, and products are spread through the id range the way rows arrive over time. {managedScopes:N0} managers hold grants on their store, region, or chain. The people measured each resolve to 3 subjects (M = 3)."));
 
+// Leave room for the CI runner's own logs and the uploaded results.
+long? FreeBytes() => options.DataDirectory is { } directory ? new DriveInfo(Path.GetFullPath(directory)).AvailableFreeSpace : null;
+var diskBudget = FreeBytes() is { } free ? free - 8_000_000_000L : (long?)null;
+
 IDatasetLoader loader = options.Provider == DatabaseProvider.PostgreSql
     ? new PostgreSqlDatasetLoader(server.DatabaseConnectionString, fga, log)
-    : new SqlServerDatasetLoader(server.DatabaseConnectionString, fga, log);
+    : new SqlServerDatasetLoader(server.DatabaseConnectionString, fga, diskBudget, log);
 
 await loader.ConfigureDatabaseAsync(cancellation);
 log.Info($"Loading the hierarchy: {tree.Nodes.Count:N0} organizational nodes, {tree.Stores.Count:N0} stores, {tree.Leaves.Count:N0} leaves...");
@@ -134,8 +138,10 @@ foreach (var target in options.Scales)
     loaded = target;
 
     var size = await loader.DatabaseSizeBytesAsync(cancellation);
-    log.Info($"Measuring at {RetailTree.Count(target)} products ({tree.TotalResources(target):N0} resources, {size / 1e9:F1} GB)...");
-    var scenarios = ScenarioCatalog.Build(tree, people, target);
+    log.Info(
+        $"Measuring at {RetailTree.Count(target)} products ({tree.TotalResources(target):N0} resources, {size / 1e9:F1} GB)" +
+        (FreeBytes() is { } left ? $", {left / 1e9:F0} GB free on the data disk..." : "..."));
+    var scenarios = ScenarioCatalog.Build(tree, people, target).Where(s => !options.Exclude.Contains(s.Id)).ToList();
     var results = await runner.RunAsync(scenarios, target, cancellation);
 
     // Grant density does not depend on N, so it is measured once, at the first scale.

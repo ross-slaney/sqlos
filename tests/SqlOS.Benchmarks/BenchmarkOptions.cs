@@ -30,6 +30,9 @@ internal sealed record BenchmarkOptions
     public bool KeepContainer { get; init; }
     public int Seed { get; init; } = 20260930;
 
+    /// <summary>Scenario ids to skip (pull requests skip the 30-second sparse scan).</summary>
+    public IReadOnlySet<string> Exclude { get; init; } = new HashSet<string>();
+
     /// <summary>Memory given to the database engine. The CI runner has 16 GB; the harness itself needs little.</summary>
     public int DatabaseMemoryMegabytes { get; init; } = 8192;
 
@@ -54,6 +57,7 @@ internal sealed record BenchmarkOptions
           --no-gates               report gate results without failing the run
           --keep                   leave the container running afterwards
           --seed <n>               dataset seed (default 20260930)
+          --exclude <ids>          scenario ids to skip, comma-separated (e.g. list.store.first-page)
         """;
 
     public static BenchmarkOptions? Parse(string[] args)
@@ -67,6 +71,7 @@ internal sealed record BenchmarkOptions
         var keep = false;
         var seed = 20260930;
         var memory = 8192;
+        var exclude = new HashSet<string>(StringComparer.Ordinal);
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -119,6 +124,9 @@ internal sealed record BenchmarkOptions
                 case "--seed":
                     seed = int.Parse(Next(), CultureInfo.InvariantCulture);
                     break;
+                case "--exclude":
+                    exclude.UnionWith(Next().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+                    break;
                 default:
                     throw new ArgumentException($"Unknown option '{args[i]}'.");
             }
@@ -148,6 +156,7 @@ internal sealed record BenchmarkOptions
             KeepContainer = keep,
             Seed = seed,
             DatabaseMemoryMegabytes = memory,
+            Exclude = exclude,
         };
     }
 

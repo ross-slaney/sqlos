@@ -1,18 +1,28 @@
 name: Benchmarks
 
-# SHRBAC list filtering and point checks on the shipped schema and fn_IsResourceAccessible, grown from 1M
-# to 100M products in place, one job per engine. Runs beside Pull Request CI, only when the library, the
-# benchmark, or this workflow changes. See tests/SqlOS.Benchmarks/README.md.
+# SHRBAC list filtering and point checks on the shipped schema and fn_IsResourceAccessible, one job per
+# engine, beside Pull Request CI. See tests/SqlOS.Benchmarks/README.md.
+#
+# Pull requests grow the catalog 1M -> 10M and skip the 30-second sparse scan, so the check finishes well
+# inside the PR CI envelope. The full run, 1M -> 10M -> 100M with every scenario, happens on every merge to
+# main, weekly, on demand, and on a pull request labelled `benchmark-100m`.
 
 on:
-  # CALIBRATION ONLY: remove before opening the PR.
   push:
-    branches: [benchmarks-scale-100m]
-  pull_request:
+    # CALIBRATION ONLY: remove the feature branch before opening the PR.
+    branches: [main, benchmarks-scale-100m]
     paths:
       - "src/SqlOS/**"
       - "tests/SqlOS.Benchmarks/**"
       - ".github/workflows/benchmarks.yml"
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - "src/SqlOS/**"
+      - "tests/SqlOS.Benchmarks/**"
+      - ".github/workflows/benchmarks.yml"
+  schedule:
+    - cron: "17 6 * * 1"
   workflow_dispatch:
     inputs:
       scales:
@@ -26,12 +36,15 @@ concurrency:
 
 env:
   DOTNET_VERSION: "9.0.x"
+  FULL_RUN: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'benchmark-100m') }}
 
 jobs:
   benchmark:
     name: SHRBAC benchmarks (${{ matrix.name }})
+    # Adding some other label to a pull request should not re-run the benchmarks.
+    if: github.event.action != 'labeled' || github.event.label.name == 'benchmark-100m'
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'benchmark-100m')) && 120 || 30 }}
     strategy:
       fail-fast: false
       matrix:
@@ -57,12 +70,19 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nuget-
 
-      # The OS disk has ~20 GB free; the temporary disk at /mnt has room for 100M rows and their indexes.
-      - name: Put database files on the temporary disk
+      - name: Choose the tier
+        id: tier
         run: |
-          df -h / /mnt
+          if [ "$FULL_RUN" = "true" ]; then
+            echo "scales=${{ inputs.scales || '1m,10m,100m' }}" >> "$GITHUB_OUTPUT"
+            echo "exclude=" >> "$GITHUB_OUTPUT"
+          else
+            echo "scales=1m,10m" >> "$GITHUB_OUTPUT"
+            echo "exclude=list.store.first-page" >> "$GITHUB_OUTPUT"
+          fi
           sudo mkdir -p /mnt/sqlos-bench
           sudo chmod 0777 /mnt/sqlos-bench
+          df -h /mnt/sqlos-bench
 
       - name: Pull ${{ matrix.image }}
         run: docker pull ${{ matrix.image }}
@@ -70,18 +90,19 @@ jobs:
       - name: Build
         run: dotnet build tests/SqlOS.Benchmarks --configuration Release
 
-      - name: Run benchmarks
+      - name: Run benchmarks (${{ steps.tier.outputs.scales }})
         run: >-
           dotnet run --project tests/SqlOS.Benchmarks --configuration Release --no-build --
           --provider ${{ matrix.provider }}
-          --scales ${{ inputs.scales || '1m,10m,100m' }}
+          --scales ${{ steps.tier.outputs.scales }}
+          ${{ steps.tier.outputs.exclude && format('--exclude {0}', steps.tier.outputs.exclude) || '' }}
           --data-dir /mnt/sqlos-bench
           --out artifacts/benchmarks
           --summary "$GITHUB_STEP_SUMMARY"
 
       - name: Disk usage
         if: always()
-        run: df -h / /mnt
+        run: df -h /mnt/sqlos-bench
 
       - uses: actions/upload-artifact@v4
         if: always()

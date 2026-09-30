@@ -8,11 +8,14 @@ namespace SqlOS.Benchmarks.Data;
 /// SQL Server: ordered <c>SqlBulkCopy</c> with a table lock into the clustered primary keys (minimally logged
 /// under the simple recovery model), nonclustered indexes disabled during the load and rebuilt afterwards.
 /// </summary>
-internal sealed class SqlServerDatasetLoader(string connectionString, SqlOSFgaOptions fga, Log log) : IDatasetLoader
+internal sealed class SqlServerDatasetLoader(string connectionString, SqlOSFgaOptions fga, long? diskBudgetBytes, Log log) : IDatasetLoader
 {
     private string Resources => $"[{fga.Schema}].[{fga.TableNames.Resources}]";
     private const string Products = "[dbo].[Products]";
     private const string Stores = "[dbo].[Stores]";
+
+    /// <summary>Rows per bulk-copy transaction, so the log truncates under simple recovery as the load runs.</summary>
+    private const int BatchRows = 1_000_000;
 
     public async Task ConfigureDatabaseAsync(CancellationToken cancellationToken)
     {
@@ -25,6 +28,47 @@ internal sealed class SqlServerDatasetLoader(string connectionString, SqlOSFgaOp
             EXEC (@sql);
             """,
             cancellationToken);
+
+        if (diskBudgetBytes is { } budget)
+        {
+            // Cap the files below the disk's free space, so running out fails this benchmark with a SQL error
+            // instead of filling the disk the CI runner itself needs (which loses every log).
+            var gb = budget / 1_000_000_000;
+            var logGb = Math.Max(4, gb / 10);
+            var temp = Math.Max(8, gb / 5);
+            var data = Math.Max(8, gb - logGb - temp);
+            await ExecuteAsync(
+                $"""
+                DECLARE @sql nvarchar(max) = N'';
+                SELECT @sql += N'ALTER DATABASE ' + QUOTENAME(DB_NAME()) + N' MODIFY FILE (NAME = ' + QUOTENAME(name)
+                    + N', MAXSIZE = ' + CASE WHEN type = 1 THEN N'{logGb}GB' ELSE N'{data}GB' END + N');'
+                FROM sys.database_files;
+                SELECT @sql += N'ALTER DATABASE tempdb MODIFY FILE (NAME = ' + QUOTENAME(name)
+                    + N', MAXSIZE = ' + CAST(CASE WHEN type = 1 THEN 4096 ELSE {temp} * 1024 / (SELECT COUNT(*) FROM tempdb.sys.database_files WHERE type = 0) END AS nvarchar(20)) + N'MB);'
+                FROM tempdb.sys.database_files;
+                EXEC (@sql);
+                """,
+                cancellationToken);
+            log.Info($"  file caps: data {data} GB, log {logGb} GB, tempdb {temp} GB (disk budget {gb} GB)");
+        }
+    }
+
+    /// <summary>Allocated size of the benchmark database's files and tempdb, for the CI log.</summary>
+    private async Task LogFileSizesAsync(string phase, CancellationToken cancellationToken)
+    {
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            SELECT
+                (SELECT SUM(CAST(size AS bigint)) * 8 / 1024 FROM sys.database_files WHERE type = 0),
+                (SELECT SUM(CAST(size AS bigint)) * 8 / 1024 FROM sys.database_files WHERE type = 1),
+                (SELECT SUM(CAST(size AS bigint)) * 8 / 1024 FROM tempdb.sys.database_files);
+            """;
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await reader.ReadAsync(cancellationToken);
+        log.Info($"  files after {phase}: data {reader.GetInt64(0) / 1024.0:F1} GB, log {reader.GetInt64(1) / 1024.0:F1} GB, tempdb {reader.GetInt64(2) / 1024.0:F1} GB");
     }
 
     public async Task LoadHierarchyAsync(RetailTree tree, CancellationToken cancellationToken)
@@ -42,7 +86,9 @@ internal sealed class SqlServerDatasetLoader(string connectionString, SqlOSFgaOp
             Task.Run(() => BulkCopyAsync(Resources, DatasetRows.Columns.Resources, DatasetRows.ProductResources(tree, from, to), orderedById: true, cancellationToken), cancellationToken),
             Task.Run(() => BulkCopyAsync(Products, DatasetRows.Columns.Products, DatasetRows.Products(tree, from, to), orderedById: true, cancellationToken), cancellationToken));
         rows.Stop();
+        await ExecuteAsync("CHECKPOINT;", cancellationToken);
         log.Info($"  rows loaded in {rows.Elapsed.TotalSeconds:F1}s");
+        await LogFileSizesAsync("load", cancellationToken);
 
         var indexes = Stopwatch.StartNew();
         foreach (var (table, index) in disabled)
@@ -51,7 +97,9 @@ internal sealed class SqlServerDatasetLoader(string connectionString, SqlOSFgaOp
         }
 
         indexes.Stop();
+        await ExecuteAsync("CHECKPOINT;", cancellationToken);
         log.Info($"  {disabled.Count} nonclustered indexes rebuilt in {indexes.Elapsed.TotalSeconds:F1}s");
+        await LogFileSizesAsync("index rebuilds", cancellationToken);
 
         // Bulk copy skips constraint checks and leaves the foreign keys untrusted; validate them so the
         // database is in the state an application's would be, then refresh statistics like the paper did.
@@ -60,6 +108,7 @@ internal sealed class SqlServerDatasetLoader(string connectionString, SqlOSFgaOp
         await ExecuteAsync($"UPDATE STATISTICS {Resources}; UPDATE STATISTICS {Products};", cancellationToken);
         maintenance.Stop();
         log.Info($"  constraints validated and statistics updated in {maintenance.Elapsed.TotalSeconds:F1}s");
+        await LogFileSizesAsync("validation", cancellationToken);
 
         return new LoadTiming(rows.Elapsed, indexes.Elapsed, maintenance.Elapsed);
     }
@@ -122,7 +171,7 @@ internal sealed class SqlServerDatasetLoader(string connectionString, SqlOSFgaOp
         using var bulk = new SqlBulkCopy(connection, SqlBulkCopyOptions.TableLock, externalTransaction: null)
         {
             DestinationTableName = table,
-            BatchSize = 0,
+            BatchSize = BatchRows,
             BulkCopyTimeout = 0,
             EnableStreaming = true,
         };
