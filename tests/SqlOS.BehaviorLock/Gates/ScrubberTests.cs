@@ -267,4 +267,20 @@ public sealed class ScrubberTests
         Assert.IsFalse(rendered.Contains("dropped", StringComparison.Ordinal));
         Assert.AreEqual("{csp-nonce#1}", sink.Scrubber.Scrub("N0nce12345678"));
     }
+
+    [TestMethod]
+    public void Stylesheet_and_script_responses_render_as_the_same_digest_as_inline_code()
+    {
+        var sink = new TranscriptValueSink(new Scrubber());
+        const string css = ":root {\r\n  --accent: #1d4ed8;\r\n}\n";
+
+        var stylesheet = TranscriptRenderer.RenderBody("text/css; charset=utf-8", css, sink, isRequest: false).Single();
+        var script = TranscriptRenderer.RenderBody("application/javascript", "(function () { run(); })();", sink, isRequest: false).Single();
+        var inline = HtmlCanonicalizer.Render($"<html><head><style>{css}</style></head><body></body></html>", sink);
+
+        StringAssert.StartsWith(stylesheet, "{style-sha256:");
+        StringAssert.StartsWith(script, "{script-sha256:");
+        StringAssert.Contains(inline, stylesheet, "A stylesheet response and the same inline <style> share one digest.");
+        Assert.AreEqual(stylesheet, sink.Scrubber.Scrub(stylesheet), "Digests are placeholders and are never rescrubbed.");
+    }
 }

@@ -189,7 +189,7 @@ public static partial class HtmlCanonicalizer
         }
     }
 
-    private static string Digest(string content)
+    internal static string Digest(string content)
         => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content.Replace("\r\n", "\n", StringComparison.Ordinal))))[..16].ToLowerInvariant();
 
     private static string CollapseWhitespace(string text)
