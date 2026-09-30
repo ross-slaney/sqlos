@@ -34,6 +34,7 @@ public static class HostProfiles
     public const string Modules = "modules";
     public const string OAuthOnly = "oauth-only";
     public const string LegacyHost = "legacy-host";
+    public const string Upgrade = "upgrade";
 
     private static readonly IReadOnlyList<HostProfile> Profiles =
     [
@@ -386,6 +387,65 @@ public static class HostProfiles
                 options.AuthServer.ConfigureOpenIdProvider(provider => provider.Enabled = false);
             },
             MapApplication = MapFirstPartyApi
+        },
+        new HostProfile
+        {
+            Name = Upgrade,
+            DeploymentModel = "Upgrade gate: a standalone identity server with every persisted feature in use (MFA required, first-party, partner, CLI, DCR, and CIMD clients, SAML, SCIM, calendar), seeded by the released package and then started by the build under test.",
+            Documentation = ["web/content/docs/guides/standalone-identity-server.mdx", "web/content/docs/authserver/mfa-totp.mdx"],
+            OptionsSummary =
+            [
+                "ConfigureApplication(\"Upgrade Suite\", app => { Origin; Authorization(workspace model) })",
+                "AuthServer.PublicOrigin, AuthServer.Issuer",
+                "SeedClient upgrade-portal (first party), upgrade-partner (third party, consent); SeedCliClient(\"upgrade-cli\")",
+                "AuthServer.EnableChatGptCompatibility() and ClientRegistration.Cimd.Enabled = true, TrustedHosts = [client.example.test]",
+                "AuthServer.EnableSaml = true, EnableScim = true, ScimBasePath = /scim/v2",
+                "AuthServer.SeedAuthPage(password), SeedMfaPolicy(TOTP required for all users), SeedGoogleConnection (calendar)",
+                "Dashboard.AuthorizationCallback = operator header"
+            ],
+            ConfigureSqlOS = (options, context) =>
+            {
+                options.ConfigureApplication("Upgrade Suite", app =>
+                {
+                    app.Origin = PublicOrigin;
+                    app.Authorization(SeedWorkspaceModel);
+                });
+                var auth = options.AuthServer;
+                auth.PublicOrigin = PublicOrigin;
+                auth.Issuer = Issuer;
+                string[] scopes = ["openid", "profile", "email", "offline_access"];
+                auth.SeedClient(client =>
+                {
+                    client.ClientId = UpgradeData.PortalClientId;
+                    client.Name = "Upgrade Portal";
+                    client.RedirectUris = [UpgradeData.PortalRedirectUri];
+                    client.AllowedScopes = [.. scopes];
+                    client.IsFirstParty = true;
+                });
+                auth.SeedClient(client =>
+                {
+                    client.ClientId = UpgradeData.PartnerClientId;
+                    client.Name = "Upgrade Partner";
+                    client.RedirectUris = [UpgradeData.PartnerRedirectUri];
+                    client.AllowedScopes = [.. scopes];
+                    client.IsFirstParty = false;
+                });
+                auth.SeedCliClient(UpgradeData.CliClientId, "Upgrade CLI", null, "openid", "profile", "offline_access");
+                auth.EnableChatGptCompatibility();
+                auth.ClientRegistration.Cimd.Enabled = true;
+                auth.ClientRegistration.Cimd.TrustedHosts.Add(CimdClientHost);
+                auth.EnableSaml = true;
+                auth.EnableScim = true;
+                auth.ScimBasePath = UpgradeData.ScimBasePath;
+                auth.SeedAuthPage(page => page.EnabledCredentialTypes = ["password"]);
+                auth.SeedMfaPolicy(mfa =>
+                {
+                    mfa.Enabled = true;
+                    mfa.TotpEnabled = true;
+                    mfa.RequireForAllUsers = true;
+                });
+                auth.SeedGoogleConnection("google-client-id", "google-client-secret", SocialCallbackUri);
+            }
         },
         new HostProfile
         {

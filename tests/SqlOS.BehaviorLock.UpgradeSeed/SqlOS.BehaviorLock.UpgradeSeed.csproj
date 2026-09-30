@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <!--
+    The upgrade-gate seed. Always pinned to the released SqlOS package ($(SqlOSUpgradeFromVersion),
+    default 7.2.1) regardless of -p:SqlOSUnderTest, because it builds the "before" database that the
+    build under test must upgrade. It compiles the behavior-lock host's own sources (profiles,
+    fakes, probes) against that package, so the seed and the upgrade scenarios share one
+    definition of the `upgrade` deployment. Run it with no arguments for usage.
+
+    The behavior-lock test project references this project only to build it
+    (ReferenceOutputAssembly=false). Every package here is PrivateAssets=all so the released
+    SqlOS package never flows into the test project, which must load the build under test.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>SqlOS.BehaviorLock.UpgradeSeed</RootNamespace>
+    <SqlOSUpgradeFromVersion Condition="'$(SqlOSUpgradeFromVersion)' == ''">7.2.1</SqlOSUpgradeFromVersion>
+    <DefineConstants>$(DefineConstants);SQLOS_UNDER_TEST_PACKAGE</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SqlOS" Version="$(SqlOSUpgradeFromVersion)" PrivateAssets="all" />
+    <PackageReference Include="AngleSharp" Version="1.8.2" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.0" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" Version="9.0.0" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\SqlOS.BehaviorLock.Host\**\*.cs"
+             Exclude="..\SqlOS.BehaviorLock.Host\Program.cs;..\SqlOS.BehaviorLock.Host\bin\**;..\SqlOS.BehaviorLock.Host\obj\**"
+             LinkBase="Host" />
+  </ItemGroup>
+</Project>
