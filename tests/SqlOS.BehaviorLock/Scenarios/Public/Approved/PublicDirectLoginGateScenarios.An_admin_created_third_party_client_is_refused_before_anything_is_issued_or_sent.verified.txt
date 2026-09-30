@@ -1,0 +1,228 @@
+# SqlOS behavior lock transcript
+scenario: PublicDirectLoginGateScenarios.An_admin_created_third_party_client_is_refused_before_anything_is_issued_or_sent
+profile: hosted
+
+## 1. client: the partner's own UI collects Alice's password: refused before the password is checked
+> POST /sqlos/auth/password/login
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "partner-app",
+>     "email": "{email:alice}",
+>     "password": "{password:alice}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_client",
+      "message": "This client must use the authorization endpoint to sign users in."
+    }
+
+## 2. client: signup through the partner: refused before an account is created
+> POST /sqlos/auth/signup
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "partner-app",
+>     "displayName": "Newcomer",
+>     "email": "{email:newcomer}",
+>     "password": "{password:newcomer}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_client",
+      "message": "This client must use the authorization endpoint to sign users in."
+    }
+
+## 3. client: an email code for the partner: refused before a code is sent
+> POST /sqlos/auth/email-otp/start
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "partner-app",
+>     "email": "{email:alice}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_client",
+      "message": "This client must use the authorization endpoint to sign users in."
+    }
+
+## 4. client: a sign-in link for the partner: refused before a link is sent
+> POST /sqlos/auth/magic-link/start
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "partner-app",
+>     "email": "{email:alice}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_client",
+      "message": "This client must use the authorization endpoint to sign users in."
+    }
+
+## audit: one rejection event per attempt
+  - {
+      "action": "oauth.direct_login.rejected",
+      "actor": {
+        "displayName": null,
+        "id": "{cli#1}",
+        "type": "client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.direct_login.rejected",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "client_application_id": "{cli#1}",
+        "client_id": "partner-app",
+        "route": "/sqlos/auth/password/login"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "oauth.direct_login.rejected",
+      "actor": {
+        "displayName": null,
+        "id": "{cli#1}",
+        "type": "client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.direct_login.rejected",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "client_application_id": "{cli#1}",
+        "client_id": "partner-app",
+        "route": "/sqlos/auth/signup"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "oauth.direct_login.rejected",
+      "actor": {
+        "displayName": null,
+        "id": "{cli#1}",
+        "type": "client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.direct_login.rejected",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "client_application_id": "{cli#1}",
+        "client_id": "partner-app",
+        "route": "/sqlos/auth/email-otp/start"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "oauth.direct_login.rejected",
+      "actor": {
+        "displayName": null,
+        "id": "{cli#1}",
+        "type": "client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.direct_login.rejected",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "client_application_id": "{cli#1}",
+        "client_id": "partner-app",
+        "route": "/sqlos/auth/magic-link/start"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 5. operator: no session exists
+> GET /sqlos/admin/auth/api/users/{usr#1}/sessions
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 6. operator: no account was created
+> GET /sqlos/admin/auth/api/users?search={email:newcomer}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
