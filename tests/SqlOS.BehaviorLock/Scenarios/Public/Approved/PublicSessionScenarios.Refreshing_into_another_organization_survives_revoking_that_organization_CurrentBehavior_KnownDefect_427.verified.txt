@@ -1,0 +1,386 @@
+# SqlOS behavior lock transcript
+scenario: PublicSessionScenarios.{token#1}
+profile: hosted
+
+## 1. client: sign in to Acme
+> POST /sqlos/auth/password/login
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "email": "{email:alice}",
+>     "organizationId": "{org#1}",
+>     "password": "{password:alice}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "mfaMethods": null,
+      "mfaToken": null,
+      "organizations": [
+        {
+          "id": "{org#1}",
+          "name": "Acme",
+          "role": "member",
+          "slug": "{slug:acme}"
+        },
+        {
+          "id": "{org#2}",
+          "name": "Globex",
+          "role": "member",
+          "slug": "{slug:globex}"
+        }
+      ],
+      "pendingAuthToken": null,
+      "requiresMfa": false,
+      "requiresMfaEnrollment": false,
+      "requiresOrganizationSelection": false,
+      "tokens": {
+        "accessToken": "{access-token#1}",
+        "accessTokenExpiresAt": "{datetime:utc-z}",
+        "clientId": "behavior-lock-app",
+        "idToken": null,
+        "organizationId": "{org#1}",
+        "refreshToken": "{refresh-token#1}",
+        "refreshTokenExpiresAt": "{datetime:utc-z}",
+        "sessionId": "{ses#1}"
+      }
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "org_id": "{org#1}",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+
+## 2. client: refresh into Globex: the tokens carry Globex, the session still records Acme
+> POST /sqlos/auth/token/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "organizationId": "{org#2}",
+>     "refreshToken": "{refresh-token#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessToken": "{access-token#2}",
+      "accessTokenExpiresAt": "{datetime:utc-z}",
+      "clientId": "behavior-lock-app",
+      "idToken": null,
+      "organizationId": "{org#2}",
+      "refreshToken": "{refresh-token#2}",
+      "refreshTokenExpiresAt": "{datetime:utc-z}",
+      "sessionId": "{ses#1}"
+    }
+  jwt {access-token#2}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "org_id": "{org#2}",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+
+## 3. operator: the operator previews revoking Globex's sessions: none match
+> POST /sqlos/admin/auth/api/sessions/revocation/preview
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "organizationId": "{org#2}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "activeRefreshTokens": 0,
+      "alreadyRevokedSessions": 0,
+      "auditEventId": null,
+      "matchedSessions": 0,
+      "newlyRevokedRefreshTokens": 0,
+      "newlyRevokedSessions": 0,
+      "operationId": "session-revocation-{hex#1}",
+      "preview": true,
+      "revokedAt": null
+    }
+
+## 4. operator: executing it matches nothing to revoke
+> POST /sqlos/admin/auth/api/sessions/revocation
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "confirm": true,
+>     "expectedMatchedSessions": 0,
+>     "organizationId": "{org#2}",
+>     "reason": "incident"
+>   }
+< 404 Not Found
+
+## 5. client: Alice keeps getting Globex tokens after the revocation (#427)
+> POST /sqlos/auth/token/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "organizationId": "{org#2}",
+>     "refreshToken": "{refresh-token#2}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessToken": "{access-token#2}",
+      "accessTokenExpiresAt": "{datetime:utc-z}",
+      "clientId": "behavior-lock-app",
+      "idToken": null,
+      "organizationId": "{org#2}",
+      "refreshToken": "{refresh-token#3}",
+      "refreshTokenExpiresAt": "{datetime:utc-z}",
+      "sessionId": "{ses#1}"
+    }
+
+## 6. operator: the operator deactivates Globex, which revokes the sessions it finds for Globex
+> PUT /sqlos/admin/auth/api/organizations/{org#2}
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "isActive": false,
+>     "name": "Globex",
+>     "slug": "{slug:globex}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "id": "{org#2}",
+      "isActive": false,
+      "name": "Globex",
+      "primaryDomain": null,
+      "slug": "{slug:globex}"
+    }
+
+## 7. client: a Globex refresh is now a lifecycle denial
+> POST /sqlos/auth/token/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "organizationId": "{org#2}",
+>     "refreshToken": "{refresh-token#3}"
+>   }
+< 500 Internal Server Error
+
+## 8. client: but the session itself was never revoked: it still refreshes into Acme
+> POST /sqlos/auth/token/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "organizationId": "{org#1}",
+>     "refreshToken": "{refresh-token#3}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessToken": "{access-token#1}",
+      "accessTokenExpiresAt": "{datetime:utc-z}",
+      "clientId": "behavior-lock-app",
+      "idToken": null,
+      "organizationId": "{org#1}",
+      "refreshToken": "{refresh-token#4}",
+      "refreshTokenExpiresAt": "{datetime:utc-z}",
+      "sessionId": "{ses#1}"
+    }
+
+## audit: sign-in, revocation, deactivation, and denial events
+  - {
+      "action": "password.login.succeeded",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "password.login.succeeded",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "AuthorizationRequestId": "[redacted]",
+        "ClientKey": "behavior-lock-app",
+        "NormalizedEmail": "{email:ALICE}",
+        "Surface": "api",
+        "UserAgentHash": null,
+        "details": {
+          "resetScopes": [
+            "email",
+            "user"
+          ]
+        },
+        "maskedEmail": "AL***@EXAMPLE.TEST"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "user.login.password",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.password",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "sso.portal.sessions.revoked",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "sso.portal.sessions.revoked",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "reason": "organization_deactivated",
+        "revokedSessions": 0
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#2}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.lifecycle.denied",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": "{ses#1}",
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.lifecycle.denied",
+      "id": "{aud#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "boundary": "refresh",
+        "reason": "organization_inactive"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#2}",
+      "requestId": null,
+      "sessionId": "{ses#1}",
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+
+## 9. operator: the session is still active
+> GET /sqlos/admin/auth/api/users/{usr#1}/sessions
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "absoluteExpiresAt": "{datetime:unspecified}",
+          "authenticationMethod": "password",
+          "clientApplicationId": "{cli#1}",
+          "createdAt": "{datetime:unspecified}",
+          "id": "{ses#1}",
+          "idleExpiresAt": "{datetime:unspecified}",
+          "ipAddress": "203.0.113.10",
+          "lastSeenAt": "{datetime:unspecified}",
+          "revocationReason": null,
+          "revokedAt": null,
+          "user": "Alice",
+          "userAgent": "",
+          "userId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }

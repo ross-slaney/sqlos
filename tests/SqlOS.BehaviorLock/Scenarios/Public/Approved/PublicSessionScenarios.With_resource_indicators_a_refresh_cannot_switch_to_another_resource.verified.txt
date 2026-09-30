@@ -1,0 +1,159 @@
+# SqlOS behavior lock transcript
+scenario: PublicSessionScenarios.With_resource_indicators_a_refresh_cannot_switch_to_another_resource
+profile: mcp
+
+## 1. client: direct login binds no resource: the token is for the client's audience
+> POST /sqlos/auth/password/login
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "email": "{email:alice}",
+>     "password": "{password:alice}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "mfaMethods": null,
+      "mfaToken": null,
+      "organizations": [],
+      "pendingAuthToken": null,
+      "requiresMfa": false,
+      "requiresMfaEnrollment": false,
+      "requiresOrganizationSelection": false,
+      "tokens": {
+        "accessToken": "{access-token#1}",
+        "accessTokenExpiresAt": "{datetime:utc-z}",
+        "clientId": "behavior-lock-app",
+        "idToken": null,
+        "organizationId": null,
+        "refreshToken": "{refresh-token#1}",
+        "refreshTokenExpiresAt": "{datetime:utc-z}",
+        "sessionId": "{ses#1}"
+      }
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+
+## 2. client: declaring app.Mcp turns resource indicators on: asking for the MCP resource the session was not issued for escapes the endpoint
+> POST /sqlos/auth/token/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshToken": "{refresh-token#1}",
+>     "resource": "https://sqlos.example.test/mcp"
+>   }
+< 500 Internal Server Error
+
+## 3. client: the refusal did not consume the token: without a resource it refreshes
+> POST /sqlos/auth/token/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshToken": "{refresh-token#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessToken": "{access-token#1}",
+      "accessTokenExpiresAt": "{datetime:utc-z}",
+      "clientId": "behavior-lock-app",
+      "idToken": null,
+      "organizationId": null,
+      "refreshToken": "{refresh-token#2}",
+      "refreshTokenExpiresAt": "{datetime:utc-z}",
+      "sessionId": "{ses#1}"
+    }
+
+## audit: sign-in events; the refusal is not audited
+  - {
+      "action": "password.login.succeeded",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "password.login.succeeded",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "AuthorizationRequestId": "[redacted]",
+        "ClientKey": "behavior-lock-app",
+        "NormalizedEmail": "{email:ALICE}",
+        "Surface": "api",
+        "UserAgentHash": null,
+        "details": {
+          "resetScopes": [
+            "email",
+            "user"
+          ]
+        },
+        "maskedEmail": "AL***@EXAMPLE.TEST"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "user.login.password",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.password",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
