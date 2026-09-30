@@ -88,7 +88,7 @@ profile: dashboard-callback
 > Content-Type: application/json; charset=utf-8
 >   {
 >     "audience": "https://sqlos.example.test/api",
->     "token": "{link-token#1}"
+>     "token": "{access-token#1}"
 >   }
 < 200 OK
 < Content-Type: application/json; charset=utf-8
@@ -101,7 +101,7 @@ profile: dashboard-callback
       "userId": "{usr#1}",
       "valid": true
     }
-  jwt {link-token#1}
+  jwt {access-token#1}
     header: {
       "alg": "RS256",
       "kid": "{kid#1}",
@@ -135,14 +135,14 @@ profile: dashboard-callback
 < Content-Type: application/json; charset=utf-8
 < Pragma: no-cache
     {
-      "access_token": "{access-token#1}",
+      "access_token": "{access-token#2}",
       "expires_in": ~600,
       "id_token": "{id-token#1}",
       "refresh_token": "{refresh-token#2}",
       "scope": "openid profile email offline_access",
       "token_type": "Bearer"
     }
-  jwt {access-token#1}
+  jwt {access-token#2}
     header: {
       "alg": "RS256",
       "kid": "{kid#2}",

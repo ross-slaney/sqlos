@@ -1,0 +1,202 @@
+# SqlOS behavior lock transcript
+scenario: SessionRevocationAdminScenarios.Admin_revocation_by_organization_misses_a_session_switched_into_it_CurrentBehavior_KnownDefect_427
+profile: dashboard-callback
+
+## 1. app: Alice signs in to Alpha
+> POST /sqlos/auth/password/login
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "email": "{email:alice}",
+>     "organizationId": "{org#1}",
+>     "password": "{password:alice}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "mfaMethods": null,
+      "mfaToken": null,
+      "organizations": [
+        {
+          "id": "{org#1}",
+          "name": "Alpha",
+          "role": "member",
+          "slug": "{slug:alpha}"
+        }
+      ],
+      "pendingAuthToken": null,
+      "requiresMfa": false,
+      "requiresMfaEnrollment": false,
+      "requiresOrganizationSelection": false,
+      "tokens": {
+        "accessToken": "{access-token#1}",
+        "accessTokenExpiresAt": "{datetime:utc-z}",
+        "clientId": "behavior-lock-app",
+        "idToken": null,
+        "organizationId": "{org#1}",
+        "refreshToken": "{refresh-token#1}",
+        "refreshTokenExpiresAt": "{datetime:utc-z}",
+        "sessionId": "{ses#1}"
+      }
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "org_id": "{org#1}",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+
+## 2. app: after joining Beta she switches the session to it on refresh
+> POST /sqlos/auth/token/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "organizationId": "{org#2}",
+>     "refreshToken": "{refresh-token#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessToken": "{access-token#2}",
+      "accessTokenExpiresAt": "{datetime:utc-z}",
+      "clientId": "behavior-lock-app",
+      "idToken": null,
+      "organizationId": "{org#2}",
+      "refreshToken": "{refresh-token#2}",
+      "refreshTokenExpiresAt": "{datetime:utc-z}",
+      "sessionId": "{ses#1}"
+    }
+  jwt {access-token#2}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "org_id": "{org#2}",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+
+## 3. operator: known defect #427: revoking Beta's sessions matches none, because the session row still records Alpha
+> POST /sqlos/admin/auth/api/sessions/revocation/preview
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "organizationId": "{org#2}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "activeRefreshTokens": 0,
+      "alreadyRevokedSessions": 0,
+      "auditEventId": null,
+      "matchedSessions": 0,
+      "newlyRevokedRefreshTokens": 0,
+      "newlyRevokedSessions": 0,
+      "operationId": "session-revocation-{hex#1}",
+      "preview": true,
+      "revokedAt": null
+    }
+
+## 4. operator: so the confirmed revocation is not found
+> POST /sqlos/admin/auth/api/sessions/revocation
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "confirm": true,
+>     "expectedMatchedSessions": 0,
+>     "organizationId": "{org#2}"
+>   }
+< 404 Not Found
+
+## 5. probe: Alice's Beta access token still validates
+> POST /__probe/auth/validate
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "audience": "https://sqlos.example.test/api",
+>     "token": "{access-token#2}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "audience": "https://sqlos.example.test/api",
+      "clientId": "behavior-lock-app",
+      "organizationId": "{org#2}",
+      "scope": null,
+      "sessionId": "{ses#1}",
+      "userId": "{usr#1}",
+      "valid": true
+    }
+
+## 6. app: and she keeps refreshing into Beta
+> POST /sqlos/auth/token/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "organizationId": "{org#2}",
+>     "refreshToken": "{refresh-token#2}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessToken": "{access-token#2}",
+      "accessTokenExpiresAt": "{datetime:utc-z}",
+      "clientId": "behavior-lock-app",
+      "idToken": null,
+      "organizationId": "{org#2}",
+      "refreshToken": "{refresh-token#3}",
+      "refreshTokenExpiresAt": "{datetime:utc-z}",
+      "sessionId": "{ses#1}"
+    }
+
+## 7. operator: the session is only reachable through Alpha
+> POST /sqlos/admin/auth/api/sessions/revocation/preview
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "organizationId": "{org#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "activeRefreshTokens": 3,
+      "alreadyRevokedSessions": 0,
+      "auditEventId": null,
+      "matchedSessions": 1,
+      "newlyRevokedRefreshTokens": 0,
+      "newlyRevokedSessions": 0,
+      "operationId": "session-revocation-{hex#2}",
+      "preview": true,
+      "revokedAt": null
+    }
+
+## audit: the sign-in is audited; no revocation is recorded
+  (no new events)

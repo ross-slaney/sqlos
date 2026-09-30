@@ -45,6 +45,8 @@ public sealed class SigningKeyAdminScenarios
         t.ObserveDocument(
             $"GET /sqlos/auth/.well-known/jwks.json answered {jwks.StatusCode} and publishes both keys during the grace window (retired key first)",
             string.Join("\n", published));
+        // The validation probe names its input "token"; register the JWT as an access token first.
+        t.Scrub(session.AccessToken, "access-token");
         t.Observe(
             await t.NewClient("probe").PostJsonAsync("/__probe/auth/validate", new { token = session.AccessToken, audience = BehaviorLockConstants.ApiAudience }),
             "an access token signed with the retired key still validates");
