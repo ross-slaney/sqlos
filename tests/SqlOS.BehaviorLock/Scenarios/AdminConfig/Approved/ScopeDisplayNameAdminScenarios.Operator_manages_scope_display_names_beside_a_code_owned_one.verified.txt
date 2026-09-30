@@ -1,0 +1,296 @@
+# SqlOS behavior lock transcript
+scenario: ScopeDisplayNameAdminScenarios.Operator_manages_scope_display_names_beside_a_code_owned_one
+profile: dashboard-callback
+
+## 1. operator: without operator credentials the list is not found
+> GET /sqlos/admin/auth/api/scope-display-names
+< 404 Not Found
+
+## 2. operator: SeedScopeDisplayName owns the workspace.read entry
+> GET /sqlos/admin/auth/api/scope-display-names
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "description": "View workspaces you can access.",
+          "displayName": "Read workspaces",
+          "id": "{sdn#1}",
+          "ownership": {
+            "canEmergencyDisable": false,
+            "configurationFingerprint": "{hex#1}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "workspace.read"
+          },
+          "scope": "workspace.read",
+          "updatedAt": "{datetime:unspecified}"
+        }
+      ]
+    }
+
+## 3. operator: add a dashboard-owned display name; values are trimmed
+> POST /sqlos/admin/auth/api/scope-display-names
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "description": " Create and change workspaces you can access. ",
+>     "displayName": " Edit workspaces ",
+>     "scope": " workspace.write "
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "description": "Create and change workspaces you can access.",
+      "displayName": "Edit workspaces",
+      "id": "{sdn#2}",
+      "ownership": {
+        "canEmergencyDisable": false,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "scope": "workspace.write",
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 4. operator: rename it and clear its description
+> PUT /sqlos/admin/auth/api/scope-display-names/{sdn#2}
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "description": " ",
+>     "displayName": "Change workspaces"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "description": null,
+      "displayName": "Change workspaces",
+      "id": "{sdn#2}",
+      "ownership": {
+        "canEmergencyDisable": false,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "scope": "workspace.write",
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 5. operator: the code-owned entry cannot be edited here
+> PUT /sqlos/admin/auth/api/scope-display-names/{sdn#1}
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Look at workspaces"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Scope display name 'workspace.read' is owned by the 'code' configuration source. Change its source configuration instead."
+    }
+
+## 6. operator: nor deleted while its seed exists
+> DELETE /sqlos/admin/auth/api/scope-display-names/{sdn#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Scope display name 'workspace.read' is owned by the 'code' configuration source. Change its source configuration instead."
+    }
+
+## 7. operator: both entries, ordered by scope
+> GET /sqlos/admin/auth/api/scope-display-names
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "description": "View workspaces you can access.",
+          "displayName": "Read workspaces",
+          "id": "{sdn#1}",
+          "ownership": {
+            "canEmergencyDisable": false,
+            "configurationFingerprint": "{hex#1}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "workspace.read"
+          },
+          "scope": "workspace.read",
+          "updatedAt": "{datetime:unspecified}"
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "description": null,
+          "displayName": "Change workspaces",
+          "id": "{sdn#2}",
+          "ownership": {
+            "canEmergencyDisable": false,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "scope": "workspace.write",
+          "updatedAt": "{datetime:unspecified}"
+        }
+      ]
+    }
+
+## 8. operator: delete the dashboard-owned entry
+> DELETE /sqlos/admin/auth/api/scope-display-names/{sdn#2}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "deleted": true
+    }
+
+## 9. operator: only the code-owned entry remains
+> GET /sqlos/admin/auth/api/scope-display-names
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "description": "View workspaces you can access.",
+          "displayName": "Read workspaces",
+          "id": "{sdn#1}",
+          "ownership": {
+            "canEmergencyDisable": false,
+            "configurationFingerprint": "{hex#1}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "workspace.read"
+          },
+          "scope": "workspace.read",
+          "updatedAt": "{datetime:unspecified}"
+        }
+      ]
+    }
+
+## audit: dashboard changes are audited; rejected ones are not
+  - {
+      "action": "scope_display_name.created",
+      "actor": {
+        "displayName": null,
+        "id": "dashboard",
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "scope_display_name.created",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "display_name": "Edit workspaces",
+        "scope": "workspace.write"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scope_display_name.updated",
+      "actor": {
+        "displayName": null,
+        "id": "dashboard",
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "scope_display_name.updated",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "display_name": "Change workspaces",
+        "scope": "workspace.write"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scope_display_name.deleted",
+      "actor": {
+        "displayName": null,
+        "id": "dashboard",
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "scope_display_name.deleted",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "scope": "workspace.write"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

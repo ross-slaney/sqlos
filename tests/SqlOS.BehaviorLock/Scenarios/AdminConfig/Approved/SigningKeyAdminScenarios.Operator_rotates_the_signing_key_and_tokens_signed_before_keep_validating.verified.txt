@@ -1,0 +1,222 @@
+# SqlOS behavior lock transcript
+scenario: SigningKeyAdminScenarios.Operator_rotates_the_signing_key_and_tokens_signed_before_keep_validating
+profile: dashboard-callback
+
+## 1. operator: without operator credentials the key list is not found
+> GET /sqlos/admin/auth/api/signing-keys
+< 404 Not Found
+
+## 2. operator: nor can a key be rotated
+> POST /sqlos/admin/auth/api/signing-keys/rotate
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 3. operator: one active key, created at startup
+> GET /sqlos/admin/auth/api/signing-keys
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "graceWindowDays": 7,
+      "keys": [
+        {
+          "activatedAt": "{datetime:unspecified}",
+          "ageDays": 0,
+          "algorithm": "RS256",
+          "id": "{key#1}",
+          "isActive": true,
+          "kid": "{kid#1}",
+          "retiredAt": null
+        }
+      ],
+      "nextRotationDue": "{datetime:unspecified}",
+      "rotationIntervalDays": 90
+    }
+
+## 4. operator: rotate the signing key
+> POST /sqlos/admin/auth/api/signing-keys/rotate
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "activatedAt": "{datetime:utc-z}",
+      "algorithm": "RS256",
+      "id": "{key#2}",
+      "kid": "{kid#2}"
+    }
+
+## 5. operator: the new key is active and the old one is retired
+> GET /sqlos/admin/auth/api/signing-keys
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "graceWindowDays": 7,
+      "keys": [
+        {
+          "activatedAt": "{datetime:unspecified}",
+          "ageDays": 0,
+          "algorithm": "RS256",
+          "id": "{key#2}",
+          "isActive": true,
+          "kid": "{kid#2}",
+          "retiredAt": null
+        },
+        {
+          "activatedAt": "{datetime:unspecified}",
+          "ageDays": 0,
+          "algorithm": "RS256",
+          "id": "{key#1}",
+          "isActive": false,
+          "kid": "{kid#1}",
+          "retiredAt": "{datetime:unspecified}"
+        }
+      ],
+      "nextRotationDue": "{datetime:unspecified}",
+      "rotationIntervalDays": 90
+    }
+
+## document: GET /sqlos/auth/.well-known/jwks.json answered 200 and publishes both keys during the grace window (retired key first)
+    kid={kid#1} alg=RS256 kty=RSA use=sig e=AQAB
+    kid={kid#2} alg=RS256 kty=RSA use=sig e=AQAB
+
+## 6. probe: an access token signed with the retired key still validates
+> POST /__probe/auth/validate
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "audience": "https://sqlos.example.test/api",
+>     "token": "{link-token#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "audience": "https://sqlos.example.test/api",
+      "clientId": "behavior-lock-app",
+      "organizationId": null,
+      "scope": "openid profile email offline_access",
+      "sessionId": "{ses#1}",
+      "userId": "{usr#1}",
+      "valid": true
+    }
+  jwt {link-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "scope": "openid profile email offline_access",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+
+## 7. client: a refreshed access token is signed with the new key
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=refresh_token
+>   refresh_token={refresh-token#1}
+>   client_id=behavior-lock-app
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "access_token": "{access-token#1}",
+      "expires_in": ~600,
+      "id_token": "{id-token#1}",
+      "refresh_token": "{refresh-token#2}",
+      "scope": "openid profile email offline_access",
+      "token_type": "Bearer"
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#2}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "scope": "openid profile email offline_access",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+  jwt {id-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#2}",
+      "typ": "JWT"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "at_hash": "{hash#1}",
+      "aud": "behavior-lock-app",
+      "auth_time": {epoch},
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=5m
+
+## audit: the manual rotation is audited
+  - {
+      "action": "signing_key_rotated_manual",
+      "actor": {
+        "displayName": null,
+        "id": "dashboard",
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "signing_key_rotated_manual",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "newKeyId": "{key#2}",
+        "newKid": "{kid#2}"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

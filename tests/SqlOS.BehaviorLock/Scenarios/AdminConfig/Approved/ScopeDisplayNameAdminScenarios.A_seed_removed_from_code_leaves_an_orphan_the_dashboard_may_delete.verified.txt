@@ -1,0 +1,187 @@
+# SqlOS behavior lock transcript
+scenario: ScopeDisplayNameAdminScenarios.A_seed_removed_from_code_leaves_an_orphan_the_dashboard_may_delete
+profile: dashboard-callback
+
+# The database was first started with SeedScopeDisplayName("workspace.read", ...); this host no longer declares that seed.
+
+## 1. operator: the entry is still code-owned but marked orphaned
+> GET /sqlos/admin/auth/api/scope-display-names
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "description": "View workspaces you can access.",
+          "displayName": "Read workspaces",
+          "id": "{sdn#1}",
+          "ownership": {
+            "canEmergencyDisable": false,
+            "configurationFingerprint": "{hash#1}",
+            "isEditable": false,
+            "isOrphaned": true,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "workspace.read"
+          },
+          "scope": "workspace.read",
+          "updatedAt": "{datetime:unspecified}"
+        }
+      ]
+    }
+
+## 2. operator: startup reconciliation recorded the seed's creation and then its orphaning
+> GET /sqlos/admin/audit/api/events?action=configuration.reconciled&search=scope_display_name
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "action": "configuration.reconciled",
+          "actor": {
+            "displayName": null,
+            "id": "startup",
+            "type": "system"
+          },
+          "applicationId": null,
+          "applicationKey": null,
+          "context": {
+            "correlationId": null,
+            "ipAddress": null,
+            "requestId": null,
+            "sessionId": null,
+            "userAgent": null
+          },
+          "correlationId": null,
+          "eventType": "configuration.reconciled",
+          "id": "{evt#1}",
+          "ingestedAt": "{datetime:unspecified}",
+          "ipAddress": null,
+          "metadata": {
+            "fingerprint": "{hash#1}",
+            "outcome": "orphaned",
+            "owner": "code",
+            "resourceId": "{sdn#1}",
+            "resourceType": "scope_display_name",
+            "sourceKey": "workspace.read"
+          },
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": null,
+          "requestId": null,
+          "sessionId": null,
+          "source": "authserver",
+          "targets": [],
+          "userAgent": null,
+          "userId": null
+        },
+        {
+          "action": "configuration.reconciled",
+          "actor": {
+            "displayName": null,
+            "id": "startup",
+            "type": "system"
+          },
+          "applicationId": null,
+          "applicationKey": null,
+          "context": {
+            "correlationId": null,
+            "ipAddress": null,
+            "requestId": null,
+            "sessionId": null,
+            "userAgent": null
+          },
+          "correlationId": null,
+          "eventType": "configuration.reconciled",
+          "id": "{evt#2}",
+          "ingestedAt": "{datetime:unspecified}",
+          "ipAddress": null,
+          "metadata": {
+            "fingerprint": "{hash#1}",
+            "outcome": "created",
+            "owner": "code",
+            "resourceId": "workspace.read",
+            "resourceType": "scope_display_name",
+            "sourceKey": "workspace.read"
+          },
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": null,
+          "requestId": null,
+          "sessionId": null,
+          "source": "authserver",
+          "targets": [],
+          "userAgent": null,
+          "userId": null
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 3. operator: an orphan still cannot be edited from the dashboard
+> PUT /sqlos/admin/auth/api/scope-display-names/{sdn#1}
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Adopted by the dashboard"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Scope display name 'workspace.read' is owned by the 'code' configuration source. Change its source configuration instead."
+    }
+
+## 4. operator: but it can be deleted, which is the supported cleanup
+> DELETE /sqlos/admin/auth/api/scope-display-names/{sdn#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "deleted": true
+    }
+
+## 5. operator: no entries remain
+> GET /sqlos/admin/auth/api/scope-display-names
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": []
+    }
+
+## audit: the cleanup is audited
+  - {
+      "action": "scope_display_name.deleted",
+      "actor": {
+        "displayName": null,
+        "id": "dashboard",
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "scope_display_name.deleted",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "scope": "workspace.read"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
