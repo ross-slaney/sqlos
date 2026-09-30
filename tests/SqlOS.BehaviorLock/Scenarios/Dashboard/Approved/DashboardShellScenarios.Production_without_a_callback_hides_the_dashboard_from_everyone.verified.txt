@@ -1,0 +1,97 @@
+# SqlOS behavior lock transcript
+scenario: DashboardShellScenarios.Production_without_a_callback_hides_the_dashboard_from_everyone
+profile: dashboard-off
+
+## 1. visitor: the prefix redirect still runs
+> GET /sqlos
+< 302 Found
+< Location: /sqlos/
+
+## 2. visitor: the shell is hidden
+> GET /sqlos/
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 3. visitor: the login route is hidden
+> GET /sqlos/login
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 4. visitor: assets are hidden
+> GET /sqlos/style.css
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 5. visitor: deep links are hidden
+> GET /sqlos/admin/calendar/connections
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 6. visitor: FGA assets are hidden
+> GET /sqlos/admin/fga/style.css
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 7. visitor: the FGA API is hidden
+> GET /sqlos/admin/fga/api/stats
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 8. visitor: the admin API is hidden
+> GET /sqlos/admin/auth/api/stats
+< 404 Not Found
+
+## 9. visitor: no header opens it: there is no callback to ask
+> GET /sqlos/
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 10. visitor: the session probe reports no access
+> GET /sqlos/dashboard-auth/session
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "authenticated": false,
+      "expiresAt": null
+    }
+
+## 11. visitor: password login does not exist outside Password mode
+> POST /sqlos/dashboard-auth/login
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "password": "{password#1}"
+>   }
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 12. visitor: logout still answers 204 and clears the cookie
+> POST /sqlos/dashboard-auth/logout
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {}
+< 204 No Content
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+< Set-Cookie: SqlOS.Dashboard.Session=; expires={unix-epoch}; path=/sqlos; secure; samesite=lax; httponly

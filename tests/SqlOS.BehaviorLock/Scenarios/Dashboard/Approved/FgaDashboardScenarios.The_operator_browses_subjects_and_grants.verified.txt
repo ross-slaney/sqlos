@@ -1,0 +1,407 @@
+# SqlOS behavior lock transcript
+scenario: FgaDashboardScenarios.The_operator_browses_subjects_and_grants
+profile: dashboard-callback
+
+## 1. operator: every subject, by display name
+> GET /sqlos/admin/fga/api/subjects
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "displayName": "Alice",
+          "externalRef": "{usr#1}",
+          "id": "{usr#1}",
+          "organizationId": null,
+          "subjectType": "User",
+          "subjectTypeId": "user"
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "displayName": "Indexer",
+          "externalRef": "agent-indexer",
+          "id": "agent-indexer",
+          "organizationId": null,
+          "subjectType": "Agent",
+          "subjectTypeId": "agent"
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "displayName": "Reporter",
+          "externalRef": "sa-reporter",
+          "id": "sa-reporter",
+          "organizationId": null,
+          "subjectType": "Service Account",
+          "subjectTypeId": "service_account"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 2. operator: subjects of one type
+> GET /sqlos/admin/fga/api/subjects?type=agent
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "displayName": "Indexer",
+          "externalRef": "agent-indexer",
+          "id": "agent-indexer",
+          "organizationId": null,
+          "subjectType": "Agent",
+          "subjectTypeId": "agent"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 3. operator: subjects matched by name
+> GET /sqlos/admin/fga/api/subjects?search=Rep
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "displayName": "Reporter",
+          "externalRef": "sa-reporter",
+          "id": "sa-reporter",
+          "organizationId": null,
+          "subjectType": "Service Account",
+          "subjectTypeId": "service_account"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 4. operator: a subject's detail, groups, and members
+> GET /sqlos/admin/fga/api/subjects/{usr#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "groups": [],
+      "members": [],
+      "subject": {
+        "createdAt": "{datetime:unspecified}",
+        "displayName": "Alice",
+        "externalRef": "{usr#1}",
+        "id": "{usr#1}",
+        "organizationId": null,
+        "subjectType": "User",
+        "subjectTypeId": "user",
+        "updatedAt": "{datetime:unspecified}"
+      }
+    }
+
+## 5. operator: a subject's grants
+> GET /sqlos/admin/fga/api/subjects/{usr#1}/grants
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "effectiveFrom": null,
+          "effectiveTo": null,
+          "id": "grant::{hex#1}",
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleId": "workspace_reader",
+          "roleName": "Workspace reader"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 6. operator: an unknown subject is 404
+> GET /sqlos/admin/fga/api/subjects/no-such-subject
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 404 Not Found
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "Subject not found"
+    }
+
+## 7. operator: DELETE on a subject answers its detail and deletes nothing
+> DELETE /sqlos/admin/fga/api/subjects/{usr#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "groups": [],
+      "members": [],
+      "subject": {
+        "createdAt": "{datetime:unspecified}",
+        "displayName": "Alice",
+        "externalRef": "{usr#1}",
+        "id": "{usr#1}",
+        "organizationId": null,
+        "subjectType": "User",
+        "subjectTypeId": "user",
+        "updatedAt": "{datetime:unspecified}"
+      }
+    }
+
+## 8. operator: the subject is still there
+> GET /sqlos/admin/fga/api/subjects?search=Alice
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "displayName": "Alice",
+          "externalRef": "{usr#1}",
+          "id": "{usr#1}",
+          "organizationId": null,
+          "subjectType": "User",
+          "subjectTypeId": "user"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 9. operator: but its grants are an empty page
+> GET /sqlos/admin/fga/api/subjects/no-such-subject/grants
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 10. operator: user subjects
+> GET /sqlos/admin/fga/api/users
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "displayName": "Alice",
+          "email": "{email:alice}",
+          "id": "usr::{hex#2}",
+          "isActive": true,
+          "lastLoginAt": null,
+          "subjectId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 11. operator: user subjects matched by email
+> GET /sqlos/admin/fga/api/users?search={email:alice}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "displayName": "Alice",
+          "email": "{email:alice}",
+          "id": "usr::{hex#2}",
+          "isActive": true,
+          "lastLoginAt": null,
+          "subjectId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 12. operator: agent subjects
+> GET /sqlos/admin/fga/api/agents
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "agentType": null,
+          "createdAt": "{datetime:unspecified}",
+          "description": null,
+          "displayName": "Indexer",
+          "id": "agt::{hex#3}",
+          "lastRunAt": null,
+          "subjectId": "agent-indexer"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 13. operator: service-account subjects
+> GET /sqlos/admin/fga/api/service-accounts
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "clientId": "reporter-client",
+          "configurationOrphanedAt": null,
+          "configurationOwner": "dashboard",
+          "configurationSourceKey": null,
+          "createdAt": "{datetime:unspecified}",
+          "description": null,
+          "displayName": "Reporter",
+          "expiresAt": null,
+          "id": "sa::{hex#4}",
+          "lastUsedAt": null,
+          "subjectId": "sa-reporter"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 14. operator: no user groups
+> GET /sqlos/admin/fga/api/user-groups
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 15. operator: every grant, newest first
+> GET /sqlos/admin/fga/api/grants
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "effectiveFrom": null,
+          "effectiveTo": null,
+          "id": "grant::{hex#5}",
+          "resourceId": "workspace::beta",
+          "resourceName": "Beta",
+          "roleId": "workspace_admin",
+          "roleName": "Workspace admin",
+          "subjectId": "agent-indexer",
+          "subjectName": "Indexer"
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "effectiveFrom": null,
+          "effectiveTo": null,
+          "id": "grant::{hex#1}",
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleId": "workspace_reader",
+          "roleName": "Workspace reader",
+          "subjectId": "{usr#1}",
+          "subjectName": "Alice"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 16. operator: grants matched by resource, subject, or role name
+> GET /sqlos/admin/fga/api/grants?search=Beta
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "effectiveFrom": null,
+          "effectiveTo": null,
+          "id": "grant::{hex#5}",
+          "resourceId": "workspace::beta",
+          "resourceName": "Beta",
+          "roleId": "workspace_admin",
+          "roleName": "Workspace admin",
+          "subjectId": "agent-indexer",
+          "subjectName": "Indexer"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }

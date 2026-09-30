@@ -1,0 +1,119 @@
+# SqlOS behavior lock transcript
+scenario: FgaDashboardScenarios.Schema_writes_are_refused_because_the_model_is_seeded_in_code
+profile: dashboard-callback
+
+## 1. operator: create a role
+> POST /sqlos/admin/fga/api/roles
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "key": "auditor",
+>     "name": "Auditor"
+>   }
+< 405 Method Not Allowed
+< Allow: GET
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "FGA roles and permissions are defined in startup configuration. Use options.Fga.Seed to change the authorization model."
+    }
+
+## 2. operator: rename a role
+> PUT /sqlos/admin/fga/api/roles/workspace_reader
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "name": "Renamed"
+>   }
+< 405 Method Not Allowed
+< Allow: GET
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "FGA roles and permissions are defined in startup configuration. Use options.Fga.Seed to change the authorization model."
+    }
+
+## 3. operator: delete a role
+> DELETE /sqlos/admin/fga/api/roles/workspace_reader
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 405 Method Not Allowed
+< Allow: GET
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "FGA roles and permissions are defined in startup configuration. Use options.Fga.Seed to change the authorization model."
+    }
+
+## 4. operator: add a permission to a role
+> POST /sqlos/admin/fga/api/roles/workspace_reader/permissions
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "permissionId": "workspace.write"
+>   }
+< 405 Method Not Allowed
+< Allow: GET
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "FGA roles and permissions are defined in startup configuration. Use options.Fga.Seed to change the authorization model."
+    }
+
+## 5. operator: remove a permission from a role
+> DELETE /sqlos/admin/fga/api/roles/workspace_reader/permissions/workspace.read
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 405 Method Not Allowed
+< Allow: GET
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "FGA roles and permissions are defined in startup configuration. Use options.Fga.Seed to change the authorization model."
+    }
+
+## 6. operator: create a permission
+> POST /sqlos/admin/fga/api/permissions
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "key": "workspace.delete",
+>     "name": "Delete workspace"
+>   }
+< 405 Method Not Allowed
+< Allow: GET
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "FGA roles and permissions are defined in startup configuration. Use options.Fga.Seed to change the authorization model."
+    }
+
+## 7. operator: the role is unchanged
+> GET /sqlos/admin/fga/api/roles/workspace_reader
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "description": null,
+      "id": "workspace_reader",
+      "isVirtual": false,
+      "key": "workspace_reader",
+      "name": "Workspace reader",
+      "permissionCount": 1
+    }
+
+## audit: refused schema writes are not audited
+  (no new events)

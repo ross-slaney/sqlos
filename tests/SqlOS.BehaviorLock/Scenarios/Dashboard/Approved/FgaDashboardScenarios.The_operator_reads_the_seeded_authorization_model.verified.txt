@@ -1,0 +1,234 @@
+# SqlOS behavior lock transcript
+scenario: FgaDashboardScenarios.The_operator_reads_the_seeded_authorization_model
+profile: dashboard-callback
+
+## 1. operator: summary counts of the seeded model
+> GET /sqlos/admin/fga/api/stats
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "agents": 0,
+      "grants": 0,
+      "permissions": 2,
+      "resources": 1,
+      "roles": 2,
+      "serviceAccounts": 0,
+      "subjects": 0,
+      "userGroups": 0,
+      "users": 0
+    }
+
+## 2. operator: resource types, by name
+> GET /sqlos/admin/fga/api/resource-types
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "description": "The root resource type",
+          "id": "root",
+          "key": "root",
+          "name": "Root"
+        },
+        {
+          "description": "Behavior-lock application workspace.",
+          "id": "workspace",
+          "key": "workspace",
+          "name": "Workspace"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 3. operator: roles, by name
+> GET /sqlos/admin/fga/api/roles
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "description": null,
+          "id": "workspace_admin",
+          "isVirtual": false,
+          "key": "workspace_admin",
+          "name": "Workspace admin",
+          "permissionCount": 2
+        },
+        {
+          "description": null,
+          "id": "workspace_reader",
+          "isVirtual": false,
+          "key": "workspace_reader",
+          "name": "Workspace reader",
+          "permissionCount": 1
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 4. operator: roles filtered by key or name
+> GET /sqlos/admin/fga/api/roles?search=reader
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "description": null,
+          "id": "workspace_reader",
+          "isVirtual": false,
+          "key": "workspace_reader",
+          "name": "Workspace reader",
+          "permissionCount": 1
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 5. operator: a role's detail
+> GET /sqlos/admin/fga/api/roles/workspace_admin
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "description": null,
+      "id": "workspace_admin",
+      "isVirtual": false,
+      "key": "workspace_admin",
+      "name": "Workspace admin",
+      "permissionCount": 2
+    }
+
+## 6. operator: an unknown role is 404
+> GET /sqlos/admin/fga/api/roles/no-such-role
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 404 Not Found
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "Role not found"
+    }
+
+## 7. operator: the permissions a role grants
+> GET /sqlos/admin/fga/api/roles/workspace_admin/permissions
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    [
+      {
+        "description": null,
+        "id": "workspace.read",
+        "key": "workspace.read",
+        "name": "Read workspace"
+      },
+      {
+        "description": null,
+        "id": "workspace.write",
+        "key": "workspace.write",
+        "name": "Write workspace"
+      }
+    ]
+
+## 8. operator: an unknown role has no permissions, not a 404
+> GET /sqlos/admin/fga/api/roles/no-such-role/permissions
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    []
+
+## 9. operator: permissions, by name
+> GET /sqlos/admin/fga/api/permissions
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "description": null,
+          "id": "workspace.read",
+          "key": "workspace.read",
+          "name": "Read workspace",
+          "resourceType": "Workspace"
+        },
+        {
+          "description": null,
+          "id": "workspace.write",
+          "key": "workspace.write",
+          "name": "Write workspace",
+          "resourceType": "Workspace"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 10. operator: permissions filtered by key or name
+> GET /sqlos/admin/fga/api/permissions?search=write
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "description": null,
+          "id": "workspace.write",
+          "key": "workspace.write",
+          "name": "Write workspace",
+          "resourceType": "Workspace"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 11. operator: an unknown API path is a JSON 404
+> GET /sqlos/admin/fga/api/no-such-endpoint
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 404 Not Found
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "Not found"
+    }

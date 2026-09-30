@@ -1,0 +1,149 @@
+# SqlOS behavior lock transcript
+scenario: DashboardShellScenarios.Without_the_operator_callback_the_dashboard_answers_404
+profile: dashboard-callback
+
+## 1. visitor: the prefix redirect runs before authorization
+> GET /sqlos
+< 302 Found
+< Location: /sqlos/
+
+## 2. visitor: the shell is hidden
+> GET /sqlos/
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 3. visitor: so is the login route outside Password mode
+> GET /sqlos/login
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 4. visitor: assets are hidden
+> GET /sqlos/app.js
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 5. visitor: stylesheet hidden
+> GET /sqlos/style.css
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 6. visitor: deep links are hidden
+> GET /sqlos/admin/auth/users
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 7. visitor: FGA deep links are hidden
+> GET /sqlos/admin/fga/resources
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 8. visitor: the FGA middleware hides its script
+> GET /sqlos/admin/fga/app.js
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 9. visitor: and its stylesheet
+> GET /sqlos/admin/fga/style.css
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 10. visitor: and its API
+> GET /sqlos/admin/fga/api/stats
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 11. visitor: the callback rejects a wrong operator credential
+> GET /sqlos/
+> X-BehaviorLock-Operator: not-the-operator-secret
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 12. visitor: the session probe answers and reports no access
+> GET /sqlos/dashboard-auth/session
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "authenticated": false,
+      "expiresAt": null
+    }
+
+## 13. visitor: password login does not exist outside Password mode
+> POST /sqlos/dashboard-auth/login
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "password": "{password#1}"
+>   }
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 14. visitor: logout succeeds for an anonymous caller and clears the cookie
+> POST /sqlos/dashboard-auth/logout
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {}
+< 204 No Content
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+< Set-Cookie: SqlOS.Dashboard.Session=; expires={unix-epoch}; path=/sqlos; secure; samesite=lax; httponly
+
+## audit: the anonymous logout is audited as a dashboard logout
+  - {
+      "action": "dashboard.logout",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "dashboard"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "dashboard.logout",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "reason": "operator_requested"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

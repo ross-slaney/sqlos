@@ -1,0 +1,863 @@
+# SqlOS behavior lock transcript
+scenario: DashboardShellScenarios.The_host_callback_admits_the_operator_to_the_shell_deep_links_and_assets
+profile: dashboard-callback
+
+## 1. operator: the bare prefix redirects to the shell
+> GET /sqlos
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 302 Found
+< Location: /sqlos/
+
+## 2. operator: the shell carries a fresh CSP nonce and the security headers
+> GET /sqlos/
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#1}'; style-src 'self' 'nonce-{csp-nonce#1}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>SqlOS Dashboard</title>
+        <link rel="stylesheet" href="/sqlos/style.css" />
+      </head>
+      <body>
+        <script nonce="{csp-nonce#1}">{script-sha256:e2e7315636187e83}</script>
+        <div class="layout">
+          <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+              <div class="sidebar-logo">So</div>
+              <span class="sidebar-title">SqlOS</span>
+              <button class="sidebar-close" id="sidebar-close">×</button>
+            </div>
+            <nav>
+              <div class="nav-group">
+                <div class="nav-label">Dashboard</div>
+                <a href="#" data-route="home" class="active">Home</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Governance</div>
+                <a href="#" data-route="audit-logs">Audit Logs</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Auth Server</div>
+                <a href="#" data-route="auth-overview">Overview</a>
+                <a href="#" data-route="auth-organizations">Organizations</a>
+                <a href="#" data-route="auth-users">Users</a>
+                <a href="#" data-route="auth-memberships">Memberships</a>
+                <a href="#" data-route="auth-clients">Applications</a>
+                <a href="#" data-route="auth-machine-clients">Machine Clients</a>
+                <a href="#" data-route="auth-oidc">OIDC</a>
+                <a href="#" data-route="auth-scopes">Scope Display Names</a>
+                <a href="#" data-route="auth-security">Security</a>
+                <a href="#" data-route="auth-mfa">MFA</a>
+                <a href="#" data-route="auth-authpage">Auth Page</a>
+                <a href="#" data-route="auth-sessions">Sessions</a>
+                <a href="#" data-route="auth-audit">Audit Events</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Fine-Grained Auth</div>
+                <a href="#" data-route="fga-resources">Resources</a>
+                <a href="#" data-route="fga-grants">Grants</a>
+                <a href="#" data-route="fga-roles">Roles</a>
+                <a href="#" data-route="fga-permissions">Permissions</a>
+                <a href="#" data-route="fga-users">Users</a>
+                <a href="#" data-route="fga-agents">Agents</a>
+                <a href="#" data-route="fga-service-accounts">Service Accounts</a>
+                <a href="#" data-route="fga-user-groups">User Groups</a>
+                <a href="#" data-route="fga-access-tester">Access Tester</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Communications</div>
+                <a href="#" data-route="email-templates">Templates</a>
+                <a href="#" data-route="email-messages">Messages</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Integrations</div>
+                <a href="#" data-route="calendar-connections">Calendar</a>
+              </div>
+            </nav>
+            <div class="sidebar-footer">
+              <button class="sidebar-action" id="dashboard-logout" type="button">Log out</button>
+            </div>
+          </aside>
+          <div class="main-wrapper">
+            <div class="topbar">
+              <button class="hamburger" id="hamburger">☰</button>
+              <span class="topbar-title" id="topbar-title">SqlOS Dashboard</span>
+            </div>
+            <main>
+              <header class="page-header">
+                <div>
+                  <div class="page-eyebrow" id="page-eyebrow">Dashboard</div>
+                  <h1 id="page-title">SqlOS Dashboard</h1>
+                  <p id="page-description">Authentication, organizations, sessions, and authorization in one embedded control plane.</p>
+                </div>
+              </header>
+              <div id="content" class="content-area"></div>
+            </main>
+          </div>
+        </div>
+        <div class="modal-overlay" id="dashboard-modal" hidden="">
+          <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dashboard-modal-title">
+            <div class="modal-header">
+              <h3 id="dashboard-modal-title"></h3>
+              <button type="button" class="modal-close" id="dashboard-modal-close" aria-label="Close">×</button>
+            </div>
+            <div class="modal-body" id="dashboard-modal-body"></div>
+          </div>
+        </div>
+        <script nonce="{csp-nonce#1}" src="/sqlos/admin/fga/app.js"></script>
+        <script nonce="{csp-nonce#1}" src="/sqlos/app.js"></script>
+      </body>
+    </html>
+
+## document: the values the middleware writes into the shell's bootstrap script
+    window.__SQL_OS_BASE_PATH__ = "/sqlos";
+    window.__SQL_OS_CAPABILITIES__ = {"scimEnabled":false};
+
+## 3. operator: an authorized operator on the login route goes back to the shell
+> GET /sqlos/login
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 302 Found
+< Location: /sqlos/
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 4. operator: an auth admin deep link serves the shell
+> GET /sqlos/admin/auth/users
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#2}'; style-src 'self' 'nonce-{csp-nonce#2}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>SqlOS Dashboard</title>
+        <link rel="stylesheet" href="/sqlos/style.css" />
+      </head>
+      <body>
+        <script nonce="{csp-nonce#2}">{script-sha256:e2e7315636187e83}</script>
+        <div class="layout">
+          <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+              <div class="sidebar-logo">So</div>
+              <span class="sidebar-title">SqlOS</span>
+              <button class="sidebar-close" id="sidebar-close">×</button>
+            </div>
+            <nav>
+              <div class="nav-group">
+                <div class="nav-label">Dashboard</div>
+                <a href="#" data-route="home" class="active">Home</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Governance</div>
+                <a href="#" data-route="audit-logs">Audit Logs</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Auth Server</div>
+                <a href="#" data-route="auth-overview">Overview</a>
+                <a href="#" data-route="auth-organizations">Organizations</a>
+                <a href="#" data-route="auth-users">Users</a>
+                <a href="#" data-route="auth-memberships">Memberships</a>
+                <a href="#" data-route="auth-clients">Applications</a>
+                <a href="#" data-route="auth-machine-clients">Machine Clients</a>
+                <a href="#" data-route="auth-oidc">OIDC</a>
+                <a href="#" data-route="auth-scopes">Scope Display Names</a>
+                <a href="#" data-route="auth-security">Security</a>
+                <a href="#" data-route="auth-mfa">MFA</a>
+                <a href="#" data-route="auth-authpage">Auth Page</a>
+                <a href="#" data-route="auth-sessions">Sessions</a>
+                <a href="#" data-route="auth-audit">Audit Events</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Fine-Grained Auth</div>
+                <a href="#" data-route="fga-resources">Resources</a>
+                <a href="#" data-route="fga-grants">Grants</a>
+                <a href="#" data-route="fga-roles">Roles</a>
+                <a href="#" data-route="fga-permissions">Permissions</a>
+                <a href="#" data-route="fga-users">Users</a>
+                <a href="#" data-route="fga-agents">Agents</a>
+                <a href="#" data-route="fga-service-accounts">Service Accounts</a>
+                <a href="#" data-route="fga-user-groups">User Groups</a>
+                <a href="#" data-route="fga-access-tester">Access Tester</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Communications</div>
+                <a href="#" data-route="email-templates">Templates</a>
+                <a href="#" data-route="email-messages">Messages</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Integrations</div>
+                <a href="#" data-route="calendar-connections">Calendar</a>
+              </div>
+            </nav>
+            <div class="sidebar-footer">
+              <button class="sidebar-action" id="dashboard-logout" type="button">Log out</button>
+            </div>
+          </aside>
+          <div class="main-wrapper">
+            <div class="topbar">
+              <button class="hamburger" id="hamburger">☰</button>
+              <span class="topbar-title" id="topbar-title">SqlOS Dashboard</span>
+            </div>
+            <main>
+              <header class="page-header">
+                <div>
+                  <div class="page-eyebrow" id="page-eyebrow">Dashboard</div>
+                  <h1 id="page-title">SqlOS Dashboard</h1>
+                  <p id="page-description">Authentication, organizations, sessions, and authorization in one embedded control plane.</p>
+                </div>
+              </header>
+              <div id="content" class="content-area"></div>
+            </main>
+          </div>
+        </div>
+        <div class="modal-overlay" id="dashboard-modal" hidden="">
+          <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dashboard-modal-title">
+            <div class="modal-header">
+              <h3 id="dashboard-modal-title"></h3>
+              <button type="button" class="modal-close" id="dashboard-modal-close" aria-label="Close">×</button>
+            </div>
+            <div class="modal-body" id="dashboard-modal-body"></div>
+          </div>
+        </div>
+        <script nonce="{csp-nonce#2}" src="/sqlos/admin/fga/app.js"></script>
+        <script nonce="{csp-nonce#2}" src="/sqlos/app.js"></script>
+      </body>
+    </html>
+
+## 5. operator: an audit deep link serves the shell
+> GET /sqlos/admin/audit/events
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#3}'; style-src 'self' 'nonce-{csp-nonce#3}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>SqlOS Dashboard</title>
+        <link rel="stylesheet" href="/sqlos/style.css" />
+      </head>
+      <body>
+        <script nonce="{csp-nonce#3}">{script-sha256:e2e7315636187e83}</script>
+        <div class="layout">
+          <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+              <div class="sidebar-logo">So</div>
+              <span class="sidebar-title">SqlOS</span>
+              <button class="sidebar-close" id="sidebar-close">×</button>
+            </div>
+            <nav>
+              <div class="nav-group">
+                <div class="nav-label">Dashboard</div>
+                <a href="#" data-route="home" class="active">Home</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Governance</div>
+                <a href="#" data-route="audit-logs">Audit Logs</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Auth Server</div>
+                <a href="#" data-route="auth-overview">Overview</a>
+                <a href="#" data-route="auth-organizations">Organizations</a>
+                <a href="#" data-route="auth-users">Users</a>
+                <a href="#" data-route="auth-memberships">Memberships</a>
+                <a href="#" data-route="auth-clients">Applications</a>
+                <a href="#" data-route="auth-machine-clients">Machine Clients</a>
+                <a href="#" data-route="auth-oidc">OIDC</a>
+                <a href="#" data-route="auth-scopes">Scope Display Names</a>
+                <a href="#" data-route="auth-security">Security</a>
+                <a href="#" data-route="auth-mfa">MFA</a>
+                <a href="#" data-route="auth-authpage">Auth Page</a>
+                <a href="#" data-route="auth-sessions">Sessions</a>
+                <a href="#" data-route="auth-audit">Audit Events</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Fine-Grained Auth</div>
+                <a href="#" data-route="fga-resources">Resources</a>
+                <a href="#" data-route="fga-grants">Grants</a>
+                <a href="#" data-route="fga-roles">Roles</a>
+                <a href="#" data-route="fga-permissions">Permissions</a>
+                <a href="#" data-route="fga-users">Users</a>
+                <a href="#" data-route="fga-agents">Agents</a>
+                <a href="#" data-route="fga-service-accounts">Service Accounts</a>
+                <a href="#" data-route="fga-user-groups">User Groups</a>
+                <a href="#" data-route="fga-access-tester">Access Tester</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Communications</div>
+                <a href="#" data-route="email-templates">Templates</a>
+                <a href="#" data-route="email-messages">Messages</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Integrations</div>
+                <a href="#" data-route="calendar-connections">Calendar</a>
+              </div>
+            </nav>
+            <div class="sidebar-footer">
+              <button class="sidebar-action" id="dashboard-logout" type="button">Log out</button>
+            </div>
+          </aside>
+          <div class="main-wrapper">
+            <div class="topbar">
+              <button class="hamburger" id="hamburger">☰</button>
+              <span class="topbar-title" id="topbar-title">SqlOS Dashboard</span>
+            </div>
+            <main>
+              <header class="page-header">
+                <div>
+                  <div class="page-eyebrow" id="page-eyebrow">Dashboard</div>
+                  <h1 id="page-title">SqlOS Dashboard</h1>
+                  <p id="page-description">Authentication, organizations, sessions, and authorization in one embedded control plane.</p>
+                </div>
+              </header>
+              <div id="content" class="content-area"></div>
+            </main>
+          </div>
+        </div>
+        <div class="modal-overlay" id="dashboard-modal" hidden="">
+          <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dashboard-modal-title">
+            <div class="modal-header">
+              <h3 id="dashboard-modal-title"></h3>
+              <button type="button" class="modal-close" id="dashboard-modal-close" aria-label="Close">×</button>
+            </div>
+            <div class="modal-body" id="dashboard-modal-body"></div>
+          </div>
+        </div>
+        <script nonce="{csp-nonce#3}" src="/sqlos/admin/fga/app.js"></script>
+        <script nonce="{csp-nonce#3}" src="/sqlos/app.js"></script>
+      </body>
+    </html>
+
+## 6. operator: an email deep link serves the shell
+> GET /sqlos/admin/email/templates
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#4}'; style-src 'self' 'nonce-{csp-nonce#4}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>SqlOS Dashboard</title>
+        <link rel="stylesheet" href="/sqlos/style.css" />
+      </head>
+      <body>
+        <script nonce="{csp-nonce#4}">{script-sha256:e2e7315636187e83}</script>
+        <div class="layout">
+          <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+              <div class="sidebar-logo">So</div>
+              <span class="sidebar-title">SqlOS</span>
+              <button class="sidebar-close" id="sidebar-close">×</button>
+            </div>
+            <nav>
+              <div class="nav-group">
+                <div class="nav-label">Dashboard</div>
+                <a href="#" data-route="home" class="active">Home</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Governance</div>
+                <a href="#" data-route="audit-logs">Audit Logs</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Auth Server</div>
+                <a href="#" data-route="auth-overview">Overview</a>
+                <a href="#" data-route="auth-organizations">Organizations</a>
+                <a href="#" data-route="auth-users">Users</a>
+                <a href="#" data-route="auth-memberships">Memberships</a>
+                <a href="#" data-route="auth-clients">Applications</a>
+                <a href="#" data-route="auth-machine-clients">Machine Clients</a>
+                <a href="#" data-route="auth-oidc">OIDC</a>
+                <a href="#" data-route="auth-scopes">Scope Display Names</a>
+                <a href="#" data-route="auth-security">Security</a>
+                <a href="#" data-route="auth-mfa">MFA</a>
+                <a href="#" data-route="auth-authpage">Auth Page</a>
+                <a href="#" data-route="auth-sessions">Sessions</a>
+                <a href="#" data-route="auth-audit">Audit Events</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Fine-Grained Auth</div>
+                <a href="#" data-route="fga-resources">Resources</a>
+                <a href="#" data-route="fga-grants">Grants</a>
+                <a href="#" data-route="fga-roles">Roles</a>
+                <a href="#" data-route="fga-permissions">Permissions</a>
+                <a href="#" data-route="fga-users">Users</a>
+                <a href="#" data-route="fga-agents">Agents</a>
+                <a href="#" data-route="fga-service-accounts">Service Accounts</a>
+                <a href="#" data-route="fga-user-groups">User Groups</a>
+                <a href="#" data-route="fga-access-tester">Access Tester</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Communications</div>
+                <a href="#" data-route="email-templates">Templates</a>
+                <a href="#" data-route="email-messages">Messages</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Integrations</div>
+                <a href="#" data-route="calendar-connections">Calendar</a>
+              </div>
+            </nav>
+            <div class="sidebar-footer">
+              <button class="sidebar-action" id="dashboard-logout" type="button">Log out</button>
+            </div>
+          </aside>
+          <div class="main-wrapper">
+            <div class="topbar">
+              <button class="hamburger" id="hamburger">☰</button>
+              <span class="topbar-title" id="topbar-title">SqlOS Dashboard</span>
+            </div>
+            <main>
+              <header class="page-header">
+                <div>
+                  <div class="page-eyebrow" id="page-eyebrow">Dashboard</div>
+                  <h1 id="page-title">SqlOS Dashboard</h1>
+                  <p id="page-description">Authentication, organizations, sessions, and authorization in one embedded control plane.</p>
+                </div>
+              </header>
+              <div id="content" class="content-area"></div>
+            </main>
+          </div>
+        </div>
+        <div class="modal-overlay" id="dashboard-modal" hidden="">
+          <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dashboard-modal-title">
+            <div class="modal-header">
+              <h3 id="dashboard-modal-title"></h3>
+              <button type="button" class="modal-close" id="dashboard-modal-close" aria-label="Close">×</button>
+            </div>
+            <div class="modal-body" id="dashboard-modal-body"></div>
+          </div>
+        </div>
+        <script nonce="{csp-nonce#4}" src="/sqlos/admin/fga/app.js"></script>
+        <script nonce="{csp-nonce#4}" src="/sqlos/app.js"></script>
+      </body>
+    </html>
+
+## 7. operator: a calendar deep link serves the shell
+> GET /sqlos/admin/calendar/connections
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#5}'; style-src 'self' 'nonce-{csp-nonce#5}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>SqlOS Dashboard</title>
+        <link rel="stylesheet" href="/sqlos/style.css" />
+      </head>
+      <body>
+        <script nonce="{csp-nonce#5}">{script-sha256:e2e7315636187e83}</script>
+        <div class="layout">
+          <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+              <div class="sidebar-logo">So</div>
+              <span class="sidebar-title">SqlOS</span>
+              <button class="sidebar-close" id="sidebar-close">×</button>
+            </div>
+            <nav>
+              <div class="nav-group">
+                <div class="nav-label">Dashboard</div>
+                <a href="#" data-route="home" class="active">Home</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Governance</div>
+                <a href="#" data-route="audit-logs">Audit Logs</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Auth Server</div>
+                <a href="#" data-route="auth-overview">Overview</a>
+                <a href="#" data-route="auth-organizations">Organizations</a>
+                <a href="#" data-route="auth-users">Users</a>
+                <a href="#" data-route="auth-memberships">Memberships</a>
+                <a href="#" data-route="auth-clients">Applications</a>
+                <a href="#" data-route="auth-machine-clients">Machine Clients</a>
+                <a href="#" data-route="auth-oidc">OIDC</a>
+                <a href="#" data-route="auth-scopes">Scope Display Names</a>
+                <a href="#" data-route="auth-security">Security</a>
+                <a href="#" data-route="auth-mfa">MFA</a>
+                <a href="#" data-route="auth-authpage">Auth Page</a>
+                <a href="#" data-route="auth-sessions">Sessions</a>
+                <a href="#" data-route="auth-audit">Audit Events</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Fine-Grained Auth</div>
+                <a href="#" data-route="fga-resources">Resources</a>
+                <a href="#" data-route="fga-grants">Grants</a>
+                <a href="#" data-route="fga-roles">Roles</a>
+                <a href="#" data-route="fga-permissions">Permissions</a>
+                <a href="#" data-route="fga-users">Users</a>
+                <a href="#" data-route="fga-agents">Agents</a>
+                <a href="#" data-route="fga-service-accounts">Service Accounts</a>
+                <a href="#" data-route="fga-user-groups">User Groups</a>
+                <a href="#" data-route="fga-access-tester">Access Tester</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Communications</div>
+                <a href="#" data-route="email-templates">Templates</a>
+                <a href="#" data-route="email-messages">Messages</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Integrations</div>
+                <a href="#" data-route="calendar-connections">Calendar</a>
+              </div>
+            </nav>
+            <div class="sidebar-footer">
+              <button class="sidebar-action" id="dashboard-logout" type="button">Log out</button>
+            </div>
+          </aside>
+          <div class="main-wrapper">
+            <div class="topbar">
+              <button class="hamburger" id="hamburger">☰</button>
+              <span class="topbar-title" id="topbar-title">SqlOS Dashboard</span>
+            </div>
+            <main>
+              <header class="page-header">
+                <div>
+                  <div class="page-eyebrow" id="page-eyebrow">Dashboard</div>
+                  <h1 id="page-title">SqlOS Dashboard</h1>
+                  <p id="page-description">Authentication, organizations, sessions, and authorization in one embedded control plane.</p>
+                </div>
+              </header>
+              <div id="content" class="content-area"></div>
+            </main>
+          </div>
+        </div>
+        <div class="modal-overlay" id="dashboard-modal" hidden="">
+          <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dashboard-modal-title">
+            <div class="modal-header">
+              <h3 id="dashboard-modal-title"></h3>
+              <button type="button" class="modal-close" id="dashboard-modal-close" aria-label="Close">×</button>
+            </div>
+            <div class="modal-body" id="dashboard-modal-body"></div>
+          </div>
+        </div>
+        <script nonce="{csp-nonce#5}" src="/sqlos/admin/fga/app.js"></script>
+        <script nonce="{csp-nonce#5}" src="/sqlos/app.js"></script>
+      </body>
+    </html>
+
+## 8. operator: an FGA deep link serves the shell
+> GET /sqlos/admin/fga/resources
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#6}'; style-src 'self' 'nonce-{csp-nonce#6}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>SqlOS Dashboard</title>
+        <link rel="stylesheet" href="/sqlos/style.css" />
+      </head>
+      <body>
+        <script nonce="{csp-nonce#6}">{script-sha256:e2e7315636187e83}</script>
+        <div class="layout">
+          <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+              <div class="sidebar-logo">So</div>
+              <span class="sidebar-title">SqlOS</span>
+              <button class="sidebar-close" id="sidebar-close">×</button>
+            </div>
+            <nav>
+              <div class="nav-group">
+                <div class="nav-label">Dashboard</div>
+                <a href="#" data-route="home" class="active">Home</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Governance</div>
+                <a href="#" data-route="audit-logs">Audit Logs</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Auth Server</div>
+                <a href="#" data-route="auth-overview">Overview</a>
+                <a href="#" data-route="auth-organizations">Organizations</a>
+                <a href="#" data-route="auth-users">Users</a>
+                <a href="#" data-route="auth-memberships">Memberships</a>
+                <a href="#" data-route="auth-clients">Applications</a>
+                <a href="#" data-route="auth-machine-clients">Machine Clients</a>
+                <a href="#" data-route="auth-oidc">OIDC</a>
+                <a href="#" data-route="auth-scopes">Scope Display Names</a>
+                <a href="#" data-route="auth-security">Security</a>
+                <a href="#" data-route="auth-mfa">MFA</a>
+                <a href="#" data-route="auth-authpage">Auth Page</a>
+                <a href="#" data-route="auth-sessions">Sessions</a>
+                <a href="#" data-route="auth-audit">Audit Events</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Fine-Grained Auth</div>
+                <a href="#" data-route="fga-resources">Resources</a>
+                <a href="#" data-route="fga-grants">Grants</a>
+                <a href="#" data-route="fga-roles">Roles</a>
+                <a href="#" data-route="fga-permissions">Permissions</a>
+                <a href="#" data-route="fga-users">Users</a>
+                <a href="#" data-route="fga-agents">Agents</a>
+                <a href="#" data-route="fga-service-accounts">Service Accounts</a>
+                <a href="#" data-route="fga-user-groups">User Groups</a>
+                <a href="#" data-route="fga-access-tester">Access Tester</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Communications</div>
+                <a href="#" data-route="email-templates">Templates</a>
+                <a href="#" data-route="email-messages">Messages</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Integrations</div>
+                <a href="#" data-route="calendar-connections">Calendar</a>
+              </div>
+            </nav>
+            <div class="sidebar-footer">
+              <button class="sidebar-action" id="dashboard-logout" type="button">Log out</button>
+            </div>
+          </aside>
+          <div class="main-wrapper">
+            <div class="topbar">
+              <button class="hamburger" id="hamburger">☰</button>
+              <span class="topbar-title" id="topbar-title">SqlOS Dashboard</span>
+            </div>
+            <main>
+              <header class="page-header">
+                <div>
+                  <div class="page-eyebrow" id="page-eyebrow">Dashboard</div>
+                  <h1 id="page-title">SqlOS Dashboard</h1>
+                  <p id="page-description">Authentication, organizations, sessions, and authorization in one embedded control plane.</p>
+                </div>
+              </header>
+              <div id="content" class="content-area"></div>
+            </main>
+          </div>
+        </div>
+        <div class="modal-overlay" id="dashboard-modal" hidden="">
+          <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dashboard-modal-title">
+            <div class="modal-header">
+              <h3 id="dashboard-modal-title"></h3>
+              <button type="button" class="modal-close" id="dashboard-modal-close" aria-label="Close">×</button>
+            </div>
+            <div class="modal-body" id="dashboard-modal-body"></div>
+          </div>
+        </div>
+        <script nonce="{csp-nonce#6}" src="/sqlos/admin/fga/app.js"></script>
+        <script nonce="{csp-nonce#6}" src="/sqlos/app.js"></script>
+      </body>
+    </html>
+
+## 9. operator: the FGA area root serves the shell too
+> GET /sqlos/admin/fga
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#7}'; style-src 'self' 'nonce-{csp-nonce#7}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>SqlOS Dashboard</title>
+        <link rel="stylesheet" href="/sqlos/style.css" />
+      </head>
+      <body>
+        <script nonce="{csp-nonce#7}">{script-sha256:e2e7315636187e83}</script>
+        <div class="layout">
+          <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+              <div class="sidebar-logo">So</div>
+              <span class="sidebar-title">SqlOS</span>
+              <button class="sidebar-close" id="sidebar-close">×</button>
+            </div>
+            <nav>
+              <div class="nav-group">
+                <div class="nav-label">Dashboard</div>
+                <a href="#" data-route="home" class="active">Home</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Governance</div>
+                <a href="#" data-route="audit-logs">Audit Logs</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Auth Server</div>
+                <a href="#" data-route="auth-overview">Overview</a>
+                <a href="#" data-route="auth-organizations">Organizations</a>
+                <a href="#" data-route="auth-users">Users</a>
+                <a href="#" data-route="auth-memberships">Memberships</a>
+                <a href="#" data-route="auth-clients">Applications</a>
+                <a href="#" data-route="auth-machine-clients">Machine Clients</a>
+                <a href="#" data-route="auth-oidc">OIDC</a>
+                <a href="#" data-route="auth-scopes">Scope Display Names</a>
+                <a href="#" data-route="auth-security">Security</a>
+                <a href="#" data-route="auth-mfa">MFA</a>
+                <a href="#" data-route="auth-authpage">Auth Page</a>
+                <a href="#" data-route="auth-sessions">Sessions</a>
+                <a href="#" data-route="auth-audit">Audit Events</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Fine-Grained Auth</div>
+                <a href="#" data-route="fga-resources">Resources</a>
+                <a href="#" data-route="fga-grants">Grants</a>
+                <a href="#" data-route="fga-roles">Roles</a>
+                <a href="#" data-route="fga-permissions">Permissions</a>
+                <a href="#" data-route="fga-users">Users</a>
+                <a href="#" data-route="fga-agents">Agents</a>
+                <a href="#" data-route="fga-service-accounts">Service Accounts</a>
+                <a href="#" data-route="fga-user-groups">User Groups</a>
+                <a href="#" data-route="fga-access-tester">Access Tester</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Communications</div>
+                <a href="#" data-route="email-templates">Templates</a>
+                <a href="#" data-route="email-messages">Messages</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Integrations</div>
+                <a href="#" data-route="calendar-connections">Calendar</a>
+              </div>
+            </nav>
+            <div class="sidebar-footer">
+              <button class="sidebar-action" id="dashboard-logout" type="button">Log out</button>
+            </div>
+          </aside>
+          <div class="main-wrapper">
+            <div class="topbar">
+              <button class="hamburger" id="hamburger">☰</button>
+              <span class="topbar-title" id="topbar-title">SqlOS Dashboard</span>
+            </div>
+            <main>
+              <header class="page-header">
+                <div>
+                  <div class="page-eyebrow" id="page-eyebrow">Dashboard</div>
+                  <h1 id="page-title">SqlOS Dashboard</h1>
+                  <p id="page-description">Authentication, organizations, sessions, and authorization in one embedded control plane.</p>
+                </div>
+              </header>
+              <div id="content" class="content-area"></div>
+            </main>
+          </div>
+        </div>
+        <div class="modal-overlay" id="dashboard-modal" hidden="">
+          <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dashboard-modal-title">
+            <div class="modal-header">
+              <h3 id="dashboard-modal-title"></h3>
+              <button type="button" class="modal-close" id="dashboard-modal-close" aria-label="Close">×</button>
+            </div>
+            <div class="modal-body" id="dashboard-modal-body"></div>
+          </div>
+        </div>
+        <script nonce="{csp-nonce#7}" src="/sqlos/admin/fga/app.js"></script>
+        <script nonce="{csp-nonce#7}" src="/sqlos/app.js"></script>
+      </body>
+    </html>
+
+## 10. operator: the dashboard script
+> GET /sqlos/app.js
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/javascript; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {script-sha256:5f723a5941b8e19b}
+
+## 11. operator: the dashboard stylesheet
+> GET /sqlos/style.css
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: text/css; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {style-sha256:59406f8a48d13796}
+
+## 12. operator: the FGA dashboard script
+> GET /sqlos/admin/fga/app.js
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/javascript
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {script-sha256:ec65c096e7e7830a}
+
+## 13. operator: the FGA dashboard stylesheet
+> GET /sqlos/admin/fga/style.css
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: text/css
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {style-sha256:fe558fd270aca283}
+
+## 14. operator: callback mode reports the callback's decision and no session expiry
+> GET /sqlos/dashboard-auth/session
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "authenticated": true,
+      "expiresAt": null
+    }
+
+## 15. operator: an unknown path under the prefix falls through to routing and 404
+> GET /sqlos/no-such-page
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 16. operator: an asset-like path under an admin area passes through to routing
+> GET /sqlos/admin/auth/no-such-asset.css
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 404 Not Found
+
+## 17. operator: the FGA middleware answers a missing asset with 404
+> GET /sqlos/admin/fga/no-such-asset.js
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 18. operator: the dashboard-auth root is not an endpoint
+> GET /sqlos/dashboard-auth
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## audit: reading the dashboard writes no audit events
+  (no new events)

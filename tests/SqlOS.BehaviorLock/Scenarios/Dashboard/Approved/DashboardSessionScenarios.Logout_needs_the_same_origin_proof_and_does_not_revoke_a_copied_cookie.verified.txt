@@ -1,0 +1,306 @@
+# SqlOS behavior lock transcript
+scenario: DashboardSessionScenarios.Logout_needs_the_same_origin_proof_and_does_not_revoke_a_copied_cookie
+profile: dashboard-password
+
+## 1. operator-browser: sign in
+> POST /sqlos/dashboard-auth/login
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "password": "{password:dashboard}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+< Set-Cookie: SqlOS.Dashboard.Session={cookie#1}; expires=+8h; path=/sqlos; secure; samesite=lax; httponly
+    {
+      "authenticated": true,
+      "expiresAt": "{datetime:utc-z}"
+    }
+
+## 2. operator-browser: the session reports its expiry
+> GET /sqlos/dashboard-auth/session
+> Cookie: SqlOS.Dashboard.Session={cookie#1}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "authenticated": true,
+      "expiresAt": "{datetime:utc-z}"
+    }
+
+## 3. operator-browser: the session reads the FGA API
+> GET /sqlos/admin/fga/api/stats
+> Cookie: SqlOS.Dashboard.Session={cookie#1}
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "agents": 0,
+      "grants": 0,
+      "permissions": 2,
+      "resources": 1,
+      "roles": 2,
+      "serviceAccounts": 0,
+      "subjects": 0,
+      "userGroups": 0,
+      "users": 0
+    }
+
+## 4. tampered-browser: a tampered ticket is no session
+> GET /sqlos/dashboard-auth/session
+> Cookie: SqlOS.Dashboard.Session={cookie#2}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "authenticated": false,
+      "expiresAt": null
+    }
+
+## 5. tampered-browser: and reads nothing
+> GET /sqlos/admin/fga/api/stats
+> Cookie: SqlOS.Dashboard.Session={cookie#2}
+< 401 Unauthorized
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 6. operator-browser: logout with the session cookie but without X-SqlOS-Request is refused
+> POST /sqlos/dashboard-auth/logout
+> Content-Type: application/json; charset=utf-8
+> Cookie: SqlOS.Dashboard.Session={cookie#1}
+> Origin: https://sqlos.example.test
+>   {}
+< 403 Forbidden
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "csrf_rejected",
+      "message": "The request could not be verified."
+    }
+
+## 7. operator-browser: logout from a foreign origin is refused
+> POST /sqlos/dashboard-auth/logout
+> Content-Type: application/json; charset=utf-8
+> Cookie: SqlOS.Dashboard.Session={cookie#1}
+> Origin: https://evil.example
+> X-SqlOS-Request: 1
+>   {}
+< 403 Forbidden
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "csrf_rejected",
+      "message": "The request could not be verified."
+    }
+
+## 8. operator-browser: logout with the same-origin proof deletes the cookie
+> POST /sqlos/dashboard-auth/logout
+> Content-Type: application/json; charset=utf-8
+> Cookie: SqlOS.Dashboard.Session={cookie#1}
+> Origin: https://sqlos.example.test
+> X-SqlOS-Request: 1
+>   {}
+< 204 No Content
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+< Set-Cookie: SqlOS.Dashboard.Session=; expires={unix-epoch}; path=/sqlos; secure; samesite=lax; httponly
+
+## 9. operator-browser: the browser is signed out
+> GET /sqlos/dashboard-auth/session
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "authenticated": false,
+      "expiresAt": null
+    }
+
+## 10. copied-cookie: a copy of the cookie taken before logout is still a session
+> GET /sqlos/dashboard-auth/session
+> Cookie: SqlOS.Dashboard.Session={cookie#1}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "authenticated": true,
+      "expiresAt": "{datetime:utc-z}"
+    }
+
+## 11. copied-cookie: and still reads the dashboard APIs
+> GET /sqlos/admin/fga/api/stats
+> Cookie: SqlOS.Dashboard.Session={cookie#1}
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "agents": 0,
+      "grants": 0,
+      "permissions": 2,
+      "resources": 1,
+      "roles": 2,
+      "serviceAccounts": 0,
+      "subjects": 0,
+      "userGroups": 0,
+      "users": 0
+    }
+
+## audit: sign-in, refused logouts, and logout
+  - {
+      "action": "dashboard.login.success",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "dashboard"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "dashboard.login.success",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "expires_at": "{datetime:utc-z}"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "security.csrf_rejected",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "security"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "security.csrf_rejected",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "method": "POST",
+        "path": "/sqlos/dashboard-auth/logout",
+        "reason": "missing_header"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "security.csrf_rejected",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "security"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "security.csrf_rejected",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "method": "POST",
+        "path": "/sqlos/dashboard-auth/logout",
+        "reason": "untrusted_origin"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "dashboard.logout",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "dashboard"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "dashboard.logout",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "reason": "operator_requested"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

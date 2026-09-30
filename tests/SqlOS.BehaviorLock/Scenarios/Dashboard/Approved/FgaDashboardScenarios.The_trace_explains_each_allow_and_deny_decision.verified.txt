@@ -1,0 +1,507 @@
+# SqlOS behavior lock transcript
+scenario: FgaDashboardScenarios.The_trace_explains_each_allow_and_deny_decision
+profile: dashboard-callback
+
+## 1. operator: subject, resource, and permission are required
+> POST /sqlos/admin/fga/api/trace
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "subjectId": "{usr#1}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "subjectId, resourceId, and permissionKey are required"
+    }
+
+## 2. operator: a direct grant
+> POST /sqlos/admin/fga/api/trace
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::alpha",
+>     "subjectId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "accessGranted": true,
+      "allRolesUsed": [
+        {
+          "contributedToDecision": true,
+          "isFromGrant": true,
+          "isVirtualRole": false,
+          "permissions": [
+            {
+              "permissionKey": "workspace.read",
+              "permissionName": "Read workspace",
+              "usedForDecision": true
+            }
+          ],
+          "roleKey": "workspace_reader",
+          "roleName": "Workspace reader",
+          "sourceResourceId": "workspace::alpha",
+          "sourceResourceName": "Alpha",
+          "sourceResourceType": "Workspace"
+        }
+      ],
+      "decisionSummary": "Access granted because Alice has role 'Workspace reader' directly on this resource, and 'Workspace reader' includes permission 'workspace.read'.",
+      "denialReason": null,
+      "grantsUsed": [
+        {
+          "appliesToSubject": true,
+          "contributedToDecision": true,
+          "grantId": "grant::{hex#1}",
+          "isDirectGrant": true,
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "resourceType": "Workspace",
+          "roleKey": "workspace_reader",
+          "roleName": "Workspace reader",
+          "subjectDisplayName": "Alice",
+          "subjectId": "{usr#1}",
+          "viaGroupName": null
+        }
+      ],
+      "pathNodes": [
+        {
+          "depth": 0,
+          "effectivePermissions": [
+            "workspace.read"
+          ],
+          "grantsOnThisNode": [
+            {
+              "appliesToSubject": true,
+              "contributedToDecision": true,
+              "grantId": "grant::{hex#1}",
+              "isDirectGrant": true,
+              "resourceId": "workspace::alpha",
+              "resourceName": "Alpha",
+              "resourceType": "Workspace",
+              "roleKey": "workspace_reader",
+              "roleName": "Workspace reader",
+              "subjectDisplayName": "Alice",
+              "subjectId": "{usr#1}",
+              "viaGroupName": null
+            }
+          ],
+          "isTarget": true,
+          "name": "Alpha",
+          "permissionFoundHere": true,
+          "resourceId": "workspace::alpha",
+          "resourceType": "Workspace"
+        }
+      ],
+      "permissionKey": "workspace.read",
+      "permissionName": "Read workspace",
+      "subjectDisplayName": "Alice",
+      "subjectId": "{usr#1}",
+      "subjectsChecked": [
+        {
+          "displayName": "Alice",
+          "isDirect": true,
+          "subjectId": "{usr#1}",
+          "type": "user"
+        }
+      ],
+      "suggestion": null,
+      "targetResourceId": "workspace::alpha",
+      "targetResourceName": "Alpha",
+      "targetResourceType": "Workspace"
+    }
+
+## 3. operator: a grant inherited from the parent
+> POST /sqlos/admin/fga/api/trace
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::docs",
+>     "subjectId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "accessGranted": true,
+      "allRolesUsed": [
+        {
+          "contributedToDecision": true,
+          "isFromGrant": true,
+          "isVirtualRole": false,
+          "permissions": [
+            {
+              "permissionKey": "workspace.read",
+              "permissionName": "Read workspace",
+              "usedForDecision": true
+            }
+          ],
+          "roleKey": "workspace_reader",
+          "roleName": "Workspace reader",
+          "sourceResourceId": "workspace::alpha",
+          "sourceResourceName": "Alpha",
+          "sourceResourceType": "Workspace"
+        }
+      ],
+      "decisionSummary": "Access granted because Alice has role 'Workspace reader' on parent resource 'Alpha', and 'Workspace reader' includes permission 'workspace.read' which is inherited by child resources.",
+      "denialReason": null,
+      "grantsUsed": [
+        {
+          "appliesToSubject": true,
+          "contributedToDecision": true,
+          "grantId": "grant::{hex#1}",
+          "isDirectGrant": true,
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "resourceType": "Workspace",
+          "roleKey": "workspace_reader",
+          "roleName": "Workspace reader",
+          "subjectDisplayName": "Alice",
+          "subjectId": "{usr#1}",
+          "viaGroupName": null
+        }
+      ],
+      "pathNodes": [
+        {
+          "depth": 0,
+          "effectivePermissions": [
+            "workspace.read"
+          ],
+          "grantsOnThisNode": [
+            {
+              "appliesToSubject": true,
+              "contributedToDecision": true,
+              "grantId": "grant::{hex#1}",
+              "isDirectGrant": true,
+              "resourceId": "workspace::alpha",
+              "resourceName": "Alpha",
+              "resourceType": "Workspace",
+              "roleKey": "workspace_reader",
+              "roleName": "Workspace reader",
+              "subjectDisplayName": "Alice",
+              "subjectId": "{usr#1}",
+              "viaGroupName": null
+            }
+          ],
+          "isTarget": false,
+          "name": "Alpha",
+          "permissionFoundHere": true,
+          "resourceId": "workspace::alpha",
+          "resourceType": "Workspace"
+        },
+        {
+          "depth": 1,
+          "effectivePermissions": [],
+          "grantsOnThisNode": [],
+          "isTarget": true,
+          "name": "Docs",
+          "permissionFoundHere": false,
+          "resourceId": "workspace::docs",
+          "resourceType": "Workspace"
+        }
+      ],
+      "permissionKey": "workspace.read",
+      "permissionName": "Read workspace",
+      "subjectDisplayName": "Alice",
+      "subjectId": "{usr#1}",
+      "subjectsChecked": [
+        {
+          "displayName": "Alice",
+          "isDirect": true,
+          "subjectId": "{usr#1}",
+          "type": "user"
+        }
+      ],
+      "suggestion": null,
+      "targetResourceId": "workspace::docs",
+      "targetResourceName": "Docs",
+      "targetResourceType": "Workspace"
+    }
+
+## 4. operator: a grant whose role lacks the permission
+> POST /sqlos/admin/fga/api/trace
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "permissionKey": "workspace.write",
+>     "resourceId": "workspace::alpha",
+>     "subjectId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "accessGranted": false,
+      "allRolesUsed": [
+        {
+          "contributedToDecision": false,
+          "isFromGrant": true,
+          "isVirtualRole": false,
+          "permissions": [
+            {
+              "permissionKey": "workspace.read",
+              "permissionName": "Read workspace",
+              "usedForDecision": false
+            }
+          ],
+          "roleKey": "workspace_reader",
+          "roleName": "Workspace reader",
+          "sourceResourceId": "workspace::alpha",
+          "sourceResourceName": "Alpha",
+          "sourceResourceType": "Workspace"
+        }
+      ],
+      "decisionSummary": "Access denied. Alice has grants on ancestor resources, but none of the assigned roles include permission 'workspace.write'.",
+      "denialReason": "Grants were found, but none of the roles (Workspace reader) include permission 'workspace.write'.",
+      "grantsUsed": [
+        {
+          "appliesToSubject": true,
+          "contributedToDecision": false,
+          "grantId": "grant::{hex#1}",
+          "isDirectGrant": true,
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "resourceType": "Workspace",
+          "roleKey": "workspace_reader",
+          "roleName": "Workspace reader",
+          "subjectDisplayName": "Alice",
+          "subjectId": "{usr#1}",
+          "viaGroupName": null
+        }
+      ],
+      "pathNodes": [
+        {
+          "depth": 0,
+          "effectivePermissions": [
+            "workspace.read"
+          ],
+          "grantsOnThisNode": [
+            {
+              "appliesToSubject": true,
+              "contributedToDecision": false,
+              "grantId": "grant::{hex#1}",
+              "isDirectGrant": true,
+              "resourceId": "workspace::alpha",
+              "resourceName": "Alpha",
+              "resourceType": "Workspace",
+              "roleKey": "workspace_reader",
+              "roleName": "Workspace reader",
+              "subjectDisplayName": "Alice",
+              "subjectId": "{usr#1}",
+              "viaGroupName": null
+            }
+          ],
+          "isTarget": true,
+          "name": "Alpha",
+          "permissionFoundHere": false,
+          "resourceId": "workspace::alpha",
+          "resourceType": "Workspace"
+        }
+      ],
+      "permissionKey": "workspace.write",
+      "permissionName": "Write workspace",
+      "subjectDisplayName": "Alice",
+      "subjectId": "{usr#1}",
+      "subjectsChecked": [
+        {
+          "displayName": "Alice",
+          "isDirect": true,
+          "subjectId": "{usr#1}",
+          "type": "user"
+        }
+      ],
+      "suggestion": "Either assign a different role that includes 'workspace.write', or add 'workspace.write' to one of the existing roles (Workspace reader).",
+      "targetResourceId": "workspace::alpha",
+      "targetResourceName": "Alpha",
+      "targetResourceType": "Workspace"
+    }
+
+## 5. operator: no grant anywhere on the path
+> POST /sqlos/admin/fga/api/trace
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::beta",
+>     "subjectId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "accessGranted": false,
+      "allRolesUsed": [],
+      "decisionSummary": "Access denied. No roles are assigned to Alice on 'Beta' or any of its parent resources.",
+      "denialReason": "No grants found for Alice (or their groups) on this resource or any ancestor resources.",
+      "grantsUsed": [],
+      "pathNodes": [
+        {
+          "depth": 0,
+          "effectivePermissions": [],
+          "grantsOnThisNode": [],
+          "isTarget": true,
+          "name": "Beta",
+          "permissionFoundHere": false,
+          "resourceId": "workspace::beta",
+          "resourceType": "Workspace"
+        }
+      ],
+      "permissionKey": "workspace.read",
+      "permissionName": "Read workspace",
+      "subjectDisplayName": "Alice",
+      "subjectId": "{usr#1}",
+      "subjectsChecked": [
+        {
+          "displayName": "Alice",
+          "isDirect": true,
+          "subjectId": "{usr#1}",
+          "type": "user"
+        }
+      ],
+      "suggestion": "To grant access, assign a role that includes 'workspace.read' on this resource or on a parent.",
+      "targetResourceId": "workspace::beta",
+      "targetResourceName": "Beta",
+      "targetResourceType": "Workspace"
+    }
+
+## 6. operator: a permission scoped to another resource type
+> POST /sqlos/admin/fga/api/trace
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "root",
+>     "subjectId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "accessGranted": false,
+      "allRolesUsed": [],
+      "decisionSummary": "Access denied because permission 'workspace.read' is not valid for this resource type.",
+      "denialReason": "Permission 'workspace.read' applies to resource type 'workspace', not 'root'.",
+      "grantsUsed": [],
+      "pathNodes": [],
+      "permissionKey": "workspace.read",
+      "permissionName": "Read workspace",
+      "subjectDisplayName": "Alice",
+      "subjectId": "{usr#1}",
+      "subjectsChecked": [],
+      "suggestion": null,
+      "targetResourceId": "root",
+      "targetResourceName": "Root",
+      "targetResourceType": "Root"
+    }
+
+## 7. operator: an unknown permission
+> POST /sqlos/admin/fga/api/trace
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "permissionKey": "workspace.delete",
+>     "resourceId": "workspace::alpha",
+>     "subjectId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "accessGranted": false,
+      "allRolesUsed": [],
+      "decisionSummary": "Access denied because the permission 'workspace.delete' does not exist.",
+      "denialReason": "Permission 'workspace.delete' not found",
+      "grantsUsed": [],
+      "pathNodes": [],
+      "permissionKey": "workspace.delete",
+      "permissionName": "",
+      "subjectDisplayName": "Alice",
+      "subjectId": "{usr#1}",
+      "subjectsChecked": [],
+      "suggestion": null,
+      "targetResourceId": "workspace::alpha",
+      "targetResourceName": "Alpha",
+      "targetResourceType": "Workspace"
+    }
+
+## 8. operator: an unknown subject
+> POST /sqlos/admin/fga/api/trace
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::alpha",
+>     "subjectId": "no-such-subject"
+>   }
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "accessGranted": false,
+      "allRolesUsed": [],
+      "decisionSummary": "Access denied because the subject 'no-such-subject' does not exist.",
+      "denialReason": "Subject 'no-such-subject' not found",
+      "grantsUsed": [],
+      "pathNodes": [],
+      "permissionKey": "workspace.read",
+      "permissionName": "",
+      "subjectDisplayName": "",
+      "subjectId": "no-such-subject",
+      "subjectsChecked": [],
+      "suggestion": null,
+      "targetResourceId": "workspace::alpha",
+      "targetResourceName": "Alpha",
+      "targetResourceType": "Workspace"
+    }
+
+## 9. operator: an unknown resource
+> POST /sqlos/admin/fga/api/trace
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::missing",
+>     "subjectId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "accessGranted": false,
+      "allRolesUsed": [],
+      "decisionSummary": "Access denied because the resource 'workspace::missing' does not exist.",
+      "denialReason": "Resource 'workspace::missing' not found",
+      "grantsUsed": [],
+      "pathNodes": [],
+      "permissionKey": "workspace.read",
+      "permissionName": "",
+      "subjectDisplayName": "",
+      "subjectId": "{usr#1}",
+      "subjectsChecked": [],
+      "suggestion": null,
+      "targetResourceId": "",
+      "targetResourceName": "",
+      "targetResourceType": ""
+    }

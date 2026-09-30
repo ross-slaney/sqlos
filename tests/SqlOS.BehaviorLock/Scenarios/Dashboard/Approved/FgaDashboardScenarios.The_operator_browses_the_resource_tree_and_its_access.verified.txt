@@ -1,0 +1,446 @@
+# SqlOS behavior lock transcript
+scenario: FgaDashboardScenarios.The_operator_browses_the_resource_tree_and_its_access
+profile: dashboard-callback
+
+## 1. operator: counts after the setup
+> GET /sqlos/admin/fga/api/stats
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "agents": 0,
+      "grants": 1,
+      "permissions": 2,
+      "resources": 5,
+      "roles": 2,
+      "serviceAccounts": 0,
+      "subjects": 1,
+      "userGroups": 0,
+      "users": 1
+    }
+
+## 2. operator: top-level resources with child and grant counts
+> GET /sqlos/admin/fga/api/resources/tree
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "childCount": 1,
+          "grantsCount": 1,
+          "id": "workspace::alpha",
+          "name": "Alpha",
+          "parentId": null,
+          "resourceType": "Workspace"
+        },
+        {
+          "childCount": 0,
+          "grantsCount": 0,
+          "id": "workspace::beta",
+          "name": "Beta",
+          "parentId": null,
+          "resourceType": "Workspace"
+        },
+        {
+          "childCount": 1,
+          "grantsCount": 0,
+          "id": "root",
+          "name": "Root",
+          "parentId": null,
+          "resourceType": "Root"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 3. operator: top-level resources filtered by name
+> GET /sqlos/admin/fga/api/resources/tree?search=Al
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "childCount": 1,
+          "grantsCount": 1,
+          "id": "workspace::alpha",
+          "name": "Alpha",
+          "parentId": null,
+          "resourceType": "Workspace"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 4. operator: the flat list finds resources at any depth
+> GET /sqlos/admin/fga/api/resources?search=Doc
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "id": "workspace::docs",
+          "name": "Docs",
+          "parentId": "workspace::alpha",
+          "resourceType": "Workspace"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 5. operator: the flat list also matches resource IDs
+> GET /sqlos/admin/fga/api/resources?search=workspace::l
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "id": "workspace::ledger",
+          "name": "Ledger",
+          "parentId": "root",
+          "resourceType": "Workspace"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 6. operator: the flat list pages by name
+> GET /sqlos/admin/fga/api/resources?pageSize=2
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "id": "workspace::alpha",
+          "name": "Alpha",
+          "parentId": null,
+          "resourceType": "Workspace"
+        },
+        {
+          "id": "workspace::beta",
+          "name": "Beta",
+          "parentId": null,
+          "resourceType": "Workspace"
+        }
+      ],
+      "hasNextPage": true,
+      "nextCursor": "{cursor#1}",
+      "pageSize": 2
+    }
+
+## 7. operator: the next page
+> GET /sqlos/admin/fga/api/resources?pageSize=2&cursor={cursor#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "id": "workspace::docs",
+          "name": "Docs",
+          "parentId": "workspace::alpha",
+          "resourceType": "Workspace"
+        },
+        {
+          "id": "workspace::ledger",
+          "name": "Ledger",
+          "parentId": "root",
+          "resourceType": "Workspace"
+        }
+      ],
+      "hasNextPage": true,
+      "nextCursor": "{cursor#2}",
+      "pageSize": 2
+    }
+
+## 8. operator: a nested resource's detail and breadcrumbs
+> GET /sqlos/admin/fga/api/resources/workspace::docs
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "breadcrumbs": [
+        {
+          "id": "workspace::alpha",
+          "name": "Alpha"
+        }
+      ],
+      "resource": {
+        "childCount": 0,
+        "createdAt": "{datetime:unspecified}",
+        "description": null,
+        "grantsCount": 0,
+        "id": "workspace::docs",
+        "isActive": true,
+        "name": "Docs",
+        "parentId": "workspace::alpha",
+        "resourceType": "Workspace",
+        "resourceTypeId": "workspace",
+        "updatedAt": "{datetime:unspecified}"
+      }
+    }
+
+## 9. operator: a resource under the root resource
+> GET /sqlos/admin/fga/api/resources/workspace::ledger
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "breadcrumbs": [
+        {
+          "id": "root",
+          "name": "Root"
+        }
+      ],
+      "resource": {
+        "childCount": 0,
+        "createdAt": "{datetime:unspecified}",
+        "description": null,
+        "grantsCount": 0,
+        "id": "workspace::ledger",
+        "isActive": true,
+        "name": "Ledger",
+        "parentId": "root",
+        "resourceType": "Workspace",
+        "resourceTypeId": "workspace",
+        "updatedAt": "{datetime:unspecified}"
+      }
+    }
+
+## 10. operator: the root resource's children
+> GET /sqlos/admin/fga/api/resources/root/children
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "childCount": 0,
+          "grantsCount": 0,
+          "id": "workspace::ledger",
+          "name": "Ledger",
+          "parentId": "root",
+          "resourceType": "Workspace"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25,
+      "parentId": "root"
+    }
+
+## 11. operator: the children route answers any method
+> POST /sqlos/admin/fga/api/resources/root/children
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "childCount": 0,
+          "grantsCount": 0,
+          "id": "workspace::ledger",
+          "name": "Ledger",
+          "parentId": "root",
+          "resourceType": "Workspace"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25,
+      "parentId": "root"
+    }
+
+## 12. operator: a workspace's children
+> GET /sqlos/admin/fga/api/resources/workspace::alpha/children
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "childCount": 0,
+          "grantsCount": 0,
+          "id": "workspace::docs",
+          "name": "Docs",
+          "parentId": "workspace::alpha",
+          "resourceType": "Workspace"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25,
+      "parentId": "workspace::alpha"
+    }
+
+## 13. operator: children filtered by name
+> GET /sqlos/admin/fga/api/resources/workspace::alpha/children?search=Nothing
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25,
+      "parentId": "workspace::alpha"
+    }
+
+## 14. operator: the grants made directly on a resource
+> GET /sqlos/admin/fga/api/resources/workspace::alpha/grants
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "effectiveFrom": null,
+          "effectiveTo": null,
+          "id": "grant::{hex#1}",
+          "roleId": "workspace_reader",
+          "roleName": "Workspace reader",
+          "subjectId": "{usr#1}",
+          "subjectName": "Alice",
+          "subjectType": "User"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 15. operator: access on a resource with a direct grant
+> GET /sqlos/admin/fga/api/resources/workspace::alpha/access
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    [
+      {
+        "isInherited": false,
+        "roleId": "workspace_reader",
+        "roleName": "Workspace reader",
+        "sourceResourceId": "workspace::alpha",
+        "sourceResourceName": "Alpha",
+        "subjectId": "{usr#1}",
+        "subjectName": "Alice"
+      }
+    ]
+
+## 16. operator: access inherited from the parent
+> GET /sqlos/admin/fga/api/resources/workspace::docs/access
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    [
+      {
+        "isInherited": true,
+        "roleId": "workspace_reader",
+        "roleName": "Workspace reader",
+        "sourceResourceId": "workspace::alpha",
+        "sourceResourceName": "Alpha",
+        "subjectId": "{usr#1}",
+        "subjectName": "Alice"
+      }
+    ]
+
+## 17. operator: an unknown resource is 404
+> GET /sqlos/admin/fga/api/resources/workspace::missing
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 404 Not Found
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "Resource not found"
+    }
+
+## 18. operator: so is its access
+> GET /sqlos/admin/fga/api/resources/workspace::missing/access
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 404 Not Found
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "Resource not found"
+    }
+
+## 19. operator: but its children are an empty page
+> GET /sqlos/admin/fga/api/resources/workspace::missing/children
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25,
+      "parentId": "workspace::missing"
+    }
