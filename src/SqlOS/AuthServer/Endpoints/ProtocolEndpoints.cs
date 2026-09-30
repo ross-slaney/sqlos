@@ -342,15 +342,9 @@ public static partial class EndpointRouteBuilderExtensions
                     SqlOSIssuerSessionService.SessionNoLongerActiveMessage,
                     StringComparison.Ordinal))
                 {
-                    if (promptRequestsNone)
-                    {
-                        return Results.Redirect(await authorizationServerService.BuildAuthorizationErrorRedirectAsync(
-                            authorizationRequest,
-                            "login_required",
-                            "The user is not signed in.",
-                            cancellationToken));
-                    }
-
+                    // The session died while it was being reused (for example a logout
+                    // raced it). Fall through as signed out: the dead cookie is deleted
+                    // below, and prompt=none still gets login_required.
                     existingSession = null;
                     completion = null!;
                 }
