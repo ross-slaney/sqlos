@@ -120,6 +120,7 @@ var report = new BenchmarkReport
     Server = server.Description,
     Environment = new RunEnvironment(
         RuntimeInformation.OSDescription,
+        RunEnvironment.DetectCpu(),
         Environment.ProcessorCount,
         GC.GetGCMemoryInfo().TotalAvailableMemoryBytes,
         RuntimeInformation.FrameworkDescription,

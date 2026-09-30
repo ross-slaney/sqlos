@@ -124,8 +124,14 @@ From CI calibration runs (4 vCPU runner, warm cache, median ms). Current numbers
 | `Allows`, product at depth 9 | 37.7 → 34.4 | 56.0 → 55.8 |
 
 Per-page cost does not grow with N on either engine across 100 times the data: every ratio is between ×0.72
-and ×1.13. What sets the cost is the number of rows the scan examines, k / σ, times a per-row constant: about
-90–110 µs of server execution on PostgreSQL and 410–540 µs on SQL Server.
+and ×1.13. What sets the cost is the number of rows the scan examines, k / σ, times a per-row constant. That
+constant is about 90–110 µs of server execution on PostgreSQL. On SQL Server it is 150–200 µs on current
+runners and 400–540 µs on older ones.
+
+Hosted runners come from a mixed pool. The SQL Server numbers above ran on a slow one: on a faster runner the
+identical plans (same operators, same execution counts) took 2.5 times less CPU. For example, the admin page
+took 11.6 ms and the region page 251 ms. The report records the CPU model, and the scale gate compares
+within one job on one machine. The ceilings were set from the slower hardware.
 
 ## Findings
 
@@ -143,7 +149,7 @@ and ×1.13. What sets the cost is the number of rows the scan examines, k / σ, 
   default, so PostgreSQL plans the inlined function body on every query: about 5.3 ms, against about 2 ms of
   execution for a 21-row page.
 - **The shipped SQL Server function costs several times the paper's.** The paper reported 3.47 ms for a
-  k = 20 page at D = 5. The same page through the shipped function takes 26 ms, and a single row about 400 µs.
+  k = 20 page at D = 5. The same page through the shipped function takes 11.6–26 ms, depending on the runner.
   Since the paper, the function has gained subject-type validation, cycle detection over `NVARCHAR(MAX)`
   paths, a caller-validation `EXISTS`, and `OPENJSON` parsing, all evaluated per candidate row.
 - **`Allows` costs several times the function.** `CheckAccessAsync` resolves and explains the decision in

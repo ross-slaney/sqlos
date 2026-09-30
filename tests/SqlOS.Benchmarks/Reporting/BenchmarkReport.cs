@@ -14,13 +14,39 @@ internal sealed class BenchmarkReport
     public double DurationSeconds { get; set; }
 }
 
+/// <param name="Cpu">
+/// The processor model. Hosted CI runners come from a mixed pool, and identical plans have run 2.5x apart on
+/// different CPUs, so absolute numbers are only comparable between runs on the same model.
+/// </param>
 internal sealed record RunEnvironment(
     string OperatingSystem,
+    string Cpu,
     int ProcessorCount,
     long MemoryBytes,
     string Runtime,
     string? Commit,
-    string? Ref);
+    string? Ref)
+{
+    public static string DetectCpu()
+    {
+        try
+        {
+            if (File.Exists("/proc/cpuinfo"))
+            {
+                var model = File.ReadLines("/proc/cpuinfo").FirstOrDefault(l => l.StartsWith("model name", StringComparison.Ordinal));
+                if (model is not null)
+                {
+                    return model.Split(':', 2)[1].Trim();
+                }
+            }
+        }
+        catch (IOException)
+        {
+        }
+
+        return System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString();
+    }
+}
 
 internal sealed record DatasetShape(
     int Chains,

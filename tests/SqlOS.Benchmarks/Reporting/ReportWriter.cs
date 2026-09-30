@@ -147,7 +147,7 @@ internal static class ReportWriter
         text.AppendLine();
         var environment = report.Environment;
         text.AppendLine(CultureInfo.InvariantCulture,
-            $"<sub>{environment.ProcessorCount} CPUs · {environment.MemoryBytes / 1e9:F0} GB · {environment.OperatingSystem} · {report.Server} · {(environment.Commit is { Length: >= 7 } c ? c[..7] : "local")} · {TimeSpan.FromSeconds(report.DurationSeconds):h\\:mm\\:ss}</sub>");
+            $"<sub>{environment.Cpu} × {environment.ProcessorCount} · {environment.MemoryBytes / 1e9:F0} GB · {environment.OperatingSystem} · {report.Server} · {(environment.Commit is { Length: >= 7 } c ? c[..7] : "local")} · {TimeSpan.FromSeconds(report.DurationSeconds):h\\:mm\\:ss}</sub>");
         return text.ToString();
     }
 
