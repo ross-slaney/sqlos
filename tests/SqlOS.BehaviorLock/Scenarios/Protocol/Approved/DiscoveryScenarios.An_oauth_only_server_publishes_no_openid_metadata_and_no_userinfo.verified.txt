@@ -1,0 +1,60 @@
+# SqlOS behavior lock transcript
+scenario: DiscoveryScenarios.An_oauth_only_server_publishes_no_openid_metadata_and_no_userinfo
+profile: oauth-only
+
+## 1. client: OAuth 2.0 metadata without OpenID fields
+> GET /sqlos/auth/.well-known/oauth-authorization-server
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "authorization_endpoint": "https://sqlos.example.test/sqlos/auth/authorize",
+      "code_challenge_methods_supported": [
+        "S256"
+      ],
+      "device_authorization_endpoint": "https://sqlos.example.test/sqlos/auth/device_authorization",
+      "grant_types_supported": [
+        "authorization_code",
+        "refresh_token",
+        "urn:ietf:params:oauth:grant-type:device_code"
+      ],
+      "issuer": "https://sqlos.example.test/sqlos/auth",
+      "jwks_uri": "https://sqlos.example.test/sqlos/auth/.well-known/jwks.json",
+      "request_parameter_supported": false,
+      "request_uri_parameter_supported": false,
+      "response_modes_supported": [
+        "query"
+      ],
+      "response_types_supported": [
+        "code"
+      ],
+      "scopes_supported": [],
+      "token_endpoint": "https://sqlos.example.test/sqlos/auth/token",
+      "token_endpoint_auth_methods_supported": [
+        "none"
+      ]
+    }
+
+## 2. client: the JWKS is still published for access tokens
+> GET /sqlos/auth/.well-known/jwks.json
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "keys": [
+        {
+          "alg": "RS256",
+          "e": "AQAB",
+          "kid": "{kid#1}",
+          "kty": "RSA",
+          "n": "{token#1}",
+          "use": "sig"
+        }
+      ]
+    }
+
+## 3. client: OpenID discovery is not mapped
+> GET /sqlos/auth/.well-known/openid-configuration
+< 404 Not Found
+
+## 4. client: UserInfo is not mapped
+> GET /sqlos/auth/userinfo
+< 404 Not Found

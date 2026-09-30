@@ -1,0 +1,256 @@
+# SqlOS behavior lock transcript
+scenario: ResourceRouteScenarios.A_separate_resource_api_trusts_the_jwks_until_expiry_while_a_same_process_audience_checks_the_session
+profile: multi-app
+
+## 1. resource-client: AddJwtBearer challenges a request without a token
+> GET /resource-api/me
+< 401 Unauthorized
+< WWW-Authenticate: Bearer
+
+## 2. resource-client: AddJwtBearer validates the portal token against discovery and the JWKS
+> GET /resource-api/me
+> Authorization: Bearer {access-token#1}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "claims": [
+        {
+          "type": "amr",
+          "value": "password"
+        },
+        {
+          "type": "aud",
+          "value": "https://api.example.test"
+        },
+        {
+          "type": "client_id",
+          "value": "atlas-portal"
+        },
+        {
+          "type": "email",
+          "value": "{email:alice}"
+        },
+        {
+          "type": "exp",
+          "value": "{epoch:claim}"
+        },
+        {
+          "type": "iat",
+          "value": "{epoch:claim}"
+        },
+        {
+          "type": "iss",
+          "value": "https://sqlos.example.test/sqlos/auth"
+        },
+        {
+          "type": "nbf",
+          "value": "{epoch:claim}"
+        },
+        {
+          "type": "scope",
+          "value": "openid profile email offline_access"
+        },
+        {
+          "type": "sid",
+          "value": "{ses#1}"
+        },
+        {
+          "type": "sub",
+          "value": "{usr#1}"
+        }
+      ],
+      "scheme": "ResourceApi"
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "https://api.example.test",
+      "client_id": "atlas-portal",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "scope": "openid profile email offline_access",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+
+## 3. resource-client: AddSqlOSJwt("Billing") challenges with its own realm and no resource metadata
+> GET /billing/me
+< 401 Unauthorized
+< Content-Type: application/json; charset=utf-8
+< WWW-Authenticate: Bearer realm="Billing API", error="invalid_token", error_description="A bearer access token is required."
+    {
+      "error": "invalid_token",
+      "error_description": "A bearer access token is required."
+    }
+
+## 4. resource-client: the portal token is for another audience
+> GET /billing/me
+> Authorization: Bearer {access-token#1}
+< 401 Unauthorized
+< Content-Type: application/json; charset=utf-8
+< WWW-Authenticate: Bearer realm="Billing API", error="invalid_token", error_description="The bearer access token is invalid, expired, revoked, or was not minted for this resource."
+    {
+      "error": "invalid_token",
+      "error_description": "The bearer access token is invalid, expired, revoked, or was not minted for this resource."
+    }
+
+## 5. resource-client: a token minted for the billing client's audience is accepted
+> GET /billing/me
+> Authorization: Bearer {access-token#2}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "audience": "https://billing.example.test",
+      "claims": [
+        {
+          "type": "amr",
+          "value": "password"
+        },
+        {
+          "type": "aud",
+          "value": "https://billing.example.test"
+        },
+        {
+          "type": "client_id",
+          "value": "atlas-billing"
+        },
+        {
+          "type": "email",
+          "value": "{email:alice}"
+        },
+        {
+          "type": "exp",
+          "value": "{epoch:claim}"
+        },
+        {
+          "type": "iat",
+          "value": "{epoch:claim}"
+        },
+        {
+          "type": "iss",
+          "value": "https://sqlos.example.test/sqlos/auth"
+        },
+        {
+          "type": "nbf",
+          "value": "{epoch:claim}"
+        },
+        {
+          "type": "scope",
+          "value": "openid profile email offline_access"
+        },
+        {
+          "type": "sid",
+          "value": "{ses#2}"
+        },
+        {
+          "type": "sub",
+          "value": "{usr#1}"
+        }
+      ],
+      "clientId": "atlas-billing",
+      "organizationId": null,
+      "scope": "openid profile email offline_access",
+      "sessionId": "{ses#2}",
+      "userId": "{usr#1}"
+    }
+  jwt {access-token#2}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "https://billing.example.test",
+      "client_id": "atlas-billing",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "scope": "openid profile email offline_access",
+      "sid": "{ses#2}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+
+# Every session of Alice is revoked (SqlOSAuthService.LogoutAllAsync).
+
+## 6. resource-client: the JWKS-validated API still accepts the unexpired token: revoke-at-exp
+> GET /resource-api/me
+> Authorization: Bearer {access-token#1}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "claims": [
+        {
+          "type": "amr",
+          "value": "password"
+        },
+        {
+          "type": "aud",
+          "value": "https://api.example.test"
+        },
+        {
+          "type": "client_id",
+          "value": "atlas-portal"
+        },
+        {
+          "type": "email",
+          "value": "{email:alice}"
+        },
+        {
+          "type": "exp",
+          "value": "{epoch:claim}"
+        },
+        {
+          "type": "iat",
+          "value": "{epoch:claim}"
+        },
+        {
+          "type": "iss",
+          "value": "https://sqlos.example.test/sqlos/auth"
+        },
+        {
+          "type": "nbf",
+          "value": "{epoch:claim}"
+        },
+        {
+          "type": "scope",
+          "value": "openid profile email offline_access"
+        },
+        {
+          "type": "sid",
+          "value": "{ses#1}"
+        },
+        {
+          "type": "sub",
+          "value": "{usr#1}"
+        }
+      ],
+      "scheme": "ResourceApi"
+    }
+
+## 7. resource-client: the same-process scheme looks the session up and rejects the revoked token
+> GET /billing/me
+> Authorization: Bearer {access-token#2}
+< 401 Unauthorized
+< Content-Type: application/json; charset=utf-8
+< WWW-Authenticate: Bearer realm="Billing API", error="invalid_token", error_description="The bearer access token is invalid, expired, revoked, or was not minted for this resource."
+    {
+      "error": "invalid_token",
+      "error_description": "The bearer access token is invalid, expired, revoked, or was not minted for this resource."
+    }

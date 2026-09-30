@@ -1,0 +1,118 @@
+# SqlOS behavior lock transcript
+scenario: DiscoveryScenarios.An_mcp_host_describes_its_api_and_mcp_resources_and_advertises_resource_indicators
+profile: mcp
+
+## 1. mcp-client: the well-known root describes the API
+> GET /.well-known/oauth-protected-resource
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "authorization_servers": [
+        "https://sqlos.example.test/sqlos/auth"
+      ],
+      "bearer_methods_supported": [
+        "header"
+      ],
+      "resource": "https://sqlos.example.test/api",
+      "scopes_supported": [
+        "openid",
+        "profile",
+        "email",
+        "offline_access"
+      ]
+    }
+
+## 2. mcp-client: the API document
+> GET /.well-known/oauth-protected-resource/api
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "authorization_servers": [
+        "https://sqlos.example.test/sqlos/auth"
+      ],
+      "bearer_methods_supported": [
+        "header"
+      ],
+      "resource": "https://sqlos.example.test/api",
+      "scopes_supported": [
+        "openid",
+        "profile",
+        "email",
+        "offline_access"
+      ]
+    }
+
+## 3. mcp-client: the MCP document names the MCP audience
+> GET /.well-known/oauth-protected-resource/mcp
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "authorization_servers": [
+        "https://sqlos.example.test/sqlos/auth"
+      ],
+      "bearer_methods_supported": [
+        "header"
+      ],
+      "resource": "https://sqlos.example.test/mcp",
+      "scopes_supported": [
+        "openid",
+        "profile",
+        "email",
+        "offline_access"
+      ]
+    }
+
+## 4. mcp-client: the provider metadata an MCP client reads next
+> GET /sqlos/auth/.well-known/openid-configuration
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "authorization_endpoint": "https://sqlos.example.test/sqlos/auth/authorize",
+      "claims_supported": [
+        "sub",
+        "name",
+        "preferred_username",
+        "email",
+        "email_verified",
+        "auth_time",
+        "amr",
+        "org_id"
+      ],
+      "client_id_metadata_document_supported": true,
+      "code_challenge_methods_supported": [
+        "S256"
+      ],
+      "device_authorization_endpoint": "https://sqlos.example.test/sqlos/auth/device_authorization",
+      "grant_types_supported": [
+        "authorization_code",
+        "refresh_token",
+        "urn:ietf:params:oauth:grant-type:device_code"
+      ],
+      "id_token_signing_alg_values_supported": [
+        "RS256"
+      ],
+      "issuer": "https://sqlos.example.test/sqlos/auth",
+      "jwks_uri": "https://sqlos.example.test/sqlos/auth/.well-known/jwks.json",
+      "request_parameter_supported": false,
+      "request_uri_parameter_supported": false,
+      "resource_parameter_supported": true,
+      "response_modes_supported": [
+        "query"
+      ],
+      "response_types_supported": [
+        "code"
+      ],
+      "scopes_supported": [
+        "email",
+        "openid",
+        "profile"
+      ],
+      "subject_types_supported": [
+        "public"
+      ],
+      "token_endpoint": "https://sqlos.example.test/sqlos/auth/token",
+      "token_endpoint_auth_methods_supported": [
+        "none"
+      ],
+      "userinfo_endpoint": "https://sqlos.example.test/sqlos/auth/userinfo"
+    }

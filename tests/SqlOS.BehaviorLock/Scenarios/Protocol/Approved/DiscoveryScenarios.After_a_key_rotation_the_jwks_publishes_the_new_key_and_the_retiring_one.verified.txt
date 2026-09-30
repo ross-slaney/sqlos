@@ -1,0 +1,225 @@
+# SqlOS behavior lock transcript
+scenario: DiscoveryScenarios.After_a_key_rotation_the_jwks_publishes_the_new_key_and_the_retiring_one
+profile: hosted
+
+## 1. resource-server: one key before the rotation
+> GET /sqlos/auth/.well-known/jwks.json
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "keys": [
+        {
+          "alg": "RS256",
+          "e": "AQAB",
+          "kid": "{kid#1}",
+          "kty": "RSA",
+          "n": "{token#1}",
+          "use": "sig"
+        }
+      ]
+    }
+
+## 2. operator: the operator rotates the signing key
+> POST /sqlos/admin/auth/api/signing-keys/rotate
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "activatedAt": "{datetime:utc-z}",
+      "algorithm": "RS256",
+      "id": "{key#1}",
+      "kid": "{kid#2}"
+    }
+
+## document: the new key and the retiring key are both published (GET /sqlos/auth/.well-known/jwks.json -> 200 application/json; charset=utf-8; keys in first-seen order)
+    {
+      "keys": [
+        {
+          "kty": "RSA",
+          "use": "sig",
+          "alg": "RS256",
+          "kid": "{kid#1}",
+          "n": "{token#1}",
+          "e": "AQAB"
+        },
+        {
+          "kty": "RSA",
+          "use": "sig",
+          "alg": "RS256",
+          "kid": "{kid#2}",
+          "n": "{token#2}",
+          "e": "AQAB"
+        }
+      ]
+    }
+
+# A token signed before the rotation and one signed after it: the kid in each header names the key that signed it.
+
+## 3. resource-server: a token signed with the retiring key still validates
+> GET /api/me
+> Authorization: Bearer {access-token#1}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "audience": "https://sqlos.example.test/api",
+      "claims": [
+        {
+          "type": "amr",
+          "value": "password"
+        },
+        {
+          "type": "aud",
+          "value": "https://sqlos.example.test/api"
+        },
+        {
+          "type": "client_id",
+          "value": "behavior-lock-app"
+        },
+        {
+          "type": "email",
+          "value": "{email:alice}"
+        },
+        {
+          "type": "exp",
+          "value": "{epoch:claim}"
+        },
+        {
+          "type": "iat",
+          "value": "{epoch:claim}"
+        },
+        {
+          "type": "iss",
+          "value": "https://sqlos.example.test/sqlos/auth"
+        },
+        {
+          "type": "nbf",
+          "value": "{epoch:claim}"
+        },
+        {
+          "type": "scope",
+          "value": "openid profile email offline_access"
+        },
+        {
+          "type": "sid",
+          "value": "{ses#1}"
+        },
+        {
+          "type": "sub",
+          "value": "{usr#1}"
+        }
+      ],
+      "clientId": "behavior-lock-app",
+      "organizationId": null,
+      "scope": "openid profile email offline_access",
+      "sessionId": "{ses#1}",
+      "userId": "{usr#1}"
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "scope": "openid profile email offline_access",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+
+## 4. resource-server: a token signed with the new key validates
+> GET /api/me
+> Authorization: Bearer {access-token#2}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "audience": "https://sqlos.example.test/api",
+      "claims": [
+        {
+          "type": "amr",
+          "value": "password"
+        },
+        {
+          "type": "aud",
+          "value": "https://sqlos.example.test/api"
+        },
+        {
+          "type": "client_id",
+          "value": "behavior-lock-app"
+        },
+        {
+          "type": "email",
+          "value": "{email:alice}"
+        },
+        {
+          "type": "exp",
+          "value": "{epoch:claim}"
+        },
+        {
+          "type": "iat",
+          "value": "{epoch:claim}"
+        },
+        {
+          "type": "iss",
+          "value": "https://sqlos.example.test/sqlos/auth"
+        },
+        {
+          "type": "nbf",
+          "value": "{epoch:claim}"
+        },
+        {
+          "type": "scope",
+          "value": "openid profile email offline_access"
+        },
+        {
+          "type": "sid",
+          "value": "{ses#2}"
+        },
+        {
+          "type": "sub",
+          "value": "{usr#1}"
+        }
+      ],
+      "clientId": "behavior-lock-app",
+      "organizationId": null,
+      "scope": "openid profile email offline_access",
+      "sessionId": "{ses#2}",
+      "userId": "{usr#1}"
+    }
+  jwt {access-token#2}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#2}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "scope": "openid profile email offline_access",
+      "sid": "{ses#2}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+
+## audit: key rotation events
+  (no new events)

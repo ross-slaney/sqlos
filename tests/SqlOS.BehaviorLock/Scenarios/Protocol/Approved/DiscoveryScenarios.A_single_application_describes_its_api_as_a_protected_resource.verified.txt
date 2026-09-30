@@ -1,0 +1,47 @@
+# SqlOS behavior lock transcript
+scenario: DiscoveryScenarios.A_single_application_describes_its_api_as_a_protected_resource
+profile: hosted
+
+## 1. resource-client: the well-known root describes the API
+> GET /.well-known/oauth-protected-resource
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "authorization_servers": [
+        "https://sqlos.example.test/sqlos/auth"
+      ],
+      "bearer_methods_supported": [
+        "header"
+      ],
+      "resource": "https://sqlos.example.test/api",
+      "scopes_supported": [
+        "openid",
+        "profile",
+        "email",
+        "offline_access"
+      ]
+    }
+
+## 2. resource-client: the path-suffixed document for /api (RFC 9728 §3)
+> GET /.well-known/oauth-protected-resource/api
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "authorization_servers": [
+        "https://sqlos.example.test/sqlos/auth"
+      ],
+      "bearer_methods_supported": [
+        "header"
+      ],
+      "resource": "https://sqlos.example.test/api",
+      "scopes_supported": [
+        "openid",
+        "profile",
+        "email",
+        "offline_access"
+      ]
+    }
+
+## 3. resource-client: no MCP surface is declared, so there is no /mcp document
+> GET /.well-known/oauth-protected-resource/mcp
+< 404 Not Found
