@@ -1,0 +1,170 @@
+# SqlOS behavior lock transcript
+scenario: DeviceFlowScenarios.An_expired_device_code_is_expired_token_for_the_cli_and_the_device_page
+profile: multi-app
+
+## 1. cli: a device authorization with a two-second lifetime (DeviceAuthorization.Lifetime)
+> POST /sqlos/auth/device_authorization
+> Content-Type: application/x-www-form-urlencoded
+>   client_id=atlas-cli
+>   scope=openid profile email offline_access
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "device_code": "{device-code#1}",
+      "expires_in": ~0,
+      "interval": 5,
+      "user_code": "{user-code#1}",
+      "verification_uri": "https://sqlos.example.test/sqlos/auth/device",
+      "verification_uri_complete": "https://sqlos.example.test/sqlos/auth/device?user_code={user-code#1}"
+    }
+
+## audit
+  - {
+      "action": "oauth.device.started",
+      "actor": {
+        "displayName": null,
+        "id": "{cli#1}",
+        "type": "client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.device.started",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+# Three seconds later the device code has expired.
+
+## 2. cli: the CLI's poll is expired_token
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=urn:ietf:params:oauth:grant-type:device_code
+>   device_code={device-code#1}
+>   client_id=atlas-cli
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "error": "expired_token",
+      "error_description": "Device code has expired."
+    }
+
+## 3. browser: the device page no longer accepts the code
+> GET /sqlos/auth/device?user_code={user-code#1}
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#1}'; style-src 'self' 'nonce-{csp-nonce#1}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+< Set-Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}; expires=+15m; max-age=900; path=/sqlos/auth; secure; samesite=strict; httponly
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Atlas Identity</title>
+        <style nonce="{csp-nonce#1}">{style-sha256:80d77a550f3a606a}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Atlas Identity</h1>
+                <p class="brand-subtitle">Secure your app-owned AI and MCP experiences with SqlOS.</p>
+              </div>
+              <div class="messages">
+                <div class="callout error">
+                  <span class="callout-icon">!</span>
+                  <span>The request could not be completed.</span>
+                </div>
+              </div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <div class="panel-intro">
+                    <span class="panel-kicker">Connect CLI</span>
+                    <p>Enter the code shown in your terminal to continue.</p>
+                  </div>
+                  <form class="auth-form" method="post" action="/sqlos/auth/device/verify?deviceUserCode={user-code#1}">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#1}" />
+                    <label class="field">
+                      <span>Device code</span>
+                      <input name="userCode" value="{user-code#1}" placeholder="ABCD-EFGH" autocomplete="one-time-code" required="" autofocus="" />
+                    </label>
+                    <button class="primary-action" type="submit" data-loading-label="Checking code">
+                      <span class="button-label">Continue</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                  </form>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#1}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+
+## audit: events
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "Device code is invalid or expired.",
+        "error": "invalid_request",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The request could not be completed.",
+        "surface": "HostedPage"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

@@ -1,0 +1,206 @@
+# SqlOS behavior lock transcript
+scenario: DeviceFlowScenarios.With_the_device_flow_disabled_every_device_route_refuses
+profile: multi-app
+
+## 1. cli: the metadata a CLI reads first
+> GET /sqlos/auth/.well-known/oauth-authorization-server
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "authorization_endpoint": "https://sqlos.example.test/sqlos/auth/authorize",
+      "claims_supported": [
+        "sub",
+        "name",
+        "preferred_username",
+        "email",
+        "email_verified",
+        "auth_time",
+        "amr",
+        "org_id"
+      ],
+      "code_challenge_methods_supported": [
+        "S256"
+      ],
+      "grant_types_supported": [
+        "authorization_code",
+        "refresh_token",
+        "client_credentials"
+      ],
+      "id_token_signing_alg_values_supported": [
+        "RS256"
+      ],
+      "issuer": "https://sqlos.example.test/sqlos/auth",
+      "jwks_uri": "https://sqlos.example.test/sqlos/auth/.well-known/jwks.json",
+      "request_parameter_supported": false,
+      "request_uri_parameter_supported": false,
+      "resource_parameter_supported": true,
+      "response_modes_supported": [
+        "query"
+      ],
+      "response_types_supported": [
+        "code"
+      ],
+      "scopes_supported": [
+        "email",
+        "openid",
+        "profile",
+        "workspace.read"
+      ],
+      "subject_types_supported": [
+        "public"
+      ],
+      "token_endpoint": "https://sqlos.example.test/sqlos/auth/token",
+      "token_endpoint_auth_methods_supported": [
+        "none",
+        "client_secret_basic",
+        "client_secret_post"
+      ],
+      "userinfo_endpoint": "https://sqlos.example.test/sqlos/auth/userinfo"
+    }
+
+## 2. cli: starting a device authorization
+> POST /sqlos/auth/device_authorization
+> Content-Type: application/x-www-form-urlencoded
+>   client_id=atlas-cli
+>   scope=openid profile email offline_access
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "unsupported_grant_type",
+      "error_description": "Device authorization is disabled."
+    }
+
+## 3. cli: polling
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=urn:ietf:params:oauth:grant-type:device_code
+>   device_code=any-device-code
+>   client_id=atlas-cli
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "error": "unsupported_grant_type",
+      "error_description": "Device authorization is disabled."
+    }
+
+## 4. browser: the code entry page still renders
+> GET /sqlos/auth/device
+< 200 OK
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#1}'; style-src 'self' 'nonce-{csp-nonce#1}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+< Set-Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}; expires=+15m; max-age=900; path=/sqlos/auth; secure; samesite=strict; httponly
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Atlas Identity</title>
+        <style nonce="{csp-nonce#1}">{style-sha256:80d77a550f3a606a}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Atlas Identity</h1>
+                <p class="brand-subtitle">Secure your app-owned AI and MCP experiences with SqlOS.</p>
+              </div>
+              <div class="messages"></div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <div class="panel-intro">
+                    <span class="panel-kicker">Connect CLI</span>
+                    <p>Enter the code shown in your terminal to continue.</p>
+                  </div>
+                  <form class="auth-form" method="post" action="/sqlos/auth/device/verify">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#1}" />
+                    <label class="field">
+                      <span>Device code</span>
+                      <input name="userCode" value="" placeholder="{user-code#1}" autocomplete="one-time-code" required="" autofocus="" />
+                    </label>
+                    <button class="primary-action" type="submit" data-loading-label="Checking code">
+                      <span class="button-label">Continue</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                  </form>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#1}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+
+## 5. browser: entering a code
+> GET /sqlos/auth/device?user_code={user-code#1}
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#2}'; style-src 'self' 'nonce-{csp-nonce#2}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Atlas Identity</title>
+        <style nonce="{csp-nonce#2}">{style-sha256:80d77a550f3a606a}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Atlas Identity</h1>
+                <p class="brand-subtitle">Secure your app-owned AI and MCP experiences with SqlOS.</p>
+              </div>
+              <div class="messages">
+                <div class="callout error">
+                  <span class="callout-icon">!</span>
+                  <span>Device authorization is disabled.</span>
+                </div>
+              </div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <div class="panel-intro">
+                    <span class="panel-kicker">Connect CLI</span>
+                    <p>Enter the code shown in your terminal to continue.</p>
+                  </div>
+                  <form class="auth-form" method="post" action="/sqlos/auth/device/verify?deviceUserCode={user-code#1}">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#2}" />
+                    <label class="field">
+                      <span>Device code</span>
+                      <input name="userCode" value="{user-code#1}" placeholder="{user-code#1}" autocomplete="one-time-code" required="" autofocus="" />
+                    </label>
+                    <button class="primary-action" type="submit" data-loading-label="Checking code">
+                      <span class="button-label">Continue</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                  </form>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#2}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+
+## audit
+  (no new events)
