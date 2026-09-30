@@ -1,0 +1,289 @@
+# SqlOS behavior lock transcript
+scenario: UpstreamOidcScenarios.{token#1}
+profile: hosted
+
+## 1. browser: a custom provider need not verify the email: SqlOS provisions Carol with an unverified address
+> GET /sqlos/auth/oidc/callback?code={code#1}&state={state#1}
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+< 302 Found
+< Location: https://sqlos.example.test/auth/callback?code={code#2}&state={state#2}&scope=openid%20profile%20email%20offline_access
+< Set-Cookie: sqlos_auth_page={cookie#2}; expires=+7d; path=/; secure; samesite=lax; httponly
+  ~ http SqlOSOidcAuthService: GET https://oidc.example.local/.well-known/openid-configuration -> 200
+  ~ http SqlOSOidcAuthService: POST https://oidc.example.local/token -> 200
+      grant_type=authorization_code
+      client_id=custom-client-id
+      code={code#1}
+      redirect_uri=https://sqlos.example.test/sqlos/auth/oidc/callback
+      code_verifier={pkce-verifier#1}
+      client_secret=custom-client-secret
+  ~ http SqlOSOidcAuthService: GET https://oidc.example.local/jwks -> 200
+  ~ http SqlOSOidcAuthService: GET https://oidc.example.local/userinfo -> 200
+
+## 2. client: the code redeems
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=authorization_code
+>   code={code#2}
+>   client_id=behavior-lock-app
+>   redirect_uri=https://sqlos.example.test/auth/callback
+>   code_verifier={pkce-verifier#2}
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "access_token": "{access-token#1}",
+      "expires_in": ~600,
+      "id_token": "{id-token#1}",
+      "refresh_token": "{refresh-token#1}",
+      "scope": "openid profile email offline_access",
+      "token_type": "Bearer"
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "oidc"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:carol}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "scope": "openid profile email offline_access",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+  jwt {id-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "JWT"
+    }
+    claims: {
+      "amr": [
+        "oidc"
+      ],
+      "at_hash": "{hash:at_hash}",
+      "aud": "behavior-lock-app",
+      "auth_time": {epoch},
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nonce": "{nonce#1}",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=5m
+
+## audit: known defect #415: provisioning writes user.login.oidc.provisioned after the user is saved, without the request's address, and no user.created
+  - {
+      "action": "user.login.oidc.provisioned",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.oidc.provisioned",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "oidcConnectionId": "{oidc#1}",
+        "provider": "Custom"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "user.login.oidc.success",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.oidc.success",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "oidcConnectionId": "{oidc#1}",
+        "protocol": "Oidc",
+        "provider": "Custom",
+        "upstreamMfa": {
+          "Accepted": false,
+          "AcceptedClaim": null,
+          "AcceptedValue": null,
+          "AcrValues": [],
+          "AmrValues": [],
+          "EvidencePresent": false,
+          "Reason": "evidence_missing"
+        }
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+
+## 3. alice-browser: an unverified upstream address that already has an account is never linked
+> GET /sqlos/auth/oidc/callback?code={code#3}&state={state#3}
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#3}
+< 302 Found
+< Location: https://sqlos.example.test/auth/callback?state={state#4}&error=The%20external%20sign-in%20request%20could%20not%20be%20completed.
+  ~ http SqlOSOidcAuthService: GET https://oidc.example.local/.well-known/openid-configuration -> 200
+  ~ http SqlOSOidcAuthService: POST https://oidc.example.local/token -> 200
+      grant_type=authorization_code
+      client_id=custom-client-id
+      code={code#3}
+      redirect_uri=https://sqlos.example.test/sqlos/auth/oidc/callback
+      code_verifier={pkce-verifier#3}
+      client_secret=custom-client-secret
+  ~ http SqlOSOidcAuthService: GET https://oidc.example.local/jwks -> 200
+  ~ http SqlOSOidcAuthService: GET https://oidc.example.local/userinfo -> 200
+
+## audit
+  - {
+      "action": "user.login.oidc.email_link_rejected",
+      "actor": {
+        "displayName": null,
+        "id": "{oidc#1}",
+        "type": "oidc_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.oidc.email_link_rejected",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "claimSource": "userinfo",
+        "oidcConnectionId": "{oidc#1}",
+        "provider": "Custom",
+        "reason": "email_not_verified_in_source"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "user.login.oidc.error",
+      "actor": {
+        "displayName": null,
+        "id": "{oidc#1}",
+        "type": "oidc_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.oidc.error",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "error": "The social login could not be completed."
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "The social login could not be completed.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "OidcCallback"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

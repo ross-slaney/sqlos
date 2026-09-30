@@ -1,0 +1,52 @@
+# SqlOS behavior lock transcript
+scenario: UpstreamOidcScenarios.Invalid_direct_social_sign_in_requests_fail_unhandled
+profile: hosted
+
+# no PKCE challenge: SqlOS throws System.InvalidOperationException "A PKCE code challenge is required." and writes no response (Kestrel answers 500).
+
+# the plain PKCE method: SqlOS throws System.InvalidOperationException "Only S256 PKCE is supported for OIDC browser login." and writes no response (Kestrel answers 500).
+
+# a challenge that is not 43 characters: SqlOS throws System.InvalidOperationException "PKCE code challenge must be a 43-character RFC 7636 S256 value." and writes no response (Kestrel answers 500).
+
+# an unknown client: SqlOS throws System.InvalidOperationException "Unknown client 'unknown-client'." and writes no response (Kestrel answers 500).
+
+# a redirect URI the client did not register: SqlOS throws System.InvalidOperationException "Redirect URI 'https://attacker.example/callback' is not allowed for client 'behavior-lock-app'." and writes no response (Kestrel answers 500).
+
+# an unknown connection: SqlOS throws System.InvalidOperationException "No enabled OIDC connection was found for this request." and writes no response (Kestrel answers 500).
+
+## audit: the unknown connection wrote a start error
+  - {
+      "action": "user.login.oidc.start_error",
+      "actor": {
+        "displayName": null,
+        "id": "{oidc#1}",
+        "type": "oidc_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.oidc.start_error",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "error": "No enabled OIDC connection was found for this request."
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+# exchanging an unknown code: SqlOS throws System.InvalidOperationException "Authorization code is invalid or expired." and writes no response (Kestrel answers 500).
