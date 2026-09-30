@@ -38,10 +38,10 @@ internal static partial class TranscriptRenderer
     public static string Render(ScenarioContext scenario, string profile, IReadOnlyList<TranscriptEntry> entries, Scrubber scrubber)
     {
         var sink = new TranscriptValueSink(scrubber);
+        // The header is not scrubbed: a scenario name is never a per-run value, and names such as
+        // "..._CurrentBehavior_KnownDefect_447" would otherwise match the high-entropy token pattern.
+        var header = $"# SqlOS behavior lock transcript\nscenario: {scenario.Name}\nprofile: {profile}\n";
         var builder = new StringBuilder();
-        builder.Append("# SqlOS behavior lock transcript\n");
-        builder.Append("scenario: ").Append(scenario.Name).Append('\n');
-        builder.Append("profile: ").Append(profile).Append('\n');
         var exchangeNumber = 0;
         foreach (var entry in entries)
         {
@@ -77,7 +77,7 @@ internal static partial class TranscriptRenderer
             }
         }
 
-        return scrubber.Scrub(builder.ToString()).TrimEnd('\n') + "\n";
+        return (header + scrubber.Scrub(builder.ToString())).TrimEnd('\n') + "\n";
     }
 
     private static void RenderExchange(StringBuilder builder, int number, string? caption, HttpExchange exchange, TranscriptValueSink sink)
