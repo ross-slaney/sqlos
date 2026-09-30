@@ -9,6 +9,7 @@ public sealed class SqlOSIssuerSessionService
 {
     private const string CookieName = "sqlos_auth_page";
     private const string FamilyItemKey = "SqlOS.IssuerSessionFamilyId";
+    private const string CookieClearedItemKey = "SqlOS.IssuerSessionCookieCleared";
 
     public const string SessionNoLongerActiveMessage = "Authentication session is no longer active.";
 
@@ -204,6 +205,31 @@ public sealed class SqlOSIssuerSessionService
             }
         }
 
+        DeleteSessionCookie(httpContext);
+    }
+
+    /// <summary>
+    /// Deletes the issuer session cookie the request presented when it no longer resolves to
+    /// a live session (revoked family, cleaned-up token row, inactive user). A dead cookie
+    /// counts as signed out, so the browser should stop presenting it instead of carrying it
+    /// until the idle timeout. No-op when the request carried no issuer cookie.
+    /// </summary>
+    internal void ClearPresentedSessionCookie(HttpContext httpContext)
+    {
+        if (!string.IsNullOrWhiteSpace(httpContext.Request.Cookies[CookieName]))
+        {
+            DeleteSessionCookie(httpContext);
+        }
+    }
+
+    private static void DeleteSessionCookie(HttpContext httpContext)
+    {
+        if (httpContext.Items.ContainsKey(CookieClearedItemKey))
+        {
+            return;
+        }
+
+        httpContext.Items[CookieClearedItemKey] = true;
         httpContext.Response.Cookies.Delete(CookieName, new CookieOptions
         {
             HttpOnly = true,
@@ -214,6 +240,11 @@ public sealed class SqlOSIssuerSessionService
         });
     }
 
+    /// <summary>
+    /// Whether a sign-in that rests on the presented issuer session (silent reuse or a
+    /// renewal) may still be issued. A cookie whose token row no longer exists presents no
+    /// session, exactly like no cookie. A cookie from a revoked family fails closed.
+    /// </summary>
     internal async Task<bool> CanContinuePresentingSessionAsync(
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
@@ -234,7 +265,12 @@ public sealed class SqlOSIssuerSessionService
         }
 
         var token = await FindAuthPageTokenByRawAsync(rawToken, unconsumedOnly: false, cancellationToken);
-        if (token == null || string.IsNullOrWhiteSpace(token.IssuerSessionFamilyId))
+        if (token == null)
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(token.IssuerSessionFamilyId))
         {
             return false;
         }
@@ -301,6 +337,10 @@ public sealed class SqlOSIssuerSessionService
             }
             else if (continueExistingSession)
             {
+                // A consumed or expired row fails a renewal closed. A row that no longer
+                // exists (startup cleanup deletes consumed and expired rows) presents no
+                // session at all: the sign-in starts a new family below and never revives
+                // the family the deleted row belonged to.
                 var consumed = await FindAuthPageTokenByRawAsync(rawToken, unconsumedOnly: false, cancellationToken);
                 if (consumed != null)
                 {

@@ -707,7 +707,7 @@ public static partial class EndpointRouteBuilderExtensions
                     await issuerSessionService.SignInAsync(context, authentication.User, organizationId, authentication.AuthenticationMethod, cancellationToken);
                     return RedirectAfterStandaloneSignIn(authPrefix, invitation == null ? "signed-in" : "invitation-accepted", deviceUserCode);
                 }
-                var completion = await authorizationServerService.CompleteAuthorizationRequestLoginAsync(
+                var completion = await authorizationServerService.CompleteCredentialSignInAsync(
                     authorizationRequest,
                     authentication.User,
                     authentication.AuthenticationMethod,

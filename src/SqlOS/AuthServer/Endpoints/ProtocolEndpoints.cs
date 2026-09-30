@@ -342,15 +342,9 @@ public static partial class EndpointRouteBuilderExtensions
                     SqlOSIssuerSessionService.SessionNoLongerActiveMessage,
                     StringComparison.Ordinal))
                 {
-                    if (promptRequestsNone)
-                    {
-                        return Results.Redirect(await authorizationServerService.BuildAuthorizationErrorRedirectAsync(
-                            authorizationRequest,
-                            "login_required",
-                            "The user is not signed in.",
-                            cancellationToken));
-                    }
-
+                    // The session died while it was being reused (for example a logout
+                    // raced it). Fall through as signed out: the dead cookie is deleted
+                    // below, and prompt=none still gets login_required.
                     existingSession = null;
                     completion = null!;
                 }
@@ -458,6 +452,15 @@ public static partial class EndpointRouteBuilderExtensions
 
                 return Results.Redirect(completion.RedirectUrl!);
                 }
+            }
+
+            if (existingSession == null)
+            {
+                // A presented issuer cookie that resolved no session (revoked family,
+                // cleaned-up row, inactive user, or a logout that raced silent reuse) counts
+                // as signed out. Delete it so the browser stops presenting it; signing in
+                // again sets a new cookie.
+                issuerSessionService.ClearPresentedSessionCookie(context);
             }
 
             if (promptRequestsNone)

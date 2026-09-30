@@ -441,11 +441,15 @@ public sealed class SqlOSAuthorizationServerService
 
         try
         {
-            return await CompleteAuthorizationRequestLoginAsync(
+            return await CompleteAuthorizationRequestLoginCoreAsync(
                 authorizationRequest,
                 user,
                 payload.AuthenticationMethod,
                 httpContext,
+                approverOrganizationId: null,
+                // The consent interstitial keeps the evidence of the flow that reached it: a
+                // credential sign-in may replace a dead issuer cookie, silent reuse may not.
+                payload.CredentialSignIn ? SqlOSSignInEvidence.Credential : SqlOSSignInEvidence.PresentedSession,
                 cancellationToken,
                 consentGranted: true,
                 // Preserve the original authentication instant (SAML AuthnInstant / upstream
@@ -596,14 +600,16 @@ public sealed class SqlOSAuthorizationServerService
     internal const string ConsentClientMetadataChangedMessage =
         "The application's registration changed while consent was pending. Start the request again.";
 
-    // AuthenticatedAt and ClientMetadataFingerprint default so consent tokens minted
-    // before the fields existed still deserialize; null AuthenticatedAt falls back to
-    // issuance-time resolution and null fingerprint skips the staleness check.
+    // AuthenticatedAt, ClientMetadataFingerprint, and CredentialSignIn default so consent
+    // tokens minted before the fields existed still deserialize; null AuthenticatedAt falls
+    // back to issuance-time resolution, null fingerprint skips the staleness check, and a
+    // missing CredentialSignIn keeps the presented-session check.
     private sealed record PendingConsentPayload(
         string AuthorizationRequestId,
         string AuthenticationMethod,
         DateTime? AuthenticatedAt = null,
-        string? ClientMetadataFingerprint = null);
+        string? ClientMetadataFingerprint = null,
+        bool CredentialSignIn = false);
 
     public async Task<SqlOSPasswordAuthenticationResult> AuthenticatePasswordAsync(
         string email,
@@ -847,12 +853,27 @@ public sealed class SqlOSAuthorizationServerService
             "invitation");
     }
 
-    public async Task<string> CreatePendingOrganizationSelectionAsync(
+    public Task<string> CreatePendingOrganizationSelectionAsync(
         SqlOSUser user,
         SqlOSAuthorizationRequest authorizationRequest,
         string authenticationMethod,
         CancellationToken cancellationToken = default,
         DateTime? authenticatedAt = null)
+        => CreatePendingOrganizationSelectionAsync(
+            user,
+            authorizationRequest,
+            authenticationMethod,
+            authenticatedAt,
+            SqlOSSignInEvidence.PresentedSession,
+            cancellationToken);
+
+    private async Task<string> CreatePendingOrganizationSelectionAsync(
+        SqlOSUser user,
+        SqlOSAuthorizationRequest authorizationRequest,
+        string authenticationMethod,
+        DateTime? authenticatedAt,
+        SqlOSSignInEvidence evidence,
+        CancellationToken cancellationToken)
     {
         // Stamp the moment the user actually authenticated so organization
         // selection cannot inflate auth_time to the selection-click time. When
@@ -867,7 +888,8 @@ public sealed class SqlOSAuthorizationServerService
             new PendingAuthorizationPayload(
                 authorizationRequest.Id,
                 authenticationMethod,
-                authenticatedAt ?? DateTime.UtcNow),
+                authenticatedAt ?? DateTime.UtcNow,
+                evidence == SqlOSSignInEvidence.Credential),
             TimeSpan.FromMinutes(10),
             cancellationToken);
     }
@@ -941,7 +963,8 @@ public sealed class SqlOSAuthorizationServerService
             cancellationToken,
             // Pending tokens minted before AuthenticatedAt existed deserialize
             // null, which falls back to issuance-time resolution.
-            knownAuthenticatedAt: payload.AuthenticatedAt);
+            knownAuthenticatedAt: payload.AuthenticatedAt,
+            payload.CredentialSignIn ? SqlOSSignInEvidence.Credential : SqlOSSignInEvidence.PresentedSession);
     }
 
     internal async Task<SqlOSAuthorizationRequestLoginResult> GetPendingOrganizationSelectionForLoginAsync(
@@ -1255,7 +1278,8 @@ public sealed class SqlOSAuthorizationServerService
                 authorizationRequest.Id,
                 consentPayload.AuthenticationMethod,
                 consentPayload.AuthenticatedAt,
-                consentPayload.ClientMetadataFingerprint),
+                consentPayload.ClientMetadataFingerprint,
+                consentPayload.CredentialSignIn),
             ConsentTokenLifetime,
             cancellationToken);
     }
@@ -1320,6 +1344,11 @@ public sealed class SqlOSAuthorizationServerService
             cancellationToken);
     }
 
+    /// <summary>
+    /// Completes sign-in for a user whose identity rests on the issuer session the browser
+    /// presents (silent reuse, or device approval by a signed-in browser). Issuance fails
+    /// closed when that session's family has been revoked.
+    /// </summary>
     public Task<SqlOSAuthorizationRequestLoginResult> CompleteAuthorizationRequestLoginAsync(
         SqlOSAuthorizationRequest authorizationRequest,
         SqlOSUser user,
@@ -1334,6 +1363,7 @@ public sealed class SqlOSAuthorizationServerService
             authenticationMethod,
             httpContext,
             approverOrganizationId: null,
+            SqlOSSignInEvidence.PresentedSession,
             cancellationToken,
             consentGranted,
             knownAuthenticatedAt);
@@ -1342,7 +1372,8 @@ public sealed class SqlOSAuthorizationServerService
     /// Completes sign-in for a device authorization request on the approval surface.
     /// The organization the approver picked is authorized by the same membership check as
     /// a request-bound organization, but it is never assigned to the tracked request: a
-    /// pick the user is not a member of fails without changing the request.
+    /// pick the user is not a member of fails without changing the request. The approval
+    /// rests on the approver's presented issuer session.
     /// </summary>
     internal Task<SqlOSAuthorizationRequestLoginResult> CompleteDeviceApprovalLoginAsync(
         SqlOSAuthorizationRequest authorizationRequest,
@@ -1359,10 +1390,36 @@ public sealed class SqlOSAuthorizationServerService
             authenticationMethod,
             httpContext,
             string.IsNullOrWhiteSpace(selectedOrganizationId) ? null : selectedOrganizationId,
+            SqlOSSignInEvidence.PresentedSession,
             cancellationToken,
             consentGranted: false,
             knownAuthenticatedAt: null);
     }
+
+    /// <summary>
+    /// Completes sign-in right after the user presented a credential in this flow: password,
+    /// one-time code, magic link, SSO or OIDC callback, or signup. The credential proves
+    /// identity on its own, so an issuer session cookie that was revoked or cleaned up counts
+    /// as signed out: issuance starts a new family and replaces the dead cookie instead of
+    /// failing. The revoked family is never revived.
+    /// </summary>
+    internal Task<SqlOSAuthorizationRequestLoginResult> CompleteCredentialSignInAsync(
+        SqlOSAuthorizationRequest authorizationRequest,
+        SqlOSUser user,
+        string authenticationMethod,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default,
+        DateTime? knownAuthenticatedAt = null)
+        => CompleteAuthorizationRequestLoginCoreAsync(
+            authorizationRequest,
+            user,
+            authenticationMethod,
+            httpContext,
+            approverOrganizationId: null,
+            SqlOSSignInEvidence.Credential,
+            cancellationToken,
+            consentGranted: false,
+            knownAuthenticatedAt);
 
     private async Task<SqlOSAuthorizationRequestLoginResult> CompleteAuthorizationRequestLoginCoreAsync(
         SqlOSAuthorizationRequest authorizationRequest,
@@ -1370,6 +1427,7 @@ public sealed class SqlOSAuthorizationServerService
         string authenticationMethod,
         HttpContext httpContext,
         string? approverOrganizationId,
+        SqlOSSignInEvidence evidence,
         CancellationToken cancellationToken,
         bool consentGranted,
         DateTime? knownAuthenticatedAt)
@@ -1417,7 +1475,8 @@ public sealed class SqlOSAuthorizationServerService
                             // Never null — approval must not substitute the approval click.
                             knownAuthenticatedAt
                                 ?? await ResolveAuthenticatedAtAsync(httpContext, user.Id, cancellationToken),
-                            clientMetadataFingerprint),
+                            clientMetadataFingerprint,
+                            evidence == SqlOSSignInEvidence.Credential),
                         ConsentTokenLifetime,
                         cancellationToken);
                     return new SqlOSAuthorizationRequestLoginResult(
@@ -1459,7 +1518,8 @@ public sealed class SqlOSAuthorizationServerService
                 invitationOrganizations,
                 httpContext,
                 cancellationToken,
-                knownAuthenticatedAt ?? invitationAuthenticatedAt);
+                knownAuthenticatedAt ?? invitationAuthenticatedAt,
+                evidence);
         }
 
         var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
@@ -1480,7 +1540,8 @@ public sealed class SqlOSAuthorizationServerService
                 organizations,
                 httpContext,
                 cancellationToken,
-                knownAuthenticatedAt);
+                knownAuthenticatedAt,
+                evidence);
         }
 
         if (organizations.Count > 1)
@@ -1492,8 +1553,9 @@ public sealed class SqlOSAuthorizationServerService
                     user,
                     authorizationRequest,
                     authenticationMethod,
-                    cancellationToken,
-                    knownAuthenticatedAt ?? await ResolveAuthenticatedAtAsync(httpContext, user.Id, cancellationToken)),
+                    knownAuthenticatedAt ?? await ResolveAuthenticatedAtAsync(httpContext, user.Id, cancellationToken),
+                    evidence,
+                    cancellationToken),
                 organizations,
                 AuthorizationRequestId: authorizationRequest.Id);
         }
@@ -1507,7 +1569,8 @@ public sealed class SqlOSAuthorizationServerService
             organizations,
             httpContext,
             cancellationToken,
-            knownAuthenticatedAt);
+            knownAuthenticatedAt,
+            evidence);
     }
 
     public async Task<string> CompleteMfaChallengeAsync(
@@ -1625,7 +1688,8 @@ public sealed class SqlOSAuthorizationServerService
             authenticationMethod,
             httpContext,
             cancellationToken,
-            knownAuthenticatedAt: DateTime.UtcNow);
+            knownAuthenticatedAt: DateTime.UtcNow,
+            payload.CredentialSignIn ? SqlOSSignInEvidence.Credential : SqlOSSignInEvidence.PresentedSession);
 
         await _adminService.RecordAuditAsync(
             "user.login.mfa",
@@ -1647,7 +1711,8 @@ public sealed class SqlOSAuthorizationServerService
         IReadOnlyList<SqlOSOrganizationOption> organizations,
         HttpContext httpContext,
         CancellationToken cancellationToken,
-        DateTime? knownAuthenticatedAt = null)
+        DateTime? knownAuthenticatedAt,
+        SqlOSSignInEvidence evidence)
     {
         var decision = await _mfaPolicyService.EvaluateForIssuanceAsync(
             user.Id,
@@ -1664,6 +1729,7 @@ public sealed class SqlOSAuthorizationServerService
                 authenticationMethod,
                 organizations,
                 decision.Evaluation,
+                evidence,
                 cancellationToken);
         }
 
@@ -1674,7 +1740,8 @@ public sealed class SqlOSAuthorizationServerService
                 user,
                 httpContext,
                 cancellationToken,
-                knownAuthenticatedAt),
+                knownAuthenticatedAt,
+                evidence),
             false,
             null,
             organizations,
@@ -1688,6 +1755,7 @@ public sealed class SqlOSAuthorizationServerService
         string authenticationMethod,
         IReadOnlyList<SqlOSOrganizationOption> organizations,
         SqlOSMfaPolicyEvaluation evaluation,
+        SqlOSSignInEvidence evidence,
         CancellationToken cancellationToken)
     {
         var client = authorizationRequest.ClientApplication
@@ -1706,7 +1774,8 @@ public sealed class SqlOSAuthorizationServerService
                 : Array.Empty<string>(),
             authorizationRequest.Id,
             authorizationRequest.Resource,
-            cancellationToken);
+            cancellationToken,
+            credentialSignIn: evidence == SqlOSSignInEvidence.Credential);
 
         return new SqlOSAuthorizationRequestLoginResult(
             null,
@@ -1727,7 +1796,8 @@ public sealed class SqlOSAuthorizationServerService
         string authenticationMethod,
         HttpContext httpContext,
         CancellationToken cancellationToken = default,
-        DateTime? knownAuthenticatedAt = null)
+        DateTime? knownAuthenticatedAt = null,
+        SqlOSSignInEvidence evidence = SqlOSSignInEvidence.PresentedSession)
     {
         var decision = await _mfaPolicyService.EvaluateForIssuanceAsync(
             user.Id,
@@ -1746,7 +1816,8 @@ public sealed class SqlOSAuthorizationServerService
             user,
             httpContext,
             cancellationToken,
-            knownAuthenticatedAt);
+            knownAuthenticatedAt,
+            evidence);
     }
 
     private async Task<string> IssueAssuredAuthorizationRedirectAsync(
@@ -1755,8 +1826,13 @@ public sealed class SqlOSAuthorizationServerService
         SqlOSUser user,
         HttpContext httpContext,
         CancellationToken cancellationToken,
-        DateTime? knownAuthenticatedAt = null)
+        DateTime? knownAuthenticatedAt,
+        SqlOSSignInEvidence evidence)
     {
+        // Only a sign-in that rests on the presented issuer session must prove that session
+        // is still live. A credential sign-in treats a revoked or cleaned-up cookie as signed
+        // out and replaces it with a new family below.
+        var continuesPresentedSession = evidence == SqlOSSignInEvidence.PresentedSession;
         if (!string.Equals(assurance.UserId, user.Id, StringComparison.Ordinal)
             || !string.Equals(assurance.AuthorizationRequestId, authorizationRequest.Id, StringComparison.Ordinal))
         {
@@ -1828,15 +1904,16 @@ public sealed class SqlOSAuthorizationServerService
 
         if (!string.IsNullOrWhiteSpace(authorizationRequest.DeviceAuthorizationId))
         {
-            authorizationRequest.ResolvedAuthMethod = authenticationMethod;
-            authorizationRequest.ResolvedOrganizationId = organizationId;
-            if (!await _issuerSessionService.CanContinuePresentingSessionAsync(httpContext, cancellationToken))
+            if (continuesPresentedSession
+                && !await _issuerSessionService.CanContinuePresentingSessionAsync(httpContext, cancellationToken))
             {
                 throw new InvalidOperationException(SqlOSIssuerSessionService.SessionNoLongerActiveMessage);
             }
 
+            authorizationRequest.ResolvedAuthMethod = authenticationMethod;
+            authorizationRequest.ResolvedOrganizationId = organizationId;
             await _context.SaveChangesAsync(cancellationToken);
-            await SignInForAuthorizationAsync(httpContext, user, organizationId, authenticationMethod, authenticatedAt, cancellationToken);
+            await SignInForAuthorizationAsync(httpContext, user, organizationId, authenticationMethod, authenticatedAt, continuesPresentedSession, cancellationToken);
 
             return QueryHelpers.AddQueryString(
                 $"{_options.BasePath.TrimEnd('/')}/device/approve",
@@ -1844,7 +1921,8 @@ public sealed class SqlOSAuthorizationServerService
                 authorizationRequest.Id);
         }
 
-        if (!await _issuerSessionService.CanContinuePresentingSessionAsync(httpContext, cancellationToken))
+        if (continuesPresentedSession
+            && !await _issuerSessionService.CanContinuePresentingSessionAsync(httpContext, cancellationToken))
         {
             throw new InvalidOperationException(SqlOSIssuerSessionService.SessionNoLongerActiveMessage);
         }
@@ -1891,7 +1969,7 @@ public sealed class SqlOSAuthorizationServerService
 
         try
         {
-            await SignInForAuthorizationAsync(httpContext, user, organizationId, authenticationMethod, authenticatedAt, cancellationToken);
+            await SignInForAuthorizationAsync(httpContext, user, organizationId, authenticationMethod, authenticatedAt, continuesPresentedSession, cancellationToken);
         }
         catch (InvalidOperationException ex) when (string.Equals(
             ex.Message,
@@ -1989,12 +2067,19 @@ public sealed class SqlOSAuthorizationServerService
     internal static string[] TokenizePrompt(string? prompt)
         => (prompt ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
+    /// <summary>
+    /// Signs the browser in for an issued authorization. A sign-in that rests on the presented
+    /// session renews that session's family and fails closed when the family was revoked,
+    /// including a logout that races the renewal. A credential sign-in continues a live
+    /// presented family but starts a new one when the presented cookie is dead.
+    /// </summary>
     private async Task SignInForAuthorizationAsync(
         HttpContext httpContext,
         SqlOSUser user,
         string? organizationId,
         string authenticationMethod,
         DateTime? authenticatedAt,
+        bool continueExistingSession,
         CancellationToken cancellationToken)
     {
         await _issuerSessionService.SignInAsync(
@@ -2003,7 +2088,7 @@ public sealed class SqlOSAuthorizationServerService
             organizationId,
             authenticationMethod,
             authenticatedAt,
-            continueExistingSession: true,
+            continueExistingSession,
             cancellationToken);
         if (!await _issuerSessionService.CanContinuePresentingSessionAsync(httpContext, cancellationToken))
         {
@@ -2308,7 +2393,8 @@ public sealed class SqlOSAuthorizationServerService
     private sealed record PendingAuthorizationPayload(
         string AuthorizationRequestId,
         string AuthenticationMethod,
-        DateTime? AuthenticatedAt = null);
+        DateTime? AuthenticatedAt = null,
+        bool CredentialSignIn = false);
 
     private SqlOSInvitationService RequireInvitationService()
         => _invitationService ?? throw new InvalidOperationException("SqlOS invitations are not configured.");
@@ -2373,3 +2459,23 @@ public sealed record SqlOSTokenRequest(
 public sealed record SqlOSTokenEndpointResult(
     SqlOSTokenResponse Tokens,
     string? Scope);
+
+/// <summary>
+/// What proves the user's identity when an authorization sign-in is issued. It decides how
+/// the issuer session cookie the browser presents is treated.
+/// </summary>
+internal enum SqlOSSignInEvidence
+{
+    /// <summary>
+    /// The presented issuer session (silent reuse, or device approval by a signed-in browser).
+    /// Issuance fails closed unless that session's family is still live, and it renews the
+    /// session inside that family.
+    /// </summary>
+    PresentedSession = 0,
+
+    /// <summary>
+    /// A credential the user presented in this flow. A revoked or cleaned-up issuer cookie
+    /// counts as signed out: issuance starts a new family and replaces the cookie.
+    /// </summary>
+    Credential = 1
+}

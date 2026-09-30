@@ -103,6 +103,8 @@ public sealed record SqlOSMfaChallengeVerifyResult(
     SqlOSTokenResponse? Tokens,
     string? RedirectUrl);
 
+// CredentialSignIn defaults so challenges minted before the field existed still
+// deserialize and keep the presented-session check at issuance.
 internal sealed record SqlOSMfaChallengePayload(
     string Flow,
     string ClientId,
@@ -111,7 +113,8 @@ internal sealed record SqlOSMfaChallengePayload(
     string? Resource = null,
     bool EnrollmentRequired = false,
     IReadOnlyList<string>? PermittedEnrollmentFactors = null,
-    int FailedAttempts = 0);
+    int FailedAttempts = 0,
+    bool CredentialSignIn = false);
 
 internal sealed record SqlOSAuthorizationMfaChallengeState(
     bool EnrollmentRequired,
