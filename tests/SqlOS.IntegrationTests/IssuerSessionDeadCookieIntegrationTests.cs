@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
@@ -79,6 +80,42 @@ public sealed class IssuerSessionDeadCookieIntegrationTests
         using var reuse = await fixture.AuthorizeWithSessionAsync("openid", freshCookie!, prompt: "none");
         var reuseQuery = QueryHelpers.ParseQuery(reuse.Response.Headers.Location!.Query);
         reuseQuery["code"].ToString().Should().NotBeNullOrWhiteSpace();
+    }
+
+    [TestMethod]
+    public async Task HeadlessPasswordLogin_WithRevokedCookie_IssuesCodeInNewFamily()
+    {
+        await using var fixture = await CreateFixtureAsync();
+        var deadCookie = await SignInAsync(fixture);
+        var deadFamily = await FamilyOfAsync(fixture, deadCookie);
+        await LogoutAllAsync(fixture);
+        var started = await fixture.StartAuthorizeAsync("openid");
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/sqlos/auth/headless/password/login")
+        {
+            Content = JsonContent.Create(new
+            {
+                requestId = started.RequestId,
+                email = fixture.Email,
+                password = HostedAuthorizeTokenFixture.Password
+            })
+        };
+        request.Headers.TryAddWithoutValidation("Cookie", deadCookie);
+        using var response = await fixture.Client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        using var result = JsonDocument.Parse(body);
+        var redirectUrl = result.RootElement.GetProperty("redirectUrl").GetString();
+        redirectUrl.Should().NotBeNullOrWhiteSpace($"the headless login should redirect with a code, not {body}");
+        var code = QueryHelpers.ParseQuery(new Uri(redirectUrl!).Query)["code"].ToString();
+        code.Should().NotBeNullOrWhiteSpace();
+        using var tokens = await fixture.ExchangeAuthorizationCodeAsync(code, started.CodeVerifier);
+        tokens.RootElement.GetProperty("access_token").GetString().Should().NotBeNullOrWhiteSpace();
+        var freshCookie = HostedAuthorizeTokenFixture.TryExtractCookie(response, "sqlos_auth_page=");
+        freshCookie.Should().NotBeNullOrWhiteSpace();
+        (await FamilyOfAsync(fixture, freshCookie!)).Id.Should().NotBe(deadFamily.Id);
+        (await FindFamilyAsync(fixture, deadFamily.Id)).RevokedAt.Should().NotBeNull();
     }
 
     [TestMethod]
