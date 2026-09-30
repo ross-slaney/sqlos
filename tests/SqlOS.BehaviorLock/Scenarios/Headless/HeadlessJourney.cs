@@ -19,9 +19,6 @@ internal static partial class HeadlessJourney
     /// <summary>The first-party single-application client the headless profile derives.</summary>
     public const string AppClientId = BehaviorLockConstants.AppClientId;
 
-    /// <summary>The headless profile's UI, where SqlOS sends browser interaction.</summary>
-    public const string UiPath = BehaviorLockConstants.PublicOrigin + "/auth/authorize";
-
     /// <summary>A third-party client an operator registered, for consent journeys.</summary>
     public const string PartnerClientId = "partner-app";
 
