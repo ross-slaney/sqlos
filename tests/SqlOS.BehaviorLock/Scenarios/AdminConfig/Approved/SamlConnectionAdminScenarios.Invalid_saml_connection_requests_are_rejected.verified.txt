@@ -1,0 +1,318 @@
+# SqlOS behavior lock transcript
+scenario: SamlConnectionAdminScenarios.Invalid_saml_connection_requests_are_rejected
+profile: enterprise
+
+## 1. operator: an unknown organization escapes as a server error
+> POST /sqlos/admin/auth/api/sso-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "autoLinkByEmail": false,
+>     "autoProvisionUsers": true,
+>     "displayName": "Acme SAML",
+>     "emailAttributeName": "email",
+>     "firstNameAttributeName": "first_name",
+>     "identityProviderEntityId": "urn:behavior-lock:acme-idp",
+>     "lastNameAttributeName": "last_name",
+>     "organizationId": "{org#1}",
+>     "singleSignOnUrl": "https://idp.acme.example.test/saml/sso",
+>     "x509CertificatePem": "{saml-certificate:acme}"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Organization not found.
+
+## 2. operator: a missing IdP entity ID escapes as a server error
+> POST /sqlos/admin/auth/api/sso-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "autoLinkByEmail": false,
+>     "autoProvisionUsers": true,
+>     "displayName": "Acme SAML",
+>     "emailAttributeName": "email",
+>     "firstNameAttributeName": "first_name",
+>     "identityProviderEntityId": " ",
+>     "lastNameAttributeName": "last_name",
+>     "organizationId": "{org#2}",
+>     "singleSignOnUrl": "https://idp.acme.example.test/saml/sso",
+>     "x509CertificatePem": "{saml-certificate:acme}"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: SAML IdP entity ID is required.
+
+## 3. operator: a plain-HTTP SSO URL escapes as a server error
+> POST /sqlos/admin/auth/api/sso-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "autoLinkByEmail": false,
+>     "autoProvisionUsers": true,
+>     "displayName": "Acme SAML",
+>     "emailAttributeName": "email",
+>     "firstNameAttributeName": "first_name",
+>     "identityProviderEntityId": "urn:other",
+>     "lastNameAttributeName": "last_name",
+>     "organizationId": "{org#2}",
+>     "singleSignOnUrl": "http://idp.acme.example.test/saml/sso",
+>     "x509CertificatePem": "{saml-certificate:acme}"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: SAML SSO URL must be an absolute HTTPS URL.
+
+## 4. operator: a malformed certificate escapes as a server error
+> POST /sqlos/admin/auth/api/sso-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "autoLinkByEmail": false,
+>     "autoProvisionUsers": true,
+>     "displayName": "Acme SAML",
+>     "emailAttributeName": "email",
+>     "firstNameAttributeName": "first_name",
+>     "identityProviderEntityId": "urn:other",
+>     "lastNameAttributeName": "last_name",
+>     "organizationId": "{org#2}",
+>     "singleSignOnUrl": "https://idp.acme.example.test/saml/sso",
+>     "x509CertificatePem": "-----BEGIN CERTIFICATE-----\{token#1}=\n-----END CERTIFICATE-----"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: SAML signing certificate is malformed.
+
+## 5. operator: an expired certificate escapes as a server error
+> POST /sqlos/admin/auth/api/sso-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "autoLinkByEmail": false,
+>     "autoProvisionUsers": true,
+>     "displayName": "Acme SAML",
+>     "emailAttributeName": "email",
+>     "firstNameAttributeName": "first_name",
+>     "identityProviderEntityId": "urn:other",
+>     "lastNameAttributeName": "last_name",
+>     "organizationId": "{org#2}",
+>     "singleSignOnUrl": "https://idp.acme.example.test/saml/sso",
+>     "x509CertificatePem": "{saml-certificate:expired}"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: SAML signing certificate is expired.
+
+## 6. operator: a certificate that is not valid yet escapes as a server error
+> POST /sqlos/admin/auth/api/sso-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "autoLinkByEmail": false,
+>     "autoProvisionUsers": true,
+>     "displayName": "Acme SAML",
+>     "emailAttributeName": "email",
+>     "firstNameAttributeName": "first_name",
+>     "identityProviderEntityId": "urn:other",
+>     "lastNameAttributeName": "last_name",
+>     "organizationId": "{org#2}",
+>     "singleSignOnUrl": "https://idp.acme.example.test/saml/sso",
+>     "x509CertificatePem": "{saml-certificate:future}"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: SAML signing certificate is not valid yet.
+
+## 7. operator: a missing display name escapes as a server error
+> POST /sqlos/admin/auth/api/sso-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "autoLinkByEmail": false,
+>     "autoProvisionUsers": true,
+>     "displayName": " ",
+>     "emailAttributeName": "email",
+>     "firstNameAttributeName": "first_name",
+>     "identityProviderEntityId": "urn:other",
+>     "lastNameAttributeName": "last_name",
+>     "organizationId": "{org#2}",
+>     "singleSignOnUrl": "https://idp.acme.example.test/saml/sso",
+>     "x509CertificatePem": "{saml-certificate:acme}"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: SAML display name is required.
+
+## 8. operator: a second connection for the same IdP entity ID escapes as a server error
+> POST /sqlos/admin/auth/api/sso-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "autoLinkByEmail": false,
+>     "autoProvisionUsers": true,
+>     "displayName": "Acme SAML",
+>     "emailAttributeName": "email",
+>     "firstNameAttributeName": "first_name",
+>     "identityProviderEntityId": "urn:behavior-lock:acme-idp",
+>     "lastNameAttributeName": "last_name",
+>     "organizationId": "{org#2}",
+>     "singleSignOnUrl": "https://idp.acme.example.test/saml/sso",
+>     "x509CertificatePem": "{saml-certificate:acme}"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: A SAML connection already uses this IdP entity ID.
+
+## 9. operator: a draft for an unknown organization escapes as a server error
+> POST /sqlos/admin/auth/api/sso-connections/draft
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "autoLinkByEmail": false,
+>     "autoProvisionUsers": false,
+>     "displayName": "Nowhere",
+>     "organizationId": "{org#1}"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Organization not found.
+
+## 10. operator: importing metadata into an unknown connection escapes as a server error
+> POST /sqlos/admin/auth/api/sso-connections/{sso#1}/metadata
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "metadataXml": "<md:EntityDescriptor xmlns:md=\"urn:oasis:names:tc:SAML:2.0:metadata\" entityID=\"urn:other\"><md:IDPSSODescriptor protocolSupportEnumeration=\"urn:oasis:names:tc:SAML:2.0:protocol\"><md:KeyDescriptor use=\"signing\"><ds:KeyInfo xmlns:ds=\"http://www.w3.org/2000/09/xmldsig#\"><ds:X509Data><ds:X509Certificate>{saml-certificate:acme}</ds:X509Certificate></ds:X509Data></ds:KeyInfo></md:KeyDescriptor><md:SingleSignOnService Binding=\"urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect\" Location=\"https://idp.acme.example.test/saml/sso\"/></md:IDPSSODescriptor></md:EntityDescriptor>"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: SAML connection not found.
+
+## 11. operator: malformed XML escapes as a server error
+> POST /sqlos/admin/auth/api/sso-connections/{sso#2}/metadata
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "metadataXml": "<md:EntityDescriptor"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.Xml.XmlException: Unexpected end of file while parsing Name has occurred. Line 1, position 21.
+
+## 12. operator: metadata without an entityID escapes as a server error
+> POST /sqlos/admin/auth/api/sso-connections/{sso#2}/metadata
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "metadataXml": "<md:EntityDescriptor xmlns:md=\"urn:oasis:names:tc:SAML:2.0:metadata\"><md:IDPSSODescriptor protocolSupportEnumeration=\"urn:oasis:names:tc:SAML:2.0:protocol\"><md:KeyDescriptor use=\"signing\"><ds:KeyInfo xmlns:ds=\"http://www.w3.org/2000/09/xmldsig#\"><ds:X509Data><ds:X509Certificate>{saml-certificate:acme}</ds:X509Certificate></ds:X509Data></ds:KeyInfo></md:KeyDescriptor><md:SingleSignOnService Binding=\"urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect\" Location=\"https://idp.acme.example.test/saml/sso\"/></md:IDPSSODescriptor></md:EntityDescriptor>"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Federation metadata is missing the entityID attribute.
+
+## 13. operator: metadata without a single sign-on service escapes as a server error
+> POST /sqlos/admin/auth/api/sso-connections/{sso#2}/metadata
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "metadataXml": "<md:EntityDescriptor xmlns:md=\"urn:oasis:names:tc:SAML:2.0:metadata\" entityID=\"urn:other\"><md:IDPSSODescriptor protocolSupportEnumeration=\"urn:oasis:names:tc:SAML:2.0:protocol\"><md:KeyDescriptor use=\"signing\"><ds:KeyInfo xmlns:ds=\"http://www.w3.org/2000/09/xmldsig#\"><ds:X509Data><ds:X509Certificate>{saml-certificate:acme}</ds:X509Certificate></ds:X509Data></ds:KeyInfo></md:KeyDescriptor></md:IDPSSODescriptor></md:EntityDescriptor>"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Federation metadata is missing an IdP SingleSignOnService endpoint.
+
+## 14. operator: metadata without a signing certificate escapes as a server error
+> POST /sqlos/admin/auth/api/sso-connections/{sso#2}/metadata
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "metadataXml": "<md:EntityDescriptor xmlns:md=\"urn:oasis:names:tc:SAML:2.0:metadata\" entityID=\"urn:other\"><md:IDPSSODescriptor protocolSupportEnumeration=\"urn:oasis:names:tc:SAML:2.0:protocol\"><md:SingleSignOnService Binding=\"urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect\" Location=\"https://idp.acme.example.test/saml/sso\"/></md:IDPSSODescriptor></md:EntityDescriptor>"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Federation metadata is missing an X509 signing certificate.
+
+## 15. operator: metadata for an IdP another connection already uses escapes as a server error
+> POST /sqlos/admin/auth/api/sso-connections/{sso#2}/metadata
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "metadataXml": "<md:EntityDescriptor xmlns:md=\"urn:oasis:names:tc:SAML:2.0:metadata\" entityID=\"urn:behavior-lock:acme-idp\"><md:IDPSSODescriptor protocolSupportEnumeration=\"urn:oasis:names:tc:SAML:2.0:protocol\"><md:KeyDescriptor use=\"signing\"><ds:KeyInfo xmlns:ds=\"http://www.w3.org/2000/09/xmldsig#\"><ds:X509Data><ds:X509Certificate>{saml-certificate:acme}</ds:X509Certificate></ds:X509Data></ds:KeyInfo></md:KeyDescriptor><md:SingleSignOnService Binding=\"urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect\" Location=\"https://idp.acme.example.test/saml/sso\"/></md:IDPSSODescriptor></md:EntityDescriptor>"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: A SAML connection already uses this IdP entity ID.
+
+## 16. operator: enabling an unknown connection escapes as a server error
+> POST /sqlos/admin/auth/api/sso-connections/{sso#1}/enable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: SAML connection not found.
+
+## 17. operator: disabling an unknown connection escapes as a server error
+> POST /sqlos/admin/auth/api/sso-connections/{sso#1}/disable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: SAML connection not found.
+
+## 18. operator: offset paging of an organization's connections is refused
+> GET /sqlos/admin/auth/api/organizations/{org#2}/sso-connections?page=2
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_cursor",
+      "message": "Offset pagination is no longer supported. Omit page or pass page=1 for the first window, then follow nextCursor."
+    }
+
+## 19. operator: only the original connection and the untouched draft exist
+> GET /sqlos/admin/auth/api/organizations/{org#2}/sso-connections
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "assertionConsumerServiceUrl": "https://sqlos.example.test/sqlos/auth/saml/acs/{sso#3}",
+          "autoLinkByEmail": false,
+          "autoProvisionUsers": true,
+          "displayName": "Acme SAML",
+          "id": "{sso#3}",
+          "identityProviderEntityId": "urn:behavior-lock:acme-idp",
+          "isEnabled": true,
+          "organization": "Acme",
+          "organizationId": "{org#2}",
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "primaryDomain": null,
+          "serviceProviderEntityId": "https://sqlos.example.test/sqlos/auth",
+          "setupStatus": "active",
+          "singleSignOnUrl": "https://idp.acme.example.test/saml/sso"
+        },
+        {
+          "assertionConsumerServiceUrl": "https://sqlos.example.test/sqlos/auth/saml/acs/{sso#2}",
+          "autoLinkByEmail": false,
+          "autoProvisionUsers": false,
+          "displayName": "Second IdP",
+          "id": "{sso#2}",
+          "identityProviderEntityId": "",
+          "isEnabled": false,
+          "organization": "Acme",
+          "organizationId": "{org#2}",
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "primaryDomain": null,
+          "serviceProviderEntityId": "https://sqlos.example.test/sqlos/auth",
+          "setupStatus": "draft",
+          "singleSignOnUrl": ""
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## audit: rejected changes write no audit events
+  (no new events)

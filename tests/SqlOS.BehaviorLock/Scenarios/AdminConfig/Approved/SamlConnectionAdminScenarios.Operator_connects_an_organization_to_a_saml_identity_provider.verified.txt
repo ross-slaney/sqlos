@@ -1,0 +1,288 @@
+# SqlOS behavior lock transcript
+scenario: SamlConnectionAdminScenarios.Operator_connects_an_organization_to_a_saml_identity_provider
+profile: enterprise
+
+## 1. operator: without operator credentials the SAML connection list is not found
+> GET /sqlos/admin/auth/api/sso-connections
+< 404 Not Found
+
+## 2. operator: create an enabled connection from explicit IdP fields
+> POST /sqlos/admin/auth/api/sso-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "acceptedAuthnContextClassRefs": [
+>       "urn:oasis:names:tc:SAML:2.0:ac:classes:MobileTwoFactorContract",
+>       " "
+>     ],
+>     "autoLinkByEmail": false,
+>     "autoProvisionUsers": true,
+>     "displayName": " Acme Okta ",
+>     "emailAttributeName": " mail ",
+>     "firstNameAttributeName": null,
+>     "identityProviderEntityId": " urn:behavior-lock:acme-idp ",
+>     "lastNameAttributeName": "",
+>     "organizationId": "{org#1}",
+>     "singleSignOnUrl": "https://idp.acme.example.test/saml/sso",
+>     "trustUpstreamMfa": true,
+>     "x509CertificatePem": "{saml-certificate:acme}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "acceptedAuthnContextClassRefs": [
+        "urn:oasis:names:tc:SAML:2.0:ac:classes:MobileTwoFactorContract"
+      ],
+      "autoLinkByEmail": false,
+      "autoProvisionUsers": true,
+      "createdAt": "{datetime:utc-z}",
+      "displayName": "Acme Okta",
+      "id": "{sso#1}",
+      "identityProviderEntityId": "urn:behavior-lock:acme-idp",
+      "isEnabled": true,
+      "organizationId": "{org#1}",
+      "singleSignOnUrl": "https://idp.acme.example.test/saml/sso",
+      "trustUpstreamMfa": true,
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 3. operator: the connection list shows the service-provider values to give the IdP
+> GET /sqlos/admin/auth/api/sso-connections
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "assertionConsumerServiceUrl": "https://sqlos.example.test/sqlos/auth/saml/acs/{sso#1}",
+          "autoLinkByEmail": false,
+          "autoProvisionUsers": true,
+          "displayName": "Acme Okta",
+          "id": "{sso#1}",
+          "identityProviderEntityId": "urn:behavior-lock:acme-idp",
+          "isEnabled": true,
+          "organization": "Acme",
+          "organizationId": "{org#1}",
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "primaryDomain": "{domain:acme}",
+          "serviceProviderEntityId": "https://sqlos.example.test/sqlos/auth",
+          "setupStatus": "active",
+          "singleSignOnUrl": "https://idp.acme.example.test/saml/sso"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 4. operator: the organization's connection list
+> GET /sqlos/admin/auth/api/organizations/{org#1}/sso-connections
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "assertionConsumerServiceUrl": "https://sqlos.example.test/sqlos/auth/saml/acs/{sso#1}",
+          "autoLinkByEmail": false,
+          "autoProvisionUsers": true,
+          "displayName": "Acme Okta",
+          "id": "{sso#1}",
+          "identityProviderEntityId": "urn:behavior-lock:acme-idp",
+          "isEnabled": true,
+          "organization": "Acme",
+          "organizationId": "{org#1}",
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "primaryDomain": "{domain:acme}",
+          "serviceProviderEntityId": "https://sqlos.example.test/sqlos/auth",
+          "setupStatus": "active",
+          "singleSignOnUrl": "https://idp.acme.example.test/saml/sso"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 5. operator: disable the connection
+> POST /sqlos/admin/auth/api/sso-connections/{sso#1}/disable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "id": "{sso#1}",
+      "isEnabled": false,
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 6. operator: a disabled connection with complete metadata is ready to activate
+> GET /sqlos/admin/auth/api/organizations/{org#1}/sso-connections
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "assertionConsumerServiceUrl": "https://sqlos.example.test/sqlos/auth/saml/acs/{sso#1}",
+          "autoLinkByEmail": false,
+          "autoProvisionUsers": true,
+          "displayName": "Acme Okta",
+          "id": "{sso#1}",
+          "identityProviderEntityId": "urn:behavior-lock:acme-idp",
+          "isEnabled": false,
+          "organization": "Acme",
+          "organizationId": "{org#1}",
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "primaryDomain": "{domain:acme}",
+          "serviceProviderEntityId": "https://sqlos.example.test/sqlos/auth",
+          "setupStatus": "ready_to_activate",
+          "singleSignOnUrl": "https://idp.acme.example.test/saml/sso"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 7. operator: enable it again
+> POST /sqlos/admin/auth/api/sso-connections/{sso#1}/enable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "id": "{sso#1}",
+      "isEnabled": true,
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## audit: SAML connection changes
+  - {
+      "action": "saml.connection.created",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "saml.connection.created",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "Id": "{sso#1}",
+        "IdentityProviderEntityId": "urn:behavior-lock:acme-idp"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "saml.connection.disabled",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "saml.connection.disabled",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "ConfigurationOwner": "dashboard",
+        "Id": "{sso#1}"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "saml.connection.enabled",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "saml.connection.enabled",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "ConfigurationOwner": "dashboard",
+        "Id": "{sso#1}"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

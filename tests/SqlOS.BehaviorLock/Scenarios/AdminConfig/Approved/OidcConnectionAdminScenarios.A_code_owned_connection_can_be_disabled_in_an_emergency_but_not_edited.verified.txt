@@ -1,0 +1,171 @@
+# SqlOS behavior lock transcript
+scenario: OidcConnectionAdminScenarios.A_code_owned_connection_can_be_disabled_in_an_emergency_but_not_edited
+profile: modules
+
+## 1. operator: startup seeded Google and Microsoft as code-owned connections
+> GET /sqlos/admin/auth/api/oidc-connections
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "allowedCallbackUris": "[\"https://sqlos.example.test/sqlos/auth/oidc/callback\"]",
+          "appleKeyId": null,
+          "appleTeamId": null,
+          "authorizationEndpoint": null,
+          "claimMapping": "{\"SubjectClaim\":\"sub\",\"EmailClaim\":\"email\",\"EmailVerifiedClaim\":\"email_verified\",\"DisplayNameClaim\":\"name\",\"FirstNameClaim\":\"given_name\",\"LastNameClaim\":\"family_name\",\"PreferredUsernameClaim\":\"preferred_username\"}",
+          "clientAuthMethod": "ClientSecretPost",
+          "clientId": "google-client-id",
+          "createdAt": "{datetime:unspecified}",
+          "discoveryUrl": "https://accounts.google.com/.well-known/openid-configuration",
+          "displayName": "Google",
+          "effectiveLogoDataUrl": "{data-uri:image/svg+xml}",
+          "id": "{oidc#1}",
+          "isEnabled": true,
+          "issuer": null,
+          "jwksUri": null,
+          "logoDataUrl": null,
+          "microsoftTenant": null,
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": "{hex#1}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "google"
+          },
+          "protocol": "Oidc",
+          "providerType": "Google",
+          "scopes": "[]",
+          "tokenEndpoint": null,
+          "updatedAt": "{datetime:unspecified}",
+          "useDiscovery": true,
+          "useUserInfo": true,
+          "userInfoEndpoint": null
+        },
+        {
+          "allowedCallbackUris": "[\"https://sqlos.example.test/sqlos/auth/oidc/callback\"]",
+          "appleKeyId": null,
+          "appleTeamId": null,
+          "authorizationEndpoint": null,
+          "claimMapping": "{\"SubjectClaim\":\"sub\",\"EmailClaim\":\"email\",\"EmailVerifiedClaim\":\"email_verified\",\"DisplayNameClaim\":\"name\",\"FirstNameClaim\":\"given_name\",\"LastNameClaim\":\"family_name\",\"PreferredUsernameClaim\":\"preferred_username\"}",
+          "clientAuthMethod": "ClientSecretPost",
+          "clientId": "microsoft-client-id",
+          "createdAt": "{datetime:unspecified}",
+          "discoveryUrl": "https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration",
+          "displayName": "Microsoft",
+          "effectiveLogoDataUrl": "{data-uri:image/svg+xml}",
+          "id": "{oidc#2}",
+          "isEnabled": true,
+          "issuer": null,
+          "jwksUri": null,
+          "logoDataUrl": null,
+          "microsoftTenant": "common",
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": "{hex#2}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "microsoft"
+          },
+          "protocol": "Oidc",
+          "providerType": "Microsoft",
+          "scopes": "[]",
+          "tokenEndpoint": null,
+          "updatedAt": "{datetime:unspecified}",
+          "useDiscovery": true,
+          "useUserInfo": true,
+          "userInfoEndpoint": null
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 2. operator: editing a code-owned connection escapes as a server error that names its owner
+> PUT /sqlos/admin/auth/api/oidc-connections/{oidc#1}
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "allowedCallbackUris": [
+>       "https://sqlos.example.test/sqlos/auth/oidc/callback"
+>     ],
+>     "clientAuthMethod": null,
+>     "clientId": "google-client",
+>     "displayName": "Renamed in the dashboard",
+>     "useDiscovery": true
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: OIDC connection is owned by the 'code' configuration source. Change its source configuration instead.
+
+## 3. operator: an operator can still disable it
+> POST /sqlos/admin/auth/api/oidc-connections/{oidc#1}/disable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "id": "{oidc#1}",
+      "isEnabled": false,
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 4. probe: sign-in no longer offers Google
+> GET /__probe/auth/providers
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    [
+      {
+        "connectionId": "{oidc#2}",
+        "displayName": "Microsoft",
+        "isEnabled": true,
+        "logoDataUrl": "{data-uri:image/svg+xml}",
+        "protocol": "Oidc",
+        "providerType": "Microsoft"
+      }
+    ]
+
+## 5. operator: and enable it again
+> POST /sqlos/admin/auth/api/oidc-connections/{oidc#1}/enable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "id": "{oidc#1}",
+      "isEnabled": true,
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 6. probe: Google is offered again
+> GET /__probe/auth/providers
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    [
+      {
+        "connectionId": "{oidc#1}",
+        "displayName": "Google",
+        "isEnabled": true,
+        "logoDataUrl": "{data-uri:image/svg+xml}",
+        "protocol": "Oidc",
+        "providerType": "Google"
+      },
+      {
+        "connectionId": "{oidc#2}",
+        "displayName": "Microsoft",
+        "isEnabled": true,
+        "logoDataUrl": "{data-uri:image/svg+xml}",
+        "protocol": "Oidc",
+        "providerType": "Microsoft"
+      }
+    ]
+
+## audit: toggling a code-owned connection writes no audit events
+  (no new events)
