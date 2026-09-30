@@ -83,6 +83,7 @@ public static partial class HtmlCanonicalizer
 
         if (WhitespaceSensitiveElements.Contains(name))
         {
+            InspectText(element.TextContent, sink);
             builder.Append(EscapeText(element.TextContent)).Append("</").Append(name).Append(">\n");
             return;
         }
@@ -100,6 +101,7 @@ public static partial class HtmlCanonicalizer
         if (children.All(node => node is IText))
         {
             var text = CollapseWhitespace(string.Concat(children.Cast<IText>().Select(node => node.Data)));
+            InspectText(text, sink);
             if (text.Length <= 100)
             {
                 builder.Append(EscapeText(text)).Append("</").Append(name).Append(">\n");
@@ -116,6 +118,7 @@ public static partial class HtmlCanonicalizer
             }
             else if (child is IText text)
             {
+                InspectText(text.Data, sink);
                 builder.Append(indent).Append("  ").Append(EscapeText(CollapseWhitespace(text.Data))).Append('\n');
             }
         }
@@ -174,6 +177,18 @@ public static partial class HtmlCanonicalizer
         }
     }
 
+    /// <summary>
+    /// Pages sometimes print a URL as text (the <c>otpauth://</c> enrollment URI next to a QR
+    /// code); its query parameters carry the same roles as in a link.
+    /// </summary>
+    private static void InspectText(string text, TranscriptValueSink sink)
+    {
+        foreach (Match url in UrlInText().Matches(text))
+        {
+            sink.Inspect(url.Value);
+        }
+    }
+
     private static string Digest(string content)
         => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content.Replace("\r\n", "\n", StringComparison.Ordinal))))[..16].ToLowerInvariant();
 
@@ -191,6 +206,9 @@ public static partial class HtmlCanonicalizer
 
     [GeneratedRegex(@"\s+")]
     private static partial Regex Whitespace();
+
+    [GeneratedRegex(@"[a-z][a-z0-9+.\-]*://[^\s<>""']+", RegexOptions.IgnoreCase)]
+    private static partial Regex UrlInText();
 
     [GeneratedRegex(@"url=(?<url>\S+)", RegexOptions.IgnoreCase)]
     private static partial Regex MetaRefresh();

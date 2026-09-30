@@ -235,6 +235,20 @@ public sealed class ScrubberTests
     }
 
     [TestMethod]
+    public void Secrets_in_urls_printed_as_page_text_are_registered()
+    {
+        var sink = new TranscriptValueSink(new Scrubber());
+
+        var rendered = HtmlCanonicalizer.Render(
+            "<html><body><code>otpauth://totp/Lock:alice?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&amp;issuer=Lock</code><p>JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP</p></body></html>",
+            sink);
+
+        var scrubbed = sink.Scrubber.Scrub(rendered);
+        Assert.IsFalse(scrubbed.Contains("JBSWY3DPEHPK3PXP", StringComparison.Ordinal), scrubbed);
+        StringAssert.Contains(scrubbed, "{totp-secret#1}");
+    }
+
+    [TestMethod]
     public void Html_is_normalized_with_digests_for_inline_code_and_data_uris()
     {
         var sink = new TranscriptValueSink(new Scrubber());
