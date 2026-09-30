@@ -1,0 +1,56 @@
+<Project Sdk="Microsoft.NET.Sdk.Web" InitialTargets="ValidateSqlOSUnderTest">
+  <!--
+    The behavior-lock host. It references SqlOS in one of two modes, chosen with an MSBuild switch:
+
+      -p:SqlOSUnderTest=source   (default) ProjectReference to src/SqlOS
+      -p:SqlOSUnderTest=package  PackageReference SqlOS $(SqlOSBaselineVersion), default 7.2.1
+
+    Global properties flow to project references, so building or testing tests/SqlOS.BehaviorLock
+    with the switch selects the SqlOS assembly the whole suite runs against. Package mode defines
+    SQLOS_UNDER_TEST_PACKAGE so probes can keep compiling against the released API when a later
+    refactor layer changes a public signature on purpose (and records it in the behavior ledger).
+  -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>SqlOS.BehaviorLock.Host</RootNamespace>
+    <SqlOSUnderTest Condition="'$(SqlOSUnderTest)' == ''">source</SqlOSUnderTest>
+    <SqlOSBaselineVersion Condition="'$(SqlOSBaselineVersion)' == ''">7.2.1</SqlOSBaselineVersion>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(SqlOSUnderTest)' == 'package'">
+    <DefineConstants>$(DefineConstants);SQLOS_UNDER_TEST_PACKAGE</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>SqlOSUnderTest</_Parameter1>
+      <_Parameter2>$(SqlOSUnderTest)</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>SqlOSBaselineVersion</_Parameter1>
+      <_Parameter2>$(SqlOSBaselineVersion)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(SqlOSUnderTest)' == 'package'">
+    <PackageReference Include="SqlOS" Version="$(SqlOSBaselineVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(SqlOSUnderTest)' == 'source'">
+    <ProjectReference Include="..\..\src\SqlOS\SqlOS.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" Version="9.0.0" />
+  </ItemGroup>
+
+  <Target Name="ValidateSqlOSUnderTest">
+    <Error
+      Condition="'$(SqlOSUnderTest)' != 'source' AND '$(SqlOSUnderTest)' != 'package'"
+      Text="SqlOSUnderTest must be 'source' or 'package' (was '$(SqlOSUnderTest)')." />
+  </Target>
+</Project>

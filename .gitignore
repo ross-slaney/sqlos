@@ -128,3 +128,6 @@ TestResults/
 packages/headless/dist/
 packages/headless/coverage/
 *.tsbuildinfo
+
+## Verify approval tests (behavior lock)
+*.received.*
