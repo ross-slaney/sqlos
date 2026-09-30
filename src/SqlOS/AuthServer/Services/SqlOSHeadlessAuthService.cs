@@ -300,21 +300,21 @@ public sealed class SqlOSHeadlessAuthService
         var session = await RequireIssuerSessionService().TryGetSessionAsync(httpContext, cancellationToken)
             ?? throw new InvalidOperationException("Sign in before approving this device request.");
 
+        // The picked organization is authorized by the membership-checked completion and
+        // approval below. It is never written to the authorization request itself.
         if (!string.IsNullOrWhiteSpace(request.RequestId))
         {
             var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
-            if (!string.IsNullOrWhiteSpace(request.OrganizationId))
-            {
-                authorizationRequest.OrganizationId = request.OrganizationId;
-            }
+            SqlOSDeviceAuthorizationService.RequireDeviceAuthorizationRequest(authorizationRequest);
 
             if (string.IsNullOrWhiteSpace(authorizationRequest.ResolvedAuthMethod))
             {
-                var completion = await _authorizationServerService.CompleteAuthorizationRequestLoginAsync(
+                var completion = await _authorizationServerService.CompleteDeviceApprovalLoginAsync(
                     authorizationRequest,
                     session.User,
                     session.AuthenticationMethod,
                     httpContext,
+                    request.OrganizationId,
                     cancellationToken);
                 if (completion.RequiresMfa || completion.RequiresOrganizationSelection)
                 {
@@ -329,11 +329,12 @@ public sealed class SqlOSHeadlessAuthService
                     ?? throw new InvalidOperationException("Sign in before approving this device request.");
             }
 
-            var requestResolved = await RequireDeviceAuthorizationService().ApproveAsync(
+            var requestResolved = await RequireDeviceAuthorizationService().ApproveAuthorizationRequestAsync(
                 authorizationRequest,
                 session.User,
                 session.AuthenticationMethod,
                 httpContext,
+                request.OrganizationId,
                 cancellationToken);
 
             if (requestResolved.RequiresOrganizationSelection)
@@ -368,16 +369,13 @@ public sealed class SqlOSHeadlessAuthService
             userCode,
             "headless",
             cancellationToken);
-        if (!string.IsNullOrWhiteSpace(request.OrganizationId))
-        {
-            standaloneRequest.OrganizationId = request.OrganizationId;
-        }
 
-        var standaloneCompletion = await _authorizationServerService.CompleteAuthorizationRequestLoginAsync(
+        var standaloneCompletion = await _authorizationServerService.CompleteDeviceApprovalLoginAsync(
             standaloneRequest,
             session.User,
             session.AuthenticationMethod,
             httpContext,
+            request.OrganizationId,
             cancellationToken);
         if (standaloneCompletion.RequiresMfa || standaloneCompletion.RequiresOrganizationSelection)
         {
@@ -390,11 +388,12 @@ public sealed class SqlOSHeadlessAuthService
 
         session = await RequireIssuerSessionService().TryGetSessionAsync(httpContext, cancellationToken)
             ?? throw new InvalidOperationException("Sign in before approving this device request.");
-        var resolved = await RequireDeviceAuthorizationService().ApproveAsync(
+        var resolved = await RequireDeviceAuthorizationService().ApproveAuthorizationRequestAsync(
             standaloneRequest,
             session.User,
             session.AuthenticationMethod,
             httpContext,
+            request.OrganizationId,
             cancellationToken);
         if (resolved.RequiresOrganizationSelection)
         {
@@ -494,18 +493,7 @@ public sealed class SqlOSHeadlessAuthService
         var discovery = await _discoveryService.DiscoverAsync(new SqlOSHomeRealmDiscoveryRequest(email), cancellationToken);
 
         authorizationRequest.LoginHintEmail = email;
-        if (!string.IsNullOrWhiteSpace(discovery.OrganizationId))
-        {
-            authorizationRequest.OrganizationId = discovery.OrganizationId;
-            authorizationRequest.ResolvedOrganizationId = discovery.OrganizationId;
-        }
-
-        if (!string.IsNullOrWhiteSpace(discovery.ConnectionId))
-        {
-            authorizationRequest.ConnectionId = discovery.ConnectionId;
-            authorizationRequest.ResolvedConnectionId = discovery.ConnectionId;
-        }
-
+        SqlOSHomeRealmDiscoveryService.BindToAuthorizationRequest(authorizationRequest, discovery);
         await _context.SaveChangesAsync(cancellationToken);
 
         if (string.Equals(discovery.Mode, "sso", StringComparison.Ordinal)
@@ -2020,18 +2008,7 @@ public sealed class SqlOSHeadlessAuthService
     {
         var discovery = await _discoveryService.DiscoverAsync(new SqlOSHomeRealmDiscoveryRequest(email), cancellationToken);
         authorizationRequest.LoginHintEmail = email;
-        if (!string.IsNullOrWhiteSpace(discovery.OrganizationId))
-        {
-            authorizationRequest.OrganizationId = discovery.OrganizationId;
-            authorizationRequest.ResolvedOrganizationId = discovery.OrganizationId;
-        }
-
-        if (!string.IsNullOrWhiteSpace(discovery.ConnectionId))
-        {
-            authorizationRequest.ConnectionId = discovery.ConnectionId;
-            authorizationRequest.ResolvedConnectionId = discovery.ConnectionId;
-        }
-
+        SqlOSHomeRealmDiscoveryService.BindToAuthorizationRequest(authorizationRequest, discovery);
         await _context.SaveChangesAsync(cancellationToken);
 
         if (string.Equals(discovery.Mode, "sso", StringComparison.Ordinal)

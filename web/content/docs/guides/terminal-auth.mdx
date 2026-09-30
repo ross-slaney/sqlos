@@ -135,6 +135,8 @@ Always leave the URL visible. Browser launch commonly fails in containers, remot
 
 The complete verification URI opens `/sqlos/auth/device?user_code=...`. SqlOS resolves the code, runs the configured sign-in and tenant-selection flow, then shows the client name, requested access, resource, expiration, and approve or deny actions.
 
+The hosted and headless approve actions accept only device authorization requests. An organization picked on the approval page is checked against the signed-in user's active memberships, MFA policy, and application access before the device is approved into it; a pick the user does not belong to fails and leaves the request unchanged.
+
 The CLI should remain useful while it waits: explain that authentication continues in the browser and let the user cancel locally. Do not ask them to paste the browser result back into the terminal.
 
 For a custom sign-in UI, configure [headless auth](/docs/guides/custom-login-ui) and reuse the device-bound request. Do not build a separate credential pipeline just for the CLI.

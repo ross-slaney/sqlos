@@ -202,6 +202,8 @@ SCIM remains the right control for who is in the organization. After SCIM create
 
 Denied first-links are audited as `user.login.saml.link_denied` with a reason code and connection id. Assertion attributes, email addresses, and NameIDs are not written to the audit payload.
 
+A SAML connection only signs users into its own organization. The ACS resolves, links, JIT-provisions, and completes sign-in in the connection's organization, never in an organization the authorization request names. If the request is bound to a different organization, SqlOS rejects the response with the generic external sign-in error before it consumes the assertion, writes nothing else, and audits `user.login.saml.request_denied` with reason `organization_mismatch`.
+
 **Migration:** identities already stored in `SqlOSExternalIdentities` keep working through subject lookup. New first-time email links of existing users fail closed until the organization owns the asserted domain. Review unexpected connection-subject bindings if a tenant admin may have linked another organization's users before this change.
 
 JIT provisioning never reactivates an existing inactive membership, and SAML callbacks reject inactive users and inactive organizations. This preserves offboarding even when the IdP still sends a valid assertion for a previously linked subject. Re-enable the user or membership through an explicit trusted workflow before allowing another SAML login.

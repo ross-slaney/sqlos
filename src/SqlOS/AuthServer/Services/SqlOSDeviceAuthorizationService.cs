@@ -14,6 +14,7 @@ public sealed class SqlOSDeviceAuthorizationService
     public const string PendingStatus = "pending";
     public const string ApprovedStatus = "approved";
     public const string DeniedStatus = "denied";
+    internal const string InvalidDeviceAuthorizationRequestMessage = "Device authorization request is invalid or expired.";
 
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSAdminService _adminService;
@@ -222,11 +223,32 @@ public sealed class SqlOSDeviceAuthorizationService
             organizations);
     }
 
-    public async Task<SqlOSDeviceAuthorizationResolveResult> ApproveAsync(
+    public Task<SqlOSDeviceAuthorizationResolveResult> ApproveAsync(
         SqlOSAuthorizationRequest authorizationRequest,
         SqlOSUser user,
         string authenticationMethod,
         HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+        => ApproveAuthorizationRequestAsync(
+            authorizationRequest,
+            user,
+            authenticationMethod,
+            httpContext,
+            selectedOrganizationId: null,
+            cancellationToken);
+
+    /// <summary>
+    /// Approves the device authorization bound to <paramref name="authorizationRequest"/>.
+    /// An organization the approver picked on the approval page is passed straight to the
+    /// membership-, MFA-, and application-access-checked approval below. It is never written
+    /// to the authorization request, so a rejected pick leaves the request unchanged.
+    /// </summary>
+    internal async Task<SqlOSDeviceAuthorizationResolveResult> ApproveAuthorizationRequestAsync(
+        SqlOSAuthorizationRequest authorizationRequest,
+        SqlOSUser user,
+        string authenticationMethod,
+        HttpContext httpContext,
+        string? selectedOrganizationId,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(authorizationRequest.ResolvedAuthMethod)
@@ -238,7 +260,9 @@ public sealed class SqlOSDeviceAuthorizationService
         var resolved = await ApproveAsync(
             new SqlOSDeviceAuthorizationApprovalRequest(
                 (await GetRequiredByAuthorizationRequestAsync(authorizationRequest, cancellationToken)).UserCode,
-                authorizationRequest.ResolvedOrganizationId),
+                string.IsNullOrWhiteSpace(selectedOrganizationId)
+                    ? authorizationRequest.ResolvedOrganizationId
+                    : selectedOrganizationId),
             user,
             authenticationMethod,
             httpContext,
@@ -694,6 +718,22 @@ public sealed class SqlOSDeviceAuthorizationService
             deviceAuthorization.Status,
             requiresOrganizationSelection,
             organizations);
+
+    internal static bool IsDeviceAuthorizationRequest(SqlOSAuthorizationRequest authorizationRequest)
+        => !string.IsNullOrWhiteSpace(authorizationRequest.DeviceAuthorizationId);
+
+    /// <summary>
+    /// Device approval routes accept only authorization requests created for a device
+    /// authorization. Any other request is rejected before it is touched, so an interactive
+    /// request cannot be re-bound or advanced through the device approval surface.
+    /// </summary>
+    internal static void RequireDeviceAuthorizationRequest(SqlOSAuthorizationRequest authorizationRequest)
+    {
+        if (!IsDeviceAuthorizationRequest(authorizationRequest))
+        {
+            throw new InvalidOperationException(InvalidDeviceAuthorizationRequestMessage);
+        }
+    }
 
     public static string NormalizeUserCode(string? code)
         => string.IsNullOrWhiteSpace(code)

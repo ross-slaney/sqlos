@@ -445,6 +445,7 @@ public static partial class EndpointRouteBuilderExtensions
                 if (!string.IsNullOrWhiteSpace(requestId))
                 {
                     authorizationRequest = await authorizationServerService.GetRequiredAuthorizationRequestAsync(requestId, cancellationToken);
+                    SqlOSDeviceAuthorizationService.RequireDeviceAuthorizationRequest(authorizationRequest);
                 }
                 else
                 {
@@ -454,18 +455,16 @@ public static partial class EndpointRouteBuilderExtensions
                         cancellationToken);
                 }
 
-                if (!string.IsNullOrWhiteSpace(organizationId))
-                {
-                    authorizationRequest.OrganizationId = organizationId;
-                }
-
+                // The picked organization is authorized by the membership-checked completion
+                // and approval below. It is never written to the request itself.
                 if (string.IsNullOrWhiteSpace(authorizationRequest.ResolvedAuthMethod))
                 {
-                    var completion = await authorizationServerService.CompleteAuthorizationRequestLoginAsync(
+                    var completion = await authorizationServerService.CompleteDeviceApprovalLoginAsync(
                         authorizationRequest,
                         session.User,
                         session.AuthenticationMethod,
                         context,
+                        organizationId,
                         cancellationToken);
                     if (completion.RequiresMfa || completion.RequiresOrganizationSelection)
                     {
@@ -483,11 +482,12 @@ public static partial class EndpointRouteBuilderExtensions
                         ?? throw new InvalidOperationException("Sign in before approving this device request.");
                 }
 
-                resolved = await deviceAuthorizationService.ApproveAsync(
+                resolved = await deviceAuthorizationService.ApproveAuthorizationRequestAsync(
                     authorizationRequest,
                     session.User,
                     session.AuthenticationMethod,
                     context,
+                    organizationId,
                     cancellationToken);
 
                 if (resolved.RequiresOrganizationSelection)
@@ -523,6 +523,23 @@ public static partial class EndpointRouteBuilderExtensions
                 var authorizationRequest = string.IsNullOrWhiteSpace(requestId)
                     ? null
                     : await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
+                if (authorizationRequest != null
+                    && !SqlOSDeviceAuthorizationService.IsDeviceAuthorizationRequest(authorizationRequest))
+                {
+                    // No device authorization to resolve: return to device code entry.
+                    return Html(await BuildAuthPageViewModelAsync(
+                        "device",
+                        null,
+                        null,
+                        await PublicAuthMessageAsync(context, ex, SqlOSPublicAuthErrorSurface.HostedPage, cancellationToken),
+                        null,
+                        null,
+                        authPrefix,
+                        authorizationServerService,
+                        cancellationToken),
+                        StatusCodes.Status400BadRequest);
+                }
+
                 var resolved = authorizationRequest == null
                     ? await deviceAuthorizationService.ResolveAsync(userCode, session.User, cancellationToken)
                     : await deviceAuthorizationService.ResolveAsync(authorizationRequest, session.User, cancellationToken);
@@ -599,18 +616,7 @@ public static partial class EndpointRouteBuilderExtensions
             if (authorizationRequest != null)
             {
                 authorizationRequest.LoginHintEmail = email;
-                if (!string.IsNullOrWhiteSpace(discovery.OrganizationId))
-                {
-                    authorizationRequest.OrganizationId = discovery.OrganizationId;
-                    authorizationRequest.ResolvedOrganizationId = discovery.OrganizationId;
-                }
-
-                if (!string.IsNullOrWhiteSpace(discovery.ConnectionId))
-                {
-                    authorizationRequest.ConnectionId = discovery.ConnectionId;
-                    authorizationRequest.ResolvedConnectionId = discovery.ConnectionId;
-                }
-
+                SqlOSHomeRealmDiscoveryService.BindToAuthorizationRequest(authorizationRequest, discovery);
                 await dbContext.SaveChangesAsync(cancellationToken);
             }
 
