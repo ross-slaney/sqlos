@@ -33,7 +33,7 @@ public sealed class CoverageGateTests
 
     /// <summary>
     /// Always passes. Writes the per-profile route inventory and the uncovered routes to
-    /// <c>TestResults/behavior-lock/</c> so the catalog can be split and tracked.
+    /// <c>TestResults/BehaviorLock/route-coverage/</c> so the catalog can be split and tracked.
     /// </summary>
     [TestMethod]
     public void Route_coverage_report()
@@ -63,7 +63,7 @@ public sealed class CoverageGateTests
             }
         }
 
-        var directory = RepositoryPaths.Combine("TestResults", "behavior-lock");
+        var directory = RepositoryPaths.Combine("TestResults", "BehaviorLock", "route-coverage");
         Directory.CreateDirectory(directory);
         File.WriteAllText(Path.Combine(directory, "route-coverage.md"), report.ToString());
         File.WriteAllLines(Path.Combine(directory, "uncovered-routes.txt"), missing.Select(route => $"{RouteSurfaces.Of(route)}\t{route.Route}"));
