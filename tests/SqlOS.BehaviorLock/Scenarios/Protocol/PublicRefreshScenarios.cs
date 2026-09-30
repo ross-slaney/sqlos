@@ -103,7 +103,7 @@ public sealed class PublicRefreshScenarios
     public async Task Refreshing_into_another_organization_switches_the_access_token_but_not_the_session()
     {
         await using var t = await Transcript.StartAsync(HostProfiles.Hosted);
-        var (alice, acme, globex, session) = await SignInToAcmeAsync(t);
+        var (alice, _, globex, session) = await SignInToAcmeAsync(t);
         var initech = await t.Setup.CreateOrganizationAsync("initech");
         var backend = t.NewClient("app-backend");
 
@@ -131,7 +131,7 @@ public sealed class PublicRefreshScenarios
     public async Task Revoking_an_organization_misses_sessions_refreshed_into_it_CurrentBehavior_KnownDefect_427()
     {
         await using var t = await Transcript.StartAsync(HostProfiles.Hosted);
-        var (alice, acme, globex, session) = await SignInToAcmeAsync(t);
+        var (_, _, globex, session) = await SignInToAcmeAsync(t);
         var backend = t.NewClient("app-backend");
         var toGlobex = t.ObserveTokens(
             await backend.PostJsonAsync("/sqlos/auth/token/refresh", new { refreshToken = session.RefreshToken, organizationId = globex.Id }),
