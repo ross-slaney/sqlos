@@ -1,0 +1,337 @@
+# SqlOS behavior lock transcript
+scenario: SsoPortalScenarios.The_portal_api_requires_a_live_portal_session
+profile: enterprise
+
+# A browser that never opened a setup link:
+
+## 1. visitor: state
+> GET /sqlos/admin/auth/sso-portal/api/state
+< 401 Unauthorized
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Portal session is invalid or expired."
+    }
+
+## 2. visitor: choose a provider
+> PUT /sqlos/admin/auth/sso-portal/api/provider
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "provider": "okta"
+>   }
+< 401 Unauthorized
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Portal session is invalid or expired."
+    }
+
+## 3. visitor: change the enrollment policy
+> PUT /sqlos/admin/auth/sso-portal/api/enrollment-policy
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "allowJitProvisioning": true,
+>     "requireSsoForExistingMembers": true
+>   }
+< 401 Unauthorized
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Portal session is invalid or expired."
+    }
+
+## 4. visitor: start domain verification
+> POST /sqlos/admin/auth/sso-portal/api/domain
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "domain": "acme.example.test"
+>   }
+< 401 Unauthorized
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Portal session is invalid or expired."
+    }
+
+## 5. visitor: confirm a domain
+> POST /sqlos/admin/auth/sso-portal/api/domains/{dom#1}/confirm
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {}
+< 401 Unauthorized
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Portal session is invalid or expired."
+    }
+
+## 6. visitor: validate metadata
+> POST /sqlos/admin/auth/sso-portal/api/metadata/validate
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "metadataXml": "<md:EntityDescriptor/>"
+>   }
+< 401 Unauthorized
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Portal session is invalid or expired."
+    }
+
+## 7. visitor: import metadata
+> POST /sqlos/admin/auth/sso-portal/api/metadata
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "metadataXml": "<md:EntityDescriptor/>"
+>   }
+< 401 Unauthorized
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Portal session is invalid or expired."
+    }
+
+## 8. visitor: activate
+> POST /sqlos/admin/auth/sso-portal/api/activate
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {}
+< 401 Unauthorized
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Portal session is invalid or expired."
+    }
+
+## 9. visitor: disable
+> POST /sqlos/admin/auth/sso-portal/api/disable
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {}
+< 401 Unauthorized
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Portal session is invalid or expired."
+    }
+
+## 10. visitor: sign out the organization's sessions
+> POST /sqlos/admin/auth/sso-portal/api/organization-sessions/revoke
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "confirm": true
+>   }
+< 401 Unauthorized
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Portal session is invalid or expired."
+    }
+
+## 11. visitor: test
+> POST /sqlos/admin/auth/sso-portal/api/test
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {}
+< 401 Unauthorized
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Portal session is invalid or expired."
+    }
+
+## 12. visitor: sign out with no session still succeeds
+> POST /sqlos/admin/auth/sso-portal/api/signout
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {}
+< 204 No Content
+< Set-Cookie: sqlos_sso_portal=; expires={unix-epoch}; path=/sqlos/admin/auth/sso-portal; secure; samesite=lax; httponly
+
+## 13. customer-admin: an opened portal session works
+> GET /sqlos/admin/auth/sso-portal/api/state
+> Cookie: sqlos_sso_portal={cookie#1}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowedActions": {
+        "canActivate": false,
+        "canConfirmDomainVerification": false,
+        "canDisable": false,
+        "canImportMetadata": true,
+        "canRevokeOrganizationSessions": false,
+        "canSelectProvider": true,
+        "canSignOut": true,
+        "canStartDomainVerification": true,
+        "canTest": false,
+        "canUpdateEnrollmentPolicy": true,
+        "canValidateMetadata": true
+      },
+      "assertionConsumerServiceUrl": "https://sqlos.example.test/sqlos/auth/saml/acs/{sso#1}",
+      "connection": {
+        "autoLinkByEmail": true,
+        "autoProvisionUsers": false,
+        "createdAt": "{datetime:unspecified}",
+        "displayName": "Acme SSO",
+        "enrollmentPolicy": {
+          "allowJitProvisioning": false,
+          "requireSsoForExistingMembers": true
+        },
+        "id": "{sso#1}",
+        "identityProviderEntityId": null,
+        "isEnabled": false,
+        "setupStatus": "draft",
+        "singleSignOnUrl": null,
+        "updatedAt": "{datetime:unspecified}"
+      },
+      "domain": null,
+      "latestTest": null,
+      "organization": {
+        "id": "{org#1}",
+        "name": "Acme",
+        "primaryDomain": null,
+        "slug": "{slug:acme}"
+      },
+      "provider": null,
+      "providers": [
+        {
+          "acsUrlLabel": "Reply URL (ACS URL)",
+          "entityIdLabel": "Identifier (Entity ID)",
+          "key": "microsoft-entra",
+          "label": "Microsoft Entra",
+          "metadataLabel": "Federation Metadata XML",
+          "steps": [
+            "Create an Enterprise Application, then choose SAML as the single sign-on method.",
+            "Paste the SP Entity ID into Identifier and the ACS URL into Reply URL.",
+            "Download or copy the Federation Metadata XML and import it here.",
+            "Review the IdP Entity ID and SSO URL, activate the connection, then test sign-in."
+          ]
+        },
+        {
+          "acsUrlLabel": "Single sign-on URL",
+          "entityIdLabel": "Audience URI (SP Entity ID)",
+          "key": "okta",
+          "label": "Okta",
+          "metadataLabel": "IdP metadata",
+          "steps": [
+            "Create a SAML 2.0 application integration in Okta.",
+            "Use the ACS URL as Single sign-on URL and the SP Entity ID as Audience URI.",
+            "Set Name ID format to EmailAddress and map email, first_name, and last_name attributes.",
+            "Copy the IdP metadata XML into this portal, activate, and run a test."
+          ]
+        },
+        {
+          "acsUrlLabel": "ACS URL",
+          "entityIdLabel": "Entity ID",
+          "key": "google-workspace",
+          "label": "Google Workspace",
+          "metadataLabel": "IdP metadata",
+          "steps": [
+            "Create a custom SAML app in Google Admin Console.",
+            "Paste the ACS URL and Entity ID from this page into the service provider details.",
+            "Download Google IdP metadata and import it here.",
+            "Activate the connection and verify that a user in the primary domain routes to SSO."
+          ]
+        },
+        {
+          "acsUrlLabel": "ACS URL",
+          "entityIdLabel": "SP Entity ID",
+          "key": "generic-saml",
+          "label": "Generic SAML",
+          "metadataLabel": "SAML metadata XML",
+          "steps": [
+            "Create a SAML application in your identity provider.",
+            "Use the SP Entity ID and ACS URL shown here as the service provider values.",
+            "Export IdP metadata with a signing certificate and HTTP-Redirect or HTTP-POST SSO endpoint.",
+            "Import metadata, activate the connection, and run a test from a matching email domain."
+          ]
+        }
+      ],
+      "serviceProviderEntityId": "https://sqlos.example.test/sqlos/auth"
+    }
+
+## 14. operator: the operator revokes it
+> POST /sqlos/admin/auth/api/sso-portal/sessions/{ssp#1}/revoke
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "reason": "offboarded"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "connectionId": "{sso#1}",
+      "createdAt": "{datetime:unspecified}",
+      "expiresAt": "{datetime:unspecified}",
+      "id": "{ssp#1}",
+      "lastSeenAt": "{datetime:unspecified}",
+      "openedAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "organizationName": "Acme",
+      "portalUrl": "https://sqlos.example.test/sqlos/admin/auth/sso-portal",
+      "primaryDomain": null,
+      "provider": null,
+      "revokedAt": "{datetime:utc-z}",
+      "revokedReason": "offboarded",
+      "setupUrl": null,
+      "status": "revoked"
+    }
+
+## 15. customer-admin: the revoked session is refused and its cookie cleared
+> GET /sqlos/admin/auth/sso-portal/api/state
+> Cookie: sqlos_sso_portal={cookie#1}
+< 401 Unauthorized
+< Content-Type: application/json; charset=utf-8
+< Set-Cookie: sqlos_sso_portal=; expires={unix-epoch}; path=/sqlos/admin/auth/sso-portal; secure; samesite=lax; httponly
+    {
+      "message": "Portal session is invalid or expired."
+    }
+
+## 16. customer-admin: the browser no longer sends a portal cookie
+> GET /sqlos/admin/auth/sso-portal/api/state
+< 401 Unauthorized
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Portal session is invalid or expired."
+    }
+
+## 17. visitor: a forged portal cookie is refused and cleared
+> GET /sqlos/admin/auth/sso-portal/api/state
+> Cookie: sqlos_sso_portal=forged-session-value
+< 401 Unauthorized
+< Content-Type: application/json; charset=utf-8
+< Set-Cookie: sqlos_sso_portal=; expires={unix-epoch}; path=/sqlos/admin/auth/sso-portal; secure; samesite=lax; httponly
+    {
+      "message": "Portal session is invalid or expired."
+    }
+
+## audit: only the operator's revocation is audited
+  - {
+      "action": "sso.portal.session.revoked",
+      "actor": {
+        "displayName": null,
+        "id": "{ssp#1}",
+        "type": "sso_portal"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "sso.portal.session.revoked",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "Id": "{ssp#1}",
+        "RevokedReason": "offboarded"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

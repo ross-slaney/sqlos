@@ -1,0 +1,339 @@
+# SqlOS behavior lock transcript
+scenario: SsoPortalScenarios.Activating_sso_can_sign_out_the_organizations_existing_sessions
+profile: enterprise
+
+# Before SSO existed, Legacy (an Acme member whose address at Acme's domain was never verified) signed in with a password.
+
+## 1. employee: Ivan signs in through Acme's IdP
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#1}
+>   RelayState={relay-state#1}
+< 302 Found
+< Location: https://sqlos.example.test/auth/callback?code={code#1}&state={state#1}&scope=openid%20profile%20email%20offline_access
+< Set-Cookie: sqlos_auth_page={cookie#2}; expires=+7d; path=/; secure; samesite=lax; httponly
+
+## 2. client: redeem Ivan's code
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=authorization_code
+>   code={code#1}
+>   client_id=behavior-lock-app
+>   redirect_uri=https://sqlos.example.test/auth/callback
+>   code_verifier={pkce-verifier#1}
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "access_token": "{access-token#1}",
+      "expires_in": ~600,
+      "id_token": "{id-token#1}",
+      "refresh_token": "{refresh-token#1}",
+      "scope": "openid profile email offline_access",
+      "token_type": "Bearer"
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "saml"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:ivan}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "org_id": "{org#1}",
+      "scope": "openid profile email offline_access",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+  jwt {id-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "JWT"
+    }
+    claims: {
+      "amr": [
+        "saml"
+      ],
+      "at_hash": "{hash#1}",
+      "aud": "behavior-lock-app",
+      "auth_time": {epoch},
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nonce": "{nonce#1}",
+      "org_id": "{org#1}",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=5m
+
+## 3. employee: Ivan's browser session signs him in silently
+> GET /sqlos/auth/authorize?response_type=code&client_id=behavior-lock-app&redirect_uri=https%3A%2F%2Fsqlos.example.test%2Fauth%2Fcallback&scope=openid%20profile%20email%20offline_access&state={state#2}&nonce={nonce#2}&code_challenge={pkce-challenge#1}&code_challenge_method=S256
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}; sqlos_auth_page={cookie#2}
+< 302 Found
+< Location: https://sqlos.example.test/auth/callback?code={code#2}&state={state#2}&scope=openid%20profile%20email%20offline_access
+< Set-Cookie: sqlos_auth_page={cookie#3}; expires=+7d; path=/; secure; samesite=lax; httponly
+
+## 4. customer-admin: revoking without confirmation
+> POST /sqlos/admin/auth/sso-portal/api/organization-sessions/revoke
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_sso_portal={cookie#4}
+> Origin: https://sqlos.example.test
+> X-SqlOS-Request: 1
+>   {
+>     "confirm": false
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Confirm session revocation before signing out existing sessions."
+    }
+
+## 5. customer-admin: confirm: sign out everyone at Acme's verified domain
+> POST /sqlos/admin/auth/sso-portal/api/organization-sessions/revoke
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_sso_portal={cookie#4}
+> Origin: https://sqlos.example.test
+> X-SqlOS-Request: 1
+>   {
+>     "confirm": true
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "connectionId": "{sso#1}",
+      "domain": "{domain:acme}",
+      "organizationId": "{org#1}",
+      "revokedAt": "{datetime:utc-z}",
+      "revokedSessions": 1
+    }
+
+## 6. client: Ivan's refresh token is revoked
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=refresh_token
+>   refresh_token={refresh-token#1}
+>   client_id=behavior-lock-app
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "error": "invalid_grant",
+      "error_description": "The authorization grant is invalid or expired."
+    }
+
+## 7. employee: his browser session no longer signs him in
+> GET /sqlos/auth/authorize?response_type=code&client_id=behavior-lock-app&redirect_uri=https%3A%2F%2Fsqlos.example.test%2Fauth%2Fcallback&scope=openid%20profile%20email%20offline_access&state={state#3}&nonce={nonce#3}&code_challenge={pkce-challenge#2}&code_challenge_method=S256
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}; sqlos_auth_page={cookie#3}
+< 200 OK
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#1}'; style-src 'self' 'nonce-{csp-nonce#1}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+< Set-Cookie: sqlos_auth_page=; expires={unix-epoch}; path=/; secure; samesite=lax; httponly
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Behavior Lock</title>
+        <style nonce="{csp-nonce#1}">{style-sha256:80d77a550f3a606a}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Behavior Lock</h1>
+                <p class="brand-subtitle">Secure your app-owned AI and MCP experiences with SqlOS.</p>
+              </div>
+              <div class="messages"></div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <form class="auth-form" method="post" action="/sqlos/auth/login/identify" data-flow-kind="hrd">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#1}" />
+                    <input type="hidden" name="requestId" value="{req#1}" />
+                    <label class="field">
+                      <span>Email</span>
+                      <input name="email" type="email" value="" placeholder="Your email address" autocomplete="email" required="" />
+                    </label>
+                    <button class="primary-action" type="submit" data-loading-label="Checking email">
+                      <span class="button-label">Continue</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                    <div class="flow-status" hidden="">
+                      <span class="loader loader-sm" aria-hidden="true"></span>
+                      <span>Checking your sign-in method...</span>
+                    </div>
+                  </form>
+                  <p class="footer-prompt">
+                    Don't have an account?
+                    <a class="secondary-link" href="/sqlos/auth/signup?request={req#1}">Get started</a>
+                  </p>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#1}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+
+## 8. client: Legacy's session was not in scope: its unverified address is not proof of the domain
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=refresh_token
+>   refresh_token={refresh-token#2}
+>   client_id=behavior-lock-app
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "access_token": "{access-token#2}",
+      "expires_in": ~600,
+      "id_token": "{id-token#2}",
+      "refresh_token": "{refresh-token#3}",
+      "scope": "openid profile email offline_access",
+      "token_type": "Bearer"
+    }
+  jwt {access-token#2}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:legacy}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "org_id": "{org#1}",
+      "scope": "openid profile email offline_access",
+      "sid": "{ses#2}",
+      "sub": "{usr:legacy}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+  jwt {id-token#2}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "JWT"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "at_hash": "{hash#2}",
+      "aud": "behavior-lock-app",
+      "auth_time": {epoch},
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "org_id": "{org#1}",
+      "sid": "{ses#2}",
+      "sub": "{usr:legacy}"
+    }
+    lifetimes: exp-iat=5m
+
+## audit: the organization sign-out
+  - {
+      "action": "sso.portal.organization_sessions.revoked",
+      "actor": {
+        "displayName": null,
+        "id": "{ssp#1}",
+        "type": "sso_portal"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "sso.portal.organization_sessions.revoked",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "connectionId": "{sso#1}",
+        "domain": "{domain:acme}",
+        "invalidatedAuthPageSessions": 2,
+        "revokedSessions": 1
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "Refresh token is no longer valid.",
+        "error": "invalid_grant",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The authorization grant is invalid or expired.",
+        "surface": "OAuthToken"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

@@ -1,0 +1,355 @@
+# SqlOS behavior lock transcript
+scenario: SsoPortalValidationScenarios.An_organization_with_only_an_unverified_primary_domain_can_activate_but_not_sign_sessions_out
+profile: enterprise
+
+# Acme was created with PrimaryDomain {domain:legacy}, which it never verified.
+
+## 1. customer-admin: import metadata
+> POST /sqlos/admin/auth/sso-portal/api/metadata
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_sso_portal={cookie#1}
+> Origin: https://sqlos.example.test
+> X-SqlOS-Request: 1
+>   {
+>     "metadataXml": "<md:EntityDescriptor xmlns:md=\"urn:oasis:names:tc:SAML:2.0:metadata\" xmlns:ds=\"http://www.w3.org/2000/09/xmldsig#\" entityID=\"urn:behavior-lock:idp\">\n  <md:IDPSSODescriptor protocolSupportEnumeration=\"urn:oasis:names:tc:SAML:2.0:protocol\">\n    <md:KeyDescriptor use=\"signing\">\n      <ds:KeyInfo><ds:X509Data><ds:X509Certificate>{saml-certificate#1}</ds:X509Certificate></ds:X509Data></ds:KeyInfo>\n    </md:KeyDescriptor>\n    <md:SingleSignOnService Binding=\"urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect\" Location=\"https://idp.example.test/sso\" />\n  </md:IDPSSODescriptor>\n</md:EntityDescriptor>"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowedActions": {
+        "canActivate": true,
+        "canConfirmDomainVerification": false,
+        "canDisable": false,
+        "canImportMetadata": true,
+        "canRevokeOrganizationSessions": false,
+        "canSelectProvider": true,
+        "canSignOut": true,
+        "canStartDomainVerification": true,
+        "canTest": false,
+        "canUpdateEnrollmentPolicy": true,
+        "canValidateMetadata": true
+      },
+      "assertionConsumerServiceUrl": "https://sqlos.example.test/sqlos/auth/saml/acs/{sso#1}",
+      "connection": {
+        "autoLinkByEmail": true,
+        "autoProvisionUsers": false,
+        "createdAt": "{datetime:unspecified}",
+        "displayName": "Acme SSO",
+        "enrollmentPolicy": {
+          "allowJitProvisioning": false,
+          "requireSsoForExistingMembers": true
+        },
+        "id": "{sso#1}",
+        "identityProviderEntityId": "urn:behavior-lock:idp",
+        "isEnabled": false,
+        "setupStatus": "ready_to_activate",
+        "singleSignOnUrl": "https://idp.example.test/sso",
+        "updatedAt": "{datetime:utc-z}"
+      },
+      "domain": null,
+      "latestTest": null,
+      "organization": {
+        "id": "{org#1}",
+        "name": "Acme",
+        "primaryDomain": "{domain:legacy}",
+        "slug": "{slug:acme}"
+      },
+      "provider": null,
+      "providers": [
+        {
+          "acsUrlLabel": "Reply URL (ACS URL)",
+          "entityIdLabel": "Identifier (Entity ID)",
+          "key": "microsoft-entra",
+          "label": "Microsoft Entra",
+          "metadataLabel": "Federation Metadata XML",
+          "steps": [
+            "Create an Enterprise Application, then choose SAML as the single sign-on method.",
+            "Paste the SP Entity ID into Identifier and the ACS URL into Reply URL.",
+            "Download or copy the Federation Metadata XML and import it here.",
+            "Review the IdP Entity ID and SSO URL, activate the connection, then test sign-in."
+          ]
+        },
+        {
+          "acsUrlLabel": "Single sign-on URL",
+          "entityIdLabel": "Audience URI (SP Entity ID)",
+          "key": "okta",
+          "label": "Okta",
+          "metadataLabel": "IdP metadata",
+          "steps": [
+            "Create a SAML 2.0 application integration in Okta.",
+            "Use the ACS URL as Single sign-on URL and the SP Entity ID as Audience URI.",
+            "Set Name ID format to EmailAddress and map email, first_name, and last_name attributes.",
+            "Copy the IdP metadata XML into this portal, activate, and run a test."
+          ]
+        },
+        {
+          "acsUrlLabel": "ACS URL",
+          "entityIdLabel": "Entity ID",
+          "key": "google-workspace",
+          "label": "Google Workspace",
+          "metadataLabel": "IdP metadata",
+          "steps": [
+            "Create a custom SAML app in Google Admin Console.",
+            "Paste the ACS URL and Entity ID from this page into the service provider details.",
+            "Download Google IdP metadata and import it here.",
+            "Activate the connection and verify that a user in the primary domain routes to SSO."
+          ]
+        },
+        {
+          "acsUrlLabel": "ACS URL",
+          "entityIdLabel": "SP Entity ID",
+          "key": "generic-saml",
+          "label": "Generic SAML",
+          "metadataLabel": "SAML metadata XML",
+          "steps": [
+            "Create a SAML application in your identity provider.",
+            "Use the SP Entity ID and ACS URL shown here as the service provider values.",
+            "Export IdP metadata with a signing certificate and HTTP-Redirect or HTTP-POST SSO endpoint.",
+            "Import metadata, activate the connection, and run a test from a matching email domain."
+          ]
+        }
+      ],
+      "serviceProviderEntityId": "https://sqlos.example.test/sqlos/auth"
+    }
+
+## 2. customer-admin: activation accepts the unverified primary domain
+> POST /sqlos/admin/auth/sso-portal/api/activate
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_sso_portal={cookie#1}
+> Origin: https://sqlos.example.test
+> X-SqlOS-Request: 1
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowedActions": {
+        "canActivate": false,
+        "canConfirmDomainVerification": false,
+        "canDisable": true,
+        "canImportMetadata": true,
+        "canRevokeOrganizationSessions": false,
+        "canSelectProvider": true,
+        "canSignOut": true,
+        "canStartDomainVerification": true,
+        "canTest": true,
+        "canUpdateEnrollmentPolicy": true,
+        "canValidateMetadata": true
+      },
+      "assertionConsumerServiceUrl": "https://sqlos.example.test/sqlos/auth/saml/acs/{sso#1}",
+      "connection": {
+        "autoLinkByEmail": true,
+        "autoProvisionUsers": false,
+        "createdAt": "{datetime:unspecified}",
+        "displayName": "Acme SSO",
+        "enrollmentPolicy": {
+          "allowJitProvisioning": false,
+          "requireSsoForExistingMembers": true
+        },
+        "id": "{sso#1}",
+        "identityProviderEntityId": "urn:behavior-lock:idp",
+        "isEnabled": true,
+        "setupStatus": "active",
+        "singleSignOnUrl": "https://idp.example.test/sso",
+        "updatedAt": "{datetime:utc-z}"
+      },
+      "domain": null,
+      "latestTest": null,
+      "organization": {
+        "id": "{org#1}",
+        "name": "Acme",
+        "primaryDomain": "{domain:legacy}",
+        "slug": "{slug:acme}"
+      },
+      "provider": null,
+      "providers": [
+        {
+          "acsUrlLabel": "Reply URL (ACS URL)",
+          "entityIdLabel": "Identifier (Entity ID)",
+          "key": "microsoft-entra",
+          "label": "Microsoft Entra",
+          "metadataLabel": "Federation Metadata XML",
+          "steps": [
+            "Create an Enterprise Application, then choose SAML as the single sign-on method.",
+            "Paste the SP Entity ID into Identifier and the ACS URL into Reply URL.",
+            "Download or copy the Federation Metadata XML and import it here.",
+            "Review the IdP Entity ID and SSO URL, activate the connection, then test sign-in."
+          ]
+        },
+        {
+          "acsUrlLabel": "Single sign-on URL",
+          "entityIdLabel": "Audience URI (SP Entity ID)",
+          "key": "okta",
+          "label": "Okta",
+          "metadataLabel": "IdP metadata",
+          "steps": [
+            "Create a SAML 2.0 application integration in Okta.",
+            "Use the ACS URL as Single sign-on URL and the SP Entity ID as Audience URI.",
+            "Set Name ID format to EmailAddress and map email, first_name, and last_name attributes.",
+            "Copy the IdP metadata XML into this portal, activate, and run a test."
+          ]
+        },
+        {
+          "acsUrlLabel": "ACS URL",
+          "entityIdLabel": "Entity ID",
+          "key": "google-workspace",
+          "label": "Google Workspace",
+          "metadataLabel": "IdP metadata",
+          "steps": [
+            "Create a custom SAML app in Google Admin Console.",
+            "Paste the ACS URL and Entity ID from this page into the service provider details.",
+            "Download Google IdP metadata and import it here.",
+            "Activate the connection and verify that a user in the primary domain routes to SSO."
+          ]
+        },
+        {
+          "acsUrlLabel": "ACS URL",
+          "entityIdLabel": "SP Entity ID",
+          "key": "generic-saml",
+          "label": "Generic SAML",
+          "metadataLabel": "SAML metadata XML",
+          "steps": [
+            "Create a SAML application in your identity provider.",
+            "Use the SP Entity ID and ACS URL shown here as the service provider values.",
+            "Export IdP metadata with a signing certificate and HTTP-Redirect or HTTP-POST SSO endpoint.",
+            "Import metadata, activate the connection, and run a test from a matching email domain."
+          ]
+        }
+      ],
+      "serviceProviderEntityId": "https://sqlos.example.test/sqlos/auth"
+    }
+
+## 3. customer-admin: a test sign-in without a PKCE challenge
+> POST /sqlos/admin/auth/sso-portal/api/test
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_sso_portal={cookie#1}
+> Origin: https://sqlos.example.test
+> X-SqlOS-Request: 1
+>   {
+>     "clientId": "behavior-lock-app",
+>     "redirectUri": "https://sqlos.example.test/auth/callback",
+>     "state": "portal-test-state"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "SAML authorization requires an S256 PKCE code challenge."
+    }
+
+## 4. customer-admin: signing out sessions needs a verified domain
+> POST /sqlos/admin/auth/sso-portal/api/organization-sessions/revoke
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_sso_portal={cookie#1}
+> Origin: https://sqlos.example.test
+> X-SqlOS-Request: 1
+>   {
+>     "confirm": true
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Verify an SSO domain before signing out existing sessions."
+    }
+
+## audit: metadata import and activation
+  - {
+      "action": "saml.connection.metadata-imported",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "saml.connection.metadata-imported",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "Id": "{sso#1}",
+        "IdentityProviderEntityId": "urn:behavior-lock:idp"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "sso.portal.metadata.imported",
+      "actor": {
+        "displayName": null,
+        "id": "{ssp#1}",
+        "type": "sso_portal"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "sso.portal.metadata.imported",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "connectionId": "{sso#1}",
+        "identityProviderEntityId": "urn:behavior-lock:idp",
+        "singleSignOnUrl": "https://idp.example.test/sso"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "sso.portal.connection.activated",
+      "actor": {
+        "displayName": null,
+        "id": "{ssp#1}",
+        "type": "sso_portal"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "sso.portal.connection.activated",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "connectionId": "{sso#1}"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
