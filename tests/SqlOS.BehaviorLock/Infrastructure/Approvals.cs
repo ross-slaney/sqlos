@@ -19,7 +19,7 @@ namespace SqlOS.BehaviorLock.Infrastructure;
 /// released package.</item>
 /// </list>
 /// </summary>
-public static class Approvals
+public static partial class Approvals
 {
     public const string AcceptEnvironmentVariable = "BEHAVIOR_LOCK_ACCEPT";
     public const string DiffEnvironmentVariable = "BEHAVIOR_LOCK_DIFF";
@@ -71,6 +71,9 @@ public static class Approvals
     /// <summary>Approves <paramref name="text"/> as <c>{directory}/{name}.verified.txt</c>.</summary>
     public static async Task VerifyAsync(string directory, string name, string text)
     {
+        // Approved files live in git; trailing whitespace is never meaningful in rendered output
+        // and would fail `git diff --check`.
+        text = TrailingWhitespace().Replace(text.ReplaceLineEndings("\n"), string.Empty);
         var approved = Path.Combine(directory, name + ".verified.txt");
         if (SqlOSUnderTest.IsPackage && BehaviorLedger.Load().Lists(approved))
         {
@@ -122,6 +125,9 @@ public static class Approvals
     }
 
     private static string Normalize(string text) => text.Replace("\r\n", "\n", StringComparison.Ordinal);
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"[ \t]+(?=\n|$)")]
+    private static partial System.Text.RegularExpressions.Regex TrailingWhitespace();
 
     private static bool IsSet(string variable)
         => Environment.GetEnvironmentVariable(variable) is { } value
