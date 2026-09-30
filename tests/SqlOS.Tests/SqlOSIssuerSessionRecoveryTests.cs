@@ -159,6 +159,24 @@ public sealed class SqlOSIssuerSessionRecoveryTests
         await harness.AssertContinuationOutcomeAsync(selection, request, credentialSignIn);
     }
 
+    [TestMethod]
+    public async Task PublicPendingOrganizationSelection_KeepsThePresentedSessionCheck()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var user = await harness.CreateMemberAsync("public-pending");
+        var secondOrganization = await harness.AddOrganizationAsync(user);
+        var request = await harness.CreateRequestAsync(FirstPartyClientId, FirstPartyRedirect);
+        var pendingToken = await harness.Authorization.CreatePendingOrganizationSelectionAsync(user, request, "password");
+        var dead = await harness.CreateDeadCookieAsync(user, cleanedUp: false);
+
+        var selection = async () => (await harness.Authorization.CompletePendingOrganizationSelectionForLoginAsync(
+            pendingToken,
+            secondOrganization,
+            harness.CreateHttpContext(dead.Cookie))).RedirectUrl;
+
+        await harness.AssertContinuationOutcomeAsync(selection, request, credentialSignIn: false);
+    }
+
     [DataTestMethod]
     [DataRow(true, DisplayName = "credential sign-in replaces the dead cookie")]
     [DataRow(false, DisplayName = "silent reuse fails closed after revocation")]
