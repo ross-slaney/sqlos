@@ -58,6 +58,29 @@ Everything composes into one SQL statement: the authorization TVF join, your bus
 
 For cursor/keyset pagination over authorized lists, see [Paginating authorized lists](/docs/guides/paginating-authorized-lists).
 
+## Listing everything a subject can see
+
+`BuildFilterAsync` tests each candidate row the query reads. That is the right shape when the query already narrows the rows: a store's products, a search, a date range. It is the wrong shape for "everything I can see" when the subject can see little of the table, because the engine examines about `pageSize / selectivity` rows per page. A manager who may see one row in ten thousand pays about 200,000 row checks for a page of 20.
+
+`ListVisibleAsync` answers that question from the resource closure SqlOS maintains (one row per ancestor and descendant), reading at most `pageSize` entries per grant the subject holds, whatever the table's size and however sparse the subject's access:
+
+```csharp
+var page = await authService.ListVisibleAsync<Product>(
+    subjectId, "PRODUCT_VIEW", resourceTypeId: "product", pageSize: 20, cursor: request.Cursor);
+
+return Results.Ok(new { items = page.Items, nextCursor = page.NextCursor });
+```
+
+The two paths agree row for row: a page is exactly the rows `BuildFilterAsync` would admit for that resource type, in resource creation order. `ListVisibleAsync` fixes that order and takes no other predicate; when the screen needs a different order or a filter, narrow the query by that filter and compose `BuildFilterAsync`.
+
+The page starts from the resources and joins your entity rows by `ResourceId`, so index that column on every table you list this way (a unique index, since one resource backs one row).
+
+| | `BuildFilterAsync` | `ListVisibleAsync` |
+|---|---|---|
+| Composes with | Any EF query: predicates, projections, ordering, paging | Nothing: one type, creation order, opaque cursor |
+| Rows examined per page | About `pageSize / selectivity` | At most `pageSize` closure entries per grant |
+| Use for | Narrowed lists, search, dashboards | "Everything I can see" lists and feeds |
+
 ## Full endpoint example
 
 From the retail example app:

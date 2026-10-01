@@ -7,8 +7,17 @@ internal enum ScenarioKind
     /// <summary>A cursor page of products through <c>BuildFilterAsync</c>, the list-filtering path.</summary>
     List,
 
+    /// <summary>The same page through the previous release's function (<see cref="Infrastructure.ReferenceFunction"/>).</summary>
+    ListReference,
+
+    /// <summary>The same page through <c>ListVisibleAsync</c>: one closure range per access root.</summary>
+    Visible,
+
     /// <summary><c>fn_IsResourceAccessible</c> for one resource, the enforcement primitive the paper measures.</summary>
     PointFunction,
+
+    /// <summary>The previous release's function for one resource.</summary>
+    PointFunctionReference,
 
     /// <summary><c>Allows</c> (<c>CheckAccessAsync</c>), the point check applications call.</summary>
     PointApi,
@@ -16,6 +25,8 @@ internal enum ScenarioKind
 
 /// <param name="Selectivity">σ: the fraction of all products the principal may see.</param>
 /// <param name="ProductDepth">Depth of the products involved below the root (4 in a D = 5 chain, 9 in the D = 10 chain).</param>
+/// <param name="Cursor">For pages: the product id the page starts after (0 for the first page).</param>
+/// <param name="Baseline">For the reference twins and the visible twins: the id of the current-path scenario they pair with.</param>
 internal sealed record Scenario(
     string Id,
     string Title,
@@ -27,7 +38,11 @@ internal sealed record Scenario(
     int Cursor = 0,
     int? StoreId = null,
     long ProductId = 0,
-    bool ExpectAllowed = true);
+    bool ExpectAllowed = true,
+    string? Baseline = null)
+{
+    public bool IsPage => Kind is ScenarioKind.List or ScenarioKind.ListReference or ScenarioKind.Visible;
+}
 
 internal static class ScenarioCatalog
 {
@@ -38,8 +53,8 @@ internal static class ScenarioCatalog
         var otherChainProduct = tree.FirstProduct(l => l.Chain == 2, productCount);
         double Share(Principal p) => tree.ShareOf(p.ScopeResourceId);
 
-        return
-        [
+        var current = new List<Scenario>
+        {
             new("list.admin.first-page", "Company admin, first page (k = 20)", ScenarioKind.List, people.Admin, 1.0, "4 and 9"),
             new("list.admin.k100", "Company admin, first page (k = 100)", ScenarioKind.List, people.Admin, 1.0, "4 and 9", PageSize: 100),
             new("list.admin.mid-cursor", "Company admin, page from the middle of the table", ScenarioKind.List, people.Admin, 1.0, "4 and 9", Cursor: (int)(productCount / 2)),
@@ -53,20 +68,44 @@ internal static class ScenarioCatalog
             new("point.function.denied", "fn_IsResourceAccessible, denied (walks to the root)", ScenarioKind.PointFunction, people.StoreManager, 0.0, "4", ProductId: otherChainProduct, ExpectAllowed: false),
             new("point.api.product", "Allows (CheckAccessAsync), product at depth 4", ScenarioKind.PointApi, people.Admin, 1.0, "4", ProductId: standardProduct),
             new("point.api.deep-product", "Allows (CheckAccessAsync), product at depth 9", ScenarioKind.PointApi, people.Admin, 1.0, "9", ProductId: deepProduct),
-        ];
+        };
+
+        // Twins: the previous function for the regression gate, and the closure page for the σ-free path.
+        var all = new List<Scenario>();
+        foreach (var scenario in current)
+        {
+            all.Add(scenario);
+            switch (scenario.Kind)
+            {
+                case ScenarioKind.List:
+                    all.Add(scenario with { Id = "reference." + scenario.Id, Title = scenario.Title + " · previous function", Kind = ScenarioKind.ListReference, Baseline = scenario.Id });
+                    if (scenario.StoreId is null)
+                    {
+                        all.Add(scenario with { Id = "visible." + scenario.Id, Title = scenario.Title + " · ListVisibleAsync", Kind = ScenarioKind.Visible, Baseline = scenario.Id });
+                    }
+
+                    break;
+                case ScenarioKind.PointFunction:
+                    all.Add(scenario with { Id = "reference." + scenario.Id, Title = scenario.Title + " · previous function", Kind = ScenarioKind.PointFunctionReference, Baseline = scenario.Id });
+                    break;
+            }
+        }
+
+        return all;
     }
 
     /// <summary>
-    /// The grant-density pass: the same region page and denied check, re-run while
+    /// The grant-density pass: the region page (both paths) and the denied check, re-run while
     /// <see cref="BenchmarkModel.RootCrowdGrants"/> other people hold grants on the root.
     /// </summary>
     public static IReadOnlyList<Scenario> Density(IReadOnlyList<Scenario> scenarios)
         => scenarios
-            .Where(s => s.Id is "list.region.first-page" or "point.function.denied")
+            .Where(s => s.Id is "list.region.first-page" or "visible.list.region.first-page" or "point.function.denied")
             .Select(s => s with
             {
                 Id = "density." + s.Id,
                 Title = $"{s.Title}, {BenchmarkModel.RootCrowdGrants} others' grants on the root",
+                Baseline = null,
             })
             .ToList();
 }

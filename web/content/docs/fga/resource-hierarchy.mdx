@@ -80,6 +80,12 @@ When checking `WORKSPACE_VIEW` on `workspace::1`:
 
 This means a single grant at the organization level can authorize resources underneath it without creating per-resource grants.
 
+## The closure, depth, and cycles
+
+Beside the resource table SqlOS keeps an ancestor closure (`SqlOSFgaResourcesClosure`): one row per ancestor and descendant whose path is fully active. Database triggers on the resource table keep it exact for every write, whether it comes from `SaveChanges`, raw SQL, or a DBA, and `SqlOSFgaFunctionInitializer` builds it once when it is empty beside an existing tree (the first start after upgrading; minutes on a tree of tens of millions of resources). [`ListVisibleAsync`](/docs/fga/list-filter#listing-everything-a-subject-can-see) pages it directly.
+
+The triggers also enforce the hierarchy's shape at the database: a write that would close a cycle, or place a resource deeper than `MaxResourceHierarchyDepth` (default 10), fails with error 51011 or 51012 on SQL Server and SQLSTATE `SQ011` or `SQ012` on PostgreSQL. Deactivating a resource cuts every path through it: its descendants stay in the tree but inherit nothing from above it until it is reactivated, and access checks, filters, and pages agree on that.
+
 ## Browse in the dashboard
 
 **Path**: Fine-Grained Auth > Resources

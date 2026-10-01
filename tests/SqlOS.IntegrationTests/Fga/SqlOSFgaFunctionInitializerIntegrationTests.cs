@@ -1,3 +1,4 @@
+using System.Data.Common;
 using FluentAssertions;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -124,7 +125,10 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
     [TestMethod]
     public async Task EnsureFunctionsExist_EnforcesPrincipalAndResourceLifecycle()
     {
-        var definition = await GetFunctionDefinitionAsync();
+        // The grant conditions live in fn_AccessRoots; fn_IsResourceAccessible walks the tree and joins them.
+        var definition = await GetFunctionDefinitionAsync()
+            + Environment.NewLine
+            + await TestCatalog.GetFunctionDefinitionAsync(Context, "fn_AccessRoots");
 
         if (TestDatabase.IsPostgreSql)
         {
@@ -149,7 +153,7 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
     }
 
     [TestMethod]
-    public async Task CyclicHierarchy_FailsClosedWithoutSqlRecursionFailure()
+    public async Task CyclicHierarchy_IsRejectedOnWrite_AndStillFailsClosedInTheFunction()
     {
         var loggerFactory = LoggerFactory.Create(b => b.AddConsole());
         var initializer = new SqlOSFgaFunctionInitializer(
@@ -177,18 +181,28 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
             ResourceId = first.Id,
             RoleId = FgaTestDataSeeder.SystemAdminRoleId
         };
+        var closeTheCycle = TestDatabase.Rewrite("UPDATE [dbo].[SqlOSFgaResources] SET [ParentId] = {0} WHERE [Id] = {1}");
+        var updateTrigger = TestDatabase.IsPostgreSql
+            ? "\"dbo\".\"SqlOSFgaResources\" {0} TRIGGER \"TR_SqlOSFgaResourcesClosure_Update\""
+            : "[dbo].[SqlOSFgaResources] {0} TRIGGER [TR_SqlOSFgaResourcesClosure_Update]";
+        var triggerDisabled = false;
 
         try
         {
             Context.Set<SqlOSFgaResource>().AddRange(first, second);
             Context.Set<SqlOSFgaGrant>().Add(grant);
             await Context.SaveChangesAsync();
-            await Context.Database.ExecuteSqlRawAsync(
-                TestDatabase.Rewrite("UPDATE [dbo].[SqlOSFgaResources] SET [ParentId] = {0} WHERE [Id] = {1}"),
-                second.Id,
-                first.Id);
-            Context.ChangeTracker.Clear();
             await initializer.EnsureFunctionsExistAsync();
+
+            // The closure trigger refuses the edge that would close the cycle.
+            var closing = () => Context.Database.ExecuteSqlRawAsync(closeTheCycle, second.Id, first.Id);
+            (await closing.Should().ThrowAsync<DbException>()).Which.Message.Should().Contain("cycle");
+
+            // A cycle that reaches the data anyway (here: with the trigger disabled) still fails closed.
+            await Context.Database.ExecuteSqlRawAsync("ALTER TABLE " + string.Format(updateTrigger, "DISABLE"));
+            triggerDisabled = true;
+            await Context.Database.ExecuteSqlRawAsync(closeTheCycle, second.Id, first.Id);
+            Context.ChangeTracker.Clear();
 
             var visible = await Context.IsResourceAccessible(
                     first.Id,
@@ -203,6 +217,11 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
             await Context.Database.ExecuteSqlRawAsync(
                 TestDatabase.Rewrite("UPDATE [dbo].[SqlOSFgaResources] SET [ParentId] = NULL WHERE [Id] = {0}"),
                 first.Id);
+            if (triggerDisabled)
+            {
+                await Context.Database.ExecuteSqlRawAsync("ALTER TABLE " + string.Format(updateTrigger, "ENABLE"));
+            }
+
             Context.ChangeTracker.Clear();
             Context.Set<SqlOSFgaGrant>().Remove(grant);
             Context.Set<SqlOSFgaResource>().RemoveRange(second, first);
@@ -230,6 +249,10 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
             await startGate.Task;
             for (var i = 0; i < 5; i++)
             {
+                // Forget the stored definition hash, so every iteration re-creates the routines for real
+                // while the readers run; an unchanged definition is otherwise skipped.
+                await updater.Database.ExecuteSqlRawAsync(
+                    TestDatabase.Rewrite("UPDATE [dbo].[SqlOSFgaSchema] SET [RoutinesHash] = NULL"));
                 await initializer.EnsureFunctionsExistAsync();
             }
         }

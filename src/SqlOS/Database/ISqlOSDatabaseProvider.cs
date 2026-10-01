@@ -30,6 +30,30 @@ internal interface ISqlOSDatabaseProvider
     string BuildEnsureFgaVersionTableSql(string schema);
     string BuildSelectFgaVersionSql(string schema);
     string BuildIsResourceAccessibleFunctionSql(SqlOSFgaOptions options);
+    string BuildAccessRootsFunctionSql(SqlOSFgaOptions options);
+
+    /// <summary>Idempotent batches that create the closure's apply and rebuild routines and its triggers.</summary>
+    IReadOnlyList<string> BuildResourceClosureMaintenanceSql(SqlOSFgaOptions options);
+
+    /// <summary>A scalar query: 1 when the closure is empty although resources with parents exist, else 0.</summary>
+    string BuildResourceClosureNeedsBuildSql(SqlOSFgaOptions options);
+    string BuildResourceClosureRebuildSql(SqlOSFgaOptions options);
+
+    /// <summary>
+    /// One authorized page of resources: columns <c>ResourceId</c> and <c>Seq</c>, ordered by <c>Seq</c>, as a
+    /// single composable SELECT (no CTE). Parameters <c>@SubjectIds</c>, <c>@PermissionId</c>,
+    /// <c>@ResourceTypeId</c>, <c>@Cursor</c>, <c>@PageSize</c>.
+    /// </summary>
+    string BuildVisibleResourcesPageSql(SqlOSFgaOptions options);
+
+    /// <summary>
+    /// A scalar query: the hash of the enforcement routines last applied, or NULL when none is stored or any
+    /// routine (the two functions, the closure's apply and rebuild routines, its three triggers) is missing.
+    /// </summary>
+    string BuildSelectRoutinesHashSql(SqlOSFgaOptions options);
+
+    /// <summary>Stores the routines hash; parameter <c>@RoutinesHash</c>.</summary>
+    string BuildStoreRoutinesHashSql(SqlOSFgaOptions options);
     string BuildLockedSelectSql(string schema, string table, string whereSql, string? orderBySql = null);
 
     string BuildRateLimitIncrementSql(string schema);
@@ -47,4 +71,18 @@ internal interface ISqlOSDatabaseProvider
         TimeSpan timeout,
         string failureMessage,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Takes an exclusive lock held by the connection rather than a transaction, so DDL batches can run in
+    /// their own transactions while other processes are kept out. The connection must stay open until
+    /// <see cref="ReleaseSessionLockAsync"/>.
+    /// </summary>
+    Task AcquireSessionLockAsync(
+        DatabaseFacade database,
+        string resource,
+        TimeSpan timeout,
+        string failureMessage,
+        CancellationToken cancellationToken);
+
+    Task ReleaseSessionLockAsync(DatabaseFacade database, string resource, CancellationToken cancellationToken);
 }

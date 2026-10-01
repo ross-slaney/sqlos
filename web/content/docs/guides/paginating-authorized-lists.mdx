@@ -93,6 +93,20 @@ Whatever pagination style you use, always end the `OrderBy` chain with a unique 
 
 Without a unique tiebreaker, rows that share the same sort value have no deterministic order, so rows can be skipped or duplicated across pages.
 
+## Pages of everything a subject can see
+
+When the list is "everything I can see" and the subject may see only a small part of the table, a keyset page through `BuildFilterAsync` still examines about `pageSize / selectivity` rows (the filter is tested per candidate row). `ListVisibleAsync` pages such lists from SqlOS's resource closure instead, reading at most `pageSize` entries per grant the subject holds:
+
+```csharp
+var page = await fga.ListVisibleAsync<InventoryItem>(
+    subjectId, RetailPermissionKeys.InventoryView, resourceTypeId: "inventory_item",
+    pageSize: 50, cursor: request.Cursor);
+
+// page.Items in resource creation order; page.NextCursor is opaque and null on the last page.
+```
+
+The cursor is the service's own: hand `NextCursor` back unchanged. The order is resource creation order and the only predicate is the resource type; a page is exactly the rows `BuildFilterAsync` would admit for that type. For other orders and predicates, compose `BuildFilterAsync` as above.
+
 ## Admin surfaces
 
 SqlOS's own dashboard and admin APIs use an internal keyset helper with opaque versioned cursors — see [Admin cursor pagination](/docs/guides/admin-cursor-pagination). That contract is for SqlOS admin endpoints; application lists compose `BuildFilterAsync` with the patterns above.

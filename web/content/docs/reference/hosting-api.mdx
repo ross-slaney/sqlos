@@ -45,7 +45,7 @@ protected SqlOSDbContext(DbContextOptions<TContext> options)
 | --- | --- | --- |
 | `options` | `DbContextOptions<TContext>` | EF Core options registered for the derived application context. |
 
-The base context registers SqlOS auth, email, calendar, and FGA entities in the EF model. Relational contexts also register the `dbo.fn_IsResourceAccessible` table-valued function. Its sealed `OnModelCreating` implementation invokes `OnApplicationModelCreating` for application-owned mappings.
+The base context registers SqlOS auth, email, calendar, and FGA entities in the EF model. Relational contexts also register the `dbo.fn_IsResourceAccessible` table-valued function (which reads the caller's grants through `dbo.fn_AccessRoots`) and declare the triggers that maintain the resource closure on the FGA resource table, so EF Core's SQL Server update pipeline stays compatible with them. Its sealed `OnModelCreating` implementation invokes `OnApplicationModelCreating` for application-owned mappings.
 
 `SaveChanges` and `SaveChangesAsync` synchronize tracked entities that implement `ISqlOSResourceEntity` into the FGA resource table before EF saves the unit of work.
 

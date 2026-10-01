@@ -22,9 +22,19 @@ internal sealed class BenchDbContext(DbContextOptions<BenchDbContext> options) :
         string permissionId)
         => FromExpression(() => IsResourceAccessible(resourceId, subjectIds, permissionId));
 
+    /// <summary>The previous release's row filter (see <see cref="ReferenceFunction"/>), for the regression gate.</summary>
+    public IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessibleReference(
+        string resourceId,
+        string subjectIds,
+        string permissionId)
+        => FromExpression(() => IsResourceAccessibleReference(resourceId, subjectIds, permissionId));
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplySqlOSFgaModel(GetType(), options => options.RootResourceId = BenchmarkModel.RootResourceId);
+        modelBuilder.HasDbFunction(typeof(BenchDbContext).GetMethod(nameof(IsResourceAccessibleReference))!)
+            .HasName(ReferenceFunction.Name)
+            .HasSchema("dbo");
 
         modelBuilder.Entity<Store>(store =>
         {
@@ -45,9 +55,11 @@ internal sealed class BenchDbContext(DbContextOptions<BenchDbContext> options) :
             product.Property(p => p.Name).HasMaxLength(200).IsRequired();
             product.Property(p => p.Price).HasPrecision(10, 2);
 
-            // No index on ResourceId: the authorization filter reads each candidate row's ResourceId and walks
-            // up from it; nothing looks products up by resource. The (StoreId, Id) index supports the
-            // store-scoped listing a real app uses for "this store's products".
+            // The row filter reads each candidate row's ResourceId and walks up from it, so it needs no index
+            // on ResourceId. ListVisibleAsync starts from the resources and joins the entity rows by ResourceId,
+            // so the column is indexed, as any ISqlOSResourceEntity table's should be. The (StoreId, Id) index
+            // supports the store-scoped listing a real app uses for "this store's products".
+            product.HasIndex(p => p.ResourceId).IsUnique();
             product.HasIndex(p => new { p.StoreId, p.Id });
         });
     }

@@ -1,8 +1,10 @@
+using System.Globalization;
 using System.Linq.Expressions;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using SqlOS.Database;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
@@ -449,6 +451,78 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
         var anyCall = Expression.Call(anyMethod, tvfCall);
 
         return Expression.Lambda<Func<T, bool>>(anyCall, entityParam);
+    }
+
+    public const int MaxVisiblePageSize = 1000;
+
+    public async Task<SqlOSFgaVisiblePage<T>> ListVisibleAsync<T>(
+        string subjectId,
+        string permissionKey,
+        string resourceTypeId,
+        int pageSize,
+        string? cursor = null,
+        CancellationToken cancellationToken = default) where T : class, IHasResourceId
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(subjectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(permissionKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(resourceTypeId);
+        ArgumentOutOfRangeException.ThrowIfLessThan(pageSize, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(pageSize, MaxVisiblePageSize);
+
+        long after = 0;
+        if (!string.IsNullOrEmpty(cursor)
+            && (!long.TryParse(cursor, NumberStyles.None, CultureInfo.InvariantCulture, out after) || after < 0))
+        {
+            throw new ArgumentException("The cursor is not one this service issued.", nameof(cursor));
+        }
+
+        var empty = new SqlOSFgaVisiblePage<T>([], null);
+
+        // The same resolution BuildFilterAsync performs: the principal set and the permission.
+        var subjectIds = await ResolveSubjectIdsAsync(subjectId);
+        if (subjectIds.Count == 0)
+        {
+            _logger.LogWarning("No subjects found for {SubjectId}", subjectId);
+            return empty;
+        }
+
+        var permission = await _context.Set<SqlOSFgaPermission>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Key == permissionKey, cancellationToken);
+        if (permission == null)
+        {
+            _logger.LogWarning("Permission {PermissionKey} not found", permissionKey);
+            return empty;
+        }
+
+        if (permission.ResourceTypeId != null
+            && !string.Equals(permission.ResourceTypeId, resourceTypeId, StringComparison.Ordinal))
+        {
+            return empty;
+        }
+
+        // One statement: the closure page (the authority for the cursor), left-joined to the entity rows so a
+        // resource without an entity row still advances the cursor.
+        var provider = SqlOSDatabase.Resolve(_context.Database);
+        var rows = _context.Set<SqlOSFgaVisibleResource>().FromSqlRaw(
+            provider.BuildVisibleResourcesPageSql(_options),
+            provider.CreateParameter("@SubjectIds", JsonSerializer.Serialize(subjectIds)),
+            provider.CreateParameter("@PermissionId", permission.Id),
+            provider.CreateParameter("@ResourceTypeId", resourceTypeId),
+            provider.CreateParameter("@Cursor", after),
+            provider.CreateParameter("@PageSize", pageSize));
+        var page = await (
+            from row in rows
+            join entity in _context.Set<T>() on row.ResourceId equals entity.ResourceId into matches
+            from entity in matches.DefaultIfEmpty()
+            orderby row.Seq
+            select new { row.Seq, Entity = entity }).ToListAsync(cancellationToken);
+
+        var nextCursor = page.Select(x => x.Seq).Distinct().Count() == pageSize
+            ? page[^1].Seq.ToString(CultureInfo.InvariantCulture)
+            : null;
+        var items = page.Where(x => x.Entity != null).Select(x => x.Entity!).ToList();
+        return new SqlOSFgaVisiblePage<T>(items, nextCursor);
     }
 
     private async Task<List<string>> ResolveSubjectsAsync(string subjectId, List<SqlOSFgaAccessTrace> trace)

@@ -6,9 +6,10 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 namespace SqlOS.Benchmarks.Scenarios;
 
 /// <summary>
-/// Captures the actual execution plan of the next query EF Core runs in the current async flow, by executing
-/// the exact command EF generated (text and parameters) once more under <c>EXPLAIN (ANALYZE, BUFFERS)</c> or
-/// <c>SET STATISTICS XML ON</c>. Used for one untimed execution per scenario, never inside a measurement.
+/// Captures actual execution plans: for the next query EF Core runs in the current async flow (by executing
+/// the exact command EF generated once more under <c>EXPLAIN (ANALYZE, BUFFERS)</c> or
+/// <c>SET STATISTICS XML ON</c>), or for a command the harness builds itself. Used for one untimed execution
+/// per scenario, never inside a measurement.
 /// </summary>
 internal sealed class PlanCapture(DatabaseProvider provider) : DbCommandInterceptor
 {
@@ -43,6 +44,22 @@ internal sealed class PlanCapture(DatabaseProvider provider) : DbCommandIntercep
         return result;
     }
 
+    /// <summary>Explains a command the harness built itself (the page query runs outside EF Core).</summary>
+    public async Task<CapturedPlan> ExplainAsync(DbCommand command, string relation, CancellationToken cancellationToken)
+    {
+        var plan = new CapturedPlan { Relation = relation, Done = true };
+        try
+        {
+            await CaptureAsync(command, plan, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            plan.Error = ex.Message;
+        }
+
+        return plan;
+    }
+
     private async Task CaptureAsync(DbCommand command, CapturedPlan plan, CancellationToken cancellationToken)
     {
         await using var explain = command.Connection!.CreateCommand();
@@ -59,7 +76,7 @@ internal sealed class PlanCapture(DatabaseProvider provider) : DbCommandIntercep
             var json = (string)(await explain.ExecuteScalarAsync(cancellationToken))!;
             plan.Text = json;
             plan.Extension = "json";
-            plan.ProductRowsExamined = PostgresProductRows(json);
+            plan.RowsExamined = PostgresRows(json, plan.Relation);
             using (var document = JsonDocument.Parse(json))
             {
                 var root = document.RootElement[0];
@@ -88,7 +105,7 @@ internal sealed class PlanCapture(DatabaseProvider provider) : DbCommandIntercep
         plan.Extension = "sqlplan";
         if (plan.Text is not null)
         {
-            plan.ProductRowsExamined = SqlServerProductRows(plan.Text);
+            plan.RowsExamined = SqlServerRows(plan.Text, plan.Relation);
             XNamespace ns = "http://schemas.microsoft.com/sqlserver/2004/07/showplan";
             var stats = XDocument.Parse(plan.Text).Descendants(ns + "QueryTimeStats").LastOrDefault();
             plan.ExecutionMs = (double?)stats?.Attribute("ElapsedTime");
@@ -98,14 +115,14 @@ internal sealed class PlanCapture(DatabaseProvider provider) : DbCommandIntercep
         }
     }
 
-    /// <summary>Rows the Products scan produced or discarded, summed over loops: the candidates examined.</summary>
-    internal static long? PostgresProductRows(string json)
+    /// <summary>Rows the scans of <paramref name="relation"/> produced or discarded, summed over loops.</summary>
+    internal static long? PostgresRows(string json, string relation)
     {
         using var document = JsonDocument.Parse(json);
         long? best = null;
         void Visit(JsonElement node)
         {
-            if (node.TryGetProperty("Relation Name", out var relation) && relation.GetString() == "Products")
+            if (node.TryGetProperty("Relation Name", out var name) && name.GetString() == relation)
             {
                 var rows = node.GetProperty("Actual Rows").GetDouble();
                 if (node.TryGetProperty("Rows Removed by Filter", out var removed))
@@ -135,17 +152,18 @@ internal sealed class PlanCapture(DatabaseProvider provider) : DbCommandIntercep
         return best;
     }
 
-    /// <summary>Rows the operators over <c>[Products]</c> read (<c>ActualRowsRead</c>, else <c>ActualRows</c>).</summary>
-    internal static long? SqlServerProductRows(string xml)
+    /// <summary>Rows the operators over <c>[relation]</c> read (<c>ActualRowsRead</c>, else <c>ActualRows</c>).</summary>
+    internal static long? SqlServerRows(string xml, string relation)
     {
         XNamespace ns = "http://schemas.microsoft.com/sqlserver/2004/07/showplan";
+        var table = $"[{relation}]";
         long? best = null;
         foreach (var relOp in XDocument.Parse(xml).Descendants(ns + "RelOp"))
         {
-            var readsProducts = relOp.Elements()
+            var readsRelation = relOp.Elements()
                 .SelectMany(operation => operation.Elements(ns + "Object"))
-                .Any(o => (string?)o.Attribute("Table") == "[Products]");
-            if (!readsProducts)
+                .Any(o => (string?)o.Attribute("Table") == table);
+            if (!readsRelation)
             {
                 continue;
             }
@@ -167,14 +185,19 @@ internal sealed class PlanCapture(DatabaseProvider provider) : DbCommandIntercep
 internal sealed class CapturedPlan
 {
     public bool Done { get; set; }
+
+    /// <summary>The relation whose scanned rows count as "rows examined": the entity table, or the closure.</summary>
+    public string Relation { get; set; } = "Products";
+
     public string? Text { get; set; }
     public string Extension { get; set; } = "txt";
-    public long? ProductRowsExamined { get; set; }
+    public long? RowsExamined { get; set; }
 
     /// <summary>Server-side planning, paid on every execution by PostgreSQL when statements are not prepared.</summary>
     public double? PlanningMs { get; set; }
 
     /// <summary>Server-side execution of the plan, excluding planning, network, and EF Core.</summary>
     public double? ExecutionMs { get; set; }
+
     public string? Error { get; set; }
 }

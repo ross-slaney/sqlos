@@ -68,6 +68,90 @@ public class SqlOSDatabaseProviderTests
         sql.Should().Contain("RETURNS TABLE(\"Id\"");
         sql.Should().Contain("strpos");
         sql.Should().Contain("truncated.\"Depth\" = 7");
+        // The roots are read as an array from an uncorrelated subquery, which PostgreSQL evaluates once per query.
+        sql.Should().Contain("= ANY (ARRAY(SELECT roots.\"ResourceId\" FROM \"dbo\".\"fn_AccessRoots\"(p_subject_ids, p_permission_id) roots))");
+    }
+
+    [TestMethod]
+    public void PostgreSqlClosureSql_UsesStatementTriggersWithTransitionTables()
+    {
+        var options = new SqlOSFgaOptions { Schema = "ten\"ant", MaxResourceHierarchyDepth = 5 };
+        options.TableNames.Resources = "res\"ources";
+
+        var batches = PostgreSqlDatabaseProvider.Instance.BuildResourceClosureMaintenanceSql(options);
+        var all = string.Join("\n", batches);
+
+        batches.Should().HaveCount(6);
+        all.Should().Contain("\"ten\"\"ant\".\"fn_res\"\"ourcesClosure_Apply\"(p_ids varchar[], p_reject boolean)");
+        // One walk per Apply: the insert and the malformed count share the recursive CTE; no temp table on the insert path.
+        all.Should().Contain("RETURNING 1");
+        all.Should().Contain("CREATE TEMP TABLE \"SqlOSClosureOld\" ON COMMIT DROP AS");
+        all.Should().Contain("LEFT JOIN pg_temp.\"SqlOSClosureOld\" o ON o.\"Id\" = r.\"Id\"");
+        all.Should().Contain("\"ten\"\"ant\".\"fn_res\"\"ourcesClosure_Rebuild\"()");
+        all.Should().Contain("REFERENCING NEW TABLE AS new_rows");
+        all.Should().Contain("REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows");
+        all.Should().Contain("REFERENCING OLD TABLE AS old_rows");
+        all.Should().Contain("FOR EACH STATEMENT");
+        all.Should().NotContain("AFTER UPDATE OF", "transition tables are not allowed on column-list triggers");
+        all.Should().Contain("c.\"Depth\" <= 5");
+        all.Should().Contain("\"Depth\" > 5");
+        all.Should().Contain("ERRCODE = 'SQ011'");
+        all.Should().Contain("ERRCODE = 'SQ012'");
+
+        var page = PostgreSqlDatabaseProvider.Instance.BuildVisibleResourcesPageSql(options);
+        page.Should().Contain("CROSS JOIN LATERAL");
+        // The range read is bounded inside its own derived table, so the engine stops the index scan at k rows.
+        page.Should().MatchRegex("ORDER BY c\\.\"DescendantSeq\"\\s+LIMIT @PageSize\\s+\\) c\\s+UNION ALL");
+        page.Should().Contain("\"ten\"\"ant\".\"res\"\"ourcesClosure\"");
+        page.Should().Contain("c.\"AncestorSeq\" = a.\"ResourceSeq\" AND c.\"TypeSeq\" = rt.\"Seq\" AND c.\"DescendantSeq\" > @Cursor");
+        page.Should().Contain("rt.\"Id\" = @ResourceTypeId");
+        page.Should().Contain("s.\"AncestorSeq\" = a.\"ParentSeq\" AND s.\"TypeSeq\" = a.\"TypeSeq\" AND s.\"DescendantSeq\" = a.\"ResourceSeq\"");
+        page.Should().NotContain("WITH ", "the page composes under EF Core as a subquery, which a CTE cannot");
+
+        var hash = PostgreSqlDatabaseProvider.Instance.BuildSelectRoutinesHashSql(options);
+        hash.Should().Contain("\"ten\"\"ant\".\"SqlOSFgaSchema\"");
+        hash.Should().Contain("p.proname = 'fn_AccessRoots'");
+        hash.Should().Contain("p.proname = 'fn_res\"ourcesClosure_Rebuild'");
+        hash.Should().Contain("t.tgname = 'TR_res\"ourcesClosure_Update'");
+        hash.Should().Contain("c.relname = 'res\"ources'");
+    }
+
+    [TestMethod]
+    public void SqlServerVisiblePageSql_ReadsOneRangePerRoot()
+    {
+        var page = SqlServerDatabaseProvider.Instance.BuildVisibleResourcesPageSql(new SqlOSFgaOptions());
+
+        page.Should().Contain("CROSS APPLY");
+        page.Should().Contain("SELECT TOP (@PageSize) c.DescendantSeq");
+        // The range read is bounded inside its own derived table, so the engine stops the index scan at k rows.
+        page.Should().MatchRegex("ORDER BY c\\.DescendantSeq\\s+\\) c\\s+UNION ALL");
+        page.Should().Contain("c.AncestorSeq = a.ResourceSeq AND c.TypeSeq = rt.Seq AND c.DescendantSeq > @Cursor");
+        page.Should().Contain("UNION ALL");
+        page.Should().Contain("SELECT DISTINCT v.Seq");
+        page.Should().Contain("rt.Id = @ResourceTypeId");
+        page.Should().Contain("a.ParentSeq IS NULL OR a.ParentIsActive = 0 OR EXISTS");
+        page.Should().Contain("s.AncestorSeq = a.ParentSeq AND s.TypeSeq = a.TypeSeq AND s.DescendantSeq = a.ResourceSeq");
+        page.Should().Contain("ORDER BY d.Seq");
+        page.Should().NotContain("WITH ", "the page composes under EF Core as a subquery, which a CTE cannot");
+    }
+
+    [TestMethod]
+    public void SqlServerRoutinesHashSql_RequiresEveryRoutine()
+    {
+        var options = new SqlOSFgaOptions { Schema = "ten'ant" };
+        options.TableNames.Resources = "res]ources";
+
+        var hash = SqlServerDatabaseProvider.Instance.BuildSelectRoutinesHashSql(options);
+
+        hash.Should().Contain("FROM [ten'ant].[SqlOSFgaSchema]");
+        hash.Should().Contain("OBJECT_ID(N'[ten''ant].[fn_AccessRoots]', N'IF') IS NOT NULL");
+        hash.Should().Contain("OBJECT_ID(N'[ten''ant].[fn_IsResourceAccessible]', N'IF') IS NOT NULL");
+        hash.Should().Contain("OBJECT_ID(N'[ten''ant].[sp_res]]ourcesClosure_Apply]', N'P') IS NOT NULL");
+        hash.Should().Contain("OBJECT_ID(N'[ten''ant].[sp_res]]ourcesClosure_Rebuild]', N'P') IS NOT NULL");
+        hash.Should().Contain("OBJECT_ID(N'[ten''ant].[TR_res]]ourcesClosure_Insert]', N'TR') IS NOT NULL");
+        hash.Should().Contain("OBJECT_ID(N'[ten''ant].[TR_res]]ourcesClosure_Delete]', N'TR') IS NOT NULL");
+        SqlServerDatabaseProvider.Instance.BuildStoreRoutinesHashSql(options)
+            .Should().Be("UPDATE [ten'ant].[SqlOSFgaSchema] SET [RoutinesHash] = @RoutinesHash");
     }
 
     [TestMethod]

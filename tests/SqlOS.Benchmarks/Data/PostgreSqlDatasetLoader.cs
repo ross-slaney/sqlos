@@ -7,26 +7,55 @@ namespace SqlOS.Benchmarks.Data;
 
 /// <summary>
 /// PostgreSQL: parallel <c>COPY ... (FORMAT BINARY)</c> streams over disjoint id ranges. Foreign-key triggers
-/// are skipped for the loading sessions (<c>session_replication_role = replica</c>), secondary indexes are
-/// dropped and recreated from their own <c>pg_get_indexdef</c> definitions, and the tables are vacuumed so the
-/// visibility map is set the way autovacuum would leave a production table.
+/// and the closure triggers are skipped for the loading sessions (<c>session_replication_role = replica</c>;
+/// the harness supplies the closure rows itself, in key order), secondary indexes are dropped and recreated
+/// from their own <c>pg_get_indexdef</c> definitions, and the tables are vacuumed so the visibility map is set
+/// the way autovacuum would leave a production table.
 /// </summary>
 internal sealed class PostgreSqlDatasetLoader(string connectionString, SqlOSFgaOptions fga, Log log) : IDatasetLoader
 {
     private string Resources => $"\"{fga.Schema}\".\"{fga.TableNames.Resources}\"";
+    private string ResourceTypes => $"\"{fga.Schema}\".\"{fga.TableNames.ResourceTypes}\"";
+    private string Closure => $"\"{fga.Schema}\".\"{fga.TableNames.Resources}Closure\"";
+    private string ResourceSequence => $"\"{fga.Schema}\".\"{fga.TableNames.Resources}_Seq\"";
     private const string Products = "public.\"Products\"";
     private const string Stores = "public.\"Stores\"";
 
     public Task ConfigureDatabaseAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
-    public async Task LoadHierarchyAsync(RetailTree tree, CancellationToken cancellationToken)
+    public async Task<IReadOnlyDictionary<string, int>> ReadTypeSeqsAsync(CancellationToken cancellationToken)
+    {
+        var map = new Dictionary<string, int>(StringComparer.Ordinal);
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand($"SELECT \"Id\", \"Seq\" FROM {ResourceTypes}", connection);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            map[reader.GetString(0)] = reader.GetInt32(1);
+        }
+
+        return map;
+    }
+
+    public async Task<long> ReadRootSeqAsync(string rootId, CancellationToken cancellationToken)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand($"SELECT \"Seq\" FROM {Resources} WHERE \"Id\" = @id", connection);
+        command.Parameters.AddWithValue("id", rootId);
+        return (long)(await command.ExecuteScalarAsync(cancellationToken))!;
+    }
+
+    public async Task LoadHierarchyAsync(RetailTree tree, IReadOnlyDictionary<string, int> typeSeq, CancellationToken cancellationToken)
     {
         await CopyAsync(Resources, DatasetRows.Columns.Resources, DatasetRows.Hierarchy(tree), cancellationToken);
         await CopyAsync(Stores, DatasetRows.Columns.Stores, DatasetRows.Stores(tree), cancellationToken);
-        await ExecuteAsync($"ANALYZE {Resources}; ANALYZE {Stores};", cancellationToken);
+        await CopyAsync(Closure, DatasetRows.Columns.Closure, DatasetRows.HierarchyClosure(tree, typeSeq), cancellationToken);
+        await ExecuteAsync($"SELECT setval('{ResourceSequence}', {tree.ProductSeqOffset}, true); ANALYZE {Resources}; ANALYZE {Stores}; ANALYZE {Closure};", cancellationToken);
     }
 
-    public async Task<LoadTiming> GrowProductsAsync(RetailTree tree, long from, long to, CancellationToken cancellationToken)
+    public async Task<LoadTiming> GrowProductsAsync(RetailTree tree, IReadOnlyDictionary<string, int> typeSeq, long from, long to, CancellationToken cancellationToken)
     {
         var dropped = await DropSecondaryIndexesAsync(cancellationToken);
 
@@ -46,6 +75,18 @@ internal sealed class PostgreSqlDatasetLoader(string connectionString, SqlOSFgaO
         rows.Stop();
         log.Info($"  rows loaded in {rows.Elapsed.TotalSeconds:F1}s ({streams} streams per table)");
 
+        // The closure, one ancestor position per pass, each pass in primary-key order.
+        var closure = Stopwatch.StartNew();
+        var positions = DatasetRows.AncestorPositions(tree);
+        var productType = typeSeq["product"];
+        for (var position = 0; position < positions; position++)
+        {
+            await CopyAsync(Closure, DatasetRows.Columns.Closure, DatasetRows.ProductClosure(tree, position, productType, from, to), cancellationToken);
+        }
+
+        closure.Stop();
+        log.Info($"  closure rows loaded in {closure.Elapsed.TotalSeconds:F1}s ({positions} ancestor positions)");
+
         var indexes = Stopwatch.StartNew();
         foreach (var definition in dropped)
         {
@@ -58,10 +99,31 @@ internal sealed class PostgreSqlDatasetLoader(string connectionString, SqlOSFgaO
         var maintenance = Stopwatch.StartNew();
         await ExecuteAsync($"VACUUM (ANALYZE) {Resources};", cancellationToken);
         await ExecuteAsync($"VACUUM (ANALYZE) {Products};", cancellationToken);
+        await ExecuteAsync($"VACUUM (ANALYZE) {Closure};", cancellationToken);
+        await ExecuteAsync($"SELECT setval('{ResourceSequence}', {tree.ProductSeq(to)}, true);", cancellationToken);
         maintenance.Stop();
         log.Info($"  vacuum and analyze in {maintenance.Elapsed.TotalSeconds:F1}s");
 
-        return new LoadTiming(rows.Elapsed, indexes.Elapsed, maintenance.Elapsed);
+        return new LoadTiming(rows.Elapsed, closure.Elapsed, indexes.Elapsed, maintenance.Elapsed);
+    }
+
+    public async Task<(long Rows, decimal Hash)> ClosureChecksumAsync(CancellationToken cancellationToken)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            $"""
+            SELECT COUNT(*)::bigint,
+                   COALESCE(SUM("AncestorSeq"::numeric * 31 + "TypeSeq" * 7 + "DescendantSeq"), 0)::numeric
+            FROM {Closure}
+            """,
+            connection)
+        {
+            CommandTimeout = 0,
+        };
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await reader.ReadAsync(cancellationToken);
+        return (reader.GetInt64(0), reader.GetDecimal(1));
     }
 
     public async Task<long> DatabaseSizeBytesAsync(CancellationToken cancellationToken)
@@ -157,6 +219,7 @@ internal sealed class PostgreSqlDatasetLoader(string connectionString, SqlOSFgaO
         => type == typeof(string)
             ? column == "Name" && table.Contains("SqlOSFga", StringComparison.Ordinal) ? NpgsqlDbType.Text : NpgsqlDbType.Varchar
             : type == typeof(int) ? NpgsqlDbType.Integer
+            : type == typeof(long) ? NpgsqlDbType.Bigint
             : type == typeof(bool) ? NpgsqlDbType.Boolean
             : type == typeof(DateTime) ? NpgsqlDbType.Timestamp
             : type == typeof(decimal) ? NpgsqlDbType.Numeric

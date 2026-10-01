@@ -95,6 +95,35 @@ var chains = await dbContext.Chains
 
 **Filter lifetime**: the subject's principal set (the subject plus its active group memberships) is resolved when the task is awaited. Build the filter once per request and compose it into that request's queries; do not cache it in statics or reuse it across requests.
 
+---
+
+### ListVisibleAsync
+
+One page of the entities of one resource type that the subject may see, in resource creation order, read from the resource closure rather than by testing candidate rows. Use it for "everything I can see" lists, where `BuildFilterAsync` would examine about `pageSize / selectivity` rows per page; this reads at most `pageSize` closure entries per grant the subject holds.
+
+```csharp
+var page = await authService.ListVisibleAsync<Product>(
+    subjectId, "PRODUCT_VIEW", "product", pageSize: 20, cursor: request.Cursor);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `subjectId` | `string` | The subject to list for. |
+| `permissionKey` | `string` | The permission key that determines which resources are visible. |
+| `resourceTypeId` | `string` | The resource type to list. A permission typed to another resource type yields an empty page. |
+| `pageSize` | `int` | Rows per page, 1 to 1000. |
+| `cursor` | `string?` | The previous page's `NextCursor`, or `null` for the first page. Opaque; pass it back unchanged. |
+
+**Type constraint**: `T : class, IHasResourceId`.
+
+**Returns**
+
+`Task<SqlOSFgaVisiblePage<T>>` — `Items` (the entities, oldest resource first), `NextCursor` (`null` on the last page), and `HasMore`.
+
+A page is exactly the rows `BuildFilterAsync` would admit for that resource type: the two paths cannot disagree. The order is fixed and there is no other predicate; compose `BuildFilterAsync` for anything else. The entity rows are joined by `ResourceId`, which should carry a unique index on every table listed this way.
+
 ### Lifecycle enforcement
 
 Point checks, traces, and EF authorization filters apply the same lifecycle rules automatically. Inactive users and groups, expired service accounts, inactive target resources, and resources below an inactive ancestor are denied even when a matching grant remains stored. Applications do not need to revoke every grant when deactivating one of these records, and should not add a separate display-only lifecycle filter around authorization queries.

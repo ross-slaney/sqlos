@@ -3,11 +3,12 @@ name: Benchmarks
 # SHRBAC list filtering and point checks on the shipped schema and fn_IsResourceAccessible, one job per
 # engine, beside Pull Request CI. See tests/SqlOS.Benchmarks/README.md.
 #
-# Pull requests grow the catalog 1M -> 10M and skip the sparse scan (30 s a page on PostgreSQL, 160 s on SQL
-# Server), so both jobs finish well inside the PR CI envelope. The full run, 1M -> 10M -> 100M with every
-# scenario, takes about 30 minutes on PostgreSQL and an hour on SQL Server (loading 200M rows through the
-# clustered keys is the bulk of it); it runs on every merge to main, weekly, on demand, and on a pull request
-# labelled `benchmark-100m`. Standard runners are free for public repositories.
+# Pull requests grow the catalog 1M -> 10M and skip the sparse row-filter scans (30 s a page on PostgreSQL,
+# 160 s on SQL Server, for the current and the previous function), so both jobs finish inside the PR CI
+# envelope. The full run, 1M -> 10M -> 100M with every scenario, takes about an hour on PostgreSQL and two on
+# SQL Server (loading 200M rows and 450M closure rows through the clustered keys is the bulk of it); it runs
+# on every merge to main, weekly, on demand, and on a pull request labelled `benchmark-100m`. Standard runners
+# are free for public repositories.
 
 on:
   push:
@@ -45,7 +46,7 @@ jobs:
     # Adding some other label to a pull request should not re-run the benchmarks.
     if: github.event.action != 'labeled' || github.event.label.name == 'benchmark-100m'
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'benchmark-100m')) && 90 || 30 }}
+    timeout-minutes: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'benchmark-100m')) && 170 || 45 }}
     strategy:
       fail-fast: false
       matrix:
@@ -79,7 +80,7 @@ jobs:
             echo "exclude=" >> "$GITHUB_OUTPUT"
           else
             echo "scales=1m,10m" >> "$GITHUB_OUTPUT"
-            echo "exclude=list.store.first-page" >> "$GITHUB_OUTPUT"
+            echo "exclude=list.store.first-page,reference.list.store.first-page" >> "$GITHUB_OUTPUT"
           fi
           sudo mkdir -p /mnt/sqlos-bench
           sudo chmod 0777 /mnt/sqlos-bench

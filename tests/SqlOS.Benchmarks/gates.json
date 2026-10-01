@@ -4,6 +4,15 @@
     "slackMilliseconds": 2.0,
     "exempt": []
   },
+  "regression": {
+    "maxRatio": 1.15,
+    "slackMilliseconds": 2.0,
+    "exempt": []
+  },
+  "improvement": {
+    "scenarios": ["list.store.first-page"],
+    "maxRatio": 0.05
+  },
   "ceilingsMilliseconds": {
     "postgresql": {
       "list.admin.first-page": 45,
@@ -14,6 +23,13 @@
       "list.deep-chain.first-page": 125,
       "list.store.first-page": 120000,
       "list.store.by-store": 45,
+      "visible.list.admin.first-page": 60,
+      "visible.list.admin.k100": 120,
+      "visible.list.admin.mid-cursor": 60,
+      "visible.list.chain.first-page": 60,
+      "visible.list.region.first-page": 60,
+      "visible.list.deep-chain.first-page": 60,
+      "visible.list.store.first-page": 60,
       "point.function.product": 25,
       "point.function.deep-product": 25,
       "point.function.denied": 25,
@@ -29,6 +45,13 @@
       "list.deep-chain.first-page": 475,
       "list.store.first-page": 650000,
       "list.store.by-store": 115,
+      "visible.list.admin.first-page": 150,
+      "visible.list.admin.k100": 400,
+      "visible.list.admin.mid-cursor": 150,
+      "visible.list.chain.first-page": 150,
+      "visible.list.region.first-page": 150,
+      "visible.list.deep-chain.first-page": 150,
+      "visible.list.store.first-page": 150,
       "point.function.product": 11,
       "point.function.deep-product": 14,
       "point.function.denied": 8,

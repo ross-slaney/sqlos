@@ -72,7 +72,17 @@ public static class SqlOSFgaModelConfiguration
         // Resource
         modelBuilder.Entity<SqlOSFgaResource>(entity =>
         {
-            entity.ToTable(tables.Resources, schema, t => t.ExcludeFromMigrations());
+            entity.ToTable(tables.Resources, schema, t =>
+            {
+                t.ExcludeFromMigrations();
+
+                // The closure triggers (SqlOSFgaFunctionInitializer). Declared so EF Core's SQL Server update
+                // pipeline does not emit OUTPUT without INTO, which SQL Server rejects on a table with triggers.
+                foreach (var trigger in SqlOSFgaResourceClosure.TriggerNames(tables.Resources))
+                {
+                    t.HasTrigger(trigger);
+                }
+            });
             entity.HasKey(e => e.Id);
             entity.HasOne(e => e.Parent)
                 .WithMany(r => r.Children)
@@ -179,6 +189,13 @@ public static class SqlOSFgaModelConfiguration
 
         // AccessibleResource (keyless - TVF result)
         modelBuilder.Entity<SqlOSFgaAccessibleResource>(entity =>
+        {
+            entity.HasNoKey();
+            entity.ToView(null); // Not mapped to any table
+        });
+
+        // VisibleResource (keyless - the authorized page query's rows)
+        modelBuilder.Entity<SqlOSFgaVisibleResource>(entity =>
         {
             entity.HasNoKey();
             entity.ToView(null); // Not mapped to any table

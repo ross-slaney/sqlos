@@ -58,6 +58,52 @@ internal sealed class RetailTree
     /// <summary>Every resource except the root and the products, parents before children.</summary>
     public IReadOnlyList<ResourceRow> Nodes { get; }
 
+    private Dictionary<string, long>? _seqById;
+
+    /// <summary>The root's sequence number, read from the database after SqlOS seeds it.</summary>
+    public long RootSeq { get; private set; }
+
+    /// <summary>Products are numbered after the hierarchy: product <c>i</c> has <c>Seq = ProductSeqOffset + i</c>.</summary>
+    public long ProductSeqOffset => RootSeq + Nodes.Count;
+
+    /// <summary>
+    /// Fixes every resource's sequence number: the root's from the database, then the organizational nodes in
+    /// their creation order, then the products by id. The loaders write these values explicitly so the
+    /// closure rows can be generated without reading the database back.
+    /// </summary>
+    public void AssignSeqs(long rootSeq)
+    {
+        RootSeq = rootSeq;
+        _seqById = new Dictionary<string, long>(Nodes.Count + 1, StringComparer.Ordinal) { [RootId] = rootSeq };
+        for (var i = 0; i < Nodes.Count; i++)
+        {
+            _seqById[Nodes[i].Id] = rootSeq + 1 + i;
+        }
+
+        foreach (var leaf in Leaves)
+        {
+            leaf.AncestorSeqs = leaf.Ancestors.Select(id => _seqById[id]).ToArray();
+        }
+    }
+
+    public long SeqOf(string nodeId) => (_seqById ?? throw new InvalidOperationException("Call AssignSeqs first."))[nodeId];
+
+    public long ProductSeq(long productId) => ProductSeqOffset + productId;
+
+    /// <summary>The proper ancestors of a node, nearest first, ending at the root.</summary>
+    public IEnumerable<string> AncestorsOf(string nodeId)
+    {
+        var parents = _parentById ??= Nodes.ToDictionary(n => n.Id, n => n.ParentId, StringComparer.Ordinal);
+        var current = parents.GetValueOrDefault(nodeId);
+        while (current is not null)
+        {
+            yield return current;
+            current = parents.GetValueOrDefault(current);
+        }
+    }
+
+    private Dictionary<string, string>? _parentById;
+
     public IReadOnlyList<StoreRow> Stores { get; }
 
     /// <summary>Where products attach: standard stores (depth 3) and deep-chain sections (depth 8).</summary>
@@ -193,6 +239,21 @@ internal sealed class RetailTree
 
     public int TotalResources(long products) => 1 + Nodes.Count + checked((int)Math.Min(products, int.MaxValue));
 
+    /// <summary>
+    /// The closure's size with <paramref name="products"/> products: one row per (proper ancestor, resource)
+    /// pair. Every node is active, so every pair is on an active path.
+    /// </summary>
+    public long ClosureRows(long products)
+    {
+        long rows = Nodes.Sum(n => (long)AncestorsOf(n.Id).Count());
+        for (long id = 1; id <= products; id++)
+        {
+            rows += LeafOf(id).Ancestors.Length;
+        }
+
+        return rows;
+    }
+
     /// <summary>The standard store in <paramref name="chain"/> whose size is the median of that chain's stores.</summary>
     public Leaf MedianStoreIn(int chain)
     {
@@ -248,6 +309,9 @@ internal sealed record StoreRow(int Id, int Chain, string ResourceId, string Nam
 /// <summary>A node products attach to. <see cref="Ancestors"/> runs from the leaf itself up to the root.</summary>
 internal sealed record Leaf(int Index, string ResourceId, int StoreId, int Chain, int ProductDepth, double Weight, string[] Ancestors)
 {
+    /// <summary>The sequence numbers of <see cref="Ancestors"/>, in the same order, once assigned.</summary>
+    public long[] AncestorSeqs { get; set; } = [];
+
     public bool IsUnder(string scopeId)
     {
         foreach (var ancestor in Ancestors)

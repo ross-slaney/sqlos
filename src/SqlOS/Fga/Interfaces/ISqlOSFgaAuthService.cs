@@ -69,4 +69,39 @@ public interface ISqlOSFgaAuthService
     Task<Expression<Func<T, bool>>> BuildFilterAsync<T>(
         string subjectId,
         string permissionKey) where T : IHasResourceId;
+
+    /// <summary>
+    /// Lists one page of the entities of one resource type that the subject may see, in resource creation
+    /// order, reading only what the page returns.
+    /// </summary>
+    /// <typeparam name="T">The entity type exposing the FGA resource identifier.</typeparam>
+    /// <param name="subjectId">The subject whose accessible entities should be listed.</param>
+    /// <param name="permissionKey">The permission key required for each resource.</param>
+    /// <param name="resourceTypeId">The FGA resource type of <typeparamref name="T"/>'s rows.</param>
+    /// <param name="pageSize">The number of entities to return, from 1 to 1000.</param>
+    /// <param name="cursor">The <see cref="SqlOSFgaVisiblePage{T}.NextCursor"/> of the previous page, or <see langword="null"/> for the first page.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The page. It is empty when the subject, permission, or resource type cannot be resolved.</returns>
+    /// <remarks>
+    /// <para>
+    /// <see cref="BuildFilterAsync{T}"/> checks each row the query scans, so a page costs about
+    /// <c>pageSize / selectivity</c> row checks: a subject who may see one row in ten thousand pays ten
+    /// thousand checks per page. This method instead starts from the subject's grants and reads each granted
+    /// resource's descendants from the resource closure, an index kept by the resource table's triggers. A
+    /// page reads at most <c>pageSize</c> index entries per grant, whatever the table's size or the subject's
+    /// share of it.
+    /// </para>
+    /// <para>
+    /// The order is fixed: the resource's creation order. For another order, or for further predicates,
+    /// compose <see cref="BuildFilterAsync{T}"/> into your own query.
+    /// </para>
+    /// </remarks>
+    Task<SqlOSFgaVisiblePage<T>> ListVisibleAsync<T>(
+        string subjectId,
+        string permissionKey,
+        string resourceTypeId,
+        int pageSize,
+        string? cursor = null,
+        CancellationToken cancellationToken = default) where T : class, IHasResourceId
+        => throw new NotSupportedException($"{GetType().Name} does not implement {nameof(ListVisibleAsync)}.");
 }
