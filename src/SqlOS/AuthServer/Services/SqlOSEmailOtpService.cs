@@ -314,11 +314,15 @@ public sealed class SqlOSEmailOtpService
             throw new InvalidOperationException("The sign-in code is invalid or expired.");
         }
 
-        var challenge = await VerifyChallengeAsync(
+        // Callers verify before they open the sign-up transaction, so a wrong code stays counted
+        // when that transaction rolls back. The challenge is spent later, inside the transaction,
+        // together with the sign-up token (ConsumeSignupTokenAsync).
+        var challenge = await CheckChallengeCodeAsync(
             new SqlOSEmailOtpVerifyRequest(rawChallengeToken, request.Code),
             expectedAuthorizationRequestId,
             requireAuthorizationRequestMatch,
             cancellationToken);
+        await RecordVerifySucceededAsync(challenge, cancellationToken);
 
         if (challenge.User != null)
         {
@@ -368,17 +372,98 @@ public sealed class SqlOSEmailOtpService
             payload.CustomFields);
     }
 
+    /// <summary>
+    /// Spends the sign-up token and the code challenge it is bound to. Call it inside the sign-up
+    /// transaction, after <see cref="VerifySignupAsync"/> succeeded outside it: a sign-up that rolls
+    /// back then leaves both unspent, while every attempt the verification counted stays counted.
+    /// </summary>
     public async Task ConsumeSignupTokenAsync(
         string signupToken,
         CancellationToken cancellationToken = default)
     {
         var rawSignupToken = signupToken?.Trim()
             ?? throw new InvalidOperationException("The sign-in code is invalid or expired.");
-        _ = await _cryptoService.ConsumeTemporaryTokenAsync("email_otp_signup", rawSignupToken, cancellationToken)
+        var token = await _cryptoService.ConsumeTemporaryTokenAsync("email_otp_signup", rawSignupToken, cancellationToken)
             ?? throw new InvalidOperationException("The sign-in code is invalid or expired.");
+        var payload = _cryptoService.DeserializePayload<EmailOtpSignupPayload>(token)
+            ?? throw new InvalidOperationException("The sign-in code is invalid or expired.");
+
+        var challenge = await _context.Set<SqlOSEmailOtpChallenge>()
+            .FirstOrDefaultAsync(x => x.ChallengeTokenHash == payload.ChallengeTokenHash && x.ConsumedAt == null, cancellationToken)
+            ?? throw new InvalidOperationException("The sign-in code is invalid or expired.");
+        challenge.ConsumedAt = DateTime.UtcNow;
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            // A concurrent sign-up spent the challenge first.
+            foreach (var entry in ex.Entries)
+            {
+                entry.State = EntityState.Detached;
+            }
+
+            throw new InvalidOperationException("The sign-in code is invalid or expired.");
+        }
     }
 
     private async Task<SqlOSEmailOtpChallenge> VerifyChallengeAsync(
+        SqlOSEmailOtpVerifyRequest request,
+        string? expectedAuthorizationRequestId,
+        bool requireAuthorizationRequestMatch,
+        CancellationToken cancellationToken)
+    {
+        var challenge = await CheckChallengeCodeAsync(
+            request,
+            expectedAuthorizationRequestId,
+            requireAuthorizationRequestMatch,
+            cancellationToken);
+
+        var now = DateTime.UtcNow;
+        challenge.ConsumedAt = now;
+
+        if (challenge.UserEmail != null && challenge.User is { IsActive: true })
+        {
+            // The code proved the mailbox. An unverified address is claimed: whatever was
+            // attached before the owner proved it is evicted in this same save.
+            await SqlOSEmailOwnershipClaim.ClaimAsync(
+                _context,
+                challenge.UserEmail,
+                "email_otp",
+                SqlOSEmailClaimPresentation.None,
+                now,
+                cancellationToken);
+        }
+
+        if (challenge.User != null)
+        {
+            challenge.User.UpdatedAt = DateTime.UtcNow;
+            if (!string.IsNullOrWhiteSpace(challenge.UserEmail?.Email))
+            {
+                challenge.User.DefaultEmail = challenge.UserEmail.Email;
+            }
+        }
+
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw new InvalidOperationException("The sign-in code is invalid or expired.");
+        }
+
+        await RecordVerifySucceededAsync(challenge, cancellationToken);
+        return challenge;
+    }
+
+    /// <summary>
+    /// Loads the challenge, counts this attempt, and compares the code. A wrong code is recorded
+    /// (attempt, audit event, and the max-attempts invalidation) before it throws, and none of it
+    /// depends on a transaction the caller may roll back. The challenge is not consumed.
+    /// </summary>
+    private async Task<SqlOSEmailOtpChallenge> CheckChallengeCodeAsync(
         SqlOSEmailOtpVerifyRequest request,
         string? expectedAuthorizationRequestId,
         bool requireAuthorizationRequestMatch,
@@ -427,16 +512,16 @@ public sealed class SqlOSEmailOtpService
             }
         }
 
+        // Count the attempt before comparing the code. The reservation is the only admission, so
+        // concurrent guesses that all loaded the same count cannot overrun MaxAttempts.
+        if (!await TryReserveAttemptAsync(challenge, cancellationToken))
+        {
+            throw new InvalidOperationException("The sign-in code is invalid or expired.");
+        }
+
         if (!string.Equals(challenge.CodeHash, ComputeCodeHash(rawChallengeToken, normalizedCode), StringComparison.Ordinal))
         {
-            challenge.AttemptCount++;
-            if (challenge.AttemptCount >= challenge.MaxAttempts)
-            {
-                challenge.InvalidatedAt = DateTime.UtcNow;
-                challenge.InvalidatedReason = "max_attempts";
-            }
-
-            await _context.SaveChangesAsync(cancellationToken);
+            var exhausted = await InvalidateIfAttemptsExhaustedAsync(challenge, cancellationToken);
             await RecordOtpAuditAsync(
                 "email_otp.verify_failed",
                 MaskEmail(challenge.Email),
@@ -446,47 +531,79 @@ public sealed class SqlOSEmailOtpService
                 {
                     challenge.ClientApplicationId,
                     challenge.AuthorizationRequestId,
-                    reason = challenge.InvalidatedReason ?? "wrong_code"
+                    reason = exhausted ? "max_attempts" : "wrong_code"
                 },
                 cancellationToken);
             throw new InvalidOperationException("The sign-in code is invalid or expired.");
         }
 
-        var now = DateTime.UtcNow;
-        challenge.ConsumedAt = now;
+        return challenge;
+    }
 
-        if (challenge.UserEmail != null && challenge.User is { IsActive: true })
+    /// <summary>
+    /// Counts one attempt against the challenge if it is still active and has attempts left. On a
+    /// relational database this is a single conditional update that commits on its own, so it must
+    /// not run inside a transaction: a rollback would erase the attempt.
+    /// </summary>
+    private async Task<bool> TryReserveAttemptAsync(SqlOSEmailOtpChallenge challenge, CancellationToken cancellationToken)
+    {
+        if (!_context.Database.IsRelational())
         {
-            // The code proved the mailbox. An unverified address is claimed: whatever was
-            // attached before the owner proved it is evicted in this same save.
-            await SqlOSEmailOwnershipClaim.ClaimAsync(
-                _context,
-                challenge.UserEmail,
-                "email_otp",
-                SqlOSEmailClaimPresentation.None,
-                now,
-                cancellationToken);
-        }
-
-        if (challenge.User != null)
-        {
-            challenge.User.UpdatedAt = DateTime.UtcNow;
-            if (!string.IsNullOrWhiteSpace(challenge.UserEmail?.Email))
-            {
-                challenge.User.DefaultEmail = challenge.UserEmail.Email;
-            }
-        }
-
-        try
-        {
+            // The in-memory provider (single-process tests) has no set-based updates.
+            challenge.AttemptCount++;
             await _context.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateConcurrencyException)
-        {
-            throw new InvalidOperationException("The sign-in code is invalid or expired.");
+            return true;
         }
 
-        await RecordOtpAuditAsync(
+        if (_context.Database.CurrentTransaction != null)
+        {
+            throw new InvalidOperationException(
+                "Email OTP verification cannot run inside a database transaction: a rollback would erase the attempt it counts.");
+        }
+
+        var now = DateTime.UtcNow;
+        // Bypasses the change tracker on purpose: the tracked AttemptCount stays unmodified, so a
+        // later save of this challenge never writes a stale count over concurrent reservations.
+        var reserved = await _context.Set<SqlOSEmailOtpChallenge>()
+            .Where(x => x.Id == challenge.Id
+                && x.ConsumedAt == null
+                && x.InvalidatedAt == null
+                && x.ExpiresAt > now
+                && x.AttemptCount < x.MaxAttempts)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.AttemptCount, x => x.AttemptCount + 1), cancellationToken);
+        return reserved == 1;
+    }
+
+    /// <summary>Invalidates the challenge once its counted attempts reach MaxAttempts.</summary>
+    private async Task<bool> InvalidateIfAttemptsExhaustedAsync(SqlOSEmailOtpChallenge challenge, CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        if (!_context.Database.IsRelational())
+        {
+            if (challenge.AttemptCount < challenge.MaxAttempts)
+            {
+                return false;
+            }
+
+            challenge.InvalidatedAt = now;
+            challenge.InvalidatedReason = "max_attempts";
+            await _context.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+
+        var invalidated = await _context.Set<SqlOSEmailOtpChallenge>()
+            .Where(x => x.Id == challenge.Id
+                && x.ConsumedAt == null
+                && x.InvalidatedAt == null
+                && x.AttemptCount >= x.MaxAttempts)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(x => x.InvalidatedAt, now)
+                .SetProperty(x => x.InvalidatedReason, "max_attempts"), cancellationToken);
+        return invalidated == 1;
+    }
+
+    private async Task RecordVerifySucceededAsync(SqlOSEmailOtpChallenge challenge, CancellationToken cancellationToken)
+        => await RecordOtpAuditAsync(
             "email_otp.verify_succeeded",
             MaskEmail(challenge.Email),
             challenge.User == null ? "signup" : "login",
@@ -498,9 +615,6 @@ public sealed class SqlOSEmailOtpService
                 challenge.AuthorizationRequestId
             },
             cancellationToken);
-
-        return challenge;
-    }
 
     private async Task<SqlOSEmailOtpStartResult> CreateChallengeAsync(
         string email,

@@ -482,16 +482,18 @@ public sealed class SqlOSAuthService
 
         try
         {
-            if (SupportsDatabaseTransactions())
-            {
-                transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
-            }
-
+            // Check the code before the sign-up transaction opens: a rejected code must keep its
+            // challenge invalidated through the rollback below.
             verification = await RequirePhoneOtpService().VerifySignupAsync(
                 request,
                 expectedAuthorizationRequestId: null,
                 requireAuthorizationRequestMatch: false,
                 cancellationToken);
+
+            if (SupportsDatabaseTransactions())
+            {
+                transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+            }
 
             if (string.IsNullOrWhiteSpace(verification.ClientApplicationId))
             {
@@ -572,16 +574,18 @@ public sealed class SqlOSAuthService
 
         try
         {
-            if (SupportsDatabaseTransactions())
-            {
-                transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
-            }
-
+            // Check the code before the sign-up transaction opens: a wrong code's attempt must
+            // survive the rollback below, or the code could be guessed without limit.
             verification = await _emailOtpService.VerifySignupAsync(
                 request,
                 expectedAuthorizationRequestId: null,
                 requireAuthorizationRequestMatch: false,
                 cancellationToken);
+
+            if (SupportsDatabaseTransactions())
+            {
+                transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+            }
 
             if (string.IsNullOrWhiteSpace(verification.ClientApplicationId))
             {
