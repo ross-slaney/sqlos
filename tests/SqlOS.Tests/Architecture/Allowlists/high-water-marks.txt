@@ -2,7 +2,7 @@
 # AllowlistTests fails when a list is longer than its mark (fix the new violations instead) and when
 # it is shorter (lower the mark so the list cannot grow back). Raising a mark needs a reason in the
 # pull request that a reviewer accepts.
-adapter-database-access.txt 23
+adapter-database-access.txt 0
 domain-clock-reads.txt 1
 domain-http-dependencies.txt 0
 entity-public-setters.txt 668

@@ -127,6 +127,64 @@ public sealed class SqlOSFgaDashboardSchemaWriteTests
         (await harness.CountGrantsAsync()).Should().Be(1);
     }
 
+    [TestMethod]
+    public async Task A_body_that_is_not_json_is_a_validation_error_and_writes_nothing()
+    {
+        await using var harness = await FgaDashboardHarness.CreateAsync();
+
+        var truncated = await harness.SendAsync(HttpMethods.Post, "/sqlos/admin/fga/api/grants", """{"subjectId":""");
+        var badWindow = await harness.SendAsync(
+            HttpMethods.Post,
+            "/sqlos/admin/fga/api/grants",
+            """{"subjectId":"user-1","roleId":"admin","resourceId":"root","effectiveFrom":"next tuesday"}""");
+        var trace = await harness.SendAsync(HttpMethods.Post, "/sqlos/admin/fga/api/trace", "not json");
+
+        foreach (var response in new[] { truncated, badWindow, trace })
+        {
+            response.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+            response.Body.Should().Be("""{"error":"The request body is not valid JSON."}""");
+        }
+
+        (await harness.CountGrantsAsync()).Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task An_identical_grant_is_refused_with_the_existing_one()
+    {
+        await using var harness = await FgaDashboardHarness.CreateAsync();
+        const string grant = """{"subjectId":"user-1","roleId":"admin","resourceId":"root"}""";
+
+        var first = await harness.SendAsync(HttpMethods.Post, "/sqlos/admin/fga/api/grants", grant);
+        var second = await harness.SendAsync(HttpMethods.Post, "/sqlos/admin/fga/api/grants", grant);
+
+        var grantId = JsonDocument.Parse(first.Body).RootElement.GetProperty("id").GetString();
+        second.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        second.Body.Should().Be($$"""{"error":"An identical grant already exists.","grantId":"{{grantId}}"}""");
+        (await harness.CountGrantsAsync()).Should().Be(1);
+    }
+
+    [TestMethod]
+    public async Task Deleting_a_subject_refuses_one_that_still_holds_a_grant_and_deletes_one_that_does_not()
+    {
+        await using var harness = await FgaDashboardHarness.CreateAsync();
+        var created = await harness.SendAsync(HttpMethods.Post, "/sqlos/admin/fga/api/grants", """{"subjectId":"user-1","roleId":"admin","resourceId":"root"}""");
+        var grantId = JsonDocument.Parse(created.Body).RootElement.GetProperty("id").GetString();
+
+        var unknown = await harness.SendAsync(HttpMethods.Delete, "/sqlos/admin/fga/api/subjects/no-such-subject");
+        var refused = await harness.SendAsync(HttpMethods.Delete, "/sqlos/admin/fga/api/subjects/user-1");
+        await harness.SendAsync(HttpMethods.Delete, $"/sqlos/admin/fga/api/grants/{grantId}");
+        var deleted = await harness.SendAsync(HttpMethods.Delete, "/sqlos/admin/fga/api/subjects/user-1");
+        var gone = await harness.SendAsync(HttpMethods.Get, "/sqlos/admin/fga/api/subjects/user-1");
+
+        unknown.StatusCode.Should().Be(StatusCodes.Status404NotFound);
+        unknown.Body.Should().Be("""{"error":"Subject not found"}""");
+        refused.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        refused.Body.Should().Contain("still holds 1 grant(s)");
+        deleted.StatusCode.Should().Be(StatusCodes.Status204NoContent);
+        gone.StatusCode.Should().Be(StatusCodes.Status404NotFound);
+        (await harness.AuditActionsAsync()).Should().Equal("fga.grant.created", "fga.grant.revoked", "fga.subject.deleted");
+    }
+
     private static async Task AssertSchemaWriteRejectedAsync(FgaDashboardResponse response)
     {
         response.StatusCode.Should().Be(StatusCodes.Status405MethodNotAllowed);
@@ -272,6 +330,13 @@ public sealed class SqlOSFgaDashboardSchemaWriteTests
             await using var scope = _services.CreateAsyncScope();
             var context = scope.ServiceProvider.GetRequiredService<TestSqlOSInMemoryDbContext>();
             return await context.Set<SqlOSFgaGrant>().CountAsync();
+        }
+
+        public async Task<List<string>> AuditActionsAsync()
+        {
+            await using var scope = _services.CreateAsyncScope();
+            var context = scope.ServiceProvider.GetRequiredService<TestSqlOSInMemoryDbContext>();
+            return await context.Set<SqlOS.AuthServer.Models.SqlOSAuditEvent>().OrderBy(x => x.IngestedAt).Select(x => x.EventType).ToListAsync();
         }
 
         public async ValueTask DisposeAsync()

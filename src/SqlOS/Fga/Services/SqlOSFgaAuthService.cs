@@ -456,11 +456,14 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
         var subjects = await ResolveSubjectIdsAsync(subjectId);
 
         var subjectData = await _context.Set<SqlOSFgaSubject>().FirstOrDefaultAsync(s => s.Id == subjectId);
-        var groupCount = subjects.Count - 1;
         trace.Add(new SqlOSFgaAccessTrace
         {
             Step = "Subject Resolution",
-            Detail = $"Subject \"{subjectData?.DisplayName}\" + {groupCount} group membership(s)",
+            Detail = subjects.Count > 0
+                ? $"Subject \"{subjectData?.DisplayName}\" + {subjects.Count - 1} group membership(s)"
+                : subjectData == null
+                    ? $"Subject \"{subjectId}\" was not found"
+                    : $"Subject \"{subjectData.DisplayName}\" is not active",
             SubjectName = subjectData?.DisplayName,
         });
 

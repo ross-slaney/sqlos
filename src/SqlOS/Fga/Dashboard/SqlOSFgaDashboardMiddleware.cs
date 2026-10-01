@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
@@ -8,9 +7,6 @@ using Microsoft.Extensions.Options;
 using SqlOS.Configuration;
 using SqlOS.Dashboard;
 using SqlOS.Domain;
-using SqlOS.Fga.Configuration;
-using SqlOS.Fga.Interfaces;
-using SqlOS.Fga.Models;
 using SqlOS.Fga.Processes;
 using SqlOS.Pagination;
 using SqlOS.Security;
@@ -26,8 +22,6 @@ public class SqlOSFgaDashboardMiddleware
     private readonly SqlOSDashboardSessionService _sessionService;
     private readonly IFileProvider _fileProvider;
     private readonly SqlOSBrowserSecurityHeaders _securityHeaders;
-    private const int DefaultPageSize = 25;
-    private const int MaxAncestorTraversalDepth = 50;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -155,70 +149,61 @@ public class SqlOSFgaDashboardMiddleware
     private async Task HandleApiRequestCore(HttpContext context, string endpoint)
     {
         using var scope = context.RequestServices.CreateScope();
-        var dbContext = scope.ServiceProvider.GetRequiredService<ISqlOSFgaDbContext>();
+        var fga = SqlOSFgaAdministration.For(scope.ServiceProvider);
+        var method = context.Request.Method;
+        var aborted = context.RequestAborted;
 
-        // Handle POST trace endpoint
-        if (endpoint.Equals("trace", StringComparison.OrdinalIgnoreCase) && context.Request.Method == "POST")
+        if (endpoint.Equals("trace", StringComparison.OrdinalIgnoreCase) && method == "POST")
         {
-            var body = await JsonSerializer.DeserializeAsync<TraceRequest>(context.Request.Body, JsonOptions);
-            if (body == null || string.IsNullOrEmpty(body.SubjectId) || string.IsNullOrEmpty(body.ResourceId) || string.IsNullOrEmpty(body.PermissionKey))
+            var body = await ReadJsonAsync<TraceRequest>(context);
+            if (body is not { Value: var trace } || trace == null || string.IsNullOrEmpty(trace.SubjectId) || string.IsNullOrEmpty(trace.ResourceId) || string.IsNullOrEmpty(trace.PermissionKey))
             {
-                context.Response.StatusCode = 400;
-                await context.Response.WriteAsync("{\"error\":\"subjectId, resourceId, and permissionKey are required\"}");
+                await WriteErrorAsync(context, StatusCodes.Status400BadRequest, body == null ? InvalidJsonError : "subjectId, resourceId, and permissionKey are required");
                 return;
             }
-            var authService = scope.ServiceProvider.GetRequiredService<ISqlOSFgaAuthService>();
-            var trace = await authService.TraceResourceAccessAsync(body.SubjectId, body.ResourceId, body.PermissionKey);
-            await context.Response.WriteAsync(JsonSerializer.Serialize(trace, JsonOptions));
+
+            await WriteJsonAsync(context, await fga.TraceAsync(trace.SubjectId, trace.ResourceId, trace.PermissionKey));
             return;
         }
 
-        // Handle POST grants
-        if (endpoint.Equals("grants", StringComparison.OrdinalIgnoreCase) && context.Request.Method == "POST")
+        if (endpoint.Equals("grants", StringComparison.OrdinalIgnoreCase) && method == "POST")
         {
-            await HandleCreateGrant(context, dbContext);
+            await HandleCreateGrant(context, fga);
             return;
         }
 
-        // Handle DELETE grants/{id}
-        if (endpoint.StartsWith("grants/", StringComparison.OrdinalIgnoreCase) && context.Request.Method == "DELETE")
+        if (endpoint.StartsWith("grants/", StringComparison.OrdinalIgnoreCase) && method == "DELETE")
         {
-            var grantId = endpoint[7..]; // extract id after "grants/"
-            await HandleDeleteGrant(context, dbContext, grantId);
+            if (await fga.RevokeGrantAsync(endpoint[7..], aborted))
+            {
+                context.Response.StatusCode = StatusCodes.Status204NoContent;
+                return;
+            }
+
+            await WriteErrorAsync(context, StatusCodes.Status404NotFound, "Grant not found");
             return;
         }
 
-        // Handle roles/{id}/permissions (GET list)
+        // roles/{roleId}/permissions
         if (endpoint.StartsWith("roles/", StringComparison.OrdinalIgnoreCase) && endpoint.EndsWith("/permissions") && !endpoint.Contains("/permissions/"))
         {
-            var roleId = endpoint[6..^12]; // extract id between "roles/" and "/permissions"
-            if (context.Request.Method == "GET")
+            if (method == "GET")
             {
-                var perms = await dbContext.Set<SqlOSFgaRolePermission>()
-                    .Include(rp => rp.Permission)
-                    .Where(rp => rp.RoleId == roleId)
-                    .Select(rp => new
-                    {
-                        rp.Permission!.Id,
-                        rp.Permission.Key,
-                        rp.Permission.Name,
-                        rp.Permission.Description
-                    })
-                    .ToListAsync();
-                await context.Response.WriteAsync(JsonSerializer.Serialize(perms, JsonOptions));
+                await WriteJsonAsync(context, await fga.GetRolePermissionsAsync(endpoint[6..^12], aborted));
                 return;
             }
-            if (context.Request.Method == "POST")
+
+            if (method == "POST")
             {
                 await RejectSchemaWriteAsync(context);
                 return;
             }
         }
 
-        // Handle roles/{id}/permissions/{permId} (DELETE)
-        if (endpoint.StartsWith("roles/", StringComparison.OrdinalIgnoreCase) && context.Request.Method == "DELETE")
+        // roles/{roleId}/permissions/{permissionId}
+        if (endpoint.StartsWith("roles/", StringComparison.OrdinalIgnoreCase) && method == "DELETE")
         {
-            var parts = endpoint[6..].Split('/'); // after "roles/"
+            var parts = endpoint[6..].Split('/');
             if (parts.Length == 3 && parts[1].Equals("permissions", StringComparison.OrdinalIgnoreCase))
             {
                 await RejectSchemaWriteAsync(context);
@@ -226,846 +211,183 @@ public class SqlOSFgaDashboardMiddleware
             }
         }
 
-        // Handle roles (POST) and roles/{id} (GET, PUT, DELETE)
-        if (endpoint.Equals("roles", StringComparison.OrdinalIgnoreCase) && context.Request.Method == "POST")
+        if (endpoint.Equals("roles", StringComparison.OrdinalIgnoreCase) && method == "POST")
         {
             await RejectSchemaWriteAsync(context);
             return;
         }
+
         if (endpoint.StartsWith("roles/", StringComparison.OrdinalIgnoreCase) && !endpoint[6..].Contains('/'))
         {
-            var roleId = endpoint[6..];
-            if (context.Request.Method == "GET")
+            if (method == "GET")
             {
-                await HandleGetRoleDetail(context, dbContext, roleId);
+                await WriteFoundAsync(context, await fga.GetRoleAsync(endpoint[6..], aborted), "Role not found");
                 return;
             }
-            if (context.Request.Method == "PUT" || context.Request.Method == "DELETE")
+
+            if (method == "PUT" || method == "DELETE")
             {
                 await RejectSchemaWriteAsync(context);
                 return;
             }
         }
 
-        // Handle POST permissions
-        if (endpoint.Equals("permissions", StringComparison.OrdinalIgnoreCase) && context.Request.Method == "POST")
+        if (endpoint.Equals("permissions", StringComparison.OrdinalIgnoreCase) && method == "POST")
         {
             await RejectSchemaWriteAsync(context);
             return;
         }
 
-        // Handle resources/{parentId}/children
+        // resources/{parentId}/children answers any method.
         if (endpoint.StartsWith("resources/", StringComparison.OrdinalIgnoreCase) && endpoint.EndsWith("/children"))
         {
-            var parentId = endpoint[10..^9]; // extract id between "resources/" and "/children"
-            await HandleResourceChildren(context, dbContext, parentId);
+            await WriteJsonAsync(context, await fga.GetResourceChildrenAsync(endpoint[10..^9], Search(context), Page(context), aborted));
             return;
         }
 
-        // Handle resources/{id}/access
-        if (endpoint.StartsWith("resources/", StringComparison.OrdinalIgnoreCase) && endpoint.EndsWith("/access") && context.Request.Method == "GET")
+        if (endpoint.StartsWith("resources/", StringComparison.OrdinalIgnoreCase) && endpoint.EndsWith("/access") && method == "GET")
         {
-            var resourceId = endpoint[10..^7]; // extract id between "resources/" and "/access"
-            await HandleResourceAccess(context, dbContext, resourceId);
+            await WriteFoundAsync(context, await fga.GetResourceAccessAsync(endpoint[10..^7], aborted), "Resource not found");
             return;
         }
 
-        // Handle resources/{id}/grants (direct grants on this resource, paginated - for hover popup)
-        if (endpoint.StartsWith("resources/", StringComparison.OrdinalIgnoreCase) && endpoint.EndsWith("/grants") && context.Request.Method == "GET")
+        if (endpoint.StartsWith("resources/", StringComparison.OrdinalIgnoreCase) && endpoint.EndsWith("/grants") && method == "GET")
         {
-            var resourceId = endpoint[10..^7]; // extract id between "resources/" and "/grants"
-            await HandleResourceGrants(context, dbContext, resourceId);
+            await WriteJsonAsync(context, await fga.GetResourceGrantsAsync(endpoint[10..^7], Page(context), aborted));
             return;
         }
 
-        // Handle resources/{id} (single resource detail) — exclude "tree" which is handled by the switch
-        if (endpoint.StartsWith("resources/", StringComparison.OrdinalIgnoreCase) && 
-            !endpoint[10..].Contains('/') && 
-            !endpoint.Equals("resources/tree", StringComparison.OrdinalIgnoreCase) &&
-            context.Request.Method == "GET")
+        if (endpoint.StartsWith("resources/", StringComparison.OrdinalIgnoreCase)
+            && !endpoint[10..].Contains('/')
+            && !endpoint.Equals("resources/tree", StringComparison.OrdinalIgnoreCase)
+            && method == "GET")
         {
-            var resourceId = endpoint[10..];
-            await HandleResourceDetail(context, dbContext, resourceId);
+            await WriteFoundAsync(context, await fga.GetResourceAsync(endpoint[10..], aborted), "Resource not found");
             return;
         }
 
-        // Handle subjects/{id}/grants
+        // subjects/{subjectId}/grants answers any method.
         if (endpoint.StartsWith("subjects/", StringComparison.OrdinalIgnoreCase) && endpoint.EndsWith("/grants"))
         {
-            var subjectId = endpoint[9..^7]; // extract id between "subjects/" and "/grants"
-            await HandleSubjectGrants(context, dbContext, subjectId);
+            await WriteJsonAsync(context, await fga.GetSubjectGrantsAsync(endpoint[9..^7], Page(context), aborted));
             return;
         }
 
-        // Handle subjects/{id} (single subject detail) — must be after /grants check
         if (endpoint.StartsWith("subjects/", StringComparison.OrdinalIgnoreCase) && !endpoint[9..].Contains('/'))
         {
-            var subjectId = endpoint[9..];
-            await HandleSubjectDetail(context, dbContext, subjectId);
+            if (method == "DELETE")
+            {
+                await HandleDeleteSubject(context, fga, endpoint[9..]);
+                return;
+            }
+
+            await WriteFoundAsync(context, await fga.GetSubjectAsync(endpoint[9..], aborted), "Subject not found");
             return;
         }
 
+        var search = Search(context);
         object? result = endpoint.ToLowerInvariant() switch
         {
-            "resources/tree" => await GetResourceTreeAsync(dbContext, context),
-            "resources" => await GetResourcesAsync(dbContext, context),
-            "subjects" => await GetSubjectsAsync(dbContext, context),
-            "users" => await GetUsersAsync(dbContext, context),
-            "agents" => await GetAgentsAsync(dbContext, context),
-            "service-accounts" => await GetServiceAccountsAsync(dbContext, context),
-            "user-groups" => await GetUserGroupsAsync(dbContext, context),
-            "grants" => await GetGrantsAsync(dbContext, context),
-            "roles" => await GetRolesAsync(dbContext, context),
-            "permissions" => await GetPermissionsAsync(dbContext, context),
-            "resource-types" => await GetResourceTypesAsync(dbContext, context),
-            "stats" => await GetStatsAsync(context.RequestServices, context.RequestAborted),
+            "resources/tree" => await fga.GetResourceTreeAsync(search, Page(context), aborted),
+            "resources" => await fga.GetResourcesAsync(search, Page(context), aborted),
+            "subjects" => await fga.GetSubjectsAsync(context.Request.Query["type"].FirstOrDefault(), search, Page(context), aborted),
+            "users" => await fga.GetUsersAsync(search, Page(context), aborted),
+            "agents" => await fga.GetAgentsAsync(search, Page(context), aborted),
+            "service-accounts" => await fga.GetServiceAccountsAsync(search, Page(context), aborted),
+            "user-groups" => await fga.GetUserGroupsAsync(search, Page(context), aborted),
+            "grants" => await fga.GetGrantsAsync(search, Page(context), aborted),
+            "roles" => await fga.GetRolesAsync(search, Page(context), aborted),
+            "permissions" => await fga.GetPermissionsAsync(search, Page(context), aborted),
+            "resource-types" => await fga.GetResourceTypesAsync(search, Page(context), aborted),
+            "stats" => await fga.GetStatsAsync(aborted),
             _ => null
         };
+        await WriteFoundAsync(context, result, "Not found");
+    }
 
-        if (result == null)
+    private static async Task HandleCreateGrant(HttpContext context, SqlOSFgaAdministration fga)
+    {
+        var body = await ReadJsonAsync<CreateGrantRequest>(context);
+        if (body is not { Value: var request } || request == null || string.IsNullOrEmpty(request.SubjectId) || string.IsNullOrEmpty(request.RoleId) || string.IsNullOrEmpty(request.ResourceId))
         {
-            context.Response.StatusCode = 404;
-            await context.Response.WriteAsync("{\"error\":\"Not found\"}");
+            await WriteErrorAsync(context, StatusCodes.Status400BadRequest, body == null ? InvalidJsonError : "subjectId, roleId, and resourceId are required");
             return;
         }
 
-        await context.Response.WriteAsync(JsonSerializer.Serialize(result, JsonOptions));
-    }
-
-    // --- Resource Tree (bounded roots only; children load on expand) ---
-
-    private static async Task<object> GetResourceTreeAsync(ISqlOSFgaDbContext dbContext, HttpContext context)
-    {
-        var search = context.Request.Query["search"].FirstOrDefault();
-
-        var resources = dbContext.Set<SqlOSFgaResource>()
-            .Where(r => r.ParentId == null && r.IsActive);
-
-        if (!string.IsNullOrEmpty(search))
-            resources = resources.Where(r => r.Name.Contains(search));
-
-        var query = resources.Select(r => new ResourceTreeRow
-        {
-            Id = r.Id,
-            ParentId = r.ParentId,
-            Name = r.Name,
-            ResourceType = r.ResourceType != null ? r.ResourceType.Name : r.ResourceTypeId
-        });
-
-        var page = await ToCursorPageAsync(
-            query,
-            SqlOSKeyset<ResourceTreeRow>.Create().Ascending(x => x.Name).ThenAscending(x => x.Id),
-            "fga.resource-tree",
-            SqlOSCursorCodec.Fingerprint(search),
-            context);
-
-        var counts = await GetResourcePageCountsAsync(dbContext, page.Data.Select(x => x.Id).ToList(), context.RequestAborted);
-        return page.ToResponse(r => new
-        {
-            r.Id,
-            r.ParentId,
-            r.Name,
-            r.ResourceType,
-            ChildCount = counts.ChildCounts.GetValueOrDefault(r.Id),
-            GrantsCount = counts.GrantCounts.GetValueOrDefault(r.Id)
-        });
-    }
-
-    // Flat searchable list for Access Tester and grant pickers (any depth; no child prefetch).
-    private static async Task<object> GetResourcesAsync(ISqlOSFgaDbContext dbContext, HttpContext context)
-    {
-        var search = context.Request.Query["search"].FirstOrDefault();
-
-        var resources = dbContext.Set<SqlOSFgaResource>()
-            .Where(r => r.IsActive);
-
-        if (!string.IsNullOrEmpty(search))
-        {
-            resources = resources.Where(r => r.Name.Contains(search) || r.Id.Contains(search));
-        }
-
-        var query = resources.Select(r => new ResourceTreeRow
-        {
-            Id = r.Id,
-            ParentId = r.ParentId,
-            Name = r.Name,
-            ResourceType = r.ResourceType != null ? r.ResourceType.Name : r.ResourceTypeId
-        });
-
-        var page = await ToCursorPageAsync(
-            query,
-            SqlOSKeyset<ResourceTreeRow>.Create().Ascending(x => x.Name).ThenAscending(x => x.Id),
-            "fga.resources",
-            SqlOSCursorCodec.Fingerprint(search),
-            context);
-        return page.ToResponse();
-    }
-
-    private static async Task HandleResourceChildren(
-        HttpContext context, ISqlOSFgaDbContext dbContext, string parentId)
-    {
-        var search = context.Request.Query["search"].FirstOrDefault();
-
-        var resources = dbContext.Set<SqlOSFgaResource>()
-            .Where(r => r.ParentId == parentId && r.IsActive);
-
-        if (!string.IsNullOrEmpty(search))
-            resources = resources.Where(r => r.Name.Contains(search));
-
-        var query = resources.Select(r => new ResourceTreeRow
-        {
-            Id = r.Id,
-            ParentId = r.ParentId,
-            Name = r.Name,
-            ResourceType = r.ResourceType != null ? r.ResourceType.Name : r.ResourceTypeId
-        });
-
-        var page = await ToCursorPageAsync(
-            query,
-            SqlOSKeyset<ResourceTreeRow>.Create().Ascending(x => x.Name).ThenAscending(x => x.Id),
-            "fga.resource-children",
-            SqlOSCursorCodec.Fingerprint(parentId, search),
-            context);
-
-        var counts = await GetResourcePageCountsAsync(dbContext, page.Data.Select(x => x.Id).ToList(), context.RequestAborted);
-        var result = new
-        {
-            Data = page.Data.Select(r => new
-            {
-                r.Id,
-                r.ParentId,
-                r.Name,
-                r.ResourceType,
-                ChildCount = counts.ChildCounts.GetValueOrDefault(r.Id),
-                GrantsCount = counts.GrantCounts.GetValueOrDefault(r.Id)
-            }).ToList(),
-            page.PageSize,
-            page.NextCursor,
-            page.HasNextPage,
-            ParentId = parentId
-        };
-
-        await context.Response.WriteAsync(JsonSerializer.Serialize(result, JsonOptions));
-    }
-
-    private static async Task HandleResourceDetail(HttpContext context, ISqlOSFgaDbContext dbContext, string resourceId)
-    {
-        var resource = await dbContext.Set<SqlOSFgaResource>()
-            .Include(r => r.ResourceType)
-            .Where(r => r.Id == resourceId)
-            .Select(r => new
-            {
-                r.Id,
-                r.ParentId,
-                r.Name,
-                r.Description,
-                ResourceType = r.ResourceType != null ? r.ResourceType.Name : r.ResourceTypeId,
-                r.ResourceTypeId,
-                r.IsActive,
-                r.CreatedAt,
-                r.UpdatedAt,
-                ChildCount = dbContext.Set<SqlOSFgaResource>().Count(c => c.ParentId == r.Id && c.IsActive),
-                GrantsCount = dbContext.Set<SqlOSFgaGrant>().Count(g => g.ResourceId == r.Id)
-            })
-            .FirstOrDefaultAsync();
-
-        if (resource == null)
-        {
-            context.Response.StatusCode = 404;
-            await context.Response.WriteAsync("{\"error\":\"Resource not found\"}");
-            return;
-        }
-
-        // Build breadcrumb path from root to this resource
-        var breadcrumbs = new List<object>();
-        var currentId = resource.ParentId;
-        var visited = new HashSet<string>(StringComparer.Ordinal) { resource.Id };
-        for (var depth = 0; !string.IsNullOrEmpty(currentId) && depth <= MaxAncestorTraversalDepth; depth++)
-        {
-            if (!visited.Add(currentId))
-            {
-                break;
-            }
-
-            var parent = await dbContext.Set<SqlOSFgaResource>()
-                .Where(r => r.Id == currentId)
-                .Select(r => new { r.Id, r.Name, r.ParentId })
-                .FirstOrDefaultAsync();
-            if (parent == null) break;
-            breadcrumbs.Insert(0, new { parent.Id, parent.Name });
-            currentId = parent.ParentId;
-        }
-
-        var result = new { Resource = resource, Breadcrumbs = breadcrumbs };
-        await context.Response.WriteAsync(JsonSerializer.Serialize(result, JsonOptions));
-    }
-
-    private static async Task HandleResourceAccess(HttpContext context, ISqlOSFgaDbContext dbContext, string resourceId)
-    {
-        var resource = await dbContext.Set<SqlOSFgaResource>().Where(r => r.Id == resourceId).Select(r => new { r.Id, r.ParentId }).FirstOrDefaultAsync();
-        if (resource == null)
-        {
-            context.Response.StatusCode = 404;
-            await context.Response.WriteAsync("{\"error\":\"Resource not found\"}");
-            return;
-        }
-
-        var ancestorIds = new List<string> { resourceId };
-        var currentId = resource.ParentId;
-        var visited = new HashSet<string>(StringComparer.Ordinal) { resourceId };
-        for (var depth = 0; !string.IsNullOrEmpty(currentId) && depth <= MaxAncestorTraversalDepth; depth++)
-        {
-            if (!visited.Add(currentId))
-            {
-                break;
-            }
-
-            ancestorIds.Add(currentId);
-            var parentId = await dbContext.Set<SqlOSFgaResource>().Where(r => r.Id == currentId).Select(r => r.ParentId).FirstOrDefaultAsync();
-            currentId = parentId;
-        }
-
-        var grants = await dbContext.Set<SqlOSFgaGrant>()
-            .Include(g => g.Subject)
-            .Include(g => g.Resource)
-            .Include(g => g.Role)
-            .Where(g => ancestorIds.Contains(g.ResourceId))
-            .Select(g => new
-            {
-                SubjectId = g.SubjectId,
-                SubjectName = g.Subject != null ? g.Subject.DisplayName : g.SubjectId,
-                RoleId = g.RoleId,
-                RoleName = g.Role != null ? g.Role.Name : g.RoleId,
-                SourceResourceId = g.ResourceId,
-                SourceResourceName = g.Resource != null ? g.Resource.Name : g.ResourceId,
-                IsInherited = g.ResourceId != resourceId
-            })
-            .ToListAsync();
-
-        await context.Response.WriteAsync(JsonSerializer.Serialize(grants, JsonOptions));
-    }
-
-    // --- Resource grants (direct grants only, paginated - for hover popup) ---
-
-    private static async Task HandleResourceGrants(HttpContext context, ISqlOSFgaDbContext dbContext, string resourceId)
-    {
-        var query = dbContext.Set<SqlOSFgaGrant>()
-            .Where(g => g.ResourceId == resourceId)
-            .Select(g => new ResourceGrantRow
-            {
-                Id = g.Id,
-                SubjectId = g.SubjectId,
-                SubjectName = g.Subject != null ? g.Subject.DisplayName : g.SubjectId,
-                SubjectType = g.Subject != null && g.Subject.SubjectType != null ? g.Subject.SubjectType.Name : null,
-                RoleId = g.RoleId,
-                RoleName = g.Role != null ? g.Role.Name : g.RoleId,
-                EffectiveFrom = g.EffectiveFrom,
-                EffectiveTo = g.EffectiveTo,
-                CreatedAt = g.CreatedAt
-            });
-
-        var page = await ToCursorPageAsync(
-            query,
-            SqlOSKeyset<ResourceGrantRow>.Create().Descending(x => x.CreatedAt).ThenDescending(x => x.Id),
-            "fga.resource-grants",
-            SqlOSCursorCodec.Fingerprint(resourceId),
-            context);
-
-        await context.Response.WriteAsync(JsonSerializer.Serialize(
-            page.ToResponse(g => new
-            {
-                g.Id,
-                g.SubjectId,
-                g.SubjectName,
-                g.SubjectType,
-                g.RoleId,
-                g.RoleName,
-                g.EffectiveFrom,
-                g.EffectiveTo
-            }),
-            JsonOptions));
-    }
-
-    // --- Subject detail ---
-
-    private static async Task HandleSubjectDetail(HttpContext context, ISqlOSFgaDbContext dbContext, string subjectId)
-    {
-        var subject = await dbContext.Set<SqlOSFgaSubject>()
-            .Include(s => s.SubjectType)
-            .Where(s => s.Id == subjectId)
-            .Select(s => new
-            {
-                s.Id, s.DisplayName, s.SubjectTypeId,
-                SubjectType = s.SubjectType != null ? s.SubjectType.Name : s.SubjectTypeId,
-                s.OrganizationId, s.ExternalRef, s.CreatedAt, s.UpdatedAt
-            })
-            .FirstOrDefaultAsync();
-
-        if (subject == null)
-        {
-            context.Response.StatusCode = 404;
-            await context.Response.WriteAsync("{\"error\":\"Subject not found\"}");
-            return;
-        }
-
-        // Get group memberships (groups this subject belongs to)
-        var groups = await dbContext.Set<SqlOSFgaUserGroupMembership>()
-            .Include(m => m.UserGroup)
-            .Where(m => m.SubjectId == subjectId)
-            .Select(m => new
-            {
-                m.UserGroup!.Id,
-                m.UserGroup.Name,
-                m.UserGroup.GroupType,
-                m.UserGroup.SubjectId,
-                m.CreatedAt
-            })
-            .ToListAsync();
-
-        // If this subject IS a group, get its members
-        var members = await dbContext.Set<SqlOSFgaUserGroupMembership>()
-            .Include(m => m.Subject)
-            .Where(m => m.UserGroup != null && m.UserGroup.SubjectId == subjectId)
-            .Select(m => new
-            {
-                m.Subject!.Id,
-                m.Subject.DisplayName,
-                m.Subject.SubjectTypeId,
-                m.CreatedAt
-            })
-            .ToListAsync();
-
-        var result = new { Subject = subject, Groups = groups, Members = members };
-        await context.Response.WriteAsync(JsonSerializer.Serialize(result, JsonOptions));
-    }
-
-    private static async Task HandleSubjectGrants(
-        HttpContext context, ISqlOSFgaDbContext dbContext, string subjectId)
-    {
-        var query = dbContext.Set<SqlOSFgaGrant>()
-            .Where(g => g.SubjectId == subjectId)
-            .Select(g => new SubjectGrantRow
-            {
-                Id = g.Id,
-                ResourceName = g.Resource != null ? g.Resource.Name : g.ResourceId,
-                ResourceId = g.ResourceId,
-                RoleName = g.Role != null ? g.Role.Name : g.RoleId,
-                RoleId = g.RoleId,
-                EffectiveFrom = g.EffectiveFrom,
-                EffectiveTo = g.EffectiveTo,
-                CreatedAt = g.CreatedAt
-            });
-
-        var page = await ToCursorPageAsync(
-            query,
-            SqlOSKeyset<SubjectGrantRow>.Create().Descending(x => x.CreatedAt).ThenDescending(x => x.Id),
-            "fga.subject-grants",
-            SqlOSCursorCodec.Fingerprint(subjectId),
-            context);
-
-        await context.Response.WriteAsync(JsonSerializer.Serialize(page.ToResponse(), JsonOptions));
-    }
-
-    // --- Paginated table endpoints ---
-
-    private static async Task<object> GetSubjectsAsync(ISqlOSFgaDbContext dbContext, HttpContext context)
-    {
-        var type = context.Request.Query["type"].FirstOrDefault();
-        var search = context.Request.Query["search"].FirstOrDefault();
-
-        var subjects = dbContext.Set<SqlOSFgaSubject>().AsQueryable();
-
-        if (!string.IsNullOrEmpty(type))
-            subjects = subjects.Where(s => s.SubjectTypeId == type);
-
-        if (!string.IsNullOrEmpty(search))
-            subjects = subjects.Where(s => s.DisplayName.Contains(search) || s.Id.Contains(search));
-
-        var query = subjects.Select(s => new SubjectListRow
-        {
-            Id = s.Id,
-            DisplayName = s.DisplayName,
-            SubjectTypeId = s.SubjectTypeId,
-            SubjectType = s.SubjectType != null ? s.SubjectType.Name : s.SubjectTypeId,
-            OrganizationId = s.OrganizationId,
-            ExternalRef = s.ExternalRef,
-            CreatedAt = s.CreatedAt
-        });
-
-        var page = await ToCursorPageAsync(
-            query,
-            SqlOSKeyset<SubjectListRow>.Create().Ascending(x => x.DisplayName).ThenAscending(x => x.Id),
-            "fga.subjects",
-            SqlOSCursorCodec.Fingerprint(type, search),
-            context);
-        return page.ToResponse();
-    }
-
-    private static async Task<object> GetUsersAsync(ISqlOSFgaDbContext dbContext, HttpContext context)
-    {
-        var search = context.Request.Query["search"].FirstOrDefault();
-
-        var users = dbContext.Set<SqlOSFgaUser>().AsQueryable();
-
-        if (!string.IsNullOrEmpty(search))
-            users = users.Where(u =>
-                (u.Subject != null && (u.Subject.DisplayName.Contains(search) || u.Subject.Id.Contains(search))) ||
-                (u.Email != null && u.Email.Contains(search)));
-
-        var query = users.Select(u => new UserListRow
-        {
-            Id = u.Id,
-            SubjectId = u.SubjectId,
-            DisplayName = u.Subject != null ? u.Subject.DisplayName : u.Id,
-            Email = u.Email,
-            IsActive = u.IsActive,
-            LastLoginAt = u.LastLoginAt,
-            CreatedAt = u.CreatedAt
-        });
-
-        var page = await ToCursorPageAsync(
-            query,
-            SqlOSKeyset<UserListRow>.Create().Ascending(x => x.DisplayName).ThenAscending(x => x.Id),
-            "fga.users",
-            SqlOSCursorCodec.Fingerprint(search),
-            context);
-        return page.ToResponse();
-    }
-
-    private static async Task<object> GetAgentsAsync(ISqlOSFgaDbContext dbContext, HttpContext context)
-    {
-        var search = context.Request.Query["search"].FirstOrDefault();
-
-        var agents = dbContext.Set<SqlOSFgaAgent>().AsQueryable();
-
-        if (!string.IsNullOrEmpty(search))
-            agents = agents.Where(a =>
-                (a.Subject != null && (a.Subject.DisplayName.Contains(search) || a.Subject.Id.Contains(search))) ||
-                (a.AgentType != null && a.AgentType.Contains(search)) ||
-                (a.Description != null && a.Description.Contains(search)));
-
-        var query = agents.Select(a => new AgentListRow
-        {
-            Id = a.Id,
-            SubjectId = a.SubjectId,
-            DisplayName = a.Subject != null ? a.Subject.DisplayName : a.Id,
-            AgentType = a.AgentType,
-            Description = a.Description,
-            LastRunAt = a.LastRunAt,
-            CreatedAt = a.CreatedAt
-        });
-
-        var page = await ToCursorPageAsync(
-            query,
-            SqlOSKeyset<AgentListRow>.Create().Ascending(x => x.DisplayName).ThenAscending(x => x.Id),
-            "fga.agents",
-            SqlOSCursorCodec.Fingerprint(search),
-            context);
-        return page.ToResponse();
-    }
-
-    private static async Task<object> GetServiceAccountsAsync(ISqlOSFgaDbContext dbContext, HttpContext context)
-    {
-        var search = context.Request.Query["search"].FirstOrDefault();
-
-        var accounts = dbContext.Set<SqlOSFgaServiceAccount>().AsQueryable();
-
-        if (!string.IsNullOrEmpty(search))
-            accounts = accounts.Where(s =>
-                (s.Subject != null && (s.Subject.DisplayName.Contains(search) || s.Subject.Id.Contains(search))) ||
-                s.ClientId.Contains(search) ||
-                (s.Description != null && s.Description.Contains(search)));
-
-        var query = accounts.Select(s => new ServiceAccountListRow
-        {
-            Id = s.Id,
-            SubjectId = s.SubjectId,
-            DisplayName = s.Subject != null ? s.Subject.DisplayName : s.Id,
-            ClientId = s.ClientId,
-            Description = s.Description,
-            LastUsedAt = s.LastUsedAt,
-            ExpiresAt = s.ExpiresAt,
-            ConfigurationOwner = s.ConfigurationOwner,
-            ConfigurationSourceKey = s.ConfigurationSourceKey,
-            ConfigurationOrphanedAt = s.ConfigurationOrphanedAt,
-            CreatedAt = s.CreatedAt
-        });
-
-        var page = await ToCursorPageAsync(
-            query,
-            SqlOSKeyset<ServiceAccountListRow>.Create().Ascending(x => x.DisplayName).ThenAscending(x => x.Id),
-            "fga.service-accounts",
-            SqlOSCursorCodec.Fingerprint(search),
-            context);
-        return page.ToResponse();
-    }
-
-    private static async Task<object> GetUserGroupsAsync(ISqlOSFgaDbContext dbContext, HttpContext context)
-    {
-        var search = context.Request.Query["search"].FirstOrDefault();
-
-        var groups = dbContext.Set<SqlOSFgaUserGroup>().AsQueryable();
-
-        if (!string.IsNullOrEmpty(search))
-            groups = groups.Where(g =>
-                g.Name.Contains(search) ||
-                (g.Subject != null && g.Subject.DisplayName.Contains(search)) ||
-                (g.Description != null && g.Description.Contains(search)));
-
-        var query = groups.Select(g => new UserGroupListRow
-        {
-            Id = g.Id,
-            SubjectId = g.SubjectId,
-            Name = g.Name,
-            Description = g.Description,
-            GroupType = g.GroupType,
-            CreatedAt = g.CreatedAt
-        });
-
-        var page = await ToCursorPageAsync(
-            query,
-            SqlOSKeyset<UserGroupListRow>.Create().Ascending(x => x.Name).ThenAscending(x => x.Id),
-            "fga.user-groups",
-            SqlOSCursorCodec.Fingerprint(search),
-            context);
-
-        var groupIds = page.Data.Select(x => x.Id).ToList();
-        Dictionary<string, int> memberCountLookup;
-        if (groupIds.Count > 0)
-        {
-            var memberCounts = await dbContext.Set<SqlOSFgaUserGroupMembership>()
-                .Where(m => groupIds.Contains(m.UserGroupId))
-                .GroupBy(m => m.UserGroupId)
-                .Select(g => new { UserGroupId = g.Key, Count = g.Count() })
-                .ToListAsync(context.RequestAborted);
-            memberCountLookup = memberCounts.ToDictionary(x => x.UserGroupId, x => x.Count);
-        }
-        else
-        {
-            memberCountLookup = new Dictionary<string, int>();
-        }
-
-        return page.ToResponse(g => new
-        {
-            g.Id,
-            g.SubjectId,
-            g.Name,
-            g.Description,
-            g.GroupType,
-            MemberCount = memberCountLookup.GetValueOrDefault(g.Id, 0),
-            g.CreatedAt
-        });
-    }
-
-    private static async Task<object> GetGrantsAsync(ISqlOSFgaDbContext dbContext, HttpContext context)
-    {
-        var search = context.Request.Query["search"].FirstOrDefault();
-
-        var grants = dbContext.Set<SqlOSFgaGrant>().AsQueryable();
-
-        if (!string.IsNullOrEmpty(search))
-            grants = grants.Where(g =>
-                (g.Subject != null && g.Subject.DisplayName.Contains(search)) ||
-                (g.Resource != null && g.Resource.Name.Contains(search)) ||
-                (g.Role != null && g.Role.Name.Contains(search)));
-
-        var query = grants.Select(g => new GrantListRow
-        {
-            Id = g.Id,
-            SubjectName = g.Subject != null ? g.Subject.DisplayName : g.SubjectId,
-            SubjectId = g.SubjectId,
-            ResourceName = g.Resource != null ? g.Resource.Name : g.ResourceId,
-            ResourceId = g.ResourceId,
-            RoleName = g.Role != null ? g.Role.Name : g.RoleId,
-            RoleId = g.RoleId,
-            EffectiveFrom = g.EffectiveFrom,
-            EffectiveTo = g.EffectiveTo,
-            CreatedAt = g.CreatedAt
-        });
-
-        var page = await ToCursorPageAsync(
-            query,
-            SqlOSKeyset<GrantListRow>.Create().Descending(x => x.CreatedAt).ThenDescending(x => x.Id),
-            "fga.grants",
-            SqlOSCursorCodec.Fingerprint(search),
-            context);
-        return page.ToResponse();
-    }
-
-    private static async Task<object> GetRolesAsync(ISqlOSFgaDbContext dbContext, HttpContext context)
-    {
-        var search = context.Request.Query["search"].FirstOrDefault();
-
-        var roles = dbContext.Set<SqlOSFgaRole>().AsQueryable();
-
-        if (!string.IsNullOrEmpty(search))
-            roles = roles.Where(r => r.Name.Contains(search) || r.Key.Contains(search));
-
-        var query = roles.Select(r => new RoleListRow
-        {
-            Id = r.Id,
-            Key = r.Key,
-            Name = r.Name,
-            Description = r.Description,
-            IsVirtual = r.IsVirtual,
-            PermissionCount = r.RolePermissions.Count
-        });
-
-        var page = await ToCursorPageAsync(
-            query,
-            SqlOSKeyset<RoleListRow>.Create().Ascending(x => x.Name).ThenAscending(x => x.Id),
-            "fga.roles",
-            SqlOSCursorCodec.Fingerprint(search),
-            context);
-        return page.ToResponse();
-    }
-
-    private static async Task<object> GetPermissionsAsync(ISqlOSFgaDbContext dbContext, HttpContext context)
-    {
-        var search = context.Request.Query["search"].FirstOrDefault();
-
-        var permissions = dbContext.Set<SqlOSFgaPermission>().AsQueryable();
-
-        if (!string.IsNullOrEmpty(search))
-            permissions = permissions.Where(p => p.Key.Contains(search) || p.Name.Contains(search));
-
-        var query = permissions.Select(p => new PermissionListRow
-        {
-            Id = p.Id,
-            Key = p.Key,
-            Name = p.Name,
-            Description = p.Description,
-            ResourceType = p.ResourceType != null ? p.ResourceType.Name : null
-        });
-
-        var page = await ToCursorPageAsync(
-            query,
-            SqlOSKeyset<PermissionListRow>.Create().Ascending(x => x.Name).ThenAscending(x => x.Id),
-            "fga.permissions",
-            SqlOSCursorCodec.Fingerprint(search),
-            context);
-        return page.ToResponse();
-    }
-
-    private static async Task<object> GetResourceTypesAsync(ISqlOSFgaDbContext dbContext, HttpContext context)
-    {
-        var search = context.Request.Query["search"].FirstOrDefault();
-
-        var types = dbContext.Set<SqlOSFgaResourceType>().AsQueryable();
-
-        if (!string.IsNullOrEmpty(search))
-            types = types.Where(rt => rt.Name.Contains(search) || rt.Id.Contains(search));
-
-        var query = types.Select(rt => new ResourceTypeListRow
-        {
-            Id = rt.Id,
-            Key = rt.Id,
-            Name = rt.Name,
-            Description = rt.Description
-        });
-
-        var page = await ToCursorPageAsync(
-            query,
-            SqlOSKeyset<ResourceTypeListRow>.Create().Ascending(x => x.Name).ThenAscending(x => x.Id),
-            "fga.resource-types",
-            SqlOSCursorCodec.Fingerprint(search),
-            context);
-        return page.ToResponse();
-    }
-
-    private static async Task<object> GetStatsAsync(IServiceProvider services, CancellationToken cancellationToken)
-    {
-        async Task<int> CountAsync<TEntity>()
-            where TEntity : class
-        {
-            using var scope = services.CreateScope();
-            var dbContext = scope.ServiceProvider.GetRequiredService<ISqlOSFgaDbContext>();
-            return await dbContext.Set<TEntity>().CountAsync(cancellationToken);
-        }
-
-        var counts = await Task.WhenAll(
-            CountAsync<SqlOSFgaResource>(),
-            CountAsync<SqlOSFgaSubject>(),
-            CountAsync<SqlOSFgaUser>(),
-            CountAsync<SqlOSFgaAgent>(),
-            CountAsync<SqlOSFgaServiceAccount>(),
-            CountAsync<SqlOSFgaUserGroup>(),
-            CountAsync<SqlOSFgaGrant>(),
-            CountAsync<SqlOSFgaRole>(),
-            CountAsync<SqlOSFgaPermission>());
-
-        return new
-        {
-            Resources = counts[0],
-            Subjects = counts[1],
-            Users = counts[2],
-            Agents = counts[3],
-            ServiceAccounts = counts[4],
-            UserGroups = counts[5],
-            Grants = counts[6],
-            Roles = counts[7],
-            Permissions = counts[8]
-        };
-    }
-
-    // --- Helpers ---
-
-    private static (string? Cursor, int PageSize) GetCursorParams(HttpContext context)
-    {
-        SqlOSCursorPagination.RejectLegacyOffset(TryGetIntQuery(context, "page"));
-        var pageSize = SqlOSCursorPagination.NormalizePageSize(TryGetIntQuery(context, "pageSize"), DefaultPageSize);
-        var cursor = context.Request.Query["cursor"].FirstOrDefault();
-        return (cursor, pageSize);
-    }
-
-    private static int? TryGetIntQuery(HttpContext context, string name)
-    {
-        var value = context.Request.Query[name].FirstOrDefault();
-        return int.TryParse(value, out var parsed) ? parsed : null;
-    }
-
-    private static Task<SqlOSCursorPage<T>> ToCursorPageAsync<T>(
-        IQueryable<T> query,
-        SqlOSKeyset<T> keyset,
-        string sortKey,
-        string filterFingerprint,
-        HttpContext context)
-        where T : class
-    {
-        var (cursor, pageSize) = GetCursorParams(context);
-        return SqlOSCursorPagination.ToPageAsync(
-            query,
-            keyset,
-            sortKey,
-            filterFingerprint,
-            cursor,
-            pageSize,
+        var (outcome, grant) = await fga.GrantAsync(
+            new GrantFgaRoleCommand(request.SubjectId, request.RoleId, request.ResourceId, request.EffectiveFrom, request.EffectiveTo),
+            new GrantAuthority(FgaActor.Operator),
             context.RequestAborted);
+        switch (outcome)
+        {
+            case GrantFgaRoleOutcome.Granted:
+                context.Response.StatusCode = StatusCodes.Status201Created;
+                await WriteJsonAsync(context, grant);
+                break;
+            case GrantFgaRoleOutcome.Refused { Reason: GrantRefusal.Duplicate } duplicate:
+                context.Response.StatusCode = StatusCodes.Status409Conflict;
+                await WriteJsonAsync(context, new { error = "An identical grant already exists.", grantId = duplicate.ExistingGrantId });
+                break;
+            case GrantFgaRoleOutcome.Refused refused:
+                await WriteErrorAsync(context, StatusCodes.Status400BadRequest, refused.Reason switch
+                {
+                    GrantRefusal.SubjectNotFound => "Subject not found",
+                    GrantRefusal.RoleNotFound => "Role not found",
+                    _ => "Resource not found"
+                });
+                break;
+        }
     }
 
-    private static async Task<(Dictionary<string, int> ChildCounts, Dictionary<string, int> GrantCounts)> GetResourcePageCountsAsync(
-        ISqlOSFgaDbContext dbContext,
-        IReadOnlyList<string> resourceIds,
-        CancellationToken cancellationToken)
+    private static async Task HandleDeleteSubject(HttpContext context, SqlOSFgaAdministration fga, string subjectId)
     {
-        if (resourceIds.Count == 0)
+        switch (await fga.DeleteSubjectAsync(subjectId, context.RequestAborted))
         {
-            return (new Dictionary<string, int>(), new Dictionary<string, int>());
+            case DeleteFgaSubjectOutcome.Deleted:
+                context.Response.StatusCode = StatusCodes.Status204NoContent;
+                break;
+            case DeleteFgaSubjectOutcome.Refused refused:
+                await WriteErrorAsync(context, StatusCodes.Status409Conflict, refused.Message);
+                break;
+            default:
+                await WriteErrorAsync(context, StatusCodes.Status404NotFound, "Subject not found");
+                break;
         }
+    }
 
-        var childCounts = await dbContext.Set<SqlOSFgaResource>()
-            .Where(c => resourceIds.Contains(c.ParentId!) && c.IsActive)
-            .GroupBy(c => c.ParentId!)
-            .Select(g => new { Id = g.Key, Count = g.Count() })
-            .ToDictionaryAsync(x => x.Id, x => x.Count, cancellationToken);
+    private const string InvalidJsonError = "The request body is not valid JSON.";
 
-        var grantCounts = await dbContext.Set<SqlOSFgaGrant>()
-            .Where(g => resourceIds.Contains(g.ResourceId))
-            .GroupBy(g => g.ResourceId)
-            .Select(g => new { Id = g.Key, Count = g.Count() })
-            .ToDictionaryAsync(x => x.Id, x => x.Count, cancellationToken);
+    /// <summary>The body as <typeparamref name="T"/>, or null when it is not valid JSON for it.</summary>
+    private static async Task<JsonBody<T>?> ReadJsonAsync<T>(HttpContext context)
+    {
+        try
+        {
+            return new JsonBody<T>(await JsonSerializer.DeserializeAsync<T>(context.Request.Body, JsonOptions, context.RequestAborted));
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
-        return (childCounts, grantCounts);
+    private static string? Search(HttpContext context) => context.Request.Query["search"].FirstOrDefault();
+
+    private static FgaPageRequest Page(HttpContext context)
+        => new(context.Request.Query["cursor"].FirstOrDefault(), IntQuery(context, "pageSize"), IntQuery(context, "page"));
+
+    private static int? IntQuery(HttpContext context, string name)
+        => int.TryParse(context.Request.Query[name].FirstOrDefault(), out var parsed) ? parsed : null;
+
+    private static Task WriteJsonAsync(HttpContext context, object? value)
+        => context.Response.WriteAsync(JsonSerializer.Serialize(value, JsonOptions));
+
+    private static Task WriteFoundAsync(HttpContext context, object? value, string notFound)
+        => value == null ? WriteErrorAsync(context, StatusCodes.Status404NotFound, notFound) : WriteJsonAsync(context, value);
+
+    private static Task WriteErrorAsync(HttpContext context, int statusCode, string error)
+    {
+        context.Response.StatusCode = statusCode;
+        return WriteJsonAsync(context, new { error });
     }
 
     private async Task ServeStaticFile(HttpContext context, string relativePath)
@@ -1122,222 +444,9 @@ public class SqlOSFgaDashboardMiddleware
         await context.Response.WriteAsync(JsonSerializer.Serialize(new { error = SchemaWriteError }, JsonOptions));
     }
 
-    private static async Task HandleCreateGrant(HttpContext context, ISqlOSFgaDbContext dbContext)
-    {
-        var body = await JsonSerializer.DeserializeAsync<CreateGrantRequest>(context.Request.Body, JsonOptions);
-        if (body == null || string.IsNullOrEmpty(body.SubjectId) || string.IsNullOrEmpty(body.RoleId) || string.IsNullOrEmpty(body.ResourceId))
-        {
-            context.Response.StatusCode = 400;
-            await context.Response.WriteAsync("{\"error\":\"subjectId, roleId, and resourceId are required\"}");
-            return;
-        }
+    private sealed record JsonBody<T>(T? Value);
 
-        var outcome = await new GrantFgaRole(dbContext).ExecuteAsync(
-            new GrantFgaRoleCommand(body.SubjectId, body.RoleId, body.ResourceId, body.EffectiveFrom, body.EffectiveTo),
-            new GrantAuthority(FgaActor.Operator),
-            context.RequestAborted);
-        if (outcome is GrantFgaRoleOutcome.Refused refused)
-        {
-            context.Response.StatusCode = refused.Reason == GrantRefusal.Duplicate ? StatusCodes.Status409Conflict : StatusCodes.Status400BadRequest;
-            await context.Response.WriteAsync(refused.Reason switch
-            {
-                GrantRefusal.SubjectNotFound => "{\"error\":\"Subject not found\"}",
-                GrantRefusal.RoleNotFound => "{\"error\":\"Role not found\"}",
-                GrantRefusal.ResourceNotFound => "{\"error\":\"Resource not found\"}",
-                _ => JsonSerializer.Serialize(new { error = "An identical grant already exists.", grantId = refused.ExistingGrantId }, JsonOptions)
-            });
-            return;
-        }
+    private sealed record TraceRequest(string SubjectId, string ResourceId, string PermissionKey);
 
-        var grantId = ((GrantFgaRoleOutcome.Granted)outcome).Grant.Id;
-        var created = await dbContext.Set<SqlOSFgaGrant>()
-            .Include(g => g.Subject)
-            .Include(g => g.Resource)
-            .Include(g => g.Role)
-            .Where(g => g.Id == grantId)
-            .Select(g => new
-            {
-                g.Id,
-                SubjectName = g.Subject != null ? g.Subject.DisplayName : g.SubjectId,
-                g.SubjectId,
-                ResourceName = g.Resource != null ? g.Resource.Name : g.ResourceId,
-                g.ResourceId,
-                RoleName = g.Role != null ? g.Role.Name : g.RoleId,
-                g.RoleId,
-                g.EffectiveFrom, g.EffectiveTo, g.CreatedAt
-            })
-            .FirstOrDefaultAsync();
-
-        context.Response.StatusCode = 201;
-        await context.Response.WriteAsync(JsonSerializer.Serialize(created, JsonOptions));
-    }
-
-    private static async Task HandleDeleteGrant(HttpContext context, ISqlOSFgaDbContext dbContext, string grantId)
-    {
-        if (!await new RevokeFgaGrant(dbContext).ExecuteAsync(grantId, FgaActor.Operator, context.RequestAborted))
-        {
-            context.Response.StatusCode = 404;
-            await context.Response.WriteAsync("{\"error\":\"Grant not found\"}");
-            return;
-        }
-
-        context.Response.StatusCode = 204;
-    }
-
-    private static async Task HandleGetRoleDetail(HttpContext context, ISqlOSFgaDbContext dbContext, string roleId)
-    {
-        var role = await dbContext.Set<SqlOSFgaRole>()
-            .Include(r => r.RolePermissions)
-            .Where(r => r.Id == roleId)
-            .Select(r => new
-            {
-                r.Id, r.Key, r.Name, r.Description, r.IsVirtual,
-                PermissionCount = r.RolePermissions.Count
-            })
-            .FirstOrDefaultAsync();
-
-        if (role == null)
-        {
-            context.Response.StatusCode = 404;
-            await context.Response.WriteAsync("{\"error\":\"Role not found\"}");
-            return;
-        }
-
-        await context.Response.WriteAsync(JsonSerializer.Serialize(role, JsonOptions));
-    }
-
-    private sealed class ResourceTreeRow
-    {
-        public string Id { get; set; } = string.Empty;
-        public string? ParentId { get; set; }
-        public string Name { get; set; } = string.Empty;
-        public string ResourceType { get; set; } = string.Empty;
-    }
-
-    private sealed class SubjectListRow
-    {
-        public string Id { get; set; } = string.Empty;
-        public string DisplayName { get; set; } = string.Empty;
-        public string SubjectTypeId { get; set; } = string.Empty;
-        public string SubjectType { get; set; } = string.Empty;
-        public string? OrganizationId { get; set; }
-        public string? ExternalRef { get; set; }
-        public DateTime CreatedAt { get; set; }
-    }
-
-    private sealed class UserListRow
-    {
-        public string Id { get; set; } = string.Empty;
-        public string SubjectId { get; set; } = string.Empty;
-        public string DisplayName { get; set; } = string.Empty;
-        public string? Email { get; set; }
-        public bool IsActive { get; set; }
-        public DateTime? LastLoginAt { get; set; }
-        public DateTime CreatedAt { get; set; }
-    }
-
-    private sealed class AgentListRow
-    {
-        public string Id { get; set; } = string.Empty;
-        public string SubjectId { get; set; } = string.Empty;
-        public string DisplayName { get; set; } = string.Empty;
-        public string? AgentType { get; set; }
-        public string? Description { get; set; }
-        public DateTime? LastRunAt { get; set; }
-        public DateTime CreatedAt { get; set; }
-    }
-
-    private sealed class ServiceAccountListRow
-    {
-        public string Id { get; set; } = string.Empty;
-        public string SubjectId { get; set; } = string.Empty;
-        public string DisplayName { get; set; } = string.Empty;
-        public string ClientId { get; set; } = string.Empty;
-        public string? Description { get; set; }
-        public DateTime? LastUsedAt { get; set; }
-        public DateTime? ExpiresAt { get; set; }
-        public string ConfigurationOwner { get; set; } = string.Empty;
-        public string? ConfigurationSourceKey { get; set; }
-        public DateTime? ConfigurationOrphanedAt { get; set; }
-        public DateTime CreatedAt { get; set; }
-    }
-
-    private sealed class UserGroupListRow
-    {
-        public string Id { get; set; } = string.Empty;
-        public string SubjectId { get; set; } = string.Empty;
-        public string Name { get; set; } = string.Empty;
-        public string? Description { get; set; }
-        public string? GroupType { get; set; }
-        public DateTime CreatedAt { get; set; }
-    }
-
-    private sealed class GrantListRow
-    {
-        public string Id { get; set; } = string.Empty;
-        public string SubjectName { get; set; } = string.Empty;
-        public string SubjectId { get; set; } = string.Empty;
-        public string ResourceName { get; set; } = string.Empty;
-        public string ResourceId { get; set; } = string.Empty;
-        public string RoleName { get; set; } = string.Empty;
-        public string RoleId { get; set; } = string.Empty;
-        public DateTime? EffectiveFrom { get; set; }
-        public DateTime? EffectiveTo { get; set; }
-        public DateTime CreatedAt { get; set; }
-    }
-
-    private sealed class ResourceGrantRow
-    {
-        public string Id { get; set; } = string.Empty;
-        public string SubjectId { get; set; } = string.Empty;
-        public string SubjectName { get; set; } = string.Empty;
-        public string? SubjectType { get; set; }
-        public string RoleId { get; set; } = string.Empty;
-        public string RoleName { get; set; } = string.Empty;
-        public DateTime? EffectiveFrom { get; set; }
-        public DateTime? EffectiveTo { get; set; }
-        public DateTime CreatedAt { get; set; }
-    }
-
-    private sealed class SubjectGrantRow
-    {
-        public string Id { get; set; } = string.Empty;
-        public string ResourceName { get; set; } = string.Empty;
-        public string ResourceId { get; set; } = string.Empty;
-        public string RoleName { get; set; } = string.Empty;
-        public string RoleId { get; set; } = string.Empty;
-        public DateTime? EffectiveFrom { get; set; }
-        public DateTime? EffectiveTo { get; set; }
-        public DateTime CreatedAt { get; set; }
-    }
-
-    private sealed class RoleListRow
-    {
-        public string Id { get; set; } = string.Empty;
-        public string Key { get; set; } = string.Empty;
-        public string Name { get; set; } = string.Empty;
-        public string? Description { get; set; }
-        public bool IsVirtual { get; set; }
-        public int PermissionCount { get; set; }
-    }
-
-    private sealed class PermissionListRow
-    {
-        public string Id { get; set; } = string.Empty;
-        public string Key { get; set; } = string.Empty;
-        public string Name { get; set; } = string.Empty;
-        public string? Description { get; set; }
-        public string? ResourceType { get; set; }
-    }
-
-    private sealed class ResourceTypeListRow
-    {
-        public string Id { get; set; } = string.Empty;
-        public string Key { get; set; } = string.Empty;
-        public string Name { get; set; } = string.Empty;
-        public string? Description { get; set; }
-    }
-
-    private record TraceRequest(string SubjectId, string ResourceId, string PermissionKey);
-    private record CreateGrantRequest(string SubjectId, string RoleId, string ResourceId, DateTime? EffectiveFrom, DateTime? EffectiveTo);
+    private sealed record CreateGrantRequest(string SubjectId, string RoleId, string ResourceId, DateTime? EffectiveFrom, DateTime? EffectiveTo);
 }

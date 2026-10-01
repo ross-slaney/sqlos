@@ -1,11 +1,13 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Models;
 using SqlOS.Domain;
 using SqlOS.Domain.Events;
 using SqlOS.Extensions;
+using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Models;
 using SqlOS.Fga.Services;
 using SqlOS.Tests.Infrastructure;
@@ -183,6 +185,26 @@ public sealed class FgaSubjectTests
             "fga.group.member_added",
             "fga.group.member_removed");
         await missing.Should().ThrowAsync<InvalidOperationException>().WithMessage("Group 'grp_missing' not found");
+    }
+
+    [TestMethod]
+    public async Task An_access_check_trace_names_an_unknown_or_inactive_subject()
+    {
+        await using var context = CreateContext();
+        context.Set<SqlOSFgaResourceType>().Add(FgaTestModel.ResourceType("document"));
+        context.Set<SqlOSFgaResource>().Add(FgaTestModel.Resource("doc", "Doc", "document"));
+        context.Set<SqlOSFgaPermission>().Add(FgaTestModel.Permission("perm_read", "doc.read", resourceTypeId: "document"));
+        context.Set<SqlOSFgaSubject>().Add(FgaTestModel.Subject("usr_gone", "user", "Gone"));
+        context.Set<SqlOSFgaUser>().Add(FgaTestModel.User("usr::gone", "usr_gone", isActive: false));
+        await context.SaveChangesAsync();
+        var fga = new SqlOSFgaAuthService(context, Options.Create(new SqlOSFgaOptions()), NullLogger<SqlOSFgaAuthService>.Instance);
+
+        var unknown = await fga.CheckAccessAsync("usr_nobody", "doc.read", "doc");
+        var inactive = await fga.CheckAccessAsync("usr_gone", "doc.read", "doc");
+
+        unknown.Trace.Single(step => step.Step == "Subject Resolution").Detail.Should().Be("Subject \"usr_nobody\" was not found");
+        inactive.Trace.Single(step => step.Step == "Subject Resolution").Detail.Should().Be("Subject \"Gone\" is not active");
+        new[] { unknown, inactive }.Should().AllSatisfy(result => result.Should().BeEquivalentTo(new { Allowed = false, Error = "No subjects found" }));
     }
 
     private static SqlOSFgaSubject Group(string id)
