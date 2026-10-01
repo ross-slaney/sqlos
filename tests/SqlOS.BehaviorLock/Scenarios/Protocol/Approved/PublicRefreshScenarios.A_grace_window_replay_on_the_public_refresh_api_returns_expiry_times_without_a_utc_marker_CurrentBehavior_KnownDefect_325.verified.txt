@@ -1,5 +1,5 @@
 # SqlOS behavior lock transcript
-scenario: PublicRefreshScenarios.{token#1}
+scenario: PublicRefreshScenarios.A_grace_window_replay_on_the_public_refresh_api_returns_expiry_times_without_a_utc_marker_CurrentBehavior_KnownDefect_325
 profile: hosted
 
 ## 1. app-backend: a rotation computes its expiry times in memory: they carry Z

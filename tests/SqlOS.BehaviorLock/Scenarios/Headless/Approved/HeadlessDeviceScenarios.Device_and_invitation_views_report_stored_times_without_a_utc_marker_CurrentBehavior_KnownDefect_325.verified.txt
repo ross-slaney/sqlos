@@ -1,5 +1,5 @@
 # SqlOS behavior lock transcript
-scenario: HeadlessDeviceScenarios.{token#1}
+scenario: HeadlessDeviceScenarios.Device_and_invitation_views_report_stored_times_without_a_utc_marker_CurrentBehavior_KnownDefect_325
 profile: headless
 
 # Known defect #325: times read back from the database serialize without Z ({datetime:unspecified}), so browsers read UTC as local time.

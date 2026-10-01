@@ -1,5 +1,5 @@
 # SqlOS behavior lock transcript
-scenario: HostedInvitationScenarios.{token#1}
+scenario: HostedInvitationScenarios.An_invitee_creates_an_account_inside_an_authorization_request_CurrentBehavior_KnownDefect_415
 profile: hosted
 
 ## 1. browser: the sign-in page for a pending authorization request, with the invitation

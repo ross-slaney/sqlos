@@ -1,5 +1,5 @@
 # SqlOS behavior lock transcript
-scenario: PublicSessionScenarios.{token#1}
+scenario: PublicSessionScenarios.Refreshing_into_another_organization_survives_revoking_that_organization_CurrentBehavior_KnownDefect_427
 profile: hosted
 
 ## 1. client: sign in to Acme

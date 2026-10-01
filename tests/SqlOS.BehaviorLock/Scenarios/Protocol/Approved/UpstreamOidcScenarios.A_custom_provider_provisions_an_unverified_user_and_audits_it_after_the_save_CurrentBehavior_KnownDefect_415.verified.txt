@@ -1,5 +1,5 @@
 # SqlOS behavior lock transcript
-scenario: UpstreamOidcScenarios.{token#1}
+scenario: UpstreamOidcScenarios.A_custom_provider_provisions_an_unverified_user_and_audits_it_after_the_save_CurrentBehavior_KnownDefect_415
 profile: hosted
 
 ## 1. browser: a custom provider need not verify the email: SqlOS provisions Carol with an unverified address

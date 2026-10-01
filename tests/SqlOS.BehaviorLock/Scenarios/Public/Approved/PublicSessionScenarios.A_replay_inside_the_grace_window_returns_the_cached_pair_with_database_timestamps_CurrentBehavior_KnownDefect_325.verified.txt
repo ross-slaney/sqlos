@@ -1,5 +1,5 @@
 # SqlOS behavior lock transcript
-scenario: PublicSessionScenarios.{token#1}
+scenario: PublicSessionScenarios.A_replay_inside_the_grace_window_returns_the_cached_pair_with_database_timestamps_CurrentBehavior_KnownDefect_325
 profile: hosted
 
 ## 1. client: refresh: a new pair; its expiry times are UTC (Z)

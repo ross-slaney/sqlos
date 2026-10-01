@@ -1,5 +1,5 @@
 # SqlOS behavior lock transcript
-scenario: AdminIdentityUserScenarios.{token#1}
+scenario: AdminIdentityUserScenarios.Admin_reads_return_database_timestamps_without_a_utc_marker_CurrentBehavior_KnownDefect_325
 profile: dashboard-callback
 
 # Known defect #325, recorded as it behaves today: create responses serialize the in-memory UTC value with Z, while every value read back from the database has no zone ({datetime:unspecified}).

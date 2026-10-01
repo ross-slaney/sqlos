@@ -1,5 +1,5 @@
 # SqlOS behavior lock transcript
-scenario: AdminIdentityOrganizationScenarios.{token#1}
+scenario: AdminIdentityOrganizationScenarios.Deactivating_an_organization_misses_a_session_refreshed_into_it_CurrentBehavior_KnownDefect_427
 profile: dashboard-callback
 
 # Known defect #427, recorded as it behaves today: organization deactivation revokes sessions by the organization they started in, so a session that refreshed into the deactivated organization is not revoked.

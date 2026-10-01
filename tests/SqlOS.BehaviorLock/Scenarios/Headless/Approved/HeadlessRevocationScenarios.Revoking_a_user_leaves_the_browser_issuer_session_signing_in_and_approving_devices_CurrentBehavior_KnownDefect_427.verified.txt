@@ -1,5 +1,5 @@
 # SqlOS behavior lock transcript
-scenario: HeadlessRevocationScenarios.{token#1}
+scenario: HeadlessRevocationScenarios.Revoking_a_user_leaves_the_browser_issuer_session_signing_in_and_approving_devices_CurrentBehavior_KnownDefect_427
 profile: headless
 
 ## 1. operator: the operator previews revoking every session of alice

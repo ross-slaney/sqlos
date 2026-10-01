@@ -1,5 +1,5 @@
 # SqlOS behavior lock transcript
-scenario: ClientRegistrationScenarios.{token#1}
+scenario: ClientRegistrationScenarios.A_metadata_document_client_can_mint_a_token_for_the_first_party_api_CurrentBehavior_KnownDefect_429
 profile: mcp
 
 # The client should only ever receive tokens for the MCP resource. It asks for the first-party API instead.

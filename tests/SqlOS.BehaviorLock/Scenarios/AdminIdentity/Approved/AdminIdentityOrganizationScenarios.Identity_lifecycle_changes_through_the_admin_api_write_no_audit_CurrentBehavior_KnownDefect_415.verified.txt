@@ -1,5 +1,5 @@
 # SqlOS behavior lock transcript
-scenario: AdminIdentityOrganizationScenarios.{token#1}
+scenario: AdminIdentityOrganizationScenarios.Identity_lifecycle_changes_through_the_admin_api_write_no_audit_CurrentBehavior_KnownDefect_415
 profile: dashboard-callback
 
 # Known defect #415, recorded as it behaves today: creating a user (with a password), an organization, or a membership, renaming or deactivating an organization, and re-adding a member write no lifecycle audit event, and re-adding a member silently changes the role and reactivates the membership.

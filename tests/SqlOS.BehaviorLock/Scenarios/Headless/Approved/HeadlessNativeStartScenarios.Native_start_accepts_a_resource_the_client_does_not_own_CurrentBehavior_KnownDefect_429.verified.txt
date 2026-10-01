@@ -1,5 +1,5 @@
 # SqlOS behavior lock transcript
-scenario: HeadlessNativeStartScenarios.{token#1}
+scenario: HeadlessNativeStartScenarios.Native_start_accepts_a_resource_the_client_does_not_own_CurrentBehavior_KnownDefect_429
 profile: mcp
 
 # Known defect #429: the MCP client's audience is the MCP surface, but a requested resource is stored without checking it, so the token opens the first-party API.

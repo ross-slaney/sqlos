@@ -1,5 +1,5 @@
 # SqlOS behavior lock transcript
-scenario: PublicRaceScenarios.{token#1}
+scenario: PublicRaceScenarios.Parallel_code_requests_exceed_the_hourly_limit_CurrentBehavior_KnownDefect_424
 profile: hosted
 
 ## 1. client: parallel request 1 of 6: admitted, and a code is sent

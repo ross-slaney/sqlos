@@ -1,5 +1,5 @@
 # SqlOS behavior lock transcript
-scenario: HostedEmailOtpScenarios.{token#1}
+scenario: HostedEmailOtpScenarios.Concurrent_code_requests_exceed_the_per_address_limit_CurrentBehavior_KnownDefect_424
 profile: hosted
 
 ## 1. browser: seven code requests at once for one address, one per tab (one shown)

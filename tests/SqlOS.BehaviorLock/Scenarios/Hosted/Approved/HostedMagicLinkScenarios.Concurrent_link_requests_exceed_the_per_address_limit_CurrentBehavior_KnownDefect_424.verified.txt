@@ -1,5 +1,5 @@
 # SqlOS behavior lock transcript
-scenario: HostedMagicLinkScenarios.{token#1}
+scenario: HostedMagicLinkScenarios.Concurrent_link_requests_exceed_the_per_address_limit_CurrentBehavior_KnownDefect_424
 profile: hosted
 
 ## 1. browser: seven link requests at once for one address, one per tab (one shown)

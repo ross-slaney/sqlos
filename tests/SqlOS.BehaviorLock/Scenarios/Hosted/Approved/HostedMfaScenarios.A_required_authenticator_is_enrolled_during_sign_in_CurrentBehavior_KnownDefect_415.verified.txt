@@ -1,5 +1,5 @@
 # SqlOS behavior lock transcript
-scenario: HostedMfaScenarios.{token#1}
+scenario: HostedMfaScenarios.A_required_authenticator_is_enrolled_during_sign_in_CurrentBehavior_KnownDefect_415
 profile: hosted
 
 ## 1. browser: sign in: the authenticator setup page

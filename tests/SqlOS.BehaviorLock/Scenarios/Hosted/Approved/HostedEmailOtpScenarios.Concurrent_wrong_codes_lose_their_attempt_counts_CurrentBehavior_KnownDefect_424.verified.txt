@@ -1,5 +1,5 @@
 # SqlOS behavior lock transcript
-scenario: HostedEmailOtpScenarios.{token#1}
+scenario: HostedEmailOtpScenarios.Concurrent_wrong_codes_lose_their_attempt_counts_CurrentBehavior_KnownDefect_424
 profile: hosted
 
 ## 1. browser: ten wrong codes at once from ten tabs: each is answered 'invalid or expired' (one shown)

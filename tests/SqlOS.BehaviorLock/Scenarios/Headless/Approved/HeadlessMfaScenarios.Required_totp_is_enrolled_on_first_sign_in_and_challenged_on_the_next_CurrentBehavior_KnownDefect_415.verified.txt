@@ -1,5 +1,5 @@
 # SqlOS behavior lock transcript
-scenario: HeadlessMfaScenarios.{token#1}
+scenario: HeadlessMfaScenarios.Required_totp_is_enrolled_on_first_sign_in_and_challenged_on_the_next_CurrentBehavior_KnownDefect_415
 profile: headless
 
 ## 1. browser: sign in: the policy requires TOTP and grace has none, so enrollment starts

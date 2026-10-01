@@ -1,5 +1,5 @@
 # SqlOS behavior lock transcript
-scenario: HeadlessDisabledApiScenarios.{token#1}
+scenario: HeadlessDisabledApiScenarios.Every_headless_route_answers_404_when_the_host_disables_the_api
 profile: hosted
 
 ## 1. browser: loading a live hosted request through the disabled API

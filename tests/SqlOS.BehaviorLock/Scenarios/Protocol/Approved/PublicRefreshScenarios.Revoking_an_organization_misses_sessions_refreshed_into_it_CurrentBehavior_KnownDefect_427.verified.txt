@@ -1,5 +1,5 @@
 # SqlOS behavior lock transcript
-scenario: PublicRefreshScenarios.{token#1}
+scenario: PublicRefreshScenarios.Revoking_an_organization_misses_sessions_refreshed_into_it_CurrentBehavior_KnownDefect_427
 profile: hosted
 
 # Alice (member of Acme, admin of Globex) signed in on the hosted page and chose Acme.

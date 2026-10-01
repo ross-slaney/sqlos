@@ -1,5 +1,5 @@
 # SqlOS behavior lock transcript
-scenario: HeadlessRevocationScenarios.{token#1}
+scenario: HeadlessRevocationScenarios.Revoking_a_user_leaves_a_pending_mfa_challenge_usable_CurrentBehavior_KnownDefect_427
 profile: headless
 
 ## 1. laptop: a sign-in on the laptop stops at the MFA challenge

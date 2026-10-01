@@ -1,5 +1,5 @@
 # SqlOS behavior lock transcript
-scenario: AdminIdentityClientScenarios.{token#1}
+scenario: AdminIdentityClientScenarios.An_operator_registered_client_obtains_a_token_for_another_resource_CurrentBehavior_KnownDefect_429
 profile: mcp
 
 # Known defect #429, recorded as it behaves today: /authorize accepts any resource, so a client registered for the MCP audience receives a token for the first-party API audience.

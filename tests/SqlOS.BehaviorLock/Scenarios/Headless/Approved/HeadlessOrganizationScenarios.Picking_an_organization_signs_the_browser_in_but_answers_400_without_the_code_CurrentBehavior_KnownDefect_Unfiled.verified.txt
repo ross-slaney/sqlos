@@ -1,5 +1,5 @@
 # SqlOS behavior lock transcript
-scenario: HeadlessOrganizationScenarios.{token#1}
+scenario: HeadlessOrganizationScenarios.Picking_an_organization_signs_the_browser_in_but_answers_400_without_the_code_CurrentBehavior_KnownDefect_Unfiled
 profile: headless
 
 ## 1. browser: sign in: two memberships, so the UI must ask which organization

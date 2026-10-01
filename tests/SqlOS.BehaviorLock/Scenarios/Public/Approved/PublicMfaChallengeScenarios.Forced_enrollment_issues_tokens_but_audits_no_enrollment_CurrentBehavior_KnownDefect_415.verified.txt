@@ -1,5 +1,5 @@
 # SqlOS behavior lock transcript
-scenario: PublicMfaChallengeScenarios.{token#1}
+scenario: PublicMfaChallengeScenarios.Forced_enrollment_issues_tokens_but_audits_no_enrollment_CurrentBehavior_KnownDefect_415
 profile: hosted
 
 ## 1. client: Acme requires MFA and Alice has no authenticator: the login answers with an enrollment challenge

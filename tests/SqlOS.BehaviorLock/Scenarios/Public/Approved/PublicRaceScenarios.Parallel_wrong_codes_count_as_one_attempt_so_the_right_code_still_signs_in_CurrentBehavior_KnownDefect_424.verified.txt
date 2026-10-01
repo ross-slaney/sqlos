@@ -1,5 +1,5 @@
 # SqlOS behavior lock transcript
-scenario: PublicRaceScenarios.{token#1}
+scenario: PublicRaceScenarios.Parallel_wrong_codes_count_as_one_attempt_so_the_right_code_still_signs_in_CurrentBehavior_KnownDefect_424
 profile: hosted
 
 ## 1. client: an attacker who knows Alice's address starts a challenge (the code goes to Alice)
