@@ -122,7 +122,10 @@ plans, and chooses from its statistics on the ancestor columns:
 
 The cost is therefore min(k/σ, S) lookups plus a sort of at most S rows, and a page never examines more rows
 than the paper's filter did; it only examines them more cheaply. Over all callers the worst case is a scope
-of about √(kN) rows, where both plans cost the same.
+of about √(kN) rows, where both plans cost the same. Note that S = σN grows with the table for a caller whose
+share of it is fixed: the benchmark's store manager sees 0.0065% of the catalog, 65 rows at 1M products and
+3,250 at 50M, and the *drive* plan reads all of them for every page (2.4 ms at 1M, 39 ms at 50M on
+PostgreSQL), while the scope-columns page below reads k rows at either size (1.7 ms).
 
 **With scope columns**, for a caller with one root at level ℓ and an order the application declared an
 index for, the predicate is `Ancestor_ℓ = a AND Reach ≤ ℓ` on the row itself, and the mirrored index

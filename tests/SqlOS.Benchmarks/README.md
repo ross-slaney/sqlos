@@ -91,12 +91,13 @@ the two the scale gate compares. The lineage and scope-columns pages run at ever
 - **correctness**: every scenario returned exactly the authorized answer.
 - **lineage**: the loaded lineage and scope columns, the same after the maintenance pass, and SqlOS's
   rebuild are identical (counts and hashes).
-- **scale**: per-page cost must not grow with N. The median at the largest scale may be at most `maxRatio`
-  (3.0) times the median at the smallest, plus `slackMilliseconds`; for the scope-columns pages
-  `scopedMaxRatio` (1.5), since a single-grant caller's page is one index seek. A lineage page costs the
-  cheaper of two plans (start from the caller's scope, or scan the rows in the requested order), and the
-  optimizer may switch between them as the table grows, which is what the wider ratio allows for. Both
-  scales run on the same machine in the same job, so the ratio holds on shared runners.
+- **scale**: per-page cost must follow the work the paper predicts, not N. The median at the largest scale
+  may be at most `maxRatio` (3.0) times the median at the smallest, times the growth of the rows the page has
+  to touch, plus `slackMilliseconds`. A lineage page touches min(k / σ, σN) rows (the cheaper of the rows in
+  the requested order and the caller's scope): flat for a dense caller, growing with the catalog for a sparse
+  one whose scope grows with it. The previous function touches min(k / σ, N). A page filtered to a store
+  touches that store's σN rows through its own index. The scope-columns pages use `scopedMaxRatio` (1.5) and
+  no growth term: one index seek and k rows at any N.
 - **regression**: the lineage and the scope-columns pages against the previous function, at every scale: at
   most `maxRatio` (1.15) times the previous median, plus slack.
 - **improvement**: for the sparse pages, the lineage page must take at most `lineageMaxRatio` (0.2) of the

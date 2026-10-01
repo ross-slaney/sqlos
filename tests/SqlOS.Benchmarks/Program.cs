@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
@@ -32,6 +34,27 @@ if (options is null)
 {
     Console.WriteLine(BenchmarkOptions.Usage);
     return 0;
+}
+
+if (options.EvaluatePath is { } resultsPath)
+{
+    // The gates alone, on a run's results: the same evaluation CI ran, for recalibrating a gate.
+    var saved = JsonSerializer.Deserialize<BenchmarkReport>(
+        await File.ReadAllTextAsync(resultsPath),
+        new JsonSerializerOptions { PreferredObjectCreationHandling = JsonObjectCreationHandling.Populate })
+        ?? throw new InvalidOperationException($"Could not read {resultsPath}.");
+    var evaluated = GateEvaluator.Evaluate(saved, GateConfig.Load(options.GatesPath));
+    foreach (var group in evaluated.GroupBy(g => g.Gate))
+    {
+        Console.WriteLine($"{(group.All(g => g.Passed) ? "PASS" : "FAIL")} {group.Key} {group.Count(g => g.Passed)}/{group.Count()}");
+    }
+
+    foreach (var gate in evaluated.Where(g => !g.Passed))
+    {
+        Console.WriteLine($"  FAILED [{gate.Gate}] {gate.Subject}: {gate.Detail}");
+    }
+
+    return evaluated.All(g => g.Passed) || !options.EnforceGates ? 0 : 1;
 }
 
 var log = new Log();

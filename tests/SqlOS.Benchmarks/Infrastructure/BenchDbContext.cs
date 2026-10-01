@@ -54,11 +54,13 @@ internal abstract class BenchDbContextBase(DbContextOptions options, bool scopeC
 
             // The indexes an application table like this carries: the unique resource id (which the scope
             // triggers and the lineage join use), the store foreign key, and the one order the catalog pages in
-            // besides the key, price. With the scope columns on, SqlOS mirrors the key and the price index per
-            // level; the foreign key's index and the unique index are not orders and are left alone.
+            // besides the key: price, then the key, as a keyset page by price orders (an index on price alone
+            // makes every page read the whole run of equal prices, hundreds of rows at 50M). With the scope
+            // columns on, SqlOS mirrors the key and the price index per level; the foreign key's index and the
+            // unique index are not orders and are left alone.
             product.HasIndex(p => p.ResourceId).IsUnique();
             product.HasOne<Store>().WithMany().HasForeignKey(p => p.StoreId);
-            product.HasIndex(p => p.Price).HasDatabaseName("IX_Products_Price");
+            product.HasIndex(p => new { p.Price, p.Id }).HasDatabaseName("IX_Products_Price");
         });
 
         // The app's entities first, then SqlOS: with the scope columns on, every entity above with a ResourceId

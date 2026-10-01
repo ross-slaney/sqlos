@@ -43,6 +43,9 @@ internal sealed record BenchmarkOptions
     /// </summary>
     public int ScenarioBudgetSeconds { get; init; } = 600;
 
+    /// <summary>A results file to evaluate the gates on, without running anything (recalibrating a gate).</summary>
+    public string? EvaluatePath { get; init; }
+
     public const string Usage = """
         SqlOS SHRBAC benchmarks: the shipped FGA schema and fn_IsResourceAccessible on a realistic
         retail hierarchy, measured as the product count grows.
@@ -67,6 +70,7 @@ internal sealed record BenchmarkOptions
           --exclude <ids>          scenario ids to skip, comma-separated (e.g. list.store.first-page)
           --scenario-budget <s>    the longest a single query may run, in seconds (default 600); a
                                    scenario that exceeds it is reported as not finished, at the budget
+          --evaluate <file>        evaluate the gates on an existing results.json and exit (no database)
         """;
 
     public static BenchmarkOptions? Parse(string[] args)
@@ -82,6 +86,7 @@ internal sealed record BenchmarkOptions
         var memory = 8192;
         var exclude = new HashSet<string>(StringComparer.Ordinal);
         var budget = 600;
+        string? evaluate = null;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -140,6 +145,9 @@ internal sealed record BenchmarkOptions
                 case "--scenario-budget":
                     budget = int.Parse(Next(), CultureInfo.InvariantCulture);
                     break;
+                case "--evaluate":
+                    evaluate = Next();
+                    break;
                 default:
                     throw new ArgumentException($"Unknown option '{args[i]}'.");
             }
@@ -171,6 +179,7 @@ internal sealed record BenchmarkOptions
             DatabaseMemoryMegabytes = memory,
             Exclude = exclude,
             ScenarioBudgetSeconds = budget,
+            EvaluatePath = evaluate,
         };
     }
 

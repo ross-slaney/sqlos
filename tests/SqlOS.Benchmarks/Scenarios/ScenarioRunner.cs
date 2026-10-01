@@ -96,7 +96,7 @@ internal sealed class ScenarioRunner(
                 ServerPlanningMs: null,
                 ServerExecutionMs: null,
                 PlanFile: null)
-            { TimedOut = true };
+            { TimedOut = true, StoreFiltered = scenario.StoreId is not null };
         }
 
         var (correct, fullPage, detail) = Verify(scenario, first, productCount);
@@ -140,7 +140,8 @@ internal sealed class ScenarioRunner(
             plan?.RowsExamined,
             plan?.PlanningMs,
             plan?.ExecutionMs,
-            plan?.File);
+            plan?.File)
+        { StoreFiltered = scenario.StoreId is not null };
 
         log.Info(
             $"  {scenario.Id,-44} p50 {result.MedianMs,9:F2} ms  p95 {result.P95Ms,9:F2} ms  n={iterations,2}" +
@@ -382,6 +383,9 @@ internal sealed record ScenarioResult(
 {
     /// <summary>The first execution exceeded the run's budget; the timings hold the budget, a lower bound.</summary>
     public bool TimedOut { get; init; }
+
+    /// <summary>The page was filtered to one store as well, so it touches that store's rows through its own index.</summary>
+    public bool StoreFiltered { get; init; }
 
     /// <summary>
     /// Server execution time per row examined, in microseconds: the paper's per-row constant, without
