@@ -309,7 +309,10 @@ public sealed class SqlOSPhoneOtpService
         }
 
         var account = await _context.GetUserAsync(user.Id, SqlOSUserParts.PhoneNumbers, cancellationToken);
-        var record = account.AddVerifiedPhone(e164PhoneNumber, _cryptoService.ProtectSecret(e164PhoneNumber), DateTime.UtcNow);
+        var record = account.AddVerifiedPhone(
+            e164PhoneNumber,
+            _cryptoService.ProtectSecret(e164PhoneNumber),
+            _cryptoService.Clock.GetUtcNow().UtcDateTime);
         enrollment?.RecordEnrollment(account.Id, record.Id);
         await _context.SaveChangesAsync(cancellationToken);
         return record;

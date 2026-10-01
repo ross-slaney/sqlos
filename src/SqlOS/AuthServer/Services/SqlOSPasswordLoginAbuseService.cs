@@ -179,7 +179,7 @@ public sealed class SqlOSPasswordLoginAbuseService
         SqlOSPasswordLoginAttempt attempt,
         CancellationToken cancellationToken)
     {
-        var now = DateTime.UtcNow;
+        var now = _cryptoService.Clock.GetUtcNow().UtcDateTime;
         var priorReservation = await _context.Set<SqlOSPasswordLoginReservation>()
             .AsNoTracking()
             .AnyAsync(x => x.Id == attempt.ReservationId, cancellationToken);
@@ -268,7 +268,7 @@ public sealed class SqlOSPasswordLoginAbuseService
         SqlOSPasswordLoginAttempt attempt,
         CancellationToken cancellationToken)
     {
-        var now = DateTime.UtcNow;
+        var now = _cryptoService.Clock.GetUtcNow().UtcDateTime;
         var reservation = await _context.Set<SqlOSPasswordLoginReservation>()
             .Include(x => x.Buckets)
             .ThenInclude(x => x.Bucket)
@@ -299,7 +299,7 @@ public sealed class SqlOSPasswordLoginAbuseService
         SqlOSPasswordLoginAttempt attempt,
         CancellationToken cancellationToken)
     {
-        var now = DateTime.UtcNow;
+        var now = _cryptoService.Clock.GetUtcNow().UtcDateTime;
         var reservation = await _context.Set<SqlOSPasswordLoginReservation>()
             .Include(x => x.Buckets)
             .ThenInclude(x => x.Bucket)

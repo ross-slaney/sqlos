@@ -166,7 +166,7 @@ public sealed class SqlOSTotpMfaService
             throw new InvalidOperationException("Authenticator was not found.");
         }
 
-        user.RevokeAuthenticator(authenticatorId, reason, DateTime.UtcNow);
+        user.RevokeAuthenticator(authenticatorId, reason, _cryptoService.Clock.GetUtcNow().UtcDateTime);
         await _context.SaveChangesAsync(cancellationToken);
     }
 

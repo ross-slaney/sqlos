@@ -48,7 +48,7 @@ public sealed partial class SqlOSAdminService
 
     public async Task CleanupExpiredTemporaryTokensAsync(CancellationToken cancellationToken = default)
     {
-        var now = DateTime.UtcNow;
+        var now = _cryptoService.Clock.GetUtcNow().UtcDateTime;
         var expired = await _context.Set<SqlOSTemporaryToken>()
             .Where(x => x.ExpiresAt < now || x.ConsumedAt != null)
             .ToListAsync(cancellationToken);
@@ -63,7 +63,7 @@ public sealed partial class SqlOSAdminService
 
     public async Task CleanupExpiredEmailOtpChallengesAsync(CancellationToken cancellationToken = default)
     {
-        var now = DateTime.UtcNow;
+        var now = _cryptoService.Clock.GetUtcNow().UtcDateTime;
         var expired = await _context.Set<SqlOSEmailOtpChallenge>()
             .Where(x => x.ExpiresAt < now || x.ConsumedAt != null || x.InvalidatedAt != null)
             .ToListAsync(cancellationToken);
@@ -78,7 +78,7 @@ public sealed partial class SqlOSAdminService
 
     public async Task CleanupExpiredPhoneOtpChallengesAsync(CancellationToken cancellationToken = default)
     {
-        var now = DateTime.UtcNow;
+        var now = _cryptoService.Clock.GetUtcNow().UtcDateTime;
         var expired = await _context.Set<SqlOSPhoneOtpChallenge>()
             .Where(x => x.ExpiresAt < now || x.ConsumedAt != null || x.InvalidatedAt != null)
             .ToListAsync(cancellationToken);

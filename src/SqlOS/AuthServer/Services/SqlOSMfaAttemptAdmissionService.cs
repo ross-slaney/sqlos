@@ -74,7 +74,7 @@ public sealed class SqlOSMfaAttemptAdmissionService
         var identity = new MfaBucketIdentity("user", userId, _options.MaxFailedAttemptsPerUser);
         return await ExecuteAtomicAsync(async () =>
         {
-            var now = DateTime.UtcNow;
+            var now = _cryptoService.Clock.GetUtcNow().UtcDateTime;
             var bucket = await FindBucketAsync(identity, cancellationToken);
             if (bucket == null)
             {
@@ -95,7 +95,7 @@ public sealed class SqlOSMfaAttemptAdmissionService
         string? authorizationRequestId,
         CancellationToken cancellationToken)
     {
-        var now = DateTime.UtcNow;
+        var now = _cryptoService.Clock.GetUtcNow().UtcDateTime;
         var identities = GetBucketIdentities(challenge, origin, authorizationRequestId).ToArray();
         var existing = new List<(MfaBucketIdentity Identity, SqlOSMfaAttemptBucket Bucket)>();
         var missing = new List<MfaBucketIdentity>();
@@ -161,7 +161,7 @@ public sealed class SqlOSMfaAttemptAdmissionService
 
     private async Task<bool> FinalizeAsync(string reservationId, bool release, CancellationToken cancellationToken)
     {
-        var now = DateTime.UtcNow;
+        var now = _cryptoService.Clock.GetUtcNow().UtcDateTime;
         var reservation = await _context.Set<SqlOSMfaAttemptReservation>()
             .Include(x => x.Buckets)
             .ThenInclude(x => x.Bucket)
