@@ -1,0 +1,57 @@
+# SqlOS behavior lock transcript
+scenario: DashboardSessionScenarios.An_expired_session_ticket_is_no_session
+profile: dashboard-password
+
+## 1. operator-browser: sign in to a three-second session
+> POST /sqlos/dashboard-auth/login
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "password": "{password:dashboard}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+< Set-Cookie: SqlOS.Dashboard.Session={cookie#1}; expires=+0s; path=/sqlos; secure; samesite=lax; httponly
+    {
+      "authenticated": true,
+      "expiresAt": "{datetime:utc-z}"
+    }
+
+## 2. operator-browser: the session is active
+> GET /sqlos/dashboard-auth/session
+> Cookie: SqlOS.Dashboard.Session={cookie#1}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "authenticated": true,
+      "expiresAt": "{datetime:utc-z}"
+    }
+
+# Four seconds later.
+
+## 3. stale-cookie: the expired ticket is no session
+> GET /sqlos/dashboard-auth/session
+> Cookie: SqlOS.Dashboard.Session={cookie#1}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "authenticated": false,
+      "expiresAt": null
+    }
+
+## 4. stale-cookie: and reads nothing
+> GET /sqlos/admin/fga/api/stats
+> Cookie: SqlOS.Dashboard.Session={cookie#1}
+< 401 Unauthorized
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY

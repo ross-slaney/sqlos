@@ -1,0 +1,239 @@
+# SqlOS behavior lock transcript
+scenario: DashboardShellScenarios.Development_without_a_callback_opens_the_dashboard_to_every_caller
+profile: dashboard-dev
+
+## 1. visitor: any caller gets the shell
+> GET /sqlos/
+< 200 OK
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#1}'; style-src 'self' 'nonce-{csp-nonce#1}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>SqlOS Dashboard</title>
+        <link rel="stylesheet" href="/sqlos/style.css" />
+      </head>
+      <body>
+        <script nonce="{csp-nonce#1}">{script-sha256:e2e7315636187e83}</script>
+        <div class="layout">
+          <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+              <div class="sidebar-logo">So</div>
+              <span class="sidebar-title">SqlOS</span>
+              <button class="sidebar-close" id="sidebar-close">×</button>
+            </div>
+            <nav>
+              <div class="nav-group">
+                <div class="nav-label">Dashboard</div>
+                <a href="#" data-route="home" class="active">Home</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Governance</div>
+                <a href="#" data-route="audit-logs">Audit Logs</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Auth Server</div>
+                <a href="#" data-route="auth-overview">Overview</a>
+                <a href="#" data-route="auth-organizations">Organizations</a>
+                <a href="#" data-route="auth-users">Users</a>
+                <a href="#" data-route="auth-memberships">Memberships</a>
+                <a href="#" data-route="auth-clients">Applications</a>
+                <a href="#" data-route="auth-machine-clients">Machine Clients</a>
+                <a href="#" data-route="auth-oidc">OIDC</a>
+                <a href="#" data-route="auth-scopes">Scope Display Names</a>
+                <a href="#" data-route="auth-security">Security</a>
+                <a href="#" data-route="auth-mfa">MFA</a>
+                <a href="#" data-route="auth-authpage">Auth Page</a>
+                <a href="#" data-route="auth-sessions">Sessions</a>
+                <a href="#" data-route="auth-audit">Audit Events</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Fine-Grained Auth</div>
+                <a href="#" data-route="fga-resources">Resources</a>
+                <a href="#" data-route="fga-grants">Grants</a>
+                <a href="#" data-route="fga-roles">Roles</a>
+                <a href="#" data-route="fga-permissions">Permissions</a>
+                <a href="#" data-route="fga-users">Users</a>
+                <a href="#" data-route="fga-agents">Agents</a>
+                <a href="#" data-route="fga-service-accounts">Service Accounts</a>
+                <a href="#" data-route="fga-user-groups">User Groups</a>
+                <a href="#" data-route="fga-access-tester">Access Tester</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Communications</div>
+                <a href="#" data-route="email-templates">Templates</a>
+                <a href="#" data-route="email-messages">Messages</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Integrations</div>
+                <a href="#" data-route="calendar-connections">Calendar</a>
+              </div>
+            </nav>
+            <div class="sidebar-footer">
+              <button class="sidebar-action" id="dashboard-logout" type="button">Log out</button>
+            </div>
+          </aside>
+          <div class="main-wrapper">
+            <div class="topbar">
+              <button class="hamburger" id="hamburger">☰</button>
+              <span class="topbar-title" id="topbar-title">SqlOS Dashboard</span>
+            </div>
+            <main>
+              <header class="page-header">
+                <div>
+                  <div class="page-eyebrow" id="page-eyebrow">Dashboard</div>
+                  <h1 id="page-title">SqlOS Dashboard</h1>
+                  <p id="page-description">Authentication, organizations, sessions, and authorization in one embedded control plane.</p>
+                </div>
+              </header>
+              <div id="content" class="content-area"></div>
+            </main>
+          </div>
+        </div>
+        <div class="modal-overlay" id="dashboard-modal" hidden="">
+          <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dashboard-modal-title">
+            <div class="modal-header">
+              <h3 id="dashboard-modal-title"></h3>
+              <button type="button" class="modal-close" id="dashboard-modal-close" aria-label="Close">×</button>
+            </div>
+            <div class="modal-body" id="dashboard-modal-body"></div>
+          </div>
+        </div>
+        <script nonce="{csp-nonce#1}" src="/sqlos/admin/fga/app.js"></script>
+        <script nonce="{csp-nonce#1}" src="/sqlos/app.js"></script>
+      </body>
+    </html>
+
+## 2. visitor: and is sent from the login route to the shell
+> GET /sqlos/login
+< 302 Found
+< Location: /sqlos/
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 3. visitor: the dashboard script
+> GET /sqlos/app.js
+< 200 OK
+< Content-Type: application/javascript; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {script-sha256:5f723a5941b8e19b}
+
+## 4. visitor: the FGA dashboard script
+> GET /sqlos/admin/fga/app.js
+< 200 OK
+< Content-Type: application/javascript
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {script-sha256:ec65c096e7e7830a}
+
+## 5. visitor: the FGA API
+> GET /sqlos/admin/fga/api/stats
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "agents": 0,
+      "grants": 0,
+      "permissions": 2,
+      "resources": 1,
+      "roles": 2,
+      "serviceAccounts": 0,
+      "subjects": 0,
+      "userGroups": 0,
+      "users": 0
+    }
+
+## 6. visitor: the admin API
+> GET /sqlos/admin/auth/api/stats
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "auditEvents": 8,
+      "clients": 1,
+      "oidcConnections": 0,
+      "organizations": 0,
+      "sessions": 0,
+      "ssoConnections": 0,
+      "users": 0
+    }
+
+## 7. visitor: the session probe reports access without a session
+> GET /sqlos/dashboard-auth/session
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "authenticated": true,
+      "expiresAt": null
+    }
+
+## 8. visitor: password login does not exist outside Password mode
+> POST /sqlos/dashboard-auth/login
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "password": "{password#1}"
+>   }
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 9. visitor: logout clears the cookie
+> POST /sqlos/dashboard-auth/logout
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {}
+< 204 No Content
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+< Set-Cookie: SqlOS.Dashboard.Session=; expires={unix-epoch}; path=/sqlos; secure; samesite=lax; httponly
+
+## audit: logout events
+  - {
+      "action": "dashboard.logout",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "dashboard"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "dashboard.logout",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "reason": "operator_requested"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

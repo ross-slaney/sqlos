@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json.Nodes;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using SqlOS.BehaviorLock.Host;
 using SqlOS.BehaviorLock.Host.Fakes;
@@ -249,7 +250,16 @@ public sealed class Transcript : IAsyncDisposable
         _pending.Add(exchange);
     }
 
-    internal bool OperatorCanReadAudit => Profile.OperatorAccess != OperatorAccess.None;
+    internal bool OperatorCanReadAudit => Profile.OperatorAccess != OperatorAccess.None && AuditApiIsMapped;
+
+    /// <summary>
+    /// Whether the host maps the admin audit API. A host that also calls <c>MapAuthServer()</c>
+    /// itself (the legacy-host profile) does not: SqlOS then withdraws its whole core route set,
+    /// including the audit, email, and calendar admin APIs that <c>MapAuthServer()</c> does not map.
+    /// </summary>
+    private bool AuditApiIsMapped => Host.App.Services.GetRequiredService<EndpointDataSource>().Endpoints
+        .OfType<RouteEndpoint>()
+        .Any(endpoint => string.Equals(endpoint.RoutePattern.RawText, "/sqlos/admin/audit/api/events", StringComparison.Ordinal));
 
     private async Task InitializeAsync()
     {
@@ -297,7 +307,7 @@ public sealed class Transcript : IAsyncDisposable
         if (!OperatorCanReadAudit)
         {
             throw new InvalidOperationException(
-                $"Profile '{Profile.Name}' has no operator access, so audit events cannot be read through the admin audit API.");
+                $"Profile '{Profile.Name}' has no operator access or does not map the admin audit API, so audit events cannot be read through it.");
         }
 
         var fresh = new List<JsonNode>();

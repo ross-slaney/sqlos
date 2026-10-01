@@ -1,0 +1,159 @@
+# SqlOS behavior lock transcript
+scenario: FgaDashboardScenarios.List_cursors_are_bound_to_their_list_and_filters
+profile: dashboard-callback
+
+## 1. operator: the first page of one role carries a cursor
+> GET /sqlos/admin/fga/api/roles?pageSize=1
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "description": null,
+          "id": "workspace_admin",
+          "isVirtual": false,
+          "key": "workspace_admin",
+          "name": "Workspace admin",
+          "permissionCount": 2
+        }
+      ],
+      "hasNextPage": true,
+      "nextCursor": "{cursor#1}",
+      "pageSize": 1
+    }
+
+## 2. operator: the cursor reads the next page
+> GET /sqlos/admin/fga/api/roles?pageSize=1&cursor={cursor#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "description": null,
+          "id": "workspace_reader",
+          "isVirtual": false,
+          "key": "workspace_reader",
+          "name": "Workspace reader",
+          "permissionCount": 1
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 1
+    }
+
+## 3. operator: the cursor is refused under a different filter
+> GET /sqlos/admin/fga/api/roles?pageSize=1&search=Workspace&cursor={cursor#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "invalid_cursor",
+      "message": "The cursor does not match the current filters."
+    }
+
+## 4. operator: and on a different list
+> GET /sqlos/admin/fga/api/permissions?pageSize=1&cursor={cursor#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "invalid_cursor",
+      "message": "The cursor does not match this list."
+    }
+
+## 5. operator: a malformed cursor is refused
+> GET /sqlos/admin/fga/api/roles?cursor=not-a-cursor
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "invalid_cursor",
+      "message": "The cursor is invalid."
+    }
+
+## 6. operator: offset pagination beyond the first page is refused
+> GET /sqlos/admin/fga/api/roles?page=2
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "invalid_cursor",
+      "message": "Offset pagination is no longer supported. Omit page or pass page=1 for the first window, then follow nextCursor."
+    }
+
+## 7. operator: page=1 is accepted and the page size is capped
+> GET /sqlos/admin/fga/api/roles?page=1&pageSize=500
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "description": null,
+          "id": "workspace_admin",
+          "isVirtual": false,
+          "key": "workspace_admin",
+          "name": "Workspace admin",
+          "permissionCount": 2
+        },
+        {
+          "description": null,
+          "id": "workspace_reader",
+          "isVirtual": false,
+          "key": "workspace_reader",
+          "name": "Workspace reader",
+          "permissionCount": 1
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 100
+    }
+
+## 8. operator: and raised to at least one
+> GET /sqlos/admin/fga/api/roles?pageSize=0
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "description": null,
+          "id": "workspace_admin",
+          "isVirtual": false,
+          "key": "workspace_admin",
+          "name": "Workspace admin",
+          "permissionCount": 2
+        }
+      ],
+      "hasNextPage": true,
+      "nextCursor": "{cursor#1}",
+      "pageSize": 1
+    }

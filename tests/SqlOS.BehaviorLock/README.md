@@ -132,7 +132,7 @@ An effect sits under the exchange that caused it:
         Your Behavior Lock sign-in code is {otp#1}. It expires in 10 minute(s).
 ```
 
-`>` lines are the request, `<` lines the response status and headers (sorted; `Date`, `Server`, `Content-Length`, `Transfer-Encoding`, `Connection`, `Keep-Alive`, `ETag`, `Last-Modified`, and tracing headers are dropped). Bodies are indented: JSON is canonical (members sorted, arrays in order), forms one field per line, HTML normalized with AngleSharp (inline `<style>` and `<script>` become content digests such as `{script-sha256:…}`, data URIs become `{data-uri:type}`).
+`>` lines are the request, `<` lines the response status and headers (sorted; `Date`, `Server`, `Content-Length`, `Transfer-Encoding`, `Connection`, `Keep-Alive`, `ETag`, `Last-Modified`, and tracing headers are dropped). Bodies are indented: JSON is canonical (members sorted, arrays in order), forms one field per line, HTML normalized with AngleSharp (inline `<style>` and `<script>` become content digests such as `{script-sha256:…}`, data URIs become `{data-uri:type}`), and stylesheet and script responses (the dashboard assets) become the same digests.
 
 ## Scrubbing
 

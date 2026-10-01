@@ -1,0 +1,147 @@
+# SqlOS behavior lock transcript
+scenario: AuthLibraryScenarios.Device_authorization_starts_for_a_device_client_and_binds_its_resource
+profile: multi-app
+
+## 1. probe: StartDeviceAuthorizationAsync issues device and user codes
+> POST /__probe/auth/device-authorization
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "atlas-cli",
+>     "scope": "openid profile offline_access"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "deviceCode": "{device-code#1}",
+      "expiresIn": ~900,
+      "interval": 5,
+      "userCode": "{user-code#1}",
+      "verificationUri": "https://sqlos.example.test/sqlos/auth/device",
+      "verificationUriComplete": "https://sqlos.example.test/sqlos/auth/device?user_code={user-code#1}"
+    }
+
+## 2. probe: the client's own audience is accepted as the resource
+> POST /__probe/auth/device-authorization
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "atlas-cli",
+>     "resource": "https://api.example.test",
+>     "scope": "openid"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "deviceCode": "{device-code#2}",
+      "expiresIn": ~900,
+      "interval": 5,
+      "userCode": "{user-code#2}",
+      "verificationUri": "https://sqlos.example.test/sqlos/auth/device",
+      "verificationUriComplete": "https://sqlos.example.test/sqlos/auth/device?user_code={user-code#2}"
+    }
+
+## 3. probe: any other resource is refused as invalid_target
+> POST /__probe/auth/device-authorization
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "atlas-cli",
+>     "resource": "https://billing.example.test",
+>     "scope": "openid"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "SqlOSDeviceAuthorizationException",
+      "message": "Requested resource is not allowed for this client."
+    }
+
+## 4. probe: a client without the device grant is refused
+> POST /__probe/auth/device-authorization
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "atlas-portal",
+>     "scope": "openid"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "SqlOSDeviceAuthorizationException",
+      "message": "This client is not allowed to use device authorization."
+    }
+
+## 5. probe: an unknown client is refused
+> POST /__probe/auth/device-authorization
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "no-such-client",
+>     "scope": "openid"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "Unknown client 'no-such-client'."
+    }
+
+## audit: device authorization events
+  - {
+      "action": "oauth.device.started",
+      "actor": {
+        "displayName": null,
+        "id": "{cli#1}",
+        "type": "client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.device.started",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "oauth.device.started",
+      "actor": {
+        "displayName": null,
+        "id": "{cli#1}",
+        "type": "client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.device.started",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

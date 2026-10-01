@@ -1,0 +1,361 @@
+# SqlOS behavior lock transcript
+scenario: AuthLibraryScenarios.Revoking_an_organization_misses_sessions_switched_into_it_CurrentBehavior_KnownDefect_427
+profile: hosted
+
+## 1. probe: sign in to Acme
+> POST /__probe/auth/password-login
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "email": "{email:alice}",
+>     "organizationId": "{org#1}",
+>     "password": "{password:alice}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "mfaMethods": null,
+      "mfaToken": null,
+      "organizations": [
+        {
+          "id": "{org#1}",
+          "name": "Acme",
+          "role": "member",
+          "slug": "{slug:acme}"
+        },
+        {
+          "id": "{org#2}",
+          "name": "Beta",
+          "role": "member",
+          "slug": "{slug:beta}"
+        }
+      ],
+      "pendingAuthToken": null,
+      "requiresMfa": false,
+      "requiresMfaEnrollment": false,
+      "requiresOrganizationSelection": false,
+      "tokens": {
+        "accessToken": "{access-token#1}",
+        "accessTokenExpiresAt": "{datetime:utc-z}",
+        "clientId": "behavior-lock-app",
+        "idToken": null,
+        "organizationId": "{org#1}",
+        "refreshToken": "{refresh-token#1}",
+        "refreshTokenExpiresAt": "{datetime:utc-z}",
+        "sessionId": "{ses#1}"
+      }
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "org_id": "{org#1}",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+
+## 2. probe: refresh into Beta
+> POST /__probe/auth/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "organizationId": "{org#2}",
+>     "refreshToken": "{refresh-token#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessToken": "{access-token#2}",
+      "accessTokenExpiresAt": "{datetime:utc-z}",
+      "clientId": "behavior-lock-app",
+      "idToken": null,
+      "organizationId": "{org#2}",
+      "refreshToken": "{refresh-token#2}",
+      "refreshTokenExpiresAt": "{datetime:utc-z}",
+      "sessionId": "{ses#1}"
+    }
+  jwt {access-token#2}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "org_id": "{org#2}",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+
+## 3. operator: the operator previews revoking Beta's sessions: none match
+> POST /sqlos/admin/auth/api/sessions/revocation/preview
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "organizationId": "{org#2}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "activeRefreshTokens": 0,
+      "alreadyRevokedSessions": 0,
+      "auditEventId": null,
+      "matchedSessions": 0,
+      "newlyRevokedRefreshTokens": 0,
+      "newlyRevokedSessions": 0,
+      "operationId": "session-revocation-{hex#1}",
+      "preview": true,
+      "revokedAt": null
+    }
+
+## 4. operator: executing it finds nothing to revoke
+> POST /sqlos/admin/auth/api/sessions/revocation
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "confirm": true,
+>     "expectedMatchedSessions": 0,
+>     "organizationId": "{org#2}"
+>   }
+< 404 Not Found
+
+## 5. probe: the Beta access token still validates
+> POST /__probe/auth/validate
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "audience": "https://sqlos.example.test/api",
+>     "token": "{access-token#2}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "audience": "https://sqlos.example.test/api",
+      "clientId": "behavior-lock-app",
+      "organizationId": "{org#2}",
+      "scope": null,
+      "sessionId": "{ses#1}",
+      "userId": "{usr#1}",
+      "valid": true
+    }
+
+## 6. probe: and the session keeps refreshing into Beta
+> POST /__probe/auth/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "organizationId": "{org#2}",
+>     "refreshToken": "{refresh-token#2}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessToken": "{access-token#2}",
+      "accessTokenExpiresAt": "{datetime:utc-z}",
+      "clientId": "behavior-lock-app",
+      "idToken": null,
+      "organizationId": "{org#2}",
+      "refreshToken": "{refresh-token#3}",
+      "refreshTokenExpiresAt": "{datetime:utc-z}",
+      "sessionId": "{ses#1}"
+    }
+
+## 7. operator: the session is only found under Acme, where it started
+> POST /sqlos/admin/auth/api/sessions/revocation/preview
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "organizationId": "{org#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "activeRefreshTokens": 3,
+      "alreadyRevokedSessions": 0,
+      "auditEventId": null,
+      "matchedSessions": 1,
+      "newlyRevokedRefreshTokens": 0,
+      "newlyRevokedSessions": 0,
+      "operationId": "session-revocation-{hex#2}",
+      "preview": true,
+      "revokedAt": null
+    }
+
+## 8. operator: revoking Acme's sessions
+> POST /sqlos/admin/auth/api/sessions/revocation
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "confirm": true,
+>     "expectedMatchedSessions": 1,
+>     "organizationId": "{org#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "activeRefreshTokens": 3,
+      "alreadyRevokedSessions": 0,
+      "auditEventId": "{evt#1}",
+      "matchedSessions": 1,
+      "newlyRevokedRefreshTokens": 3,
+      "newlyRevokedSessions": 1,
+      "operationId": "session-revocation-{hex#3}",
+      "preview": false,
+      "revokedAt": "{datetime:utc-z}"
+    }
+
+## 9. probe: ends the Beta tokens too
+> POST /__probe/auth/validate
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "audience": "https://sqlos.example.test/api",
+>     "token": "{access-token#2}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "valid": false
+    }
+
+## audit: sign-in, refresh, and revocation events
+  - {
+      "action": "password.login.succeeded",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "password.login.succeeded",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "AuthorizationRequestId": "[redacted]",
+        "ClientKey": "behavior-lock-app",
+        "NormalizedEmail": "{email:ALICE}",
+        "Surface": "api",
+        "UserAgentHash": null,
+        "details": {
+          "resetScopes": [
+            "email",
+            "user"
+          ]
+        },
+        "maskedEmail": "AL***@EXAMPLE.TEST"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "user.login.password",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.password",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "session.admin-revoked",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": "session-revocation-{hex#3}",
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": "session-revocation-{hex#3}",
+      "eventType": "session.admin-revoked",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "already_revoked_sessions": 0,
+        "matched_sessions": 1,
+        "newly_revoked_refresh_credentials": 3,
+        "newly_revoked_sessions": 1,
+        "operation_id": "session-revocation-{hex#3}",
+        "reason": "admin_revoked",
+        "selector_fingerprint": "{hex#4}"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{org#1}",
+          "type": "organization"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }

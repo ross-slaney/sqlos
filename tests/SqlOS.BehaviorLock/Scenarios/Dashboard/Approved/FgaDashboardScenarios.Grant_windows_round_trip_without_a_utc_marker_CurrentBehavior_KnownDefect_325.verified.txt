@@ -1,0 +1,373 @@
+# SqlOS behavior lock transcript
+scenario: FgaDashboardScenarios.Grant_windows_round_trip_without_a_utc_marker_CurrentBehavior_KnownDefect_325
+profile: dashboard-callback
+
+## 1. operator: a grant whose UTC window is open now comes back without the UTC marker
+> POST /sqlos/admin/fga/api/grants
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "effectiveFrom": "{datetime:utc-z}",
+>     "effectiveTo": "{datetime:utc-z}",
+>     "resourceId": "workspace::alpha",
+>     "roleId": "workspace_reader",
+>     "subjectId": "{usr#1}"
+>   }
+< 201 Created
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "createdAt": "{datetime:unspecified}",
+      "effectiveFrom": "{datetime:unspecified}",
+      "effectiveTo": "{datetime:unspecified}",
+      "id": "{grant#1}",
+      "resourceId": "workspace::alpha",
+      "resourceName": "Alpha",
+      "roleId": "workspace_reader",
+      "roleName": "Workspace reader",
+      "subjectId": "{usr#1}",
+      "subjectName": "Alice"
+    }
+
+## 2. operator: a grant that starts in the future
+> POST /sqlos/admin/fga/api/grants
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "effectiveFrom": "{datetime:utc-z}",
+>     "resourceId": "workspace::beta",
+>     "roleId": "workspace_reader",
+>     "subjectId": "{usr#1}"
+>   }
+< 201 Created
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "createdAt": "{datetime:unspecified}",
+      "effectiveFrom": "{datetime:unspecified}",
+      "effectiveTo": null,
+      "id": "{grant#2}",
+      "resourceId": "workspace::beta",
+      "resourceName": "Beta",
+      "roleId": "workspace_reader",
+      "roleName": "Workspace reader",
+      "subjectId": "{usr#1}",
+      "subjectName": "Alice"
+    }
+
+## 3. operator: a grant that ended in the past
+> POST /sqlos/admin/fga/api/grants
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "effectiveTo": "{datetime:utc-z}",
+>     "resourceId": "workspace::gamma",
+>     "roleId": "workspace_reader",
+>     "subjectId": "{usr#1}"
+>   }
+< 201 Created
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "createdAt": "{datetime:unspecified}",
+      "effectiveFrom": null,
+      "effectiveTo": "{datetime:unspecified}",
+      "id": "{grant#3}",
+      "resourceId": "workspace::gamma",
+      "resourceName": "Gamma",
+      "roleId": "workspace_reader",
+      "roleName": "Workspace reader",
+      "subjectId": "{usr#1}",
+      "subjectName": "Alice"
+    }
+
+## 4. operator: the resource's grants carry the window without the marker
+> GET /sqlos/admin/fga/api/resources/workspace::alpha/grants
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "effectiveFrom": "{datetime:unspecified}",
+          "effectiveTo": "{datetime:unspecified}",
+          "id": "{grant#1}",
+          "roleId": "workspace_reader",
+          "roleName": "Workspace reader",
+          "subjectId": "{usr#1}",
+          "subjectName": "Alice",
+          "subjectType": "User"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 5. operator: so do the subject's grants
+> GET /sqlos/admin/fga/api/subjects/{usr#1}/grants
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "effectiveFrom": null,
+          "effectiveTo": "{datetime:unspecified}",
+          "id": "{grant#3}",
+          "resourceId": "workspace::gamma",
+          "resourceName": "Gamma",
+          "roleId": "workspace_reader",
+          "roleName": "Workspace reader"
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "effectiveFrom": "{datetime:unspecified}",
+          "effectiveTo": null,
+          "id": "{grant#2}",
+          "resourceId": "workspace::beta",
+          "resourceName": "Beta",
+          "roleId": "workspace_reader",
+          "roleName": "Workspace reader"
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "effectiveFrom": "{datetime:unspecified}",
+          "effectiveTo": "{datetime:unspecified}",
+          "id": "{grant#1}",
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleId": "workspace_reader",
+          "roleName": "Workspace reader"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 6. probe: inside its window the grant allows read
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::alpha",
+>     "subjectId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": true,
+      "error": null,
+      "trace": [
+        {
+          "detail": "Checking access to Alpha (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Read workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"Alice\" + 0 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": "Alice"
+        },
+        {
+          "detail": "Checking 1 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Alpha",
+          "grantId": null,
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Role \"Workspace reader\" provides permission \"Read workspace\" via grant at Alpha",
+          "grantId": "{grant#1}",
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleName": "Workspace reader",
+          "step": "Access Granted",
+          "subjectName": "Alice"
+        }
+      ]
+    }
+
+## 7. probe: before its window it does not
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::beta",
+>     "subjectId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": false,
+      "error": null,
+      "trace": [
+        {
+          "detail": "Checking access to Beta (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::beta",
+          "resourceName": "Beta",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Read workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"Alice\" + 0 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": "Alice"
+        },
+        {
+          "detail": "Checking 1 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Beta",
+          "grantId": null,
+          "resourceId": "workspace::beta",
+          "resourceName": "Beta",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "No matching grants found that provide permission \"Read workspace\"",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Access Denied",
+          "subjectName": null
+        }
+      ]
+    }
+
+## 8. probe: after its window it does not
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::gamma",
+>     "subjectId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": false,
+      "error": null,
+      "trace": [
+        {
+          "detail": "Checking access to Gamma (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::gamma",
+          "resourceName": "Gamma",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Read workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"Alice\" + 0 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": "Alice"
+        },
+        {
+          "detail": "Checking 1 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Gamma",
+          "grantId": null,
+          "resourceId": "workspace::gamma",
+          "resourceName": "Gamma",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "No matching grants found that provide permission \"Read workspace\"",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Access Denied",
+          "subjectName": null
+        }
+      ]
+    }

@@ -200,7 +200,7 @@ public static class ProbeEndpoints
             }));
 
         auth.MapPost("/password-login", (HttpContext http, SqlOSAuthService service) =>
-            Invoke(http, (SqlOSPasswordLoginRequest request) => service.LoginWithPasswordAsync(request, http, http.RequestAborted)));
+            Invoke(http, async (SqlOSPasswordLoginRequest request) => InNameOrder(await service.LoginWithPasswordAsync(request, http, http.RequestAborted))));
 
         auth.MapPost("/refresh", (HttpContext http, SqlOSAuthService service) =>
             Invoke(http, (SqlOSRefreshRequest request) => service.RefreshAsync(request, http.RequestAborted)));
@@ -259,7 +259,7 @@ public static class ProbeEndpoints
             }));
 
         admin.MapGet("/users/{userId}/organizations", (string userId, HttpContext http, SqlOSAdminService service) =>
-            Execute(http, () => service.GetUserOrganizationsAsync(userId, http.RequestAborted)));
+            Execute(http, async () => InNameOrder(await service.GetUserOrganizationsAsync(userId, http.RequestAborted))));
 
         admin.MapGet("/users/{userId}/memberships/{organizationId}", (string userId, string organizationId, HttpContext http, SqlOSAdminService service) =>
             Execute(http, async () => new { member = await service.UserHasMembershipAsync(userId, organizationId, http.RequestAborted) }));
@@ -312,6 +312,20 @@ public static class ProbeEndpoints
         probes.MapGet("/calendar/connections", (string? userId, string? organizationId, HttpContext http, SqlOSCalendarService calendar) =>
             Execute(http, () => calendar.ListConnectionsAsync(userId, organizationId, includeRevoked: true, cancellationToken: http.RequestAborted)));
     }
+
+    /// <summary>
+    /// <c>SqlOSAdminService.GetUserOrganizationsAsync</c> reads memberships with no ORDER BY, so a
+    /// user's organizations arrive in index order (by random organization ID on SQL Server). The
+    /// order is not part of the contract; the probes list them by name so transcripts are stable.
+    /// </summary>
+    private static List<SqlOSOrganizationOption> InNameOrder(IEnumerable<SqlOSOrganizationOption> organizations)
+        => organizations
+            .OrderBy(organization => organization.Name, StringComparer.Ordinal)
+            .ThenBy(organization => organization.Slug, StringComparer.Ordinal)
+            .ToList();
+
+    private static SqlOSLoginResult InNameOrder(SqlOSLoginResult result)
+        => result with { Organizations = InNameOrder(result.Organizations) };
 
     private static IQueryable<Workspace> Workspaces(ISqlOSFgaDbContext db)
         => ((DbContext)db).Set<Workspace>();

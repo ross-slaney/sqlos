@@ -194,7 +194,13 @@ internal static partial class TranscriptRenderer
     {
         var mediaType = contentType?.Split(';')[0].Trim().ToLowerInvariant() ?? string.Empty;
         string rendered;
-        if (mediaType == "application/x-www-form-urlencoded")
+        if (mediaType is "text/css" or "application/javascript" or "text/javascript")
+        {
+            // Static assets (the dashboard scripts and stylesheets) render as a content digest,
+            // like inline <script> and <style> in HTML: any change shows, without the source.
+            rendered = $"{{{(mediaType == "text/css" ? "style" : "script")}-sha256:{HtmlCanonicalizer.Digest(body)}}}";
+        }
+        else if (mediaType == "application/x-www-form-urlencoded")
         {
             rendered = RenderForm(body, sink);
         }

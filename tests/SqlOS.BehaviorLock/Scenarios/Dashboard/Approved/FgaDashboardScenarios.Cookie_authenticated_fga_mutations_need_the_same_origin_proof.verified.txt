@@ -1,0 +1,616 @@
+# SqlOS behavior lock transcript
+scenario: FgaDashboardScenarios.Cookie_authenticated_fga_mutations_need_the_same_origin_proof
+profile: dashboard-password
+
+## 1. visitor: without a session the API is 401
+> POST /sqlos/admin/fga/api/grants
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "resourceId": "workspace::alpha",
+>     "roleId": "workspace_reader",
+>     "subjectId": "{usr#1}"
+>   }
+< 401 Unauthorized
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 2. operator: the session cookie alone is refused
+> POST /sqlos/admin/fga/api/grants
+> Content-Type: application/json; charset=utf-8
+> Cookie: SqlOS.Dashboard.Session={cookie#1}
+>   {
+>     "resourceId": "workspace::alpha",
+>     "roleId": "workspace_reader",
+>     "subjectId": "{usr#1}"
+>   }
+< 403 Forbidden
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "csrf_rejected",
+      "message": "The request could not be verified."
+    }
+
+## 3. operator: a repeated proof header is ambiguous
+> POST /sqlos/admin/fga/api/grants
+> Content-Type: application/json; charset=utf-8
+> Cookie: SqlOS.Dashboard.Session={cookie#1}
+> X-SqlOS-Request: 1
+> X-SqlOS-Request: 1
+>   {
+>     "resourceId": "workspace::alpha",
+>     "roleId": "workspace_reader",
+>     "subjectId": "{usr#1}"
+>   }
+< 403 Forbidden
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "csrf_rejected",
+      "message": "The request could not be verified."
+    }
+
+## 4. operator: a foreign Origin is refused
+> POST /sqlos/admin/fga/api/grants
+> Content-Type: application/json; charset=utf-8
+> Cookie: SqlOS.Dashboard.Session={cookie#1}
+> Origin: https://evil.example
+> X-SqlOS-Request: 1
+>   {
+>     "resourceId": "workspace::alpha",
+>     "roleId": "workspace_reader",
+>     "subjectId": "{usr#1}"
+>   }
+< 403 Forbidden
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "csrf_rejected",
+      "message": "The request could not be verified."
+    }
+
+## 5. operator: an opaque Origin is refused
+> POST /sqlos/admin/fga/api/grants
+> Content-Type: application/json; charset=utf-8
+> Cookie: SqlOS.Dashboard.Session={cookie#1}
+> Origin: null
+> X-SqlOS-Request: 1
+>   {
+>     "resourceId": "workspace::alpha",
+>     "roleId": "workspace_reader",
+>     "subjectId": "{usr#1}"
+>   }
+< 403 Forbidden
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "csrf_rejected",
+      "message": "The request could not be verified."
+    }
+
+## 6. operator: a list of origins is ambiguous
+> POST /sqlos/admin/fga/api/grants
+> Content-Type: application/json; charset=utf-8
+> Cookie: SqlOS.Dashboard.Session={cookie#1}
+> Origin: https://sqlos.example.test, https://evil.example
+> X-SqlOS-Request: 1
+>   {
+>     "resourceId": "workspace::alpha",
+>     "roleId": "workspace_reader",
+>     "subjectId": "{usr#1}"
+>   }
+< 403 Forbidden
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "csrf_rejected",
+      "message": "The request could not be verified."
+    }
+
+## 7. operator: no Origin, Referer, or Sec-Fetch-Site is refused
+> POST /sqlos/admin/fga/api/grants
+> Content-Type: application/json; charset=utf-8
+> Cookie: SqlOS.Dashboard.Session={cookie#1}
+> X-SqlOS-Request: 1
+>   {
+>     "resourceId": "workspace::alpha",
+>     "roleId": "workspace_reader",
+>     "subjectId": "{usr#1}"
+>   }
+< 403 Forbidden
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "csrf_rejected",
+      "message": "The request could not be verified."
+    }
+
+## 8. operator: a foreign Referer is refused
+> POST /sqlos/admin/fga/api/grants
+> Content-Type: application/json; charset=utf-8
+> Cookie: SqlOS.Dashboard.Session={cookie#1}
+> Referer: https://evil.example/page
+> X-SqlOS-Request: 1
+>   {
+>     "resourceId": "workspace::alpha",
+>     "roleId": "workspace_reader",
+>     "subjectId": "{usr#1}"
+>   }
+< 403 Forbidden
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "csrf_rejected",
+      "message": "The request could not be verified."
+    }
+
+## 9. operator: a same-origin Referer is accepted
+> POST /sqlos/admin/fga/api/grants
+> Content-Type: application/json; charset=utf-8
+> Cookie: SqlOS.Dashboard.Session={cookie#1}
+> Referer: https://sqlos.example.test/sqlos/admin/fga/grants
+> X-SqlOS-Request: 1
+>   {
+>     "resourceId": "workspace::alpha",
+>     "roleId": "workspace_reader",
+>     "subjectId": "{usr#1}"
+>   }
+< 201 Created
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "createdAt": "{datetime:unspecified}",
+      "effectiveFrom": null,
+      "effectiveTo": null,
+      "id": "{grant#1}",
+      "resourceId": "workspace::alpha",
+      "resourceName": "Alpha",
+      "roleId": "workspace_reader",
+      "roleName": "Workspace reader",
+      "subjectId": "{usr#1}",
+      "subjectName": "Alice"
+    }
+
+## 10. operator: so is Sec-Fetch-Site: same-origin
+> POST /sqlos/admin/fga/api/grants
+> Content-Type: application/json; charset=utf-8
+> Cookie: SqlOS.Dashboard.Session={cookie#1}
+> Sec-Fetch-Site: same-origin
+> X-SqlOS-Request: 1
+>   {
+>     "resourceId": "workspace::alpha",
+>     "roleId": "workspace_reader",
+>     "subjectId": "{usr#1}"
+>   }
+< 201 Created
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "createdAt": "{datetime:unspecified}",
+      "effectiveFrom": null,
+      "effectiveTo": null,
+      "id": "{grant#2}",
+      "resourceId": "workspace::alpha",
+      "resourceName": "Alpha",
+      "roleId": "workspace_reader",
+      "roleName": "Workspace reader",
+      "subjectId": "{usr#1}",
+      "subjectName": "Alice"
+    }
+
+## 11. operator: a delete without the proof is refused
+> DELETE /sqlos/admin/fga/api/grants/{grant#2}
+> Cookie: SqlOS.Dashboard.Session={cookie#1}
+< 403 Forbidden
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "csrf_rejected",
+      "message": "The request could not be verified."
+    }
+
+## 12. operator: a delete with the proof and the dashboard's Origin
+> DELETE /sqlos/admin/fga/api/grants/{grant#2}
+> Cookie: SqlOS.Dashboard.Session={cookie#1}
+> Origin: https://sqlos.example.test
+> X-SqlOS-Request: 1
+< 204 No Content
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 13. operator: a read-only POST such as the trace needs the proof too
+> POST /sqlos/admin/fga/api/trace
+> Content-Type: application/json; charset=utf-8
+> Cookie: SqlOS.Dashboard.Session={cookie#1}
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::alpha",
+>     "subjectId": "{usr#1}"
+>   }
+< 403 Forbidden
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "csrf_rejected",
+      "message": "The request could not be verified."
+    }
+
+## 14. operator: reads need no proof
+> GET /sqlos/admin/fga/api/grants
+> Cookie: SqlOS.Dashboard.Session={cookie#1}
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "effectiveFrom": null,
+          "effectiveTo": null,
+          "id": "{grant#1}",
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleId": "workspace_reader",
+          "roleName": "Workspace reader",
+          "subjectId": "{usr#1}",
+          "subjectName": "Alice"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## audit: each refusal is audited
+  - {
+      "action": "security.csrf_rejected",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "security"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "security.csrf_rejected",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "method": "POST",
+        "path": "/sqlos/admin/fga/api/grants",
+        "reason": "missing_header"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "security.csrf_rejected",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "security"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "security.csrf_rejected",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "method": "POST",
+        "path": "/sqlos/admin/fga/api/grants",
+        "reason": "ambiguous_header"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "security.csrf_rejected",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "security"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "security.csrf_rejected",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "method": "POST",
+        "path": "/sqlos/admin/fga/api/grants",
+        "reason": "untrusted_origin"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "security.csrf_rejected",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "security"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "security.csrf_rejected",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "method": "POST",
+        "path": "/sqlos/admin/fga/api/grants",
+        "reason": "untrusted_origin"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "security.csrf_rejected",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "security"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "security.csrf_rejected",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "method": "POST",
+        "path": "/sqlos/admin/fga/api/grants",
+        "reason": "ambiguous_origin"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "security.csrf_rejected",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "security"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "security.csrf_rejected",
+      "id": "{evt#6}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "method": "POST",
+        "path": "/sqlos/admin/fga/api/grants",
+        "reason": "untrusted_origin"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "security.csrf_rejected",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "security"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "security.csrf_rejected",
+      "id": "{evt#7}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "method": "POST",
+        "path": "/sqlos/admin/fga/api/grants",
+        "reason": "untrusted_origin"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "security.csrf_rejected",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "security"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "security.csrf_rejected",
+      "id": "{evt#8}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "method": "DELETE",
+        "path": "/sqlos/admin/fga/api/grants/{grant#2}",
+        "reason": "missing_header"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "security.csrf_rejected",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "security"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "security.csrf_rejected",
+      "id": "{evt#9}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "method": "POST",
+        "path": "/sqlos/admin/fga/api/trace",
+        "reason": "missing_header"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
