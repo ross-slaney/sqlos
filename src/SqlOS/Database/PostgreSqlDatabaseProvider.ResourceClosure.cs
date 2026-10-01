@@ -10,6 +10,60 @@ namespace SqlOS.Database;
 /// </summary>
 internal sealed partial class PostgreSqlDatabaseProvider
 {
+    /// <summary>
+    /// <c>fn_ActiveSubjects(p_subject_ids)</c>: the caller's live principal set (see the SQL Server provider).
+    /// It depends on who is asking, never on what they were granted.
+    /// </summary>
+    public string BuildActiveSubjectsFunctionSql(SqlOSFgaOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var schema = QuoteIdentifier(options.Schema);
+        var tables = options.TableNames;
+        var subjects = Qualify(options.Schema, tables.Subjects);
+        var users = Qualify(options.Schema, tables.Users);
+        var serviceAccounts = Qualify(options.Schema, tables.ServiceAccounts);
+        var userGroups = Qualify(options.Schema, tables.UserGroups);
+        var agents = Qualify(options.Schema, tables.Agents);
+        return $"""
+            CREATE OR REPLACE FUNCTION {schema}."fn_ActiveSubjects"(
+                p_subject_ids text
+            )
+            RETURNS TABLE("SubjectId" varchar(450))
+            LANGUAGE sql
+            STABLE
+            AS $sqlos$
+            SELECT s."Id"
+            FROM {subjects} s
+            LEFT JOIN {users} u ON s."Id" = u."SubjectId"
+            LEFT JOIN {serviceAccounts} sa ON s."Id" = sa."SubjectId"
+            LEFT JOIN {userGroups} ug ON s."Id" = ug."SubjectId"
+            LEFT JOIN {agents} ag ON s."Id" = ag."SubjectId"
+            WHERE s."Id" = ANY (ARRAY(SELECT jsonb_array_elements_text(p_subject_ids::jsonb)))
+              AND (s."SubjectTypeId" <> 'user' OR u."IsActive" = TRUE)
+              AND (s."SubjectTypeId" <> 'service_account' OR (sa."SubjectId" IS NOT NULL AND (sa."ExpiresAt" IS NULL OR sa."ExpiresAt" > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))))
+              AND (s."SubjectTypeId" <> 'group' OR ug."IsActive" = TRUE)
+              AND (s."SubjectTypeId" <> 'agent' OR ag."SubjectId" IS NOT NULL)
+              AND EXISTS (
+                  SELECT 1
+                  FROM {subjects} caller
+                  LEFT JOIN {users} callerUser ON caller."Id" = callerUser."SubjectId"
+                  LEFT JOIN {serviceAccounts} callerSa ON caller."Id" = callerSa."SubjectId"
+                  LEFT JOIN {userGroups} callerGroup ON caller."Id" = callerGroup."SubjectId"
+                  LEFT JOIN {agents} callerAgent ON caller."Id" = callerAgent."SubjectId"
+                  WHERE caller."Id" = (p_subject_ids::jsonb ->> 0)
+                    AND (caller."SubjectTypeId" <> 'user' OR callerUser."IsActive" = TRUE)
+                    AND (caller."SubjectTypeId" <> 'service_account' OR (callerSa."SubjectId" IS NOT NULL AND (callerSa."ExpiresAt" IS NULL OR callerSa."ExpiresAt" > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))))
+                    AND (caller."SubjectTypeId" <> 'group' OR callerGroup."IsActive" = TRUE)
+                    AND (caller."SubjectTypeId" <> 'agent' OR callerAgent."SubjectId" IS NOT NULL)
+              )
+            $sqlos$;
+            """;
+    }
+
+    /// <summary>
+    /// <c>fn_AccessRoots</c>: the caller's granted resources, read from the grants by subject (see the SQL
+    /// Server provider). Only the authorized page uses it.
+    /// </summary>
     public string BuildAccessRootsFunctionSql(SqlOSFgaOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -19,11 +73,6 @@ internal sealed partial class PostgreSqlDatabaseProvider
         var resourceTypes = Qualify(options.Schema, tables.ResourceTypes);
         var grants = Qualify(options.Schema, tables.Grants);
         var rolePermissions = Qualify(options.Schema, tables.RolePermissions);
-        var subjects = Qualify(options.Schema, tables.Subjects);
-        var users = Qualify(options.Schema, tables.Users);
-        var serviceAccounts = Qualify(options.Schema, tables.ServiceAccounts);
-        var userGroups = Qualify(options.Schema, tables.UserGroups);
-        var agents = Qualify(options.Schema, tables.Agents);
         return $"""
             CREATE OR REPLACE FUNCTION {schema}."fn_AccessRoots"(
                 p_subject_ids text,
@@ -33,39 +82,14 @@ internal sealed partial class PostgreSqlDatabaseProvider
             LANGUAGE sql
             STABLE
             AS $sqlos$
-            -- The caller's live grants first (a handful of rows, found by subject), then their resources by primary
-            -- key. The CTE is materialized so the planner cannot start from the resource table: at ten million
-            -- resources it has chosen a merge join along the resource index to feed a DISTINCT, scanning tens of
-            -- thousands of rows per call. Duplicate roots (two grants on one resource) are fine; the consumers
-            -- treat the result as a set.
+            -- The caller's current grants first, found by subject, then their resources by primary key. The CTE is
+            -- materialized so the planner cannot start from the resource table (at ten million resources it once
+            -- chose a merge join along the resource index, scanning tens of thousands of rows per call).
             WITH g AS MATERIALIZED (
                 SELECT g."ResourceId"
                 FROM {grants} g
-                INNER JOIN {rolePermissions} rp ON g."RoleId" = rp."RoleId"
-                INNER JOIN {subjects} s ON g."SubjectId" = s."Id"
-                LEFT JOIN {users} u ON s."Id" = u."SubjectId"
-                LEFT JOIN {serviceAccounts} sa ON s."Id" = sa."SubjectId"
-                LEFT JOIN {userGroups} ug ON s."Id" = ug."SubjectId"
-                LEFT JOIN {agents} ag ON s."Id" = ag."SubjectId"
-                WHERE g."SubjectId" = ANY (ARRAY(SELECT jsonb_array_elements_text(p_subject_ids::jsonb)))
-                  AND rp."PermissionId" = p_permission_id
-                  AND (s."SubjectTypeId" <> 'user' OR u."IsActive" = TRUE)
-                  AND (s."SubjectTypeId" <> 'service_account' OR (sa."SubjectId" IS NOT NULL AND (sa."ExpiresAt" IS NULL OR sa."ExpiresAt" > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))))
-                  AND (s."SubjectTypeId" <> 'group' OR ug."IsActive" = TRUE)
-                  AND (s."SubjectTypeId" <> 'agent' OR ag."SubjectId" IS NOT NULL)
-                  AND EXISTS (
-                      SELECT 1
-                      FROM {subjects} caller
-                      LEFT JOIN {users} callerUser ON caller."Id" = callerUser."SubjectId"
-                      LEFT JOIN {serviceAccounts} callerSa ON caller."Id" = callerSa."SubjectId"
-                      LEFT JOIN {userGroups} callerGroup ON caller."Id" = callerGroup."SubjectId"
-                      LEFT JOIN {agents} callerAgent ON caller."Id" = callerAgent."SubjectId"
-                      WHERE caller."Id" = (p_subject_ids::jsonb ->> 0)
-                        AND (caller."SubjectTypeId" <> 'user' OR callerUser."IsActive" = TRUE)
-                        AND (caller."SubjectTypeId" <> 'service_account' OR (callerSa."SubjectId" IS NOT NULL AND (callerSa."ExpiresAt" IS NULL OR callerSa."ExpiresAt" > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))))
-                        AND (caller."SubjectTypeId" <> 'group' OR callerGroup."IsActive" = TRUE)
-                        AND (caller."SubjectTypeId" <> 'agent' OR callerAgent."SubjectId" IS NOT NULL)
-                  )
+                WHERE g."SubjectId" = ANY (ARRAY(SELECT live."SubjectId" FROM {schema}."fn_ActiveSubjects"(p_subject_ids) live))
+                  AND g."RoleId" = ANY (ARRAY(SELECT rp."RoleId" FROM {rolePermissions} rp WHERE rp."PermissionId" = p_permission_id))
                   AND (g."EffectiveFrom" IS NULL OR g."EffectiveFrom" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))
                   AND (g."EffectiveTo" IS NULL OR g."EffectiveTo" >= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))
             )
@@ -398,7 +422,8 @@ internal sealed partial class PostgreSqlDatabaseProvider
         return $"""
             SELECT "RoutinesHash"
             FROM {Qualify(options.Schema, "SqlOSFgaSchema")}
-            WHERE {Routine("fn_AccessRoots")}
+            WHERE {Routine("fn_ActiveSubjects")}
+              AND {Routine("fn_AccessRoots")}
               AND {Routine("fn_IsResourceAccessible")}
               AND {Routine($"fn_{closure}_Apply")}
               AND {Routine($"fn_{closure}_Rebuild")}

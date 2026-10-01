@@ -267,8 +267,7 @@ internal sealed class ScenarioRunner(
         var expected = new List<int>(rows);
         for (long id = scenario.Cursor + 1; id <= productCount && expected.Count < rows; id++)
         {
-            var leaf = tree.LeafOf(id);
-            if (leaf.IsUnder(scenario.Principal.ScopeResourceId) && (scenario.StoreId is null || leaf.StoreId == scenario.StoreId))
+            if (scenario.Principal.Sees(tree, id) && (scenario.StoreId is null || tree.LeafOf(id).StoreId == scenario.StoreId))
             {
                 expected.Add((int)id);
             }

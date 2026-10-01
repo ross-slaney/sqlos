@@ -35,7 +35,41 @@ public class SqlOSFgaFunctionInitializerTests
 
         sql.Should().Contain("[tenant]]one].fn_IsResourceAccessible");
         sql.Should().Contain("[tenant]]one].[resources]]current]");
-        sql.Should().Contain("[tenant]]one].fn_AccessRoots(@SubjectIds, @PermissionId)");
+        sql.Should().Contain("[tenant]]one].fn_ActiveSubjects(@SubjectIds)");
+    }
+
+    [TestMethod]
+    public void RowFilter_LooksUpGrantsPerAncestor_NeverTheCallersWholeGrantList()
+    {
+        // Reading the caller's granted resources (fn_AccessRoots) costs one row per grant; the row filter must
+        // cost the same for a caller with one grant as for one with a million, so it probes the grants of each
+        // ancestor by ResourceId instead.
+        var sqlServer = SqlOSFgaFunctionInitializer.BuildIsResourceAccessibleFunctionSql(new SqlOSFgaOptions());
+        var postgres = SqlOS.Database.PostgreSqlDatabaseProvider.Instance.BuildIsResourceAccessibleFunctionSql(new SqlOSFgaOptions());
+
+        sqlServer.Should().NotContain("fn_AccessRoots");
+        sqlServer.Should().Contain("WHERE g.ResourceId = a.Id");
+        sqlServer.Should().Contain("rp.RoleId = g.RoleId AND rp.PermissionId = @PermissionId");
+        postgres.Should().NotContain("fn_AccessRoots");
+        postgres.Should().Contain("WHERE g.\"ResourceId\" = a.\"Id\"");
+        postgres.Should().Contain("g.\"RoleId\" = ANY (ARRAY(SELECT rp.\"RoleId\" FROM \"dbo\".\"SqlOSFgaRolePermissions\" rp WHERE rp.\"PermissionId\" = p_permission_id))");
+    }
+
+    [TestMethod]
+    public void BuildActiveSubjectsSql_CarriesEverySubjectCondition()
+    {
+        var options = new SqlOSFgaOptions { Schema = "tenant]one" };
+
+        var sql = SqlOSFgaFunctionInitializer.BuildActiveSubjectsFunctionSql(options);
+
+        sql.Should().Contain("CREATE OR ALTER FUNCTION [tenant]]one].fn_ActiveSubjects");
+        sql.Should().Contain("OPENJSON(@SubjectIds)");
+        sql.Should().Contain("JSON_VALUE(@SubjectIds, '$[0]')");
+        sql.Should().Contain("u.IsActive = 1");
+        sql.Should().Contain("ug.IsActive = 1");
+        sql.Should().Contain("sa.ExpiresAt > GETUTCDATE()");
+        sql.Should().Contain("ag.SubjectId IS NOT NULL");
+        sql.Should().NotContain("Grants", "who is asking never depends on what they were granted");
     }
 
     [TestMethod]
@@ -48,15 +82,12 @@ public class SqlOSFgaFunctionInitializerTests
 
         sql.Should().Contain("CREATE OR ALTER FUNCTION [tenant]]one].fn_AccessRoots");
         sql.Should().Contain("[tenant]]one].[grants]]current]");
-        sql.Should().Contain("OPENJSON(@SubjectIds)");
-        sql.Should().Contain("JSON_VALUE(@SubjectIds, '$[0]')");
+        sql.Should().Contain("[tenant]]one].fn_ActiveSubjects(@SubjectIds)");
         sql.Should().Contain("rp.PermissionId = @PermissionId");
         sql.Should().Contain("r.IsActive = 1");
         sql.Should().Contain("g.EffectiveFrom IS NULL OR g.EffectiveFrom <= GETUTCDATE()");
         sql.Should().Contain("g.EffectiveTo IS NULL OR g.EffectiveTo >= GETUTCDATE()");
-        sql.Should().Contain("sa.ExpiresAt > GETUTCDATE()");
         sql.Should().Contain("parent.Seq AS ParentSeq, parent.IsActive AS ParentIsActive");
-        // The DISTINCT is what makes SQL Server build the root set once per query (a spool) instead of per row.
         sql.Should().Contain("SELECT DISTINCT r.Id AS ResourceId");
         sql.Should().Contain("LEFT JOIN [tenant]]one].[SqlOSFgaResources] parent ON parent.Id = r.ParentId");
     }
@@ -100,6 +131,7 @@ public class SqlOSFgaFunctionInitializerTests
             var provider = SqlOS.Database.SqlServerDatabaseProvider.Instance;
             var batches = new List<string>
             {
+                provider.BuildActiveSubjectsFunctionSql(options),
                 provider.BuildAccessRootsFunctionSql(options),
                 provider.BuildIsResourceAccessibleFunctionSql(options),
             };

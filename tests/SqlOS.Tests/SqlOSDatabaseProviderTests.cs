@@ -68,8 +68,10 @@ public class SqlOSDatabaseProviderTests
         sql.Should().Contain("RETURNS TABLE(\"Id\"");
         sql.Should().Contain("strpos");
         sql.Should().Contain("truncated.\"Depth\" = 7");
-        // The roots are read as an array from an uncorrelated subquery, which PostgreSQL evaluates once per query.
-        sql.Should().Contain("= ANY (ARRAY(SELECT roots.\"ResourceId\" FROM \"dbo\".\"fn_AccessRoots\"(p_subject_ids, p_permission_id) roots))");
+        // The live subjects are read as an array from an uncorrelated subquery, which PostgreSQL evaluates once per
+        // query; each ancestor's grants are probed by ResourceId.
+        sql.Should().Contain("g.\"SubjectId\" = ANY (ARRAY(SELECT live.\"SubjectId\" FROM \"dbo\".\"fn_ActiveSubjects\"(p_subject_ids) live))");
+        sql.Should().NotContain("fn_AccessRoots");
     }
 
     [TestMethod]
@@ -110,6 +112,7 @@ public class SqlOSDatabaseProviderTests
 
         var hash = PostgreSqlDatabaseProvider.Instance.BuildSelectRoutinesHashSql(options);
         hash.Should().Contain("\"ten\"\"ant\".\"SqlOSFgaSchema\"");
+        hash.Should().Contain("p.proname = 'fn_ActiveSubjects'");
         hash.Should().Contain("p.proname = 'fn_AccessRoots'");
         hash.Should().Contain("p.proname = 'fn_res\"ourcesClosure_Rebuild'");
         hash.Should().Contain("t.tgname = 'TR_res\"ourcesClosure_Update'");
@@ -144,6 +147,7 @@ public class SqlOSDatabaseProviderTests
         var hash = SqlServerDatabaseProvider.Instance.BuildSelectRoutinesHashSql(options);
 
         hash.Should().Contain("FROM [ten'ant].[SqlOSFgaSchema]");
+        hash.Should().Contain("OBJECT_ID(N'[ten''ant].[fn_ActiveSubjects]', N'IF') IS NOT NULL");
         hash.Should().Contain("OBJECT_ID(N'[ten''ant].[fn_AccessRoots]', N'IF') IS NOT NULL");
         hash.Should().Contain("OBJECT_ID(N'[ten''ant].[fn_IsResourceAccessible]', N'IF') IS NOT NULL");
         hash.Should().Contain("OBJECT_ID(N'[ten''ant].[sp_res]]ourcesClosure_Apply]', N'P') IS NOT NULL");

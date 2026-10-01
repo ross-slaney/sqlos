@@ -91,8 +91,11 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
 
     /// <summary>
     /// <c>fn_IsResourceAccessible</c>: the row filter. It walks up from the target over active resources, as the
-    /// paper describes, and matches the chain against <c>fn_AccessRoots</c>. The roots are read through an
-    /// uncorrelated array subquery, which PostgreSQL evaluates once per query (an InitPlan), not once per row.
+    /// paper describes, and looks for a current grant on each ancestor by the grants' ResourceId index, held
+    /// by one of the caller's live subjects (<c>fn_ActiveSubjects</c>) through a role that carries the
+    /// permission. Both sets are uncorrelated array subqueries, evaluated once per query (InitPlans), and both
+    /// are small whatever the caller was granted: the principal set and the roles. So a check costs the same
+    /// for a caller with one grant as for one with a million.
     /// </summary>
     public string BuildIsResourceAccessibleFunctionSql(SqlOSFgaOptions options)
     {
@@ -101,6 +104,8 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
         var tables = options.TableNames;
         var resources = Qualify(options.Schema, tables.Resources);
         var permissions = Qualify(options.Schema, tables.Permissions);
+        var grants = Qualify(options.Schema, tables.Grants);
+        var rolePermissions = Qualify(options.Schema, tables.RolePermissions);
         var maxDepth = Math.Max(1, options.MaxResourceHierarchyDepth)
             .ToString(CultureInfo.InvariantCulture);
         return $"""
@@ -139,7 +144,15 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
             )
             SELECT a."Id"
             FROM ancestors a
-            WHERE a."Id" = ANY (ARRAY(SELECT roots."ResourceId" FROM {schema}."fn_AccessRoots"(p_subject_ids, p_permission_id) roots))
+            WHERE EXISTS (
+                  SELECT 1
+                  FROM {grants} g
+                  WHERE g."ResourceId" = a."Id"
+                    AND g."SubjectId" = ANY (ARRAY(SELECT live."SubjectId" FROM {schema}."fn_ActiveSubjects"(p_subject_ids) live))
+                    AND g."RoleId" = ANY (ARRAY(SELECT rp."RoleId" FROM {rolePermissions} rp WHERE rp."PermissionId" = p_permission_id))
+                    AND (g."EffectiveFrom" IS NULL OR g."EffectiveFrom" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))
+                    AND (g."EffectiveTo" IS NULL OR g."EffectiveTo" >= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))
+              )
               AND NOT EXISTS (SELECT 1 FROM ancestors malformed WHERE malformed."CycleDetected" = TRUE)
               AND NOT EXISTS (
                   SELECT 1

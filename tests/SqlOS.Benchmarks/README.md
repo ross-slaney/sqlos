@@ -184,15 +184,20 @@ records the CPU model, and every gate compares within one job on one machine.
 - **`fn_AccessRoots` moves the grant conditions out of the per-row walk.** The current row filter examines
   the same rows as the previous release's and evaluates the caller's grants once per query instead of once
   per ancestor per row; the `regression` gate compares the two on every run.
-- **Each engine needs its own cue to build the roots once, from the grant side; the plans show both failure
-  modes.** The first CI run passed on PostgreSQL at 1M and failed at 10M: inlined into the queries,
-  `fn_AccessRoots` was planned as a merge join along the resource primary-key index to feed its `DISTINCT`,
-  scanning 60K resource rows per evaluation (the denied point check went from 5 ms to 168 ms, the store
-  manager's page from 8 ms to 172 ms). The PostgreSQL function now materializes the caller's grants in a CTE
-  first and looks their resources up by key. On SQL Server the `DISTINCT` is what makes the optimizer build
-  the root set once into a spool; a run without it recomputed the roots for every candidate row (the grants
-  seek ran 21 times for a 21-row page) and the admin page went from ×0.94 to ×1.36 of the previous function.
-  The `regression` gate and the 1M → 10M growth are what caught both.
+- **The row filter must not read the caller's grants up front.** An earlier revision of this PR built the
+  caller's whole grant set once per query and tested each ancestor against it. With one grant per person,
+  every gate passed; a user with 100,000 grants would have read all of them on every check, and
+  PostgreSQL's `= ANY(array)` scans the array per probe (100,000 grants × 10,000 probes: 4.2 s against
+  14 ms hashed). The filter now hoists only the caller's live subjects and looks up each ancestor's grants
+  by index; the `grants10k` and `grants100k` people check it. Their point checks cost the same as everyone
+  else's (about 2 ms on PostgreSQL, against 7 ms for the previous function).
+- **The closure page's cost grows with grants; the row filter's with sparsity.** For the 100,000-grant
+  person (σ = 1%) the row-filter page takes 15 ms and the closure page 1.5 s, because the page reads every
+  grant. For the store manager (one grant, σ = 0.0065%) it is the other way round. Which list to call is a
+  property of the caller's grants, not of the data size.
+- **On PostgreSQL the roots must be read from the grant side.** At 10M, an inlined `fn_AccessRoots` was
+  planned as a merge join along the resource index (60K rows read per call); it now materializes the
+  caller's grants first and looks their resources up by key.
 - **On SQL Server the point check costs about 1 ms more than before** (3.6 ms against 2.6 ms at 10M): for a
   single row, the inline roots join costs a little more than the old per-ancestor grant probe. List pages
   are ×0.68–0.94 of the previous function's, and the closure page is 6 ms for every principal.

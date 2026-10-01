@@ -125,10 +125,11 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
     [TestMethod]
     public async Task EnsureFunctionsExist_EnforcesPrincipalAndResourceLifecycle()
     {
-        // The grant conditions live in fn_AccessRoots; fn_IsResourceAccessible walks the tree and joins them.
+        // The subject and caller conditions live in fn_ActiveSubjects; fn_IsResourceAccessible walks the tree and
+        // probes each ancestor's grants for those subjects.
         var definition = await GetFunctionDefinitionAsync()
             + Environment.NewLine
-            + await TestCatalog.GetFunctionDefinitionAsync(Context, "fn_AccessRoots");
+            + await TestCatalog.GetFunctionDefinitionAsync(Context, "fn_ActiveSubjects");
 
         if (TestDatabase.IsPostgreSql)
         {

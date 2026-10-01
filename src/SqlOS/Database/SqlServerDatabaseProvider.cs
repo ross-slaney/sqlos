@@ -104,8 +104,9 @@ internal sealed partial class SqlServerDatabaseProvider : ISqlOSDatabaseProvider
 
     /// <summary>
     /// <c>fn_IsResourceAccessible</c>: the row filter. It walks up from the target over active resources, as the
-    /// paper describes, and matches the chain against <c>fn_AccessRoots</c>. The roots depend only on the
-    /// function's parameters, so the engine evaluates them once per query rather than once per row.
+    /// paper describes, and looks for a current grant on each ancestor by the grants' ResourceId index, held
+    /// by one of the caller's live subjects (<c>fn_ActiveSubjects</c>) through a role that carries the
+    /// permission. Nothing in it depends on how many grants the caller holds elsewhere.
     /// </summary>
     public string BuildIsResourceAccessibleFunctionSql(SqlOSFgaOptions options)
     {
@@ -114,6 +115,8 @@ internal sealed partial class SqlServerDatabaseProvider : ISqlOSDatabaseProvider
         var tables = options.TableNames;
         var resources = Escape(tables.Resources);
         var permissions = Escape(tables.Permissions);
+        var grants = Escape(tables.Grants);
+        var rolePermissions = Escape(tables.RolePermissions);
         var maxDepth = Math.Max(1, options.MaxResourceHierarchyDepth)
             .ToString(CultureInfo.InvariantCulture);
         return $"""
@@ -155,8 +158,16 @@ internal sealed partial class SqlServerDatabaseProvider : ISqlOSDatabaseProvider
                 )
                 SELECT TOP 1 a.Id
                 FROM ancestors a
-                INNER JOIN [{schema}].fn_AccessRoots(@SubjectIds, @PermissionId) roots ON roots.ResourceId = a.Id
-                WHERE NOT EXISTS (SELECT 1 FROM ancestors malformed WHERE malformed.CycleDetected = 1)
+                WHERE EXISTS (
+                      SELECT 1
+                      FROM [{schema}].[{grants}] g
+                      INNER JOIN [{schema}].[{rolePermissions}] rp ON rp.RoleId = g.RoleId AND rp.PermissionId = @PermissionId
+                      WHERE g.ResourceId = a.Id
+                        AND g.SubjectId IN (SELECT live.SubjectId FROM [{schema}].fn_ActiveSubjects(@SubjectIds) live)
+                        AND (g.EffectiveFrom IS NULL OR g.EffectiveFrom <= GETUTCDATE())
+                        AND (g.EffectiveTo IS NULL OR g.EffectiveTo >= GETUTCDATE())
+                  )
+                  AND NOT EXISTS (SELECT 1 FROM ancestors malformed WHERE malformed.CycleDetected = 1)
                   AND NOT EXISTS (
                       SELECT 1
                       FROM ancestors truncated

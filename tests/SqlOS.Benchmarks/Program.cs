@@ -90,7 +90,7 @@ var dataset = new DatasetShape(
     MaxDepth: 10,
     options.Seed,
     string.Create(CultureInfo.InvariantCulture,
-        $"The shipped schema, indexes, `fn_AccessRoots`, `fn_IsResourceAccessible`, and the ancestor closure, queried through `BuildFilterAsync` and `ListVisibleAsync`; the previous release's function beside them on the same data. The tree: {chains} retail chains ({chains - 1} at D = 5, one at D = 10) with {tree.Stores.Count:N0} stores and {tree.Nodes.Count + 1:N0} organizational nodes. Store sizes are log-normal, and products are spread through the id range the way rows arrive over time. {managedScopes:N0} managers hold grants on their store, region, or chain. The people measured each resolve to 3 subjects (M = 3)."));
+        $"The shipped schema, indexes, `fn_AccessRoots`, `fn_IsResourceAccessible`, and the ancestor closure, queried through `BuildFilterAsync` and `ListVisibleAsync`; the previous release's function beside them on the same data. The tree: {chains} retail chains ({chains - 1} at D = 5, one at D = 10) with {tree.Stores.Count:N0} stores and {tree.Nodes.Count + 1:N0} organizational nodes. Store sizes are log-normal, and products are spread through the id range the way rows arrive over time. {managedScopes:N0} managers hold grants on their store, region, or chain. Two more people hold 10,000 and 100,000 grants on single products, spread through the catalog. The people measured each resolve to 3 subjects (M = 3)."));
 
 // Leave room for the CI runner's own logs and the uploaded results.
 long? FreeBytes() => options.DataDirectory is { } directory ? new DriveInfo(Path.GetFullPath(directory)).AvailableFreeSpace : null;
@@ -143,6 +143,13 @@ foreach (var target in options.Scales)
 {
     log.Info($"Growing the catalog to {RetailTree.Count(target)} products ({target - loaded:N0} new rows in each of two tables, plus their closure)...");
     var timing = await loader.GrowProductsAsync(tree, typeSeq, loaded, target, cancellation);
+    if (loaded == 0)
+    {
+        await using var db = CreateContext();
+        var granted = await BenchmarkModel.GrantProductsAsync(db, people, target, cancellation);
+        log.Info($"Granted {granted:N0} single products to the many-grants people ({string.Join(", ", people.ManyGrants.Select(p => $"{p.Key}: {p.GrantedProducts:N0}"))}).");
+    }
+
     loaded = target;
 
     var size = await loader.DatabaseSizeBytesAsync(cancellation);

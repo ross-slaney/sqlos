@@ -71,7 +71,9 @@ internal static class BenchmarkModel
             RegionManager: new Principal("region", RetailTree.RegionId(1, 1), "role_region_manager", GrantViaGroup: false),
             DeepChainManager: new Principal("deep", RetailTree.ChainId(RetailTree.DeepChain), "role_chain_manager", GrantViaGroup: false),
             StoreManager: new Principal("store", store.ResourceId, "role_store_manager", GrantViaGroup: false),
-            StoreManagerStoreId: store.StoreId);
+            StoreManagerStoreId: store.StoreId,
+            Grants10K: new Principal("grants10k", "", "role_store_manager", GrantViaGroup: false, RequestedProductGrants: 10_000),
+            Grants100K: new Principal("grants100k", "", "role_store_manager", GrantViaGroup: false, RequestedProductGrants: 100_000));
 
         foreach (var principal in principals.All)
         {
@@ -92,6 +94,12 @@ internal static class BenchmarkModel
             for (var g = 1; g <= 2; g++)
             {
                 db.Set<SqlOSFgaUserGroupMembership>().Add(new SqlOSFgaUserGroupMembership { SubjectId = principal.SubjectId, UserGroupId = $"ug_{principal.Key}_{g}" });
+            }
+
+            // The many-grants people are granted single products once products exist (GrantProductsAsync).
+            if (principal.RequestedProductGrants > 0)
+            {
+                continue;
             }
 
             db.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant
@@ -176,6 +184,43 @@ internal static class BenchmarkModel
         return grants;
     }
 
+    /// <summary>
+    /// Grants each many-grants person their single products: every <c>stride</c>-th product of the first scale,
+    /// spread through the id range the way per-item sharing accumulates. Run once, after the first load.
+    /// </summary>
+    /// <returns>The number of grants created.</returns>
+    public static async Task<int> GrantProductsAsync(BenchDbContext db, Principals people, long productCount, CancellationToken cancellationToken)
+    {
+        db.ChangeTracker.AutoDetectChangesEnabled = false;
+        var created = 0;
+        foreach (var principal in people.ManyGrants)
+        {
+            var count = (int)Math.Min(principal.RequestedProductGrants, productCount);
+            principal.GrantedProducts = count;
+            principal.ProductStride = Math.Max(1, productCount / count);
+            for (var start = 0; start < count; start += 5_000)
+            {
+                for (var i = start; i < Math.Min(start + 5_000, count); i++)
+                {
+                    db.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant
+                    {
+                        Id = $"grant::{principal.Key}::{i:D6}",
+                        SubjectId = principal.SubjectId,
+                        ResourceId = RetailTree.ProductResourceId(principal.GrantedProductId(i)),
+                        RoleId = principal.RoleId,
+                    });
+                }
+
+                await db.SaveChangesAsync(cancellationToken);
+                db.ChangeTracker.Clear();
+            }
+
+            created += count;
+        }
+
+        return created;
+    }
+
     /// <summary>Grants each auditor a company-wide role on the root, for the grant-density pass.</summary>
     public static async Task AddRootCrowdAsync(BenchDbContext db, RetailTree tree, CancellationToken cancellationToken)
     {
@@ -199,8 +244,24 @@ internal static class BenchmarkModel
     private static SqlOSFgaResourceType Type(string id, string name) => new() { Id = id, Name = name };
 }
 
-internal sealed record Principal(string Key, string ScopeResourceId, string RoleId, bool GrantViaGroup)
+/// <param name="ScopeResourceId">The one resource the principal is granted on, for the hierarchy people.</param>
+/// <param name="RequestedProductGrants">For the many-grants people: how many single products to grant instead.</param>
+internal sealed record Principal(string Key, string ScopeResourceId, string RoleId, bool GrantViaGroup, int RequestedProductGrants = 0)
 {
+    /// <summary>Single-product grants actually created (at most the first scale's product count).</summary>
+    public int GrantedProducts { get; set; }
+
+    /// <summary>Granted products are 1, 1 + stride, 1 + 2·stride, …</summary>
+    public long ProductStride { get; set; } = 1;
+
+    public long GrantedProductId(int index) => 1 + index * ProductStride;
+
+    /// <summary>Ground truth: whether this principal may see product <paramref name="productId"/>.</summary>
+    public bool Sees(RetailTree tree, long productId)
+        => RequestedProductGrants > 0
+            ? (productId - 1) % ProductStride == 0 && (productId - 1) / ProductStride < GrantedProducts
+            : tree.LeafOf(productId).IsUnder(ScopeResourceId);
+
     public string SubjectId => $"u_{Key}";
     public string GroupSubjectId(int group) => $"g_{Key}_{group}";
 
@@ -214,7 +275,12 @@ internal sealed record Principals(
     Principal RegionManager,
     Principal DeepChainManager,
     Principal StoreManager,
-    int StoreManagerStoreId)
+    int StoreManagerStoreId,
+    Principal Grants10K,
+    Principal Grants100K)
 {
-    public IReadOnlyList<Principal> All => [Admin, ChainManager, RegionManager, DeepChainManager, StoreManager];
+    public IReadOnlyList<Principal> All => [Admin, ChainManager, RegionManager, DeepChainManager, StoreManager, Grants10K, Grants100K];
+
+    /// <summary>People granted many single products rather than one node of the tree.</summary>
+    public IReadOnlyList<Principal> ManyGrants => [Grants10K, Grants100K];
 }

@@ -30,6 +30,11 @@ internal interface ISqlOSDatabaseProvider
     string BuildEnsureFgaVersionTableSql(string schema);
     string BuildSelectFgaVersionSql(string schema);
     string BuildIsResourceAccessibleFunctionSql(SqlOSFgaOptions options);
+
+    /// <summary><c>fn_ActiveSubjects</c>: the caller's live principal set; the row filter and the roots use it.</summary>
+    string BuildActiveSubjectsFunctionSql(SqlOSFgaOptions options);
+
+    /// <summary><c>fn_AccessRoots</c>: the caller's granted resources, for the authorized page only.</summary>
     string BuildAccessRootsFunctionSql(SqlOSFgaOptions options);
 
     /// <summary>Idempotent batches that create the closure's apply and rebuild routines and its triggers.</summary>

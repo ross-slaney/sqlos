@@ -214,8 +214,8 @@ disagree, which is what lets an application use either for the same screen.
 
 **Theorem 3 (page cost).** Let |C| ≤ N · D be the closure's size. One page performs:
 
-- one evaluation of `fn_AccessRoots`: the caller's grants joined to roles and subjects, O(M · G_max)
-  index seeks, independent of N and of other callers' grants;
+- one evaluation of `fn_AccessRoots`: the caller's live subjects (M rows), then their current grants
+  read by subject, O(M · log G + |A|) index entries, independent of N and of other callers' grants;
 - for each root a ∈ A: one ordered index range read of at most k closure entries (one seek, O(log |C|)) and
   one point lookup for wf(a);
 - a merge of at most |A| · (k + 1) candidates to the k smallest, O(|A| · k · log(|A| · k)) comparisons;
@@ -239,30 +239,44 @@ the measured ratio is far smaller.
 
 ## 5. The row filter after the change
 
-`fn_IsResourceAccessible` keeps its walk unchanged (the same recursive CTE with the same cycle and depth
-guards) and now joins the walked chain to `fn_AccessRoots` instead of evaluating the grant, role, subject,
-caller and time conditions once per ancestor per candidate row.
+`fn_IsResourceAccessible` keeps the paper's evaluation: the same walk up (recursive CTE, cycle and depth
+guards) and, for each ancestor c_i, a lookup of the grants on c_i. What moved is the part of each grant
+check that depends only on who is asking:
 
-**Proposition (same answers, no more work).** For every candidate row the new predicate is true exactly
-when the old one was: the old predicate was ∃ i ≤ L, ∃ grant on c_i satisfying the conditions, and A is by
-definition the set of resources with such a grant, so both are ∃ i ≤ L : c_i ∈ A. The walk reads the same
-rows as before. The grant conditions no longer depend on the candidate row, so an engine evaluates A once
-per query (PostgreSQL: an uncorrelated subquery, an InitPlan in the captured plans; SQL Server: an inline
-function with query-constant arguments) and tests each ancestor with one membership probe instead of a
-join through four subject tables. Rows examined per page are therefore identical, and the per-row constant
-is not larger. The benchmark's `regression` gate checks the constant against the previous release's
-function, kept beside the current one on the same data in the same job.
+```
+live(p, t) = { p' ∈ resolve(p) : alive(p', t) }   if alive(p, t)
+live(p, t) = ∅                                    otherwise
+```
 
-A is small (the caller's grants) and each engine needs its own cue to build it once and from the grant
-side; the benchmark's captured plans at 10M showed both failure modes. On PostgreSQL the function
-materializes the caller's live grants in a CTE before joining them to the resource table by primary key;
-inlined, the planner once chose a merge join along the resource index to feed the function's `DISTINCT`,
-scanning tens of thousands of resource rows per evaluation. On SQL Server the function keeps its
-`DISTINCT`: it makes the root set a blocking subtree that the optimizer builds once into a spool and
-rewinds for every candidate row; without it the inlined set was recomputed per row (the grants seek ran
-once per candidate). The per-query cost of building A is paid once, about a millisecond on SQL Server for
-a point check with a single grant; the per-row cost is a spool probe instead of a join through the grant
-and subject tables.
+This is `fn_ActiveSubjects(@SubjectIds)`, evaluated once per query: M rows, whatever the caller was
+granted. Per ancestor the filter probes the grants' `ResourceId` index (which carries `SubjectId`,
+`RoleId` and the time window) and keeps a grant when its subject is in live(p, t), its role carries the
+permission, and it is within its window.
+
+**Proposition (same answers).** The previous predicate was ∃ i ≤ L, ∃ grant g on c_i with g.subject ∈
+resolve(p), alive(g.subject, t), alive(p, t), perm ∈ perms(g.role) and within(g, t). Since alive(p, t) does
+not depend on g, and g.subject ∈ resolve(p) ∧ alive(g.subject, t) ∧ alive(p, t) ⟺ g.subject ∈ live(p, t),
+the two predicates are equal row by row.
+
+**Proposition (no grant-count term).** Per candidate row the filter performs at most D + 1 index probes,
+each reading the grants on one resource. Once per query it reads M subjects and the roles that carry the
+permission. Nothing depends on how many grants the caller holds elsewhere, so the per-row bound is the
+paper's O(D · M · G_max), and the per-page bound its Theorem 3. (The index is keyed by `ResourceId` alone,
+since migration v10 kept keys under SQL Server's size limit, so a probe also passes over other people's
+grants on that resource, filtering them on the index's included columns. The density pass measures
+that: ×1.0 with 100 other people's grants on the root.)
+
+**Why the grants are not hoisted too.** An earlier revision of this change evaluated the whole grant
+condition once per query, as the root set A, and tested each ancestor for membership in A. That adds an
+O(|A|) term to every query, a point check included, and the membership test is constant-time only if the
+engine hashes A. PostgreSQL's `= ANY(array)` over a computed array scans it: 100,000 grants and 10,000
+probes took 4.2 s, against 14 ms for a hashed `IN (SELECT …)`. Every benchmark principal then held exactly
+one grant, so no gate could see it. The benchmark now includes people with 10,000 and 100,000
+single-product grants, and their checks and pages run beside the previous release's function under the
+`regression` gate.
+
+`fn_AccessRoots` remains, for the authorized page only (Section 4): enumerating from grants must read each
+grant once, which is the |A| in its bound.
 
 ---
 

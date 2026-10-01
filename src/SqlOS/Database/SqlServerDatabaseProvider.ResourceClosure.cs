@@ -13,52 +13,36 @@ internal sealed partial class SqlServerDatabaseProvider
     private const int ClosureRecursionLimit = 110;
 
     /// <summary>
-    /// <c>fn_AccessRoots(@SubjectIds, @PermissionId)</c>: the active resources on which one of the caller's
-    /// subjects holds an active grant whose role includes the permission. Every grant condition the row
-    /// filter used to evaluate per candidate row lives here, evaluated once per query. The parent's sequence
-    /// number and state let the page query confirm a root's own chain is well formed with one closure lookup.
+    /// <c>fn_ActiveSubjects(@SubjectIds)</c>: the caller's principal set as the grant lookups may use it — the
+    /// listed subjects that are alive (active user or group, unexpired service account, existing agent), and
+    /// none at all unless the caller (the first id) is alive. It depends on who is asking, never on what they
+    /// were granted, so it costs a handful of rows however many grants they hold.
     /// </summary>
-    public string BuildAccessRootsFunctionSql(SqlOSFgaOptions options)
+    public string BuildActiveSubjectsFunctionSql(SqlOSFgaOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
         var schema = Escape(options.Schema);
         var tables = options.TableNames;
-        var resources = Escape(tables.Resources);
-        var resourceTypes = Escape(tables.ResourceTypes);
-        var grants = Escape(tables.Grants);
-        var rolePermissions = Escape(tables.RolePermissions);
         var subjects = Escape(tables.Subjects);
         var users = Escape(tables.Users);
         var serviceAccounts = Escape(tables.ServiceAccounts);
         var userGroups = Escape(tables.UserGroups);
         var agents = Escape(tables.Agents);
         return $"""
-            CREATE OR ALTER FUNCTION [{schema}].fn_AccessRoots(
-                @SubjectIds NVARCHAR(MAX),
-                @PermissionId NVARCHAR(128)
+            CREATE OR ALTER FUNCTION [{schema}].fn_ActiveSubjects(
+                @SubjectIds NVARCHAR(MAX)
             )
             RETURNS TABLE
             AS
             RETURN
             (
-                -- DISTINCT is load-bearing: it makes the root set a blocking subtree that the optimizer builds
-                -- once into a spool and rewinds for every candidate row of a query. Without it the inlined set
-                -- is recomputed per row (seen in captured plans: the grants seek ran once per row).
-                SELECT DISTINCT r.Id AS ResourceId, r.Seq AS ResourceSeq, rt.Seq AS TypeSeq,
-                       parent.Seq AS ParentSeq, parent.IsActive AS ParentIsActive
-                FROM [{schema}].[{grants}] g
-                INNER JOIN [{schema}].[{rolePermissions}] rp ON g.RoleId = rp.RoleId
-                INNER JOIN [{schema}].[{resources}] r ON g.ResourceId = r.Id
-                INNER JOIN [{schema}].[{resourceTypes}] rt ON r.ResourceTypeId = rt.Id
-                LEFT JOIN [{schema}].[{resources}] parent ON parent.Id = r.ParentId
-                INNER JOIN [{schema}].[{subjects}] s ON g.SubjectId = s.Id
+                SELECT s.Id AS SubjectId
+                FROM [{schema}].[{subjects}] s
                 LEFT JOIN [{schema}].[{users}] u ON s.Id = u.SubjectId
                 LEFT JOIN [{schema}].[{serviceAccounts}] sa ON s.Id = sa.SubjectId
                 LEFT JOIN [{schema}].[{userGroups}] ug ON s.Id = ug.SubjectId
                 LEFT JOIN [{schema}].[{agents}] ag ON s.Id = ag.SubjectId
-                WHERE g.SubjectId IN (SELECT CONVERT(NVARCHAR(450), [value]) FROM OPENJSON(@SubjectIds))
-                  AND rp.PermissionId = @PermissionId
-                  AND r.IsActive = 1
+                WHERE s.Id IN (SELECT CONVERT(NVARCHAR(450), [value]) FROM OPENJSON(@SubjectIds))
                   AND (s.SubjectTypeId <> 'user' OR u.IsActive = 1)
                   AND (s.SubjectTypeId <> 'service_account' OR (sa.SubjectId IS NOT NULL AND (sa.ExpiresAt IS NULL OR sa.ExpiresAt > GETUTCDATE())))
                   AND (s.SubjectTypeId <> 'group' OR ug.IsActive = 1)
@@ -76,6 +60,45 @@ internal sealed partial class SqlServerDatabaseProvider
                         AND (caller.SubjectTypeId <> 'group' OR callerGroup.IsActive = 1)
                         AND (caller.SubjectTypeId <> 'agent' OR callerAgent.SubjectId IS NOT NULL)
                   )
+            )
+            """;
+    }
+
+    /// <summary>
+    /// <c>fn_AccessRoots(@SubjectIds, @PermissionId)</c>: the active resources on which one of the caller's
+    /// active subjects holds a current grant whose role includes the permission, read from the grants by
+    /// subject. Only the authorized page uses it: listing from grants has to read each grant once. The row
+    /// filter does not, so its cost never depends on how many grants the caller holds. The parent's sequence
+    /// number and state let the page confirm a root's own chain is well formed with one closure lookup.
+    /// </summary>
+    public string BuildAccessRootsFunctionSql(SqlOSFgaOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var schema = Escape(options.Schema);
+        var tables = options.TableNames;
+        var resources = Escape(tables.Resources);
+        var resourceTypes = Escape(tables.ResourceTypes);
+        var grants = Escape(tables.Grants);
+        var rolePermissions = Escape(tables.RolePermissions);
+        return $"""
+            CREATE OR ALTER FUNCTION [{schema}].fn_AccessRoots(
+                @SubjectIds NVARCHAR(MAX),
+                @PermissionId NVARCHAR(128)
+            )
+            RETURNS TABLE
+            AS
+            RETURN
+            (
+                -- DISTINCT: two grants on one resource are one root, and the optimizer builds the set once.
+                SELECT DISTINCT r.Id AS ResourceId, r.Seq AS ResourceSeq, rt.Seq AS TypeSeq,
+                       parent.Seq AS ParentSeq, parent.IsActive AS ParentIsActive
+                FROM [{schema}].[{grants}] g
+                INNER JOIN [{schema}].[{rolePermissions}] rp ON rp.RoleId = g.RoleId AND rp.PermissionId = @PermissionId
+                INNER JOIN [{schema}].[{resources}] r ON r.Id = g.ResourceId
+                INNER JOIN [{schema}].[{resourceTypes}] rt ON rt.Id = r.ResourceTypeId
+                LEFT JOIN [{schema}].[{resources}] parent ON parent.Id = r.ParentId
+                WHERE g.SubjectId IN (SELECT live.SubjectId FROM [{schema}].fn_ActiveSubjects(@SubjectIds) live)
+                  AND r.IsActive = 1
                   AND (g.EffectiveFrom IS NULL OR g.EffectiveFrom <= GETUTCDATE())
                   AND (g.EffectiveTo IS NULL OR g.EffectiveTo >= GETUTCDATE())
             )
@@ -403,7 +426,8 @@ internal sealed partial class SqlServerDatabaseProvider
         return $"""
             SELECT TOP 1 [RoutinesHash]
             FROM [{schema}].[SqlOSFgaSchema]
-            WHERE {Exists("fn_AccessRoots", "IF")}
+            WHERE {Exists("fn_ActiveSubjects", "IF")}
+              AND {Exists("fn_AccessRoots", "IF")}
               AND {Exists("fn_IsResourceAccessible", "IF")}
               AND {Exists($"sp_{closure}_Apply", "P")}
               AND {Exists($"sp_{closure}_Rebuild", "P")}

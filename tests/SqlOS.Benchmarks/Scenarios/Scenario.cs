@@ -70,6 +70,20 @@ internal static class ScenarioCatalog
             new("point.api.deep-product", "Allows (CheckAccessAsync), product at depth 9", ScenarioKind.PointApi, people.Admin, 1.0, "9", ProductId: deepProduct),
         };
 
+        // People holding thousands of single-product grants, the way per-item sharing accumulates. Their cost
+        // must not depend on how many grants they hold, except for the closure page, which reads each one.
+        foreach (var person in people.ManyGrants.Where(p => p.GrantedProducts > 0))
+        {
+            var share = (double)person.GrantedProducts / productCount;
+            var grants = person.GrantedProducts.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+            current.Add(new($"list.{person.Key}.first-page", $"{grants} single-product grants, first page", ScenarioKind.List, person, share, "4 and 9"));
+            current.Add(new($"point.function.{person.Key}", $"fn_IsResourceAccessible, {grants} grants, a granted product", ScenarioKind.PointFunction, person, share, "4 or 9", ProductId: person.GrantedProductId(person.GrantedProducts - 1)));
+            if (person.ProductStride > 1)
+            {
+                current.Add(new($"point.function.{person.Key}.denied", $"fn_IsResourceAccessible, {grants} grants, an ungranted product", ScenarioKind.PointFunction, person, 0.0, "4 or 9", ProductId: 2, ExpectAllowed: false));
+            }
+        }
+
         // Twins: the previous function for the regression gate, and the closure page for the σ-free path.
         var all = new List<Scenario>();
         foreach (var scenario in current)

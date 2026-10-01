@@ -2,7 +2,12 @@
   "scale": {
     "maxRatio": 2.0,
     "slackMilliseconds": 2.0,
-    "exempt": []
+    "exempt": [
+      "list.grants10k.first-page",
+      "reference.list.grants10k.first-page",
+      "list.grants100k.first-page",
+      "reference.list.grants100k.first-page"
+    ]
   },
   "regression": {
     "maxRatio": 1.15,
@@ -10,7 +15,9 @@
     "exempt": []
   },
   "improvement": {
-    "scenarios": ["list.store.first-page"],
+    "scenarios": [
+      "list.store.first-page"
+    ],
     "maxRatio": 0.05
   },
   "ceilingsMilliseconds": {

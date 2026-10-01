@@ -14,7 +14,7 @@ using SqlOS.Fga.Interfaces;
 namespace SqlOS.Fga.Services;
 
 /// <summary>
-/// Creates the SHRBAC enforcement routines in the database: <c>fn_AccessRoots</c>,
+/// Creates the SHRBAC enforcement routines in the database: <c>fn_ActiveSubjects</c>, <c>fn_AccessRoots</c>,
 /// <c>fn_IsResourceAccessible</c>, and the routines and triggers that maintain the resource closure. The
 /// definitions' hash is stored with the schema version, so a startup that finds the same hash and every
 /// routine present changes nothing; a new definition (a new SqlOS version, a changed option) is applied under
@@ -43,11 +43,13 @@ public class SqlOSFgaFunctionInitializer
         _logger.LogInformation("Ensuring database functions exist...");
         var provider = SqlOSDatabase.Resolve(_context.Database);
 
-        // fn_AccessRoots first: fn_IsResourceAccessible and the page query reference it. Each batch is
+        // fn_ActiveSubjects first (both functions reference it), then fn_AccessRoots (the page references it).
+        // Each batch is
         // idempotent (CREATE OR ALTER / CREATE OR REPLACE) and runs in its own transaction, so no batch holds a
         // schema lock on one object while waiting for another; readers cannot deadlock with the initializer.
         var batches = new List<string>
         {
+            provider.BuildActiveSubjectsFunctionSql(_options),
             provider.BuildAccessRootsFunctionSql(_options),
             provider.BuildIsResourceAccessibleFunctionSql(_options),
         };
@@ -69,7 +71,7 @@ public class SqlOSFgaFunctionInitializer
             {
                 if (await IsCurrentAsync(provider, hash, cancellationToken))
                 {
-                    _logger.LogDebug("fn_AccessRoots, fn_IsResourceAccessible, and the resource closure maintenance are current.");
+                    _logger.LogDebug("fn_ActiveSubjects, fn_AccessRoots, fn_IsResourceAccessible, and the resource closure maintenance are current.");
                     _logger.LogInformation("Database functions verified.");
                     return;
                 }
@@ -121,7 +123,7 @@ public class SqlOSFgaFunctionInitializer
 
     private async Task ApplyAsync(ISqlOSDatabaseProvider provider, IReadOnlyList<string> batches, string hash, CancellationToken cancellationToken)
     {
-        _logger.LogDebug("Creating or updating fn_AccessRoots, fn_IsResourceAccessible, and the resource closure maintenance...");
+        _logger.LogDebug("Creating or updating fn_ActiveSubjects, fn_AccessRoots, fn_IsResourceAccessible, and the resource closure maintenance...");
         foreach (var batch in batches)
         {
             await _context.Database.ExecuteSqlRawAsync(batch, cancellationToken);
@@ -230,6 +232,9 @@ public class SqlOSFgaFunctionInitializer
 
     internal static string BuildIsResourceAccessibleFunctionSql(SqlOSFgaOptions options)
         => SqlServerDatabaseProvider.Instance.BuildIsResourceAccessibleFunctionSql(options);
+
+    internal static string BuildActiveSubjectsFunctionSql(SqlOSFgaOptions options)
+        => SqlServerDatabaseProvider.Instance.BuildActiveSubjectsFunctionSql(options);
 
     internal static string BuildAccessRootsFunctionSql(SqlOSFgaOptions options)
         => SqlServerDatabaseProvider.Instance.BuildAccessRootsFunctionSql(options);
