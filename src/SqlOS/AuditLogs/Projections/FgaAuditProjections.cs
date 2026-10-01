@@ -18,6 +18,12 @@ internal static class FgaAuditProjections
             .Unaudited<FgaResourceDescribed>()
             .Unaudited<FgaResourceTypeDefined>()
             .Unaudited<FgaPermissionDefined>()
+            .AddGrantEvents()
+            .AddSubjectEvents()
+            .AddResourceAndRoleEvents();
+
+    private static SqlOSAuditProjectionBuilder AddGrantEvents(this SqlOSAuditProjectionBuilder builder)
+        => builder
             .Audit<FgaGrantCreated>(static (created, context) => Row(
                 "fga.grant.created",
                 created.Actor,
@@ -45,7 +51,10 @@ internal static class FgaAuditProjections
                     roleId = revoked.RoleId,
                     resourceId = revoked.ResourceId,
                     reason = revoked.Reason
-                }))
+                }));
+
+    private static SqlOSAuditProjectionBuilder AddSubjectEvents(this SqlOSAuditProjectionBuilder builder)
+        => builder
             .Audit<FgaSubjectCreated>(static (created, context) => Row(
                 "fga.subject.created",
                 created.Actor,
@@ -95,7 +104,10 @@ internal static class FgaAuditProjections
                     groupIds = merged.GroupIds,
                     movedGrantIds = merged.MovedGrantIds,
                     droppedGrantIds = merged.DroppedGrantIds
-                }))
+                }));
+
+    private static SqlOSAuditProjectionBuilder AddResourceAndRoleEvents(this SqlOSAuditProjectionBuilder builder)
+        => builder
             .Audit<FgaResourceMoved>(static (moved, context) => Row(
                 "fga.resource.moved",
                 moved.Actor,

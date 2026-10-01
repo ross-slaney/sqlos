@@ -61,44 +61,9 @@ public sealed partial class SqlOSAdminService
         return expired.Count;
     }
 
-    /// <summary>
-    /// Merges the FGA subjects that 7.x SCIM created for SqlOS users into the subject keyed by each
-    /// user's ID (#448). Once merged, later startups find nothing to do.
-    /// </summary>
-    internal async Task MergeScimUserSubjectsAsync(CancellationToken cancellationToken = default)
-    {
-        var merge = new MergeDirectoryUserSubjects((DbContext)_context);
-        if (!await merge.IsNeededAsync(cancellationToken))
-        {
-            return;
-        }
-
-        if (!_context.Database.IsRelational())
-        {
-            await merge.ExecuteAsync(cancellationToken);
-            return;
-        }
-
-        var strategy = _context.Database.CreateExecutionStrategy();
-        var attempt = 0;
-        await strategy.ExecuteAsync(async () =>
-        {
-            if (attempt++ > 0)
-            {
-                ((DbContext)_context).ChangeTracker.Clear();
-            }
-
-            await using var transaction = await _context.Database.BeginTransactionAsync(SqlOSDatabase.ExclusiveWorkIsolationLevel(_context.Database), cancellationToken);
-            await SqlOSDatabase.AcquireExclusiveTransactionLockAsync(
-                _context.Database,
-                "SqlOS:ScimUserSubjectMerge",
-                TimeSpan.FromSeconds(30),
-                "Could not acquire the SqlOS SCIM user subject merge lock.",
-                cancellationToken);
-            await merge.ExecuteAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
-        });
-    }
+    /// <summary>Merges the FGA subjects 7.x SCIM created for SqlOS users into each user's ID subject (#448).</summary>
+    internal Task MergeScimUserSubjectsAsync(CancellationToken cancellationToken = default)
+        => new MergeDirectoryUserSubjects((DbContext)_context).ExecuteAtStartupAsync(cancellationToken);
 
     public async Task ReconcileDisabledScimManagedGrantsAsync(CancellationToken cancellationToken = default)
     {

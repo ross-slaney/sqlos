@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using SqlOS.AuthServer.Models;
+using SqlOS.Database;
 using SqlOS.Domain;
 using SqlOS.Fga.Models;
 
@@ -22,6 +23,43 @@ internal sealed class MergeDirectoryUserSubjects(DbContext context)
     /// <summary>Whether a SCIM user link still points at a subject other than its user's.</summary>
     public async Task<bool> IsNeededAsync(CancellationToken cancellationToken)
         => IsMapped && await LinksToOtherSubjects().AnyAsync(cancellationToken);
+
+    /// <summary>
+    /// Merges at startup: nothing when no link points at another subject, otherwise everything in
+    /// one transaction under a database lock, so instances that start together merge once.
+    /// </summary>
+    public async Task ExecuteAtStartupAsync(CancellationToken cancellationToken)
+    {
+        if (!await IsNeededAsync(cancellationToken))
+        {
+            return;
+        }
+
+        if (!context.Database.IsRelational())
+        {
+            await ExecuteAsync(cancellationToken);
+            return;
+        }
+
+        var attempt = 0;
+        await context.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            if (attempt++ > 0)
+            {
+                context.ChangeTracker.Clear();
+            }
+
+            await using var transaction = await context.Database.BeginTransactionAsync(SqlOSDatabase.ExclusiveWorkIsolationLevel(context.Database), cancellationToken);
+            await SqlOSDatabase.AcquireExclusiveTransactionLockAsync(
+                context.Database,
+                "SqlOS:ScimUserSubjectMerge",
+                TimeSpan.FromSeconds(30),
+                "Could not acquire the SqlOS SCIM user subject merge lock.",
+                cancellationToken);
+            await ExecuteAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        });
+    }
 
     /// <summary>Merges the other subjects of every SCIM-linked user, oldest link first, saving after each user.</summary>
     public async Task ExecuteAsync(CancellationToken cancellationToken)

@@ -43,6 +43,17 @@ internal static class SqlOSResourceEntitySynchronizer
             placed.ToDictionary(change => change.ResourceId, change => change.ParentResourceId, StringComparer.Ordinal),
             deleting);
 
+        var ancestries = await PlaceAsync(tree, placed, cancellationToken).ConfigureAwait(false);
+        var resources = await FindStoredAsync(tree, changes, deleting, cancellationToken).ConfigureAwait(false);
+        await ApplyAsync(context, placed, deleted, ancestries, resources, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Validates where each new or changed entity's resource goes, in 7.x's order of checks.</summary>
+    private static async Task<Dictionary<string, SqlOSFgaAncestry>> PlaceAsync(
+        SqlOSFgaResourceTree tree,
+        IReadOnlyList<ResourceEntityChange> placed,
+        CancellationToken cancellationToken)
+    {
         var ancestries = new Dictionary<string, SqlOSFgaAncestry>(StringComparer.Ordinal);
         foreach (var change in placed)
         {
@@ -66,7 +77,16 @@ internal static class SqlOSResourceEntitySynchronizer
             ancestries[change.ResourceId] = ancestry;
         }
 
-        // 7.x's order: every new entity, then every changed one, then every deleted one.
+        return ancestries;
+    }
+
+    /// <summary>The stored resources of changed and deleted entities, refusing what 7.x refused, in its order.</summary>
+    private static async Task<Dictionary<string, SqlOSFgaResource>> FindStoredAsync(
+        SqlOSFgaResourceTree tree,
+        IReadOnlyList<ResourceEntityChange> changes,
+        IReadOnlySet<string> deleting,
+        CancellationToken cancellationToken)
+    {
         var resources = new Dictionary<string, SqlOSFgaResource>(StringComparer.Ordinal);
         foreach (var change in changes.OrderBy(change => change.State == EntityState.Added ? 0 : change.State == EntityState.Modified ? 1 : 2))
         {
@@ -89,6 +109,17 @@ internal static class SqlOSResourceEntitySynchronizer
             }
         }
 
+        return resources;
+    }
+
+    private static async Task ApplyAsync(
+        DbContext context,
+        IReadOnlyList<ResourceEntityChange> placed,
+        IReadOnlyList<ResourceEntityChange> deleted,
+        IReadOnlyDictionary<string, SqlOSFgaAncestry> ancestries,
+        IReadOnlyDictionary<string, SqlOSFgaResource> resources,
+        CancellationToken cancellationToken)
+    {
         var now = SqlOSFgaWrites.Now(context);
         foreach (var change in placed)
         {
