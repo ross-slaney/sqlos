@@ -95,7 +95,7 @@ A service account is an FGA subject. It can receive grants without being an Auth
 
 A SqlOS user has one FGA subject, keyed by the SqlOS user ID. Provision it with `ProvisionUserSubjectAsync(user.Id, ...)` and check access with `user.Id`. When a SCIM directory provisions the user, it resolves the same subject: it reuses the one you provisioned, or creates it with the user's ID, and puts it in the directory's groups, so grants mapped to those groups reach a check by user ID. Only the directory that owns the person's lifecycle renames or deactivates that subject; another organization's directory changes only its own groups' memberships.
 
-Upgrading from 7.x merges the subjects earlier SCIM versions created with IDs of their own (`subj_...`) into the user-ID subject at startup, moving their group memberships and grants, dropping a grant the user's subject already holds, and recording `fga.subject.merged`. A check by an old `subj_...` ID then finds no subject.
+Upgrading from 7.x merges every subject a SCIM link points at under another ID into the user-ID subject at startup: the `subj_...` subjects earlier versions created, and any subject with an ID of your own that SCIM reused because its `ExternalRef` was the user ID. The merge moves their group memberships and grants, drops a grant the user's subject already holds, and records `fga.subject.merged`. A check by an old subject ID then finds no subject, so check access by the SqlOS user ID. Subjects no SCIM link points at are not touched.
 
 ## Record activity and delete subjects
 
