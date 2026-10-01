@@ -12,7 +12,9 @@ SqlOS.Domain.LoginEvidence <- SqlOS.AuthServer.Processes.Identity.SignInWithPass
 SqlOS.Domain.LoginEvidence <- SqlOS.AuthServer.Processes.Identity.SignUpWithInvitation
 SqlOS.Domain.LoginEvidence <- SqlOS.AuthServer.Processes.Identity.SignUpWithPassword
 SqlOS.Domain.LoginEvidence <- SqlOS.AuthServer.Processes.Identity.VerifyEmailOtpSignIn
+SqlOS.Domain.LoginEvidence <- SqlOS.AuthServer.Processes.Identity.VerifyMfaChallenge
 SqlOS.Domain.LoginEvidence <- SqlOS.AuthServer.Processes.Identity.VerifyPhoneOtpSignIn
+SqlOS.Domain.LoginEvidence <- SqlOS.AuthServer.Processes.Identity.VerifyTotpEnrollment
 SqlOS.Domain.OwnershipProof <- SqlOS.AuthServer.Models.SqlOSEmailOtpChallenge
 SqlOS.Domain.OwnershipProof <- SqlOS.AuthServer.Processes.Identity.CompleteMagicLinkSignIn
 SqlOS.Domain.OwnershipProof <- SqlOS.AuthServer.Processes.Identity.ResetPassword

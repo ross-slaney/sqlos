@@ -193,7 +193,6 @@ public static partial class EndpointRouteBuilderExtensions
         hostedForms.MapPost("/login/magic-link/complete", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
-            SqlOSAuthService authService,
             SqlOSIdentityProcesses processes,
             CancellationToken cancellationToken) =>
         {
@@ -258,7 +257,7 @@ public static partial class EndpointRouteBuilderExtensions
                         signedIn.Email,
                         authPrefix,
                         authorizationServerService,
-                        authService,
+                        processes,
                         cancellationToken);
                 }
 
@@ -388,7 +387,6 @@ public static partial class EndpointRouteBuilderExtensions
         hostedForms.MapPost("/login/phone-otp/verify", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
-            SqlOSAuthService authService,
             SqlOSIdentityProcesses processes,
             CancellationToken cancellationToken) =>
         {
@@ -459,7 +457,7 @@ public static partial class EndpointRouteBuilderExtensions
                         email: null,
                         authPrefix,
                         authorizationServerService,
-                        authService,
+                        processes,
                         cancellationToken,
                         phoneNumber: phoneNumber);
                 }
@@ -488,7 +486,7 @@ public static partial class EndpointRouteBuilderExtensions
         hostedForms.MapPost("/login/select-organization", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
-            SqlOSAuthService authService,
+            SqlOSIdentityProcesses processes,
             CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
@@ -510,7 +508,7 @@ public static partial class EndpointRouteBuilderExtensions
                         email: null,
                         authPrefix,
                         authorizationServerService,
-                        authService,
+                        processes,
                         cancellationToken);
                 }
 
@@ -552,7 +550,7 @@ public static partial class EndpointRouteBuilderExtensions
         hostedForms.MapPost("/mfa/verify", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
-            SqlOSAuthService authService,
+            SqlOSIdentityProcesses processes,
             CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
@@ -562,12 +560,20 @@ public static partial class EndpointRouteBuilderExtensions
 
             try
             {
-                var redirectUrl = await authorizationServerService.CompleteMfaChallengeAsync(
-                    mfaToken,
-                    code,
-                    context,
+                // The challenge completes the authorization request it was issued for.
+                var outcome = await processes.VerifyMfaChallenge(context).ExecuteAsync(
+                    new VerifyMfaChallengeCommand(
+                        mfaToken,
+                        code,
+                        MfaChallengeTarget.AuthorizationRequest,
+                        SqlOSHttpRequestContext.From(context, SqlOSRequestSurface.Hosted)),
                     cancellationToken);
-                return ClientRedirect(redirectUrl);
+                return outcome switch
+                {
+                    MfaChallengeOutcome.SignedIn { Completion: LoginCompletion.CodeIssued issued } => ClientRedirect(issued.RedirectUrl),
+                    MfaChallengeOutcome.Refused refused => throw refused.Refusal.ToException(),
+                    _ => throw new InvalidOperationException($"Unknown MFA challenge outcome '{outcome.GetType().Name}'.")
+                };
             }
             catch (InvalidOperationException ex)
             {
@@ -589,7 +595,7 @@ public static partial class EndpointRouteBuilderExtensions
         hostedForms.MapPost("/mfa/totp/enroll/verify", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
-            SqlOSAuthService authService,
+            SqlOSIdentityProcesses processes,
             CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
@@ -600,14 +606,19 @@ public static partial class EndpointRouteBuilderExtensions
 
             try
             {
-                var redirectUrl = await authorizationServerService.VerifyMfaTotpEnrollmentAsync(
-                    mfaToken,
-                    enrollmentToken,
-                    code,
-                    requestId,
-                    context,
+                var outcome = await processes.VerifyTotpEnrollment(context).ExecuteAsync(
+                    new VerifyTotpEnrollmentCommand(
+                        enrollmentToken,
+                        code,
+                        new TotpEnrollmentTarget.Challenge(mfaToken, MfaChallengeTarget.AuthorizationRequest, requestId),
+                        SqlOSHttpRequestContext.From(context, SqlOSRequestSurface.Hosted)),
                     cancellationToken);
-                return ClientRedirect(redirectUrl);
+                return outcome switch
+                {
+                    TotpEnrollmentVerifyOutcome.SignedIn { Completion: LoginCompletion.CodeIssued issued } => ClientRedirect(issued.RedirectUrl),
+                    TotpEnrollmentVerifyOutcome.Refused refused => throw refused.Refusal.ToException(),
+                    _ => throw new InvalidOperationException($"Unknown enrollment outcome '{outcome.GetType().Name}'.")
+                };
             }
             catch (InvalidOperationException ex)
             {
@@ -633,7 +644,7 @@ public static partial class EndpointRouteBuilderExtensions
                         email: null,
                         authPrefix,
                         authorizationServerService,
-                        authService,
+                        processes,
                         cancellationToken,
                         error: publicMessage);
                 }

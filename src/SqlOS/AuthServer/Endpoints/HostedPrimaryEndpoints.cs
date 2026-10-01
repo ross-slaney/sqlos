@@ -227,7 +227,7 @@ public static partial class EndpointRouteBuilderExtensions
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSDeviceAuthorizationService deviceAuthorizationService,
             SqlOSIssuerSessionService issuerSessionService,
-            SqlOSAuthService authService,
+            SqlOSIdentityProcesses processes,
             SqlOSHeadlessAuthService headlessAuthService,
             CancellationToken cancellationToken) =>
         {
@@ -328,7 +328,7 @@ public static partial class EndpointRouteBuilderExtensions
                             session.User.DefaultEmail,
                             authPrefix,
                             authorizationServerService,
-                            authService,
+                            processes,
                             cancellationToken);
                     }
 
@@ -430,7 +430,7 @@ public static partial class EndpointRouteBuilderExtensions
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSDeviceAuthorizationService deviceAuthorizationService,
             SqlOSIssuerSessionService issuerSessionService,
-            SqlOSAuthService authService,
+            SqlOSIdentityProcesses processes,
             CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
@@ -482,7 +482,7 @@ public static partial class EndpointRouteBuilderExtensions
                             session.User.DefaultEmail,
                             authPrefix,
                             authorizationServerService,
-                            authService,
+                            processes,
                             cancellationToken);
                     }
 
@@ -646,7 +646,6 @@ public static partial class EndpointRouteBuilderExtensions
         hostedForms.MapPost("/login/password", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
-            SqlOSAuthService authService,
             SqlOSInvitationService invitationService,
             SqlOSIdentityProcesses processes,
             CancellationToken cancellationToken) =>
@@ -735,7 +734,7 @@ public static partial class EndpointRouteBuilderExtensions
                         email,
                         authPrefix,
                         authorizationServerService,
-                        authService,
+                        processes,
                         cancellationToken,
                         invitationToken: invitationToken,
                         invitationService: invitationService);

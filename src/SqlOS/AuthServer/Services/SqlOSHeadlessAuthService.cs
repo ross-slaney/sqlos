@@ -75,6 +75,8 @@ public sealed class SqlOSHeadlessAuthService
         _options)
     {
         PasswordAdmission = _authorizationServerService.PasswordAdmission,
+        MfaAdmission = _authorizationServerService.MfaAdmission,
+        Authenticators = _authorizationServerService.Authenticators,
         AuthorizationServer = _authorizationServerService,
         Auth = _authService,
         IssuerSessions = _issuerSessionService,
@@ -192,11 +194,7 @@ public sealed class SqlOSHeadlessAuthService
             SqlOSTotpEnrollmentStartResult? enrollment = null;
             if (state.EnrollmentRequired)
             {
-                enrollment = await RequireAuthService().StartTotpEnrollmentForAuthorizationChallengeAsync(
-                    mfaToken,
-                    authorizationRequest.Id,
-                    new SqlOSTotpEnrollmentStartRequest(),
-                    cancellationToken);
+                enrollment = await StartChallengeEnrollmentAsync(mfaToken, authorizationRequest.Id, displayName: null, cancellationToken);
             }
 
             return await BuildViewModelAsync(
@@ -1290,11 +1288,20 @@ public sealed class SqlOSHeadlessAuthService
         var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
         try
         {
-            return Redirect(await _authorizationServerService.CompleteMfaChallengeAsync(
-                request.MfaToken,
-                request.Code,
-                httpContext,
-                cancellationToken));
+            // The challenge completes its own authorization request, whichever request the UI names.
+            var outcome = await Processes.VerifyMfaChallenge(httpContext).ExecuteAsync(
+                new VerifyMfaChallengeCommand(
+                    request.MfaToken,
+                    request.Code,
+                    MfaChallengeTarget.AuthorizationRequest,
+                    SqlOSHttpRequestContext.From(httpContext, SqlOSRequestSurface.Headless)),
+                cancellationToken);
+            return outcome switch
+            {
+                MfaChallengeOutcome.SignedIn { Completion: LoginCompletion.CodeIssued issued } => Redirect(issued.RedirectUrl),
+                MfaChallengeOutcome.Refused refused => throw refused.Refusal.ToException(),
+                _ => throw new InvalidOperationException($"Unknown MFA challenge outcome '{outcome.GetType().Name}'.")
+            };
         }
         catch (InvalidOperationException ex)
         {
@@ -1320,11 +1327,7 @@ public sealed class SqlOSHeadlessAuthService
         var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
         try
         {
-            var enrollment = await RequireAuthService().StartTotpEnrollmentForAuthorizationChallengeAsync(
-                request.MfaToken,
-                request.RequestId,
-                new SqlOSTotpEnrollmentStartRequest(request.DisplayName),
-                cancellationToken);
+            var enrollment = await StartChallengeEnrollmentAsync(request.MfaToken, request.RequestId, request.DisplayName, cancellationToken);
             return View(await BuildViewModelAsync(
                 authorizationRequest,
                 "mfa-enroll",
@@ -1366,13 +1369,19 @@ public sealed class SqlOSHeadlessAuthService
         var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
         try
         {
-            return Redirect(await _authorizationServerService.VerifyMfaTotpEnrollmentAsync(
-                request.MfaToken,
-                request.EnrollmentToken,
-                request.Code,
-                request.RequestId,
-                httpContext,
-                cancellationToken));
+            var outcome = await Processes.VerifyTotpEnrollment(httpContext).ExecuteAsync(
+                new VerifyTotpEnrollmentCommand(
+                    request.EnrollmentToken,
+                    request.Code,
+                    new TotpEnrollmentTarget.Challenge(request.MfaToken, MfaChallengeTarget.AuthorizationRequest, request.RequestId),
+                    SqlOSHttpRequestContext.From(httpContext, SqlOSRequestSurface.Headless)),
+                cancellationToken);
+            return outcome switch
+            {
+                TotpEnrollmentVerifyOutcome.SignedIn { Completion: LoginCompletion.CodeIssued issued } => Redirect(issued.RedirectUrl),
+                TotpEnrollmentVerifyOutcome.Refused refused => throw refused.Refusal.ToException(),
+                _ => throw new InvalidOperationException($"Unknown enrollment outcome '{outcome.GetType().Name}'.")
+            };
         }
         catch (InvalidOperationException ex)
         {
@@ -1391,6 +1400,21 @@ public sealed class SqlOSHeadlessAuthService
                 cancellationToken: cancellationToken));
         }
     }
+
+    /// <summary>Starts the authenticator enrollment an authorization request's MFA challenge requires.</summary>
+    private async Task<SqlOSTotpEnrollmentStartResult> StartChallengeEnrollmentAsync(
+        string mfaToken,
+        string authorizationRequestId,
+        string? displayName,
+        CancellationToken cancellationToken)
+        => await Processes.StartTotpEnrollment().ExecuteAsync(
+                StartTotpEnrollmentCommand.ForAuthorizationChallenge(mfaToken, authorizationRequestId, displayName, SqlOSRequestSurface.Headless),
+                cancellationToken) switch
+        {
+            TotpEnrollmentStartOutcome.Started started => started.Result,
+            TotpEnrollmentStartOutcome.Refused refused => throw refused.Refusal.ToException(),
+            var outcome => throw new InvalidOperationException($"Unknown enrollment outcome '{outcome.GetType().Name}'.")
+        };
 
     public async Task<SqlOSHeadlessActionResult> StartProviderAsync(
         HttpContext httpContext,
@@ -1648,11 +1672,7 @@ public sealed class SqlOSHeadlessAuthService
             SqlOSTotpEnrollmentStartResult? totpEnrollment = null;
             if (completion.RequiresMfaEnrollment && !string.IsNullOrWhiteSpace(completion.MfaToken))
             {
-                totpEnrollment = await RequireAuthService().StartTotpEnrollmentForAuthorizationChallengeAsync(
-                    completion.MfaToken,
-                    authorizationRequest.Id,
-                    new SqlOSTotpEnrollmentStartRequest(),
-                    cancellationToken);
+                totpEnrollment = await StartChallengeEnrollmentAsync(completion.MfaToken, authorizationRequest.Id, displayName: null, cancellationToken);
             }
 
             return View(await BuildViewModelAsync(

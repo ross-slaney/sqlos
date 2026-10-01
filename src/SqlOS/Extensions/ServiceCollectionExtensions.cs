@@ -170,8 +170,10 @@ public static class ServiceCollectionExtensions
             {
                 PasswordAdmission = authorizationServer.PasswordAdmission,
                 PasswordResetAdmission = auth.Admission,
+                MfaAdmission = authorizationServer.MfaAdmission,
                 PasswordResetEmails = auth.PasswordResetEmails,
                 VerificationEmails = auth.VerificationEmails,
+                Authenticators = authorizationServer.Authenticators,
                 AuthorizationServer = authorizationServer,
                 Auth = auth,
                 IssuerSessions = sp.GetRequiredService<SqlOSIssuerSessionService>(),

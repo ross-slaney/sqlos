@@ -55,11 +55,17 @@ internal sealed class SqlOSIdentityProcesses
     /// <summary>The admission gate password-reset emails pass (the delivery buckets).</summary>
     public IAdmissionGate? PasswordResetAdmission { get; init; }
 
+    /// <summary>The admission gate MFA factor comparisons pass (the MFA-attempt buckets).</summary>
+    public IAdmissionGate? MfaAdmission { get; init; }
+
     /// <summary>The password-reset email channel: the reset options and the delivery.</summary>
     public SqlOSPasswordResetDelivery? PasswordResetEmails { get; init; }
 
     /// <summary>The email-verification channel.</summary>
     public SqlOSEmailVerificationDelivery? VerificationEmails { get; init; }
+
+    /// <summary>The authenticator-app channel: TOTP options, secrets, codes and the MFA policy.</summary>
+    public SqlOSTotpMfaService? Authenticators { get; init; }
 
     public SqlOSAuthorizationServerService? AuthorizationServer { get; init; }
 
@@ -175,6 +181,26 @@ internal sealed class SqlOSIdentityProcesses
     public VerifyEmail VerifyEmail()
         => new(_context, _cryptoService.Clock);
 
+    public StartTotpEnrollment StartTotpEnrollment()
+        => new(_context, _adminService, RequireAuthenticators(), AuditRecorder(), _cryptoService.Clock);
+
+    public VerifyTotpEnrollment VerifyTotpEnrollment(HttpContext? httpContext)
+        => new(_context, _adminService, RequireAuthenticators(), Hub(httpContext), _cryptoService.Clock);
+
+    public VerifyMfaChallenge VerifyMfaChallenge(HttpContext? httpContext)
+        => new(
+            _context,
+            _adminService,
+            new SecondFactors(_context, Authenticators),
+            MfaAdmission ?? throw new InvalidOperationException("The MFA admission gate is not configured."),
+            AuditRecorder(),
+            Hub(httpContext),
+            _options,
+            _cryptoService.Clock);
+
+    public VerifySecondFactor VerifySecondFactor()
+        => new(new SecondFactors(_context, Authenticators), _cryptoService.Clock);
+
     public CreateUser CreateUser()
         => new(_context, _cryptoService.Clock);
 
@@ -189,6 +215,9 @@ internal sealed class SqlOSIdentityProcesses
 
     private SqlOSPasswordResetDelivery RequirePasswordResetEmails()
         => PasswordResetEmails ?? throw new InvalidOperationException("The password-reset delivery is not configured.");
+
+    private SqlOSTotpMfaService RequireAuthenticators()
+        => Authenticators ?? throw new InvalidOperationException("TOTP MFA service is not registered.");
 
     /// <summary>Records the failures and outcomes a process audits without a state change, in its unit of work.</summary>
     private IAuditRecorder AuditRecorder() => new SqlOSAuditRecorder(_context);

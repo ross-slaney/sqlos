@@ -25,7 +25,6 @@ public sealed class SqlOSAuthService
 {
     public const string MfaChallengePurpose = SqlOSTemporaryTokenKinds.Purposes.MfaChallenge;
     internal const string MfaChallengeFailureMessage = "MFA code is invalid.";
-    private const string MfaChallengeFailedAuditEvent = "user.mfa.challenge_failed";
 
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSAuthServerOptions _options;
@@ -93,6 +92,9 @@ public sealed class SqlOSAuthService
     /// <summary>The email-verification channel the verification process sends through.</summary>
     internal SqlOSEmailVerificationDelivery VerificationEmails { get; }
 
+    /// <summary>The authenticator channel this service was built with, if any.</summary>
+    internal SqlOSTotpMfaService? Authenticators => _totpMfaService;
+
     /// <summary>
     /// The identity processes this facade delegates to. Its sign-ins complete as first-party direct
     /// logins (<see cref="FinalizeClientLoginAsync"/>).
@@ -101,8 +103,10 @@ public sealed class SqlOSAuthService
     {
         PasswordAdmission = _admission,
         PasswordResetAdmission = _admission,
+        MfaAdmission = _admission,
         PasswordResetEmails = PasswordResetEmails,
         VerificationEmails = VerificationEmails,
+        Authenticators = _totpMfaService,
         Auth = this,
         Invitations = _invitationService,
         EmailCodes = _emailOtpService,
@@ -1038,11 +1042,12 @@ public sealed class SqlOSAuthService
         SqlOSTotpEnrollmentStartRequest request,
         string? organizationId = null,
         CancellationToken cancellationToken = default)
-        => await RequireTotpMfaService().StartEnrollmentAsync(
-            userId,
-            organizationId,
-            request.DisplayName,
-            cancellationToken: cancellationToken);
+        => Started(await Processes.StartTotpEnrollment().ExecuteAsync(
+            new StartTotpEnrollmentCommand(
+                new TotpEnrollmentTarget.Account(userId, organizationId),
+                request.DisplayName,
+                SqlOSRequestContext.System),
+            cancellationToken));
 
     public async Task<SqlOSTotpEnrollmentStartResult> StartTotpEnrollmentForChallengeAsync(
         string mfaToken,
@@ -1050,293 +1055,76 @@ public sealed class SqlOSAuthService
         CancellationToken cancellationToken = default)
         => await StartTotpEnrollmentForChallengeAsync(mfaToken, request, httpContext: null, cancellationToken);
 
+    /// <summary>Starts the enrollment a direct login's MFA challenge requires (the public API).</summary>
     internal async Task<SqlOSTotpEnrollmentStartResult> StartTotpEnrollmentForChallengeAsync(
         string mfaToken,
         SqlOSTotpEnrollmentStartRequest request,
         HttpContext? httpContext,
         CancellationToken cancellationToken)
-        => await StartTotpEnrollmentForChallengeCoreAsync(
-            mfaToken,
-            request,
-            expectedFlow: "client",
-            expectedAuthorizationRequestId: null,
-            httpContext,
-            cancellationToken);
-
-    internal async Task<SqlOSTotpEnrollmentStartResult> StartTotpEnrollmentForAuthorizationChallengeAsync(
-        string mfaToken,
-        string authorizationRequestId,
-        SqlOSTotpEnrollmentStartRequest request,
-        CancellationToken cancellationToken = default)
-        => await StartTotpEnrollmentForChallengeCoreAsync(
-            mfaToken,
-            request,
-            expectedFlow: "authorization",
-            expectedAuthorizationRequestId: authorizationRequestId,
-            httpContext: null,
-            cancellationToken);
-
-    private async Task<SqlOSTotpEnrollmentStartResult> StartTotpEnrollmentForChallengeCoreAsync(
-        string mfaToken,
-        SqlOSTotpEnrollmentStartRequest request,
-        string expectedFlow,
-        string? expectedAuthorizationRequestId,
-        HttpContext? httpContext,
-        CancellationToken cancellationToken)
-    {
-        var token = await RequireTotpMfaService().GetPendingMfaTokenAsync(mfaToken, cancellationToken);
-        await EnsureClientFlowChallengeIsFirstPartyAsync(token, httpContext, cancellationToken);
-        try
-        {
-            var payload = await ValidateEnrollmentChallengeAsync(
-                token,
-                expectedFlow,
-                expectedAuthorizationRequestId,
-                cancellationToken);
-            return await RequireTotpMfaService().StartChallengeEnrollmentAsync(
-                token,
-                payload,
+        => Started(await Processes.StartTotpEnrollment().ExecuteAsync(
+            new StartTotpEnrollmentCommand(
+                new TotpEnrollmentTarget.Challenge(mfaToken, MfaChallengeTarget.DirectLogin),
                 request.DisplayName,
-                cancellationToken);
-        }
-        catch (InvalidOperationException)
-        {
-            await RecordRejectedChallengeEnrollmentAsync(token, "start", cancellationToken);
-            throw new InvalidOperationException("MFA enrollment is not authorized for this challenge.");
-        }
-    }
+                SqlOSHttpRequestContext.FromOptional(httpContext, SqlOSRequestSurface.PublicApi)),
+            cancellationToken));
 
+    /// <summary>
+    /// Confirms an authenticator with its first code: the account's own enrollment, or, with
+    /// <see cref="SqlOSTotpEnrollmentVerifyRequest.MfaToken"/>, the enrollment a direct login's MFA
+    /// challenge required, which then answers the challenge and returns the login's tokens.
+    /// </summary>
     public async Task<SqlOSTotpEnrollmentVerifyResult> VerifyTotpEnrollmentAsync(
         SqlOSTotpEnrollmentVerifyRequest request,
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(request.MfaToken))
-        {
-            return await RequireTotpMfaService().VerifyEnrollmentAsync(request, cancellationToken);
-        }
-
-        // Outside the enrollment transaction, so a refused client's audit event is not rolled back.
-        await EnsureClientFlowChallengeIsFirstPartyAsync(
-            await _cryptoService.FindTemporaryTokenAsync(SqlOSTemporaryTokenKinds.MfaChallenge, request.MfaToken, cancellationToken),
-            httpContext,
+        var challenge = string.IsNullOrWhiteSpace(request.MfaToken)
+            ? null
+            : new TotpEnrollmentTarget.Challenge(request.MfaToken, MfaChallengeTarget.DirectLogin);
+        var outcome = await Processes.VerifyTotpEnrollment(httpContext).ExecuteAsync(
+            new VerifyTotpEnrollmentCommand(
+                request.EnrollmentToken,
+                request.Code,
+                challenge,
+                SqlOSHttpRequestContext.FromOptional(httpContext, SqlOSRequestSurface.PublicApi)),
             cancellationToken);
-
-        IDbContextTransaction? transaction = null;
-        try
+        return outcome switch
         {
-            if (SupportsDatabaseTransactions() && _context.Database.CurrentTransaction == null)
-            {
-                transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
-            }
-
-            var verification = await VerifyTotpChallengeEnrollmentCoreAsync(
-                request,
-                expectedFlow: "client",
-                expectedAuthorizationRequestId: null,
-                cancellationToken);
-            var challengeResult = await CompleteConsumedMfaChallengeAsync(
-                verification.ChallengeToken,
-                SqlOSMfaFactorTypes.Totp,
-                httpContext,
-                cancellationToken);
-            if (transaction != null)
-            {
-                await transaction.CommitAsync(cancellationToken);
-            }
-
-            return verification.Enrollment with
-            {
-                Tokens = challengeResult.Tokens,
-                RedirectUrl = challengeResult.RedirectUrl
-            };
-        }
-        catch
-        {
-            if (transaction != null)
-            {
-                await transaction.RollbackAsync(cancellationToken);
-            }
-
-            throw;
-        }
-        finally
-        {
-            if (transaction != null)
-            {
-                await transaction.DisposeAsync();
-            }
-        }
+            TotpEnrollmentVerifyOutcome.Confirmed confirmed => confirmed.Result,
+            TotpEnrollmentVerifyOutcome.SignedIn { Completion: LoginCompletion.TokensIssued issued } signedIn
+                => signedIn.Result with { Tokens = issued.Tokens, RedirectUrl = null },
+            TotpEnrollmentVerifyOutcome.Refused refused => throw refused.Refusal.ToException(),
+            _ => throw new InvalidOperationException($"Unknown enrollment outcome '{outcome.GetType().Name}'.")
+        };
     }
 
-    internal async Task<SqlOSTotpChallengeEnrollmentVerification> VerifyTotpEnrollmentForAuthorizationChallengeAsync(
-        SqlOSTotpEnrollmentVerifyRequest request,
-        string authorizationRequestId,
-        CancellationToken cancellationToken = default)
-        => await VerifyTotpChallengeEnrollmentCoreAsync(
-            request,
-            expectedFlow: "authorization",
-            expectedAuthorizationRequestId: authorizationRequestId,
-            cancellationToken);
-
-    private async Task<SqlOSTotpChallengeEnrollmentVerification> VerifyTotpChallengeEnrollmentCoreAsync(
-        SqlOSTotpEnrollmentVerifyRequest request,
-        string expectedFlow,
-        string? expectedAuthorizationRequestId,
-        CancellationToken cancellationToken)
-        => await RequireTotpMfaService().VerifyChallengeEnrollmentAsync(
-            request,
-            expectedFlow,
-            expectedAuthorizationRequestId,
-            cancellationToken);
-
-    private async Task<SqlOSMfaChallengePayload> ValidateEnrollmentChallengeAsync(
-        SqlOSTemporaryToken token,
-        string expectedFlow,
-        string? expectedAuthorizationRequestId,
-        CancellationToken cancellationToken)
-    {
-        if (token.UserId == null || token.ClientApplicationId == null)
-        {
-            throw new InvalidOperationException("MFA challenge payload is invalid.");
-        }
-
-        var payload = token.ReadPayload(SqlOSTemporaryTokenKinds.MfaChallenge)
-            ?? throw new InvalidOperationException("MFA challenge payload is invalid.");
-        if (!payload.EnrollmentRequired
-            || payload.PermittedEnrollmentFactors?.Contains(SqlOSMfaFactorTypes.Totp, StringComparer.OrdinalIgnoreCase) != true
-            || !string.Equals(payload.Flow, expectedFlow, StringComparison.Ordinal)
-            || (expectedAuthorizationRequestId != null
-                && !string.Equals(payload.AuthorizationRequestId, expectedAuthorizationRequestId, StringComparison.Ordinal)))
-        {
-            throw new InvalidOperationException("MFA enrollment is not authorized for this challenge.");
-        }
-
-        var client = await _context.Set<SqlOSClientApplication>()
-            .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == token.ClientApplicationId, cancellationToken);
-        if (client == null || !string.Equals(client.ClientId, payload.ClientId, StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException("MFA challenge client binding is invalid.");
-        }
-
-        if (string.Equals(expectedFlow, "authorization", StringComparison.Ordinal))
-        {
-            if (string.IsNullOrWhiteSpace(payload.AuthorizationRequestId))
-            {
-                throw new InvalidOperationException("MFA challenge authorization binding is invalid.");
-            }
-
-            var request = await _context.Set<SqlOSAuthorizationRequest>()
-                .AsNoTracking()
-                .FirstOrDefaultAsync(x => x.Id == payload.AuthorizationRequestId, cancellationToken);
-            if (request == null || !string.Equals(request.ClientApplicationId, token.ClientApplicationId, StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException("MFA challenge authorization binding is invalid.");
-            }
-        }
-
-        return payload;
-    }
-
-    private async Task RecordRejectedChallengeEnrollmentAsync(
-        SqlOSTemporaryToken token,
-        string stage,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            await _adminService.RecordAuditAsync(
-                "user.mfa.enrollment.challenge_rejected",
-                "user",
-                token.UserId,
-                userId: token.UserId,
-                organizationId: token.OrganizationId,
-                data: new
-                {
-                    stage,
-                    challenge_id = token.Id,
-                    client_application_id = token.ClientApplicationId
-                },
-                cancellationToken: cancellationToken);
-        }
-        catch (Exception) when (!cancellationToken.IsCancellationRequested)
-        {
-            // Rejection must remain fail-closed even if audit persistence is unavailable.
-        }
-    }
-
+    /// <summary>Answers a direct login's MFA challenge with an authenticator code or a recovery code and returns the login's tokens.</summary>
     public async Task<SqlOSMfaChallengeVerifyResult> VerifyMfaChallengeAsync(
         SqlOSMfaChallengeVerifyRequest request,
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
     {
-        var token = await _cryptoService.FindTemporaryTokenAsync(SqlOSTemporaryTokenKinds.MfaChallenge, request.MfaToken, cancellationToken)
-            ?? throw new InvalidOperationException("MFA challenge is invalid or expired.");
-        if (token.UserId == null || token.ClientApplicationId == null)
-        {
-            throw new InvalidOperationException("MFA challenge payload is invalid.");
-        }
-
-        var payload = token.ReadPayload(SqlOSTemporaryTokenKinds.MfaChallenge)
-            ?? throw new InvalidOperationException("MFA challenge payload is invalid.");
-        if (!string.Equals(payload.Flow, "client", StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException("MFA challenge is not valid for direct authentication.");
-        }
-
-        if (payload.EnrollmentRequired)
-        {
-            throw new InvalidOperationException("MFA enrollment must be completed with its challenge-bound enrollment proof.");
-        }
-
-        await EnsureClientFlowChallengeIsFirstPartyAsync(token, httpContext, cancellationToken);
-        var factorMethod = await VerifyMfaChallengeFactorAsync(token, request.Code, httpContext, cancellationToken);
-        token.Consume(SqlOSTemporaryTokenKinds.MfaChallenge, DateTime.UtcNow);
-        return await CompleteConsumedMfaChallengeAsync(token, factorMethod, httpContext, cancellationToken);
-    }
-
-    internal async Task<string> VerifyMfaChallengeFactorAsync(
-        SqlOSTemporaryToken token,
-        string code,
-        HttpContext? httpContext,
-        CancellationToken cancellationToken)
-    {
-        if (token.UserId == null)
-        {
-            throw new InvalidOperationException("MFA challenge payload is invalid.");
-        }
-
-        var payload = token.ReadPayload(SqlOSTemporaryTokenKinds.MfaChallenge)
-            ?? throw new InvalidOperationException("MFA challenge payload is invalid.");
-        var reservationId = await _admission.AdmitMfaAttemptAsync(
-            token,
-            AdmissionOrigin.Of(httpContext),
-            payload.AuthorizationRequestId,
+        var outcome = await Processes.VerifyMfaChallenge(httpContext).ExecuteAsync(
+            new VerifyMfaChallengeCommand(
+                request.MfaToken,
+                request.Code,
+                MfaChallengeTarget.DirectLogin,
+                SqlOSHttpRequestContext.FromOptional(httpContext, SqlOSRequestSurface.PublicApi)),
             cancellationToken);
-        try
+        return outcome switch
         {
-            var factorMethod = await RequireTotpMfaService().VerifySecondFactorCodeAsync(token.UserId, code, cancellationToken);
-            await _admission.RecordMfaAttemptSucceededAsync(reservationId, CancellationToken.None);
-            return factorMethod;
-        }
-        catch (InvalidOperationException)
-        {
-            await _admission.RecordMfaAttemptFailedAsync(reservationId, CancellationToken.None);
-            var attemptCount = await RecordMfaChallengeFailureAsync(token, cancellationToken);
-            await TryRecordMfaChallengeAuditAsync(
-                MfaChallengeFailedAuditEvent,
-                token,
-                httpContext,
-                new
-                {
-                    attemptCount,
-                    challengeLocked = attemptCount >= _options.Mfa.Totp.MaxFailedAttemptsPerChallenge
-                },
-                cancellationToken);
-            throw new InvalidOperationException(MfaChallengeFailureMessage);
-        }
+            MfaChallengeOutcome.SignedIn { Completion: LoginCompletion.TokensIssued issued } => new SqlOSMfaChallengeVerifyResult(issued.Tokens, null),
+            MfaChallengeOutcome.Refused refused => throw refused.Refusal.ToException(),
+            _ => throw new InvalidOperationException($"Unknown MFA challenge outcome '{outcome.GetType().Name}'.")
+        };
     }
+
+    private static SqlOSTotpEnrollmentStartResult Started(TotpEnrollmentStartOutcome outcome) => outcome switch
+    {
+        TotpEnrollmentStartOutcome.Started started => started.Result,
+        TotpEnrollmentStartOutcome.Refused refused => throw refused.Refusal.ToException(),
+        _ => throw new InvalidOperationException($"Unknown enrollment outcome '{outcome.GetType().Name}'.")
+    };
 
     internal async Task<string> CreateMfaChallengeAsync(
         SqlOSUser user,
@@ -1380,55 +1168,7 @@ public sealed class SqlOSAuthService
         return challenge.RawToken;
     }
 
-    private async Task<int> RecordMfaChallengeFailureAsync(
-        SqlOSTemporaryToken token,
-        CancellationToken cancellationToken)
-    {
-        while (true)
-        {
-            var payload = token.ReadPayload(SqlOSTemporaryTokenKinds.MfaChallenge)
-                ?? throw new InvalidOperationException("MFA challenge payload is invalid.");
-            if (token.ConsumedAt != null)
-            {
-                return payload.FailedAttempts;
-            }
 
-            var attemptCount = payload.FailedAttempts + 1;
-            token.ReplacePayload(SqlOSTemporaryTokenKinds.MfaChallenge, payload with { FailedAttempts = attemptCount });
-            if (attemptCount >= _options.Mfa.Totp.MaxFailedAttemptsPerChallenge)
-            {
-                // The last allowed failure locks the challenge: it is withdrawn, never completed.
-                token.Retire(DateTime.UtcNow);
-            }
-
-            try
-            {
-                await _context.SaveChangesAsync(cancellationToken);
-                return attemptCount;
-            }
-            catch (DbUpdateConcurrencyException) when (_context is DbContext dbContext)
-            {
-                dbContext.ChangeTracker.Clear();
-                token = await _context.Set<SqlOSTemporaryToken>()
-                    .FirstOrDefaultAsync(x => x.Id == token.Id, cancellationToken)
-                    ?? throw new InvalidOperationException(MfaChallengeFailureMessage);
-            }
-        }
-    }
-
-    private Task TryRecordMfaChallengeAuditAsync(
-        string eventType,
-        SqlOSTemporaryToken token,
-        HttpContext? httpContext,
-        object data,
-        CancellationToken cancellationToken)
-        => TryRecordMfaChallengeAuditAsync(
-            eventType,
-            token.UserId!,
-            token.OrganizationId,
-            GetIp(httpContext),
-            new { challengeId = token.Id, details = data },
-            cancellationToken);
 
     private async Task TryRecordMfaChallengeAuditAsync(
         string eventType,
@@ -1491,79 +1231,31 @@ public sealed class SqlOSAuthService
     }
 
     /// <summary>
-    /// A client-flow MFA challenge finishes as direct login, so it is first-party only. A third-party
-    /// client can hold one only if it was issued before the direct-login gate; refuse it before the
-    /// factor is checked or any enrollment state is written. Authorization-flow challenges pass.
+    /// The hub adapter's continuation of a first-party client's direct login once its MFA challenge
+    /// was answered (<see cref="SqlOSHttpLoginCompletion"/>): a session and tokens for the challenge's
+    /// organization and resource, and the <c>user.login.mfa</c> audit. The client flow mints tokens
+    /// here, outside <see cref="FinalizeClientLoginAsync"/>, so it checks the client is still
+    /// first-party itself (#419).
     /// </summary>
-    private async Task EnsureClientFlowChallengeIsFirstPartyAsync(
-        SqlOSTemporaryToken? token,
+    internal async Task<SqlOSTokenResponse> IssueTokensAfterMfaAsync(
+        SqlOSUser user,
+        string clientApplicationId,
+        string? organizationId,
+        string authenticationMethod,
+        string? resource,
         HttpContext? httpContext,
         CancellationToken cancellationToken)
     {
-        if (token != null
-            && string.Equals(
-                token.ReadPayload(SqlOSTemporaryTokenKinds.MfaChallenge)?.Flow,
-                "client",
-                StringComparison.Ordinal))
-        {
-            await EnsureArtifactClientIsFirstPartyAsync(token, httpContext, cancellationToken);
-        }
-    }
-
-    /// <summary>
-    /// Refuses the third-party client bound to a direct-login artifact (an MFA challenge issued
-    /// before the direct-login gate) before the caller writes anything or opens a transaction, so
-    /// the refusal's audit event is never rolled back.
-    /// </summary>
-    private async Task EnsureArtifactClientIsFirstPartyAsync(
-        SqlOSTemporaryToken? token,
-        HttpContext? httpContext,
-        CancellationToken cancellationToken)
-    {
-        if (token?.ClientApplicationId == null)
-        {
-            return;
-        }
-
-        var client = await _context.Set<SqlOSClientApplication>()
-            .FirstOrDefaultAsync(x => x.Id == token.ClientApplicationId, cancellationToken);
-        if (client != null)
-        {
-            await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(_adminService, client, httpContext, token.UserId, cancellationToken);
-        }
-    }
-
-    private async Task<SqlOSMfaChallengeVerifyResult> CompleteConsumedMfaChallengeAsync(
-        SqlOSTemporaryToken token,
-        string factorMethod,
-        HttpContext? httpContext,
-        CancellationToken cancellationToken)
-    {
-        if (token.UserId == null || token.ClientApplicationId == null)
-        {
-            throw new InvalidOperationException("MFA challenge payload is invalid.");
-        }
-
-        var payload = token.ReadPayload(SqlOSTemporaryTokenKinds.MfaChallenge)
-            ?? throw new InvalidOperationException("MFA challenge payload is invalid.");
-        if (!string.Equals(payload.Flow, "client", StringComparison.Ordinal))
-        {
-            return new SqlOSMfaChallengeVerifyResult(null, null);
-        }
-
-        var user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == token.UserId, cancellationToken);
-        var client = await _context.Set<SqlOSClientApplication>().FirstAsync(x => x.Id == token.ClientApplicationId, cancellationToken);
-        // The client flow is direct login: it mints tokens here, outside FinalizeClientLoginAsync.
+        var client = await _context.Set<SqlOSClientApplication>().FirstAsync(x => x.Id == clientApplicationId, cancellationToken);
         await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(_adminService, client, httpContext, user.Id, cancellationToken);
-        var authenticationMethod = SqlOSMfaPolicyService.AddAuthenticationMethod(payload.AuthenticationMethod, factorMethod);
         var tokens = await CreateSessionAndTokensAsync(
             user,
             client,
-            token.OrganizationId,
+            organizationId,
             authenticationMethod,
             httpContext?.Request.Headers.UserAgent.ToString(),
             GetIp(httpContext),
-            payload.Resource,
+            resource,
             scope: null,
             nonce: null,
             authenticatedAt: null,
@@ -1575,11 +1267,11 @@ public sealed class SqlOSAuthService
             "user",
             user.Id,
             userId: user.Id,
-            organizationId: token.OrganizationId,
+            organizationId: organizationId,
             ipAddress: GetIp(httpContext),
             cancellationToken: cancellationToken);
 
-        return new SqlOSMfaChallengeVerifyResult(tokens, null);
+        return tokens;
     }
 
     public Task<SqlOSLoginResult> CompleteClientAuthenticationAsync(

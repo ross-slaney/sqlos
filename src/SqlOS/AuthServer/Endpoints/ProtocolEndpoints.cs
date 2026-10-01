@@ -73,7 +73,7 @@ public static partial class EndpointRouteBuilderExtensions
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSHeadlessAuthService headlessAuthService,
-            SqlOSAuthService authService,
+            SqlOSIdentityProcesses processes,
             CancellationToken cancellationToken) =>
         {
             try
@@ -119,7 +119,7 @@ public static partial class EndpointRouteBuilderExtensions
                     authorizationRequest.LoginHintEmail,
                     authPrefix,
                     authorizationServerService,
-                    authService,
+                    processes,
                     cancellationToken);
             }
             catch (InvalidOperationException ex)
@@ -158,7 +158,7 @@ public static partial class EndpointRouteBuilderExtensions
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSHeadlessAuthService headlessAuthService,
-            SqlOSAuthService authService,
+            SqlOSIdentityProcesses processes,
             SqlOSIssuerSessionService issuerSessionService,
             SqlOSInvitationService invitationService,
             CancellationToken cancellationToken) =>
@@ -168,7 +168,7 @@ public static partial class EndpointRouteBuilderExtensions
                 authPrefix,
                 authorizationServerService,
                 headlessAuthService,
-                authService,
+                processes,
                 issuerSessionService,
                 invitationService,
                 cancellationToken));
@@ -183,7 +183,7 @@ public static partial class EndpointRouteBuilderExtensions
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSHeadlessAuthService headlessAuthService,
-            SqlOSAuthService authService,
+            SqlOSIdentityProcesses processes,
             SqlOSIssuerSessionService issuerSessionService,
             SqlOSInvitationService invitationService,
             CancellationToken cancellationToken) =>
@@ -197,7 +197,7 @@ public static partial class EndpointRouteBuilderExtensions
                 authPrefix,
                 authorizationServerService,
                 headlessAuthService,
-                authService,
+                processes,
                 issuerSessionService,
                 invitationService,
                 cancellationToken);
@@ -210,7 +210,7 @@ public static partial class EndpointRouteBuilderExtensions
         string authPrefix,
         SqlOSAuthorizationServerService authorizationServerService,
         SqlOSHeadlessAuthService headlessAuthService,
-        SqlOSAuthService authService,
+        SqlOSIdentityProcesses processes,
         SqlOSIssuerSessionService issuerSessionService,
         SqlOSInvitationService invitationService,
         CancellationToken cancellationToken)
@@ -446,7 +446,7 @@ public static partial class EndpointRouteBuilderExtensions
                         existingSession.User.DefaultEmail,
                         authPrefix,
                         authorizationServerService,
-                        authService,
+                        processes,
                         cancellationToken);
                 }
 

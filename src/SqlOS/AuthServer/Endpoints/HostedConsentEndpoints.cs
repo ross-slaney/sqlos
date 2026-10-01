@@ -13,7 +13,7 @@ public static partial class EndpointRouteBuilderExtensions
         hostedForms.MapPost("/consent/approve", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
-            SqlOSAuthService authService,
+            SqlOSIdentityProcesses processes,
             SqlOSIssuerSessionService issuerSessionService,
             CancellationToken cancellationToken) =>
         {
@@ -38,7 +38,7 @@ public static partial class EndpointRouteBuilderExtensions
                     session?.User.DefaultEmail ?? authorizationRequest.LoginHintEmail,
                     authPrefix,
                     authorizationServerService,
-                    authService,
+                    processes,
                     cancellationToken);
             }
             catch (InvalidOperationException ex)

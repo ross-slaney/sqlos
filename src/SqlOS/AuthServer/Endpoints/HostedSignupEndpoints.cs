@@ -136,7 +136,6 @@ public static partial class EndpointRouteBuilderExtensions
         hostedForms.MapPost("/signup/submit", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
-            SqlOSAuthService authService,
             SqlOSInvitationService invitationService,
             SqlOSIdentityProcesses processes,
             CancellationToken cancellationToken) =>
@@ -186,7 +185,7 @@ public static partial class EndpointRouteBuilderExtensions
                     deviceUserCode,
                     authPrefix,
                     authorizationServerService,
-                    authService,
+                    processes,
                     cancellationToken);
             }
             catch (InvalidOperationException ex)
@@ -211,7 +210,6 @@ public static partial class EndpointRouteBuilderExtensions
         hostedForms.MapPost("/signup/invitation/submit", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
-            SqlOSAuthService authService,
             SqlOSInvitationService invitationService,
             SqlOSIdentityProcesses processes,
             CancellationToken cancellationToken) =>
@@ -257,7 +255,7 @@ public static partial class EndpointRouteBuilderExtensions
                     deviceUserCode,
                     authPrefix,
                     authorizationServerService,
-                    authService,
+                    processes,
                     cancellationToken);
             }
             catch (InvalidOperationException ex)
@@ -367,7 +365,6 @@ public static partial class EndpointRouteBuilderExtensions
         hostedForms.MapPost("/signup/email-otp/verify", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
-            SqlOSAuthService authService,
             SqlOSInvitationService invitationService,
             SqlOSIdentityProcesses processes,
             CancellationToken cancellationToken) =>
@@ -403,7 +400,7 @@ public static partial class EndpointRouteBuilderExtensions
                     deviceUserCode,
                     authPrefix,
                     authorizationServerService,
-                    authService,
+                    processes,
                     cancellationToken);
             }
             catch (InvalidOperationException ex)
@@ -505,7 +502,6 @@ public static partial class EndpointRouteBuilderExtensions
         hostedForms.MapPost("/signup/phone-otp/verify", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
-            SqlOSAuthService authService,
             SqlOSInvitationService invitationService,
             SqlOSIdentityProcesses processes,
             CancellationToken cancellationToken) =>
@@ -540,7 +536,7 @@ public static partial class EndpointRouteBuilderExtensions
                     deviceUserCode,
                     authPrefix,
                     authorizationServerService,
-                    authService,
+                    processes,
                     cancellationToken);
             }
             catch (InvalidOperationException ex)
@@ -578,7 +574,7 @@ public static partial class EndpointRouteBuilderExtensions
         string? deviceUserCode,
         string authPrefix,
         SqlOSAuthorizationServerService authorizationServerService,
-        SqlOSAuthService authService,
+        SqlOSIdentityProcesses processes,
         CancellationToken cancellationToken)
     {
         var signedUp = outcome switch
@@ -598,7 +594,7 @@ public static partial class EndpointRouteBuilderExtensions
             signedUp.Evidence.User.DefaultEmail,
             authPrefix,
             authorizationServerService,
-            authService,
+            processes,
             cancellationToken);
     }
 }

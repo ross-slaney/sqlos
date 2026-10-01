@@ -155,7 +155,6 @@ public static partial class EndpointRouteBuilderExtensions
         hostedForms.MapPost("/login/email-otp/verify", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
-            SqlOSAuthService authService,
             SqlOSInvitationService invitationService,
             SqlOSIdentityProcesses processes,
             CancellationToken cancellationToken) =>
@@ -234,7 +233,7 @@ public static partial class EndpointRouteBuilderExtensions
                         challengeEmail,
                         authPrefix,
                         authorizationServerService,
-                        authService,
+                        processes,
                         cancellationToken,
                         invitationToken: invitationToken,
                         invitationService: invitationService);

@@ -407,14 +407,7 @@ internal sealed class CompleteMagicLinkSignIn(
     }
 
     private Task<SqlOSAuthorizationRequest?> FindActiveAuthorizationRequestAsync(string authorizationRequestId, DateTime now, CancellationToken cancellationToken)
-        => context.Set<SqlOSAuthorizationRequest>()
-            .Include(x => x.ClientApplication)
-            .FirstOrDefaultAsync(
-                x => x.Id == authorizationRequestId
-                    && x.CancelledAt == null
-                    && x.CompletedAt == null
-                    && x.ExpiresAt > now,
-                cancellationToken);
+        => ActiveAuthorizationRequests.FindAsync(context, authorizationRequestId, now, cancellationToken);
 
     private abstract record DestinationResolution;
 

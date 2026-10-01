@@ -24,6 +24,11 @@ namespace SqlOS.AuthServer.Services;
 /// browser an issuer session for the invitation's organization, or the account's first one.</item>
 /// <item>A direct login is first-party only and returns tokens, an organization choice or an MFA
 /// challenge (<see cref="SqlOSAuthService.FinalizeClientLoginAsync"/>, #419).</item>
+/// <item>A login whose MFA challenge was answered continues where the hub paused it: the
+/// authorization request's code is issued
+/// (<see cref="SqlOSAuthorizationServerService.IssueCodeAfterMfaAsync"/>), or the direct login's
+/// session and tokens (<see cref="SqlOSAuthService.IssueTokensAfterMfaAsync"/>), and
+/// <c>user.login.mfa</c> is audited.</item>
 /// </list>
 /// It is also the host's sign-up hook, which receives the same HTTP request.
 /// </remarks>
@@ -79,6 +84,26 @@ internal sealed class SqlOSHttpLoginCompletion : ILoginCompletion, IHostSignupHo
                     directLogin.OrganizationId,
                     evidence.AuthenticationMethod,
                     RequireHttpContext(),
+                    cancellationToken)),
+            LoginDestination.AuthorizationRequestAfterMfa afterMfa => new LoginCompletion.CodeIssued(
+                await RequireAuthorizationServerService().IssueCodeAfterMfaAsync(
+                    afterMfa.AuthorizationRequestId,
+                    evidence.User,
+                    afterMfa.OrganizationId,
+                    evidence.AuthenticationMethod,
+                    evidence.AuthenticatedAt,
+                    afterMfa.CredentialSignIn,
+                    RequireHttpContext(),
+                    cancellationToken)),
+            // A host may answer a direct login's challenge from its own code, without a request.
+            LoginDestination.DirectLoginAfterMfa afterMfa => new LoginCompletion.TokensIssued(
+                await RequireAuthService().IssueTokensAfterMfaAsync(
+                    evidence.User,
+                    afterMfa.ClientApplicationId,
+                    afterMfa.OrganizationId,
+                    evidence.AuthenticationMethod,
+                    afterMfa.Resource,
+                    _httpContext,
                     cancellationToken)),
             _ => throw new InvalidOperationException($"Unknown login destination '{destination.GetType().Name}'.")
         };

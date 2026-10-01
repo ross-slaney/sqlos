@@ -51,7 +51,6 @@ SqlOS.AuthServer.Services.SqlOSAdminService::UpsertSeededScimConnectionsCoreAsyn
 SqlOS.AuthServer.Services.SqlOSAdminService::UpsertSeededScopeDisplayNamesCoreAsync
 SqlOS.AuthServer.Services.SqlOSAuthService::CreateSessionAndTokensAsync
 SqlOS.AuthServer.Services.SqlOSAuthService::LogoutAllAsync
-SqlOS.AuthServer.Services.SqlOSAuthService::RecordMfaChallengeFailureAsync
 SqlOS.AuthServer.Services.SqlOSAuthService::RefreshWithSessionScopeAsync
 SqlOS.AuthServer.Services.SqlOSAuthService::RequireActiveLifecycleAsync
 SqlOS.AuthServer.Services.SqlOSAuthService::RevokeRefreshTokenFamilyAsync
@@ -166,10 +165,7 @@ SqlOS.AuthServer.Services.SqlOSSsoPortalService::RevokeSessionAsync
 SqlOS.AuthServer.Services.SqlOSSsoPortalService::SetProviderCoreAsync
 SqlOS.AuthServer.Services.SqlOSSsoPortalService::TryGetSessionAsync
 SqlOS.AuthServer.Services.SqlOSSsoPortalService::UpdateEnrollmentPolicyCoreAsync
-SqlOS.AuthServer.Services.SqlOSTotpMfaService::ConfirmEnrollmentAsync
 SqlOS.AuthServer.Services.SqlOSTotpMfaService::RevokeAuthenticatorAsync
-SqlOS.AuthServer.Services.SqlOSTotpMfaService::TryConsumeRecoveryCodeAsync
-SqlOS.AuthServer.Services.SqlOSTotpMfaService::TryVerifyTotpAsync
 SqlOS.Calendar.Services.SqlOSCalendarService::CompleteConnectAsync
 SqlOS.Calendar.Services.SqlOSCalendarService::EnableCalendarSyncAsync
 SqlOS.Calendar.Services.SqlOSCalendarService::TrySaveConnectionAsync

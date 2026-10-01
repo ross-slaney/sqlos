@@ -113,6 +113,25 @@ internal abstract record LoginDestination
 
     /// <summary>A first-party client's direct login, into <see cref="OrganizationId"/> when one is named.</summary>
     public sealed record DirectLogin(SqlOSClientApplication Client, string? OrganizationId) : LoginDestination;
+
+    /// <summary>
+    /// The authorization request whose MFA challenge the evidence answered: its code is issued in the
+    /// challenge's organization, the second factor counting as fresh authentication, and a
+    /// <see cref="CredentialSignIn"/> treating a dead issuer cookie as signed out (#443).
+    /// </summary>
+    public sealed record AuthorizationRequestAfterMfa(
+        string AuthorizationRequestId,
+        string? OrganizationId,
+        bool CredentialSignIn) : LoginDestination;
+
+    /// <summary>
+    /// The first-party client's direct login whose MFA challenge the evidence answered: a session and
+    /// tokens are issued in the challenge's organization, for its resource.
+    /// </summary>
+    public sealed record DirectLoginAfterMfa(
+        string ClientApplicationId,
+        string? OrganizationId,
+        string? Resource) : LoginDestination;
 }
 
 /// <summary>What the hub did with the evidence: today's completion result, per destination.</summary>
@@ -130,6 +149,12 @@ internal abstract record LoginCompletion
 
     /// <summary>The direct login answered (<see cref="LoginDestination.DirectLogin"/>): tokens, an organization choice or an MFA challenge.</summary>
     public sealed record DirectLoginCompleted(SqlOSLoginResult Result) : LoginCompletion;
+
+    /// <summary>The authorization request's code was issued (<see cref="LoginDestination.AuthorizationRequestAfterMfa"/>): the redirect to the client.</summary>
+    public sealed record CodeIssued(string RedirectUrl) : LoginCompletion;
+
+    /// <summary>The direct login's session and tokens were issued (<see cref="LoginDestination.DirectLoginAfterMfa"/>).</summary>
+    public sealed record TokensIssued(SqlOSTokenResponse Tokens) : LoginCompletion;
 
     /// <summary>
     /// Nothing completed the login: the caller asked only for the credential's evidence

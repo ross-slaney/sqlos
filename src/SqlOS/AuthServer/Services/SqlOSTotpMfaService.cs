@@ -4,16 +4,29 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using SqlOS.Database;
 using QRCoder;
+using SqlOS.AuditLogs;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.AuthServer.Processes.Identity;
 using SqlOS.Domain;
 
 namespace SqlOS.AuthServer.Services;
 
+/// <summary>
+/// Authenticator apps (TOTP) and recovery codes: the host's account-settings API over the identity
+/// processes (<c>SqlOS.AuthServer.Processes.Identity</c>), and the authenticator channel those
+/// processes use: the TOTP options, secrets and their protection, code matching (RFC 6238),
+/// provisioning URIs and QR codes, recovery codes, and the MFA policy.
+/// </summary>
+/// <remarks>
+/// Enrolling, confirming and checking a factor are the processes' (<see cref="StartTotpEnrollment"/>,
+/// <see cref="VerifyTotpEnrollment"/>, <see cref="SecondFactors"/>); the public methods below keep
+/// their 7.x signatures and delegate to them. Code matching takes the time it matches at: a process
+/// reads its clock once.
+/// </remarks>
 public sealed class SqlOSTotpMfaService
 {
     public const string EnrollmentPurpose = SqlOSTemporaryTokenKinds.Purposes.TotpEnrollment;
@@ -23,6 +36,7 @@ public sealed class SqlOSTotpMfaService
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSCryptoService _cryptoService;
     private readonly SqlOSMfaPolicyService _policyService;
+    private readonly IOptions<SqlOSAuthServerOptions> _authOptions;
     private readonly SqlOSAuthServerOptions _options;
 
     public SqlOSTotpMfaService(
@@ -34,8 +48,18 @@ public sealed class SqlOSTotpMfaService
         _context = context;
         _cryptoService = cryptoService;
         _policyService = policyService;
+        _authOptions = options;
         _options = options.Value;
     }
+
+    /// <summary>The TOTP options: algorithm, digits, period, skew, lifetimes and limits.</summary>
+    internal SqlOSTotpMfaOptions Options => _options.Mfa.Totp;
+
+    /// <summary>The MFA policy an enrollment and its recovery codes follow.</summary>
+    internal SqlOSMfaPolicyService Policy => _policyService;
+
+    /// <summary>The parameters a new authenticator is enrolled with.</summary>
+    internal TotpParameters Parameters => new(Options.Algorithm, Options.Digits, Options.PeriodSeconds);
 
     public async Task<SqlOSMfaStatusResult> GetStatusAsync(
         string userId,
@@ -71,278 +95,63 @@ public sealed class SqlOSTotpMfaService
                 x.LastUsedAt))
             .ToListAsync(cancellationToken);
 
+    /// <summary>Starts the account's own authenticator enrollment, under the policy of <paramref name="organizationId"/>.</summary>
     public async Task<SqlOSTotpEnrollmentStartResult> StartEnrollmentAsync(
         string userId,
         string? organizationId = null,
         string? displayName = null,
         CancellationToken cancellationToken = default)
     {
-        var evaluation = await _policyService.EvaluateAsync(userId, organizationId, authenticationMethod: null, cancellationToken);
-        if (!evaluation.Enabled || !evaluation.AvailableFactors.Contains(SqlOSMfaFactorTypes.Totp, StringComparer.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException("Authenticator app enrollment is not enabled.");
-        }
-
-        if (!evaluation.CanSelfEnroll && !evaluation.EnrollmentRequired)
-        {
-            throw new InvalidOperationException("Authenticator app enrollment is not available for this account.");
-        }
-
-        return await CreateEnrollmentAsync(
-            userId,
-            organizationId,
-            clientApplicationId: null,
-            displayName,
-            challengeBinding: null,
+        var outcome = await new StartTotpEnrollment(_context, Admin(), this, new SqlOSAuditRecorder(_context), _cryptoService.Clock).ExecuteAsync(
+            new StartTotpEnrollmentCommand(
+                new TotpEnrollmentTarget.Account(userId, organizationId),
+                displayName,
+                SqlOSRequestContext.System),
             cancellationToken);
+        return outcome switch
+        {
+            TotpEnrollmentStartOutcome.Started started => started.Result,
+            TotpEnrollmentStartOutcome.Refused refused => throw refused.Refusal.ToException(),
+            _ => throw new InvalidOperationException($"Unknown enrollment outcome '{outcome.GetType().Name}'.")
+        };
     }
 
-    internal async Task<SqlOSTotpEnrollmentStartResult> StartChallengeEnrollmentAsync(
-        SqlOSTemporaryToken challengeToken,
-        SqlOSMfaChallengePayload challengePayload,
-        string? displayName,
-        CancellationToken cancellationToken = default)
-    {
-        if (challengeToken.UserId == null || challengeToken.ClientApplicationId == null)
-        {
-            throw ChallengeEnrollmentRejected();
-        }
-
-        var evaluation = await _policyService.EvaluateAsync(
-            challengeToken.UserId,
-            challengeToken.OrganizationId,
-            challengePayload.AuthenticationMethod,
-            cancellationToken);
-        if (!challengePayload.EnrollmentRequired
-            || challengePayload.PermittedEnrollmentFactors?.Contains(SqlOSMfaFactorTypes.Totp, StringComparer.OrdinalIgnoreCase) != true
-            || !evaluation.EnrollmentRequired
-            || evaluation.HasTotp
-            || !evaluation.AvailableFactors.Contains(SqlOSMfaFactorTypes.Totp, StringComparer.OrdinalIgnoreCase))
-        {
-            throw ChallengeEnrollmentRejected();
-        }
-
-        return await CreateEnrollmentAsync(
-            challengeToken.UserId,
-            challengeToken.OrganizationId,
-            challengeToken.ClientApplicationId,
-            displayName,
-            new TotpEnrollmentChallengeBinding(
-                challengeToken.Id,
-                challengeToken.UserId,
-                challengeToken.ClientApplicationId,
-                challengeToken.OrganizationId,
-                challengePayload.Flow,
-                challengePayload.ClientId,
-                challengePayload.AuthorizationRequestId,
-                challengePayload.Resource),
-            cancellationToken);
-    }
-
-    private async Task<SqlOSTotpEnrollmentStartResult> CreateEnrollmentAsync(
-        string userId,
-        string? organizationId,
-        string? clientApplicationId,
-        string? displayName,
-        TotpEnrollmentChallengeBinding? challengeBinding,
-        CancellationToken cancellationToken)
-    {
-
-        var now = DateTime.UtcNow;
-        var user = await _context.GetUserAsync(userId, SqlOSUserParts.Authenticators, cancellationToken);
-        var secret = EncodeBase32(RandomNumberGenerator.GetBytes(_options.Mfa.Totp.SecretBytes));
-        var authenticator = user.EnrollTotp(
-            _cryptoService.ProtectSecret(secret),
-            displayName,
-            new TotpParameters(_options.Mfa.Totp.Algorithm, _options.Mfa.Totp.Digits, _options.Mfa.Totp.PeriodSeconds),
-            now);
-        var authenticatorId = authenticator.Id;
-        var token = (await _cryptoService.CreateTemporaryTokenAsync(
-            SqlOSTemporaryTokenKinds.TotpEnrollment,
-            new TotpEnrollmentPayload(authenticatorId, challengeBinding),
-            new TemporaryTokenBinding(UserId: userId, ClientApplicationId: clientApplicationId, OrganizationId: organizationId),
-            _options.Mfa.Totp.EnrollmentTokenLifetime,
-            cancellationToken)).RawToken;
-
-        var provisioningUri = BuildProvisioningUri(user, secret);
-
-        return new SqlOSTotpEnrollmentStartResult(
-            token,
-            authenticatorId,
-            secret,
-            provisioningUri,
-            BuildQrCodeDataUrl(provisioningUri),
-            now.Add(_options.Mfa.Totp.EnrollmentTokenLifetime));
-    }
-
+    /// <summary>Confirms the account's own enrollment with the authenticator's first code.</summary>
     public async Task<SqlOSTotpEnrollmentVerifyResult> VerifyEnrollmentAsync(
         SqlOSTotpEnrollmentVerifyRequest request,
         CancellationToken cancellationToken = default)
     {
-        var temporaryToken = await _cryptoService.FindTemporaryTokenAsync(SqlOSTemporaryTokenKinds.TotpEnrollment, request.EnrollmentToken, cancellationToken)
-            ?? throw new InvalidOperationException("Authenticator enrollment is invalid or expired.");
-        if (temporaryToken.UserId == null)
-        {
-            throw new InvalidOperationException("Authenticator enrollment is invalid.");
-        }
-
-        var payload = temporaryToken.ReadPayload(SqlOSTemporaryTokenKinds.TotpEnrollment)
-            ?? throw new InvalidOperationException("Authenticator enrollment payload is invalid.");
-        if (payload.ChallengeBinding != null)
-        {
-            throw new InvalidOperationException("Challenge-bound enrollment must be verified with its original MFA challenge.");
-        }
-
-        return await ConfirmEnrollmentAsync(temporaryToken, payload, request.Code, challengeToken: null, cancellationToken);
-    }
-
-    internal async Task<SqlOSTotpChallengeEnrollmentVerification> VerifyChallengeEnrollmentAsync(
-        SqlOSTotpEnrollmentVerifyRequest request,
-        string expectedFlow,
-        string? expectedAuthorizationRequestId,
-        CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(request.MfaToken))
-        {
-            throw ChallengeEnrollmentRejected();
-        }
-
-        var challengeToken = await _cryptoService.FindTemporaryTokenAsync(
-                SqlOSTemporaryTokenKinds.MfaChallenge,
-                request.MfaToken,
-                cancellationToken)
-            ?? throw ChallengeEnrollmentRejected();
-        var enrollmentToken = await _cryptoService.FindTemporaryTokenAsync(
-                SqlOSTemporaryTokenKinds.TotpEnrollment,
-                request.EnrollmentToken,
-                cancellationToken)
-            ?? throw ChallengeEnrollmentRejected();
-        var challengePayload = challengeToken.ReadPayload(SqlOSTemporaryTokenKinds.MfaChallenge)
-            ?? throw ChallengeEnrollmentRejected();
-        var enrollmentPayload = enrollmentToken.ReadPayload(SqlOSTemporaryTokenKinds.TotpEnrollment)
-            ?? throw ChallengeEnrollmentRejected();
-        var binding = enrollmentPayload.ChallengeBinding
-            ?? throw ChallengeEnrollmentRejected();
-
-        if (challengeToken.UserId == null
-            || challengeToken.ClientApplicationId == null
-            || !challengePayload.EnrollmentRequired
-            || challengePayload.PermittedEnrollmentFactors?.Contains(SqlOSMfaFactorTypes.Totp, StringComparer.OrdinalIgnoreCase) != true
-            || !string.Equals(enrollmentToken.UserId, challengeToken.UserId, StringComparison.Ordinal)
-            || !string.Equals(enrollmentToken.ClientApplicationId, challengeToken.ClientApplicationId, StringComparison.Ordinal)
-            || !string.Equals(enrollmentToken.OrganizationId, challengeToken.OrganizationId, StringComparison.Ordinal)
-            || !string.Equals(binding.ChallengeTokenId, challengeToken.Id, StringComparison.Ordinal)
-            || !string.Equals(binding.UserId, challengeToken.UserId, StringComparison.Ordinal)
-            || !string.Equals(binding.ClientApplicationId, challengeToken.ClientApplicationId, StringComparison.Ordinal)
-            || !string.Equals(binding.OrganizationId, challengeToken.OrganizationId, StringComparison.Ordinal)
-            || !string.Equals(binding.Flow, challengePayload.Flow, StringComparison.Ordinal)
-            || !string.Equals(challengePayload.Flow, expectedFlow, StringComparison.Ordinal)
-            || !string.Equals(binding.ClientId, challengePayload.ClientId, StringComparison.Ordinal)
-            || !string.Equals(binding.AuthorizationRequestId, challengePayload.AuthorizationRequestId, StringComparison.Ordinal)
-            || (expectedAuthorizationRequestId != null
-                && !string.Equals(challengePayload.AuthorizationRequestId, expectedAuthorizationRequestId, StringComparison.Ordinal))
-            || !string.Equals(binding.Resource, challengePayload.Resource, StringComparison.Ordinal))
-        {
-            throw ChallengeEnrollmentRejected();
-        }
-
-        var evaluation = await _policyService.EvaluateAsync(
-            challengeToken.UserId,
-            challengeToken.OrganizationId,
-            challengePayload.AuthenticationMethod,
+        // The account's own enrollment completes no login, so it needs no hub.
+        var admin = Admin();
+        var outcome = await new VerifyTotpEnrollment(_context, admin, this, new SqlOSHttpLoginCompletion(null, admin, _options), _cryptoService.Clock).ExecuteAsync(
+            new VerifyTotpEnrollmentCommand(request.EnrollmentToken, request.Code, Challenge: null, SqlOSRequestContext.System),
             cancellationToken);
-        if (!evaluation.EnrollmentRequired
-            || evaluation.HasTotp
-            || !evaluation.AvailableFactors.Contains(SqlOSMfaFactorTypes.Totp, StringComparer.OrdinalIgnoreCase))
+        return outcome switch
         {
-            throw ChallengeEnrollmentRejected();
-        }
-
-        var result = await ConfirmEnrollmentAsync(
-            enrollmentToken,
-            enrollmentPayload,
-            request.Code,
-            challengeToken,
-            cancellationToken);
-        return new SqlOSTotpChallengeEnrollmentVerification(challengeToken, challengePayload, result);
+            TotpEnrollmentVerifyOutcome.Confirmed confirmed => confirmed.Result,
+            TotpEnrollmentVerifyOutcome.Refused refused => throw refused.Refusal.ToException(),
+            _ => throw new InvalidOperationException($"Unknown enrollment outcome '{outcome.GetType().Name}'.")
+        };
     }
 
-    private async Task<SqlOSTotpEnrollmentVerifyResult> ConfirmEnrollmentAsync(
-        SqlOSTemporaryToken temporaryToken,
-        TotpEnrollmentPayload payload,
-        string code,
-        SqlOSTemporaryToken? challengeToken,
-        CancellationToken cancellationToken)
-    {
-        if (temporaryToken.UserId == null)
-        {
-            throw new InvalidOperationException("Authenticator enrollment is invalid.");
-        }
-
-        var user = await _context.FindUserAsync(
-                temporaryToken.UserId,
-                SqlOSUserParts.Authenticators | SqlOSUserParts.RecoveryCodes | SqlOSUserParts.MfaPolicyOverride,
-                cancellationToken)
-            ?? throw new InvalidOperationException("Authenticator enrollment is invalid.");
-        var authenticator = user.FindAuthenticator(payload.AuthenticatorId) is { IsTotp: true } found
-            ? found
-            : throw new InvalidOperationException("Authenticator enrollment is invalid.");
-
-        if (authenticator.IsConfirmed)
-        {
-            throw new InvalidOperationException("Authenticator enrollment has already been confirmed.");
-        }
-
-        var secret = _cryptoService.UnprotectSecret(authenticator.SecretProtected);
-        if (!TryValidateTotp(secret, code, authenticator.PeriodSeconds, authenticator.Digits, out var matchedStep))
-        {
-            throw new InvalidOperationException("Authenticator code is invalid.");
-        }
-
-        // Confirming opts the account into MFA unless it already chose.
-        var now = DateTime.UtcNow;
-        user.ConfirmTotp(authenticator.Id, matchedStep, now);
-        temporaryToken.Consume(SqlOSTemporaryTokenKinds.TotpEnrollment, now);
-        challengeToken?.Consume(SqlOSTemporaryTokenKinds.MfaChallenge, now);
-
-        var recoveryCodes = await ReplaceRecoveryCodesAsync(user, temporaryToken.OrganizationId, now, cancellationToken);
-        try
-        {
-            await _context.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateConcurrencyException)
-        {
-            throw new InvalidOperationException("MFA enrollment challenge has already been used.");
-        }
-        catch (DbUpdateException ex) when (SqlOSDatabaseErrors.IsUniqueConstraintViolation(ex))
-        {
-            throw new InvalidOperationException("MFA enrollment challenge has already been used.");
-        }
-
-        return new SqlOSTotpEnrollmentVerifyResult(authenticator.Id, recoveryCodes);
-    }
-
+    /// <summary>
+    /// Checks a second factor of the account, an authenticator code or a recovery code, and spends
+    /// it; returns the factor (<c>totp</c> or <c>recovery_code</c>).
+    /// </summary>
     public async Task<string> VerifySecondFactorCodeAsync(
         string userId,
         string code,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(code))
+        var check = await new VerifySecondFactor(new SecondFactors(_context, this), _cryptoService.Clock).ExecuteAsync(
+            new VerifySecondFactorCommand(userId, code),
+            cancellationToken);
+        return check switch
         {
-            throw new InvalidOperationException("MFA code is required.");
-        }
-
-        if (await TryVerifyTotpAsync(userId, code, cancellationToken))
-        {
-            return SqlOSMfaFactorTypes.Totp;
-        }
-
-        if (await TryConsumeRecoveryCodeAsync(userId, code, cancellationToken))
-        {
-            return SqlOSMfaFactorTypes.RecoveryCode;
-        }
-
-        throw new InvalidOperationException("MFA code is invalid.");
+            SecondFactorCheck.Verified verified => verified.Factor,
+            SecondFactorCheck.Refused refused => throw refused.Refusal.ToException(),
+            _ => throw new InvalidOperationException($"Unknown second-factor check '{check.GetType().Name}'.")
+        };
     }
 
     public async Task RevokeAuthenticatorAsync(
@@ -365,94 +174,64 @@ public sealed class SqlOSTotpMfaService
         => await _cryptoService.FindTemporaryTokenAsync(SqlOSTemporaryTokenKinds.MfaChallenge, mfaToken, cancellationToken)
             ?? throw new InvalidOperationException("MFA challenge is invalid or expired.");
 
-    private async Task<bool> TryVerifyTotpAsync(
-        string userId,
+    /// <summary>A new random secret, base32 as authenticator apps take it.</summary>
+    internal string NewSecret() => EncodeBase32(RandomNumberGenerator.GetBytes(Options.SecretBytes));
+
+    /// <summary>Protects a secret for storage.</summary>
+    internal string Protect(string secret) => _cryptoService.ProtectSecret(secret);
+
+    /// <summary>Reads a stored secret back.</summary>
+    internal string Unprotect(string protectedSecret) => _cryptoService.UnprotectSecret(protectedSecret);
+
+    /// <summary>New raw recovery codes (<c>XXXXX-XXXXX</c>), distinct, as many as the options ask; shown once.</summary>
+    internal string[] NewRecoveryCodes()
+        => Enumerable.Range(0, Options.RecoveryCodeCount)
+            .Select(_ => FormatRecoveryCode(EncodeBase32(RandomNumberGenerator.GetBytes(8))[..10]))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+    /// <summary>
+    /// True when <paramref name="code"/> is the code of <paramref name="secret"/> for a time step
+    /// within the allowed skew of <paramref name="now"/>; <paramref name="matchedStep"/> is that step.
+    /// </summary>
+    internal bool TryMatchCode(
+        string secret,
         string code,
-        CancellationToken cancellationToken)
+        int periodSeconds,
+        int digits,
+        DateTime now,
+        out long matchedStep)
     {
-        var user = await _context.FindUserAsync(userId, SqlOSUserParts.Authenticators, cancellationToken);
-        if (user == null)
+        matchedStep = 0;
+        var normalizedCode = new string((code ?? string.Empty).Where(char.IsDigit).ToArray());
+        if (normalizedCode.Length != digits)
         {
             return false;
         }
 
-        foreach (var authenticator in user.ConfirmedTotpAuthenticators)
+        var secretBytes = DecodeBase32(secret);
+        var nowStep = new DateTimeOffset(DateTime.SpecifyKind(now, DateTimeKind.Utc)).ToUnixTimeSeconds() / periodSeconds;
+        for (var offset = -Options.AllowedClockSkewSteps; offset <= Options.AllowedClockSkewSteps; offset++)
         {
-            var secret = _cryptoService.UnprotectSecret(authenticator.SecretProtected);
-            if (!TryValidateTotp(secret, code, authenticator.PeriodSeconds, authenticator.Digits, out var matchedStep))
+            var step = nowStep + offset;
+            var expected = ComputeTotp(secretBytes, step, digits);
+            if (CryptographicOperations.FixedTimeEquals(
+                    Encoding.ASCII.GetBytes(expected),
+                    Encoding.ASCII.GetBytes(normalizedCode)))
             {
-                continue;
-            }
-
-            // A code for a time step already accepted is a replay.
-            if (!user.AcceptTotpCode(authenticator.Id, matchedStep, DateTime.UtcNow))
-            {
-                continue;
-            }
-
-            try
-            {
-                await _context.SaveChangesAsync(cancellationToken);
+                matchedStep = step;
                 return true;
-            }
-            catch (DbUpdateConcurrencyException)
-            {
-                throw new InvalidOperationException("MFA code has already been used.");
             }
         }
 
         return false;
     }
 
-    private async Task<bool> TryConsumeRecoveryCodeAsync(
-        string userId,
-        string code,
-        CancellationToken cancellationToken)
-    {
-        var normalized = NormalizeRecoveryCode(code);
-        if (string.IsNullOrWhiteSpace(normalized))
-        {
-            return false;
-        }
+    /// <summary>The operator service the processes' first-party checks audit through; the account's own enrollment never uses it.</summary>
+    private SqlOSAdminService Admin() => new(_context, _authOptions, _cryptoService);
 
-        var user = await _context.FindUserAsync(userId, SqlOSUserParts.RecoveryCodes, cancellationToken);
-        if (user == null || !user.UseRecoveryCode(normalized, DateTime.UtcNow))
-        {
-            return false;
-        }
-
-        try
-        {
-            await _context.SaveChangesAsync(cancellationToken);
-            return true;
-        }
-        catch (DbUpdateConcurrencyException)
-        {
-            throw new InvalidOperationException("Recovery code has already been used.");
-        }
-    }
-
-    private async Task<string[]> ReplaceRecoveryCodesAsync(
-        SqlOSUser user,
-        string? organizationId,
-        DateTime now,
-        CancellationToken cancellationToken)
-    {
-        var evaluation = await _policyService.EvaluateAsync(user.Id, organizationId, authenticationMethod: null, cancellationToken);
-        if (!evaluation.RecoveryCodesEnabled || !evaluation.AvailableFactors.Contains(SqlOSMfaFactorTypes.RecoveryCode, StringComparer.OrdinalIgnoreCase))
-        {
-            return [];
-        }
-
-        var rawCodes = Enumerable.Range(0, _options.Mfa.Totp.RecoveryCodeCount)
-            .Select(_ => FormatRecoveryCode(EncodeBase32(RandomNumberGenerator.GetBytes(8))[..10]))
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
-        user.IssueRecoveryCodes(rawCodes.Select(NormalizeRecoveryCode).ToArray(), now);
-        return rawCodes;
-    }
-
-    private string BuildProvisioningUri(SqlOSUser user, string secret)
+    /// <summary>The <c>otpauth://</c> URI that adds <paramref name="secret"/> to an authenticator app for <paramref name="user"/>.</summary>
+    internal string BuildProvisioningUri(SqlOSUser user, string secret)
     {
         var issuer = string.IsNullOrWhiteSpace(_options.Mfa.Totp.Issuer)
             ? "SqlOS"
@@ -473,44 +252,13 @@ public sealed class SqlOSTotpMfaService
         return $"otpauth://totp/{label}?{query}";
     }
 
-    private static string BuildQrCodeDataUrl(string value)
+    /// <summary>The QR code of <paramref name="value"/> as an SVG data URL.</summary>
+    internal static string BuildQrCodeDataUrl(string value)
     {
         using var generator = new QRCodeGenerator();
         using var data = generator.CreateQrCode(value, QRCodeGenerator.ECCLevel.Q);
         var svg = new SvgQRCode(data).GetGraphic(5);
         return $"data:image/svg+xml;charset=utf-8,{Uri.EscapeDataString(svg)}";
-    }
-
-    private bool TryValidateTotp(
-        string secret,
-        string code,
-        int periodSeconds,
-        int digits,
-        out long matchedStep)
-    {
-        matchedStep = 0;
-        var normalizedCode = new string((code ?? string.Empty).Where(char.IsDigit).ToArray());
-        if (normalizedCode.Length != digits)
-        {
-            return false;
-        }
-
-        var secretBytes = DecodeBase32(secret);
-        var nowStep = DateTimeOffset.UtcNow.ToUnixTimeSeconds() / periodSeconds;
-        for (var offset = -_options.Mfa.Totp.AllowedClockSkewSteps; offset <= _options.Mfa.Totp.AllowedClockSkewSteps; offset++)
-        {
-            var step = nowStep + offset;
-            var expected = ComputeTotp(secretBytes, step, digits);
-            if (CryptographicOperations.FixedTimeEquals(
-                    Encoding.ASCII.GetBytes(expected),
-                    Encoding.ASCII.GetBytes(normalizedCode)))
-            {
-                matchedStep = step;
-                return true;
-            }
-        }
-
-        return false;
     }
 
     public string GenerateCodeForTesting(string secret, DateTimeOffset? timestamp = null)
@@ -611,7 +359,8 @@ public sealed class SqlOSTotpMfaService
         return bytes.ToArray();
     }
 
-    private static string NormalizeRecoveryCode(string code)
+    /// <summary>A recovery code as stored and compared: its letters and digits, upper case.</summary>
+    internal static string NormalizeRecoveryCode(string code)
         => new((code ?? string.Empty)
             .Where(char.IsLetterOrDigit)
             .Select(char.ToUpperInvariant)
@@ -619,12 +368,4 @@ public sealed class SqlOSTotpMfaService
 
     private static string FormatRecoveryCode(string code)
         => $"{code[..5]}-{code[5..10]}";
-
-    private static InvalidOperationException ChallengeEnrollmentRejected()
-        => new("MFA enrollment is not authorized for this challenge.");
 }
-
-internal sealed record SqlOSTotpChallengeEnrollmentVerification(
-    SqlOSTemporaryToken ChallengeToken,
-    SqlOSMfaChallengePayload ChallengePayload,
-    SqlOSTotpEnrollmentVerifyResult Enrollment);

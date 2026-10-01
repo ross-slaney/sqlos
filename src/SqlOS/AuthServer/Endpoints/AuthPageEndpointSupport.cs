@@ -21,6 +21,7 @@ using SqlOS.AuthServer.Services;
 using SqlOS.AuthServer.Security;
 using SqlOS.Configuration;
 using SqlOS.Dashboard;
+using SqlOS.Domain;
 using SqlOS.Security;
 
 namespace SqlOS.AuthServer.Extensions;
@@ -139,7 +140,7 @@ public static partial class EndpointRouteBuilderExtensions
         string? email,
         string authPrefix,
         SqlOSAuthorizationServerService authorizationServerService,
-        SqlOSAuthService authService,
+        SqlOSIdentityProcesses processes,
         CancellationToken cancellationToken,
         string? error = null,
         string? invitationToken = null,
@@ -153,11 +154,19 @@ public static partial class EndpointRouteBuilderExtensions
 
         if (completion.RequiresMfaEnrollment)
         {
-            var enrollment = await authService.StartTotpEnrollmentForAuthorizationChallengeAsync(
-                completion.MfaToken,
-                authorizationRequestId ?? throw new InvalidOperationException("MFA authorization request is invalid."),
-                new SqlOSTotpEnrollmentStartRequest(),
+            var outcome = await processes.StartTotpEnrollment().ExecuteAsync(
+                StartTotpEnrollmentCommand.ForAuthorizationChallenge(
+                    completion.MfaToken,
+                    authorizationRequestId ?? throw new InvalidOperationException("MFA authorization request is invalid."),
+                    displayName: null,
+                    SqlOSRequestSurface.Hosted),
                 cancellationToken);
+            var enrollment = outcome switch
+            {
+                TotpEnrollmentStartOutcome.Started started => started.Result,
+                TotpEnrollmentStartOutcome.Refused refused => throw refused.Refusal.ToException(),
+                _ => throw new InvalidOperationException($"Unknown enrollment outcome '{outcome.GetType().Name}'.")
+            };
             var enrollmentPage = await BuildAuthPageViewModelAsync(
                 "mfa-enroll",
                 authorizationRequestId,
@@ -204,7 +213,7 @@ public static partial class EndpointRouteBuilderExtensions
         string? email,
         string authPrefix,
         SqlOSAuthorizationServerService authorizationServerService,
-        SqlOSAuthService authService,
+        SqlOSIdentityProcesses processes,
         CancellationToken cancellationToken)
     {
         if (completion.RequiresConsent)
@@ -231,7 +240,7 @@ public static partial class EndpointRouteBuilderExtensions
                 email,
                 authPrefix,
                 authorizationServerService,
-                authService,
+                processes,
                 cancellationToken);
         }
 
