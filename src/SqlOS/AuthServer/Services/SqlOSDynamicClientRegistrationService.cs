@@ -6,6 +6,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Domain;
 using SqlOS.Security;
 
 namespace SqlOS.AuthServer.Services;
@@ -249,7 +250,7 @@ public sealed class SqlOSDynamicClientRegistrationService
 
         foreach (var token in requested)
         {
-            if (token.Length > dcr.MaxScopeLength || !IsValidScopeToken(token))
+            if (token.Length > dcr.MaxScopeLength || !ScopeSet.IsValidToken(token))
             {
                 throw new SqlOSClientRegistrationException(
                     "invalid_client_metadata",
@@ -278,19 +279,6 @@ public sealed class SqlOSDynamicClientRegistrationService
         }
 
         return requested;
-    }
-
-    private static bool IsValidScopeToken(string token)
-    {
-        foreach (var ch in token)
-        {
-            if (ch is < (char)0x21 or > (char)0x7E or '"' or '\\')
-            {
-                return false;
-            }
-        }
-
-        return token.Length > 0;
     }
 
     private List<string> NormalizeRedirectUris(List<string> redirectUris)

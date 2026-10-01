@@ -1,3 +1,5 @@
+using SqlOS.Domain;
+
 namespace SqlOS.AuthServer.Services;
 
 /// <summary>
@@ -5,33 +7,17 @@ namespace SqlOS.AuthServer.Services;
 /// Authorize, device, and client_credentials all apply the same silent intersection
 /// (RFC 6749 §3.3): granted = requested ∩ client allow-list. An empty allow-list
 /// intersects to an empty grant. Unknown requested scopes are dropped, not rejected.
+/// The normalization rules live in <see cref="ScopeSet"/>.
 /// </summary>
 internal static class SqlOSScopePolicy
 {
-    public static List<string> Split(string? scope)
-    {
-        if (string.IsNullOrWhiteSpace(scope))
-        {
-            return [];
-        }
-
-        return scope
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
-    }
+    public static List<string> Split(string? scope) => [.. ScopeSet.Parse(scope)];
 
     public static List<string> Intersect(IEnumerable<string> requested, IReadOnlyCollection<string> allowed)
-    {
-        var allowedSet = new HashSet<string>(allowed, StringComparer.Ordinal);
-        return requested
-            .Where(allowedSet.Contains)
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
-    }
+        => [.. ScopeSet.Of(requested).IntersectWith(allowed)];
 
     public static List<string> Grant(string? requestedScope, string? allowedScopesJson)
-        => Intersect(Split(requestedScope), SqlOSAdminService.DeserializeJsonList(allowedScopesJson));
+        => [.. ScopeSet.Parse(requestedScope).IntersectWith(SqlOSAdminService.DeserializeJsonList(allowedScopesJson))];
 
     public static string Join(IEnumerable<string> scopes)
         => string.Join(' ', scopes);

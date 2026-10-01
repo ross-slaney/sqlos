@@ -4,7 +4,6 @@ using System.Data;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
@@ -14,6 +13,7 @@ using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 using SqlOS.Database;
+using SqlOS.Domain;
 using System.IdentityModel.Tokens.Jwt;
 
 namespace SqlOS.AuthServer.Services;
@@ -30,7 +30,6 @@ public sealed class SqlOSCryptoService
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSAuthServerOptions _options;
     private readonly SqlOSValidationSigningKeyCache _validationSigningKeyCache;
-    private readonly PasswordHasher<object> _passwordHasher = new();
     private readonly IDataProtector? _secretProtector;
     private readonly ITimeLimitedDataProtector? _refreshTokenResponseProtector;
     private readonly ISqlOSSigningKeyCustody _signingKeyCustody;
@@ -65,7 +64,7 @@ public sealed class SqlOSCryptoService
         _signingKeyCustody = signingKeyCustody;
     }
 
-    public string HashPassword(string password) => _passwordHasher.HashPassword(new object(), password);
+    public string HashPassword(string password) => HashedSecret.Pbkdf2(password).Hash;
 
     public string ProtectSecret(string secret)
     {
@@ -169,12 +168,9 @@ public sealed class SqlOSCryptoService
     }
 
     public bool VerifyPassword(string hashedPassword, string password)
-    {
-        var result = _passwordHasher.VerifyHashedPassword(new object(), hashedPassword, password);
-        return result is PasswordVerificationResult.Success or PasswordVerificationResult.SuccessRehashNeeded;
-    }
+        => HashedSecret.FromStored(HashedSecretScheme.Pbkdf2, hashedPassword).Matches(password);
 
-    public string GenerateId(string prefix) => $"{prefix}_{Guid.NewGuid():N}"[..Math.Min(prefix.Length + 1 + 24, prefix.Length + 1 + 32)];
+    public string GenerateId(string prefix) => SqlOSIds.New(prefix);
 
     public string GenerateOpaqueToken(int numBytes = 32)
     {
@@ -182,11 +178,7 @@ public sealed class SqlOSCryptoService
         return Base64UrlEncoder.Encode(bytes);
     }
 
-    public string HashToken(string rawToken)
-    {
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(rawToken));
-        return Convert.ToHexString(hash);
-    }
+    public string HashToken(string rawToken) => HashedSecret.Sha256(rawToken).Hash;
 
     public string CreatePkceCodeChallenge(string codeVerifier)
     {

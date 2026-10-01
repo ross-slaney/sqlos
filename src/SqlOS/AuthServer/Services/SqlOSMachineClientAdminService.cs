@@ -9,6 +9,7 @@ using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 using SqlOS.Database;
+using SqlOS.Domain;
 using SqlOS.Fga.Models;
 using SqlOS.Pagination;
 
@@ -462,7 +463,7 @@ public sealed class SqlOSMachineClientAdminService
         {
             var hash = machine.SecretHashResolver()?.Trim();
             if (string.IsNullOrWhiteSpace(hash)) throw new InvalidOperationException("Machine-client secret hash resolution returned no value.");
-            if (!IsSupportedPasswordHash(hash)) throw new InvalidOperationException("Machine-client secret hash resolution returned an unsupported PasswordHasher payload.");
+            if (!HashedSecret.IsPbkdf2Payload(hash)) throw new InvalidOperationException("Machine-client secret hash resolution returned an unsupported PasswordHasher payload.");
             return hash;
         }
         var secret = machine.SecretResolver!()?.Trim();
@@ -564,18 +565,6 @@ public sealed class SqlOSMachineClientAdminService
             client.DisabledReason);
 
     private static string GenerateSecret() => WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(48));
-    private static bool IsSupportedPasswordHash(string hash)
-    {
-        try
-        {
-            var payload = Convert.FromBase64String(hash);
-            return payload.Length >= 13 && payload[0] is 0x00 or 0x01;
-        }
-        catch (FormatException)
-        {
-            return false;
-        }
-    }
     private static string Require(string? value, string message, int max)
     {
         var normalized = value?.Trim();

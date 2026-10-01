@@ -1,10 +1,10 @@
 using System.Globalization;
-using System.Net;
 using System.Text;
 using System.Text.Json;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
+using SqlOS.Domain;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -30,79 +30,18 @@ public static class SqlOSDomainOwnershipVerification
     public static string BuildVerificationValue(string verificationToken, SqlOSSsoPortalOptions options)
         => $"{NormalizeValuePrefix(options.DomainVerificationRecordValuePrefix)}{ExtractVerificationTokenSuffix(verificationToken)}";
 
+    /// <summary>
+    /// Normalizes a domain an organization claims; the rules live in <see cref="DomainName"/>.
+    /// Throws <see cref="InvalidOperationException"/> with the rule's message when the domain
+    /// cannot be claimed.
+    /// </summary>
     public static string NormalizeDomain(string? value, SqlOSSsoPortalOptions options)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            throw new InvalidOperationException("Domain is required.");
-        }
+        => DomainName.TryParse(value, ToDomainNameRules(options), out var domainName, out var error)
+            ? domainName.Value
+            : throw new InvalidOperationException(error);
 
-        var candidate = value.Trim();
-        if (Uri.TryCreate(candidate, UriKind.Absolute, out var uri) && !string.IsNullOrWhiteSpace(uri.Host))
-        {
-            candidate = uri.Host;
-        }
-
-        var atIndex = candidate.LastIndexOf('@');
-        if (atIndex >= 0)
-        {
-            candidate = candidate[(atIndex + 1)..];
-        }
-
-        candidate = candidate.Trim().Trim('[', ']').Trim('.').Trim().ToLowerInvariant();
-        if (candidate.StartsWith("*.", StringComparison.Ordinal) || candidate.Contains('*', StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException("Wildcard domains cannot be verified.");
-        }
-
-        string asciiDomain;
-        try
-        {
-            asciiDomain = new IdnMapping().GetAscii(candidate).ToLowerInvariant();
-        }
-        catch (ArgumentException ex)
-        {
-            throw new InvalidOperationException("Domain is not a valid DNS name.", ex);
-        }
-
-        if (IPAddress.TryParse(asciiDomain, out _))
-        {
-            throw new InvalidOperationException("IP addresses cannot be verified as organization domains.");
-        }
-
-        if (string.Equals(asciiDomain, "localhost", StringComparison.Ordinal))
-        {
-            if (options.AllowLocalhostDomainVerification)
-            {
-                return asciiDomain;
-            }
-
-            throw new InvalidOperationException("Localhost domain verification is disabled.");
-        }
-
-        if (!asciiDomain.Contains('.', StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException("Domain must include a public DNS suffix.");
-        }
-
-        ValidateLabels(asciiDomain);
-        foreach (var root in options.ReservedDomainRoots)
-        {
-            var normalizedRoot = NormalizeReservedRoot(root);
-            if (string.IsNullOrWhiteSpace(normalizedRoot))
-            {
-                continue;
-            }
-
-            if (string.Equals(asciiDomain, normalizedRoot, StringComparison.Ordinal)
-                || asciiDomain.EndsWith($".{normalizedRoot}", StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException($"Domain is reserved by the SqlOS host: {normalizedRoot}.");
-            }
-        }
-
-        return asciiDomain;
-    }
+    internal static DomainNameRules ToDomainNameRules(SqlOSSsoPortalOptions options)
+        => new(options.ReservedDomainRoots, options.AllowLocalhostDomainVerification);
 
     public static bool IsLocalhostDomain(string domain)
         => string.Equals(domain, "localhost", StringComparison.OrdinalIgnoreCase);
@@ -148,38 +87,6 @@ public static class SqlOSDomainOwnershipVerification
         return builder.Length == 0 ? trimmed.Trim('"') : builder.ToString();
     }
 
-    private static void ValidateLabels(string domain)
-    {
-        if (domain.Length > 253)
-        {
-            throw new InvalidOperationException("Domain name is too long.");
-        }
-
-        var labels = domain.Split('.', StringSplitOptions.RemoveEmptyEntries);
-        if (labels.Length < 2)
-        {
-            throw new InvalidOperationException("Domain must include a public DNS suffix.");
-        }
-
-        foreach (var label in labels)
-        {
-            if (label.Length is 0 or > 63)
-            {
-                throw new InvalidOperationException("Domain contains an invalid DNS label.");
-            }
-
-            if (label[0] == '-' || label[^1] == '-')
-            {
-                throw new InvalidOperationException("Domain labels cannot start or end with a hyphen.");
-            }
-
-            if (!label.All(static ch => ch is >= 'a' and <= 'z' or >= '0' and <= '9' or '-'))
-            {
-                throw new InvalidOperationException("Domain contains characters that are not valid in DNS labels.");
-            }
-        }
-    }
-
     private static string NormalizeRecordPrefix(string? value)
     {
         var prefix = string.IsNullOrWhiteSpace(value) ? "_sqlos-verify" : value.Trim().Trim('.');
@@ -209,29 +116,6 @@ public static class SqlOSDomainOwnershipVerification
         return separatorIndex >= 0 && separatorIndex < token.Length - 1
             ? token[(separatorIndex + 1)..]
             : token;
-    }
-
-    private static string? NormalizeReservedRoot(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-
-        var root = value.Trim().Trim('.').ToLowerInvariant();
-        if (string.IsNullOrWhiteSpace(root))
-        {
-            return null;
-        }
-
-        try
-        {
-            return new IdnMapping().GetAscii(root).ToLowerInvariant();
-        }
-        catch (ArgumentException ex)
-        {
-            throw new InvalidOperationException($"Reserved domain root is invalid: {value}.", ex);
-        }
     }
 }
 

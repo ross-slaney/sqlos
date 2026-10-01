@@ -3,11 +3,11 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
-using PhoneNumbers;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Domain;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -22,7 +22,6 @@ public sealed class SqlOSPhoneOtpService
     private readonly ISqlOSOtpDeliveryChannel _deliveryChannel;
     private readonly SqlOSDeliveryAdmissionService _deliveryAdmission;
     private readonly SqlOSPhoneOtpOptions _options;
-    private readonly PhoneNumberUtil _phoneNumberUtil = PhoneNumberUtil.GetInstance();
 
     public SqlOSPhoneOtpService(
         ISqlOSAuthServerDbContext context,
@@ -775,31 +774,20 @@ public sealed class SqlOSPhoneOtpService
         }
     }
 
-    private NormalizedPhoneNumber NormalizePhoneNumber(string phoneNumber)
+    private PhoneNumber NormalizePhoneNumber(string phoneNumber)
     {
-        var trimmed = RequireText(phoneNumber, "Phone number is required.");
-        try
+        var defaultRegion = string.IsNullOrWhiteSpace(_options.DefaultRegion) ? null : _options.DefaultRegion.Trim().ToUpperInvariant();
+        if (!PhoneNumber.TryParse(phoneNumber, defaultRegion, out var normalized, out var error))
         {
-            var parsed = _phoneNumberUtil.Parse(trimmed, string.IsNullOrWhiteSpace(_options.DefaultRegion) ? null : _options.DefaultRegion.Trim().ToUpperInvariant());
-            if (!_phoneNumberUtil.IsValidNumber(parsed))
-            {
-                throw new InvalidOperationException("Phone number is invalid.");
-            }
-
-            var region = _phoneNumberUtil.GetRegionCodeForNumber(parsed)?.ToUpperInvariant();
-            if (!IsCountryAllowed(region))
-            {
-                throw new InvalidOperationException("Phone number country is not allowed.");
-            }
-
-            return new NormalizedPhoneNumber(
-                _phoneNumberUtil.Format(parsed, PhoneNumberFormat.E164),
-                region);
+            throw new InvalidOperationException(error);
         }
-        catch (NumberParseException ex)
+
+        if (!IsCountryAllowed(normalized.Region))
         {
-            throw new InvalidOperationException("Phone number is invalid.", ex);
+            throw new InvalidOperationException("Phone number country is not allowed.");
         }
+
+        return normalized;
     }
 
     private bool IsCountryAllowed(string? region)
@@ -890,8 +878,6 @@ public sealed class SqlOSPhoneOtpService
                 details = data
             },
             cancellationToken: cancellationToken);
-
-    private sealed record NormalizedPhoneNumber(string E164, string? Region);
 
     private sealed record PhoneOtpSignupPayload(
         string ChallengeTokenHash,

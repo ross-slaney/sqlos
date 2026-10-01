@@ -11,6 +11,7 @@ using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 using SqlOS.Database;
+using SqlOS.Domain;
 using SqlOS.Fga.Models;
 using SqlOS.Pagination;
 
@@ -325,7 +326,7 @@ public sealed partial class SqlOSAdminService
             {
                 secretHash = hashResolver()?.Trim()
                     ?? throw new InvalidOperationException($"Confidential client '{sourceKey}' secret-hash resolver returned no value.");
-                if (!IsSupportedPasswordHash(secretHash))
+                if (!HashedSecret.IsPbkdf2Payload(secretHash))
                 {
                     throw new InvalidOperationException($"Confidential client '{sourceKey}' secret-hash resolver returned an unsupported PasswordHasher payload.");
                 }
@@ -365,19 +366,6 @@ public sealed partial class SqlOSAdminService
         }
 
         await _context.SaveChangesAsync(cancellationToken);
-    }
-
-    private static bool IsSupportedPasswordHash(string hash)
-    {
-        try
-        {
-            var payload = Convert.FromBase64String(hash);
-            return payload.Length >= 13 && payload[0] is 0x00 or 0x01;
-        }
-        catch (FormatException)
-        {
-            return false;
-        }
     }
 
     public async Task UpsertSeededOidcConnectionsAsync(CancellationToken cancellationToken = default)

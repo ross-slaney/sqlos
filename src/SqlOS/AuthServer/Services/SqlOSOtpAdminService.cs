@@ -2,10 +2,10 @@ using System.Net.Mail;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using PhoneNumbers;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Domain;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -19,7 +19,6 @@ public sealed class SqlOSOtpAdminService
     private readonly ISqlOSOtpDeliveryChannel _phoneChannel;
     private readonly SqlOSOtpAdminRateLimiter _rateLimiter;
     private readonly SqlOSAuthServerOptions _options;
-    private readonly PhoneNumberUtil _phoneNumbers = PhoneNumberUtil.GetInstance();
 
     public SqlOSOtpAdminService(
         ISqlOSAuthServerDbContext context,
@@ -215,15 +214,9 @@ public sealed class SqlOSOtpAdminService
     }
 
     private string NormalizePhone(string value)
-    {
-        try
-        {
-            var parsed = _phoneNumbers.Parse(value?.Trim(), _options.PhoneOtp.DefaultRegion);
-            if (!_phoneNumbers.IsValidNumber(parsed)) throw new ArgumentException("A valid phone destination is required.");
-            return _phoneNumbers.Format(parsed, PhoneNumberFormat.E164);
-        }
-        catch (NumberParseException exception) { throw new ArgumentException("A valid phone destination is required.", exception); }
-    }
+        => PhoneNumber.TryParse(value, _options.PhoneOtp.DefaultRegion, out var phoneNumber)
+            ? phoneNumber.E164
+            : throw new ArgumentException("A valid phone destination is required.");
 
     private static string Mask(string method, string value) => method == "email" ? MaskEmail(value)! : value.Length <= 4 ? "****" : $"***{value[^4..]}";
     private static string? MaskEmail(string? value)
