@@ -15,6 +15,19 @@ public class SqlOSFgaOptions
     public bool InitializeFunctions { get; set; } = true;
     public bool SeedCoreData { get; set; } = true;
     public int MaxResourceHierarchyDepth { get; set; } = 10;
+
+    /// <summary>
+    /// Copies the resource lineage onto every table whose entity implements <c>IHasResourceId</c>: one
+    /// column per level of the tree holding the row's ancestor at that level, the row's reach, and its
+    /// resource type. SqlOS adds the columns as shadow properties (the entity classes do not change),
+    /// indexes each level with the table's primary key and with every index the application declared,
+    /// keeps the values current with triggers, and fills them once when the setting is turned on. With the
+    /// columns in place, an authorized page for a caller whose access comes from one grant is one index
+    /// seek, whatever the table's size. The filter returned by <c>BuildFilterAsync</c> is the same
+    /// predicate either way; it reads the columns from the application table instead of joining to the
+    /// resources table. Off by default; see the list-filter documentation for the storage it costs.
+    /// </summary>
+    public bool ScopeColumns { get; set; }
     public SqlOSDashboardOptions Dashboard { get; set; } = new();
     public SqlOSFgaTableNames TableNames { get; set; } = new();
     public SqlOSFgaSeedData? StartupSeedData { get; private set; }

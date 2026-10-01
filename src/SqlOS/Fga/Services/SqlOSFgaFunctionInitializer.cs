@@ -1,4 +1,10 @@
+using System.Data;
+using System.Data.Common;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SqlOS.Database;
@@ -7,8 +13,18 @@ using SqlOS.Fga.Interfaces;
 
 namespace SqlOS.Fga.Services;
 
+/// <summary>
+/// Creates the SHRBAC enforcement routines in the database: the ancestor columns of the configured depth,
+/// <c>fn_ActiveSubjects</c>, <c>fn_AccessRoots</c>, <c>fn_IsResourceAccessible</c>, and the routines and
+/// triggers that keep the resource lineage (and the scope columns of application tables) exact. The
+/// definitions' hash is stored with the schema version, so a startup that finds the same hash and every
+/// routine present changes nothing; a new definition (a new SqlOS version, a changed option, a newly
+/// registered application table) is applied under an exclusive lock, one batch per transaction. Builds the
+/// lineage once when it is empty but the resource tree is not, and fills newly added scope columns once.
+/// </summary>
 public class SqlOSFgaFunctionInitializer
 {
+    private const string LockName = "SqlOS:FgaFunctionInitializer";
     private readonly ISqlOSFgaDbContext _context;
     private readonly SqlOSFgaOptions _options;
     private readonly ILogger<SqlOSFgaFunctionInitializer> _logger;
@@ -26,43 +42,218 @@ public class SqlOSFgaFunctionInitializer
     public async Task EnsureFunctionsExistAsync(CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Ensuring database functions exist...");
-        await EnsureIsResourceAccessibleFunctionAsync(cancellationToken);
-        _logger.LogInformation("Database functions verified.");
-    }
+        var provider = SqlOSDatabase.Resolve(_context.Database);
+        var scopeTables = ScopeTables();
 
-    private async Task EnsureIsResourceAccessibleFunctionAsync(CancellationToken cancellationToken)
-    {
-        var functionSql = SqlOSDatabase.Resolve(_context.Database).BuildIsResourceAccessibleFunctionSql(_options);
+        // Dependencies first: the ancestor columns, then fn_ActiveSubjects, then the routines built on them.
+        // Each batch is idempotent (CREATE OR ALTER / CREATE OR REPLACE) and runs in its own transaction, so no
+        // batch holds a schema lock on one object while waiting for another; readers cannot deadlock with the
+        // initializer.
+        var batches = new List<string>();
+        batches.AddRange(provider.BuildEnsureLineageColumnsSql(_options));
+        batches.Add(provider.BuildActiveSubjectsFunctionSql(_options));
+        batches.Add(provider.BuildAccessRootsFunctionSql(_options));
+        batches.Add(provider.BuildIsResourceAccessibleFunctionSql(_options));
+        batches.AddRange(provider.BuildLineageMaintenanceSql(_options, scopeTables));
+        var hash = Hash(batches);
 
         try
         {
-            _logger.LogDebug("Creating or updating fn_IsResourceAccessible TVF...");
-            if (_context.Database.IsRelational() && _context.Database.CurrentTransaction == null)
+            if (!_context.Database.IsRelational() || _context.Database.CurrentTransaction != null)
             {
-                await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
-                await SqlOSDatabase.AcquireExclusiveTransactionLockAsync(
+                // Inside a caller's transaction the caller owns the locking.
+                await ApplyAsync(provider, batches, scopeTables, hash, cancellationToken);
+                _logger.LogInformation("Database functions verified.");
+                return;
+            }
+
+            await _context.Database.OpenConnectionAsync(cancellationToken);
+            try
+            {
+                if (await IsCurrentAsync(provider, scopeTables, hash, cancellationToken))
+                {
+                    _logger.LogDebug("The FGA routines, the resource lineage, and its triggers are current.");
+                    _logger.LogInformation("Database functions verified.");
+                    return;
+                }
+
+                await provider.AcquireSessionLockAsync(
                     _context.Database,
-                    "SqlOS:FgaFunctionInitializer",
+                    LockName,
                     TimeSpan.FromSeconds(30),
                     "Could not acquire the SqlOS FGA function lock.",
                     cancellationToken);
-                await _context.Database.ExecuteSqlRawAsync(functionSql, cancellationToken);
-                await transaction.CommitAsync(cancellationToken);
+                try
+                {
+                    // Another process may have applied the same definitions while this one waited.
+                    if (!await IsCurrentAsync(provider, scopeTables, hash, cancellationToken))
+                    {
+                        await ApplyAsync(provider, batches, scopeTables, hash, cancellationToken);
+                    }
+                }
+                finally
+                {
+                    await provider.ReleaseSessionLockAsync(_context.Database, LockName, cancellationToken);
+                }
             }
-            else
+            finally
             {
-                await _context.Database.ExecuteSqlRawAsync(functionSql, cancellationToken);
+                await _context.Database.CloseConnectionAsync();
             }
 
-            _logger.LogInformation("fn_IsResourceAccessible TVF is ready.");
+            _logger.LogInformation("Database functions verified.");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to create or update fn_IsResourceAccessible TVF. Authorization queries may fail.");
+            _logger.LogError(ex, "Failed to create or update the SqlOS FGA functions. Authorization queries may fail.");
             throw;
         }
     }
 
+    /// <summary>The application tables of the context's model that carry the scope columns.</summary>
+    private IReadOnlyList<SqlOSFgaScopeTable> ScopeTables()
+        => _context is DbContext db ? SqlOSFgaScopeColumns.Tables(db.Model) : [];
+
+    /// <summary>The stored hash matches these definitions, every routine exists, and the lineage is built.</summary>
+    private async Task<bool> IsCurrentAsync(ISqlOSDatabaseProvider provider, IReadOnlyList<SqlOSFgaScopeTable> scopeTables, string hash, CancellationToken cancellationToken)
+    {
+        var stored = await ExecuteScalarAsync(provider.BuildSelectRoutinesHashSql(_options, scopeTables), null, cancellationToken) as string;
+        if (!string.Equals(stored, hash, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return !await LineageNeedsBuildAsync(provider, cancellationToken);
+    }
+
+    private async Task ApplyAsync(
+        ISqlOSDatabaseProvider provider,
+        IReadOnlyList<string> batches,
+        IReadOnlyList<SqlOSFgaScopeTable> scopeTables,
+        string hash,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogDebug("Creating or updating the FGA routines, the resource lineage columns, and the lineage triggers...");
+        foreach (var batch in batches)
+        {
+            await _context.Database.ExecuteSqlRawAsync(batch, cancellationToken);
+        }
+
+        await _context.Database.ExecuteSqlRawAsync(
+            provider.BuildStoreRoutinesHashSql(_options),
+            [provider.CreateParameter("@RoutinesHash", hash)],
+            cancellationToken);
+        _logger.LogInformation("fn_IsResourceAccessible TVF is ready.");
+
+        if (await LineageNeedsBuildAsync(provider, cancellationToken))
+        {
+            // The rebuild fills the scope columns of every application table as well.
+            await BuildLineageAsync(provider, cancellationToken);
+            return;
+        }
+
+        foreach (var table in scopeTables)
+        {
+            _logger.LogInformation("Filling the FGA scope columns of {Schema}.{Table} from the resource lineage...", table.Schema ?? "(default)", table.Table);
+            await ExecuteNonQueryAsync(provider.BuildScopeFillSql(_options, table), cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// The first startup after the lineage migration finds an existing tree whose roots have no depth. Build
+    /// it once; from then on the triggers keep it current.
+    /// </summary>
+    private async Task<bool> LineageNeedsBuildAsync(ISqlOSDatabaseProvider provider, CancellationToken cancellationToken)
+    {
+        var value = await ExecuteScalarAsync(provider.BuildLineageNeedsBuildSql(_options), null, cancellationToken);
+        return Convert.ToInt32(value, CultureInfo.InvariantCulture) == 1;
+    }
+
+    private async Task BuildLineageAsync(ISqlOSDatabaseProvider provider, CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("Building the FGA resource lineage for the existing resource tree...");
+        await ExecuteNonQueryAsync(provider.BuildLineageRebuildSql(_options), cancellationToken);
+        _logger.LogInformation("FGA resource lineage built.");
+    }
+
+    private async Task<object?> ExecuteScalarAsync(string sql, DbParameter? parameter, CancellationToken cancellationToken)
+    {
+        var (connection, wasOpen) = await OpenAsync(cancellationToken);
+        try
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = sql;
+            if (parameter is not null)
+            {
+                command.Parameters.Add(parameter);
+            }
+
+            Enlist(command);
+            var value = await command.ExecuteScalarAsync(cancellationToken);
+            return value is DBNull ? null : value;
+        }
+        finally
+        {
+            if (!wasOpen)
+            {
+                await connection.CloseAsync();
+            }
+        }
+    }
+
+    private async Task ExecuteNonQueryAsync(string sql, CancellationToken cancellationToken)
+    {
+        var (connection, wasOpen) = await OpenAsync(cancellationToken);
+        try
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = sql;
+            command.CommandTimeout = 0;
+            Enlist(command);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+        finally
+        {
+            if (!wasOpen)
+            {
+                await connection.CloseAsync();
+            }
+        }
+    }
+
+    private async Task<(DbConnection Connection, bool WasOpen)> OpenAsync(CancellationToken cancellationToken)
+    {
+        var connection = _context.Database.GetDbConnection();
+        var wasOpen = connection.State == ConnectionState.Open;
+        if (!wasOpen)
+        {
+            await connection.OpenAsync(cancellationToken);
+        }
+
+        return (connection, wasOpen);
+    }
+
+    private void Enlist(DbCommand command)
+    {
+        if (_context.Database.CurrentTransaction != null)
+        {
+            command.Transaction = _context.Database.CurrentTransaction.GetDbTransaction();
+        }
+    }
+
+    /// <summary>SHA-256 of the definitions, so any change to a routine or to the options it embeds re-applies them.</summary>
+    internal static string Hash(IEnumerable<string> batches)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\n--\n", batches)));
+        return Convert.ToHexString(bytes).ToLowerInvariant();
+    }
+
     internal static string BuildIsResourceAccessibleFunctionSql(SqlOSFgaOptions options)
         => SqlServerDatabaseProvider.Instance.BuildIsResourceAccessibleFunctionSql(options);
+
+    internal static string BuildActiveSubjectsFunctionSql(SqlOSFgaOptions options)
+        => SqlServerDatabaseProvider.Instance.BuildActiveSubjectsFunctionSql(options);
+
+    internal static string BuildAccessRootsFunctionSql(SqlOSFgaOptions options)
+        => SqlServerDatabaseProvider.Instance.BuildAccessRootsFunctionSql(options);
 }

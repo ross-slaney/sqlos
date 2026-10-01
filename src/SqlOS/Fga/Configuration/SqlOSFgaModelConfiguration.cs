@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
 
@@ -67,13 +69,37 @@ public static class SqlOSFgaModelConfiguration
         {
             entity.ToTable(tables.ResourceTypes, schema, t => t.ExcludeFromMigrations());
             entity.HasKey(e => e.Id);
+
+            // The compact key of the type (schema v11), assigned by the database.
+            DatabaseOwned(entity.Property<int?>(SqlOSFgaLineage.SeqColumn));
         });
 
         // Resource
         modelBuilder.Entity<SqlOSFgaResource>(entity =>
         {
-            entity.ToTable(tables.Resources, schema, t => t.ExcludeFromMigrations());
+            entity.ToTable(tables.Resources, schema, t =>
+            {
+                t.ExcludeFromMigrations();
+
+                // The lineage triggers (SqlOSFgaFunctionInitializer). Declared so EF Core's SQL Server update
+                // pipeline does not emit OUTPUT without INTO, which SQL Server rejects on a table with triggers.
+                foreach (var trigger in SqlOSFgaLineage.TriggerNames(tables.Resources))
+                {
+                    t.HasTrigger(trigger);
+                }
+            });
             entity.HasKey(e => e.Id);
+
+            // The lineage (schema v11): the database assigns Seq and the triggers keep Depth, Reach, and the
+            // ancestor at every level exact, so EF Core never writes them. Queries read them: the filter
+            // BuildFilterAsync returns compares a row's ancestor at the caller's level with the caller's grants.
+            DatabaseOwned(entity.Property<long?>(SqlOSFgaLineage.SeqColumn));
+            DatabaseOwned(entity.Property<short?>(SqlOSFgaLineage.DepthColumn));
+            DatabaseOwned(entity.Property<short?>(SqlOSFgaLineage.ReachColumn));
+            for (var level = 0; level < SqlOSFgaLineage.Levels(options); level++)
+            {
+                DatabaseOwned(entity.Property<long?>(SqlOSFgaLineage.AncestorColumn(level)));
+            }
             entity.HasOne(e => e.Parent)
                 .WithMany(r => r.Children)
                 .HasForeignKey(e => e.ParentId)
@@ -184,6 +210,20 @@ public static class SqlOSFgaModelConfiguration
             entity.ToView(null); // Not mapped to any table
         });
 
+        // AccessRoot (keyless - fn_AccessRoots result): the resources a caller holds a usable grant on.
+        modelBuilder.Entity<SqlOSFgaAccessRoot>(entity =>
+        {
+            entity.HasNoKey();
+            entity.ToView(null);
+        });
+
+        // ActiveSubject (keyless - fn_ActiveSubjects result): the caller's live subjects.
+        modelBuilder.Entity<SqlOSFgaActiveSubject>(entity =>
+        {
+            entity.HasNoKey();
+            entity.ToView(null);
+        });
+
         // Register TVF using the concrete DbContext type's MethodInfo.
         // EF Core requires the method to be on a DbContext subclass, not an interface.
         // When contextType is null (e.g., InMemory tests), TVF registration is skipped.
@@ -200,5 +240,13 @@ public static class SqlOSFgaModelConfiguration
                     .HasSchema(schema);
             }
         }
+    }
+
+    /// <summary>A column the database fills and maintains: EF Core reads it and never includes it in a write.</summary>
+    internal static void DatabaseOwned(PropertyBuilder property)
+    {
+        property.ValueGeneratedNever();
+        property.Metadata.SetBeforeSaveBehavior(PropertySaveBehavior.Ignore);
+        property.Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Ignore);
     }
 }

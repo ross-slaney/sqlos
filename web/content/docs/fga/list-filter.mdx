@@ -8,7 +8,7 @@ order: 1
 
 `BuildFilterAsync` returns a filter for `Where(...)`. Lists only rows the subject may see. Use this on list endpoints.
 
-This is a read-side helper. Lifecycle-managed domain rows normally implement `ISqlOSResourceEntity`; the filter only needs the inherited `ResourceId` contract to join application rows to accessible FGA resources.
+This is a read-side helper. Lifecycle-managed domain rows normally implement `ISqlOSResourceEntity`; the filter only needs the inherited `ResourceId` contract to tie application rows to their FGA resources.
 
 <Callout type="warning" title="Authentication comes first">
   The filter authorizes a subject ID; it does not authenticate the request. Validate a bearer token for the API's exact audience before the endpoint runs, then use the validated token's user ID as the FGA subject.
@@ -26,11 +26,43 @@ var chains = await dbContext.Chains
     .ToListAsync();
 ```
 
-The subject only sees chains they have access to. The filter translates to a SQL query -- no in-memory filtering.
+The subject only sees chains they have access to. The filter translates to a SQL predicate -- no in-memory filtering.
+
+## How the filter works
+
+Every FGA resource carries its **lineage**: its ancestor at each level of the tree, its depth, and its **reach**, the highest level from which access flows down to it through active resources only. SqlOS keeps these columns exact with triggers on the resource table and fills them once when you upgrade.
+
+When you build a filter, SqlOS reads the caller's **access roots** once: the resources on which the caller, or one of their active groups, holds a current grant whose role includes the permission. The filter then says, for each row: the row's resource has one of those roots as its ancestor at the root's level, and the row's reach includes that level. It is the same predicate for every caller and every table.
+
+The database can run it two ways, and chooses per query from its statistics: scan the rows in the order you asked for and test each one (one lookup per row, which is what a caller who sees most rows wants), or start from the caller's roots, read their scope from the ancestor index, and join it to your table (what a caller who sees a few rows wants). Neither way walks the tree at query time.
+
+A caller with more than 1,000 roots (thousands of grants on single resources, say) is checked row by row by `fn_IsResourceAccessible` instead, which probes the grants of each row's ancestors: the same rule, at a cost that does not depend on how many grants the caller holds.
+
+## Scope columns
+
+By default the filter reads a row's lineage from the resources table by the row's `ResourceId`. With `ScopeColumns` on, SqlOS copies the lineage onto every table whose entity implements `IHasResourceId`, and the filter reads it from the row itself:
+
+```csharp
+builder.Services.AddSqlOS(options =>
+{
+    options.Fga.ScopeColumns = true;
+});
+```
+
+What this does, for every such table:
+
+- adds the configured depth plus one ancestor columns, a reach column, and a resource type column, as shadow properties: your entity classes do not change, and your next EF migration carries the columns;
+- adds, per level, an index starting with that level's ancestor column followed by the table's primary key, and one more per index you declared on the table (the orders you page in), filtered to rows at or below the level;
+- creates triggers that copy a row's lineage when it is inserted or its `ResourceId` changes, and keep it current when resources move, are deactivated, or are deleted;
+- fills the columns once when the setting is turned on.
+
+With the columns in place, a page for a caller whose access comes from one grant is one index seek plus the rows of the page, whatever the table's size, in any order you declared an index for. The price is storage: at the default depth that is 13 columns per row, and one index per level per declared order over the rows at or below that level.
+
+The setting is database-wide. For a context derived from `SqlOSDbContext<TContext>` nothing else is needed. A context that calls `ApplySqlOSFgaModel` itself must call it after configuring its entities and pass `Database.ProviderName`.
 
 ## Filter lifetime
 
-The subject's principal set (the subject plus its active group memberships) is resolved when the returned task is awaited. Build the filter once per request and compose it into that request's queries. Do not cache the filter in statics or reuse it across requests -- grant and membership changes are not reflected in an already-built filter.
+The caller's principal set (the subject plus its active group memberships) and their grants are read when the returned task is awaited. Build the filter once per request and compose it into that request's queries. Do not cache the filter in statics or reuse it across requests -- grant and membership changes are not reflected in an already-built filter. The caller's own lifecycle is still checked when the query runs: a user deactivated after the filter was built sees nothing.
 
 ## Composing with plain EF
 
@@ -54,7 +86,7 @@ var items = await db.InventoryItems
     .ToListAsync();
 ```
 
-Everything composes into one SQL statement: the authorization TVF join, your business predicates, the projection, the ordering, and the paging.
+Everything composes into one SQL statement: the authorization predicate, your business predicates, the projection, the ordering, and the paging.
 
 For cursor/keyset pagination over authorized lists, see [Paginating authorized lists](/docs/guides/paginating-authorized-lists).
 

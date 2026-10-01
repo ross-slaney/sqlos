@@ -80,6 +80,31 @@ When checking `WORKSPACE_VIEW` on `workspace::1`:
 
 This means a single grant at the organization level can authorize resources underneath it without creating per-resource grants.
 
+An inactive resource cuts the chain: a grant above it does not reach anything beneath it, and the inactive resource itself is denied.
+
+## The lineage
+
+SqlOS does not walk the tree at query time. Every resource carries its **lineage**: its ancestor at each level of the tree (`Ancestor0` is the top of its tree, `Ancestor1` the next level down, and so on, up to the configured `MaxResourceHierarchyDepth`), its `Depth`, and its `Reach`, the highest level from which access flows down to it through active resources only. A resource that is inactive, lies in a cycle, or sits deeper than the configured depth has no reach, and is denied.
+
+With the lineage, "is `workspace::1` under a grant on `org::acme`" is one comparison: `workspace::1`'s ancestor at level 1 is `org::acme`, and its reach includes level 1. That is what [`BuildFilterAsync`](/docs/fga/list-filter) and `fn_IsResourceAccessible` evaluate.
+
+Triggers on the resources table keep the lineage exact. The cost of each operation:
+
+| Operation | What SqlOS does | Cost |
+|---|---|---|
+| Create a resource | Computes its lineage from its parent | One row |
+| Grant or revoke | Nothing: grants are not part of the lineage | Nothing |
+| Change a resource's type | Updates the type on its application rows (scope columns only) | Its rows |
+| Move a resource to another parent | Recomputes the subtree beneath it, level by level | The subtree |
+| Deactivate or reactivate a resource | Recomputes the reach of the subtree beneath it | The subtree |
+| Delete a resource | Clears its application rows' scope columns | Its rows |
+| A move that would create a cycle, or place a resource deeper than the configured depth | Rejects the statement | — |
+| First start after upgrading, or a changed depth | Fills the lineage once, level by level over the whole table | The whole table, once |
+
+With [scope columns](/docs/fga/list-filter#scope-columns) on, every operation above also updates the application rows of the resources it touched.
+
+Bulk loads that skip triggers must fill the lineage themselves or run the rebuild procedure afterwards (`sp_SqlOSFgaResources_LineageRebuild` on SQL Server, `fn_SqlOSFgaResources_LineageRebuild()` on PostgreSQL).
+
 ## Browse in the dashboard
 
 **Path**: Fine-Grained Auth > Resources

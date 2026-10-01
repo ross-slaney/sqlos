@@ -3,6 +3,7 @@ using SqlOS.AuthServer.Interfaces;
 using SqlOS.Database;
 using SqlOS.Extensions;
 using SqlOS.Fga;
+using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
 
@@ -39,8 +40,12 @@ public abstract class SqlOSDbContext<TContext> : DbContext, ISqlOSAuthServerDbCo
     protected sealed override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
-        modelBuilder.UseSqlOS(Database.IsRelational() ? typeof(TContext) : null, Database.ProviderName);
+        var fga = SqlOSFgaOptionsResolver.Resolve(Database);
+        modelBuilder.UseSqlOS(Database.IsRelational() ? typeof(TContext) : null, Database.ProviderName, fga);
         OnApplicationModelCreating(modelBuilder);
+
+        // Last, so every application entity is configured: the scope columns, when the option is on.
+        SqlOSFgaScopeColumns.Configure(modelBuilder, fga, Database.ProviderName);
     }
 
     /// <summary>

@@ -1,8 +1,10 @@
 using System.Linq.Expressions;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using SqlOS.Database;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
@@ -407,7 +409,14 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
 
         var permission = await _context.Set<SqlOSFgaPermission>()
             .AsNoTracking()
-            .FirstOrDefaultAsync(p => p.Key == permissionKey);
+            .Where(p => p.Key == permissionKey)
+            .Select(p => new
+            {
+                p.Id,
+                p.ResourceTypeId,
+                TypeSeq = p.ResourceTypeId == null ? null : EF.Property<int?>(p.ResourceType!, SqlOSFgaLineage.SeqColumn),
+            })
+            .FirstOrDefaultAsync();
 
         if (permission == null)
         {
@@ -415,40 +424,50 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
             return entity => false;
         }
 
+        // The caller's access roots, read once: the resources their live subjects hold a current grant on
+        // with a role that includes the permission. The filter compares each row's ancestor at a root's
+        // level with the root. Grants are read when the filter is built, as group membership is; build the
+        // filter per request. A caller with more roots than the filter lists is checked row by row instead.
+        var provider = SqlOSDatabase.Resolve(_context.Database);
         var subjectIdsJson = JsonSerializer.Serialize(subjectIds);
-        var permissionId = permission.Id;
-
-        // Build the expression using the concrete DbContext type's method
-        // so EF Core can match it to the registered DbFunction (TVF).
-        // Using the interface method directly would fail because EF Core only
-        // registers DbFunctions on DbContext subclasses, not interfaces.
-        var contextType = _context.GetType();
-        var tvfMethod = contextType.GetMethod(
-            nameof(ISqlOSFgaDbContext.IsResourceAccessible),
-            new[] { typeof(string), typeof(string), typeof(string) });
-
-        if (tvfMethod == null)
+        var roots = await _context.Set<SqlOSFgaAccessRoot>()
+            .FromSqlRaw(provider.BuildAccessRootsQuerySql(_options), subjectIdsJson, permission.Id)
+            .AsNoTracking()
+            .Take(SqlOSFgaLineage.MaxListedRoots + 1)
+            .ToListAsync();
+        if (roots.Count == 0)
         {
-            _logger.LogWarning("IsResourceAccessible method not found on {ContextType}", contextType.Name);
             return entity => false;
         }
 
-        var entityParam = Expression.Parameter(typeof(T), "entity");
-        var resourceIdProp = Expression.Property(entityParam, nameof(IHasResourceId.ResourceId));
-        var contextExpr = Expression.Constant(_context, contextType);
-        var filterParameters = new AuthorizationFilterParameters(subjectIdsJson, permissionId);
-        var filterParametersExpr = Expression.Constant(filterParameters);
-        var tvfCall = Expression.Call(contextExpr, tvfMethod,
-            resourceIdProp,
-            Expression.Field(filterParametersExpr, nameof(AuthorizationFilterParameters.SubjectIds)),
-            Expression.Field(filterParametersExpr, nameof(AuthorizationFilterParameters.PermissionId)));
+        var liveQuery = _context.Set<SqlOSFgaActiveSubject>()
+            .FromSqlRaw(provider.BuildActiveSubjectsQuerySql(_options), subjectIdsJson)
+            .AsNoTracking();
 
-        var anyMethod = typeof(Queryable).GetMethods()
-            .First(m => m.Name == "Any" && m.GetParameters().Length == 1)
-            .MakeGenericMethod(typeof(SqlOSFgaAccessibleResource));
-        var anyCall = Expression.Call(anyMethod, tvfCall);
+        var model = (_context as DbContext)?.Model;
+        var entityType = model?.FindEntityType(typeof(T));
+        var scoped = entityType is not null && SqlOSFgaScopeColumns.Has(entityType);
+        var levels = scoped
+            ? CountLevels(entityType!, SqlOSFgaLineage.ScopeAncestorColumn)
+            : CountLevels(model?.FindEntityType(typeof(SqlOSFgaResource)), SqlOSFgaLineage.AncestorColumn);
+        return SqlOSFgaFilterBuilder.Build<T>(_context, roots, liveQuery, subjectIdsJson, permission.Id, permission.ResourceTypeId, permission.TypeSeq, scoped, levels);
+    }
 
-        return Expression.Lambda<Func<T, bool>>(anyCall, entityParam);
+    /// <summary>The ancestor columns the model declares for an entity type, or the configured depth's when the model is unavailable.</summary>
+    private int CountLevels(IEntityType? entityType, Func<int, string> ancestorColumn)
+    {
+        if (entityType is null)
+        {
+            return SqlOSFgaLineage.Levels(_options);
+        }
+
+        var levels = 0;
+        while (entityType.FindProperty(ancestorColumn(levels)) is not null)
+        {
+            levels++;
+        }
+
+        return levels > 0 ? levels : SqlOSFgaLineage.Levels(_options);
     }
 
     private async Task<List<string>> ResolveSubjectsAsync(string subjectId, List<SqlOSFgaAccessTrace> trace)
@@ -598,17 +617,5 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
                        (g.EffectiveFrom == null || g.EffectiveFrom <= now) &&
                        (g.EffectiveTo == null || g.EffectiveTo >= now))
             .ToListAsync();
-    }
-
-    private sealed class AuthorizationFilterParameters
-    {
-        public AuthorizationFilterParameters(string subjectIds, string permissionId)
-        {
-            SubjectIds = subjectIds;
-            PermissionId = permissionId;
-        }
-
-        public readonly string SubjectIds;
-        public readonly string PermissionId;
     }
 }

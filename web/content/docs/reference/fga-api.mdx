@@ -68,7 +68,7 @@ if (!canEdit)
 
 ### BuildFilterAsync
 
-Produce a LINQ expression that filters an `IQueryable<T>` to only entities the subject can access. The expression translates to a SQL Server table-valued function call at query time. This is the entire query-side API: pagination, sorting, search, and projection are plain EF Core composed on the same query (see [Paginating authorized lists](/docs/guides/paginating-authorized-lists)).
+Produce a LINQ expression that filters an `IQueryable<T>` to only entities the subject can access. The expression translates to a SQL predicate over the resource lineage at query time (see [List filtering](/docs/fga/list-filter#how-the-filter-works)). This is the entire query-side API: pagination, sorting, search, and projection are plain EF Core composed on the same query (see [Paginating authorized lists](/docs/guides/paginating-authorized-lists)).
 
 ```csharp
 var filter = await authService
@@ -93,7 +93,9 @@ var chains = await dbContext.Chains
 
 `Task<Expression<Func<T, bool>>>` — an EF Core-compatible expression you pass to `.Where()`.
 
-**Filter lifetime**: the subject's principal set (the subject plus its active group memberships) is resolved when the task is awaited. Build the filter once per request and compose it into that request's queries; do not cache it in statics or reuse it across requests.
+**Filter lifetime**: the subject's principal set (the subject plus its active group memberships) and their grants are resolved when the task is awaited; the caller's own lifecycle is rechecked when the query runs. Build the filter once per request and compose it into that request's queries; do not cache it in statics or reuse it across requests.
+
+**Scope columns**: with `SqlOSFgaOptions.ScopeColumns` on, the predicate reads the lineage from the entity's own table instead of joining the resources table; see [List filtering](/docs/fga/list-filter#scope-columns).
 
 ### Lifecycle enforcement
 

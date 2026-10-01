@@ -62,7 +62,7 @@ Define resources (projects, chains, stores), roles (admin, viewer), and permissi
         .ToListAsync();
     ```
 
-    Users only see rows they may access. Under the hood that becomes a SQL Server TVF call.
+    Users only see rows they may access. Under the hood that becomes a SQL predicate over the resource lineage, in the same query as your sorting and paging.
   </TabsContent>
 
   <TabsContent value="checks">
