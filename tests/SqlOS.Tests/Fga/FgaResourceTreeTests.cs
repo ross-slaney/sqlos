@@ -141,6 +141,18 @@ public sealed class FgaResourceTreeTests
     }
 
     [TestMethod]
+    public async Task CreateResource_without_a_parent_creates_a_root_as_7_x_did()
+    {
+        await using var context = CreateContext();
+        await SeedModelAsync(context);
+
+        context.CreateResource(null!, "Second root", "workspace", "workspace::second-root");
+        await context.SaveChangesAsync();
+
+        (await context.Set<SqlOSFgaResource>().SingleAsync(resource => resource.Id == "workspace::second-root")).ParentId.Should().BeNull();
+    }
+
+    [TestMethod]
     public async Task Host_moves_deactivations_and_deletions_are_audited_and_creations_are_not()
     {
         await using var context = CreateContext();

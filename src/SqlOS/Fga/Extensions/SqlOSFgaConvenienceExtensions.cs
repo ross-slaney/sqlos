@@ -64,7 +64,8 @@ public static class SqlOSFgaConvenienceExtensions
             throw new InvalidOperationException($"FGA resource type '{resourceTypeId}' was not found. Seed or create the resource type before provisioning resources.");
         }
 
-        if (!await tree.ExistsAsync(parentId, CancellationToken.None).ConfigureAwait(false)
+        if (parentId != null
+            && !await tree.ExistsAsync(parentId, CancellationToken.None).ConfigureAwait(false)
             && !SqlOSFgaWrites.IsPendingResourceEntity(context, parentId))
         {
             throw new InvalidOperationException($"FGA resource '{parentId}' was not found.");
