@@ -384,7 +384,7 @@ using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
 
 ISqlOSFgaDbContext db = null!;
-var support = new SqlOSFgaUserGroup();
+SqlOSFgaUserGroup support = null!;
 var ct = CancellationToken.None;
 
 ${snippet}

@@ -50,7 +50,7 @@ await context.ProvisionServiceAccountSubjectAsync(
     cancellationToken: ct);
 ```
 
-The helpers are idempotent and update provided mutable fields without creating grants. Grants stay explicit:
+The helpers are idempotent and update provided mutable fields without creating grants. They are also how host code changes a subject: the subject entities' properties are read-only, and each change goes through the subject, so a deactivation or an expiry change writes its audit row. Grants stay explicit:
 
 ```csharp
 await context.GrantRoleAsync(
@@ -75,9 +75,33 @@ await subjectService.AddToGroupAsync(subjectId, group.Id, ct);
 
 Groups are subjects with type `group`, but groups cannot be members of other groups.
 
+`CreateGroupAsync` creates a global group with a generated subject ID. To give a team a stable ID and an owning organization, provision it instead:
+
+```csharp
+var team = await context.ProvisionGroupSubjectAsync(
+    subjectId: "group::acme::inventory-operators",
+    name: "Inventory Operators",
+    groupType: "team",
+    organizationId: "org_acme",
+    cancellationToken: ct);
+await context.SaveChangesAsync(ct);
+```
+
 For the complete membership, grant, inherited-access, and removal workflow, follow [Authorize teams with FGA groups](/docs/guides/fga-groups). That guide also explains why `SqlOSFgaUserGroup.Id` is used for membership while `SubjectId` is used for grants.
 
 A service account is an FGA subject. It can receive grants without being an AuthServer user. It is not a machine client. A machine client is the AuthServer confidential OAuth client that exchanges a secret at `/sqlos/auth/token`. `SeedMachineClient` and **Auth Server > Machine Clients** can create both and link them; provisioning a service account here does not register that OAuth client. See [Machine Clients](/docs/guides/service-account-jobs).
+
+## SqlOS users and SCIM
+
+A SqlOS user has one FGA subject, keyed by the SqlOS user ID. Provision it with `ProvisionUserSubjectAsync(user.Id, ...)` and check access with `user.Id`. When a SCIM directory provisions the user, it resolves the same subject: it reuses the one you provisioned, or creates it with the user's ID, and puts it in the directory's groups, so grants mapped to those groups reach a check by user ID. Only the directory that owns the person's lifecycle renames or deactivates that subject; another organization's directory changes only its own groups' memberships.
+
+Upgrading from 7.x merges the subjects earlier SCIM versions created with IDs of their own (`subj_...`) into the user-ID subject at startup, moving their group memberships and grants, dropping a grant the user's subject already holds, and recording `fga.subject.merged`. A check by an old `subj_...` ID then finds no subject.
+
+## Record activity and delete subjects
+
+`RecordSubjectActivityAsync(subjectId)` stamps a user's `LastLoginAt`, an agent's `LastRunAt`, or a service account's `LastUsedAt`.
+
+The dashboard deletes a subject that nothing depends on (`DELETE /sqlos/admin/fga/api/subjects/{subjectId}` answers `204 No Content`, audited as `fga.subject.deleted`). It refuses with `409 Conflict` and the reason while the subject holds a grant, belongs to a group, is a group with members, is a machine client's service account, or is provisioned by a SCIM directory: revoke, remove, or deprovision those first.
 
 ## Authentication by subject type
 

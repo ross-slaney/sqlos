@@ -58,4 +58,8 @@ await db.ProvisionResourceWithIdAsync(
     cancellationToken: ct);
 ```
 
-For strict creates, use `CreateResourceAsync(...)` or `CreateResourceWithIdAsync(...)`. For deletes, use `DeleteResourceAsync(...)`; it deletes the resource and direct grants, but it does not cascade child resources.
+For strict creates, use `CreateResourceAsync(...)` or `CreateResourceWithIdAsync(...)`. For deletes, use `DeleteResourceAsync(...)`; it deletes the resource and revokes its direct grants (audited as `fga.grant.revoked` with the reason `resource_deleted`), but it does not cascade child resources. To move a resource or change whether it is active, provision it again with the new `parentResourceId` or `isActive`.
+
+Every helper validates the change before it tracks it: the resource type must exist, the parent must exist (or be an entity this unit of work is adding), and the resource can be neither its own ancestor nor deeper than the configured maximum hierarchy depth. The lower-level `CreateResource(parentId, ...)` checks the same, so an unknown parent fails when you call it, not later as a database error on save.
+
+`SqlOSFgaResource` properties are read-only; resources change only through these helpers and entity-backed sync. Moves, activity changes, and deletions are audited (`fga.resource.moved`, `fga.resource.deactivated` or `fga.resource.reactivated`, `fga.resource.deleted`).

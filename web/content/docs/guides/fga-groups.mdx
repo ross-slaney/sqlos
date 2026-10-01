@@ -78,15 +78,20 @@ The result deliberately has two identifiers:
 
 `CreateGroupAsync` persists both the group subject and group record before returning.
 
-`CreateGroupAsync` does not accept an organization id, and group authorization does not add a tenant predicate automatically. For a tenant-owned team, keep the group-to-organization relationship in application data or tag the generated group subject before exposing membership management:
+`CreateGroupAsync` creates a global group with a generated subject id, and group authorization does not add a tenant predicate automatically. For a tenant-owned team, provision the group instead with its organization and a stable subject id your application chooses, then save:
 
 ```csharp
-var supportSubject = await db.Set<SqlOSFgaSubject>()
-    .SingleAsync(subject => subject.Id == support.SubjectId, ct);
-
-supportSubject.OrganizationId = organizationId;
+var support = await db.ProvisionGroupSubjectAsync(
+    subjectId: $"group::{organizationId}::support",
+    name: "Support",
+    description: "People and services that operate the customer support workspace",
+    groupType: "team",
+    organizationId: organizationId,
+    cancellationToken: ct);
 await db.SaveChangesAsync(ct);
 ```
+
+`ProvisionGroupSubjectAsync` is idempotent: running it again finds the group by its subject id and keeps an omitted value as it is. It returns the same group record as `CreateGroupAsync`, with both identifiers below.
 
 `OrganizationId` is metadata your trusted workflow can validate; `CheckAccessAsync` and group resolution do not enforce it for you. A global group may intentionally omit it, but a tenant-owned team needs an equivalent application-owned boundary.
 
@@ -147,7 +152,7 @@ await db.GrantRoleAsync(
 await db.SaveChangesAsync(ct);
 ```
 
-`GrantRoleAsync` is idempotent for a normal replay after the earlier grant is visible, but it does not save automatically. Concurrent first writers can still race on the deterministic grant id, so serialize or handle duplicate-key convergence just as you do for membership. It creates one grant:
+`GrantRoleAsync` is idempotent: a subject holds a role on a resource once per time window, so a replay returns the existing grant, but it does not save automatically. Concurrent first writers can still race on the deterministic grant id, so serialize or handle duplicate-key convergence just as you do for membership. It creates one grant:
 
 ```text
 subject = support.SubjectId

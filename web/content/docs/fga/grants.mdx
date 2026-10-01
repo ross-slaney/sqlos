@@ -27,6 +27,8 @@ await context.GrantRoleAsync(
 await context.SaveChangesAsync(ct);
 ```
 
+`GrantRoleAsync` is the host's way to create a grant: it checks that the subject, the role (by key or ID), and the resource exist, and tracks the grant for your next save. It also accepts an `ISqlOSResourceEntity` in place of the resource ID.
+
 **Admin API**:
 
 ```bash
@@ -39,6 +41,14 @@ curl -X POST http://localhost:5062/sqlos/admin/fga/api/grants \
     "resourceId": "org::acme"
   }'
 ```
+
+A subject holds a role on a resource once per time window. `GrantRoleAsync` returns the grant the subject already has instead of adding a second one, and the Admin API answers `409 Conflict` with the existing grant's `grantId`:
+
+```json
+{ "error": "An identical grant already exists.", "grantId": "grant_..." }
+```
+
+Every grant and revocation writes an audit row, `fga.grant.created` or `fga.grant.revoked`, naming who made the change: host code, an operator, a SCIM directory, or SqlOS itself.
 
 ## Inheritance
 
@@ -58,6 +68,15 @@ A Store Clerk granted on `store-001` can only see that one store's inventory. A 
 
 ## Revoke a grant
 
+**SDK**:
+
+```csharp
+await context.RevokeRoleAsync(subjectId, "org::acme", "company_admin", ct);
+await context.SaveChangesAsync(ct);
+```
+
+`RevokeRoleAsync` removes the role in every time window the subject holds it.
+
 **Admin API**:
 
 ```bash
@@ -69,15 +88,21 @@ The Admin API requires an operator session; see [Authenticate operator API calls
 
 ## Time-bounded grants
 
-Grants support optional `EffectiveFrom` and `EffectiveTo` dates for temporary access:
+Grants support optional `EffectiveFrom` and `EffectiveTo` dates for temporary access. Pass them, and an optional description, in `SqlOSFgaGrantOptions`:
 
 ```csharp
-new SqlOSFgaGrant
-{
-    SubjectId = contractorId,
-    ResourceId = "store-001",
-    RoleId = storeManagerRole.Id,
-    EffectiveFrom = DateTime.UtcNow,
-    EffectiveTo = DateTime.UtcNow.AddMonths(3)
-}
+await context.GrantRoleAsync(
+    contractorId,
+    "store-001",
+    "store_manager",
+    new SqlOSFgaGrantOptions
+    {
+        EffectiveFrom = DateTime.UtcNow,
+        EffectiveTo = DateTime.UtcNow.AddMonths(3),
+        Description = "Holiday cover"
+    },
+    ct);
+await context.SaveChangesAsync(ct);
 ```
+
+Both bounds are included, and a bound you leave out is open. A different window is a different grant, so a subject can hold the same role on a resource for two separate periods. The Admin API takes the same window as `effectiveFrom` and `effectiveTo` in the request body.

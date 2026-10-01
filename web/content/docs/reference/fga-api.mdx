@@ -160,21 +160,52 @@ Manual resource APIs remain available for resources that are not backed by domai
 | `CreateResourceAsync(...)` | Strict create with a generated resource ID. |
 | `CreateResourceWithIdAsync(...)` | Strict create with an explicit stable resource ID. |
 | `ProvisionResourceWithIdAsync(...)` | Idempotent create/update for explicit non-entity resources. |
-| `DeleteResourceAsync(...)` | Delete one resource and its direct grants without cascading child resources. |
+| `DeleteResourceAsync(...)` | Delete one resource and revoke its direct grants without cascading child resources. |
+
+Each helper validates before it tracks a change: the resource type and the parent exist, and the resource is neither its own ancestor nor deeper than the configured maximum depth. A failed check throws `InvalidOperationException`.
 
 ---
 
 ### Subject and Grant APIs
 
-Subjects are provisioned explicitly. Grants never create subjects implicitly.
+Subjects are provisioned explicitly. Grants never create subjects implicitly. These helpers are the host's write API for FGA subjects and grants: the entities' properties are read-only, and every helper tracks its change for your next `SaveChangesAsync`.
 
 | Method | Use |
 | --- | --- |
 | `ProvisionUserSubjectAsync(...)` | Idempotently provision a user FGA subject and typed user row. |
 | `ProvisionAgentSubjectAsync(...)` | Idempotently provision an agent FGA subject and typed agent row. |
-| `ProvisionServiceAccountSubjectAsync(...)` | Idempotently provision a service-account FGA subject and typed service-account row. |
+| `ProvisionServiceAccountSubjectAsync(...)` | Idempotently provision a service-account FGA subject and typed service-account row; pass `expiresAt` to change its expiry. |
+| `ProvisionGroupSubjectAsync(...)` | Idempotently provision a group by a stable subject ID, optionally owned by an organization. |
+| `RecordSubjectActivityAsync(...)` | Stamp a user's `LastLoginAt`, an agent's `LastRunAt`, or a service account's `LastUsedAt`. |
 | `GrantRoleAsync(...)` | Idempotently grant a role by key or ID to an existing subject/resource. |
-| `RevokeRoleAsync(...)` | Remove a role grant by key or ID if it exists. |
+| `GrantRoleAsync(..., SqlOSFgaGrantOptions, ...)` | The same, in effect during a window and with a description. |
+| `RevokeRoleAsync(...)` | Remove a subject's role on a resource, in every window, if it holds it. |
+
+A grant is unique per subject, role, resource, and window: `GrantRoleAsync` returns the grant the subject already holds instead of adding another. `SqlOSFgaGrantOptions` carries the window and description:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `EffectiveFrom` | `DateTime?` | The first instant the grant is in effect, or `null` for no start. |
+| `EffectiveTo` | `DateTime?` | The last instant the grant is in effect, or `null` for no end. |
+| `Description` | `string?` | Why the subject holds the role. |
+
+Grant, revocation, and subject lifecycle changes write audit rows with source `fga` (`fga.grant.created`, `fga.grant.revoked`, `fga.subject.created`, `fga.subject.deactivated`, `fga.group.member_added`, and so on), naming the writer: host code (`application`), an operator (`admin`), a SCIM directory (`scim`), or SqlOS at startup (`system`).
+
+### Authorization model seed
+
+`SqlOSFgaSeedService.SeedAuthorizationDataAsync(SqlOSFgaSeedData)` reconciles resource types, permissions, roles, and role permissions from host code, the same way `options.Fga.Seed(...)` does at startup:
+
+```csharp
+await seedService.SeedAuthorizationDataAsync(new SqlOSFgaSeedData
+{
+    ResourceTypes = [new SqlOSFgaResourceTypeSeed { Id = "chain", Name = "Chain" }],
+    Permissions = [new SqlOSFgaPermissionSeed { Id = "perm_chain_view", Key = "CHAIN_VIEW", Name = "View chain", ResourceTypeId = "chain" }],
+    Roles = [new SqlOSFgaRoleSeed { Id = "role_chain_manager", Key = "chain_manager", Name = "Chain Manager" }],
+    RolePermissions = [("chain_manager", ["CHAIN_VIEW"])]
+});
+```
+
+A permission must name a resource type the seed or the database already defines.
 
 ---
 
@@ -190,6 +221,8 @@ Lower-level/read-side FGA convenience extensions. Available via `using SqlOS.Fga
 // Manual lifecycle sample only.
 var resourceId = context.CreateResource("retail_root", request.Name, "chain");
 ```
+
+It throws `InvalidOperationException` when the parent or the resource type does not exist, or the resource would be its own ancestor or deeper than the maximum depth, instead of leaving the error to the save.
 
 ---
 
@@ -305,41 +338,45 @@ public class SqlOSFgaAccessTrace
 }
 ```
 
+The stored FGA entities are read-only: query them with `db.Set<T>()`, and change them through the helpers above.
+
 ### SqlOSFgaResource
 
 ```csharp
-public class SqlOSFgaResource
+public sealed class SqlOSFgaResource
 {
-    public string Id { get; set; }
-    public string ParentId { get; set; }
-    public string Name { get; set; }
-    public string ResourceTypeId { get; set; }
-    public bool IsActive { get; set; }
+    public string Id { get; }
+    public string? ParentId { get; }
+    public string Name { get; }
+    public string ResourceTypeId { get; }
+    public bool IsActive { get; }
 }
 ```
 
 ### SqlOSFgaGrant
 
 ```csharp
-public class SqlOSFgaGrant
+public sealed class SqlOSFgaGrant
 {
-    public string Id { get; set; }
-    public string SubjectId { get; set; }
-    public string ResourceId { get; set; }
-    public string RoleId { get; set; }
-    public string? Description { get; set; }
+    public string Id { get; }
+    public string SubjectId { get; }
+    public string ResourceId { get; }
+    public string RoleId { get; }
+    public string? Description { get; }
+    public DateTime? EffectiveFrom { get; }
+    public DateTime? EffectiveTo { get; }
 }
 ```
 
 ### SqlOSFgaSubject
 
 ```csharp
-public class SqlOSFgaSubject
+public sealed class SqlOSFgaSubject
 {
-    public string Id { get; set; }
-    public string SubjectTypeId { get; set; }
-    public string DisplayName { get; set; }
-    public string? OrganizationId { get; set; }
-    public string? ExternalRef { get; set; }
+    public string Id { get; }
+    public string SubjectTypeId { get; }
+    public string DisplayName { get; }
+    public string? OrganizationId { get; }
+    public string? ExternalRef { get; }
 }
 ```
