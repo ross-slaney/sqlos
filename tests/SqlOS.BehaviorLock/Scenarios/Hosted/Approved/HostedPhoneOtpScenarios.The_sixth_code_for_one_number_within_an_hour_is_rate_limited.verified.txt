@@ -1,0 +1,148 @@
+# SqlOS behavior lock transcript
+scenario: HostedPhoneOtpScenarios.The_sixth_code_for_one_number_within_an_hour_is_rate_limited
+profile: hosted
+
+## 1. browser: a sixth code for the same number in the hour
+> POST /sqlos/auth/login/phone-otp/start
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#1}
+>   phoneNumber=+12025550173
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#1}'; style-src 'self' 'nonce-{csp-nonce#1}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Behavior Lock</title>
+        <style nonce="{csp-nonce#1}">{style-sha256:4961352b3f23eca1}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Behavior Lock</h1>
+                <p class="brand-subtitle">Behavior lock hosted sign-in.</p>
+              </div>
+              <div class="messages">
+                <div class="callout error">
+                  <span class="callout-icon">!</span>
+                  <span>Too many sign-in code requests. Try again later.</span>
+                </div>
+              </div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <div class="panel-intro">
+                    <span class="panel-kicker">Phone Code</span>
+                    <p>Get a one-time code sent to your phone.</p>
+                  </div>
+                  <form class="auth-form" method="post" action="/sqlos/auth/login/phone-otp/start">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#2}" />
+                    <input type="hidden" name="requestId" value="{req#1}" />
+                    <label class="field">
+                      <span>Phone</span>
+                      <input name="phoneNumber" type="tel" value="+12025550173" placeholder="+1 202 555 0105" autocomplete="tel" required="" />
+                    </label>
+                    <button class="primary-action" type="submit" data-loading-label="Sending code">
+                      <span class="button-label">Text me a code</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                  </form>
+                  <div class="footer-links">
+                    <a class="secondary-link" href="/sqlos/auth/login?request={req#1}">Use password instead</a>
+                    <a class="secondary-link" href="/sqlos/auth/login/email-otp?request={req#1}">Use an email code instead</a>
+                    <a class="secondary-link" href="/sqlos/auth/login/magic-link?request={req#1}">Email me a sign-in link</a>
+                    <a class="secondary-link" href="/sqlos/auth/signup?request={req#1}">Get started</a>
+                  </div>
+                  <div class="section-divider">OR</div>
+                  <div class="providers">
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#1}?request={req#1}&amp;email=" data-loading-label="Connecting to Example OIDC">
+                      <span class="provider-badge">
+                        <span class="provider-generic">EO</span>
+                      </span>
+                      <span class="provider-label">Continue with Example OIDC</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#2}?request={req#1}&amp;email=" data-loading-label="Connecting to GitHub">
+                      <span class="provider-badge">
+                        <img class="provider-logo" src="{data-uri:image/svg+xml}" alt="" aria-hidden="true" />
+                      </span>
+                      <span class="provider-label">Continue with GitHub</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#3}?request={req#1}&amp;email=" data-loading-label="Connecting to Google">
+                      <span class="provider-badge">
+                        <img class="provider-logo" src="{data-uri:image/svg+xml}" alt="" aria-hidden="true" />
+                      </span>
+                      <span class="provider-label">Continue with Google</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#4}?request={req#1}&amp;email=" data-loading-label="Connecting to Microsoft">
+                      <span class="provider-badge">
+                        <img class="provider-logo" src="{data-uri:image/svg+xml}" alt="" aria-hidden="true" />
+                      </span>
+                      <span class="provider-label">Continue with Microsoft</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                  </div>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#1}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+
+## audit: the per-number admission rejects it
+  - {
+      "action": "phone_otp.rate_limit_rejected",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "phone_otp.rate_limit_rejected",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "details": {
+          "clientApplicationId": "{cli#1}",
+          "limit": "phone",
+          "requestedOrganizationId": null
+        },
+        "maskedPhone": "+1******0173",
+        "purpose": "login"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

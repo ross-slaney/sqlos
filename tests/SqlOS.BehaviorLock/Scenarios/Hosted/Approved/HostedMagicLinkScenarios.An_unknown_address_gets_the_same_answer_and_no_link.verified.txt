@@ -1,0 +1,107 @@
+# SqlOS behavior lock transcript
+scenario: HostedMagicLinkScenarios.An_unknown_address_gets_the_same_answer_and_no_link
+profile: hosted
+
+## 1. browser: request a link for an address with no account
+> POST /sqlos/auth/login/magic-link/start
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   email={email:nobody}
+< 200 OK
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#1}'; style-src 'self' 'nonce-{csp-nonce#1}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Behavior Lock</title>
+        <style nonce="{csp-nonce#1}">{style-sha256:4961352b3f23eca1}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Behavior Lock</h1>
+                <p class="brand-subtitle">Behavior lock hosted sign-in.</p>
+              </div>
+              <div class="messages">
+                <div class="callout info">
+                  <span class="callout-icon">i</span>
+                  <span>If an account exists for no***@example.test, check your email for a sign-in link.</span>
+                </div>
+              </div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <div class="state-card">
+                    <span class="state-icon">OK</span>
+                    <div class="state-copy">
+                      <strong>Check your email.</strong>
+                      <p>If the account exists, a sign-in link is on the way.</p>
+                    </div>
+                  </div>
+                  <div class="footer-links">
+                    <a class="secondary-link" href="/sqlos/auth/login/magic-link?email={email:nobody}">Request another link</a>
+                    <a class="secondary-link" href="/sqlos/auth/login/email-otp?email={email:nobody}">Use an email code instead</a>
+                    <a class="secondary-link" href="/sqlos/auth/login?email={email:nobody}">Use password instead</a>
+                  </div>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#1}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+
+## audit: the request records that nothing was sent
+  - {
+      "action": "magic_link.requested",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "magic_link.requested",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "details": {
+          "authorizationRequestId": "[redacted]",
+          "clientApplicationId": null,
+          "requestedOrganizationId": null,
+          "sent": false
+        },
+        "maskedEmail": "no***@example.test",
+        "phase": "start"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

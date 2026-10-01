@@ -1,0 +1,10 @@
+# SqlOS behavior lock transcript
+scenario: HostedUpstreamRedirectScenarios.An_invitation_carried_by_a_provider_button_replaces_the_typed_address
+profile: hosted
+
+## 1. browser: start Google sign-in with an invitation: the invited address becomes the login hint
+> GET /sqlos/auth/login/oidc/{oidc#1}?request={req#1}&email=someone-else%40example.test&invitationToken={invitation-token#1}
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+< 302 Found
+< Location: https://accounts.google.com/o/oauth2/v2/auth?client_id=google-client-id&redirect_uri=https%3A%2F%2Fsqlos.example.test%2Fsqlos%2Fauth%2Foidc%2Fcallback&response_type=code&scope=openid%20email%20profile&state={state#1}&nonce={nonce#1}&code_challenge={pkce-challenge#1}&code_challenge_method=S256&login_hint={email:carol}
+  ~ http SqlOSOidcAuthService: GET https://accounts.google.com/.well-known/openid-configuration -> 200

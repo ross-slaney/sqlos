@@ -1,0 +1,164 @@
+# SqlOS behavior lock transcript
+scenario: HostedInvitationScenarios.Invitation_sign_up_needs_email_codes_and_phone_sign_up_refuses_invitations
+profile: dashboard-callback
+
+## 1. browser: a crafted invitation sign-up where email codes are off
+> POST /sqlos/auth/signup/invitation/submit
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   invitationToken={invitation-token#1}
+>   displayName=Carol
+>   email={email:carol}
+>   password=
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#1}'; style-src 'self' 'nonce-{csp-nonce#1}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Behavior Lock</title>
+        <style nonce="{csp-nonce#1}">{style-sha256:80d77a550f3a606a}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Behavior Lock</h1>
+                <p class="brand-subtitle">Secure your app-owned AI and MCP experiences with SqlOS.</p>
+              </div>
+              <div class="messages">
+                <div class="callout error">
+                  <span class="callout-icon">!</span>
+                  <span>Invitation signup without a password requires Email OTP to be enabled.</span>
+                </div>
+              </div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <div class="panel-intro">
+                    <span class="panel-kicker">Create account</span>
+                    <p>Use email and password to set up your account.</p>
+                  </div>
+                  <form class="auth-form" method="post" action="/sqlos/auth/signup/submit?invitationToken={invitation-token#1}">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#2}" />
+                    <input type="hidden" name="invitationToken" value="{invitation-token#1}" />
+                    <input type="hidden" name="mode" value="signup" />
+                    <label class="field">
+                      <span>Display name</span>
+                      <input name="displayName" value="Carol" placeholder="Jane Doe" autocomplete="name" required="" />
+                    </label>
+                    <label class="field">
+                      <span>Email</span>
+                      <input name="email" type="email" value="{email:carol}" placeholder="Your email address" autocomplete="email" required="" readonly="" />
+                    </label>
+                    <label class="field">
+                      <span>Password</span>
+                      <input name="password" type="password" placeholder="Create a password" autocomplete="new-password" required="" />
+                    </label>
+                    <button class="primary-action" type="submit" data-loading-label="Creating account">
+                      <span class="button-label">Create account</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                  </form>
+                  <p class="footer-prompt">
+                    Already have an account?
+                    <a class="secondary-link" href="/sqlos/auth/login?invitationToken={invitation-token#1}">Sign in</a>
+                  </p>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#1}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+
+## 2. browser: a crafted phone sign-up that carries the invitation
+> POST /sqlos/auth/signup/phone-otp/start
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   invitationToken={invitation-token#1}
+>   displayName=Carol
+>   email={email:carol}
+>   password=
+>   phoneNumber=+12025550173
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#2}'; style-src 'self' 'nonce-{csp-nonce#2}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Behavior Lock</title>
+        <style nonce="{csp-nonce#2}">{style-sha256:80d77a550f3a606a}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Behavior Lock</h1>
+                <p class="brand-subtitle">Secure your app-owned AI and MCP experiences with SqlOS.</p>
+              </div>
+              <div class="messages">
+                <div class="callout error">
+                  <span class="callout-icon">!</span>
+                  <span>Phone signup is not available for email invitations.</span>
+                </div>
+              </div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <div class="panel-intro">
+                    <span class="panel-kicker">Create account</span>
+                    <p>Verify your phone with a one-time code to create your account.</p>
+                  </div>
+                  <form class="auth-form" method="post" action="/sqlos/auth/signup/phone-otp/start?invitationToken={invitation-token#1}">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#3}" />
+                    <input type="hidden" name="invitationToken" value="{invitation-token#1}" />
+                    <input type="hidden" name="mode" value="phone-otp-signup" />
+                    <label class="field">
+                      <span>Display name</span>
+                      <input name="displayName" value="Carol" placeholder="Jane Doe" autocomplete="name" required="" />
+                    </label>
+                    <label class="field">
+                      <span>Phone</span>
+                      <input name="phoneNumber" type="tel" value="+12025550173" placeholder="+1 202 555 0105" autocomplete="tel" required="" />
+                    </label>
+                    <button class="primary-action" type="submit" data-loading-label="Sending code">
+                      <span class="button-label">Text me a code</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                  </form>
+                  <p class="footer-prompt">
+                    Already have an account?
+                    <a class="secondary-link" href="/sqlos/auth/login?invitationToken={invitation-token#1}">Sign in</a>
+                  </p>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#2}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>

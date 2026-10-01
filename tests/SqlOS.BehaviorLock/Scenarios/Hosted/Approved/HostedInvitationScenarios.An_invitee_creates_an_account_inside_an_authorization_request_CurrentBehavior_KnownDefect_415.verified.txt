@@ -1,0 +1,289 @@
+# SqlOS behavior lock transcript
+scenario: HostedInvitationScenarios.{token#1}
+profile: hosted
+
+## 1. browser: the sign-in page for a pending authorization request, with the invitation
+> GET /sqlos/auth/login?request={req#1}&invitationToken={invitation-token#1}
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+< 200 OK
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#1}'; style-src 'self' 'nonce-{csp-nonce#1}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Behavior Lock</title>
+        <style nonce="{csp-nonce#1}">{style-sha256:4961352b3f23eca1}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Behavior Lock</h1>
+                <p class="brand-subtitle">Behavior lock hosted sign-in.</p>
+              </div>
+              <div class="messages"></div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <div class="panel-intro">
+                    <span class="panel-kicker">Accept Invitation</span>
+                    <p>Continue with the invited email address to join the organization.</p>
+                  </div>
+                  <div class="invite-summary">
+                    <strong>Acme</strong>
+                    <span>{email:carol} invited as member.</span>
+                    <span>Expires {datetime:invariant-g} UTC.</span>
+                  </div>
+                  <form class="auth-form" method="post" action="/sqlos/auth/login/email-otp/start?invitationToken={invitation-token#1}">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#1}" />
+                    <input type="hidden" name="requestId" value="{req#1}" />
+                    <input type="hidden" name="invitationToken" value="{invitation-token#1}" />
+                    <input type="hidden" name="email" value="{email:carol}" />
+                    <button class="primary-action" type="submit" data-loading-label="Sending code">
+                      <span class="button-label">Email me a sign-in code</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                  </form>
+                  <form class="auth-form" method="post" action="/sqlos/auth/login/magic-link/start?invitationToken={invitation-token#1}">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#1}" />
+                    <input type="hidden" name="requestId" value="{req#1}" />
+                    <input type="hidden" name="invitationToken" value="{invitation-token#1}" />
+                    <input type="hidden" name="email" value="{email:carol}" />
+                    <button class="primary-action" type="submit" data-loading-label="Sending link">
+                      <span class="button-label">Email me a sign-in link</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                  </form>
+                  <form class="auth-form" method="post" action="/sqlos/auth/signup/invitation/submit?invitationToken={invitation-token#1}">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#1}" />
+                    <input type="hidden" name="requestId" value="{req#1}" />
+                    <input type="hidden" name="invitationToken" value="{invitation-token#1}" />
+                    <label class="field">
+                      <span>Display name</span>
+                      <input name="displayName" value="" placeholder="Jane Doe" autocomplete="name" required="" />
+                    </label>
+                    <input type="hidden" name="email" value="{email:carol}" />
+                    <button class="primary-action" type="submit" data-loading-label="Creating account">
+                      <span class="button-label">Create account</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                  </form>
+                  <form class="auth-form" method="post" action="/sqlos/auth/login/password?invitationToken={invitation-token#1}">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#1}" />
+                    <input type="hidden" name="requestId" value="{req#1}" />
+                    <input type="hidden" name="invitationToken" value="{invitation-token#1}" />
+                    <input type="hidden" name="email" value="{email:carol}" />
+                    <label class="field">
+                      <span>Password</span>
+                      <input name="password" type="password" placeholder="Your password" autocomplete="current-password" required="" />
+                    </label>
+                    <button class="primary-action" type="submit" data-loading-label="Signing in">
+                      <span class="button-label">Continue with password</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                  </form>
+                  <div class="section-divider">OR</div>
+                  <div class="providers">
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#1}?request={req#1}&amp;email={email:carol}&amp;invitationToken={invitation-token#1}" data-loading-label="Connecting to Example OIDC">
+                      <span class="provider-badge">
+                        <span class="provider-generic">EO</span>
+                      </span>
+                      <span class="provider-label">Continue with Example OIDC</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#2}?request={req#1}&amp;email={email:carol}&amp;invitationToken={invitation-token#1}" data-loading-label="Connecting to GitHub">
+                      <span class="provider-badge">
+                        <img class="provider-logo" src="{data-uri:image/svg+xml}" alt="" aria-hidden="true" />
+                      </span>
+                      <span class="provider-label">Continue with GitHub</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#3}?request={req#1}&amp;email={email:carol}&amp;invitationToken={invitation-token#1}" data-loading-label="Connecting to Google">
+                      <span class="provider-badge">
+                        <img class="provider-logo" src="{data-uri:image/svg+xml}" alt="" aria-hidden="true" />
+                      </span>
+                      <span class="provider-label">Continue with Google</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#4}?request={req#1}&amp;email={email:carol}&amp;invitationToken={invitation-token#1}" data-loading-label="Connecting to Microsoft">
+                      <span class="provider-badge">
+                        <img class="provider-logo" src="{data-uri:image/svg+xml}" alt="" aria-hidden="true" />
+                      </span>
+                      <span class="provider-label">Continue with Microsoft</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                  </div>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#1}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+
+## 2. browser: 'Create account': the interstitial returns to the application
+> POST /sqlos/auth/signup/invitation/submit?invitationToken={invitation-token#1}
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#1}
+>   invitationToken={invitation-token#1}
+>   displayName=Carol
+>   email={email:carol}
+< 200 OK
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#2}'; style-src 'self' 'nonce-{csp-nonce#2}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+< Set-Cookie: sqlos_auth_page={cookie#2}; expires=+7d; path=/; secure; samesite=lax; httponly
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="refresh" content="0;url=https://sqlos.example.test/auth/callback?code={code#1}&amp;state={state#1}&amp;scope=openid%20profile%20email%20offline_access" />
+        <title>Continuing…</title>
+      </head>
+      <body>
+        <p>
+          Returning to the application…
+          <a href="https://sqlos.example.test/auth/callback?code={code#1}&amp;state={state#1}&amp;scope=openid%20profile%20email%20offline_access">Continue</a>
+        </p>
+      </body>
+    </html>
+
+## 3. client: redeem the authorization code: the tokens carry Acme
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=authorization_code
+>   code={code#1}
+>   client_id=behavior-lock-app
+>   redirect_uri=https://sqlos.example.test/auth/callback
+>   code_verifier={pkce-verifier#1}
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "access_token": "{access-token#1}",
+      "expires_in": ~600,
+      "id_token": "{id-token#1}",
+      "refresh_token": "{refresh-token#1}",
+      "scope": "openid profile email offline_access",
+      "token_type": "Bearer"
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "invitation"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:carol}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "org_id": "{org#1}",
+      "scope": "openid profile email offline_access",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+  jwt {id-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "JWT"
+    }
+    claims: {
+      "amr": [
+        "invitation"
+      ],
+      "at_hash": "{hash#1}",
+      "aud": "behavior-lock-app",
+      "auth_time": {epoch},
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nonce": "{nonce#1}",
+      "org_id": "{org#1}",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=5m
+
+## audit: acceptance events: nothing records the new user
+  - {
+      "action": "invitation.accepted",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "invitation.accepted",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "Id": "{inv#1}",
+        "emailVerified": false,
+        "inviteRole": "member",
+        "maskedEmail": "ca***@example.test",
+        "membershipCreated": true,
+        "membershipReactivated": false,
+        "membershipRole": "member"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+
+## 4. operator: Carol's account and verified address
+> GET /sqlos/admin/auth/api/users/{usr#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "defaultEmail": "{email:carol}",
+      "displayName": "Carol",
+      "externalIdentityCount": 0,
+      "id": "{usr#1}",
+      "isActive": true,
+      "membershipCount": 1,
+      "sessionCount": 1,
+      "updatedAt": "{datetime:unspecified}"
+    }

@@ -1,0 +1,48 @@
+# SqlOS behavior lock transcript
+scenario: HostedHeadlessRedirectScenarios.Hosted_pages_redirect_into_the_applications_own_sign_in_ui
+profile: headless
+
+## 1. browser: the sign-in page
+> GET /sqlos/auth/login
+< 302 Found
+< Location: https://sqlos.example.test/auth/authorize?request=&view=login&email=&ui_context=%7B%7D
+
+## 2. browser: with a request, an address, and the application's own ui_context
+> GET /sqlos/auth/login?request={req#1}&email={email:alice}&ui_context=%7B%22theme%22%3A%22dark%22%7D
+< 302 Found
+< Location: https://sqlos.example.test/auth/authorize?request={req#1}&view=login&email={email:alice}&ui_context=%7B%22theme%22%3A%22dark%22%7D
+
+## 3. browser: a status page is a plain sign-in view there
+> GET /sqlos/auth/login?status=signed-in
+< 302 Found
+< Location: https://sqlos.example.test/auth/authorize?request=&view=login&email=&ui_context=%7B%7D
+
+## 4. browser: forgot password
+> GET /sqlos/auth/password/forgot?email={email:alice}
+< 302 Found
+< Location: https://sqlos.example.test/auth/authorize?request=&view=forgot-password&email={email:alice}
+
+## 5. browser: the email-code page with a device code
+> GET /sqlos/auth/login/email-otp?user_code={user-code#1}
+< 302 Found
+< Location: https://sqlos.example.test/auth/authorize?request=&view=email-otp&email=&ui_context=%7B%22deviceUserCode%22%3A%22WDJB-MJHT%22%7D
+
+## 6. browser: the magic-link page
+> GET /sqlos/auth/login/magic-link
+< 302 Found
+< Location: https://sqlos.example.test/auth/authorize?request=&view=magic-link&email=&ui_context=%7B%7D
+
+## 7. browser: the phone-code page
+> GET /sqlos/auth/login/phone-otp?deviceUserCode={user-code#1}
+< 302 Found
+< Location: https://sqlos.example.test/auth/authorize?request=&view=phone-otp&ui_context=%7B%22deviceUserCode%22%3A%22WDJB-MJHT%22%7D
+
+## 8. browser: the sign-up page
+> GET /sqlos/auth/signup
+< 302 Found
+< Location: https://sqlos.example.test/auth/authorize?request=&view=signup&email=&ui_context=%7B%7D
+
+## 9. browser: phone sign-up keeps the number and drops a ui_context that is not JSON
+> GET /sqlos/auth/signup/phone-otp?phoneNumber=%2B12025550173&ui_context=not-json
+< 302 Found
+< Location: https://sqlos.example.test/auth/authorize?request=&view=phone-otp-signup&ui_context=%7B%22phoneNumber%22%3A%22%5Cu002B12025550173%22%7D
