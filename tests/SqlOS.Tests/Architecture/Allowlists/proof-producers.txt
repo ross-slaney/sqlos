@@ -5,6 +5,14 @@
 # is constructed (or copied with `with`) only by the types listed for it here.
 SqlOS.AuthServer.Models.EmailClaimEvictions <- SqlOS.AuthServer.Processes.Identity.ClaimEmailOwnership
 SqlOS.AuthServer.Models.EmailOtpAttemptReservation <- SqlOS.AuthServer.Services.SqlOSEmailOtpAttemptLedger
+SqlOS.Domain.LoginEvidence <- SqlOS.AuthServer.Processes.Identity.CompleteEmailOtpSignUp
+SqlOS.Domain.LoginEvidence <- SqlOS.AuthServer.Processes.Identity.CompleteMagicLinkSignIn
+SqlOS.Domain.LoginEvidence <- SqlOS.AuthServer.Processes.Identity.CompletePhoneOtpSignUp
+SqlOS.Domain.LoginEvidence <- SqlOS.AuthServer.Processes.Identity.SignInWithPassword
+SqlOS.Domain.LoginEvidence <- SqlOS.AuthServer.Processes.Identity.SignUpWithInvitation
+SqlOS.Domain.LoginEvidence <- SqlOS.AuthServer.Processes.Identity.SignUpWithPassword
+SqlOS.Domain.LoginEvidence <- SqlOS.AuthServer.Processes.Identity.VerifyEmailOtpSignIn
+SqlOS.Domain.LoginEvidence <- SqlOS.AuthServer.Processes.Identity.VerifyPhoneOtpSignIn
 SqlOS.Domain.OwnershipProof <- SqlOS.AuthServer.Models.SqlOSEmailOtpChallenge
 SqlOS.Domain.OwnershipProof <- SqlOS.AuthServer.Services.SqlOSAuthService
 SqlOS.Domain.OwnershipProof <- SqlOS.AuthServer.Services.SqlOSAuthorizationServerService

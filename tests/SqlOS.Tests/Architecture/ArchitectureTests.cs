@@ -46,6 +46,19 @@ public sealed class ArchitectureTests
     }
 
     [TestMethod]
+    public void Login_evidence_is_produced_only_by_identity_processes()
+    {
+        // §3.5: a login is proven by the process that checked its credential, never by a service,
+        // an adapter or the hub that consumes the evidence.
+        var producers = ProofProducers.Load()["SqlOS.Domain.LoginEvidence"];
+
+        producers.Should().NotBeEmpty();
+        producers.Should().OnlyContain(
+            producer => producer.StartsWith("SqlOS.AuthServer.Processes.Identity.", StringComparison.Ordinal),
+            "only the identity processes check a credential");
+    }
+
+    [TestMethod]
     public void Aggregate_members_change_only_through_their_root()
     {
         var violations = ArchitectureRules.MemberChangesOutsideTheirRoot(IlScanner.SqlOS, AggregateMembers.Load());
