@@ -1,0 +1,289 @@
+# SqlOS behavior lock transcript
+scenario: PublicAccountGrantScenarios.A_first_party_session_lists_and_revokes_remembered_consent
+profile: hosted
+
+## 1. client: Alice's first-party session lists her remembered consent
+> POST /sqlos/auth/account/grants
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshToken": "{refresh-token#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "clientApplicationId": "{cli#1}",
+          "clientId": "partner-app",
+          "clientName": "Partner App",
+          "grantedAt": "{datetime:unspecified}",
+          "id": "{cgr#1}",
+          "scopes": [
+            "openid",
+            "profile",
+            "email",
+            "offline_access"
+          ],
+          "updatedAt": "{datetime:unspecified}",
+          "userId": "{usr#1}"
+        }
+      ]
+    }
+
+## 2. client: the partner's own refresh token is refused like an invalid one
+> POST /sqlos/auth/account/grants
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshToken": "{refresh-token#2}"
+>   }
+< 401 Unauthorized
+
+## 3. client: an unknown refresh token
+> POST /sqlos/auth/account/grants
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshToken": "not-a-refresh-token"
+>   }
+< 401 Unauthorized
+
+## 4. client: no refresh token
+> POST /sqlos/auth/account/grants
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 401 Unauthorized
+
+## 5. client: the partner cannot revoke its own grant
+> POST /sqlos/auth/account/grants/revoke
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "grantId": "{cgr#1}",
+>     "refreshToken": "{refresh-token#2}"
+>   }
+< 401 Unauthorized
+
+## 6. client: Bob's session cannot revoke Alice's grant: it is not found for him
+> POST /sqlos/auth/account/grants/revoke
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "grantId": "{cgr#1}",
+>     "refreshToken": "{refresh-token#3}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "message": "The request could not be completed."
+    }
+
+## 7. client: Alice revokes the grant
+> POST /sqlos/auth/account/grants/revoke
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "grantId": "{cgr#1}",
+>     "refreshToken": "{refresh-token#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "id": "{cgr#1}",
+      "revokedAt": "{datetime:utc-z}"
+    }
+
+## 8. client: revoking it again
+> POST /sqlos/auth/account/grants/revoke
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "grantId": "{cgr#1}",
+>     "refreshToken": "{refresh-token#1}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "message": "The request could not be completed."
+    }
+
+## 9. client: revoking without a grant id
+> POST /sqlos/auth/account/grants/revoke
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshToken": "{refresh-token#1}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "message": "The request could not be completed."
+    }
+
+## 10. client: the list is empty
+> POST /sqlos/auth/account/grants
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshToken": "{refresh-token#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": []
+    }
+
+## audit: the revocation and the mapped failures
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "Consent grant was not found for this user.",
+        "error": "invalid_request",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The request could not be completed.",
+        "surface": "HostedPage"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "oauth.consent.revoked",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": "{ses#1}",
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.consent.revoked",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "client_id": "partner-app",
+        "grant_id": "{cgr#1}",
+        "reason": "user_revoked"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": "{ses#1}",
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "Consent grant is already revoked.",
+        "error": "invalid_request",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The request could not be completed.",
+        "surface": "HostedPage"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "Consent grant was not found for this user.",
+        "error": "invalid_request",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The request could not be completed.",
+        "surface": "HostedPage"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 11. operator: the operator view of Alice's grants
+> GET /sqlos/admin/auth/api/users/{usr#1}/grants
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": []
+    }

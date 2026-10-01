@@ -1,0 +1,124 @@
+# SqlOS behavior lock transcript
+scenario: PublicMagicLinkScenarios.An_unknown_address_gets_the_same_answer_and_forged_links_are_rejected
+profile: hosted
+
+## 1. client: an unknown address: the usual answer, and nothing is sent
+> POST /sqlos/auth/magic-link/start
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "email": "{email:nobody}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "email": "{email:nobody}",
+      "expiresAt": "{datetime:utc-z}",
+      "maskedEmail": "no***@example.test",
+      "message": "If an account exists for no***@example.test, check your email for a sign-in link.",
+      "nextAllowedSendAt": "{datetime:utc-z}"
+    }
+
+## 2. client: an invalid address escapes the endpoint
+> POST /sqlos/auth/magic-link/start
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "email": "not an address"
+>   }
+< 500 Internal Server Error
+
+## 3. client: a token SqlOS never issued is rejected and audited
+> POST /sqlos/auth/magic-link/complete
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "token": "forged-link-token-that-was-never-issued"
+>   }
+< 500 Internal Server Error
+
+## 4. client: a blank token is rejected before any lookup
+> POST /sqlos/auth/magic-link/complete
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "token": "   "
+>   }
+< 500 Internal Server Error
+
+## audit: the unsent link and the rejected completion
+  - {
+      "action": "magic_link.requested",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "magic_link.requested",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "details": {
+          "authorizationRequestId": "[redacted]",
+          "clientApplicationId": "{cli#1}",
+          "requestedOrganizationId": null,
+          "sent": false
+        },
+        "maskedEmail": "no***@example.test",
+        "phase": "start"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "magic_link.rejected",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "magic_link.rejected",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "details": {
+          "reason": "missing_expired_or_replayed"
+        },
+        "maskedEmail": null,
+        "phase": "complete"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
