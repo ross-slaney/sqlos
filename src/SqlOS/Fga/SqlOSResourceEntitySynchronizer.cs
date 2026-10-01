@@ -117,7 +117,7 @@ internal static class SqlOSResourceEntitySynchronizer
                 .Where(grant => grant.ResourceId == change.ResourceId)
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
-            context.Set<SqlOSFgaGrant>().RemoveRange(grants);
+            SqlOSFgaGrants.Revoke(context, grants, FgaActor.Host, SqlOSFgaGrants.ResourceDeletedReason);
             var resource = resources[change.ResourceId];
             resource.Delete(FgaActor.Host);
             context.Set<SqlOSFgaResource>().Remove(resource);

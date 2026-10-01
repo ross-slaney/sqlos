@@ -225,6 +225,47 @@ internal static class ArchitectureRules
     }
 
     /// <summary>
+    /// Rule 9: <paramref name="entityType"/> comes to exist only through its factories that take
+    /// <paramref name="proofType"/>: every instance constructor is private, every non-private static
+    /// method returning it takes the proof, and nothing outside it constructs it. Returns the
+    /// violations; there is no allowlist.
+    /// </summary>
+    public static IReadOnlyList<string> CreationWithoutProof(IlScanner scanner, string entityType, string proofType)
+    {
+        var entity = scanner.Module.GetTypes().SingleOrDefault(type => IlScanner.TypeName(type) == entityType);
+        if (entity == null)
+        {
+            return [$"{entityType} does not exist"];
+        }
+
+        var findings = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var constructor in entity.Methods.Where(method => method.IsConstructor && !method.IsStatic && !method.IsPrivate))
+        {
+            findings.Add($"{entityType} has a non-private constructor");
+        }
+
+        foreach (var factory in entity.Methods.Where(method => method.IsStatic && !method.IsPrivate && !method.IsConstructor
+                     && IlScanner.TypeName(method.ReturnType.Resolve()) == entityType
+                     && !method.Parameters.Any(parameter => parameter.ParameterType.FullName == proofType)))
+        {
+            findings.Add($"{entityType}::{factory.Name} creates a {entity.Name} without a {proofType}");
+        }
+
+        foreach (var method in scanner.Methods(type => IlScanner.TypeName(type) != entityType))
+        {
+            foreach (var (instruction, target) in IlScanner.Calls(method))
+            {
+                if (instruction.OpCode.Code == Code.Newobj && IlScanner.TypeName(target.DeclaringType) == entityType)
+                {
+                    findings.Add($"{IlScanner.SourceMember(method)} constructs {entityType}");
+                }
+            }
+        }
+
+        return findings.ToList();
+    }
+
+    /// <summary>
     /// Rule 8: an aggregate's members are created and changed only through its root (§3.1). A call
     /// to a member's constructor, its static or instance methods, or its setters from any type
     /// other than the member and its root is a violation; reading the member (a property getter)

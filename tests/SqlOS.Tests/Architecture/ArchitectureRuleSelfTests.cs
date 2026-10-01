@@ -76,6 +76,17 @@ public sealed class ArchitectureRuleSelfTests
     }
 
     [TestMethod]
+    public void Creation_without_the_proof_is_found()
+    {
+        ArchitectureRules.CreationWithoutProof(IlScanner.Tests, $"{Fixtures}.Proofs.FixtureGuarded", $"{Fixtures}.Proofs.FixtureProof").Should().Equal(
+            $"{Fixtures}.Proofs.FixtureGuarded has a non-private constructor",
+            $"{Fixtures}.Proofs.FixtureGuarded::Leak creates a FixtureGuarded without a {Fixtures}.Proofs.FixtureProof",
+            $"{Fixtures}.Proofs.FixtureProducer::Bypass constructs {Fixtures}.Proofs.FixtureGuarded");
+        ArchitectureRules.CreationWithoutProof(IlScanner.Tests, $"{Fixtures}.Proofs.Missing", $"{Fixtures}.Proofs.FixtureProof")
+            .Should().Equal($"{Fixtures}.Proofs.Missing does not exist");
+    }
+
+    [TestMethod]
     public void A_listed_proof_that_does_not_exist_is_found()
     {
         var producers = ProofProducers.Parse([

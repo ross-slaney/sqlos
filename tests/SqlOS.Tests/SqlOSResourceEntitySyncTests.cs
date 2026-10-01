@@ -53,13 +53,7 @@ public sealed class SqlOSResourceEntitySyncTests
         resource.Description.Should().Be("Updated workspace");
         resource.IsActive.Should().BeFalse();
 
-        context.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant
-        {
-            Id = "grant_1",
-            SubjectId = "usr_1",
-            ResourceId = "workspace_1",
-            RoleId = "role_owner"
-        });
+        context.Set<SqlOSFgaGrant>().Add(FgaTestModel.Grant("grant_1", "usr_1", "workspace_1", "role_owner"));
         context.SaveChanges();
 
         context.Resources.Remove(entity);

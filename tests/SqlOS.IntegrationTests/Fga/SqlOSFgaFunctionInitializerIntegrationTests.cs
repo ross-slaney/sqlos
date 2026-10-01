@@ -148,13 +148,7 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
         var suffix = Guid.NewGuid().ToString("N");
         var first = FgaTestModel.Resource($"cycle_a_{suffix}", "Cycle A", "agency");
         var second = FgaTestModel.Resource($"cycle_b_{suffix}", "Cycle B", "agency", parentId: first.Id);
-        var grant = new SqlOSFgaGrant
-        {
-            Id = $"cycle_grant_{suffix}",
-            SubjectId = FgaTestDataSeeder.SystemAdminSubjectId,
-            ResourceId = first.Id,
-            RoleId = FgaTestDataSeeder.SystemAdminRoleId
-        };
+        var grant = FgaTestModel.Grant($"cycle_grant_{suffix}", FgaTestDataSeeder.SystemAdminSubjectId, first.Id, FgaTestDataSeeder.SystemAdminRoleId);
 
         try
         {

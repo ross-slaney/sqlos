@@ -7,9 +7,11 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using SqlOS.Configuration;
 using SqlOS.Dashboard;
+using SqlOS.Domain;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
+using SqlOS.Fga.Processes;
 using SqlOS.Pagination;
 using SqlOS.Security;
 
@@ -1130,45 +1132,24 @@ public class SqlOSFgaDashboardMiddleware
             return;
         }
 
-        var subjectExists = await dbContext.Set<SqlOSFgaSubject>().AnyAsync(s => s.Id == body.SubjectId);
-        if (!subjectExists)
+        var outcome = await new GrantFgaRole(dbContext).ExecuteAsync(
+            new GrantFgaRoleCommand(body.SubjectId, body.RoleId, body.ResourceId, body.EffectiveFrom, body.EffectiveTo),
+            new GrantAuthority(FgaActor.Operator),
+            context.RequestAborted);
+        if (outcome is GrantFgaRoleOutcome.Refused refused)
         {
-            context.Response.StatusCode = 400;
-            await context.Response.WriteAsync("{\"error\":\"Subject not found\"}");
+            context.Response.StatusCode = refused.Reason == GrantRefusal.Duplicate ? StatusCodes.Status409Conflict : StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync(refused.Reason switch
+            {
+                GrantRefusal.SubjectNotFound => "{\"error\":\"Subject not found\"}",
+                GrantRefusal.RoleNotFound => "{\"error\":\"Role not found\"}",
+                GrantRefusal.ResourceNotFound => "{\"error\":\"Resource not found\"}",
+                _ => JsonSerializer.Serialize(new { error = "An identical grant already exists.", grantId = refused.ExistingGrantId }, JsonOptions)
+            });
             return;
         }
 
-        var roleExists = await dbContext.Set<SqlOSFgaRole>().AnyAsync(r => r.Id == body.RoleId);
-        if (!roleExists)
-        {
-            context.Response.StatusCode = 400;
-            await context.Response.WriteAsync("{\"error\":\"Role not found\"}");
-            return;
-        }
-
-        var resourceExists = await dbContext.Set<SqlOSFgaResource>().AnyAsync(r => r.Id == body.ResourceId);
-        if (!resourceExists)
-        {
-            context.Response.StatusCode = 400;
-            await context.Response.WriteAsync("{\"error\":\"Resource not found\"}");
-            return;
-        }
-
-        var grantId = $"grant_{Guid.NewGuid():N}"[..30];
-        var grant = new SqlOSFgaGrant
-        {
-            Id = grantId,
-            SubjectId = body.SubjectId,
-            RoleId = body.RoleId,
-            ResourceId = body.ResourceId,
-            EffectiveFrom = body.EffectiveFrom,
-            EffectiveTo = body.EffectiveTo,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
-        dbContext.Set<SqlOSFgaGrant>().Add(grant);
-        await dbContext.SaveChangesAsync();
-
+        var grantId = ((GrantFgaRoleOutcome.Granted)outcome).Grant.Id;
         var created = await dbContext.Set<SqlOSFgaGrant>()
             .Include(g => g.Subject)
             .Include(g => g.Resource)
@@ -1193,16 +1174,12 @@ public class SqlOSFgaDashboardMiddleware
 
     private static async Task HandleDeleteGrant(HttpContext context, ISqlOSFgaDbContext dbContext, string grantId)
     {
-        var grant = await dbContext.Set<SqlOSFgaGrant>().FirstOrDefaultAsync(g => g.Id == grantId);
-        if (grant == null)
+        if (!await new RevokeFgaGrant(dbContext).ExecuteAsync(grantId, FgaActor.Operator, context.RequestAborted))
         {
             context.Response.StatusCode = 404;
             await context.Response.WriteAsync("{\"error\":\"Grant not found\"}");
             return;
         }
-
-        dbContext.Set<SqlOSFgaGrant>().Remove(grant);
-        await dbContext.SaveChangesAsync();
 
         context.Response.StatusCode = 204;
     }

@@ -135,13 +135,13 @@ public static class FgaTestDataSeeder
         // Grants
         context.Set<SqlOSFgaGrant>().AddRange(
             // SystemAdmin at root
-            new SqlOSFgaGrant { Id = "grant_test_sysadmin", SubjectId = SystemAdminSubjectId, ResourceId = "root", RoleId = SystemAdminRoleId },
+            FgaTestModel.Grant("grant_test_sysadmin", SystemAdminSubjectId, "root", SystemAdminRoleId),
             // AgencyAdmin at test agency
-            new SqlOSFgaGrant { Id = "grant_test_agencyadmin", SubjectId = AgencyAdminSubjectId, ResourceId = TestAgencyResourceId, RoleId = AgencyAdminRoleId },
+            FgaTestModel.Grant("grant_test_agencyadmin", AgencyAdminSubjectId, TestAgencyResourceId, AgencyAdminRoleId),
             // AgencyMember at test agency
-            new SqlOSFgaGrant { Id = "grant_test_member", SubjectId = AgencyMemberSubjectId, ResourceId = TestAgencyResourceId, RoleId = AgencyMemberRoleId },
+            FgaTestModel.Grant("grant_test_member", AgencyMemberSubjectId, TestAgencyResourceId, AgencyMemberRoleId),
             // Group at test agency (via group subject)
-            new SqlOSFgaGrant { Id = "grant_test_group", SubjectId = TestGroupSubjectId, ResourceId = TestAgencyResourceId, RoleId = AgencyMemberRoleId }
+            FgaTestModel.Grant("grant_test_group", TestGroupSubjectId, TestAgencyResourceId, AgencyMemberRoleId)
         );
 
         await context.SaveChangesAsync();

@@ -671,15 +671,3 @@ SqlOS.Email.Models.SqlOSEmailTemplate.TextBodyTemplate
 SqlOS.Email.Models.SqlOSEmailTemplate.UpdatedAt
 SqlOS.Email.Models.SqlOSEmailTemplate.VariablesJson
 SqlOS.Email.Models.SqlOSEmailTemplate.Version
-SqlOS.Fga.Models.SqlOSFgaGrant.CreatedAt
-SqlOS.Fga.Models.SqlOSFgaGrant.Description
-SqlOS.Fga.Models.SqlOSFgaGrant.EffectiveFrom
-SqlOS.Fga.Models.SqlOSFgaGrant.EffectiveTo
-SqlOS.Fga.Models.SqlOSFgaGrant.Id
-SqlOS.Fga.Models.SqlOSFgaGrant.Resource
-SqlOS.Fga.Models.SqlOSFgaGrant.ResourceId
-SqlOS.Fga.Models.SqlOSFgaGrant.Role
-SqlOS.Fga.Models.SqlOSFgaGrant.RoleId
-SqlOS.Fga.Models.SqlOSFgaGrant.Subject
-SqlOS.Fga.Models.SqlOSFgaGrant.SubjectId
-SqlOS.Fga.Models.SqlOSFgaGrant.UpdatedAt

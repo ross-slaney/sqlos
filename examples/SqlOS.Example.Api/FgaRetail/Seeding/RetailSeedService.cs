@@ -188,22 +188,22 @@ public class RetailSeedService
         );
         await _context.SaveChangesAsync(ct);
 
-        var companyAdminRole = await _context.Set<SqlOSFgaRole>().FirstAsync(r => r.Key == RetailRoleKeys.CompanyAdmin, ct);
-        var chainManagerRole = await _context.Set<SqlOSFgaRole>().FirstAsync(r => r.Key == RetailRoleKeys.ChainManager, ct);
-        var storeManagerRole = await _context.Set<SqlOSFgaRole>().FirstAsync(r => r.Key == RetailRoleKeys.StoreManager, ct);
-        var storeClerkRole = await _context.Set<SqlOSFgaRole>().FirstAsync(r => r.Key == RetailRoleKeys.StoreClerk, ct);
+        foreach (var (subjectId, resourceId, roleKey) in new[]
+        {
+            (companyAdminId, "retail_root", RetailRoleKeys.CompanyAdmin),
+            (chainMgrWalmartId, WalmartChainResourceId, RetailRoleKeys.ChainManager),
+            (chainMgrTargetId, TargetChainResourceId, RetailRoleKeys.ChainManager),
+            (storeMgr001Id, Store001ResourceId, RetailRoleKeys.StoreManager),
+            (storeMgr002Id, Store002ResourceId, RetailRoleKeys.StoreManager),
+            (storeClerk001Id, Store001ResourceId, RetailRoleKeys.StoreClerk),
+            (WalmartRegionalGroupSubjectId, WalmartChainResourceId, RetailRoleKeys.ChainManager),
+            (inventorySyncAgent.SubjectId, WalmartChainResourceId, RetailRoleKeys.StoreManager),
+            (apiServiceAccount.SubjectId, "retail_root", RetailRoleKeys.StoreClerk)
+        })
+        {
+            await _context.GrantRoleAsync(subjectId, resourceId, roleKey, ct);
+        }
 
-        _context.Set<SqlOSFgaGrant>().AddRange(
-            new SqlOSFgaGrant { Id = "grant_company_admin", SubjectId = companyAdminId, ResourceId = "retail_root", RoleId = companyAdminRole.Id },
-            new SqlOSFgaGrant { Id = "grant_chain_mgr_walmart", SubjectId = chainMgrWalmartId, ResourceId = WalmartChainResourceId, RoleId = chainManagerRole.Id },
-            new SqlOSFgaGrant { Id = "grant_chain_mgr_target", SubjectId = chainMgrTargetId, ResourceId = TargetChainResourceId, RoleId = chainManagerRole.Id },
-            new SqlOSFgaGrant { Id = "grant_store_mgr_001", SubjectId = storeMgr001Id, ResourceId = Store001ResourceId, RoleId = storeManagerRole.Id },
-            new SqlOSFgaGrant { Id = "grant_store_mgr_002", SubjectId = storeMgr002Id, ResourceId = Store002ResourceId, RoleId = storeManagerRole.Id },
-            new SqlOSFgaGrant { Id = "grant_store_clerk_001", SubjectId = storeClerk001Id, ResourceId = Store001ResourceId, RoleId = storeClerkRole.Id },
-            new SqlOSFgaGrant { Id = "grant_walmart_regional_group", SubjectId = WalmartRegionalGroupSubjectId, ResourceId = WalmartChainResourceId, RoleId = chainManagerRole.Id },
-            new SqlOSFgaGrant { Id = "grant_inventory_sync", SubjectId = inventorySyncAgent.SubjectId, ResourceId = WalmartChainResourceId, RoleId = storeManagerRole.Id },
-            new SqlOSFgaGrant { Id = "grant_api_integration", SubjectId = apiServiceAccount.SubjectId, ResourceId = "retail_root", RoleId = storeClerkRole.Id }
-        );
         await _context.SaveChangesAsync(ct);
     }
 

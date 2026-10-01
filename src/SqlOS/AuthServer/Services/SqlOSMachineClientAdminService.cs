@@ -10,6 +10,7 @@ using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 using SqlOS.Database;
 using SqlOS.Domain;
+using SqlOS.Fga;
 using SqlOS.Fga.Models;
 using SqlOS.Pagination;
 
@@ -92,7 +93,7 @@ public sealed class SqlOSMachineClientAdminService
             _context.Set<SqlOSClientApplication>().Add(client);
             _context.Set<SqlOSFgaSubject>().Add(subject);
             _context.Set<SqlOSClientCredential>().Add(credential);
-            AddGrants(subject.Id, normalized.Grants, now, marker: null);
+            await AddGrantsAsync(subject, normalized.Grants, new GrantAuthority(FgaActor.Operator), now, marker: null, cancellationToken);
             await _context.SaveChangesAsync(cancellationToken);
             await _admin.RecordAuditAsync("machine_client.created", "admin", null, organizationId: normalized.OrganizationId,
                 data: new { normalized.ClientId, subjectId = subject.Id, grantCount = normalized.Grants.Count }, cancellationToken: cancellationToken);
@@ -299,7 +300,7 @@ public sealed class SqlOSMachineClientAdminService
         var grants = await NormalizeGrantsAsync([new(request.ResourceId, request.RoleId, request.Description)], cancellationToken);
         if (!await _context.Set<SqlOSFgaGrant>().AnyAsync(x => x.SubjectId == subject.Id && x.ResourceId == request.ResourceId && x.RoleId == request.RoleId, cancellationToken))
         {
-            AddGrants(subject.Id, grants, DateTime.UtcNow, marker: null);
+            await AddGrantsAsync(subject, grants, new GrantAuthority(FgaActor.Operator), DateTime.UtcNow, marker: null, cancellationToken);
             await _context.SaveChangesAsync(cancellationToken);
             await _admin.RecordAuditAsync("machine_client.grant_added", "admin", null, organizationId: subject.OrganizationId,
                 data: new { clientId, request.ResourceId, request.RoleId }, cancellationToken: cancellationToken);
@@ -355,7 +356,7 @@ public sealed class SqlOSMachineClientAdminService
         EnsureDashboardOwned(account);
         var grant = await _context.Set<SqlOSFgaGrant>().SingleOrDefaultAsync(x => x.Id == grantId && x.SubjectId == subject.Id, cancellationToken)
             ?? throw new InvalidOperationException("Grant not found.");
-        _context.Set<SqlOSFgaGrant>().Remove(grant);
+        SqlOSFgaGrants.Revoke((DbContext)_context, [grant], FgaActor.Operator);
         await _context.SaveChangesAsync(cancellationToken);
         await _admin.RecordAuditAsync("machine_client.grant_removed", "admin", null, organizationId: subject.OrganizationId,
             data: new { clientId, grantId, grant.ResourceId, grant.RoleId }, cancellationToken: cancellationToken);
@@ -430,8 +431,21 @@ public sealed class SqlOSMachineClientAdminService
             // Emergency disable lives on the OAuth client DisabledAt flag. Do not
             // expire, revoke credentials, or otherwise mutate that runtime override here.
 
-            _context.Set<SqlOSFgaGrant>().RemoveRange(old);
-            AddGrants(account.SubjectId, grants, now, marker);
+            var kept = new List<SqlOSFgaGrant>();
+            foreach (var desired in grants)
+            {
+                var current = old.FirstOrDefault(grant => grant.ResourceId == desired.ResourceId && grant.RoleId == desired.RoleId);
+                current?.Describe($"{marker} {desired.Description}".Trim(), now);
+                if (current != null) kept.Add(current);
+            }
+            SqlOSFgaGrants.Revoke((DbContext)_context, old.Except(kept), FgaActor.Startup);
+            await AddGrantsAsync(
+                accountSubject,
+                grants.Where(desired => !kept.Any(grant => grant.ResourceId == desired.ResourceId && grant.RoleId == desired.RoleId)).ToList(),
+                new GrantAuthority(FgaActor.Startup),
+                now,
+                marker,
+                cancellationToken);
             await _admin.RecordAuditAsync("configuration.reconciled", "system", "startup", organizationId: organizationId,
                 data: new { resourceType = "machine_client", clientId = sourceKey, subjectId = account.SubjectId, owner = SqlOSConfigurationOwners.Code, fingerprint }, cancellationToken: cancellationToken);
         }
@@ -488,13 +502,22 @@ public sealed class SqlOSMachineClientAdminService
         return normalized;
     }
 
-    private void AddGrants(string subjectId, IReadOnlyList<SqlOSMachineClientGrantSeedOptions> grants, DateTime now, string? marker)
+    private async Task AddGrantsAsync(
+        SqlOSFgaSubject subject,
+        IReadOnlyList<SqlOSMachineClientGrantSeedOptions> grants,
+        GrantAuthority authority,
+        DateTime now,
+        string? marker,
+        CancellationToken cancellationToken)
     {
-        foreach (var grant in grants) _context.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant
+        var roleIds = grants.Select(x => x.RoleId).Distinct().ToList();
+        var roles = await _context.Set<SqlOSFgaRole>().Where(x => roleIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, cancellationToken);
+        foreach (var grant in grants)
         {
-            Id = _crypto.GenerateId("grant"), SubjectId = subjectId, ResourceId = grant.ResourceId, RoleId = grant.RoleId,
-            Description = marker == null ? grant.Description : $"{marker} {grant.Description}".Trim(), CreatedAt = now, UpdatedAt = now
-        });
+            _context.Set<SqlOSFgaGrant>().Add(SqlOSFgaGrant.Create(
+                _crypto.GenerateId("grant"), subject, roles[grant.RoleId], grant.ResourceId, TimeWindow.Always,
+                marker == null ? grant.Description : $"{marker} {grant.Description}".Trim(), authority, now));
+        }
     }
 
     private SqlOSClientApplication CreateClient(NormalizedCreate request, DateTime now) => new()

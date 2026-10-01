@@ -2,6 +2,8 @@ using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
+using SqlOS.AuthServer.Models;
+using SqlOS.Domain;
 using SqlOS.Fga;
 using SqlOS.Fga.Models;
 
@@ -35,6 +37,29 @@ internal static class SqlOSScimGrantBoundaryPolicy
         => new(
             context.Set<SqlOSFgaResource>(),
             SqlOSFgaHierarchyDepth.Resolve(context.Database, context as DbContext));
+
+    /// <summary>
+    /// The authority for the connection's mapping to grant <paramref name="groupSubjectId"/> a role
+    /// on <paramref name="resourceId"/>, produced only when the resource is the connection's grant
+    /// boundary or one of its descendants, and covering only that group and resource (#421).
+    /// </summary>
+    public static async Task<(GrantAuthority? Authority, SqlOSFgaSubtreeMembership Membership)> AuthorizeMappedGrantAsync(
+        SqlOSFgaSubtreeResolver resolver,
+        SqlOSScimConnection connection,
+        string groupSubjectId,
+        string resourceId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(connection.GrantBoundaryResourceId))
+        {
+            return (null, SqlOSFgaSubtreeMembership.BoundaryNotFound);
+        }
+
+        var membership = await resolver.CheckAsync(resourceId, connection.GrantBoundaryResourceId, cancellationToken);
+        return membership == SqlOSFgaSubtreeMembership.Within
+            ? (new GrantAuthority(FgaActor.Directory(connection.Id), groupSubjectId, resourceId, connection.GrantBoundaryResourceId), membership)
+            : (null, membership);
+    }
 
     /// <summary>Trims a boundary ID; <c>null</c> means "not provided".</summary>
     public static string? Normalize(string? grantBoundaryResourceId)

@@ -196,13 +196,7 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
         var parent = FgaTestModel.Resource($"res_lifecycle_parent_{suffix}", "Lifecycle Parent", "agency", parentId: "root");
         var child = FgaTestModel.Resource($"res_lifecycle_child_{suffix}", "Lifecycle Child", "project", parentId: parent.Id);
         Context.Set<SqlOSFgaResource>().AddRange(parent, child);
-        Context.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant
-        {
-            Id = $"grant_lifecycle_{suffix}",
-            SubjectId = user.SubjectId,
-            ResourceId = parent.Id,
-            RoleId = FgaTestDataSeeder.AgencyMemberRoleId
-        });
+        Context.Set<SqlOSFgaGrant>().Add(FgaTestModel.Grant($"grant_lifecycle_{suffix}", user.SubjectId, parent.Id, FgaTestDataSeeder.AgencyMemberRoleId));
         Context.Set<LifecycleProtectedEntity>().Add(new LifecycleProtectedEntity { Id = suffix, ResourceId = child.Id });
         await Context.SaveChangesAsync();
 
@@ -305,13 +299,7 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
         var suffix = Guid.NewGuid().ToString("N");
         var resourceId = $"res_lifecycle_{suffix}";
         Context.Set<SqlOSFgaResource>().Add(FgaTestModel.Resource(resourceId, "Lifecycle Protected Resource", "project", parentId: "root"));
-        Context.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant
-        {
-            Id = $"grant_lifecycle_{suffix}",
-            SubjectId = grantSubjectId,
-            ResourceId = resourceId,
-            RoleId = FgaTestDataSeeder.AgencyMemberRoleId
-        });
+        Context.Set<SqlOSFgaGrant>().Add(FgaTestModel.Grant($"grant_lifecycle_{suffix}", grantSubjectId, resourceId, FgaTestDataSeeder.AgencyMemberRoleId));
         Context.Set<LifecycleProtectedEntity>().Add(new LifecycleProtectedEntity { Id = suffix, ResourceId = resourceId });
         await Context.SaveChangesAsync();
         return resourceId;

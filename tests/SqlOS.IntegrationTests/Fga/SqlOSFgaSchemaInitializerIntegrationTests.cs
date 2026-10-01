@@ -174,13 +174,7 @@ public class SqlOSFgaSchemaInitializerIntegrationTests : FgaIntegrationTestBase
             Context.Set<SqlOS.Fga.Models.SqlOSFgaSubject>().Add(FgaTestModel.Subject(subjectId, subjectTypeId, "Bound subject"));
             await Context.SaveChangesAsync();
 
-            Context.Set<SqlOS.Fga.Models.SqlOSFgaGrant>().Add(new()
-            {
-                Id = grantId,
-                SubjectId = subjectId,
-                ResourceId = childId,
-                RoleId = roleId
-            });
+            Context.Set<SqlOS.Fga.Models.SqlOSFgaGrant>().Add(FgaTestModel.Grant(grantId, subjectId, childId, roleId));
             await Context.SaveChangesAsync();
         }
         finally

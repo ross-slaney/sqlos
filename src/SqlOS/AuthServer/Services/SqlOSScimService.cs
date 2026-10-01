@@ -1577,8 +1577,13 @@ internal sealed class SqlOSScimService
             // Authoritative tenant check: the resolved resource must be the boundary or one of its
             // descendants in the FGA tree. A matching ID prefix proves nothing.
             boundaryResolver ??= SqlOSScimGrantBoundaryPolicy.CreateResolver(_context);
-            var membership = await boundaryResolver.CheckAsync(resource.Id, connection.GrantBoundaryResourceId, cancellationToken);
-            if (membership != SqlOSFgaSubtreeMembership.Within)
+            var (authority, membership) = await SqlOSScimGrantBoundaryPolicy.AuthorizeMappedGrantAsync(
+                boundaryResolver,
+                connection,
+                group.SubjectId,
+                resource.Id,
+                cancellationToken);
+            if (authority == null)
             {
                 var (action, reason, message) = membership switch
                 {
@@ -1616,22 +1621,23 @@ internal sealed class SqlOSScimService
                 await RevokeManagedGrantEntityAsync(connection, obsolete, cancellationToken);
             }
 
-            if (activeManaged.Any(x => x.ResourceId == resource.Id && x.RoleId == role.Id))
+            // An equivalent grant the mapping did not make (an operator's, say) already gives the
+            // group this access; a second one would be a duplicate.
+            if (activeManaged.Any(x => x.ResourceId == resource.Id && x.RoleId == role.Id)
+                || await SqlOSFgaGrants.FindEquivalentAsync((DbContext)_context, group.SubjectId, role.Id, resource.Id, TimeWindow.Always, cancellationToken) != null)
             {
                 continue;
             }
 
-            var grant = new SqlOSFgaGrant
-            {
-                Id = _cryptoService.GenerateId("grant"),
-                SubjectId = group.SubjectId,
-                ResourceId = resource.Id,
-                RoleId = role.Id,
-                Description = string.IsNullOrWhiteSpace(mapping.Description)
-                    ? $"SCIM mapping {mapping.Id}"
-                    : mapping.Description,
-                CreatedAt = DateTime.UtcNow
-            };
+            var grant = SqlOSFgaGrant.Create(
+                _cryptoService.GenerateId("grant"),
+                group.Subject!,
+                role,
+                resource.Id,
+                TimeWindow.Always,
+                string.IsNullOrWhiteSpace(mapping.Description) ? $"SCIM mapping {mapping.Id}" : mapping.Description,
+                authority,
+                DateTime.UtcNow);
             _context.Set<SqlOSFgaGrant>().Add(grant);
             _context.Set<SqlOSScimManagedGrant>().Add(new SqlOSScimManagedGrant
             {
@@ -1766,7 +1772,7 @@ internal sealed class SqlOSScimService
         var grant = await _context.Set<SqlOSFgaGrant>().FirstOrDefaultAsync(x => x.Id == managed.GrantId, cancellationToken);
         if (grant != null)
         {
-            _context.Set<SqlOSFgaGrant>().Remove(grant);
+            SqlOSFgaGrants.Revoke((DbContext)_context, [grant], FgaActor.Directory(connection.Id));
         }
 
         managed.RevokedAt = DateTime.UtcNow;

@@ -684,14 +684,7 @@ public sealed class SqlOSScimGrantBoundaryTests
     private static async Task InsertLegacyManagedGrantAsync(Fixture f, string connectionId, string mappingId, string groupId, string groupExternalId, string resourceId)
     {
         var group = await f.Context.Set<SqlOSFgaUserGroup>().SingleAsync(x => x.Id == groupId);
-        f.Context.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant
-        {
-            Id = "grant_planted",
-            SubjectId = group.SubjectId,
-            ResourceId = resourceId,
-            RoleId = "role_store_manager",
-            CreatedAt = DateTime.UtcNow
-        });
+        f.Context.Set<SqlOSFgaGrant>().Add(FgaTestModel.Grant("grant_planted", group.SubjectId, resourceId, "role_store_manager", createdAt: DateTime.UtcNow));
         f.Context.Set<SqlOSScimManagedGrant>().Add(new SqlOSScimManagedGrant
         {
             Id = "scgrant_planted",

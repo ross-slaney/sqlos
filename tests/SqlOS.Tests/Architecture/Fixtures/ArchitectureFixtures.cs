@@ -157,6 +157,19 @@ namespace SqlOS.Tests.Architecture.Fixtures.Proofs
         public static FixtureProof Prove(string subject) => new(subject);
 
         public static FixtureProof Narrow(FixtureProof proof) => proof with { Subject = proof.Subject + "!" };
+
+        public static FixtureGuarded Bypass() => new(null);
+    }
+
+    internal sealed class FixtureGuarded
+    {
+        internal FixtureGuarded(FixtureProof? proof) => Proof = proof;
+
+        public FixtureProof? Proof { get; }
+
+        public static FixtureGuarded Create(FixtureProof proof) => new(proof);
+
+        public static FixtureGuarded Leak() => new(null);
     }
 
     public class FixtureLeakyProof : ISqlOSProof

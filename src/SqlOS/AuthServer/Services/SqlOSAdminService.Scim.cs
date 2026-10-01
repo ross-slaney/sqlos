@@ -8,6 +8,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Models;
 using SqlOS.Database;
+using SqlOS.Domain;
 using SqlOS.Fga;
 using SqlOS.Fga.Models;
 using SqlOS.Pagination;
@@ -996,7 +997,7 @@ public sealed partial class SqlOSAdminService
         var grants = await _context.Set<SqlOS.Fga.Models.SqlOSFgaGrant>()
             .Where(x => grantIds.Contains(x.Id))
             .ToListAsync(cancellationToken);
-        _context.Set<SqlOS.Fga.Models.SqlOSFgaGrant>().RemoveRange(grants);
+        SqlOSFgaGrants.Revoke((DbContext)_context, grants, FgaActor.Directory(connection.Id), reason);
         var now = DateTime.UtcNow;
         var orderedManagedGrants = managedGrants
             .OrderBy(managed => managed.Id, StringComparer.Ordinal)

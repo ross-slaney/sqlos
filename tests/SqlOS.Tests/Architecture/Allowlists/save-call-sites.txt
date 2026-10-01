@@ -177,5 +177,3 @@ SqlOS.Email.Services.SqlOSEmailAdminService::EnsureBuiltInTemplatesAsync
 SqlOS.Email.Services.SqlOSEmailAdminService::UpdateTemplateAsync
 SqlOS.Email.Services.SqlOSTransactionalEmailService::MarkFailedAsync
 SqlOS.Email.Services.SqlOSTransactionalEmailService::SendAsync
-SqlOS.Fga.Dashboard.SqlOSFgaDashboardMiddleware::HandleCreateGrant
-SqlOS.Fga.Dashboard.SqlOSFgaDashboardMiddleware::HandleDeleteGrant

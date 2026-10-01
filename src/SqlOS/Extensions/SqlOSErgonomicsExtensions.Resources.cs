@@ -191,7 +191,7 @@ public static partial class SqlOSErgonomicsExtensions
         var grants = await context.Set<SqlOSFgaGrant>()
             .Where(grant => grant.ResourceId == normalizedResourceId)
             .ToListAsync(cancellationToken);
-        context.Set<SqlOSFgaGrant>().RemoveRange(grants);
+        SqlOSFgaGrants.Revoke((DbContext)context, grants, FgaActor.Host, SqlOSFgaGrants.ResourceDeletedReason);
         resource.Delete(FgaActor.Host);
         context.Set<SqlOSFgaResource>().Remove(resource);
     }

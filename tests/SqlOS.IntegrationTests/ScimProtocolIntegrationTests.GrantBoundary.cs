@@ -120,15 +120,7 @@ public sealed partial class ScimProtocolIntegrationTests
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             });
-            context.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant
-            {
-                Id = "grant_planted",
-                SubjectId = group.SubjectId,
-                ResourceId = OtherTenantStore9001,
-                RoleId = "role_store_manager",
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            });
+            context.Set<SqlOSFgaGrant>().Add(FgaTestModel.Grant("grant_planted", group.SubjectId, OtherTenantStore9001, "role_store_manager", createdAt: DateTime.UtcNow));
             await context.SaveChangesAsync();
             context.Set<SqlOSScimManagedGrant>().Add(new SqlOSScimManagedGrant
             {

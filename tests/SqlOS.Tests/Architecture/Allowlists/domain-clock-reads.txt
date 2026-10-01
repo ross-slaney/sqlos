@@ -5,4 +5,3 @@
 # violation, delete its line and lower this file's mark in high-water-marks.txt. Never add a line.
 # Every allowlist is empty by the end of the 8.0.0 refactor (layer 5). Sorted ordinally.
 SqlOS.AuthServer.Models.SqlOSAuditEvent::.ctor -> DateTime.UtcNow
-SqlOS.Fga.Models.SqlOSFgaGrant::.ctor -> DateTime.UtcNow

@@ -149,15 +149,7 @@ public sealed class ScimAdminHardeningIntegrationTests
             setupContext.Set<SqlOSFgaRole>().Add(FgaTestModel.Role("batch_role", key: "batch_role", name: "Batch role"));
             const int grantCount = 129;
             setupContext.Set<SqlOSFgaGrant>().AddRange(Enumerable.Range(0, grantCount).Select(index =>
-                new SqlOSFgaGrant
-                {
-                    Id = $"batch_grant_{index:D3}",
-                    SubjectId = "batch_group_subject",
-                    ResourceId = "batch_resource",
-                    RoleId = "batch_role",
-                    CreatedAt = now,
-                    UpdatedAt = now
-                }));
+                FgaTestModel.Grant($"batch_grant_{index:D3}", "batch_group_subject", "batch_resource", "batch_role", createdAt: now)));
             setupContext.Set<SqlOSScimManagedGrant>().AddRange(Enumerable.Range(0, grantCount).Select(index =>
                 new SqlOSScimManagedGrant
                 {

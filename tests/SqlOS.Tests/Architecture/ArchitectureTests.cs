@@ -59,6 +59,16 @@ public sealed class ArchitectureTests
     }
 
     [TestMethod]
+    public void Grants_are_created_only_with_a_grant_authority()
+    {
+        // §3.5: a grant exists only through SqlOSFgaGrant.Create, which takes the proof that its
+        // caller may write it; the proof's producers are pinned in proof-producers.txt.
+        var violations = ArchitectureRules.CreationWithoutProof(IlScanner.SqlOS, "SqlOS.Fga.Models.SqlOSFgaGrant", "SqlOS.Domain.GrantAuthority");
+
+        Assert.AreEqual(0, violations.Count, string.Join(Environment.NewLine, violations));
+    }
+
+    [TestMethod]
     public void Aggregate_members_change_only_through_their_root()
     {
         var violations = ArchitectureRules.MemberChangesOutsideTheirRoot(IlScanner.SqlOS, AggregateMembers.Load());

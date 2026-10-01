@@ -85,6 +85,26 @@ internal static class FgaTestModel
     public static SqlOSFgaUserGroupMembership Membership(string subjectId, string userGroupId)
         => new(subjectId, userGroupId, Now);
 
+    /// <summary>A stored grant, as host code writes it.</summary>
+    public static SqlOSFgaGrant Grant(
+        string id,
+        string subjectId,
+        string resourceId,
+        string roleId,
+        DateTime? effectiveFrom = null,
+        DateTime? effectiveTo = null,
+        string? description = null,
+        DateTime? createdAt = null)
+        => Existing(SqlOSFgaGrant.Create(
+            id,
+            Subject(subjectId, "user"),
+            Role(roleId),
+            resourceId,
+            TimeWindow.Between(effectiveFrom, effectiveTo),
+            description,
+            new GrantAuthority(FgaActor.Host),
+            createdAt ?? Now));
+
     /// <summary>Sets a persisted property directly, for state the write model would not produce.</summary>
     public static T Set<T>(T entity, string property, object? value)
         where T : class
