@@ -1,0 +1,21 @@
+# user with an active and an inactive group
+Lambda System.Func<SqlOS.Tests.Fga.PinnedEntity,System.Boolean>
+  param entity: SqlOS.Tests.Fga.PinnedEntity
+  Call System.Linq.Queryable.Any<SqlOS.Fga.Models.SqlOSFgaAccessibleResource>(System.Linq.IQueryable<SqlOS.Fga.Models.SqlOSFgaAccessibleResource>) -> System.Boolean
+    Call SqlOS.Tests.Fga.ReadPathPinContext.IsResourceAccessible(System.String, System.String, System.String) -> System.Linq.IQueryable<SqlOS.Fga.Models.SqlOSFgaAccessibleResource>
+      on
+        Constant SqlOS.Tests.Fga.ReadPathPinContext
+      Member Property SqlOS.Tests.Fga.PinnedEntity.ResourceId: System.String
+        Parameter entity: SqlOS.Tests.Fga.PinnedEntity
+      Member Field SqlOS.Fga.Services.SqlOSFgaAuthService+AuthorizationFilterParameters.SubjectIds: System.String = ["pin-user","pin-group-subject"]
+        Constant SqlOS.Fga.Services.SqlOSFgaAuthService+AuthorizationFilterParameters
+      Member Field SqlOS.Fga.Services.SqlOSFgaAuthService+AuthorizationFilterParameters.PermissionId: System.String = perm-pin-read
+        Constant SqlOS.Fga.Services.SqlOSFgaAuthService+AuthorizationFilterParameters
+# unknown subject
+Lambda System.Func<SqlOS.Tests.Fga.PinnedEntity,System.Boolean>
+  param entity: SqlOS.Tests.Fga.PinnedEntity
+  Constant System.Boolean = False
+# unknown permission
+Lambda System.Func<SqlOS.Tests.Fga.PinnedEntity,System.Boolean>
+  param entity: SqlOS.Tests.Fga.PinnedEntity
+  Constant System.Boolean = False
