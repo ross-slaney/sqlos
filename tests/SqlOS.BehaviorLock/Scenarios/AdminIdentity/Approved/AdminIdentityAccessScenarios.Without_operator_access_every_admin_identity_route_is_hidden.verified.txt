@@ -1,0 +1,234 @@
+# SqlOS behavior lock transcript
+scenario: AdminIdentityAccessScenarios.Without_operator_access_every_admin_identity_route_is_hidden
+profile: dashboard-off
+
+## 1. operator: GET /users is not found in production without operator access
+> GET /sqlos/admin/auth/api/users
+< 404 Not Found
+
+## 2. operator: GET /users/{userId} is not found in production without operator access
+> GET /sqlos/admin/auth/api/users/usr_missing
+< 404 Not Found
+
+## 3. operator: GET /users/{userId}/memberships is not found in production without operator access
+> GET /sqlos/admin/auth/api/users/usr_missing/memberships
+< 404 Not Found
+
+## 4. operator: GET /users/{userId}/sessions is not found in production without operator access
+> GET /sqlos/admin/auth/api/users/usr_missing/sessions
+< 404 Not Found
+
+## 5. operator: GET /users/{userId}/applications is not found in production without operator access
+> GET /sqlos/admin/auth/api/users/usr_missing/applications
+< 404 Not Found
+
+## 6. operator: GET /users/{userId}/grants is not found in production without operator access
+> GET /sqlos/admin/auth/api/users/usr_missing/grants
+< 404 Not Found
+
+## 7. operator: POST /users/{userId}/grants/{grantId}/revoke is not found in production without operator access
+> POST /sqlos/admin/auth/api/users/usr_missing/grants/grant_missing/revoke
+< 404 Not Found
+
+## 8. operator: POST /users/{userId}/password-reset-email is not found in production without operator access
+> POST /sqlos/admin/auth/api/users/usr_missing/password-reset-email
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 9. operator: POST /users is not found in production without operator access
+> POST /sqlos/admin/auth/api/users
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 10. operator: GET /organizations is not found in production without operator access
+> GET /sqlos/admin/auth/api/organizations
+< 404 Not Found
+
+## 11. operator: GET /organizations/{organizationId} is not found in production without operator access
+> GET /sqlos/admin/auth/api/organizations/org_missing
+< 404 Not Found
+
+## 12. operator: GET /organizations/{organizationId}/applications is not found in production without operator access
+> GET /sqlos/admin/auth/api/organizations/org_missing/applications
+< 404 Not Found
+
+## 13. operator: POST /organizations is not found in production without operator access
+> POST /sqlos/admin/auth/api/organizations
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 14. operator: PUT /organizations/{organizationId} is not found in production without operator access
+> PUT /sqlos/admin/auth/api/organizations/org_missing
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 15. operator: GET /memberships is not found in production without operator access
+> GET /sqlos/admin/auth/api/memberships
+< 404 Not Found
+
+## 16. operator: GET /organizations/{organizationId}/memberships is not found in production without operator access
+> GET /sqlos/admin/auth/api/organizations/org_missing/memberships
+< 404 Not Found
+
+## 17. operator: GET /organizations/{organizationId}/invitations is not found in production without operator access
+> GET /sqlos/admin/auth/api/organizations/org_missing/invitations
+< 404 Not Found
+
+## 18. operator: POST /organizations/{organizationId}/invitations is not found in production without operator access
+> POST /sqlos/admin/auth/api/organizations/org_missing/invitations
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 19. operator: POST /invitations/{invitationId}/resend is not found in production without operator access
+> POST /sqlos/admin/auth/api/invitations/inv_missing/resend
+< 404 Not Found
+
+## 20. operator: POST /invitations/{invitationId}/revoke is not found in production without operator access
+> POST /sqlos/admin/auth/api/invitations/inv_missing/revoke
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 21. operator: POST /memberships is not found in production without operator access
+> POST /sqlos/admin/auth/api/memberships
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 22. operator: POST /organizations/{organizationId}/memberships is not found in production without operator access
+> POST /sqlos/admin/auth/api/organizations/org_missing/memberships
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 23. operator: GET /clients is not found in production without operator access
+> GET /sqlos/admin/auth/api/clients
+< 404 Not Found
+
+## 24. operator: GET /clients/{clientId} is not found in production without operator access
+> GET /sqlos/admin/auth/api/clients/cli_missing
+< 404 Not Found
+
+## 25. operator: GET /clients/{clientId}/credentials is not found in production without operator access
+> GET /sqlos/admin/auth/api/clients/cli_missing/credentials
+< 404 Not Found
+
+## 26. operator: POST /clients/{clientId}/credentials is not found in production without operator access
+> POST /sqlos/admin/auth/api/clients/cli_missing/credentials
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 27. operator: DELETE /clients/{clientId}/credentials/{credentialId} is not found in production without operator access
+> DELETE /sqlos/admin/auth/api/clients/cli_missing/credentials/clcred_missing
+< 404 Not Found
+
+## 28. operator: GET /applications/{applicationId}/assignments is not found in production without operator access
+> GET /sqlos/admin/auth/api/applications/cli_missing/assignments
+< 404 Not Found
+
+## 29. operator: POST /applications/{applicationId}/access-mode is not found in production without operator access
+> POST /sqlos/admin/auth/api/applications/cli_missing/access-mode
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 30. operator: POST /applications/{applicationId}/assignments is not found in production without operator access
+> POST /sqlos/admin/auth/api/applications/cli_missing/assignments
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 31. operator: DELETE /applications/{applicationId}/assignments/{assignmentId} is not found in production without operator access
+> DELETE /sqlos/admin/auth/api/applications/cli_missing/assignments/asa_missing
+< 404 Not Found
+
+## 32. operator: GET /applications/{applicationId}/access/check is not found in production without operator access
+> GET /sqlos/admin/auth/api/applications/cli_missing/access/check
+< 404 Not Found
+
+## 33. operator: POST /clients is not found in production without operator access
+> POST /sqlos/admin/auth/api/clients
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 34. operator: POST /clients/{clientId}/disable is not found in production without operator access
+> POST /sqlos/admin/auth/api/clients/cli_missing/disable
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 35. operator: POST /clients/{clientId}/enable is not found in production without operator access
+> POST /sqlos/admin/auth/api/clients/cli_missing/enable
+< 404 Not Found
+
+## 36. operator: POST /clients/{clientId}/emergency-disable is not found in production without operator access
+> POST /sqlos/admin/auth/api/clients/cli_missing/emergency-disable
+< 404 Not Found
+
+## 37. operator: POST /clients/{clientId}/emergency-enable is not found in production without operator access
+> POST /sqlos/admin/auth/api/clients/cli_missing/emergency-enable
+< 404 Not Found
+
+## 38. operator: POST /clients/{clientId}/revoke is not found in production without operator access
+> POST /sqlos/admin/auth/api/clients/cli_missing/revoke
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 39. operator: GET /machine-clients is not found in production without operator access
+> GET /sqlos/admin/auth/api/machine-clients
+< 404 Not Found
+
+## 40. operator: POST /machine-clients is not found in production without operator access
+> POST /sqlos/admin/auth/api/machine-clients
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 41. operator: POST /machine-clients/{clientId}/rotate is not found in production without operator access
+> POST /sqlos/admin/auth/api/machine-clients/missing-machine/rotate
+< 404 Not Found
+
+## 42. operator: POST /machine-clients/{clientId}/validate is not found in production without operator access
+> POST /sqlos/admin/auth/api/machine-clients/missing-machine/validate
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 43. operator: POST /machine-clients/{clientId}/revoke is not found in production without operator access
+> POST /sqlos/admin/auth/api/machine-clients/missing-machine/revoke
+< 404 Not Found
+
+## 44. operator: POST /machine-clients/{clientId}/emergency-disable is not found in production without operator access
+> POST /sqlos/admin/auth/api/machine-clients/missing-machine/emergency-disable
+< 404 Not Found
+
+## 45. operator: POST /machine-clients/{clientId}/emergency-enable is not found in production without operator access
+> POST /sqlos/admin/auth/api/machine-clients/missing-machine/emergency-enable
+< 404 Not Found
+
+## 46. operator: POST /machine-clients/{clientId}/grants is not found in production without operator access
+> POST /sqlos/admin/auth/api/machine-clients/missing-machine/grants
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 47. operator: DELETE /machine-clients/{clientId}/grants/{grantId} is not found in production without operator access
+> DELETE /sqlos/admin/auth/api/machine-clients/missing-machine/grants/grant_missing
+< 404 Not Found
+
+## 48. operator: an existing user is not found either
+> GET /sqlos/admin/auth/api/users/{usr#1}
+< 404 Not Found
+
+## 49. operator: the operator header means nothing without an authorization callback
+> GET /sqlos/admin/auth/api/users/{usr#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 404 Not Found

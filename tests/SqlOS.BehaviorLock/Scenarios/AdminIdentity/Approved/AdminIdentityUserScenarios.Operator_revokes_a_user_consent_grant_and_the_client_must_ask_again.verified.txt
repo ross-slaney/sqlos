@@ -1,0 +1,211 @@
+# SqlOS behavior lock transcript
+scenario: AdminIdentityUserScenarios.Operator_revokes_a_user_consent_grant_and_the_client_must_ask_again
+profile: multi-app
+
+## 1. operator: alice's remembered consent for the partner client
+> GET /sqlos/admin/auth/api/users/{usr#1}/grants
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "clientApplicationId": "{cli#1}",
+          "clientId": "atlas-partner",
+          "clientName": "Atlas Partner",
+          "grantedAt": "{datetime:unspecified}",
+          "id": "{cgr#1}",
+          "scopes": [
+            "openid",
+            "profile",
+            "email",
+            "offline_access"
+          ],
+          "updatedAt": "{datetime:unspecified}",
+          "userId": "{usr#1}"
+        }
+      ]
+    }
+
+## 2. operator: bob's grant cannot be revoked through alice
+> POST /sqlos/admin/auth/api/users/{usr#1}/grants/{cgr#2}/revoke
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Consent grant was not found for this user."
+    }
+
+## 3. operator: revoke alice's grant
+> POST /sqlos/admin/auth/api/users/{usr#1}/grants/{cgr#1}/revoke
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "id": "{cgr#1}",
+      "revokedAt": "{datetime:utc-z}"
+    }
+
+## 4. operator: revoking it again is refused
+> POST /sqlos/admin/auth/api/users/{usr#1}/grants/{cgr#1}/revoke
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Consent grant is already revoked."
+    }
+
+## 5. operator: an unknown grant is not found
+> POST /sqlos/admin/auth/api/users/{usr#1}/grants/grant_missing/revoke
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Consent grant was not found for this user."
+    }
+
+## 6. operator: alice has no active grants left
+> GET /sqlos/admin/auth/api/users/{usr#1}/grants
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": []
+    }
+
+## 7. operator: bob's grant is untouched
+> GET /sqlos/admin/auth/api/users/{usr#2}/grants
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "clientApplicationId": "{cli#1}",
+          "clientId": "atlas-partner",
+          "clientName": "Atlas Partner",
+          "grantedAt": "{datetime:unspecified}",
+          "id": "{cgr#2}",
+          "scopes": [
+            "openid",
+            "profile",
+            "email",
+            "offline_access"
+          ],
+          "updatedAt": "{datetime:unspecified}",
+          "userId": "{usr#2}"
+        }
+      ]
+    }
+
+## audit: the revocation is audited once
+  - {
+      "action": "oauth.consent.revoked",
+      "actor": {
+        "displayName": null,
+        "id": "dashboard",
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.consent.revoked",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "client_id": "atlas-partner",
+        "grant_id": "{cgr#1}",
+        "reason": "admin_revoked"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+
+## 8. alice-browser: a silent authorization from alice's browser now needs consent again
+> GET /sqlos/auth/authorize?response_type=code&client_id=atlas-partner&redirect_uri=https%3A%2F%2Fpartner.example.test%2Fcallback&scope=openid%20profile%20email%20offline_access&state={state#1}&nonce={nonce#1}&code_challenge={pkce-challenge#1}&code_challenge_method=S256&prompt=none
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}; sqlos_auth_page={cookie#2}
+< 302 Found
+< Location: https://partner.example.test/callback?error=consent_required&state={state#1}&error_description=User%20interaction%20is%20required%20for%20this%20client.
+
+## 9. client: the refresh token issued under the revoked grant still refreshes
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=refresh_token
+>   refresh_token={refresh-token#1}
+>   client_id=atlas-partner
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "access_token": "{access-token#1}",
+      "expires_in": ~600,
+      "id_token": "{id-token#1}",
+      "refresh_token": "{refresh-token#2}",
+      "scope": "openid profile email offline_access",
+      "token_type": "Bearer"
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "https://api.example.test",
+      "client_id": "atlas-partner",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "scope": "openid profile email offline_access",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+  jwt {id-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "JWT"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "at_hash": "{hash#1}",
+      "aud": "atlas-partner",
+      "auth_time": {epoch},
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=5m

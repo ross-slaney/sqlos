@@ -1,0 +1,84 @@
+# SqlOS behavior lock transcript
+scenario: AdminIdentityMembershipScenarios.Memberships_for_unknown_users_or_organizations_fail_in_the_database
+profile: dashboard-callback
+
+## 1. operator: an unknown user breaks the foreign key: 500
+> POST /sqlos/admin/auth/api/organizations/{org#1}/memberships
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "role": "member",
+>     "userId": "usr_missing"
+>   }
+< 500 Internal Server Error
+
+## 2. operator: an unknown organization breaks the foreign key: 500
+> POST /sqlos/admin/auth/api/memberships
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "organizationId": "org_missing",
+>     "role": "member",
+>     "userId": "{usr#1}"
+>   }
+< 500 Internal Server Error
+
+## 3. operator: a missing role reaches the database: 500
+> POST /sqlos/admin/auth/api/organizations/{org#1}/memberships
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "userId": "{usr#1}"
+>   }
+< 500 Internal Server Error
+
+## 4. operator: a role longer than its fifty-character column: 500
+> POST /sqlos/admin/auth/api/organizations/{org#1}/memberships
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "role": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+>     "userId": "{usr#1}"
+>   }
+< 500 Internal Server Error
+
+## 5. operator: an empty role is accepted
+> POST /sqlos/admin/auth/api/organizations/{org#1}/memberships
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "role": "",
+>     "userId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "isActive": true,
+      "organizationId": "{org#1}",
+      "role": "",
+      "userId": "{usr#1}"
+    }
+
+## 6. operator: the only membership has the empty role
+> GET /sqlos/admin/auth/api/organizations/{org#1}/memberships
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "isActive": true,
+          "organization": "Acme",
+          "organizationId": "{org#1}",
+          "role": "",
+          "user": "Alice",
+          "userEmail": "{email:alice}",
+          "userId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }

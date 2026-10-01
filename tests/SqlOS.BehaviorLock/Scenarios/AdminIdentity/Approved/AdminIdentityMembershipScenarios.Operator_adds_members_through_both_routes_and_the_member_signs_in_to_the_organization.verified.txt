@@ -1,0 +1,471 @@
+# SqlOS behavior lock transcript
+scenario: AdminIdentityMembershipScenarios.Operator_adds_members_through_both_routes_and_the_member_signs_in_to_the_organization
+profile: dashboard-callback
+
+## 1. operator: add alice to acme through the organization route
+> POST /sqlos/admin/auth/api/organizations/{org#1}/memberships
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "role": "admin",
+>     "userId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "isActive": true,
+      "organizationId": "{org#1}",
+      "role": "admin",
+      "userId": "{usr#1}"
+    }
+
+## 2. operator: add alice to globex through the flat route
+> POST /sqlos/admin/auth/api/memberships
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "organizationId": "{org#2}",
+>     "role": "member",
+>     "userId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "isActive": true,
+      "organizationId": "{org#2}",
+      "role": "member",
+      "userId": "{usr#1}"
+    }
+
+## 3. operator: add bob to acme
+> POST /sqlos/admin/auth/api/organizations/{org#1}/memberships
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "role": "member",
+>     "userId": "{usr#2}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "isActive": true,
+      "organizationId": "{org#1}",
+      "role": "member",
+      "userId": "{usr#2}"
+    }
+
+## 4. operator: a role is free text
+> POST /sqlos/admin/auth/api/memberships
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "organizationId": "{org#1}",
+>     "role": "billing",
+>     "userId": "{usr#3}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "isActive": true,
+      "organizationId": "{org#1}",
+      "role": "billing",
+      "userId": "{usr#3}"
+    }
+
+## audit: membership creation writes no audit event
+  (no new events)
+
+## 5. operator: all memberships, by organization name then user name
+> GET /sqlos/admin/auth/api/memberships
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "isActive": true,
+          "organization": "Acme",
+          "organizationId": "{org#1}",
+          "role": "admin",
+          "user": "Alice",
+          "userEmail": "{email:alice}",
+          "userId": "{usr#1}"
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "isActive": true,
+          "organization": "Acme",
+          "organizationId": "{org#1}",
+          "role": "member",
+          "user": "Bob",
+          "userEmail": "{email:bob}",
+          "userId": "{usr#2}"
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "isActive": true,
+          "organization": "Acme",
+          "organizationId": "{org#1}",
+          "role": "billing",
+          "user": "Carol",
+          "userEmail": "{email:carol}",
+          "userId": "{usr#3}"
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "isActive": true,
+          "organization": "Globex",
+          "organizationId": "{org#2}",
+          "role": "member",
+          "user": "Alice",
+          "userEmail": "{email:alice}",
+          "userId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 6. operator: search matches the role
+> GET /sqlos/admin/auth/api/memberships?search=billing
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "isActive": true,
+          "organization": "Acme",
+          "organizationId": "{org#1}",
+          "role": "billing",
+          "user": "Carol",
+          "userEmail": "{email:carol}",
+          "userId": "{usr#3}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 7. operator: and the organization name
+> GET /sqlos/admin/auth/api/memberships?search=Globex
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "isActive": true,
+          "organization": "Globex",
+          "organizationId": "{org#2}",
+          "role": "member",
+          "user": "Alice",
+          "userEmail": "{email:alice}",
+          "userId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 8. operator: two to a page
+> GET /sqlos/admin/auth/api/memberships?pageSize=2
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "isActive": true,
+          "organization": "Acme",
+          "organizationId": "{org#1}",
+          "role": "admin",
+          "user": "Alice",
+          "userEmail": "{email:alice}",
+          "userId": "{usr#1}"
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "isActive": true,
+          "organization": "Acme",
+          "organizationId": "{org#1}",
+          "role": "member",
+          "user": "Bob",
+          "userEmail": "{email:bob}",
+          "userId": "{usr#2}"
+        }
+      ],
+      "hasNextPage": true,
+      "nextCursor": "{cursor#1}",
+      "pageSize": 2
+    }
+
+## 9. operator: the next page
+> GET /sqlos/admin/auth/api/memberships?pageSize=2&cursor={cursor#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "isActive": true,
+          "organization": "Acme",
+          "organizationId": "{org#1}",
+          "role": "billing",
+          "user": "Carol",
+          "userEmail": "{email:carol}",
+          "userId": "{usr#3}"
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "isActive": true,
+          "organization": "Globex",
+          "organizationId": "{org#2}",
+          "role": "member",
+          "user": "Alice",
+          "userEmail": "{email:alice}",
+          "userId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 2
+    }
+
+## 10. operator: acme's members, by user name
+> GET /sqlos/admin/auth/api/organizations/{org#1}/memberships
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "isActive": true,
+          "organization": "Acme",
+          "organizationId": "{org#1}",
+          "role": "admin",
+          "user": "Alice",
+          "userEmail": "{email:alice}",
+          "userId": "{usr#1}"
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "isActive": true,
+          "organization": "Acme",
+          "organizationId": "{org#1}",
+          "role": "member",
+          "user": "Bob",
+          "userEmail": "{email:bob}",
+          "userId": "{usr#2}"
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "isActive": true,
+          "organization": "Acme",
+          "organizationId": "{org#1}",
+          "role": "billing",
+          "user": "Carol",
+          "userEmail": "{email:carol}",
+          "userId": "{usr#3}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 11. operator: search within the organization
+> GET /sqlos/admin/auth/api/organizations/{org#1}/memberships?search=Bob
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "isActive": true,
+          "organization": "Acme",
+          "organizationId": "{org#1}",
+          "role": "member",
+          "user": "Bob",
+          "userEmail": "{email:bob}",
+          "userId": "{usr#2}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 12. operator: one member to a page
+> GET /sqlos/admin/auth/api/organizations/{org#1}/memberships?pageSize=1
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "isActive": true,
+          "organization": "Acme",
+          "organizationId": "{org#1}",
+          "role": "admin",
+          "user": "Alice",
+          "userEmail": "{email:alice}",
+          "userId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": true,
+      "nextCursor": "{cursor#2}",
+      "pageSize": 1
+    }
+
+## 13. operator: the next member
+> GET /sqlos/admin/auth/api/organizations/{org#1}/memberships?pageSize=1&cursor={cursor#2}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "isActive": true,
+          "organization": "Acme",
+          "organizationId": "{org#1}",
+          "role": "member",
+          "user": "Bob",
+          "userEmail": "{email:bob}",
+          "userId": "{usr#2}"
+        }
+      ],
+      "hasNextPage": true,
+      "nextCursor": "{cursor#3}",
+      "pageSize": 1
+    }
+
+## 14. operator: an organization list's cursor does not page the flat list
+> GET /sqlos/admin/auth/api/memberships?cursor={cursor#2}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_cursor",
+      "message": "The cursor does not match this list."
+    }
+
+## 15. operator: an unknown organization has no members
+> GET /sqlos/admin/auth/api/organizations/org_missing/memberships
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 16. client: carol, a member of one organization, signs in to it
+> POST /sqlos/auth/password/login
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "email": "{email:carol}",
+>     "password": "{password:carol}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "mfaMethods": null,
+      "mfaToken": null,
+      "organizations": [
+        {
+          "id": "{org#1}",
+          "name": "Acme",
+          "role": "billing",
+          "slug": "{slug:acme}"
+        }
+      ],
+      "pendingAuthToken": null,
+      "requiresMfa": false,
+      "requiresMfaEnrollment": false,
+      "requiresOrganizationSelection": false,
+      "tokens": {
+        "accessToken": "{access-token#1}",
+        "accessTokenExpiresAt": "{datetime:utc-z}",
+        "clientId": "behavior-lock-app",
+        "idToken": null,
+        "organizationId": "{org#1}",
+        "refreshToken": "{refresh-token#1}",
+        "refreshTokenExpiresAt": "{datetime:utc-z}",
+        "sessionId": "{ses#1}"
+      }
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:carol}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "org_id": "{org#1}",
+      "sid": "{ses#1}",
+      "sub": "{usr#3}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+
+## 17. operator: alice belongs to both organizations
+> GET /sqlos/admin/auth/api/users/{usr#1}/memberships
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "isActive": true,
+          "organization": "Acme",
+          "organizationId": "{org#1}",
+          "role": "admin",
+          "user": "Alice",
+          "userEmail": "{email:alice}",
+          "userId": "{usr#1}"
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "isActive": true,
+          "organization": "Globex",
+          "organizationId": "{org#2}",
+          "role": "member",
+          "user": "Alice",
+          "userEmail": "{email:alice}",
+          "userId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }

@@ -1,0 +1,357 @@
+# SqlOS behavior lock transcript
+scenario: AdminIdentityApplicationAccessScenarios.Access_modes_and_assignments_are_validated
+profile: dashboard-callback
+
+## 1. operator: an unknown access mode is refused
+> POST /sqlos/admin/auth/api/applications/portal/access-mode
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "accessMode": "everyone"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Unsupported application access mode."
+    }
+
+## 2. operator: the dashboard cannot change a code-owned client's access mode
+> POST /sqlos/admin/auth/api/applications/behavior-lock-app/access-mode
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "accessMode": "disabled"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "OAuth client 'behavior-lock-app' access mode is owned by the 'code' configuration source. Change its source configuration instead."
+    }
+
+## 3. operator: an unknown principal type is refused
+> POST /sqlos/admin/auth/api/applications/portal/assignments
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "principalId": "x",
+>     "principalType": "team"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Unsupported application assignment principal type."
+    }
+
+## 4. operator: access must be allowed or denied
+> POST /sqlos/admin/auth/api/applications/portal/assignments
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "access": "maybe",
+>     "principalId": "{usr#1}",
+>     "principalType": "user"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Application assignment access must be allowed or denied."
+    }
+
+## 5. operator: an organization assignment needs an organization
+> POST /sqlos/admin/auth/api/applications/portal/assignments
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "principalType": "organization"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Organization assignments require organizationId or principalId."
+    }
+
+## 6. operator: a user assignment needs a principal
+> POST /sqlos/admin/auth/api/applications/portal/assignments
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "principalType": "user"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "user assignments require principalId."
+    }
+
+## 7. operator: a role assignment needs an organization
+> POST /sqlos/admin/auth/api/applications/portal/assignments
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "principalType": "role",
+>     "roleKey": "admin"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Role assignments require organizationId."
+    }
+
+## 8. operator: and a role key
+> POST /sqlos/admin/auth/api/applications/portal/assignments
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "organizationId": "{org#1}",
+>     "principalType": "role"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Role assignments require roleKey."
+    }
+
+## 9. operator: a reason over five hundred characters is refused
+> POST /sqlos/admin/auth/api/applications/portal/assignments
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "principalId": "{usr#1}",
+>     "principalType": "user",
+>     "reason": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Application assignment reason must be 500 characters or fewer."
+    }
+
+## 10. operator: an inactive organization is refused
+> POST /sqlos/admin/auth/api/applications/portal/assignments
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "organizationId": "{org#2}",
+>     "principalType": "organization"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Application assignments require an active organization."
+    }
+
+## 11. operator: an unknown user is refused
+> POST /sqlos/admin/auth/api/applications/portal/assignments
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "principalId": "usr_missing",
+>     "principalType": "user"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Application assignment user 'usr_missing' was not found or is inactive."
+    }
+
+## 12. operator: a user scoped to an organization she is not a member of is refused
+> POST /sqlos/admin/auth/api/applications/portal/assignments
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "organizationId": "{org#1}",
+>     "principalId": "{usr#1}",
+>     "principalType": "user"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Application assignment user is not active in the selected organization."
+    }
+
+## 13. operator: user_group is read as group, and an unknown group is refused
+> POST /sqlos/admin/auth/api/applications/portal/assignments
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "principalId": "grp_missing",
+>     "principalType": "user_group"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Application assignment group 'grp_missing' was not found or is inactive."
+    }
+
+## 14. operator: an unknown service account is refused
+> POST /sqlos/admin/auth/api/applications/portal/assignments
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "principalId": "sa_missing",
+>     "principalType": "service_account"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Application assignment service account 'sa_missing' was not found or is expired."
+    }
+
+## 15. operator: an unknown agent is refused
+> POST /sqlos/admin/auth/api/applications/portal/assignments
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "principalId": "agent_missing",
+>     "principalType": "agent"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Application assignment agent 'agent_missing' was not found."
+    }
+
+## 16. operator: a user assignment on an application that allows every organization is accepted
+> POST /sqlos/admin/auth/api/applications/portal/assignments
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "principalId": "{usr#1}",
+>     "principalType": "user"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "access": "allowed",
+      "clientApplicationId": "{cli#1}",
+      "createdAt": "{datetime:utc-z}",
+      "id": "{asa#1}",
+      "organizationId": null,
+      "ownership": {
+        "canEmergencyDisable": false,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "principalId": "{usr#1}",
+      "principalType": "user",
+      "reason": null,
+      "revokedAt": null,
+      "roleKey": null
+    }
+
+## 17. operator: an unknown assignment cannot be revoked
+> DELETE /sqlos/admin/auth/api/applications/portal/assignments/asa_missing
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Application assignment was not found."
+    }
+
+## 18. operator: listing an unknown application's assignments is refused
+> GET /sqlos/admin/auth/api/applications/cli_missing/assignments
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Client application was not found."
+    }
+
+## 19. operator: and so is checking access to it
+> GET /sqlos/admin/auth/api/applications/cli_missing/access/check
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Client application was not found."
+    }
+
+## 20. operator: nor can its mode change
+> POST /sqlos/admin/auth/api/applications/cli_missing/access-mode
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "accessMode": "disabled"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Client application was not found."
+    }
+
+## 21. operator: nor can it be assigned
+> POST /sqlos/admin/auth/api/applications/cli_missing/assignments
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "principalId": "{usr#1}",
+>     "principalType": "user"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Client application was not found."
+    }
+
+## 22. operator: nor can its assignments be revoked
+> DELETE /sqlos/admin/auth/api/applications/cli_missing/assignments/asa_missing
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Client application was not found."
+    }
+
+## 23. operator: an unknown organization's applications are not found
+> GET /sqlos/admin/auth/api/organizations/org_missing/applications
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Organization not found."
+    }
+
+## audit: only the accepted assignment is audited
+  - {
+      "action": "application.assignment.created",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "application.assignment.created",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "Access": "[redacted]",
+        "PrincipalId": "{usr#1}",
+        "PrincipalType": "user",
+        "RoleKey": null,
+        "assignment_id": "{asa#1}",
+        "client_application_id": "{cli#1}",
+        "client_id": "portal"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
