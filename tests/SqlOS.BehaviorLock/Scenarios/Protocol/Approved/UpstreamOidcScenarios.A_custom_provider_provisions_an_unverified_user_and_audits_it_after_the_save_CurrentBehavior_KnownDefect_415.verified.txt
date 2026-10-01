@@ -103,13 +103,13 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.login.oidc.provisioned",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "oidcConnectionId": "{oidc#1}",
         "provider": "Custom"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -137,7 +137,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.login.oidc.success",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "oidcConnectionId": "{oidc#1}",
@@ -153,7 +153,7 @@ profile: hosted
           "Reason": "evidence_missing"
         }
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -199,7 +199,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.login.oidc.email_link_rejected",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "claimSource": "userinfo",
@@ -207,7 +207,7 @@ profile: hosted
         "provider": "Custom",
         "reason": "email_not_verified_in_source"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -235,12 +235,12 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.login.oidc.error",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "error": "The social login could not be completed."
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -268,7 +268,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -278,7 +278,7 @@ profile: hosted
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "OidcCallback"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

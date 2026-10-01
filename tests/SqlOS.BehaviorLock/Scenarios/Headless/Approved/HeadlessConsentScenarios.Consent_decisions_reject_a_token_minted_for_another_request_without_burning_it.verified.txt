@@ -100,7 +100,7 @@ profile: headless
       "correlationId": null,
       "eventType": "password.login.succeeded",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "AuthorizationRequestId": "[redacted]",
@@ -116,7 +116,7 @@ profile: headless
         },
         "maskedEmail": "AL***@EXAMPLE.TEST"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -144,7 +144,7 @@ profile: headless
       "correlationId": null,
       "eventType": "password.login.succeeded",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "AuthorizationRequestId": "[redacted]",
@@ -160,7 +160,7 @@ profile: headless
         },
         "maskedEmail": "BO***@EXAMPLE.TEST"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -188,7 +188,7 @@ profile: headless
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -198,7 +198,7 @@ profile: headless
         "publicMessage": "The request could not be completed.",
         "surface": "HeadlessApi"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -226,7 +226,7 @@ profile: headless
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -236,7 +236,7 @@ profile: headless
         "publicMessage": "The request could not be completed.",
         "surface": "HeadlessApi"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -264,7 +264,7 @@ profile: headless
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -274,7 +274,7 @@ profile: headless
         "publicMessage": "The request could not be completed.",
         "surface": "HeadlessApi"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -302,13 +302,13 @@ profile: headless
       "correlationId": null,
       "eventType": "oauth.consent.granted",
       "id": "{evt#6}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "client_id": "partner-app",
         "scope": "openid profile email offline_access"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -336,13 +336,13 @@ profile: headless
       "correlationId": null,
       "eventType": "oauth.consent.denied",
       "id": "{evt#7}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "client_id": "partner-app",
         "scope": "openid profile email offline_access"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

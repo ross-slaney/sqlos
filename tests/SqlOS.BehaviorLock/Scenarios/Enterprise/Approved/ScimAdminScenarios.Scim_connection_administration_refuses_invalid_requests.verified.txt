@@ -250,7 +250,7 @@ profile: enterprise-scim-path
     {
       "data": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Live directory",
           "grantBoundary": {
             "resourceId": null,
@@ -278,8 +278,8 @@ profile: enterprise-scim-path
           "syncEventCount": 0,
           "tokenLastUsedAt": null,
           "tokenPrefix": "{token-prefix#2}",
-          "tokenRotatedAt": "{datetime:unspecified}",
-          "updatedAt": "{datetime:unspecified}"
+          "tokenRotatedAt": "{datetime:utc-z}",
+          "updatedAt": "{datetime:utc-z}"
         }
       ],
       "hasNextPage": true,
@@ -337,13 +337,13 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.connection.created",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "DisplayName": "Staged directory",
         "GrantBoundaryResourceId": null
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#2}",
       "requestId": null,
       "sessionId": null,
@@ -371,12 +371,12 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.token.rotated",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "TokenPrefix": "[redacted]"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#2}",
       "requestId": null,
       "sessionId": null,

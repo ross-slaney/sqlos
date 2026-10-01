@@ -218,13 +218,13 @@ profile: hosted
       "correlationId": null,
       "eventType": "auth.lifecycle.denied",
       "id": "{aud#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "boundary": "refresh",
         "reason": "membership_inactive"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#3}",
       "requestId": null,
       "sessionId": "{ses#1}",
@@ -242,14 +242,14 @@ profile: hosted
     {
       "data": [
         {
-          "absoluteExpiresAt": "{datetime:unspecified}",
+          "absoluteExpiresAt": "{datetime:utc-z}",
           "authenticationMethod": "password",
           "clientApplicationId": "{cli#1}",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "id": "{ses#1}",
-          "idleExpiresAt": "{datetime:unspecified}",
+          "idleExpiresAt": "{datetime:utc-z}",
           "ipAddress": "203.0.113.10",
-          "lastSeenAt": "{datetime:unspecified}",
+          "lastSeenAt": "{datetime:utc-z}",
           "revocationReason": null,
           "revokedAt": null,
           "user": "Alice",

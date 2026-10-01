@@ -69,7 +69,7 @@ profile: headless
         "deviceAuthorization": {
           "clientId": "lock-cli",
           "clientName": "Lock CLI",
-          "expiresAt": "{datetime:unspecified}",
+          "expiresAt": "{datetime:utc-z}",
           "resource": null,
           "scope": "openid profile offline_access",
           "status": "approved",
@@ -127,7 +127,7 @@ profile: headless
             "configurationFingerprint": "{hex#1}",
             "isEditable": false,
             "isOrphaned": false,
-            "lastReconciledAt": "{datetime:unspecified}",
+            "lastReconciledAt": "{datetime:utc-z}",
             "owner": "code",
             "sourceKey": "auth-page:default"
           },
@@ -135,7 +135,7 @@ profile: headless
           "pageTitle": "Sign in to Behavior Lock",
           "phoneOtpRuntimeConfigured": true,
           "primaryColor": "#2563eb",
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         "signupToken": null,
         "totpEnrollment": null,
@@ -166,10 +166,10 @@ profile: headless
       "correlationId": null,
       "eventType": "oauth.device.started",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": null,
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -197,7 +197,7 @@ profile: headless
       "correlationId": null,
       "eventType": "password_reset.requested",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "details": {
@@ -206,7 +206,7 @@ profile: headless
         },
         "maskedEmail": "al***@example.test"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -228,7 +228,7 @@ profile: headless
       "correlationId": null,
       "eventType": "email.send.queued",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "deliveryId": "{edl#1}",
@@ -236,7 +236,7 @@ profile: headless
         "templateKey": "auth.password-reset",
         "templateVersion": 1
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -264,7 +264,7 @@ profile: headless
       "correlationId": null,
       "eventType": "password_reset.email_sent",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "details": {
@@ -274,7 +274,7 @@ profile: headless
         },
         "maskedEmail": "al***@example.test"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -296,7 +296,7 @@ profile: headless
       "correlationId": null,
       "eventType": "user.email.claimed",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "emailId": "{eml#1}",
@@ -311,7 +311,7 @@ profile: headless
           "recoveryCodes": 0
         }
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -345,13 +345,13 @@ profile: headless
       "correlationId": null,
       "eventType": "password_reset.completed",
       "id": "{evt#6}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "details": null,
         "maskedEmail": null
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -379,7 +379,7 @@ profile: headless
       "correlationId": null,
       "eventType": "password.login.succeeded",
       "id": "{evt#7}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "AuthorizationRequestId": "[redacted]",
@@ -395,7 +395,7 @@ profile: headless
         },
         "maskedEmail": "AL***@EXAMPLE.TEST"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -423,10 +423,10 @@ profile: headless
       "correlationId": null,
       "eventType": "oauth.device.approved",
       "id": "{evt#8}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": null,
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

@@ -11,7 +11,7 @@ profile: enterprise-scim-path
 < Content-Type: application/json; charset=utf-8
     {
       "baseUrl": "/scim/v2",
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "displayName": "Directory",
       "grantBoundary": {
         "resourceId": "workspace::acme-temporary",
@@ -23,7 +23,7 @@ profile: enterprise-scim-path
       "groupsUrl": "/scim/v2/Groups",
       "id": "{scim#1}",
       "isEnabled": true,
-      "lastSyncAt": "{datetime:unspecified}",
+      "lastSyncAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "ownership": {
         "canEmergencyDisable": true,
@@ -36,10 +36,10 @@ profile: enterprise-scim-path
       },
       "seedKey": null,
       "source": "dashboard",
-      "tokenLastUsedAt": "{datetime:unspecified}",
+      "tokenLastUsedAt": "{datetime:utc-z}",
       "tokenPrefix": "{token-prefix#1}",
-      "tokenRotatedAt": "{datetime:unspecified}",
-      "updatedAt": "{datetime:unspecified}",
+      "tokenRotatedAt": "{datetime:utc-z}",
+      "updatedAt": "{datetime:utc-z}",
       "usersUrl": "/scim/v2/Users"
     }
 
@@ -53,7 +53,7 @@ profile: enterprise-scim-path
         {
           "activeGrantCount": 0,
           "connectionId": "{scim#1}",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "description": null,
           "grantBoundaryStatus": "boundary_not_found",
           "groupDisplayName": null,
@@ -67,7 +67,7 @@ profile: enterprise-scim-path
           "roleKey": "workspace_reader",
           "source": "dashboard",
           "sourceKey": null,
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         }
       ],
       "hasNextPage": false,
@@ -131,7 +131,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.member_added",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-team-projects",
@@ -146,7 +146,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp#1}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -174,7 +174,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.grant.boundary_missing",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-team-projects",
@@ -188,7 +188,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp#1}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -216,7 +216,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.created",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-team-projects",
@@ -235,7 +235,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp#1}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,

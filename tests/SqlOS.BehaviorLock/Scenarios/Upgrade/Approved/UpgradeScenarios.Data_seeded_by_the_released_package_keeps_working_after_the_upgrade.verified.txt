@@ -382,8 +382,8 @@ profile: upgrade
           ],
           "id": "{usr:bob}",
           "meta": {
-            "created": "{datetime:unspecified}",
-            "lastModified": "{datetime:unspecified}",
+            "created": "{datetime:utc-z}",
+            "lastModified": "{datetime:utc-z}",
             "location": "https://sqlos.example.test/scim/v2/Users/{usr:bob}",
             "resourceType": "User"
           },
@@ -496,7 +496,7 @@ profile: upgrade
     {
       "data": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Dave Lister",
           "email": "{email:dave}",
           "id": "{fusr#1}",
@@ -1260,7 +1260,7 @@ profile: upgrade
     {
       "data": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "defaultEmail": "{email:alice}",
           "displayName": "Alice",
           "id": "{usr:alice}",
@@ -1268,7 +1268,7 @@ profile: upgrade
           "membershipCount": 1
         },
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "defaultEmail": "{email:bob}",
           "displayName": "Bob Builder",
           "id": "{usr:bob}",
@@ -1276,7 +1276,7 @@ profile: upgrade
           "membershipCount": 1
         },
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "defaultEmail": "{email:carol}",
           "displayName": "Carol",
           "id": "{usr:carol}",
@@ -1284,7 +1284,7 @@ profile: upgrade
           "membershipCount": 1
         },
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "defaultEmail": "{email:dave}",
           "displayName": "Dave Lister",
           "id": "{usr:dave}",
@@ -1305,14 +1305,14 @@ profile: upgrade
     {
       "data": [
         {
-          "absoluteExpiresAt": "{datetime:unspecified}",
+          "absoluteExpiresAt": "{datetime:utc-z}",
           "authenticationMethod": "password+totp",
           "clientApplicationId": "{cli#1}",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "id": "{ses#6}",
-          "idleExpiresAt": "{datetime:unspecified}",
+          "idleExpiresAt": "{datetime:utc-z}",
           "ipAddress": "203.0.113.10",
-          "lastSeenAt": "{datetime:unspecified}",
+          "lastSeenAt": "{datetime:utc-z}",
           "revocationReason": null,
           "revokedAt": null,
           "user": "Alice",
@@ -1320,14 +1320,14 @@ profile: upgrade
           "userId": "{usr:alice}"
         },
         {
-          "absoluteExpiresAt": "{datetime:unspecified}",
+          "absoluteExpiresAt": "{datetime:utc-z}",
           "authenticationMethod": "password+totp",
           "clientApplicationId": "{cli#1}",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "id": "{ses#1}",
-          "idleExpiresAt": "{datetime:unspecified}",
+          "idleExpiresAt": "{datetime:utc-z}",
           "ipAddress": "203.0.113.10",
-          "lastSeenAt": "{datetime:unspecified}",
+          "lastSeenAt": "{datetime:utc-z}",
           "revocationReason": null,
           "revokedAt": null,
           "user": "Alice",
@@ -1335,14 +1335,14 @@ profile: upgrade
           "userId": "{usr:alice}"
         },
         {
-          "absoluteExpiresAt": "{datetime:unspecified}",
+          "absoluteExpiresAt": "{datetime:utc-z}",
           "authenticationMethod": "password+totp",
           "clientApplicationId": "{cli#2}",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "id": "{ses#5}",
-          "idleExpiresAt": "{datetime:unspecified}",
+          "idleExpiresAt": "{datetime:utc-z}",
           "ipAddress": "203.0.113.10",
-          "lastSeenAt": "{datetime:unspecified}",
+          "lastSeenAt": "{datetime:utc-z}",
           "revocationReason": null,
           "revokedAt": null,
           "user": "Alice",
@@ -1350,14 +1350,14 @@ profile: upgrade
           "userId": "{usr:alice}"
         },
         {
-          "absoluteExpiresAt": "{datetime:unspecified}",
+          "absoluteExpiresAt": "{datetime:utc-z}",
           "authenticationMethod": "password+totp",
           "clientApplicationId": "{cli#3}",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "id": "{ses#4}",
-          "idleExpiresAt": "{datetime:unspecified}",
+          "idleExpiresAt": "{datetime:utc-z}",
           "ipAddress": "203.0.113.10",
-          "lastSeenAt": "{datetime:unspecified}",
+          "lastSeenAt": "{datetime:utc-z}",
           "revocationReason": null,
           "revokedAt": null,
           "user": "Alice",
@@ -1365,14 +1365,14 @@ profile: upgrade
           "userId": "{usr:alice}"
         },
         {
-          "absoluteExpiresAt": "{datetime:unspecified}",
+          "absoluteExpiresAt": "{datetime:utc-z}",
           "authenticationMethod": "password+totp",
           "clientApplicationId": "{cli#4}",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "id": "{ses#3}",
-          "idleExpiresAt": "{datetime:unspecified}",
+          "idleExpiresAt": "{datetime:utc-z}",
           "ipAddress": "203.0.113.10",
-          "lastSeenAt": "{datetime:unspecified}",
+          "lastSeenAt": "{datetime:utc-z}",
           "revocationReason": null,
           "revokedAt": null,
           "user": "Alice",
@@ -1380,14 +1380,14 @@ profile: upgrade
           "userId": "{usr:alice}"
         },
         {
-          "absoluteExpiresAt": "{datetime:unspecified}",
+          "absoluteExpiresAt": "{datetime:utc-z}",
           "authenticationMethod": "password+totp",
           "clientApplicationId": "{cli#1}",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "id": "{ses#2}",
-          "idleExpiresAt": "{datetime:unspecified}",
+          "idleExpiresAt": "{datetime:utc-z}",
           "ipAddress": "203.0.113.10",
-          "lastSeenAt": "{datetime:unspecified}",
+          "lastSeenAt": "{datetime:utc-z}",
           "revocationReason": null,
           "revokedAt": null,
           "user": "Alice",
@@ -1406,7 +1406,7 @@ profile: upgrade
 < 200 OK
 < Content-Type: application/json; charset=utf-8
     {
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "enabledSsoConnections": 1,
       "id": "{org:acme}",
       "isActive": true,
@@ -1425,7 +1425,7 @@ profile: upgrade
     {
       "data": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "isActive": true,
           "organization": "Acme",
           "organizationId": "{org:acme}",
@@ -1435,7 +1435,7 @@ profile: upgrade
           "userId": "{usr:alice}"
         },
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "isActive": true,
           "organization": "Acme",
           "organizationId": "{org:acme}",
@@ -1445,7 +1445,7 @@ profile: upgrade
           "userId": "{usr:bob}"
         },
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "isActive": true,
           "organization": "Acme",
           "organizationId": "{org:acme}",
@@ -1455,7 +1455,7 @@ profile: upgrade
           "userId": "{usr:carol}"
         },
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "isActive": true,
           "organization": "Acme",
           "organizationId": "{org:acme}",
@@ -1504,7 +1504,7 @@ profile: upgrade
           "id": "{cli#5}",
           "isActive": true,
           "isFirstParty": true,
-          "lastSeenAt": "{datetime:unspecified}",
+          "lastSeenAt": "{datetime:utc-z}",
           "lifecycleState": "active",
           "logoUri": null,
           "managedByStartupSeed": true,
@@ -1520,7 +1520,7 @@ profile: upgrade
             "configurationFingerprint": "{hex#4}",
             "isEditable": false,
             "isOrphaned": false,
-            "lastReconciledAt": "{datetime:unspecified}",
+            "lastReconciledAt": "{datetime:utc-z}",
             "owner": "code",
             "sourceKey": "upgrade-cli"
           },
@@ -1563,14 +1563,14 @@ profile: upgrade
           "id": "{cli#2}",
           "isActive": true,
           "isFirstParty": false,
-          "lastSeenAt": "{datetime:unspecified}",
+          "lastSeenAt": "{datetime:utc-z}",
           "lifecycleState": "active",
           "logoUri": null,
           "managedByStartupSeed": false,
           "metadataCacheState": "fresh",
           "metadataDocumentUrl": "https://client.example.test/upgrade-client.json",
-          "metadataExpiresAt": "{datetime:unspecified}",
-          "metadataFetchedAt": "{datetime:unspecified}",
+          "metadataExpiresAt": "{datetime:utc-z}",
+          "metadataFetchedAt": "{datetime:utc-z}",
           "name": "Upgrade Desktop",
           "oidcCapable": true,
           "omittedOpenIdWarning": null,
@@ -1623,7 +1623,7 @@ profile: upgrade
           "id": "{cli#3}",
           "isActive": true,
           "isFirstParty": false,
-          "lastSeenAt": "{datetime:unspecified}",
+          "lastSeenAt": "{datetime:utc-z}",
           "lifecycleState": "active",
           "logoUri": null,
           "managedByStartupSeed": false,
@@ -1684,7 +1684,7 @@ profile: upgrade
           "id": "{cli#4}",
           "isActive": true,
           "isFirstParty": false,
-          "lastSeenAt": "{datetime:unspecified}",
+          "lastSeenAt": "{datetime:utc-z}",
           "lifecycleState": "active",
           "logoUri": null,
           "managedByStartupSeed": true,
@@ -1700,7 +1700,7 @@ profile: upgrade
             "configurationFingerprint": "{hex#5}",
             "isEditable": false,
             "isOrphaned": false,
-            "lastReconciledAt": "{datetime:unspecified}",
+            "lastReconciledAt": "{datetime:utc-z}",
             "owner": "code",
             "sourceKey": "upgrade-partner"
           },
@@ -1745,7 +1745,7 @@ profile: upgrade
           "id": "{cli#1}",
           "isActive": true,
           "isFirstParty": true,
-          "lastSeenAt": "{datetime:unspecified}",
+          "lastSeenAt": "{datetime:utc-z}",
           "lifecycleState": "active",
           "logoUri": null,
           "managedByStartupSeed": true,
@@ -1761,7 +1761,7 @@ profile: upgrade
             "configurationFingerprint": "{hex#6}",
             "isEditable": false,
             "isOrphaned": false,
-            "lastReconciledAt": "{datetime:unspecified}",
+            "lastReconciledAt": "{datetime:utc-z}",
             "owner": "code",
             "sourceKey": "upgrade-portal"
           },
@@ -1858,7 +1858,7 @@ profile: upgrade
 < Content-Type: application/json; charset=utf-8
     {
       "baseUrl": "https://sqlos.example.test/scim/v2",
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "displayName": "Acme Directory",
       "grantBoundary": {
         "resourceId": "workspace::acme",
@@ -1870,7 +1870,7 @@ profile: upgrade
       "groupsUrl": "https://sqlos.example.test/scim/v2/Groups",
       "id": "{scim:acme}",
       "isEnabled": true,
-      "lastSyncAt": "{datetime:unspecified}",
+      "lastSyncAt": "{datetime:utc-z}",
       "organizationId": "{org:acme}",
       "ownership": {
         "canEmergencyDisable": true,
@@ -1883,10 +1883,10 @@ profile: upgrade
       },
       "seedKey": null,
       "source": "dashboard",
-      "tokenLastUsedAt": "{datetime:unspecified}",
+      "tokenLastUsedAt": "{datetime:utc-z}",
       "tokenPrefix": "{token-prefix#1}",
-      "tokenRotatedAt": "{datetime:unspecified}",
-      "updatedAt": "{datetime:unspecified}",
+      "tokenRotatedAt": "{datetime:utc-z}",
+      "updatedAt": "{datetime:utc-z}",
       "usersUrl": "https://sqlos.example.test/scim/v2/Users"
     }
 
@@ -1900,7 +1900,7 @@ profile: upgrade
         {
           "activeGrantCount": 1,
           "connectionId": "{scim:acme}",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "description": "Engineering reads Acme projects",
           "grantBoundaryStatus": "within",
           "groupDisplayName": "Engineering",
@@ -1914,7 +1914,7 @@ profile: upgrade
           "roleKey": "workspace_reader",
           "source": "dashboard",
           "sourceKey": null,
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         }
       ],
       "hasNextPage": false,
@@ -1930,8 +1930,8 @@ profile: upgrade
     {
       "data": [
         {
-          "accessTokenExpiresAt": "{datetime:unspecified}",
-          "createdAt": "{datetime:unspecified}",
+          "accessTokenExpiresAt": "{datetime:utc-z}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Alice's calendar",
           "hasRefreshToken": true,
           "id": "{cal:alice}",
@@ -1968,7 +1968,7 @@ profile: upgrade
     {
       "data": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "effectiveFrom": null,
           "effectiveTo": null,
           "id": "grant::{hex#1}",
@@ -1997,7 +1997,7 @@ profile: upgrade
       "correlationId": null,
       "eventType": "scim.user.created",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-dave",
@@ -2023,7 +2023,7 @@ profile: upgrade
         "resourceId": "{usr:dave}",
         "resourceType": "User"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org:acme}",
       "requestId": null,
       "sessionId": null,
@@ -2051,7 +2051,7 @@ profile: upgrade
       "correlationId": null,
       "eventType": "scim.group.member_added",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-engineering",
@@ -2066,7 +2066,7 @@ profile: upgrade
         "resourceId": "{grp:engineering}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org:acme}",
       "requestId": null,
       "sessionId": null,
@@ -2094,7 +2094,7 @@ profile: upgrade
       "correlationId": null,
       "eventType": "scim.group.updated",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-engineering",
@@ -2117,7 +2117,7 @@ profile: upgrade
         "resourceId": "{grp:engineering}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org:acme}",
       "requestId": null,
       "sessionId": null,
@@ -2151,7 +2151,7 @@ profile: upgrade
       "correlationId": null,
       "eventType": "password.login.succeeded",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "AuthorizationRequestId": "[redacted]",
@@ -2167,7 +2167,7 @@ profile: upgrade
         },
         "maskedEmail": "AL***@EXAMPLE.TEST"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -2195,10 +2195,10 @@ profile: upgrade
       "correlationId": null,
       "eventType": "user.login.mfa",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": null,
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org:acme}",
       "requestId": null,
       "sessionId": null,

@@ -59,8 +59,8 @@ profile: modules
     {
       "data": [
         {
-          "accessTokenExpiresAt": "{datetime:unspecified}",
-          "createdAt": "{datetime:unspecified}",
+          "accessTokenExpiresAt": "{datetime:utc-z}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Alice's calendar",
           "hasRefreshToken": true,
           "id": "{cal#1}",
@@ -94,8 +94,8 @@ profile: modules
     {
       "calendars": [],
       "connection": {
-        "accessTokenExpiresAt": "{datetime:unspecified}",
-        "createdAt": "{datetime:unspecified}",
+        "accessTokenExpiresAt": "{datetime:utc-z}",
+        "createdAt": "{datetime:utc-z}",
         "displayName": "Alice's calendar",
         "hasRefreshToken": true,
         "id": "{cal#1}",
@@ -163,22 +163,22 @@ profile: modules
           "eventCount": 3,
           "hasSyncCursor": true,
           "isSyncEnabled": true,
-          "lastSyncCompletedAt": "{datetime:unspecified}",
+          "lastSyncCompletedAt": "{datetime:utc-z}",
           "lastSyncError": null,
-          "lastSyncStartedAt": "{datetime:unspecified}",
+          "lastSyncStartedAt": "{datetime:utc-z}",
           "lastSyncStatus": "ok",
           "providerCalendarId": "google-primary"
         }
       ],
       "connection": {
-        "accessTokenExpiresAt": "{datetime:unspecified}",
-        "createdAt": "{datetime:unspecified}",
+        "accessTokenExpiresAt": "{datetime:utc-z}",
+        "createdAt": "{datetime:utc-z}",
         "displayName": "Alice's calendar",
         "hasRefreshToken": true,
         "id": "{cal#1}",
         "lastError": null,
         "lastErrorAt": null,
-        "lastSyncAt": "{datetime:unspecified}",
+        "lastSyncAt": "{datetime:utc-z}",
         "mode": "ReadPull",
         "organizationId": null,
         "providerAccountEmail": "alice@calendar.example.test",
@@ -204,13 +204,13 @@ profile: modules
 < Content-Type: application/json; charset=utf-8
     {
       "accessTokenExpiresAt": "{datetime:utc-z}",
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "displayName": "Alice's calendar",
       "hasRefreshToken": true,
       "id": "{cal#1}",
       "lastError": null,
       "lastErrorAt": null,
-      "lastSyncAt": "{datetime:unspecified}",
+      "lastSyncAt": "{datetime:utc-z}",
       "mode": "ReadPull",
       "organizationId": null,
       "providerAccountEmail": "alice@calendar.example.test",
@@ -240,13 +240,13 @@ profile: modules
 < Content-Type: application/json; charset=utf-8
     {
       "accessTokenExpiresAt": null,
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "displayName": "Alice's calendar",
       "hasRefreshToken": false,
       "id": "{cal#1}",
       "lastError": null,
       "lastErrorAt": null,
-      "lastSyncAt": "{datetime:unspecified}",
+      "lastSyncAt": "{datetime:utc-z}",
       "mode": "ReadPull",
       "organizationId": null,
       "providerAccountEmail": "alice@calendar.example.test",
@@ -270,18 +270,18 @@ profile: modules
 < Content-Type: application/json; charset=utf-8
     {
       "accessTokenExpiresAt": null,
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "displayName": "Alice's calendar",
       "hasRefreshToken": false,
       "id": "{cal#1}",
       "lastError": null,
       "lastErrorAt": null,
-      "lastSyncAt": "{datetime:unspecified}",
+      "lastSyncAt": "{datetime:utc-z}",
       "mode": "ReadPull",
       "organizationId": null,
       "providerAccountEmail": "alice@calendar.example.test",
       "providerType": "Google",
-      "revokedAt": "{datetime:unspecified}",
+      "revokedAt": "{datetime:utc-z}",
       "scopes": [
         "openid",
         "email",
@@ -334,18 +334,18 @@ profile: modules
       "data": [
         {
           "accessTokenExpiresAt": null,
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Alice's calendar",
           "hasRefreshToken": false,
           "id": "{cal#1}",
           "lastError": null,
           "lastErrorAt": null,
-          "lastSyncAt": "{datetime:unspecified}",
+          "lastSyncAt": "{datetime:utc-z}",
           "mode": "ReadPull",
           "organizationId": null,
           "providerAccountEmail": "alice@calendar.example.test",
           "providerType": "Google",
-          "revokedAt": "{datetime:unspecified}",
+          "revokedAt": "{datetime:utc-z}",
           "scopes": [
             "openid",
             "email",
@@ -500,7 +500,7 @@ profile: modules
       "correlationId": null,
       "eventType": "calendar.connect.start",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "mode": "ReadPull",
@@ -511,7 +511,7 @@ profile: modules
           "https://www.googleapis.com/auth/calendar.readonly"
         ]
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -539,14 +539,14 @@ profile: modules
       "correlationId": null,
       "eventType": "calendar.connection.created",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "mode": "ReadPull",
         "provider": "Google",
         "providerAccountEmail": "alice@calendar.example.test"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -574,7 +574,7 @@ profile: modules
       "correlationId": null,
       "eventType": "calendar.connection.synced",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "calendarsSynced": 1,
@@ -582,7 +582,7 @@ profile: modules
         "eventsRemoved": 0,
         "eventsUpserted": 2
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -610,7 +610,7 @@ profile: modules
       "correlationId": null,
       "eventType": "calendar.connection.synced",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "calendarsSynced": 1,
@@ -618,7 +618,7 @@ profile: modules
         "eventsRemoved": 1,
         "eventsUpserted": 3
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -646,12 +646,12 @@ profile: modules
       "correlationId": null,
       "eventType": "calendar.connection.disconnected",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "reason": "admin_disconnected"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

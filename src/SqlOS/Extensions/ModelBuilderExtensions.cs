@@ -11,7 +11,8 @@ namespace SqlOS.Extensions;
 public static class ModelBuilderExtensions
 {
     /// <summary>
-    /// Registers SqlOS auth server and FGA EF models.
+    /// Registers SqlOS auth server and FGA EF models. Every <see cref="DateTime"/> SqlOS reads through
+    /// this model has <see cref="DateTimeKind.Utc"/>.
     /// </summary>
     public static ModelBuilder UseSqlOS(this ModelBuilder modelBuilder, Type? contextType = null, string? providerName = null)
     {
@@ -40,6 +41,6 @@ public static class ModelBuilderExtensions
             }
         }
 
-        return modelBuilder;
+        return modelBuilder.ApplyUtcDateTimeConvention();
     }
 }

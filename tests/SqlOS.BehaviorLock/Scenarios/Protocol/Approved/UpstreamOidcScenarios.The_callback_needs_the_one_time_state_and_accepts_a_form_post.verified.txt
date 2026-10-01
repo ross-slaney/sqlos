@@ -81,13 +81,13 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.login.oidc.provisioned",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "oidcConnectionId": "{oidc#1}",
         "provider": "Google"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -115,7 +115,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.login.oidc.success",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "oidcConnectionId": "{oidc#1}",
@@ -131,7 +131,7 @@ profile: hosted
           "Reason": "evidence_missing"
         }
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

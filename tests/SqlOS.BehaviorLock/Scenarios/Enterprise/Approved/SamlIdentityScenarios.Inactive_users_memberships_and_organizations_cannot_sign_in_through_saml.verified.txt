@@ -167,7 +167,7 @@ profile: enterprise-scim-path
       "groups": [],
       "id": "{usr:ann}",
       "meta": {
-        "created": "{datetime:unspecified}",
+        "created": "{datetime:utc-z}",
         "lastModified": "{datetime:utc-z}",
         "location": "/scim/v2/Users/{usr:ann}",
         "resourceType": "User"
@@ -216,7 +216,7 @@ profile: enterprise-scim-path
       "groups": [],
       "id": "{usr:bob}",
       "meta": {
-        "created": "{datetime:unspecified}",
+        "created": "{datetime:utc-z}",
         "lastModified": "{datetime:utc-z}",
         "location": "/scim/v2/Users/{usr:bob}",
         "resourceType": "User"
@@ -270,7 +270,7 @@ profile: enterprise-scim-path
 < 200 OK
 < Content-Type: application/json; charset=utf-8
     {
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "id": "{org#2}",
       "isActive": false,
       "name": "Acme",
@@ -306,7 +306,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.user.created",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-ann",
@@ -332,7 +332,7 @@ profile: enterprise-scim-path
         "resourceId": "{usr:ann}",
         "resourceType": "User"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#2}",
       "requestId": null,
       "sessionId": null,
@@ -360,7 +360,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.user.created",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-bob",
@@ -386,7 +386,7 @@ profile: enterprise-scim-path
         "resourceId": "{usr:bob}",
         "resourceType": "User"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#2}",
       "requestId": null,
       "sessionId": null,
@@ -414,7 +414,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.user.deactivated",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-ann",
@@ -433,7 +433,7 @@ profile: enterprise-scim-path
         "resourceId": "{usr:ann}",
         "resourceType": "User"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#2}",
       "requestId": null,
       "sessionId": null,
@@ -461,7 +461,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.user.lifecycle_released",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-bob",
@@ -474,7 +474,7 @@ profile: enterprise-scim-path
         "resourceId": "{usr:bob}",
         "resourceType": "User"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#2}",
       "requestId": null,
       "sessionId": null,
@@ -502,7 +502,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.user.deactivated",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-bob",
@@ -521,7 +521,7 @@ profile: enterprise-scim-path
         "resourceId": "{usr:bob}",
         "resourceType": "User"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#2}",
       "requestId": null,
       "sessionId": null,
@@ -549,13 +549,13 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "auth.lifecycle.denied",
       "id": "{aud#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "boundary": "saml_callback",
         "reason": "user_inactive"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#2}",
       "requestId": null,
       "sessionId": null,
@@ -583,7 +583,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#6}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -593,7 +593,7 @@ profile: enterprise-scim-path
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "SamlAcs"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -615,13 +615,13 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "auth.lifecycle.denied",
       "id": "{aud#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "boundary": "saml_callback",
         "reason": "membership_inactive"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#2}",
       "requestId": null,
       "sessionId": null,
@@ -649,7 +649,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#7}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -659,7 +659,7 @@ profile: enterprise-scim-path
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "SamlAcs"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -687,13 +687,13 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "sso.portal.sessions.revoked",
       "id": "{evt#8}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "reason": "organization_deactivated",
         "revokedSessions": 1
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#2}",
       "requestId": null,
       "sessionId": null,
@@ -715,13 +715,13 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "auth.lifecycle.denied",
       "id": "{aud#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "boundary": "saml_callback",
         "reason": "organization_inactive"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#2}",
       "requestId": null,
       "sessionId": null,
@@ -749,7 +749,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#9}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -759,7 +759,7 @@ profile: enterprise-scim-path
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "SamlAcs"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

@@ -38,7 +38,7 @@ profile: enterprise
         "connection": {
           "autoLinkByEmail": true,
           "autoProvisionUsers": false,
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Acme SSO",
           "enrollmentPolicy": {
             "allowJitProvisioning": false,
@@ -49,7 +49,7 @@ profile: enterprise
           "isEnabled": false,
           "setupStatus": "draft",
           "singleSignOnUrl": null,
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         "domain": null,
         "error": null,

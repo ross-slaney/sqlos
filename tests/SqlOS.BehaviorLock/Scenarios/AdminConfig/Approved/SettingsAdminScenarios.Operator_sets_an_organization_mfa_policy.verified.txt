@@ -23,7 +23,7 @@ profile: dashboard-callback
         "owner",
         "admin"
       ],
-      "updatedAt": "{datetime:unspecified}",
+      "updatedAt": "{datetime:utc-z}",
       "userSelfEnrollmentEnabled": true
     }
 
@@ -48,7 +48,7 @@ profile: dashboard-callback
         "owner",
         "admin"
       ],
-      "updatedAt": "{datetime:unspecified}",
+      "updatedAt": "{datetime:utc-z}",
       "userSelfEnrollmentEnabled": true
     }
 

@@ -96,7 +96,7 @@ profile: enterprise-scim-path
 < 200 OK
 < Content-Type: application/json; charset=utf-8
     {
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "displayName": "Directory",
       "grantBoundaryResourceId": null,
       "id": "{scim#1}",
@@ -114,9 +114,9 @@ profile: enterprise-scim-path
       },
       "seedKey": null,
       "source": "dashboard",
-      "tokenLastUsedAt": "{datetime:unspecified}",
+      "tokenLastUsedAt": "{datetime:utc-z}",
       "tokenPrefix": "{token-prefix#1}",
-      "tokenRotatedAt": "{datetime:unspecified}",
+      "tokenRotatedAt": "{datetime:utc-z}",
       "updatedAt": "{datetime:utc-z}"
     }
 
@@ -190,7 +190,7 @@ profile: enterprise-scim-path
 < 200 OK
 < Content-Type: application/json; charset=utf-8
     {
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "id": "{org#2}",
       "isActive": false,
       "name": "Globex",
@@ -232,12 +232,12 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.token.rotated",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "TokenPrefix": "[redacted]"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -265,10 +265,10 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.connection.disabled",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": null,
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -296,13 +296,13 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "sso.portal.sessions.revoked",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "reason": "organization_deactivated",
         "revokedSessions": 0
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#2}",
       "requestId": null,
       "sessionId": null,

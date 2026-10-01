@@ -719,7 +719,7 @@ profile: enterprise-scim-path
 < Content-Type: application/json; charset=utf-8
     {
       "baseUrl": "/scim/v2",
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "displayName": "Directory",
       "grantBoundary": {
         "resourceId": null,
@@ -744,10 +744,10 @@ profile: enterprise-scim-path
       },
       "seedKey": null,
       "source": "dashboard",
-      "tokenLastUsedAt": "{datetime:unspecified}",
+      "tokenLastUsedAt": "{datetime:utc-z}",
       "tokenPrefix": "{token-prefix#1}",
-      "tokenRotatedAt": "{datetime:unspecified}",
-      "updatedAt": "{datetime:unspecified}",
+      "tokenRotatedAt": "{datetime:utc-z}",
+      "updatedAt": "{datetime:utc-z}",
       "usersUrl": "/scim/v2/Users"
     }
 

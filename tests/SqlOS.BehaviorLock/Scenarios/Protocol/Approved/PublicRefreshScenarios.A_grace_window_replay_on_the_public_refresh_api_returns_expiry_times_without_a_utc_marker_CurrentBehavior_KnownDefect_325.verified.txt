@@ -73,11 +73,11 @@ profile: hosted
 < Content-Type: application/json; charset=utf-8
     {
       "accessToken": "{access-token#1}",
-      "accessTokenExpiresAt": "{datetime:unspecified}",
+      "accessTokenExpiresAt": "{datetime:utc-z}",
       "clientId": "behavior-lock-app",
       "idToken": "{id-token#1}",
       "organizationId": null,
       "refreshToken": "{refresh-token#2}",
-      "refreshTokenExpiresAt": "{datetime:unspecified}",
+      "refreshTokenExpiresAt": "{datetime:utc-z}",
       "sessionId": "{ses#1}"
     }

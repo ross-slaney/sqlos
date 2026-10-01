@@ -258,7 +258,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "password.login.succeeded",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "AuthorizationRequestId": "[redacted]",
@@ -274,7 +274,7 @@ profile: hosted
         },
         "maskedEmail": "AL***@EXAMPLE.TEST"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -302,10 +302,10 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.login.password",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": null,
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -333,7 +333,7 @@ profile: hosted
       "correlationId": "session-revocation-{hex#3}",
       "eventType": "session.admin-revoked",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "already_revoked_sessions": 0,
@@ -344,7 +344,7 @@ profile: hosted
         "reason": "admin_revoked",
         "selector_fingerprint": "{hex#4}"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,

@@ -116,7 +116,7 @@ profile: modules
       "correlationId": null,
       "eventType": "calendar.connect.start",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "mode": "ReadPull",
@@ -127,7 +127,7 @@ profile: modules
           "https://www.googleapis.com/auth/calendar.readonly"
         ]
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -155,7 +155,7 @@ profile: modules
       "correlationId": null,
       "eventType": "calendar.connect.start",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "mode": "ReadPull",
@@ -166,7 +166,7 @@ profile: modules
           "https://www.googleapis.com/auth/calendar.readonly"
         ]
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -194,7 +194,7 @@ profile: modules
       "correlationId": null,
       "eventType": "calendar.connect.start",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "mode": "ReadPull",
@@ -205,7 +205,7 @@ profile: modules
           "https://www.googleapis.com/auth/calendar.readonly"
         ]
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -233,12 +233,12 @@ profile: modules
       "correlationId": null,
       "eventType": "calendar.connect.error",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "error": "The authorization code is invalid."
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -266,7 +266,7 @@ profile: modules
       "correlationId": null,
       "eventType": "calendar.connect.start",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "mode": "ReadPull",
@@ -277,7 +277,7 @@ profile: modules
           "https://www.googleapis.com/auth/calendar.readonly"
         ]
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -305,12 +305,12 @@ profile: modules
       "correlationId": null,
       "eventType": "calendar.connect.error",
       "id": "{evt#6}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "error": "The provider did not return a refresh token, which read-pull and two-way connections require. Ensure offline access is granted and consent was not silently skipped."
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

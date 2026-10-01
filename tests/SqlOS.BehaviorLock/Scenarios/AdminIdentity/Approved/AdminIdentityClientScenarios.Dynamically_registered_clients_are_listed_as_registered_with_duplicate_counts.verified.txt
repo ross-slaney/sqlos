@@ -351,7 +351,7 @@ profile: dcr
           "dataJson": "{\"client_id\":\"{dcrcli#1}\",\"client_name\":\"Taskrail Desktop (laptop)\",\"redirect_uris\":[\"http://127.0.0.1/callback/taskrail\"],\"grant_types\":[\"authorization_code\",\"refresh_token\"],\"response_types\":[\"code\"],\"scope\":\"\",\"token_endpoint_auth_method\":\"[redacted]\",\"software_id\":\"taskrail-desktop\",\"software_version\":\"4.2.0\"}",
           "eventType": "client.dcr.registered",
           "id": "{evt#1}",
-          "occurredAt": "{datetime:unspecified}"
+          "occurredAt": "{datetime:utc-z}"
         }
       ],
       "redirectUris": [
@@ -495,14 +495,14 @@ profile: dcr
       "correlationId": null,
       "eventType": "client.disabled",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "client_id": "{dcrcli#1}",
         "reason": "disabled_by_operator",
         "source": "dcr"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

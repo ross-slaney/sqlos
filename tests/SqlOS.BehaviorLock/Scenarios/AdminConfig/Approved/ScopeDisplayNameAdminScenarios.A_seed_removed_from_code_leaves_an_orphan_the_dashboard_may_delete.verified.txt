@@ -12,7 +12,7 @@ profile: dashboard-callback
     {
       "data": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "description": "View workspaces you can access.",
           "displayName": "Read workspaces",
           "id": "{sdn#1}",
@@ -21,12 +21,12 @@ profile: dashboard-callback
             "configurationFingerprint": "{hash#1}",
             "isEditable": false,
             "isOrphaned": true,
-            "lastReconciledAt": "{datetime:unspecified}",
+            "lastReconciledAt": "{datetime:utc-z}",
             "owner": "code",
             "sourceKey": "workspace.read"
           },
           "scope": "workspace.read",
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         }
       ]
     }
@@ -57,7 +57,7 @@ profile: dashboard-callback
           "correlationId": null,
           "eventType": "configuration.reconciled",
           "id": "{evt#1}",
-          "ingestedAt": "{datetime:unspecified}",
+          "ingestedAt": "{datetime:utc-z}",
           "ipAddress": null,
           "metadata": {
             "fingerprint": "{hash#1}",
@@ -67,7 +67,7 @@ profile: dashboard-callback
             "resourceType": "scope_display_name",
             "sourceKey": "workspace.read"
           },
-          "occurredAt": "{datetime:unspecified}",
+          "occurredAt": "{datetime:utc-z}",
           "organizationId": null,
           "requestId": null,
           "sessionId": null,
@@ -95,7 +95,7 @@ profile: dashboard-callback
           "correlationId": null,
           "eventType": "configuration.reconciled",
           "id": "{evt#2}",
-          "ingestedAt": "{datetime:unspecified}",
+          "ingestedAt": "{datetime:utc-z}",
           "ipAddress": null,
           "metadata": {
             "fingerprint": "{hash#1}",
@@ -105,7 +105,7 @@ profile: dashboard-callback
             "resourceType": "scope_display_name",
             "sourceKey": "workspace.read"
           },
-          "occurredAt": "{datetime:unspecified}",
+          "occurredAt": "{datetime:utc-z}",
           "organizationId": null,
           "requestId": null,
           "sessionId": null,
@@ -171,12 +171,12 @@ profile: dashboard-callback
       "correlationId": null,
       "eventType": "scope_display_name.deleted",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "scope": "workspace.read"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

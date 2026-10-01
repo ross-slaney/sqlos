@@ -96,7 +96,7 @@ profile: headless
           "configurationFingerprint": "{hex#1}",
           "isEditable": false,
           "isOrphaned": false,
-          "lastReconciledAt": "{datetime:unspecified}",
+          "lastReconciledAt": "{datetime:utc-z}",
           "owner": "code",
           "sourceKey": "auth-page:default"
         },
@@ -104,7 +104,7 @@ profile: headless
         "pageTitle": "Sign in to Behavior Lock",
         "phoneOtpRuntimeConfigured": true,
         "primaryColor": "#2563eb",
-        "updatedAt": "{datetime:unspecified}"
+        "updatedAt": "{datetime:utc-z}"
       },
       "signupToken": null,
       "totpEnrollment": null,
@@ -200,7 +200,7 @@ profile: headless
           "configurationFingerprint": "{hex#1}",
           "isEditable": false,
           "isOrphaned": false,
-          "lastReconciledAt": "{datetime:unspecified}",
+          "lastReconciledAt": "{datetime:utc-z}",
           "owner": "code",
           "sourceKey": "auth-page:default"
         },
@@ -208,7 +208,7 @@ profile: headless
         "pageTitle": "Sign in to Behavior Lock",
         "phoneOtpRuntimeConfigured": true,
         "primaryColor": "#2563eb",
-        "updatedAt": "{datetime:unspecified}"
+        "updatedAt": "{datetime:utc-z}"
       },
       "signupToken": null,
       "totpEnrollment": null,
@@ -303,7 +303,7 @@ profile: headless
           "configurationFingerprint": "{hex#1}",
           "isEditable": false,
           "isOrphaned": false,
-          "lastReconciledAt": "{datetime:unspecified}",
+          "lastReconciledAt": "{datetime:utc-z}",
           "owner": "code",
           "sourceKey": "auth-page:default"
         },
@@ -311,7 +311,7 @@ profile: headless
         "pageTitle": "Sign in to Behavior Lock",
         "phoneOtpRuntimeConfigured": true,
         "primaryColor": "#2563eb",
-        "updatedAt": "{datetime:unspecified}"
+        "updatedAt": "{datetime:utc-z}"
       },
       "signupToken": null,
       "totpEnrollment": null,
@@ -357,13 +357,13 @@ profile: headless
       "correlationId": null,
       "eventType": "oauth.consent.granted",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "client_id": "partner-app",
         "scope": "openid profile email offline_access"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

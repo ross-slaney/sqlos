@@ -17,7 +17,7 @@ profile: hosted
           "claimMapping": "{\"SubjectClaim\":\"custom_sub\",\"EmailClaim\":\"email_address\",\"EmailVerifiedClaim\":\"email_verified_flag\",\"DisplayNameClaim\":\"full_name\",\"FirstNameClaim\":\"given_name\",\"LastNameClaim\":\"family_name\",\"PreferredUsernameClaim\":\"preferred_username\"}",
           "clientAuthMethod": "ClientSecretPost",
           "clientId": "custom-client-id",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "discoveryUrl": "https://oidc.example.local/.well-known/openid-configuration",
           "displayName": "Example OIDC",
           "effectiveLogoDataUrl": null,
@@ -32,7 +32,7 @@ profile: hosted
             "configurationFingerprint": "{hex#1}",
             "isEditable": false,
             "isOrphaned": false,
-            "lastReconciledAt": "{datetime:unspecified}",
+            "lastReconciledAt": "{datetime:utc-z}",
             "owner": "code",
             "sourceKey": "custom"
           },
@@ -40,7 +40,7 @@ profile: hosted
           "providerType": "Custom",
           "scopes": "[]",
           "tokenEndpoint": null,
-          "updatedAt": "{datetime:unspecified}",
+          "updatedAt": "{datetime:utc-z}",
           "useDiscovery": true,
           "useUserInfo": true,
           "userInfoEndpoint": null
@@ -53,7 +53,7 @@ profile: hosted
           "claimMapping": "{\"SubjectClaim\":\"id\",\"EmailClaim\":\"email\",\"EmailVerifiedClaim\":\"email_verified\",\"DisplayNameClaim\":\"name\",\"FirstNameClaim\":null,\"LastNameClaim\":null,\"PreferredUsernameClaim\":\"login\"}",
           "clientAuthMethod": "ClientSecretPost",
           "clientId": "github-client-id",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "discoveryUrl": null,
           "displayName": "GitHub",
           "effectiveLogoDataUrl": "{data-uri:image/svg+xml}",
@@ -68,7 +68,7 @@ profile: hosted
             "configurationFingerprint": "{hex#2}",
             "isEditable": false,
             "isOrphaned": false,
-            "lastReconciledAt": "{datetime:unspecified}",
+            "lastReconciledAt": "{datetime:utc-z}",
             "owner": "code",
             "sourceKey": "github"
           },
@@ -76,7 +76,7 @@ profile: hosted
           "providerType": "GitHub",
           "scopes": "[\"read:user\",\"user:email\"]",
           "tokenEndpoint": "https://github.com/login/oauth/access_token",
-          "updatedAt": "{datetime:unspecified}",
+          "updatedAt": "{datetime:utc-z}",
           "useDiscovery": false,
           "useUserInfo": true,
           "userInfoEndpoint": "https://api.github.com/user"
@@ -102,7 +102,7 @@ profile: hosted
           "claimMapping": "{\"SubjectClaim\":\"sub\",\"EmailClaim\":\"email\",\"EmailVerifiedClaim\":\"email_verified\",\"DisplayNameClaim\":\"name\",\"FirstNameClaim\":\"given_name\",\"LastNameClaim\":\"family_name\",\"PreferredUsernameClaim\":\"preferred_username\"}",
           "clientAuthMethod": "ClientSecretPost",
           "clientId": "google-client-id",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "discoveryUrl": "https://accounts.google.com/.well-known/openid-configuration",
           "displayName": "Google",
           "effectiveLogoDataUrl": "{data-uri:image/svg+xml}",
@@ -117,7 +117,7 @@ profile: hosted
             "configurationFingerprint": "{hex#3}",
             "isEditable": false,
             "isOrphaned": false,
-            "lastReconciledAt": "{datetime:unspecified}",
+            "lastReconciledAt": "{datetime:utc-z}",
             "owner": "code",
             "sourceKey": "google"
           },
@@ -125,7 +125,7 @@ profile: hosted
           "providerType": "Google",
           "scopes": "[]",
           "tokenEndpoint": null,
-          "updatedAt": "{datetime:unspecified}",
+          "updatedAt": "{datetime:utc-z}",
           "useDiscovery": true,
           "useUserInfo": true,
           "userInfoEndpoint": null
@@ -138,7 +138,7 @@ profile: hosted
           "claimMapping": "{\"SubjectClaim\":\"sub\",\"EmailClaim\":\"email\",\"EmailVerifiedClaim\":\"email_verified\",\"DisplayNameClaim\":\"name\",\"FirstNameClaim\":\"given_name\",\"LastNameClaim\":\"family_name\",\"PreferredUsernameClaim\":\"preferred_username\"}",
           "clientAuthMethod": "ClientSecretPost",
           "clientId": "microsoft-client-id",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "discoveryUrl": "https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration",
           "displayName": "Microsoft",
           "effectiveLogoDataUrl": "{data-uri:image/svg+xml}",
@@ -153,7 +153,7 @@ profile: hosted
             "configurationFingerprint": "{hex#4}",
             "isEditable": false,
             "isOrphaned": false,
-            "lastReconciledAt": "{datetime:unspecified}",
+            "lastReconciledAt": "{datetime:utc-z}",
             "owner": "code",
             "sourceKey": "microsoft"
           },
@@ -161,7 +161,7 @@ profile: hosted
           "providerType": "Microsoft",
           "scopes": "[]",
           "tokenEndpoint": null,
-          "updatedAt": "{datetime:unspecified}",
+          "updatedAt": "{datetime:utc-z}",
           "useDiscovery": true,
           "useUserInfo": true,
           "userInfoEndpoint": null
@@ -187,7 +187,7 @@ profile: hosted
           "claimMapping": "{\"SubjectClaim\":\"custom_sub\",\"EmailClaim\":\"email_address\",\"EmailVerifiedClaim\":\"email_verified_flag\",\"DisplayNameClaim\":\"full_name\",\"FirstNameClaim\":\"given_name\",\"LastNameClaim\":\"family_name\",\"PreferredUsernameClaim\":\"preferred_username\"}",
           "clientAuthMethod": "ClientSecretPost",
           "clientId": "custom-client-id",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "discoveryUrl": "https://oidc.example.local/.well-known/openid-configuration",
           "displayName": "Example OIDC",
           "effectiveLogoDataUrl": null,
@@ -202,7 +202,7 @@ profile: hosted
             "configurationFingerprint": "{hex#1}",
             "isEditable": false,
             "isOrphaned": false,
-            "lastReconciledAt": "{datetime:unspecified}",
+            "lastReconciledAt": "{datetime:utc-z}",
             "owner": "code",
             "sourceKey": "custom"
           },
@@ -210,7 +210,7 @@ profile: hosted
           "providerType": "Custom",
           "scopes": "[]",
           "tokenEndpoint": null,
-          "updatedAt": "{datetime:unspecified}",
+          "updatedAt": "{datetime:utc-z}",
           "useDiscovery": true,
           "useUserInfo": true,
           "userInfoEndpoint": null
@@ -249,7 +249,7 @@ profile: hosted
     {
       "data": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Auth email OTP",
           "htmlBodyTemplate": "<!DOCTYPE html>\n<html lang=\"en\">\n<body style=\"margin:0;padding:24px;background:{backgroundColor};font-family:Segoe UI,Arial,sans-serif;color:{accentColor};\">\n  <div style=\"max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:20px;padding:32px;\">\n    <img src=\"{logoBase64}\" alt=\"{applicationName}\" style=\"max-height:42px;max-width:180px;display:{logoImageDisplay};margin:0 0 16px;\" />\n    <p style=\"display:{logoTextDisplay};margin:0 0 12px;font-size:14px;color:#475569;font-weight:600;\">{applicationName}</p>\n    <h1 style=\"margin:0 0 12px;font-size:28px;line-height:1.1;color:{accentColor};\">{heading}</h1>\n    <p style=\"margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;\">Use this one-time code to finish {action} as {maskedEmail}. It expires in {expiresInMinutes} minute(s).</p>\n    <div style=\"margin:0 0 20px;padding:18px 20px;border-radius:16px;background:#eff6ff;border:1px solid #bfdbfe;font-size:34px;letter-spacing:0.24em;font-weight:700;text-align:center;color:{primaryColor};\">{code}</div>\n    <p style=\"margin:0;font-size:13px;line-height:1.6;color:#64748b;\">If you did not request this code, you can ignore this email.</p>\n  </div>\n</body>\n</html>",
           "id": "{emt#1}",
@@ -257,7 +257,7 @@ profile: hosted
           "key": "auth.email-otp",
           "subjectTemplate": "Your {applicationName} {purposeLabel} code",
           "textBodyTemplate": "Your {applicationName} {purposeLabel} code is {code}. It expires in {expiresInMinutes} minute(s).",
-          "updatedAt": "{datetime:unspecified}",
+          "updatedAt": "{datetime:utc-z}",
           "variables": {
             "accentColor": "#0f172a",
             "action": "signing in",

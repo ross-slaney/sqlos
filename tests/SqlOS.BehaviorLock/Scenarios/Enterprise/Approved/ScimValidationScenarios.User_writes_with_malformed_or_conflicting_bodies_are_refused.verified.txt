@@ -598,7 +598,7 @@ profile: enterprise-scim-path
       "groups": [],
       "id": "{usr:judy}",
       "meta": {
-        "created": "{datetime:unspecified}",
+        "created": "{datetime:utc-z}",
         "lastModified": "{datetime:utc-z}",
         "location": "/scim/v2/Users/{usr:judy}",
         "resourceType": "User"
@@ -662,7 +662,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.user.created",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-judy",
@@ -688,7 +688,7 @@ profile: enterprise-scim-path
         "resourceId": "{usr:judy}",
         "resourceType": "User"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -716,7 +716,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.user.updated",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-judy",
@@ -742,7 +742,7 @@ profile: enterprise-scim-path
         "resourceId": "{usr:judy}",
         "resourceType": "User"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,

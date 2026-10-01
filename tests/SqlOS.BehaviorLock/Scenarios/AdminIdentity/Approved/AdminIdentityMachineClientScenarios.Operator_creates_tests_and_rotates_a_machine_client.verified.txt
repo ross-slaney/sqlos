@@ -79,14 +79,14 @@ profile: multi-app
       "correlationId": null,
       "eventType": "machine_client.created",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "ClientId": "reporting-worker",
         "grantCount": 1,
         "subjectId": "{sub#1}"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -122,7 +122,7 @@ profile: multi-app
             "configurationFingerprint": "{hex#1}",
             "isEditable": false,
             "isOrphaned": false,
-            "lastReconciledAt": "{datetime:unspecified}",
+            "lastReconciledAt": "{datetime:utc-z}",
             "owner": "code",
             "sourceKey": "atlas-worker"
           },
@@ -253,7 +253,7 @@ profile: multi-app
       "correlationId": null,
       "eventType": "machine_client.credential_test_succeeded",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "clientId": "reporting-worker",
@@ -262,7 +262,7 @@ profile: multi-app
           "workspace.read"
         ]
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -290,14 +290,14 @@ profile: multi-app
       "correlationId": null,
       "eventType": "machine_client.credential_test_failed",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "clientId": "reporting-worker",
         "resource": "https://api.example.test",
         "scopes": []
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -325,14 +325,14 @@ profile: multi-app
       "correlationId": null,
       "eventType": "machine_client.credential_test_failed",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "clientId": "reporting-worker",
         "resource": "https://other.example.test",
         "scopes": []
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -360,7 +360,7 @@ profile: multi-app
       "correlationId": null,
       "eventType": "machine_client.credential_test_failed",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "clientId": "reporting-worker",
@@ -369,7 +369,7 @@ profile: multi-app
           "workspace.write"
         ]
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -508,7 +508,7 @@ profile: multi-app
         "emergencyDisabled": false,
         "expiresAt": null,
         "grantCount": 1,
-        "lastUsedAt": "{datetime:unspecified}",
+        "lastUsedAt": "{datetime:utc-z}",
         "organizationId": "{org#1}",
         "ownership": {
           "canEmergencyDisable": true,
@@ -572,22 +572,22 @@ profile: multi-app
         {
           "configurationOwner": "dashboard",
           "configurationSourceKey": null,
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Machine client credential",
           "expiresAt": null,
           "id": "{clcred#1}",
-          "lastUsedAt": "{datetime:unspecified}",
+          "lastUsedAt": "{datetime:utc-z}",
           "revokedAt": null
         },
         {
           "configurationOwner": "dashboard",
           "configurationSourceKey": null,
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Machine client credential",
           "expiresAt": null,
           "id": "{clcred#2}",
-          "lastUsedAt": "{datetime:unspecified}",
-          "revokedAt": "{datetime:unspecified}"
+          "lastUsedAt": "{datetime:utc-z}",
+          "revokedAt": "{datetime:utc-z}"
         }
       ],
       "hasNextPage": false,
@@ -615,12 +615,12 @@ profile: multi-app
       "correlationId": null,
       "eventType": "oauth.client_authentication.succeeded",
       "id": "{evt#6}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "clientId": "reporting-worker"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -648,13 +648,13 @@ profile: multi-app
       "correlationId": null,
       "eventType": "oauth.client_credentials.issued",
       "id": "{evt#7}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "clientId": "reporting-worker",
         "subjectId": "{sub#1}"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -682,13 +682,13 @@ profile: multi-app
       "correlationId": null,
       "eventType": "machine_client.secret_rotated",
       "id": "{evt#8}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "clientId": "reporting-worker",
         "subjectId": "{sub#1}"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -716,12 +716,12 @@ profile: multi-app
       "correlationId": null,
       "eventType": "oauth.client_authentication.failed",
       "id": "{evt#9}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "clientId": "reporting-worker"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -749,12 +749,12 @@ profile: multi-app
       "correlationId": null,
       "eventType": "oauth.client_authentication.succeeded",
       "id": "{evt#10}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "clientId": "reporting-worker"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -782,13 +782,13 @@ profile: multi-app
       "correlationId": null,
       "eventType": "oauth.client_credentials.issued",
       "id": "{evt#11}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "clientId": "reporting-worker",
         "subjectId": "{sub#1}"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

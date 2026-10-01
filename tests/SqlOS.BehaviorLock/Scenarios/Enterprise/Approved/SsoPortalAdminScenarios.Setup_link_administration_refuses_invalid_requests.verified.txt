@@ -144,7 +144,7 @@ profile: enterprise
 < 200 OK
 < Content-Type: application/json; charset=utf-8
     {
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "id": "{org#3}",
       "isActive": false,
       "name": "Globex",
@@ -193,7 +193,7 @@ profile: enterprise
       "correlationId": null,
       "eventType": "sso.portal.session.created",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "Id": "{ssp#1}",
@@ -201,7 +201,7 @@ profile: enterprise
         "expiresAt": "{datetime:utc-z}",
         "provider": null
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#2}",
       "requestId": null,
       "sessionId": null,
@@ -229,13 +229,13 @@ profile: enterprise
       "correlationId": null,
       "eventType": "sso.portal.sessions.revoked",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "reason": "organization_deactivated",
         "revokedSessions": 0
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#3}",
       "requestId": null,
       "sessionId": null,

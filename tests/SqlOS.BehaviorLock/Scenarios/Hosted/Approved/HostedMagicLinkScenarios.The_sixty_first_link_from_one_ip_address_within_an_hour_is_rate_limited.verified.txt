@@ -124,7 +124,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "magic_link.rate_limit_rejected",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "details": {
@@ -135,7 +135,7 @@ profile: hosted
         "maskedEmail": "vi***@unknown.example.test",
         "phase": "start"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

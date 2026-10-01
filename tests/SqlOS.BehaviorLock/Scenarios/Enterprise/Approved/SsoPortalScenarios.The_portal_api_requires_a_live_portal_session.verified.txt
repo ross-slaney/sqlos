@@ -166,7 +166,7 @@ profile: enterprise
       "connection": {
         "autoLinkByEmail": true,
         "autoProvisionUsers": false,
-        "createdAt": "{datetime:unspecified}",
+        "createdAt": "{datetime:utc-z}",
         "displayName": "Acme SSO",
         "enrollmentPolicy": {
           "allowJitProvisioning": false,
@@ -177,7 +177,7 @@ profile: enterprise
         "isEnabled": false,
         "setupStatus": "draft",
         "singleSignOnUrl": null,
-        "updatedAt": "{datetime:unspecified}"
+        "updatedAt": "{datetime:utc-z}"
       },
       "domain": null,
       "latestTest": null,
@@ -256,11 +256,11 @@ profile: enterprise
 < Content-Type: application/json; charset=utf-8
     {
       "connectionId": "{sso#1}",
-      "createdAt": "{datetime:unspecified}",
-      "expiresAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
+      "expiresAt": "{datetime:utc-z}",
       "id": "{ssp#1}",
-      "lastSeenAt": "{datetime:unspecified}",
-      "openedAt": "{datetime:unspecified}",
+      "lastSeenAt": "{datetime:utc-z}",
+      "openedAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "organizationName": "Acme",
       "portalUrl": "https://sqlos.example.test/sqlos/admin/auth/sso-portal",
@@ -320,13 +320,13 @@ profile: enterprise
       "correlationId": null,
       "eventType": "sso.portal.session.revoked",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "Id": "{ssp#1}",
         "RevokedReason": "offboarded"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,

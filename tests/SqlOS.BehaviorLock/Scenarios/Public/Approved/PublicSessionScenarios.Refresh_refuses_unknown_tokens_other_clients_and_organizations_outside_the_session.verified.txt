@@ -112,13 +112,13 @@ profile: hosted
       "correlationId": null,
       "eventType": "auth.lifecycle.denied",
       "id": "{aud#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "boundary": "refresh",
         "reason": "membership_inactive"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": "{ses#1}",

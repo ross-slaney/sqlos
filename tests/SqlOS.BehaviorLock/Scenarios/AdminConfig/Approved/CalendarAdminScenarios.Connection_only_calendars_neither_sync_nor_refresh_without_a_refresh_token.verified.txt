@@ -22,8 +22,8 @@ profile: modules
     {
       "calendars": [],
       "connection": {
-        "accessTokenExpiresAt": "{datetime:unspecified}",
-        "createdAt": "{datetime:unspecified}",
+        "accessTokenExpiresAt": "{datetime:utc-z}",
+        "createdAt": "{datetime:utc-z}",
         "displayName": "Google Calendar",
         "hasRefreshToken": false,
         "id": "{cal#1}",
@@ -140,7 +140,7 @@ profile: modules
       "correlationId": null,
       "eventType": "calendar.connect.start",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "mode": "ConnectionOnly",
@@ -151,7 +151,7 @@ profile: modules
           "https://www.googleapis.com/auth/calendar.readonly"
         ]
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -179,14 +179,14 @@ profile: modules
       "correlationId": null,
       "eventType": "calendar.connection.created",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "mode": "ConnectionOnly",
         "provider": "Google",
         "providerAccountEmail": "alice@calendar.example.test"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

@@ -102,7 +102,7 @@ profile: headless
             "configurationFingerprint": "{hex#1}",
             "isEditable": false,
             "isOrphaned": false,
-            "lastReconciledAt": "{datetime:unspecified}",
+            "lastReconciledAt": "{datetime:utc-z}",
             "owner": "code",
             "sourceKey": "auth-page:default"
           },
@@ -110,7 +110,7 @@ profile: headless
           "pageTitle": "Sign in to Behavior Lock",
           "phoneOtpRuntimeConfigured": true,
           "primaryColor": "#2563eb",
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         "signupToken": null,
         "totpEnrollment": null,
@@ -243,7 +243,7 @@ profile: headless
       "correlationId": null,
       "eventType": "password.login.succeeded",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "AuthorizationRequestId": "[redacted]",
@@ -259,7 +259,7 @@ profile: headless
         },
         "maskedEmail": "AL***@EXAMPLE.TEST"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -287,13 +287,13 @@ profile: headless
       "correlationId": null,
       "eventType": "oauth.consent.granted",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "client_id": "partner-app",
         "scope": "openid profile email offline_access"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -314,7 +314,7 @@ profile: headless
           "clientApplicationId": "{cli#1}",
           "clientId": "partner-app",
           "clientName": "Partner App",
-          "grantedAt": "{datetime:unspecified}",
+          "grantedAt": "{datetime:utc-z}",
           "id": "{cgr#1}",
           "scopes": [
             "openid",
@@ -322,7 +322,7 @@ profile: headless
             "email",
             "offline_access"
           ],
-          "updatedAt": "{datetime:unspecified}",
+          "updatedAt": "{datetime:utc-z}",
           "userId": "{usr#1}"
         }
       ]

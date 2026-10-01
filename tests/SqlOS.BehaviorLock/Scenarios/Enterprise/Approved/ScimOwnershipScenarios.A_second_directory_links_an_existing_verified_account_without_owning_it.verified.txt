@@ -154,7 +154,7 @@ profile: enterprise-scim-path
       "groups": [],
       "id": "{usr:bob}",
       "meta": {
-        "created": "{datetime:unspecified}",
+        "created": "{datetime:utc-z}",
         "lastModified": "{datetime:utc-z}",
         "location": "/scim/v2/Users/{usr:bob}",
         "resourceType": "User"
@@ -203,7 +203,7 @@ profile: enterprise-scim-path
       "groups": [],
       "id": "{usr:bob}",
       "meta": {
-        "created": "{datetime:unspecified}",
+        "created": "{datetime:utc-z}",
         "lastModified": "{datetime:utc-z}",
         "location": "/scim/v2/Users/{usr:bob}",
         "resourceType": "User"
@@ -239,8 +239,8 @@ profile: enterprise-scim-path
       "groups": [],
       "id": "{usr:bob}",
       "meta": {
-        "created": "{datetime:unspecified}",
-        "lastModified": "{datetime:unspecified}",
+        "created": "{datetime:utc-z}",
+        "lastModified": "{datetime:utc-z}",
         "location": "/scim/v2/Users/{usr:bob}",
         "resourceType": "User"
       },
@@ -275,8 +275,8 @@ profile: enterprise-scim-path
       "groups": [],
       "id": "{usr:bob}",
       "meta": {
-        "created": "{datetime:unspecified}",
-        "lastModified": "{datetime:unspecified}",
+        "created": "{datetime:utc-z}",
+        "lastModified": "{datetime:utc-z}",
         "location": "/scim/v2/Users/{usr:bob}",
         "resourceType": "User"
       },
@@ -297,7 +297,7 @@ profile: enterprise-scim-path
 < 200 OK
 < Content-Type: application/json; charset=utf-8
     {
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "defaultEmail": "{email:bob}",
       "displayName": "Bob Builder",
       "externalIdentityCount": 0,
@@ -305,7 +305,7 @@ profile: enterprise-scim-path
       "isActive": true,
       "membershipCount": 1,
       "sessionCount": 0,
-      "updatedAt": "{datetime:unspecified}"
+      "updatedAt": "{datetime:utc-z}"
     }
 
 ## 8. operator: dashboard: Bob's memberships
@@ -316,7 +316,7 @@ profile: enterprise-scim-path
     {
       "data": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "isActive": false,
           "organization": "Acme",
           "organizationId": "{org#1}",
@@ -326,7 +326,7 @@ profile: enterprise-scim-path
           "userId": "{usr:bob}"
         },
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "isActive": true,
           "organization": "Globex",
           "organizationId": "{org#2}",
@@ -352,7 +352,7 @@ profile: enterprise-scim-path
 < 200 OK
 < Content-Type: application/json; charset=utf-8
     {
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "defaultEmail": "{email:bob}",
       "displayName": "Bob Builder",
       "externalIdentityCount": 0,
@@ -360,7 +360,7 @@ profile: enterprise-scim-path
       "isActive": false,
       "membershipCount": 0,
       "sessionCount": 0,
-      "updatedAt": "{datetime:unspecified}"
+      "updatedAt": "{datetime:utc-z}"
     }
 
 ## 11. acme-directory: Acme reactivates Bob: its own membership returns
@@ -396,7 +396,7 @@ profile: enterprise-scim-path
       "groups": [],
       "id": "{usr:bob}",
       "meta": {
-        "created": "{datetime:unspecified}",
+        "created": "{datetime:utc-z}",
         "lastModified": "{datetime:utc-z}",
         "location": "/scim/v2/Users/{usr:bob}",
         "resourceType": "User"
@@ -418,7 +418,7 @@ profile: enterprise-scim-path
 < 200 OK
 < Content-Type: application/json; charset=utf-8
     {
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "defaultEmail": "{email:bob}",
       "displayName": "Bob Builder",
       "externalIdentityCount": 0,
@@ -426,7 +426,7 @@ profile: enterprise-scim-path
       "isActive": false,
       "membershipCount": 1,
       "sessionCount": 0,
-      "updatedAt": "{datetime:unspecified}"
+      "updatedAt": "{datetime:utc-z}"
     }
 
 ## audit: provisioning events from both directories
@@ -443,7 +443,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.user.created",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "globex-bob",
@@ -469,7 +469,7 @@ profile: enterprise-scim-path
         "resourceId": "{usr:bob}",
         "resourceType": "User"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#2}",
       "requestId": null,
       "sessionId": null,
@@ -497,7 +497,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.user.reactivated",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "acme-contractor-bob",
@@ -523,7 +523,7 @@ profile: enterprise-scim-path
         "resourceId": "{usr:bob}",
         "resourceType": "User"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -551,7 +551,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.user.updated",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "acme-contractor-bob",
@@ -575,7 +575,7 @@ profile: enterprise-scim-path
         "resourceId": "{usr:bob}",
         "resourceType": "User"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -603,7 +603,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.user.deactivated",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "acme-contractor-bob",
@@ -622,7 +622,7 @@ profile: enterprise-scim-path
         "resourceId": "{usr:bob}",
         "resourceType": "User"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -650,7 +650,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.user.deleted",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "globex-bob",
@@ -658,7 +658,7 @@ profile: enterprise-scim-path
         "resourceId": "{usr:bob}",
         "resourceType": "User"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#2}",
       "requestId": null,
       "sessionId": null,
@@ -686,7 +686,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.user.updated",
       "id": "{evt#6}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "acme-contractor-bob",
@@ -705,7 +705,7 @@ profile: enterprise-scim-path
         "resourceId": "{usr:bob}",
         "resourceType": "User"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,

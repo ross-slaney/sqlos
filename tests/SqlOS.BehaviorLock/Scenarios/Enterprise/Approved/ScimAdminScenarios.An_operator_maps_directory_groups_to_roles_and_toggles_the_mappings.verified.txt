@@ -103,7 +103,7 @@ profile: enterprise-scim-path
         {
           "activeGrantCount": 0,
           "connectionId": "{scim#1}",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "description": null,
           "grantBoundaryStatus": "checked_at_grant_time",
           "groupDisplayName": null,
@@ -117,12 +117,12 @@ profile: enterprise-scim-path
           "roleKey": "workspace_reader",
           "source": "dashboard",
           "sourceKey": null,
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         {
           "activeGrantCount": 0,
           "connectionId": "{scim#1}",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "description": null,
           "grantBoundaryStatus": "within",
           "groupDisplayName": null,
@@ -136,12 +136,12 @@ profile: enterprise-scim-path
           "roleKey": "workspace_admin",
           "source": "dashboard",
           "sourceKey": null,
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         {
           "activeGrantCount": 0,
           "connectionId": "{scim#1}",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "description": "Engineering reads projects",
           "grantBoundaryStatus": "within",
           "groupDisplayName": "Engineering",
@@ -155,7 +155,7 @@ profile: enterprise-scim-path
           "roleKey": "workspace_reader",
           "source": "dashboard",
           "sourceKey": null,
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         }
       ],
       "hasNextPage": false,
@@ -221,7 +221,7 @@ profile: enterprise-scim-path
 < Content-Type: application/json; charset=utf-8
     {
       "connectionId": "{scim#1}",
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "description": "Engineering administers projects",
       "groupDisplayName": "Engineering",
       "groupExternalId": null,
@@ -264,7 +264,7 @@ profile: enterprise-scim-path
 < Content-Type: application/json; charset=utf-8
     {
       "connectionId": "{scim#1}",
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "description": "Engineering administers projects",
       "groupDisplayName": "Engineering",
       "groupExternalId": null,
@@ -289,7 +289,7 @@ profile: enterprise-scim-path
 < Content-Type: application/json; charset=utf-8
     {
       "connectionId": "{scim#1}",
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "description": "Engineering administers projects",
       "groupDisplayName": "Engineering",
       "groupExternalId": null,
@@ -315,7 +315,7 @@ profile: enterprise-scim-path
         {
           "activeGrantCount": 0,
           "connectionId": "{scim#1}",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "description": null,
           "grantBoundaryStatus": "checked_at_grant_time",
           "groupDisplayName": null,
@@ -329,12 +329,12 @@ profile: enterprise-scim-path
           "roleKey": "workspace_reader",
           "source": "dashboard",
           "sourceKey": null,
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         {
           "activeGrantCount": 0,
           "connectionId": "{scim#1}",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "description": null,
           "grantBoundaryStatus": "within",
           "groupDisplayName": null,
@@ -348,12 +348,12 @@ profile: enterprise-scim-path
           "roleKey": "workspace_admin",
           "source": "dashboard",
           "sourceKey": null,
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         {
           "activeGrantCount": 0,
           "connectionId": "{scim#1}",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "description": "Engineering administers projects",
           "grantBoundaryStatus": "within",
           "groupDisplayName": "Engineering",
@@ -367,7 +367,7 @@ profile: enterprise-scim-path
           "roleKey": "workspace_admin",
           "source": "dashboard",
           "sourceKey": null,
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         }
       ],
       "hasNextPage": false,
@@ -395,7 +395,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.mapping.created",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "MatchType": "display_name",
@@ -403,7 +403,7 @@ profile: enterprise-scim-path
         "ResourceIdTemplate": null,
         "RoleKey": "workspace_reader"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -431,7 +431,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.mapping.created",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "MatchType": "external_id",
@@ -439,7 +439,7 @@ profile: enterprise-scim-path
         "ResourceIdTemplate": null,
         "RoleKey": "workspace_admin"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -467,7 +467,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.mapping.created",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "MatchType": "pattern",
@@ -475,7 +475,7 @@ profile: enterprise-scim-path
         "ResourceIdTemplate": "workspace::acme-{team}",
         "RoleKey": "workspace_reader"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -497,7 +497,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.member_added",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-engineering",
@@ -512,7 +512,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:engineering}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -540,7 +540,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.grant.mapped",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-engineering",
@@ -553,7 +553,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:engineering}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -581,7 +581,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.created",
       "id": "{evt#6}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-engineering",
@@ -600,7 +600,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:engineering}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -628,7 +628,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.grant.revoked",
       "id": "{evt#7}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "connectionId": "{scim#1}",
@@ -648,7 +648,7 @@ profile: enterprise-scim-path
         "requestedMappingId": "{scmap:engineering}",
         "revokedManagedGrantCount": 1
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -687,7 +687,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.mapping.updated",
       "id": "{evt#8}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "IsEnabled": true,
@@ -696,7 +696,7 @@ profile: enterprise-scim-path
         "ResourceIdTemplate": null,
         "RoleKey": "workspace_admin"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -718,7 +718,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.grant.mapped",
       "id": "{evt#9}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-engineering-2",
@@ -731,7 +731,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:engineering}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -759,7 +759,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.updated",
       "id": "{evt#10}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-engineering-2",
@@ -778,7 +778,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:engineering}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -806,7 +806,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.grant.revoked",
       "id": "{evt#11}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "connectionId": "{scim#1}",
@@ -826,7 +826,7 @@ profile: enterprise-scim-path
         "requestedMappingId": "{scmap:engineering}",
         "revokedManagedGrantCount": 1
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -865,10 +865,10 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.mapping.disabled",
       "id": "{evt#12}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": null,
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -896,10 +896,10 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.mapping.enabled",
       "id": "{evt#13}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": null,
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,

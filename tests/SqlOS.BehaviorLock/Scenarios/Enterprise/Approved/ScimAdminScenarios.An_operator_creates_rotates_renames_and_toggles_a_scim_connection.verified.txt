@@ -80,7 +80,7 @@ profile: enterprise-scim-path
     {
       "data": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Acme Entra",
           "grantBoundary": {
             "resourceId": "workspace::acme",
@@ -106,10 +106,10 @@ profile: enterprise-scim-path
           "seedKey": null,
           "source": "dashboard",
           "syncEventCount": 0,
-          "tokenLastUsedAt": "{datetime:unspecified}",
+          "tokenLastUsedAt": "{datetime:utc-z}",
           "tokenPrefix": "{token-prefix#1}",
-          "tokenRotatedAt": "{datetime:unspecified}",
-          "updatedAt": "{datetime:unspecified}"
+          "tokenRotatedAt": "{datetime:utc-z}",
+          "updatedAt": "{datetime:utc-z}"
         }
       ],
       "hasNextPage": false,
@@ -124,7 +124,7 @@ profile: enterprise-scim-path
 < Content-Type: application/json; charset=utf-8
     {
       "baseUrl": "/scim/v2",
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "displayName": "Acme Entra",
       "grantBoundary": {
         "resourceId": "workspace::acme",
@@ -149,10 +149,10 @@ profile: enterprise-scim-path
       },
       "seedKey": null,
       "source": "dashboard",
-      "tokenLastUsedAt": "{datetime:unspecified}",
+      "tokenLastUsedAt": "{datetime:utc-z}",
       "tokenPrefix": "{token-prefix#1}",
-      "tokenRotatedAt": "{datetime:unspecified}",
-      "updatedAt": "{datetime:unspecified}",
+      "tokenRotatedAt": "{datetime:utc-z}",
+      "updatedAt": "{datetime:utc-z}",
       "usersUrl": "/scim/v2/Users"
     }
 
@@ -241,7 +241,7 @@ profile: enterprise-scim-path
 < 200 OK
 < Content-Type: application/json; charset=utf-8
     {
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "displayName": "Acme Entra ID",
       "grantBoundaryResourceId": "workspace::acme",
       "id": "{scim#1}",
@@ -259,9 +259,9 @@ profile: enterprise-scim-path
       },
       "seedKey": null,
       "source": "dashboard",
-      "tokenLastUsedAt": "{datetime:unspecified}",
+      "tokenLastUsedAt": "{datetime:utc-z}",
       "tokenPrefix": "{token-prefix#2}",
-      "tokenRotatedAt": "{datetime:unspecified}",
+      "tokenRotatedAt": "{datetime:utc-z}",
       "updatedAt": "{datetime:utc-z}"
     }
 
@@ -276,7 +276,7 @@ profile: enterprise-scim-path
 < 200 OK
 < Content-Type: application/json; charset=utf-8
     {
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "displayName": "Acme Entra ID",
       "grantBoundaryResourceId": "workspace::acme",
       "id": "{scim#1}",
@@ -294,9 +294,9 @@ profile: enterprise-scim-path
       },
       "seedKey": null,
       "source": "dashboard",
-      "tokenLastUsedAt": "{datetime:unspecified}",
+      "tokenLastUsedAt": "{datetime:utc-z}",
       "tokenPrefix": "{token-prefix#2}",
-      "tokenRotatedAt": "{datetime:unspecified}",
+      "tokenRotatedAt": "{datetime:utc-z}",
       "updatedAt": "{datetime:utc-z}"
     }
 
@@ -322,7 +322,7 @@ profile: enterprise-scim-path
 < 200 OK
 < Content-Type: application/json; charset=utf-8
     {
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "displayName": "Acme Entra ID",
       "grantBoundaryResourceId": "workspace::acme",
       "id": "{scim#1}",
@@ -340,9 +340,9 @@ profile: enterprise-scim-path
       },
       "seedKey": null,
       "source": "dashboard",
-      "tokenLastUsedAt": "{datetime:unspecified}",
+      "tokenLastUsedAt": "{datetime:utc-z}",
       "tokenPrefix": "{token-prefix#2}",
-      "tokenRotatedAt": "{datetime:unspecified}",
+      "tokenRotatedAt": "{datetime:utc-z}",
       "updatedAt": "{datetime:utc-z}"
     }
 
@@ -354,7 +354,7 @@ profile: enterprise-scim-path
 < 200 OK
 < Content-Type: application/json; charset=utf-8
     {
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "displayName": "Acme Entra ID",
       "grantBoundaryResourceId": "workspace::acme",
       "id": "{scim#1}",
@@ -372,9 +372,9 @@ profile: enterprise-scim-path
       },
       "seedKey": null,
       "source": "dashboard",
-      "tokenLastUsedAt": "{datetime:unspecified}",
+      "tokenLastUsedAt": "{datetime:utc-z}",
       "tokenPrefix": "{token-prefix#2}",
-      "tokenRotatedAt": "{datetime:unspecified}",
+      "tokenRotatedAt": "{datetime:utc-z}",
       "updatedAt": "{datetime:utc-z}"
     }
 
@@ -386,7 +386,7 @@ profile: enterprise-scim-path
 < 200 OK
 < Content-Type: application/json; charset=utf-8
     {
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "displayName": "Acme Entra ID",
       "grantBoundaryResourceId": "workspace::acme",
       "id": "{scim#1}",
@@ -404,9 +404,9 @@ profile: enterprise-scim-path
       },
       "seedKey": null,
       "source": "dashboard",
-      "tokenLastUsedAt": "{datetime:unspecified}",
+      "tokenLastUsedAt": "{datetime:utc-z}",
       "tokenPrefix": "{token-prefix#2}",
-      "tokenRotatedAt": "{datetime:unspecified}",
+      "tokenRotatedAt": "{datetime:utc-z}",
       "updatedAt": "{datetime:utc-z}"
     }
 
@@ -430,7 +430,7 @@ profile: enterprise-scim-path
     {
       "data": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Acme Entra ID",
           "grantBoundary": {
             "resourceId": "workspace::acme",
@@ -456,10 +456,10 @@ profile: enterprise-scim-path
           "seedKey": null,
           "source": "dashboard",
           "syncEventCount": 0,
-          "tokenLastUsedAt": "{datetime:unspecified}",
+          "tokenLastUsedAt": "{datetime:utc-z}",
           "tokenPrefix": "{token-prefix#2}",
-          "tokenRotatedAt": "{datetime:unspecified}",
-          "updatedAt": "{datetime:unspecified}"
+          "tokenRotatedAt": "{datetime:utc-z}",
+          "updatedAt": "{datetime:utc-z}"
         }
       ],
       "hasNextPage": false,
@@ -487,13 +487,13 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.connection.created",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "DisplayName": "Acme Entra",
         "GrantBoundaryResourceId": "workspace::acme"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -521,12 +521,12 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.token.rotated",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "TokenPrefix": "[redacted]"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -554,12 +554,12 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.token.rotated",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "TokenPrefix": "[redacted]"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -587,10 +587,10 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.connection.enabled",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": null,
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -618,10 +618,10 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.connection.disabled",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": null,
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -649,10 +649,10 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.connection.enabled",
       "id": "{evt#6}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": null,
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -680,10 +680,10 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.connection.enabled",
       "id": "{evt#7}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": null,
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -711,10 +711,10 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.connection.disabled",
       "id": "{evt#8}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": null,
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,

@@ -114,13 +114,13 @@ profile: enterprise
       "correlationId": null,
       "eventType": "user.login.saml.link_denied",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "connectionId": "{sso#1}",
         "reason": "email_not_asserted"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -148,7 +148,7 @@ profile: enterprise
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -158,7 +158,7 @@ profile: enterprise
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "SamlAcs"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -186,13 +186,13 @@ profile: enterprise
       "correlationId": null,
       "eventType": "user.login.saml.link_denied",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "connectionId": "{sso#1}",
         "reason": "auto_provision_disabled"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -220,7 +220,7 @@ profile: enterprise
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -230,7 +230,7 @@ profile: enterprise
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "SamlAcs"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -258,13 +258,13 @@ profile: enterprise
       "correlationId": null,
       "eventType": "user.login.saml.link_denied",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "connectionId": "{sso#1}",
         "reason": "invalid_email"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -292,7 +292,7 @@ profile: enterprise
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#6}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -302,7 +302,7 @@ profile: enterprise
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "SamlAcs"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

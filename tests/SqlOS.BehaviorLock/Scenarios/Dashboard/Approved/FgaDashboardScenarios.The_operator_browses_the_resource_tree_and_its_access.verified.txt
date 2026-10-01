@@ -203,7 +203,7 @@ profile: dashboard-callback
       ],
       "resource": {
         "childCount": 0,
-        "createdAt": "{datetime:unspecified}",
+        "createdAt": "{datetime:utc-z}",
         "description": null,
         "grantsCount": 0,
         "id": "workspace::docs",
@@ -212,7 +212,7 @@ profile: dashboard-callback
         "parentId": "workspace::alpha",
         "resourceType": "Workspace",
         "resourceTypeId": "workspace",
-        "updatedAt": "{datetime:unspecified}"
+        "updatedAt": "{datetime:utc-z}"
       }
     }
 
@@ -233,7 +233,7 @@ profile: dashboard-callback
       ],
       "resource": {
         "childCount": 0,
-        "createdAt": "{datetime:unspecified}",
+        "createdAt": "{datetime:utc-z}",
         "description": null,
         "grantsCount": 0,
         "id": "workspace::ledger",
@@ -242,7 +242,7 @@ profile: dashboard-callback
         "parentId": "root",
         "resourceType": "Workspace",
         "resourceTypeId": "workspace",
-        "updatedAt": "{datetime:unspecified}"
+        "updatedAt": "{datetime:utc-z}"
       }
     }
 

@@ -290,7 +290,7 @@ profile: enterprise
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -300,7 +300,7 @@ profile: enterprise
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "SamlAcs"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -328,7 +328,7 @@ profile: enterprise
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -338,7 +338,7 @@ profile: enterprise
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "SamlAcs"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -366,7 +366,7 @@ profile: enterprise
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -376,7 +376,7 @@ profile: enterprise
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "SamlAcs"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -404,7 +404,7 @@ profile: enterprise
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -414,7 +414,7 @@ profile: enterprise
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "SamlAcs"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -442,7 +442,7 @@ profile: enterprise
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -452,7 +452,7 @@ profile: enterprise
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "SamlAcs"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -480,7 +480,7 @@ profile: enterprise
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#6}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -490,7 +490,7 @@ profile: enterprise
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "SamlAcs"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -518,7 +518,7 @@ profile: enterprise
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#7}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -528,7 +528,7 @@ profile: enterprise
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "SamlAcs"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -556,7 +556,7 @@ profile: enterprise
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#8}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -566,7 +566,7 @@ profile: enterprise
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "SamlAcs"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -594,7 +594,7 @@ profile: enterprise
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#9}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -604,7 +604,7 @@ profile: enterprise
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "SamlAcs"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -632,7 +632,7 @@ profile: enterprise
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#10}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -642,7 +642,7 @@ profile: enterprise
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "SamlAcs"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -670,7 +670,7 @@ profile: enterprise
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#11}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -680,7 +680,7 @@ profile: enterprise
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "SamlAcs"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -708,7 +708,7 @@ profile: enterprise
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#12}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -718,7 +718,7 @@ profile: enterprise
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "SamlAcs"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -746,7 +746,7 @@ profile: enterprise
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#13}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -756,7 +756,7 @@ profile: enterprise
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "SamlAcs"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -784,7 +784,7 @@ profile: enterprise
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#14}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -794,7 +794,7 @@ profile: enterprise
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "SamlAcs"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -822,7 +822,7 @@ profile: enterprise
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#15}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -832,7 +832,7 @@ profile: enterprise
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "SamlAcs"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -860,7 +860,7 @@ profile: enterprise
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#16}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -870,7 +870,7 @@ profile: enterprise
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "SamlAcs"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -898,7 +898,7 @@ profile: enterprise
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#17}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -908,7 +908,7 @@ profile: enterprise
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "SamlAcs"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -936,7 +936,7 @@ profile: enterprise
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#18}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -946,7 +946,7 @@ profile: enterprise
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "SamlAcs"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -974,7 +974,7 @@ profile: enterprise
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#19}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -984,7 +984,7 @@ profile: enterprise
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "SamlAcs"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

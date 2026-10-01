@@ -8,7 +8,7 @@ profile: dashboard-callback
 < 200 OK
 < Content-Type: application/json; charset=utf-8
     {
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "defaultEmail": "{email:alice}",
       "displayName": "Alice",
       "externalIdentityCount": 0,
@@ -16,7 +16,7 @@ profile: dashboard-callback
       "isActive": true,
       "membershipCount": 1,
       "sessionCount": 2,
-      "updatedAt": "{datetime:unspecified}"
+      "updatedAt": "{datetime:utc-z}"
     }
 
 ## 2. operator: the user's memberships
@@ -27,7 +27,7 @@ profile: dashboard-callback
     {
       "data": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "isActive": true,
           "organization": "Acme",
           "organizationId": "{org#1}",
@@ -50,14 +50,14 @@ profile: dashboard-callback
     {
       "data": [
         {
-          "absoluteExpiresAt": "{datetime:unspecified}",
+          "absoluteExpiresAt": "{datetime:utc-z}",
           "authenticationMethod": "password",
           "clientApplicationId": "{cli#1}",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "id": "{ses#1}",
-          "idleExpiresAt": "{datetime:unspecified}",
+          "idleExpiresAt": "{datetime:utc-z}",
           "ipAddress": "203.0.113.10",
-          "lastSeenAt": "{datetime:unspecified}",
+          "lastSeenAt": "{datetime:utc-z}",
           "revocationReason": null,
           "revokedAt": null,
           "user": "Alice",
@@ -78,14 +78,14 @@ profile: dashboard-callback
     {
       "data": [
         {
-          "absoluteExpiresAt": "{datetime:unspecified}",
+          "absoluteExpiresAt": "{datetime:utc-z}",
           "authenticationMethod": "password",
           "clientApplicationId": "{cli#1}",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "id": "{ses#2}",
-          "idleExpiresAt": "{datetime:unspecified}",
+          "idleExpiresAt": "{datetime:utc-z}",
           "ipAddress": "203.0.113.10",
-          "lastSeenAt": "{datetime:unspecified}",
+          "lastSeenAt": "{datetime:utc-z}",
           "revocationReason": null,
           "revokedAt": null,
           "user": "Alice",
@@ -125,9 +125,9 @@ profile: dashboard-callback
           "clientApplicationId": "{cli#1}",
           "clientId": "behavior-lock-app",
           "clientName": "Behavior Lock",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "id": "{ses#1}",
-          "lastSeenAt": "{datetime:unspecified}",
+          "lastSeenAt": "{datetime:utc-z}",
           "organizationId": "{org#1}",
           "revokedAt": null
         },
@@ -135,9 +135,9 @@ profile: dashboard-callback
           "clientApplicationId": "{cli#1}",
           "clientId": "behavior-lock-app",
           "clientName": "Behavior Lock",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "id": "{ses#2}",
-          "lastSeenAt": "{datetime:unspecified}",
+          "lastSeenAt": "{datetime:utc-z}",
           "organizationId": "{org#1}",
           "revokedAt": null
         }

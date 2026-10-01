@@ -37,7 +37,7 @@ profile: dashboard-dev
 < 200 OK
 < Content-Type: application/json; charset=utf-8
     {
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "defaultEmail": "{email:dana}",
       "displayName": "Dana",
       "externalIdentityCount": 0,
@@ -45,7 +45,7 @@ profile: dashboard-dev
       "isActive": true,
       "membershipCount": 0,
       "sessionCount": 0,
-      "updatedAt": "{datetime:unspecified}"
+      "updatedAt": "{datetime:utc-z}"
     }
 
 ## 4. anyone: create an organization

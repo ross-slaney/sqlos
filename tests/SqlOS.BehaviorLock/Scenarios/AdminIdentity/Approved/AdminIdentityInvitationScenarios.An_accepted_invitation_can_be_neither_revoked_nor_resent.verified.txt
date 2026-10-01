@@ -12,16 +12,16 @@ profile: dashboard-callback
     {
       "data": [
         {
-          "acceptedAt": "{datetime:unspecified}",
+          "acceptedAt": "{datetime:utc-z}",
           "acceptedByUserId": "{usr#1}",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "customFields": null,
           "email": "{email:dana}",
-          "expiresAt": "{datetime:unspecified}",
+          "expiresAt": "{datetime:utc-z}",
           "id": "{inv#1}",
           "inviteUrl": null,
           "lastSendError": null,
-          "lastSentAt": "{datetime:unspecified}",
+          "lastSentAt": "{datetime:utc-z}",
           "organizationId": "{org#1}",
           "organizationName": "Acme",
           "revokedAt": null,
@@ -43,7 +43,7 @@ profile: dashboard-callback
     {
       "data": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "isActive": true,
           "organization": "Acme",
           "organizationId": "{org#1}",

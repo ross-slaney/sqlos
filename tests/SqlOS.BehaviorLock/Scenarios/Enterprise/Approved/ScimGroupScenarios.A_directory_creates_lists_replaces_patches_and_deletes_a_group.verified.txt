@@ -91,8 +91,8 @@ profile: enterprise-scim-path
           "id": "{grp#1}",
           "members": [],
           "meta": {
-            "created": "{datetime:unspecified}",
-            "lastModified": "{datetime:unspecified}",
+            "created": "{datetime:utc-z}",
+            "lastModified": "{datetime:utc-z}",
             "location": "/scim/v2/Groups/{grp#1}",
             "resourceType": "Group"
           },
@@ -112,8 +112,8 @@ profile: enterprise-scim-path
             }
           ],
           "meta": {
-            "created": "{datetime:unspecified}",
-            "lastModified": "{datetime:unspecified}",
+            "created": "{datetime:utc-z}",
+            "lastModified": "{datetime:utc-z}",
             "location": "/scim/v2/Groups/{grp:engineering}",
             "resourceType": "Group"
           },
@@ -149,8 +149,8 @@ profile: enterprise-scim-path
             }
           ],
           "meta": {
-            "created": "{datetime:unspecified}",
-            "lastModified": "{datetime:unspecified}",
+            "created": "{datetime:utc-z}",
+            "lastModified": "{datetime:utc-z}",
             "location": "/scim/v2/Groups/{grp:engineering}",
             "resourceType": "Group"
           },
@@ -180,8 +180,8 @@ profile: enterprise-scim-path
           "id": "{grp#1}",
           "members": [],
           "meta": {
-            "created": "{datetime:unspecified}",
-            "lastModified": "{datetime:unspecified}",
+            "created": "{datetime:utc-z}",
+            "lastModified": "{datetime:utc-z}",
             "location": "/scim/v2/Groups/{grp#1}",
             "resourceType": "Group"
           },
@@ -210,8 +210,8 @@ profile: enterprise-scim-path
           "externalId": "directory-engineering",
           "id": "{grp:engineering}",
           "meta": {
-            "created": "{datetime:unspecified}",
-            "lastModified": "{datetime:unspecified}",
+            "created": "{datetime:utc-z}",
+            "lastModified": "{datetime:utc-z}",
             "location": "/scim/v2/Groups/{grp:engineering}",
             "resourceType": "Group"
           },
@@ -261,8 +261,8 @@ profile: enterprise-scim-path
             }
           ],
           "meta": {
-            "created": "{datetime:unspecified}",
-            "lastModified": "{datetime:unspecified}",
+            "created": "{datetime:utc-z}",
+            "lastModified": "{datetime:utc-z}",
             "location": "/scim/v2/Groups/{grp:engineering}",
             "resourceType": "Group"
           },
@@ -297,8 +297,8 @@ profile: enterprise-scim-path
         }
       ],
       "meta": {
-        "created": "{datetime:unspecified}",
-        "lastModified": "{datetime:unspecified}",
+        "created": "{datetime:utc-z}",
+        "lastModified": "{datetime:utc-z}",
         "location": "/scim/v2/Groups/{grp:engineering}",
         "resourceType": "Group"
       },
@@ -359,8 +359,8 @@ profile: enterprise-scim-path
       "externalId": "directory-engineering",
       "id": "{grp:engineering}",
       "meta": {
-        "created": "{datetime:unspecified}",
-        "lastModified": "{datetime:unspecified}",
+        "created": "{datetime:utc-z}",
+        "lastModified": "{datetime:utc-z}",
         "location": "/scim/v2/Groups/{grp:engineering}",
         "resourceType": "Group"
       },
@@ -416,7 +416,7 @@ profile: enterprise-scim-path
       "externalId": "directory-engineering",
       "id": "{grp:engineering}",
       "meta": {
-        "created": "{datetime:unspecified}",
+        "created": "{datetime:utc-z}",
         "lastModified": "{datetime:utc-z}",
         "location": "/scim/v2/Groups/{grp:engineering}",
         "resourceType": "Group"
@@ -578,8 +578,8 @@ profile: enterprise-scim-path
       "id": "{grp:engineering}",
       "members": [],
       "meta": {
-        "created": "{datetime:unspecified}",
-        "lastModified": "{datetime:unspecified}",
+        "created": "{datetime:utc-z}",
+        "lastModified": "{datetime:utc-z}",
         "location": "/scim/v2/Groups/{grp:engineering}",
         "resourceType": "Group"
       },
@@ -638,7 +638,7 @@ profile: enterprise-scim-path
         }
       ],
       "meta": {
-        "created": "{datetime:unspecified}",
+        "created": "{datetime:utc-z}",
         "lastModified": "{datetime:utc-z}",
         "location": "/scim/v2/Groups/{grp:engineering}",
         "resourceType": "Group"
@@ -659,7 +659,7 @@ profile: enterprise-scim-path
     {
       "data": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "description": "SCIM mirrored group",
           "groupType": "scim",
           "id": "{grp#1}",
@@ -668,7 +668,7 @@ profile: enterprise-scim-path
           "subjectId": "{subj#1}"
         },
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "description": "SCIM mirrored group",
           "groupType": "scim",
           "id": "{grp:engineering}",
@@ -696,7 +696,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.member_added",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-engineering",
@@ -711,7 +711,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:engineering}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -739,7 +739,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.created",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-engineering",
@@ -758,7 +758,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:engineering}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -786,7 +786,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.created",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-design",
@@ -801,7 +801,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp#1}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -829,7 +829,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.member_added",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-engineering",
@@ -844,7 +844,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:engineering}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -872,7 +872,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.updated",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-engineering",
@@ -895,7 +895,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:engineering}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -923,7 +923,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.member_removed",
       "id": "{evt#6}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-engineering",
@@ -938,7 +938,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:engineering}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -966,7 +966,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.member_added",
       "id": "{evt#7}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-engineering",
@@ -981,7 +981,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:engineering}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -1009,7 +1009,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.updated",
       "id": "{evt#8}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-engineering",
@@ -1031,7 +1031,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:engineering}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -1059,7 +1059,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.member_removed",
       "id": "{evt#9}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-engineering",
@@ -1074,7 +1074,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:engineering}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -1102,7 +1102,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.updated",
       "id": "{evt#10}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-engineering",
@@ -1120,7 +1120,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:engineering}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -1148,7 +1148,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.member_removed",
       "id": "{evt#11}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-engineering",
@@ -1163,7 +1163,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:engineering}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -1191,7 +1191,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.updated",
       "id": "{evt#12}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-engineering",
@@ -1214,7 +1214,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:engineering}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -1242,7 +1242,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.member_added",
       "id": "{evt#13}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-engineering",
@@ -1257,7 +1257,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:engineering}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -1285,7 +1285,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.updated",
       "id": "{evt#14}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-engineering",
@@ -1308,7 +1308,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:engineering}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -1336,7 +1336,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.updated",
       "id": "{evt#15}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-engineering",
@@ -1356,7 +1356,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:engineering}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -1384,7 +1384,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.member_removed",
       "id": "{evt#16}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-platform",
@@ -1399,7 +1399,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:engineering}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -1427,7 +1427,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.member_added",
       "id": "{evt#17}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-platform",
@@ -1442,7 +1442,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:engineering}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -1470,7 +1470,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.updated",
       "id": "{evt#18}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-platform",
@@ -1498,7 +1498,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:engineering}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -1526,7 +1526,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.member_removed",
       "id": "{evt#19}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-platform",
@@ -1541,7 +1541,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:engineering}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -1569,7 +1569,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.updated",
       "id": "{evt#20}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-platform",
@@ -1587,7 +1587,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:engineering}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -1615,7 +1615,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.deleted",
       "id": "{evt#21}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-platform",
@@ -1623,7 +1623,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:engineering}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -1651,7 +1651,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.member_added",
       "id": "{evt#22}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-platform",
@@ -1666,7 +1666,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:engineering}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -1694,7 +1694,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.created",
       "id": "{evt#23}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-platform",
@@ -1713,7 +1713,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:engineering}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,

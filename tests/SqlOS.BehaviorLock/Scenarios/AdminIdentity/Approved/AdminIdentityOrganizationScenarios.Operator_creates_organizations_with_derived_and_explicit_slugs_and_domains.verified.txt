@@ -250,7 +250,7 @@ profile: dashboard-callback
 < 200 OK
 < Content-Type: application/json; charset=utf-8
     {
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "enabledSsoConnections": 0,
       "id": "{org#1}",
       "isActive": true,

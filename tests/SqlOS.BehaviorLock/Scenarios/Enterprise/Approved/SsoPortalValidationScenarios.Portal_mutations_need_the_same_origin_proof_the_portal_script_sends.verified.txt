@@ -25,7 +25,7 @@ profile: enterprise
       "connection": {
         "autoLinkByEmail": true,
         "autoProvisionUsers": false,
-        "createdAt": "{datetime:unspecified}",
+        "createdAt": "{datetime:utc-z}",
         "displayName": "Acme SSO",
         "enrollmentPolicy": {
           "allowJitProvisioning": false,
@@ -36,7 +36,7 @@ profile: enterprise
         "isEnabled": false,
         "setupStatus": "draft",
         "singleSignOnUrl": null,
-        "updatedAt": "{datetime:unspecified}"
+        "updatedAt": "{datetime:utc-z}"
       },
       "domain": null,
       "latestTest": null,
@@ -251,7 +251,7 @@ profile: enterprise
       "connection": {
         "autoLinkByEmail": true,
         "autoProvisionUsers": false,
-        "createdAt": "{datetime:unspecified}",
+        "createdAt": "{datetime:utc-z}",
         "displayName": "Acme SSO",
         "enrollmentPolicy": {
           "allowJitProvisioning": false,
@@ -262,7 +262,7 @@ profile: enterprise
         "isEnabled": false,
         "setupStatus": "draft",
         "singleSignOnUrl": null,
-        "updatedAt": "{datetime:unspecified}"
+        "updatedAt": "{datetime:utc-z}"
       },
       "domain": null,
       "latestTest": null,
@@ -359,7 +359,7 @@ profile: enterprise
       "connection": {
         "autoLinkByEmail": true,
         "autoProvisionUsers": false,
-        "createdAt": "{datetime:unspecified}",
+        "createdAt": "{datetime:utc-z}",
         "displayName": "Acme SSO",
         "enrollmentPolicy": {
           "allowJitProvisioning": false,
@@ -370,7 +370,7 @@ profile: enterprise
         "isEnabled": false,
         "setupStatus": "draft",
         "singleSignOnUrl": null,
-        "updatedAt": "{datetime:unspecified}"
+        "updatedAt": "{datetime:utc-z}"
       },
       "domain": null,
       "latestTest": null,
@@ -483,7 +483,7 @@ profile: enterprise
       "connection": {
         "autoLinkByEmail": true,
         "autoProvisionUsers": false,
-        "createdAt": "{datetime:unspecified}",
+        "createdAt": "{datetime:utc-z}",
         "displayName": "Acme SSO",
         "enrollmentPolicy": {
           "allowJitProvisioning": false,
@@ -494,7 +494,7 @@ profile: enterprise
         "isEnabled": false,
         "setupStatus": "draft",
         "singleSignOnUrl": null,
-        "updatedAt": "{datetime:unspecified}"
+        "updatedAt": "{datetime:utc-z}"
       },
       "domain": null,
       "latestTest": null,
@@ -582,14 +582,14 @@ profile: enterprise
       "correlationId": null,
       "eventType": "security.csrf_rejected",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "method": "PUT",
         "path": "/sqlos/admin/auth/sso-portal/api/provider",
         "reason": "missing_header"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -617,14 +617,14 @@ profile: enterprise
       "correlationId": null,
       "eventType": "security.csrf_rejected",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "method": "PUT",
         "path": "/sqlos/admin/auth/sso-portal/api/provider",
         "reason": "missing_header"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -652,14 +652,14 @@ profile: enterprise
       "correlationId": null,
       "eventType": "security.csrf_rejected",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "method": "PUT",
         "path": "/sqlos/admin/auth/sso-portal/api/provider",
         "reason": "ambiguous_header"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -687,14 +687,14 @@ profile: enterprise
       "correlationId": null,
       "eventType": "security.csrf_rejected",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "method": "PUT",
         "path": "/sqlos/admin/auth/sso-portal/api/provider",
         "reason": "untrusted_origin"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -722,14 +722,14 @@ profile: enterprise
       "correlationId": null,
       "eventType": "security.csrf_rejected",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "method": "PUT",
         "path": "/sqlos/admin/auth/sso-portal/api/provider",
         "reason": "untrusted_origin"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -757,14 +757,14 @@ profile: enterprise
       "correlationId": null,
       "eventType": "security.csrf_rejected",
       "id": "{evt#6}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "method": "PUT",
         "path": "/sqlos/admin/auth/sso-portal/api/provider",
         "reason": "untrusted_origin"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -792,14 +792,14 @@ profile: enterprise
       "correlationId": null,
       "eventType": "security.csrf_rejected",
       "id": "{evt#7}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "method": "PUT",
         "path": "/sqlos/admin/auth/sso-portal/api/provider",
         "reason": "untrusted_origin"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -827,12 +827,12 @@ profile: enterprise
       "correlationId": null,
       "eventType": "sso.portal.provider.selected",
       "id": "{evt#8}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "Provider": "okta"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -860,12 +860,12 @@ profile: enterprise
       "correlationId": null,
       "eventType": "sso.portal.provider.selected",
       "id": "{evt#9}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "Provider": "microsoft-entra"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -893,14 +893,14 @@ profile: enterprise
       "correlationId": null,
       "eventType": "security.csrf_rejected",
       "id": "{evt#10}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "method": "PUT",
         "path": "/sqlos/admin/auth/sso-portal/api/setup/provider",
         "reason": "missing_header"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -928,12 +928,12 @@ profile: enterprise
       "correlationId": null,
       "eventType": "sso.portal.provider.selected",
       "id": "{evt#11}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "Provider": "generic-saml"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,

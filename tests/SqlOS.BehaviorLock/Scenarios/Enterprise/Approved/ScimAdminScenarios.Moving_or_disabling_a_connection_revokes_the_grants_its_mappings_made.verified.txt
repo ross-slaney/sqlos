@@ -14,7 +14,7 @@ profile: enterprise-scim-path
         {
           "activeGrantCount": 2,
           "connectionId": "{scim#1}",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "description": null,
           "grantBoundaryStatus": "checked_at_grant_time",
           "groupDisplayName": null,
@@ -28,7 +28,7 @@ profile: enterprise-scim-path
           "roleKey": "workspace_reader",
           "source": "dashboard",
           "sourceKey": null,
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         }
       ],
       "hasNextPage": false,
@@ -48,12 +48,12 @@ profile: enterprise-scim-path
 < 200 OK
 < Content-Type: application/json; charset=utf-8
     {
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "displayName": "Directory",
       "grantBoundaryResourceId": "workspace::acme-projects",
       "id": "{scim#1}",
       "isEnabled": true,
-      "lastSyncAt": "{datetime:unspecified}",
+      "lastSyncAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "ownership": {
         "canEmergencyDisable": true,
@@ -66,9 +66,9 @@ profile: enterprise-scim-path
       },
       "seedKey": null,
       "source": "dashboard",
-      "tokenLastUsedAt": "{datetime:unspecified}",
+      "tokenLastUsedAt": "{datetime:utc-z}",
       "tokenPrefix": "{token-prefix#1}",
-      "tokenRotatedAt": "{datetime:unspecified}",
+      "tokenRotatedAt": "{datetime:utc-z}",
       "updatedAt": "{datetime:utc-z}"
     }
 
@@ -82,7 +82,7 @@ profile: enterprise-scim-path
         {
           "activeGrantCount": 1,
           "connectionId": "{scim#1}",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "description": null,
           "grantBoundaryStatus": "checked_at_grant_time",
           "groupDisplayName": null,
@@ -96,7 +96,7 @@ profile: enterprise-scim-path
           "roleKey": "workspace_reader",
           "source": "dashboard",
           "sourceKey": null,
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         }
       ],
       "hasNextPage": false,
@@ -112,12 +112,12 @@ profile: enterprise-scim-path
 < 200 OK
 < Content-Type: application/json; charset=utf-8
     {
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "displayName": "Directory",
       "grantBoundaryResourceId": "workspace::acme-projects",
       "id": "{scim#1}",
       "isEnabled": false,
-      "lastSyncAt": "{datetime:unspecified}",
+      "lastSyncAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "ownership": {
         "canEmergencyDisable": true,
@@ -130,9 +130,9 @@ profile: enterprise-scim-path
       },
       "seedKey": null,
       "source": "dashboard",
-      "tokenLastUsedAt": "{datetime:unspecified}",
+      "tokenLastUsedAt": "{datetime:utc-z}",
       "tokenPrefix": "{token-prefix#1}",
-      "tokenRotatedAt": "{datetime:unspecified}",
+      "tokenRotatedAt": "{datetime:utc-z}",
       "updatedAt": "{datetime:utc-z}"
     }
 
@@ -146,7 +146,7 @@ profile: enterprise-scim-path
         {
           "activeGrantCount": 0,
           "connectionId": "{scim#1}",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "description": null,
           "grantBoundaryStatus": "checked_at_grant_time",
           "groupDisplayName": null,
@@ -160,7 +160,7 @@ profile: enterprise-scim-path
           "roleKey": "workspace_reader",
           "source": "dashboard",
           "sourceKey": null,
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         }
       ],
       "hasNextPage": false,
@@ -182,7 +182,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.grant.revoked",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "connectionId": "{scim#1}",
@@ -203,7 +203,7 @@ profile: enterprise-scim-path
         "requestedMappingId": null,
         "revokedManagedGrantCount": 1
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -242,7 +242,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.connection.grant_boundary_changed",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "connectionId": "{scim#1}",
@@ -250,7 +250,7 @@ profile: enterprise-scim-path
         "previousGrantBoundaryResourceId": "workspace::acme",
         "revokedManagedGrantCount": 1
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -278,10 +278,10 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.connection.enabled",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": null,
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -303,7 +303,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.grant.revoked",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "connectionId": "{scim#1}",
@@ -323,7 +323,7 @@ profile: enterprise-scim-path
         "requestedMappingId": null,
         "revokedManagedGrantCount": 1
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -362,10 +362,10 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.connection.disabled",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": null,
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,

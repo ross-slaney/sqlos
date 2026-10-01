@@ -282,7 +282,7 @@ profile: enterprise
       "correlationId": null,
       "eventType": "sso.portal.organization_sessions.revoked",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "connectionId": "{sso#1}",
@@ -290,7 +290,7 @@ profile: enterprise
         "invalidatedAuthPageSessions": 2,
         "revokedSessions": 1
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -318,7 +318,7 @@ profile: enterprise
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -328,7 +328,7 @@ profile: enterprise
         "publicMessage": "The authorization grant is invalid or expired.",
         "surface": "OAuthToken"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

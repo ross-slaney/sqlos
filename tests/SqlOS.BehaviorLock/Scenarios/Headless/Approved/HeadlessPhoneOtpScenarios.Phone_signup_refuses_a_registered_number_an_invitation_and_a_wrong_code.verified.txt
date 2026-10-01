@@ -76,7 +76,7 @@ profile: headless
             "configurationFingerprint": "{hex#1}",
             "isEditable": false,
             "isOrphaned": false,
-            "lastReconciledAt": "{datetime:unspecified}",
+            "lastReconciledAt": "{datetime:utc-z}",
             "owner": "code",
             "sourceKey": "auth-page:default"
           },
@@ -84,7 +84,7 @@ profile: headless
           "pageTitle": "Sign in to Behavior Lock",
           "phoneOtpRuntimeConfigured": true,
           "primaryColor": "#2563eb",
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         "signupToken": null,
         "totpEnrollment": null,
@@ -125,14 +125,14 @@ profile: headless
         "invitation": {
           "acceptedAt": null,
           "acceptedByUserId": null,
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "customFields": null,
           "email": "{email:erin}",
-          "expiresAt": "{datetime:unspecified}",
+          "expiresAt": "{datetime:utc-z}",
           "id": "{inv#1}",
           "inviteUrl": null,
           "lastSendError": null,
-          "lastSentAt": "{datetime:unspecified}",
+          "lastSentAt": "{datetime:utc-z}",
           "organizationId": "{org#1}",
           "organizationName": "Acme",
           "revokedAt": null,
@@ -185,7 +185,7 @@ profile: headless
             "configurationFingerprint": "{hex#1}",
             "isEditable": false,
             "isOrphaned": false,
-            "lastReconciledAt": "{datetime:unspecified}",
+            "lastReconciledAt": "{datetime:utc-z}",
             "owner": "code",
             "sourceKey": "auth-page:default"
           },
@@ -193,7 +193,7 @@ profile: headless
           "pageTitle": "Sign in to Behavior Lock",
           "phoneOtpRuntimeConfigured": true,
           "primaryColor": "#2563eb",
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         "signupToken": null,
         "totpEnrollment": null,
@@ -276,7 +276,7 @@ profile: headless
             "configurationFingerprint": "{hex#1}",
             "isEditable": false,
             "isOrphaned": false,
-            "lastReconciledAt": "{datetime:unspecified}",
+            "lastReconciledAt": "{datetime:utc-z}",
             "owner": "code",
             "sourceKey": "auth-page:default"
           },
@@ -284,7 +284,7 @@ profile: headless
           "pageTitle": "Sign in to Behavior Lock",
           "phoneOtpRuntimeConfigured": true,
           "primaryColor": "#2563eb",
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         "signupToken": "{signup-token#1}",
         "totpEnrollment": null,
@@ -369,7 +369,7 @@ profile: headless
             "configurationFingerprint": "{hex#1}",
             "isEditable": false,
             "isOrphaned": false,
-            "lastReconciledAt": "{datetime:unspecified}",
+            "lastReconciledAt": "{datetime:utc-z}",
             "owner": "code",
             "sourceKey": "auth-page:default"
           },
@@ -377,7 +377,7 @@ profile: headless
           "pageTitle": "Sign in to Behavior Lock",
           "phoneOtpRuntimeConfigured": true,
           "primaryColor": "#2563eb",
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         "signupToken": "{signup-token#1}",
         "totpEnrollment": null,
@@ -407,7 +407,7 @@ profile: headless
       "correlationId": null,
       "eventType": "phone_otp.challenge_started",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "details": {
@@ -419,7 +419,7 @@ profile: headless
         "maskedPhone": "+1******0173",
         "purpose": "signup"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

@@ -146,7 +146,7 @@ profile: dashboard-password
       "signingKeyGraceWindowDays": 7,
       "signingKeyRetiredCleanupDays": 30,
       "signingKeyRotationIntervalDays": 90,
-      "updatedAt": "{datetime:unspecified}"
+      "updatedAt": "{datetime:utc-z}"
     }
 
 ## 5. operator-browser: a settings change without the X-SqlOS-Request header is refused
@@ -378,12 +378,12 @@ profile: dashboard-password
       "correlationId": null,
       "eventType": "dashboard.login.success",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "expires_at": "{datetime:utc-z}"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -411,14 +411,14 @@ profile: dashboard-password
       "correlationId": null,
       "eventType": "security.csrf_rejected",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "method": "PUT",
         "path": "/sqlos/admin/auth/api/settings/security",
         "reason": "missing_header"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -446,14 +446,14 @@ profile: dashboard-password
       "correlationId": null,
       "eventType": "security.csrf_rejected",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "method": "PUT",
         "path": "/sqlos/admin/auth/api/settings/security",
         "reason": "untrusted_origin"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -481,14 +481,14 @@ profile: dashboard-password
       "correlationId": null,
       "eventType": "security.csrf_rejected",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "method": "PUT",
         "path": "/sqlos/admin/auth/api/settings/security",
         "reason": "untrusted_origin"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -516,14 +516,14 @@ profile: dashboard-password
       "correlationId": null,
       "eventType": "security.csrf_rejected",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "method": "PUT",
         "path": "/sqlos/admin/auth/api/settings/security",
         "reason": "untrusted_origin"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -551,14 +551,14 @@ profile: dashboard-password
       "correlationId": null,
       "eventType": "security.csrf_rejected",
       "id": "{evt#6}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "method": "POST",
         "path": "/sqlos/admin/email/api/templates",
         "reason": "missing_header"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -586,14 +586,14 @@ profile: dashboard-password
       "correlationId": null,
       "eventType": "security.csrf_rejected",
       "id": "{evt#7}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "method": "POST",
         "path": "/sqlos/admin/calendar/api/connections/{cal#1}/sync",
         "reason": "missing_header"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -615,14 +615,14 @@ profile: dashboard-password
       "correlationId": null,
       "eventType": "email.template.created",
       "id": "{evt#8}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "Key": "billing.receipt",
         "Version": 1,
         "templateId": "{emt#1}"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

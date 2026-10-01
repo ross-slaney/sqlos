@@ -167,10 +167,10 @@ profile: modules
       "correlationId": null,
       "eventType": "report.exported",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": null,
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -198,7 +198,7 @@ profile: modules
       "correlationId": null,
       "eventType": "invoice.paid",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "198.51.100.23",
       "metadata": {
         "amount": 4200,
@@ -209,7 +209,7 @@ profile: modules
         },
         "webhookSecret": "[redacted]"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": "request-1001",
       "sessionId": null,
@@ -243,7 +243,7 @@ profile: modules
       "correlationId": null,
       "eventType": "invoice.refunded",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "198.51.100.23",
       "metadata": {
         "amount": 4200,
@@ -254,7 +254,7 @@ profile: modules
         },
         "webhookSecret": "[redacted]"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": "request-1001",
       "sessionId": null,

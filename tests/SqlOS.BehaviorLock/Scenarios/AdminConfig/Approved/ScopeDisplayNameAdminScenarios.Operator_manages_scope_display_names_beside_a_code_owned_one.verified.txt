@@ -14,7 +14,7 @@ profile: dashboard-callback
     {
       "data": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "description": "View workspaces you can access.",
           "displayName": "Read workspaces",
           "id": "{sdn#1}",
@@ -23,12 +23,12 @@ profile: dashboard-callback
             "configurationFingerprint": "{hex#1}",
             "isEditable": false,
             "isOrphaned": false,
-            "lastReconciledAt": "{datetime:unspecified}",
+            "lastReconciledAt": "{datetime:utc-z}",
             "owner": "code",
             "sourceKey": "workspace.read"
           },
           "scope": "workspace.read",
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         }
       ]
     }
@@ -73,7 +73,7 @@ profile: dashboard-callback
 < 200 OK
 < Content-Type: application/json; charset=utf-8
     {
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "description": null,
       "displayName": "Change workspaces",
       "id": "{sdn#2}",
@@ -120,7 +120,7 @@ profile: dashboard-callback
     {
       "data": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "description": "View workspaces you can access.",
           "displayName": "Read workspaces",
           "id": "{sdn#1}",
@@ -129,15 +129,15 @@ profile: dashboard-callback
             "configurationFingerprint": "{hex#1}",
             "isEditable": false,
             "isOrphaned": false,
-            "lastReconciledAt": "{datetime:unspecified}",
+            "lastReconciledAt": "{datetime:utc-z}",
             "owner": "code",
             "sourceKey": "workspace.read"
           },
           "scope": "workspace.read",
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "description": null,
           "displayName": "Change workspaces",
           "id": "{sdn#2}",
@@ -151,7 +151,7 @@ profile: dashboard-callback
             "sourceKey": null
           },
           "scope": "workspace.write",
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         }
       ]
     }
@@ -173,7 +173,7 @@ profile: dashboard-callback
     {
       "data": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "description": "View workspaces you can access.",
           "displayName": "Read workspaces",
           "id": "{sdn#1}",
@@ -182,12 +182,12 @@ profile: dashboard-callback
             "configurationFingerprint": "{hex#1}",
             "isEditable": false,
             "isOrphaned": false,
-            "lastReconciledAt": "{datetime:unspecified}",
+            "lastReconciledAt": "{datetime:utc-z}",
             "owner": "code",
             "sourceKey": "workspace.read"
           },
           "scope": "workspace.read",
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         }
       ]
     }
@@ -212,13 +212,13 @@ profile: dashboard-callback
       "correlationId": null,
       "eventType": "scope_display_name.created",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "display_name": "Edit workspaces",
         "scope": "workspace.write"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -246,13 +246,13 @@ profile: dashboard-callback
       "correlationId": null,
       "eventType": "scope_display_name.updated",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "display_name": "Change workspaces",
         "scope": "workspace.write"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -280,12 +280,12 @@ profile: dashboard-callback
       "correlationId": null,
       "eventType": "scope_display_name.deleted",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "scope": "workspace.write"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

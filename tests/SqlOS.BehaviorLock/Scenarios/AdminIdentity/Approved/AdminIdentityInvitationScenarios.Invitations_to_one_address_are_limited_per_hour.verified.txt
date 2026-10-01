@@ -52,13 +52,13 @@ profile: dashboard-callback
       "correlationId": null,
       "eventType": "invitation.rate_limit_rejected",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "limit": "email",
         "normalizedEmail": "{email:DANA}"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -86,13 +86,13 @@ profile: dashboard-callback
       "correlationId": null,
       "eventType": "invitation.rate_limit_rejected",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "limit": "email",
         "normalizedEmail": "{email:DANA}"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,

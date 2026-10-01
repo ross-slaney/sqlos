@@ -489,7 +489,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.deleted",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-engineering",
@@ -497,7 +497,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:engineering}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,

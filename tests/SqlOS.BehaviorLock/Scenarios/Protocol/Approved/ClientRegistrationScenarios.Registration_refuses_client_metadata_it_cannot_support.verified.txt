@@ -48,7 +48,7 @@ profile: dcr
       "correlationId": null,
       "eventType": "client.dcr.rejected",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "client_name": "Taskrail",
@@ -69,7 +69,7 @@ profile: dcr
         "software_version": null,
         "token_endpoint_auth_method": "[redacted]"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -122,7 +122,7 @@ profile: dcr
       "correlationId": null,
       "eventType": "client.dcr.rejected",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "client_name": "Taskrail",
@@ -141,7 +141,7 @@ profile: dcr
         "software_version": null,
         "token_endpoint_auth_method": "[redacted]"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -196,7 +196,7 @@ profile: dcr
       "correlationId": null,
       "eventType": "client.dcr.rejected",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "client_name": "Taskrail",
@@ -217,7 +217,7 @@ profile: dcr
         "software_version": null,
         "token_endpoint_auth_method": "[redacted]"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -272,7 +272,7 @@ profile: dcr
       "correlationId": null,
       "eventType": "client.dcr.rejected",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "client_name": "Taskrail",
@@ -293,7 +293,7 @@ profile: dcr
         "software_version": null,
         "token_endpoint_auth_method": "[redacted]"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -348,7 +348,7 @@ profile: dcr
       "correlationId": null,
       "eventType": "client.dcr.rejected",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "client_name": "Taskrail",
@@ -369,7 +369,7 @@ profile: dcr
         "software_version": null,
         "token_endpoint_auth_method": "[redacted]"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -423,7 +423,7 @@ profile: dcr
       "correlationId": null,
       "eventType": "client.dcr.rejected",
       "id": "{evt#6}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "client_name": "Taskrail",
@@ -443,7 +443,7 @@ profile: dcr
         "software_version": null,
         "token_endpoint_auth_method": "[redacted]"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -498,7 +498,7 @@ profile: dcr
       "correlationId": null,
       "eventType": "client.dcr.rejected",
       "id": "{evt#7}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "client_name": "Taskrail",
@@ -519,7 +519,7 @@ profile: dcr
         "software_version": null,
         "token_endpoint_auth_method": "[redacted]"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -574,7 +574,7 @@ profile: dcr
       "correlationId": null,
       "eventType": "client.dcr.rejected",
       "id": "{evt#8}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "client_name": "Taskrail",
@@ -595,7 +595,7 @@ profile: dcr
         "software_version": null,
         "token_endpoint_auth_method": "[redacted]"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -650,7 +650,7 @@ profile: dcr
       "correlationId": null,
       "eventType": "client.dcr.rejected",
       "id": "{evt#9}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "client_name": "Taskrail",
@@ -671,7 +671,7 @@ profile: dcr
         "software_version": null,
         "token_endpoint_auth_method": "[redacted]"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -727,7 +727,7 @@ profile: dcr
       "correlationId": null,
       "eventType": "client.dcr.rejected",
       "id": "{evt#10}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "client_name": "Taskrail",
@@ -748,7 +748,7 @@ profile: dcr
         "software_version": null,
         "token_endpoint_auth_method": "[redacted]"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -803,7 +803,7 @@ profile: dcr
       "correlationId": null,
       "eventType": "client.dcr.rejected",
       "id": "{evt#11}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "client_name": "Taskrail",
@@ -824,7 +824,7 @@ profile: dcr
         "software_version": null,
         "token_endpoint_auth_method": "[redacted]"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -879,7 +879,7 @@ profile: dcr
       "correlationId": null,
       "eventType": "client.dcr.rejected",
       "id": "{evt#12}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "client_name": "Taskrail",
@@ -900,7 +900,7 @@ profile: dcr
         "software_version": null,
         "token_endpoint_auth_method": "[redacted]"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -972,7 +972,7 @@ profile: dcr
       "correlationId": null,
       "eventType": "client.dcr.registered",
       "id": "{evt#13}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "client_id": "{dcrcli#1}",
@@ -992,7 +992,7 @@ profile: dcr
         "software_version": null,
         "token_endpoint_auth_method": "[redacted]"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

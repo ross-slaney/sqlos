@@ -61,7 +61,7 @@ profile: dashboard-callback
       "correlationId": null,
       "eventType": "client.sessions-revoked",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "client_id": "portal",
@@ -69,7 +69,7 @@ profile: dashboard-callback
         "revoked_sessions": 2,
         "source": "manual"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -97,7 +97,7 @@ profile: dashboard-callback
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -107,7 +107,7 @@ profile: dashboard-callback
         "publicMessage": "The authorization grant is invalid or expired.",
         "surface": "OAuthToken"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -135,7 +135,7 @@ profile: dashboard-callback
       "correlationId": null,
       "eventType": "client.sessions-revoked",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "client_id": "portal",
@@ -143,7 +143,7 @@ profile: dashboard-callback
         "revoked_sessions": 0,
         "source": "manual"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -181,7 +181,7 @@ profile: dashboard-callback
 < Content-Type: application/json; charset=utf-8
     {
       "clientId": "portal",
-      "disabledAt": "{datetime:unspecified}",
+      "disabledAt": "{datetime:utc-z}",
       "disabledReason": "Compromised",
       "id": "{cli#1}",
       "isActive": false
@@ -237,7 +237,7 @@ profile: dashboard-callback
           "clientUri": null,
           "coreMetadataEditable": true,
           "description": null,
-          "disabledAt": "{datetime:unspecified}",
+          "disabledAt": "{datetime:utc-z}",
           "disabledReason": "Compromised",
           "duplicateCount": 0,
           "duplicateFingerprint": null,
@@ -249,7 +249,7 @@ profile: dashboard-callback
           "id": "{cli#1}",
           "isActive": false,
           "isFirstParty": true,
-          "lastSeenAt": "{datetime:unspecified}",
+          "lastSeenAt": "{datetime:utc-z}",
           "lifecycleState": "disabled",
           "logoUri": null,
           "managedByStartupSeed": false,
@@ -417,14 +417,14 @@ profile: dashboard-callback
       "correlationId": null,
       "eventType": "client.disabled",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "client_id": "portal",
         "reason": "Compromised",
         "source": "manual"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -452,12 +452,12 @@ profile: dashboard-callback
       "correlationId": null,
       "eventType": "oauth.client_authentication.failed",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "clientId": "portal"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -485,13 +485,13 @@ profile: dashboard-callback
       "correlationId": null,
       "eventType": "client.enabled",
       "id": "{evt#6}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "client_id": "portal",
         "source": "manual"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -519,13 +519,13 @@ profile: dashboard-callback
       "correlationId": null,
       "eventType": "client.enabled",
       "id": "{evt#7}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "client_id": "portal",
         "source": "manual"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -553,7 +553,7 @@ profile: dashboard-callback
       "correlationId": null,
       "eventType": "password.login.succeeded",
       "id": "{evt#8}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "AuthorizationRequestId": "[redacted]",
@@ -569,7 +569,7 @@ profile: dashboard-callback
         },
         "maskedEmail": "AL***@EXAMPLE.TEST"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -597,10 +597,10 @@ profile: dashboard-callback
       "correlationId": null,
       "eventType": "user.login.password",
       "id": "{evt#9}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": null,
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

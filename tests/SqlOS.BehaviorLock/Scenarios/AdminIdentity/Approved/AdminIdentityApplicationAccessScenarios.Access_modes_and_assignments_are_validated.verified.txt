@@ -335,7 +335,7 @@ profile: dashboard-callback
       "correlationId": null,
       "eventType": "application.assignment.created",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "Access": "[redacted]",
@@ -346,7 +346,7 @@ profile: dashboard-callback
         "client_application_id": "{cli#1}",
         "client_id": "portal"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

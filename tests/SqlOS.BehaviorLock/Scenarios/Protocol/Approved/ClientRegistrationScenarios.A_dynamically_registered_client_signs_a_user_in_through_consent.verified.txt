@@ -60,7 +60,7 @@ profile: dcr
       "correlationId": null,
       "eventType": "client.dcr.registered",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "client_id": "{dcrcli#1}",
@@ -80,7 +80,7 @@ profile: dcr
         "software_version": null,
         "token_endpoint_auth_method": "[redacted]"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -282,7 +282,7 @@ profile: dcr
       "correlationId": null,
       "eventType": "password.login.succeeded",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "AuthorizationRequestId": "[redacted]",
@@ -298,7 +298,7 @@ profile: dcr
         },
         "maskedEmail": "AL***@EXAMPLE.TEST"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -326,13 +326,13 @@ profile: dcr
       "correlationId": null,
       "eventType": "oauth.consent.granted",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "client_id": "{dcrcli#1}",
         "scope": "openid profile offline_access"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -479,7 +479,7 @@ profile: dcr
           "id": "{cli#1}",
           "isActive": true,
           "isFirstParty": false,
-          "lastSeenAt": "{datetime:unspecified}",
+          "lastSeenAt": "{datetime:utc-z}",
           "lifecycleState": "active",
           "logoUri": null,
           "managedByStartupSeed": false,

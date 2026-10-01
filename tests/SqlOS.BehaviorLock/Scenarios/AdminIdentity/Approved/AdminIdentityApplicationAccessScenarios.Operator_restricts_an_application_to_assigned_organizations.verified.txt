@@ -74,7 +74,7 @@ profile: dashboard-callback
       "correlationId": null,
       "eventType": "application.access_mode.changed",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "access_mode": "selected_organizations",
@@ -82,7 +82,7 @@ profile: dashboard-callback
         "client_id": "portal",
         "previous_access_mode": "all_organizations"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -110,7 +110,7 @@ profile: dashboard-callback
       "correlationId": null,
       "eventType": "application.assignment.created",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "Access": "[redacted]",
@@ -121,7 +121,7 @@ profile: dashboard-callback
         "client_application_id": "{cli#1}",
         "client_id": "portal"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -143,7 +143,7 @@ profile: dashboard-callback
         {
           "access": "allowed",
           "clientApplicationId": "{cli#1}",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "createdByActorId": null,
           "createdByActorType": "admin",
           "id": "{asa#1}",
@@ -396,7 +396,7 @@ profile: dashboard-callback
       "correlationId": null,
       "eventType": "password.login.succeeded",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "AuthorizationRequestId": "[redacted]",
@@ -412,7 +412,7 @@ profile: dashboard-callback
         },
         "maskedEmail": "AL***@EXAMPLE.TEST"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -440,10 +440,10 @@ profile: dashboard-callback
       "correlationId": null,
       "eventType": "user.login.password",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": null,
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -471,7 +471,7 @@ profile: dashboard-callback
       "correlationId": null,
       "eventType": "password.login.succeeded",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "AuthorizationRequestId": "[redacted]",
@@ -487,7 +487,7 @@ profile: dashboard-callback
         },
         "maskedEmail": "BO***@EXAMPLE.TEST"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -515,7 +515,7 @@ profile: dashboard-callback
       "correlationId": null,
       "eventType": "application.access.token_denied",
       "id": "{evt#6}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "AccessMode": "selected_organizations",
@@ -525,7 +525,7 @@ profile: dashboard-callback
         "client_application_id": "{cli#1}",
         "client_id": "portal"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#2}",
       "requestId": null,
       "sessionId": null,
@@ -572,7 +572,7 @@ profile: dashboard-callback
         "owner": "dashboard",
         "sourceKey": null
       },
-      "revokedAt": "{datetime:unspecified}",
+      "revokedAt": "{datetime:utc-z}",
       "revokedByActorId": null,
       "revokedByActorType": "admin"
     }
@@ -605,7 +605,7 @@ profile: dashboard-callback
         {
           "access": "allowed",
           "clientApplicationId": "{cli#1}",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "createdByActorId": null,
           "createdByActorType": "admin",
           "id": "{asa#1}",
@@ -623,7 +623,7 @@ profile: dashboard-callback
           "principalId": null,
           "principalType": "organization",
           "reason": "Pilot customer",
-          "revokedAt": "{datetime:unspecified}",
+          "revokedAt": "{datetime:utc-z}",
           "revokedByActorId": null,
           "revokedByActorType": "admin",
           "roleKey": null
@@ -674,7 +674,7 @@ profile: dashboard-callback
       "correlationId": null,
       "eventType": "application.assignment.revoked",
       "id": "{evt#7}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "Access": "[redacted]",
@@ -686,7 +686,7 @@ profile: dashboard-callback
         "client_id": "portal",
         "reason": null
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,

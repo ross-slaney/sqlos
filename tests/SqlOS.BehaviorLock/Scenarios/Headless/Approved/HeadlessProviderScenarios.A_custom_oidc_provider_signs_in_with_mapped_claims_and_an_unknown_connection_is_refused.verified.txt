@@ -134,12 +134,12 @@ profile: headless
       "correlationId": null,
       "eventType": "user.login.oidc.start_error",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "error": "No enabled OIDC connection was found for this request."
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -167,7 +167,7 @@ profile: headless
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -177,7 +177,7 @@ profile: headless
         "publicMessage": "The request could not be completed.",
         "surface": "HeadlessApi"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -205,7 +205,7 @@ profile: headless
       "correlationId": null,
       "eventType": "user.login.oidc.start",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "CallbackUri": "https://sqlos.example.test/sqlos/auth/oidc/callback",
@@ -213,7 +213,7 @@ profile: headless
         "Email": "{email:olga}",
         "provider": "Custom"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -241,13 +241,13 @@ profile: headless
       "correlationId": null,
       "eventType": "user.login.oidc.provisioned",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "oidcConnectionId": "{oidc#2}",
         "provider": "Custom"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -275,7 +275,7 @@ profile: headless
       "correlationId": null,
       "eventType": "user.login.oidc.success",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "oidcConnectionId": "{oidc#2}",
@@ -291,7 +291,7 @@ profile: headless
           "Reason": "evidence_missing"
         }
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

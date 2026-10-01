@@ -72,7 +72,7 @@ profile: dashboard-callback
     {
       "data": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "isActive": true,
           "organization": "Acme",
           "organizationId": "{org#1}",

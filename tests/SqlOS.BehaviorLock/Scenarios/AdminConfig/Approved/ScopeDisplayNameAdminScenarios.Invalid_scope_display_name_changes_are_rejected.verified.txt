@@ -102,7 +102,7 @@ profile: dashboard-callback
     {
       "data": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "description": null,
           "displayName": "Your profile",
           "id": "{sdn#1}",
@@ -116,10 +116,10 @@ profile: dashboard-callback
             "sourceKey": null
           },
           "scope": "profile",
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "description": "View workspaces you can access.",
           "displayName": "Read workspaces",
           "id": "{sdn#3}",
@@ -128,12 +128,12 @@ profile: dashboard-callback
             "configurationFingerprint": "{hex#1}",
             "isEditable": false,
             "isOrphaned": false,
-            "lastReconciledAt": "{datetime:unspecified}",
+            "lastReconciledAt": "{datetime:utc-z}",
             "owner": "code",
             "sourceKey": "workspace.read"
           },
           "scope": "workspace.read",
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         }
       ]
     }

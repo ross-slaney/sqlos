@@ -72,7 +72,7 @@ profile: enterprise-scim-path
     {
       "data": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Ann Archer",
           "email": "{email:ann}",
           "id": "{fusr#1}",
@@ -81,7 +81,7 @@ profile: enterprise-scim-path
           "subjectId": "{subj:ann-scim}"
         },
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Ann Archer (app)",
           "email": null,
           "id": "usr::{hex#1}",
@@ -260,7 +260,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.member_added",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-engineering",
@@ -275,7 +275,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp#1}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -303,7 +303,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.grant.mapped",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-engineering",
@@ -316,7 +316,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp#1}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -344,7 +344,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.created",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-engineering",
@@ -363,7 +363,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp#1}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,

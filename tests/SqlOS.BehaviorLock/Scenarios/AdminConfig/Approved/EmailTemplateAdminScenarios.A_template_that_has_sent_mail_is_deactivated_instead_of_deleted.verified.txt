@@ -104,7 +104,7 @@ profile: modules
     {
       "data": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "failedAt": null,
           "id": "{edl#2}",
           "idempotencyKey": null,
@@ -113,12 +113,12 @@ profile: modules
           "renderedSubject": "Join Research",
           "renderedTextPreview": "Ada invited you to Research.",
           "sanitizedError": null,
-          "sentAt": "{datetime:unspecified}",
+          "sentAt": "{datetime:utc-z}",
           "status": "queued",
           "templateKey": "team.invite",
           "templateVersion": 1,
           "to": "{email:grace}",
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         }
       ],
       "hasNextPage": true,
@@ -134,7 +134,7 @@ profile: modules
     {
       "data": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "failedAt": null,
           "id": "{edl#1}",
           "idempotencyKey": "invite-ada",
@@ -143,12 +143,12 @@ profile: modules
           "renderedSubject": "Join Research",
           "renderedTextPreview": "Grace invited you to Research.",
           "sanitizedError": null,
-          "sentAt": "{datetime:unspecified}",
+          "sentAt": "{datetime:utc-z}",
           "status": "queued",
           "templateKey": "team.invite",
           "templateVersion": 1,
           "to": "{email:ada}",
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         }
       ],
       "hasNextPage": false,
@@ -164,7 +164,7 @@ profile: modules
     {
       "data": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "failedAt": null,
           "id": "{edl#1}",
           "idempotencyKey": "invite-ada",
@@ -173,12 +173,12 @@ profile: modules
           "renderedSubject": "Join Research",
           "renderedTextPreview": "Grace invited you to Research.",
           "sanitizedError": null,
-          "sentAt": "{datetime:unspecified}",
+          "sentAt": "{datetime:utc-z}",
           "status": "queued",
           "templateKey": "team.invite",
           "templateVersion": 1,
           "to": "{email:ada}",
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         }
       ],
       "hasNextPage": false,
@@ -206,7 +206,7 @@ profile: modules
     {
       "data": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "failedAt": null,
           "id": "{edl#2}",
           "idempotencyKey": null,
@@ -215,15 +215,15 @@ profile: modules
           "renderedSubject": "Join Research",
           "renderedTextPreview": "Ada invited you to Research.",
           "sanitizedError": null,
-          "sentAt": "{datetime:unspecified}",
+          "sentAt": "{datetime:utc-z}",
           "status": "queued",
           "templateKey": "team.invite",
           "templateVersion": 1,
           "to": "{email:grace}",
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "failedAt": null,
           "id": "{edl#1}",
           "idempotencyKey": "invite-ada",
@@ -232,12 +232,12 @@ profile: modules
           "renderedSubject": "Join Research",
           "renderedTextPreview": "Grace invited you to Research.",
           "sanitizedError": null,
-          "sentAt": "{datetime:unspecified}",
+          "sentAt": "{datetime:utc-z}",
           "status": "queued",
           "templateKey": "team.invite",
           "templateVersion": 1,
           "to": "{email:ada}",
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         }
       ],
       "hasNextPage": false,
@@ -282,7 +282,7 @@ profile: modules
     {
       "data": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Team invite",
           "htmlBodyTemplate": "<p>{inviter} invited you to {team}.</p>",
           "id": "{emt#1}",
@@ -290,7 +290,7 @@ profile: modules
           "key": "team.invite",
           "subjectTemplate": "Join {team}",
           "textBodyTemplate": "{inviter} invited you to {team}.",
-          "updatedAt": "{datetime:unspecified}",
+          "updatedAt": "{datetime:utc-z}",
           "variables": {},
           "version": 1
         }
@@ -354,7 +354,7 @@ profile: modules
       "correlationId": null,
       "eventType": "email.send.queued",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "deliveryId": "{edl#1}",
@@ -362,7 +362,7 @@ profile: modules
         "templateKey": "team.invite",
         "templateVersion": 1
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -384,7 +384,7 @@ profile: modules
       "correlationId": null,
       "eventType": "email.send.queued",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "deliveryId": "{edl#2}",
@@ -392,7 +392,7 @@ profile: modules
         "templateKey": "team.invite",
         "templateVersion": 1
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -414,14 +414,14 @@ profile: modules
       "correlationId": null,
       "eventType": "email.template.deactivated",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "Key": "team.invite",
         "Version": 1,
         "templateId": "{emt#1}"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

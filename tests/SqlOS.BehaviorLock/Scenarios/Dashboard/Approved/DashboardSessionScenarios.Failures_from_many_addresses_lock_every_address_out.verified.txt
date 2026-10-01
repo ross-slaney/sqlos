@@ -91,12 +91,12 @@ profile: dashboard-password
       "correlationId": null,
       "eventType": "dashboard.login.failure",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "198.51.100.1",
       "metadata": {
         "reason": "invalid_password"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -124,12 +124,12 @@ profile: dashboard-password
       "correlationId": null,
       "eventType": "dashboard.login.failure",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "198.51.100.1",
       "metadata": {
         "reason": "invalid_password"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -157,13 +157,13 @@ profile: dashboard-password
       "correlationId": null,
       "eventType": "dashboard.login.lockout",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "198.51.100.1",
       "metadata": {
         "retry_after_seconds": ~300,
         "scope": "ip"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -191,12 +191,12 @@ profile: dashboard-password
       "correlationId": null,
       "eventType": "dashboard.login.failure",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "198.51.100.2",
       "metadata": {
         "reason": "invalid_password"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -224,13 +224,13 @@ profile: dashboard-password
       "correlationId": null,
       "eventType": "dashboard.login.lockout",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "198.51.100.2",
       "metadata": {
         "retry_after_seconds": ~300,
         "scope": "global"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -258,13 +258,13 @@ profile: dashboard-password
       "correlationId": null,
       "eventType": "dashboard.login.rate-limited",
       "id": "{evt#6}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "198.51.100.3",
       "metadata": {
         "retry_after_seconds": ~300,
         "scope": "global"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

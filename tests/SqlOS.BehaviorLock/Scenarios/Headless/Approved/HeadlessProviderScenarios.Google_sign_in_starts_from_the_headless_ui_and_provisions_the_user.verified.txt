@@ -120,7 +120,7 @@ profile: headless
       "correlationId": null,
       "eventType": "user.login.oidc.start",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "CallbackUri": "https://sqlos.example.test/sqlos/auth/oidc/callback",
@@ -128,7 +128,7 @@ profile: headless
         "Email": "{email:grace}",
         "provider": "Google"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -156,13 +156,13 @@ profile: headless
       "correlationId": null,
       "eventType": "user.login.oidc.provisioned",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "oidcConnectionId": "{oidc#1}",
         "provider": "Google"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -190,7 +190,7 @@ profile: headless
       "correlationId": null,
       "eventType": "user.login.oidc.success",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "oidcConnectionId": "{oidc#1}",
@@ -206,7 +206,7 @@ profile: headless
           "Reason": "evidence_missing"
         }
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

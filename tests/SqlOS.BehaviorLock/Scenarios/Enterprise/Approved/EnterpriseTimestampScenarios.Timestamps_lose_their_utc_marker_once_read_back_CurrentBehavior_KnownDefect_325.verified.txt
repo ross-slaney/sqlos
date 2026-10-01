@@ -68,8 +68,8 @@ profile: enterprise-scim-path
     {
       "id": "{usr:judy}",
       "meta": {
-        "created": "{datetime:unspecified}",
-        "lastModified": "{datetime:unspecified}",
+        "created": "{datetime:utc-z}",
+        "lastModified": "{datetime:utc-z}",
         "location": "/scim/v2/Users/{usr:judy}",
         "resourceType": "User"
       },
@@ -88,8 +88,8 @@ profile: enterprise-scim-path
         {
           "id": "{usr:judy}",
           "meta": {
-            "created": "{datetime:unspecified}",
-            "lastModified": "{datetime:unspecified}",
+            "created": "{datetime:utc-z}",
+            "lastModified": "{datetime:utc-z}",
             "location": "/scim/v2/Users/{usr:judy}",
             "resourceType": "User"
           },
@@ -129,7 +129,7 @@ profile: enterprise-scim-path
 < Content-Type: application/json; charset=utf-8
     {
       "baseUrl": "/scim/v2",
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "displayName": "Directory",
       "grantBoundary": {
         "resourceId": null,
@@ -141,7 +141,7 @@ profile: enterprise-scim-path
       "groupsUrl": "/scim/v2/Groups",
       "id": "{scim#1}",
       "isEnabled": true,
-      "lastSyncAt": "{datetime:unspecified}",
+      "lastSyncAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "ownership": {
         "canEmergencyDisable": true,
@@ -154,10 +154,10 @@ profile: enterprise-scim-path
       },
       "seedKey": null,
       "source": "dashboard",
-      "tokenLastUsedAt": "{datetime:unspecified}",
+      "tokenLastUsedAt": "{datetime:utc-z}",
       "tokenPrefix": "{token-prefix#1}",
-      "tokenRotatedAt": "{datetime:unspecified}",
-      "updatedAt": "{datetime:unspecified}",
+      "tokenRotatedAt": "{datetime:utc-z}",
+      "updatedAt": "{datetime:utc-z}",
       "usersUrl": "/scim/v2/Users"
     }
 
@@ -195,8 +195,8 @@ profile: enterprise-scim-path
       "data": [
         {
           "connectionId": "{sso#1}",
-          "createdAt": "{datetime:unspecified}",
-          "expiresAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
+          "expiresAt": "{datetime:utc-z}",
           "id": "{ssp#1}",
           "lastSeenAt": null,
           "openedAt": null,

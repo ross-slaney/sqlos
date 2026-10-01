@@ -4,19 +4,19 @@
   Access: Access nvarchar(20) NOT NULL maxLength=20
   ClientApplicationId: ClientApplicationId nvarchar(64) NOT NULL maxLength=64
   ConfigurationFingerprint: ConfigurationFingerprint nvarchar(64) NULL maxLength=64
-  ConfigurationOrphanedAt: ConfigurationOrphanedAt datetime2 NULL
+  ConfigurationOrphanedAt: ConfigurationOrphanedAt datetime2 NULL converter=DateTime->DateTime
   ConfigurationOwner: ConfigurationOwner nvarchar(40) NOT NULL maxLength=40
   ConfigurationSourceKey: ConfigurationSourceKey nvarchar(160) NULL maxLength=160
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   CreatedByActorId: CreatedByActorId nvarchar(128) NULL maxLength=128
   CreatedByActorType: CreatedByActorType nvarchar(80) NULL maxLength=80
   Id: Id nvarchar(450) NOT NULL
-  LastReconciledAt: LastReconciledAt datetime2 NULL
+  LastReconciledAt: LastReconciledAt datetime2 NULL converter=DateTime->DateTime
   OrganizationId: OrganizationId nvarchar(64) NULL maxLength=64
   PrincipalId: PrincipalId nvarchar(128) NULL maxLength=128
   PrincipalType: PrincipalType nvarchar(40) NOT NULL maxLength=40
   Reason: Reason nvarchar(500) NULL maxLength=500
-  RevokedAt: RevokedAt datetime2 NULL
+  RevokedAt: RevokedAt datetime2 NULL converter=DateTime->DateTime
   RevokedByActorId: RevokedByActorId nvarchar(128) NULL maxLength=128
   RevokedByActorType: RevokedByActorType nvarchar(80) NULL maxLength=80
   RoleKey: RoleKey nvarchar(80) NULL maxLength=80
@@ -42,10 +42,10 @@
   Id: Id nvarchar(450) NOT NULL
   IdempotencyKeyHash: IdempotencyKeyHash nvarchar(128) NULL maxLength=128
   IdempotencyScopeHash: IdempotencyScopeHash nvarchar(128) NULL maxLength=128
-  IngestedAt: IngestedAt datetime2 NOT NULL
+  IngestedAt: IngestedAt datetime2 NOT NULL converter=DateTime->DateTime
   IpAddress: IpAddress nvarchar(max) NULL
   MetadataJson: MetadataJson nvarchar(max) NULL
-  OccurredAt: OccurredAt datetime2 NOT NULL
+  OccurredAt: OccurredAt datetime2 NOT NULL converter=DateTime->DateTime
   OrganizationId: OrganizationId nvarchar(450) NULL
   RequestId: RequestId nvarchar(128) NULL maxLength=128
   SessionId: SessionId nvarchar(max) NULL
@@ -67,19 +67,19 @@
 ## SqlOSAuthPageSettings -> dbo.SqlOSAuthPageSettings [excluded from migrations]
   AccentColor: AccentColor nvarchar(32) NOT NULL maxLength=32
   AuthPageConfigurationFingerprint: AuthPageConfigurationFingerprint nvarchar(64) NULL maxLength=64
-  AuthPageConfigurationOrphanedAt: AuthPageConfigurationOrphanedAt datetime2 NULL
+  AuthPageConfigurationOrphanedAt: AuthPageConfigurationOrphanedAt datetime2 NULL converter=DateTime->DateTime
   AuthPageConfigurationOwner: AuthPageConfigurationOwner nvarchar(40) NOT NULL maxLength=40
   AuthPageConfigurationSourceKey: AuthPageConfigurationSourceKey nvarchar(160) NULL maxLength=160
-  AuthPageLastReconciledAt: AuthPageLastReconciledAt datetime2 NULL
+  AuthPageLastReconciledAt: AuthPageLastReconciledAt datetime2 NULL converter=DateTime->DateTime
   BackgroundColor: BackgroundColor nvarchar(32) NOT NULL maxLength=32
   EmailAccentColor: EmailAccentColor nvarchar(32) NOT NULL maxLength=32
   EmailApplicationName: EmailApplicationName nvarchar(200) NULL maxLength=200
   EmailBackgroundColor: EmailBackgroundColor nvarchar(32) NOT NULL maxLength=32
   EmailConfigurationFingerprint: EmailConfigurationFingerprint nvarchar(64) NULL maxLength=64
-  EmailConfigurationOrphanedAt: EmailConfigurationOrphanedAt datetime2 NULL
+  EmailConfigurationOrphanedAt: EmailConfigurationOrphanedAt datetime2 NULL converter=DateTime->DateTime
   EmailConfigurationOwner: EmailConfigurationOwner nvarchar(40) NOT NULL maxLength=40
   EmailConfigurationSourceKey: EmailConfigurationSourceKey nvarchar(160) NULL maxLength=160
-  EmailLastReconciledAt: EmailLastReconciledAt datetime2 NULL
+  EmailLastReconciledAt: EmailLastReconciledAt datetime2 NULL converter=DateTime->DateTime
   EmailLogoBase64: EmailLogoBase64 nvarchar(max) NULL
   EmailPrimaryColor: EmailPrimaryColor nvarchar(32) NOT NULL maxLength=32
   EnablePasswordSignup: EnablePasswordSignup bit NOT NULL
@@ -90,20 +90,20 @@
   PageSubtitle: PageSubtitle nvarchar(500) NOT NULL maxLength=500
   PageTitle: PageTitle nvarchar(200) NOT NULL maxLength=200
   PrimaryColor: PrimaryColor nvarchar(32) NOT NULL maxLength=32
-  UpdatedAt: UpdatedAt datetime2 NOT NULL
+  UpdatedAt: UpdatedAt datetime2 NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSAuthPageSettings (Id)
 
 ## SqlOSAuthorizationCode -> dbo.SqlOSAuthorizationCodes [excluded from migrations]
-  AuthTime: AuthTime datetime2 NULL
+  AuthTime: AuthTime datetime2 NULL converter=DateTime->DateTime
   AuthenticationMethod: AuthenticationMethod nvarchar(50) NOT NULL maxLength=50
   AuthorizationRequestId: AuthorizationRequestId nvarchar(450) NOT NULL
   ClientApplicationId: ClientApplicationId nvarchar(450) NOT NULL
   CodeChallenge: CodeChallenge nvarchar(256) NOT NULL maxLength=256
   CodeChallengeMethod: CodeChallengeMethod nvarchar(32) NOT NULL maxLength=32
   CodeHash: CodeHash nvarchar(128) NOT NULL maxLength=128
-  ConsumedAt: ConsumedAt datetime2 NULL concurrency
-  CreatedAt: CreatedAt datetime2 NOT NULL
-  ExpiresAt: ExpiresAt datetime2 NOT NULL
+  ConsumedAt: ConsumedAt datetime2 NULL converter=DateTime->DateTime concurrency
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
+  ExpiresAt: ExpiresAt datetime2 NOT NULL converter=DateTime->DateTime
   Id: Id nvarchar(450) NOT NULL
   Nonce: Nonce nvarchar(256) NULL maxLength=256
   OrganizationId: OrganizationId nvarchar(450) NULL
@@ -124,15 +124,15 @@
   INDEX IX_SqlOSAuthorizationCodes_UserId (UserId)
 
 ## SqlOSAuthorizationRequest -> dbo.SqlOSAuthorizationRequests [excluded from migrations]
-  CancelledAt: CancelledAt datetime2 NULL concurrency
+  CancelledAt: CancelledAt datetime2 NULL converter=DateTime->DateTime concurrency
   ClientApplicationId: ClientApplicationId nvarchar(450) NOT NULL
   CodeChallenge: CodeChallenge nvarchar(256) NOT NULL maxLength=256
   CodeChallengeMethod: CodeChallengeMethod nvarchar(32) NOT NULL maxLength=32
-  CompletedAt: CompletedAt datetime2 NULL concurrency
+  CompletedAt: CompletedAt datetime2 NULL converter=DateTime->DateTime concurrency
   ConnectionId: ConnectionId nvarchar(450) NULL
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   DeviceAuthorizationId: DeviceAuthorizationId nvarchar(64) NULL maxLength=64
-  ExpiresAt: ExpiresAt datetime2 NOT NULL
+  ExpiresAt: ExpiresAt datetime2 NOT NULL converter=DateTime->DateTime
   Id: Id nvarchar(450) NOT NULL
   InvitationId: InvitationId nvarchar(450) NULL
   LoginHintEmail: LoginHintEmail nvarchar(320) NULL maxLength=320
@@ -172,26 +172,26 @@
   ClientType: ClientType nvarchar(40) NOT NULL maxLength=40
   ClientUri: ClientUri nvarchar(850) NULL maxLength=850
   ConfigurationFingerprint: ConfigurationFingerprint nvarchar(64) NULL maxLength=64
-  ConfigurationOrphanedAt: ConfigurationOrphanedAt datetime2 NULL
+  ConfigurationOrphanedAt: ConfigurationOrphanedAt datetime2 NULL converter=DateTime->DateTime
   ConfigurationOwner: ConfigurationOwner nvarchar(40) NOT NULL maxLength=40
   ConfigurationSourceKey: ConfigurationSourceKey nvarchar(160) NULL maxLength=160
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   Description: Description nvarchar(500) NULL maxLength=500
-  DisabledAt: DisabledAt datetime2 NULL
+  DisabledAt: DisabledAt datetime2 NULL converter=DateTime->DateTime
   DisabledReason: DisabledReason nvarchar(500) NULL maxLength=500
   GrantTypesJson: GrantTypesJson nvarchar(max) NOT NULL
   Id: Id nvarchar(450) NOT NULL
   IsActive: IsActive bit NOT NULL
   IsFirstParty: IsFirstParty bit NOT NULL
-  LastReconciledAt: LastReconciledAt datetime2 NULL
-  LastSeenAt: LastSeenAt datetime2 NULL
+  LastReconciledAt: LastReconciledAt datetime2 NULL converter=DateTime->DateTime
+  LastSeenAt: LastSeenAt datetime2 NULL converter=DateTime->DateTime
   LogoUri: LogoUri nvarchar(850) NULL maxLength=850
   MetadataDocumentUrl: MetadataDocumentUrl nvarchar(850) NULL maxLength=850
   MetadataEtag: MetadataEtag nvarchar(256) NULL maxLength=256
-  MetadataExpiresAt: MetadataExpiresAt datetime2 NULL
-  MetadataFetchedAt: MetadataFetchedAt datetime2 NULL
+  MetadataExpiresAt: MetadataExpiresAt datetime2 NULL converter=DateTime->DateTime
+  MetadataFetchedAt: MetadataFetchedAt datetime2 NULL converter=DateTime->DateTime
   MetadataJson: MetadataJson nvarchar(max) NULL
-  MetadataLastModifiedAt: MetadataLastModifiedAt datetime2 NULL
+  MetadataLastModifiedAt: MetadataLastModifiedAt datetime2 NULL converter=DateTime->DateTime
   Name: Name nvarchar(200) NOT NULL maxLength=200
   RedirectUrisJson: RedirectUrisJson nvarchar(max) NOT NULL
   RegistrationSource: RegistrationSource nvarchar(20) NOT NULL maxLength=20
@@ -213,13 +213,13 @@
   ClientApplicationId: ClientApplicationId nvarchar(64) NOT NULL maxLength=64
   ConfigurationOwner: ConfigurationOwner nvarchar(40) NOT NULL maxLength=40
   ConfigurationSourceKey: ConfigurationSourceKey nvarchar(160) NULL maxLength=160
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   DisplayName: DisplayName nvarchar(200) NULL maxLength=200
-  ExpiresAt: ExpiresAt datetime2 NULL
+  ExpiresAt: ExpiresAt datetime2 NULL converter=DateTime->DateTime
   Id: Id nvarchar(450) NOT NULL
-  LastReconciledAt: LastReconciledAt datetime2 NULL
-  LastUsedAt: LastUsedAt datetime2 NULL
-  RevokedAt: RevokedAt datetime2 NULL
+  LastReconciledAt: LastReconciledAt datetime2 NULL converter=DateTime->DateTime
+  LastUsedAt: LastUsedAt datetime2 NULL converter=DateTime->DateTime
+  RevokedAt: RevokedAt datetime2 NULL converter=DateTime->DateTime
   SecretHash: SecretHash nvarchar(max) NOT NULL
   PRIMARY KEY PK_SqlOSClientCredentials (Id)
   FOREIGN KEY FK_SqlOSClientCredentials_SqlOSClientApplications_ClientApplicationId (ClientApplicationId) -> SqlOSClientApplication (Id) delete=Restrict required
@@ -229,12 +229,12 @@
 ## SqlOSConsentGrant -> dbo.SqlOSConsentGrants [excluded from migrations]
   ClientApplicationId: ClientApplicationId nvarchar(64) NOT NULL maxLength=64
   ClientMetadataFingerprint: ClientMetadataFingerprint nvarchar(64) NULL maxLength=64
-  GrantedAt: GrantedAt datetime2 NOT NULL
+  GrantedAt: GrantedAt datetime2 NOT NULL converter=DateTime->DateTime
   Id: Id nvarchar(450) NOT NULL
   RevocationReason: RevocationReason nvarchar(200) NULL maxLength=200
-  RevokedAt: RevokedAt datetime2 NULL
+  RevokedAt: RevokedAt datetime2 NULL converter=DateTime->DateTime
   Scope: Scope nvarchar(4000) NOT NULL maxLength=4000
-  UpdatedAt: UpdatedAt datetime2 NOT NULL concurrency
+  UpdatedAt: UpdatedAt datetime2 NOT NULL converter=DateTime->DateTime concurrency
   UserId: UserId nvarchar(64) NOT NULL maxLength=64
   PRIMARY KEY PK_SqlOSConsentGrants (Id)
   FOREIGN KEY FK_SqlOSConsentGrants_SqlOSClientApplications_ClientApplicationId (ClientApplicationId) -> SqlOSClientApplication (Id) delete=Restrict required
@@ -243,10 +243,10 @@
   INDEX UX_SqlOSConsentGrants_ActiveUserClient UNIQUE (UserId, ClientApplicationId) WHERE [RevokedAt] IS NULL
 
 ## SqlOSCredential -> dbo.SqlOSCredentials [excluded from migrations]
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   Id: Id nvarchar(450) NOT NULL
-  LastUsedAt: LastUsedAt datetime2 NULL
-  RevokedAt: RevokedAt datetime2 NULL
+  LastUsedAt: LastUsedAt datetime2 NULL converter=DateTime->DateTime
+  RevokedAt: RevokedAt datetime2 NULL converter=DateTime->DateTime
   SecretHash: SecretHash nvarchar(max) NOT NULL
   SecretVersion: SecretVersion int NOT NULL
   Type: Type nvarchar(50) NOT NULL maxLength=50
@@ -256,20 +256,20 @@
   INDEX IX_SqlOSCredentials_UserId (UserId)
 
 ## SqlOSDeviceAuthorization -> dbo.SqlOSDeviceAuthorizations [excluded from migrations]
-  ApprovedAt: ApprovedAt datetime2 NULL
+  ApprovedAt: ApprovedAt datetime2 NULL converter=DateTime->DateTime
   ApprovedOrganizationId: ApprovedOrganizationId nvarchar(450) NULL
   ApprovedUserId: ApprovedUserId nvarchar(450) NULL
-  AuthTime: AuthTime datetime2 NULL
+  AuthTime: AuthTime datetime2 NULL converter=DateTime->DateTime
   AuthenticationMethod: AuthenticationMethod nvarchar(50) NULL maxLength=50
   ClientApplicationId: ClientApplicationId nvarchar(64) NOT NULL maxLength=64
-  ConsumedAt: ConsumedAt datetime2 NULL concurrency
-  CreatedAt: CreatedAt datetime2 NOT NULL
-  DeniedAt: DeniedAt datetime2 NULL
+  ConsumedAt: ConsumedAt datetime2 NULL converter=DateTime->DateTime concurrency
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
+  DeniedAt: DeniedAt datetime2 NULL converter=DateTime->DateTime
   DeviceCodeHash: DeviceCodeHash nvarchar(450) NOT NULL
-  ExpiresAt: ExpiresAt datetime2 NOT NULL
+  ExpiresAt: ExpiresAt datetime2 NOT NULL converter=DateTime->DateTime
   Id: Id nvarchar(450) NOT NULL
   IpAddress: IpAddress nvarchar(64) NULL maxLength=64
-  LastPolledAt: LastPolledAt datetime2 NULL
+  LastPolledAt: LastPolledAt datetime2 NULL converter=DateTime->DateTime
   PollCount: PollCount int NOT NULL
   PollingIntervalSeconds: PollingIntervalSeconds int NOT NULL
   Resource: Resource nvarchar(2048) NULL maxLength=2048
@@ -298,15 +298,15 @@
   ChallengeTokenHash: ChallengeTokenHash nvarchar(128) NOT NULL maxLength=128
   ClientApplicationId: ClientApplicationId nvarchar(450) NULL
   CodeHash: CodeHash nvarchar(128) NOT NULL maxLength=128
-  ConsumedAt: ConsumedAt datetime2 NULL concurrency
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  ConsumedAt: ConsumedAt datetime2 NULL converter=DateTime->DateTime concurrency
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   Email: Email nvarchar(320) NOT NULL maxLength=320
-  ExpiresAt: ExpiresAt datetime2 NOT NULL
+  ExpiresAt: ExpiresAt datetime2 NOT NULL converter=DateTime->DateTime
   Id: Id nvarchar(450) NOT NULL
-  InvalidatedAt: InvalidatedAt datetime2 NULL
+  InvalidatedAt: InvalidatedAt datetime2 NULL converter=DateTime->DateTime
   InvalidatedReason: InvalidatedReason nvarchar(120) NULL maxLength=120
   IpAddress: IpAddress nvarchar(128) NULL maxLength=128
-  LastSentAt: LastSentAt datetime2 NOT NULL
+  LastSentAt: LastSentAt datetime2 NOT NULL converter=DateTime->DateTime
   MaxAttempts: MaxAttempts int NOT NULL
   NormalizedEmail: NormalizedEmail nvarchar(320) NOT NULL maxLength=320
   RequestedOrganizationId: RequestedOrganizationId nvarchar(max) NULL
@@ -327,7 +327,7 @@
   INDEX IX_SqlOSEmailOtpChallenges_UserId (UserId)
 
 ## SqlOSExternalIdentity -> dbo.SqlOSExternalIdentities [excluded from migrations]
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   Email: Email nvarchar(max) NULL
   Id: Id nvarchar(450) NOT NULL
   Issuer: Issuer nvarchar(max) NOT NULL
@@ -345,23 +345,23 @@
   INDEX IX_SqlOSExternalIdentities_UserId (UserId)
 
 ## SqlOSInvitation -> dbo.SqlOSInvitations [excluded from migrations]
-  AcceptedAt: AcceptedAt datetime2 NULL concurrency
+  AcceptedAt: AcceptedAt datetime2 NULL converter=DateTime->DateTime concurrency
   AcceptedByUserId: AcceptedByUserId nvarchar(450) NULL
   ClientApplicationId: ClientApplicationId nvarchar(450) NULL
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   CustomFieldsJson: CustomFieldsJson nvarchar(max) NULL
-  ExpiresAt: ExpiresAt datetime2 NOT NULL
+  ExpiresAt: ExpiresAt datetime2 NOT NULL converter=DateTime->DateTime
   Id: Id nvarchar(450) NOT NULL
   InvitedByUserId: InvitedByUserId nvarchar(450) NULL
   InvitedEmail: InvitedEmail nvarchar(320) NOT NULL maxLength=320
   IpAddress: IpAddress nvarchar(128) NULL maxLength=128
   LastSendError: LastSendError nvarchar(500) NULL maxLength=500
-  LastSentAt: LastSentAt datetime2 NULL
+  LastSentAt: LastSentAt datetime2 NULL converter=DateTime->DateTime
   NormalizedEmail: NormalizedEmail nvarchar(320) NOT NULL maxLength=320
   OrganizationId: OrganizationId nvarchar(450) NOT NULL
   RedirectUri: RedirectUri nvarchar(2048) NULL maxLength=2048
   Resource: Resource nvarchar(2048) NULL maxLength=2048
-  RevokedAt: RevokedAt datetime2 NULL
+  RevokedAt: RevokedAt datetime2 NULL converter=DateTime->DateTime
   RevokedReason: RevokedReason nvarchar(120) NULL maxLength=120
   Role: Role nvarchar(50) NOT NULL maxLength=50
   Scope: Scope nvarchar(1000) NULL maxLength=1000
@@ -382,11 +382,11 @@
   INDEX IX_SqlOSInvitations_TokenHash UNIQUE (TokenHash)
 
 ## SqlOSIssuerSessionFamily -> dbo.SqlOSAuthPageSessionFamilies [excluded from migrations]
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   Id: Id nvarchar(450) NOT NULL
   OrganizationId: OrganizationId nvarchar(64) NULL maxLength=64
   RevocationReason: RevocationReason nvarchar(200) NULL maxLength=200
-  RevokedAt: RevokedAt datetime2 NULL concurrency
+  RevokedAt: RevokedAt datetime2 NULL converter=DateTime->DateTime concurrency
   UserId: UserId nvarchar(450) NOT NULL
   PRIMARY KEY PK_SqlOSAuthPageSessionFamilies (Id)
   FOREIGN KEY FK_SqlOSAuthPageSessionFamilies_SqlOSOrganizations_OrganizationId (OrganizationId) -> SqlOSOrganization (Id) delete=Restrict optional
@@ -395,7 +395,7 @@
   INDEX IX_SqlOSAuthPageSessionFamilies_UserId_RevokedAt (UserId, RevokedAt)
 
 ## SqlOSMembership -> dbo.SqlOSMemberships [excluded from migrations]
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   IsActive: IsActive bit NOT NULL
   OrganizationId: OrganizationId nvarchar(450) NOT NULL
   Role: Role nvarchar(50) NOT NULL maxLength=50
@@ -408,17 +408,17 @@
 ## SqlOSMfaAttemptBucket -> dbo.SqlOSMfaAttemptBuckets [excluded from migrations]
   AttemptCount: AttemptCount int NOT NULL
   BucketKey: BucketKey nvarchar(512) NOT NULL maxLength=512
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   Id: Id nvarchar(450) NOT NULL
   Scope: Scope nvarchar(40) NOT NULL maxLength=40
-  UpdatedAt: UpdatedAt datetime2 NOT NULL
-  WindowStartedAt: WindowStartedAt datetime2 NULL
+  UpdatedAt: UpdatedAt datetime2 NOT NULL converter=DateTime->DateTime
+  WindowStartedAt: WindowStartedAt datetime2 NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSMfaAttemptBuckets (Id)
   INDEX IX_SqlOSMfaAttemptBuckets_Scope_BucketKey UNIQUE (Scope, BucketKey)
 
 ## SqlOSMfaAttemptReservation -> dbo.SqlOSMfaAttemptReservations [excluded from migrations]
-  CreatedAt: CreatedAt datetime2 NOT NULL
-  ExpiresAt: ExpiresAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
+  ExpiresAt: ExpiresAt datetime2 NOT NULL converter=DateTime->DateTime
   Id: Id nvarchar(450) NOT NULL
   PRIMARY KEY PK_SqlOSMfaAttemptReservations (Id)
   INDEX IX_SqlOSMfaAttemptReservations_ExpiresAt (ExpiresAt)
@@ -434,18 +434,18 @@
 ## SqlOSMfaSettings -> dbo.SqlOSMfaSettings [excluded from migrations]
   AvailableFactorsJson: AvailableFactorsJson nvarchar(max) NOT NULL
   ConfigurationFingerprint: ConfigurationFingerprint nvarchar(64) NULL maxLength=64
-  ConfigurationOrphanedAt: ConfigurationOrphanedAt datetime2 NULL
+  ConfigurationOrphanedAt: ConfigurationOrphanedAt datetime2 NULL converter=DateTime->DateTime
   ConfigurationOwner: ConfigurationOwner nvarchar(40) NOT NULL maxLength=40
   ConfigurationSourceKey: ConfigurationSourceKey nvarchar(160) NULL maxLength=160
   Enabled: Enabled bit NOT NULL
   Id: Id nvarchar(64) NOT NULL maxLength=64
-  LastReconciledAt: LastReconciledAt datetime2 NULL
+  LastReconciledAt: LastReconciledAt datetime2 NULL converter=DateTime->DateTime
   RecoveryCodesEnabled: RecoveryCodesEnabled bit NOT NULL
   RequireForAllUsers: RequireForAllUsers bit NOT NULL
   RequireForOwnersAndAdmins: RequireForOwnersAndAdmins bit NOT NULL
   RequiredRolesJson: RequiredRolesJson nvarchar(max) NOT NULL
   TotpEnabled: TotpEnabled bit NOT NULL
-  UpdatedAt: UpdatedAt datetime2 NOT NULL
+  UpdatedAt: UpdatedAt datetime2 NOT NULL converter=DateTime->DateTime
   UserSelfEnrollmentEnabled: UserSelfEnrollmentEnabled bit NOT NULL
   PRIMARY KEY PK_SqlOSMfaSettings (Id)
 
@@ -462,17 +462,17 @@
   ClientId: ClientId nvarchar(300) NOT NULL maxLength=300
   ClientSecretEncrypted: ClientSecretEncrypted nvarchar(max) NULL
   ConfigurationFingerprint: ConfigurationFingerprint nvarchar(64) NULL maxLength=64
-  ConfigurationOrphanedAt: ConfigurationOrphanedAt datetime2 NULL
+  ConfigurationOrphanedAt: ConfigurationOrphanedAt datetime2 NULL converter=DateTime->DateTime
   ConfigurationOwner: ConfigurationOwner nvarchar(40) NOT NULL maxLength=40
   ConfigurationSourceKey: ConfigurationSourceKey nvarchar(160) NULL maxLength=160
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   DiscoveryUrl: DiscoveryUrl nvarchar(500) NULL maxLength=500
   DisplayName: DisplayName nvarchar(200) NOT NULL maxLength=200
   Id: Id nvarchar(450) NOT NULL
   IsEnabled: IsEnabled bit NOT NULL
   Issuer: Issuer nvarchar(500) NULL maxLength=500
   JwksUri: JwksUri nvarchar(1000) NULL maxLength=1000
-  LastReconciledAt: LastReconciledAt datetime2 NULL
+  LastReconciledAt: LastReconciledAt datetime2 NULL converter=DateTime->DateTime
   LogoDataUrl: LogoDataUrl nvarchar(max) NULL
   MicrosoftTenant: MicrosoftTenant nvarchar(200) NULL maxLength=200
   Protocol: Protocol nvarchar(40) NOT NULL maxLength=40
@@ -480,7 +480,7 @@
   ScopesJson: ScopesJson nvarchar(max) NOT NULL
   TokenEndpoint: TokenEndpoint nvarchar(1000) NULL maxLength=1000
   TrustUpstreamMfa: TrustUpstreamMfa bit NOT NULL
-  UpdatedAt: UpdatedAt datetime2 NOT NULL
+  UpdatedAt: UpdatedAt datetime2 NOT NULL converter=DateTime->DateTime
   UseDiscovery: UseDiscovery bit NOT NULL
   UseUserInfo: UseUserInfo bit NOT NULL
   UserInfoEndpoint: UserInfoEndpoint nvarchar(1000) NULL maxLength=1000
@@ -488,7 +488,7 @@
   INDEX IX_SqlOSAuthOidcConnections_ConfigurationOwner_ConfigurationSourceKey UNIQUE (ConfigurationOwner, ConfigurationSourceKey) WHERE [ConfigurationSourceKey] IS NOT NULL
 
 ## SqlOSOrganization -> dbo.SqlOSOrganizations [excluded from migrations]
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   Id: Id nvarchar(450) NOT NULL
   IsActive: IsActive bit NOT NULL
   Name: Name nvarchar(200) NOT NULL maxLength=200
@@ -499,18 +499,18 @@
   INDEX IX_SqlOSOrganizations_Slug UNIQUE (Slug)
 
 ## SqlOSOrganizationDomain -> dbo.SqlOSOrganizationDomains [excluded from migrations]
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   CreatedByUserId: CreatedByUserId nvarchar(64) NULL maxLength=64
   Domain: Domain nvarchar(320) NOT NULL maxLength=320
   Id: Id nvarchar(450) NOT NULL
-  LastCheckedAt: LastCheckedAt datetime2 NULL
+  LastCheckedAt: LastCheckedAt datetime2 NULL converter=DateTime->DateTime
   LastError: LastError nvarchar(1000) NULL maxLength=1000
   OrganizationId: OrganizationId nvarchar(450) NOT NULL
-  RevokedAt: RevokedAt datetime2 NULL
+  RevokedAt: RevokedAt datetime2 NULL converter=DateTime->DateTime
   Status: Status nvarchar(50) NOT NULL maxLength=50
-  UpdatedAt: UpdatedAt datetime2 NOT NULL
+  UpdatedAt: UpdatedAt datetime2 NOT NULL converter=DateTime->DateTime
   VerificationToken: VerificationToken nvarchar(160) NULL maxLength=160
-  VerifiedAt: VerifiedAt datetime2 NULL
+  VerifiedAt: VerifiedAt datetime2 NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSOrganizationDomains (Id)
   FOREIGN KEY FK_SqlOSOrganizationDomains_SqlOSOrganizations_OrganizationId (OrganizationId) -> SqlOSOrganization (Id) delete=Restrict required
   INDEX IX_SqlOSOrganizationDomains_Domain_Status (Domain, Status)
@@ -525,7 +525,7 @@
   RequireMfaForAllUsers: RequireMfaForAllUsers bit NOT NULL
   RequireMfaForOwnersAndAdmins: RequireMfaForOwnersAndAdmins bit NOT NULL
   RequiredRolesJson: RequiredRolesJson nvarchar(max) NOT NULL
-  UpdatedAt: UpdatedAt datetime2 NOT NULL
+  UpdatedAt: UpdatedAt datetime2 NOT NULL converter=DateTime->DateTime
   UserSelfEnrollmentEnabled: UserSelfEnrollmentEnabled bit NOT NULL
   PRIMARY KEY PK_SqlOSOrganizationMfaPolicies (OrganizationId)
   FOREIGN KEY FK_SqlOSOrganizationMfaPolicies_SqlOSOrganizations_OrganizationId (OrganizationId) -> SqlOSOrganization (Id) delete=Restrict required unique
@@ -533,20 +533,20 @@
 ## SqlOSPasswordLoginBucket -> dbo.SqlOSPasswordLoginBuckets [excluded from migrations]
   BucketKey: BucketKey nvarchar(512) NOT NULL maxLength=512
   ClientKey: ClientKey nvarchar(850) NULL maxLength=850
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   FailureCount: FailureCount int NOT NULL
   Id: Id nvarchar(450) NOT NULL
   IpAddress: IpAddress nvarchar(128) NULL maxLength=128
-  LastFailureAt: LastFailureAt datetime2 NULL
-  LastSuccessAt: LastSuccessAt datetime2 NULL
-  LockedUntil: LockedUntil datetime2 NULL
+  LastFailureAt: LastFailureAt datetime2 NULL converter=DateTime->DateTime
+  LastSuccessAt: LastSuccessAt datetime2 NULL converter=DateTime->DateTime
+  LockedUntil: LockedUntil datetime2 NULL converter=DateTime->DateTime
   LockoutReason: LockoutReason nvarchar(120) NULL maxLength=120
   NormalizedEmail: NormalizedEmail nvarchar(320) NULL maxLength=320
   Scope: Scope nvarchar(40) NOT NULL maxLength=40
-  UpdatedAt: UpdatedAt datetime2 NOT NULL
+  UpdatedAt: UpdatedAt datetime2 NOT NULL converter=DateTime->DateTime
   UserAgentHash: UserAgentHash nvarchar(128) NULL maxLength=128
   UserId: UserId nvarchar(64) NULL maxLength=64
-  WindowStartedAt: WindowStartedAt datetime2 NULL
+  WindowStartedAt: WindowStartedAt datetime2 NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSPasswordLoginBuckets (Id)
   FOREIGN KEY FK_SqlOSPasswordLoginBuckets_SqlOSUsers_UserId (UserId) -> SqlOSUser (Id) delete=Restrict optional
   INDEX IX_SqlOSPasswordLoginBuckets_IpAddress_UpdatedAt (IpAddress, UpdatedAt)
@@ -556,8 +556,8 @@
   INDEX IX_SqlOSPasswordLoginBuckets_UserId_UpdatedAt (UserId, UpdatedAt)
 
 ## SqlOSPasswordLoginReservation -> dbo.SqlOSPasswordLoginReservations [excluded from migrations]
-  CreatedAt: CreatedAt datetime2 NOT NULL
-  ExpiresAt: ExpiresAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
+  ExpiresAt: ExpiresAt datetime2 NOT NULL converter=DateTime->DateTime
   Id: Id nvarchar(450) NOT NULL
   PRIMARY KEY PK_SqlOSPasswordLoginReservations (Id)
   INDEX IX_SqlOSPasswordLoginReservations_ExpiresAt (ExpiresAt)
@@ -575,14 +575,14 @@
   AuthorizationRequestId: AuthorizationRequestId nvarchar(450) NULL
   ChallengeTokenHash: ChallengeTokenHash nvarchar(128) NOT NULL maxLength=128
   ClientApplicationId: ClientApplicationId nvarchar(450) NULL
-  ConsumedAt: ConsumedAt datetime2 NULL concurrency
-  CreatedAt: CreatedAt datetime2 NOT NULL
-  ExpiresAt: ExpiresAt datetime2 NOT NULL
+  ConsumedAt: ConsumedAt datetime2 NULL converter=DateTime->DateTime concurrency
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
+  ExpiresAt: ExpiresAt datetime2 NOT NULL converter=DateTime->DateTime
   Id: Id nvarchar(450) NOT NULL
-  InvalidatedAt: InvalidatedAt datetime2 NULL
+  InvalidatedAt: InvalidatedAt datetime2 NULL converter=DateTime->DateTime
   InvalidatedReason: InvalidatedReason nvarchar(120) NULL maxLength=120
   IpAddress: IpAddress nvarchar(128) NULL maxLength=128
-  LastSentAt: LastSentAt datetime2 NOT NULL
+  LastSentAt: LastSentAt datetime2 NOT NULL converter=DateTime->DateTime
   MaskedPhoneNumber: MaskedPhoneNumber nvarchar(32) NOT NULL maxLength=32
   PhoneNumberEncrypted: PhoneNumberEncrypted nvarchar(2048) NOT NULL maxLength=2048
   PhoneNumberHash: PhoneNumberHash nvarchar(128) NOT NULL maxLength=128
@@ -610,10 +610,10 @@
 
 ## SqlOSRecoveryCode -> dbo.SqlOSRecoveryCodes [excluded from migrations]
   CodeHash: CodeHash nvarchar(128) NOT NULL maxLength=128
-  ConsumedAt: ConsumedAt datetime2 NULL concurrency
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  ConsumedAt: ConsumedAt datetime2 NULL converter=DateTime->DateTime concurrency
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   Id: Id nvarchar(64) NOT NULL maxLength=64
-  RevokedAt: RevokedAt datetime2 NULL
+  RevokedAt: RevokedAt datetime2 NULL converter=DateTime->DateTime
   UserId: UserId nvarchar(64) NOT NULL maxLength=64
   PRIMARY KEY PK_SqlOSRecoveryCodes (Id)
   FOREIGN KEY FK_SqlOSRecoveryCodes_SqlOSUsers_UserId (UserId) -> SqlOSUser (Id) delete=Restrict required
@@ -621,16 +621,16 @@
   INDEX IX_SqlOSRecoveryCodes_UserId_ConsumedAt_RevokedAt (UserId, ConsumedAt, RevokedAt)
 
 ## SqlOSRefreshToken -> dbo.SqlOSRefreshTokens [excluded from migrations]
-  ConsumedAt: ConsumedAt datetime2 NULL concurrency
-  CreatedAt: CreatedAt datetime2 NOT NULL
-  ExpiresAt: ExpiresAt datetime2 NOT NULL
+  ConsumedAt: ConsumedAt datetime2 NULL converter=DateTime->DateTime concurrency
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
+  ExpiresAt: ExpiresAt datetime2 NOT NULL converter=DateTime->DateTime
   FamilyId: FamilyId nvarchar(max) NOT NULL
   Id: Id nvarchar(450) NOT NULL
   ReplacedByTokenId: ReplacedByTokenId nvarchar(max) NULL
-  ReplacementAccessTokenExpiresAt: ReplacementAccessTokenExpiresAt datetime2 NULL
+  ReplacementAccessTokenExpiresAt: ReplacementAccessTokenExpiresAt datetime2 NULL converter=DateTime->DateTime
   ReplacementOrganizationId: ReplacementOrganizationId nvarchar(max) NULL
   ReplacementTokenResponse: ReplacementAccessToken nvarchar(max) NULL
-  RevokedAt: RevokedAt datetime2 NULL
+  RevokedAt: RevokedAt datetime2 NULL converter=DateTime->DateTime
   SessionId: SessionId nvarchar(450) NOT NULL
   TokenHash: TokenHash nvarchar(450) NOT NULL
   PRIMARY KEY PK_SqlOSRefreshTokens (Id)
@@ -641,8 +641,8 @@
 ## SqlOSSamlReplay -> dbo.SqlOSSamlReplays [excluded from migrations]
   AssertionId: AssertionId nvarchar(450) NOT NULL maxLength=450
   ConnectionId: ConnectionId nvarchar(450) NOT NULL
-  ConsumedAt: ConsumedAt datetime2 NOT NULL
-  ExpiresAt: ExpiresAt datetime2 NOT NULL
+  ConsumedAt: ConsumedAt datetime2 NOT NULL converter=DateTime->DateTime
+  ExpiresAt: ExpiresAt datetime2 NOT NULL converter=DateTime->DateTime
   Id: Id nvarchar(450) NOT NULL
   ResponseId: ResponseId nvarchar(450) NOT NULL maxLength=450
   PRIMARY KEY PK_SqlOSSamlReplays (Id)
@@ -652,24 +652,24 @@
 
 ## SqlOSScimConnection -> dbo.SqlOSScimConnections [excluded from migrations]
   ConfigurationFingerprint: ConfigurationFingerprint nvarchar(64) NULL maxLength=64
-  ConfigurationOrphanedAt: ConfigurationOrphanedAt datetime2 NULL
+  ConfigurationOrphanedAt: ConfigurationOrphanedAt datetime2 NULL converter=DateTime->DateTime
   ConfigurationOwner: ConfigurationOwner nvarchar(40) NOT NULL maxLength=40
   ConfigurationSourceKey: ConfigurationSourceKey nvarchar(160) NULL maxLength=160
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   DisplayName: DisplayName nvarchar(200) NOT NULL maxLength=200
   GrantBoundaryResourceId: GrantBoundaryResourceId nvarchar(256) NULL maxLength=256
   Id: Id nvarchar(450) NOT NULL
   IsEnabled: IsEnabled bit NOT NULL
-  LastReconciledAt: LastReconciledAt datetime2 NULL
-  LastSyncAt: LastSyncAt datetime2 NULL
+  LastReconciledAt: LastReconciledAt datetime2 NULL converter=DateTime->DateTime
+  LastSyncAt: LastSyncAt datetime2 NULL converter=DateTime->DateTime
   OrganizationId: OrganizationId nvarchar(450) NOT NULL
   SeedKey: SeedKey nvarchar(160) NULL maxLength=160
   Source: Source nvarchar(40) NOT NULL maxLength=40
   TokenHash: TokenHash nvarchar(128) NULL maxLength=128
-  TokenLastUsedAt: TokenLastUsedAt datetime2 NULL
+  TokenLastUsedAt: TokenLastUsedAt datetime2 NULL converter=DateTime->DateTime
   TokenPrefix: TokenPrefix nvarchar(24) NULL maxLength=24
-  TokenRotatedAt: TokenRotatedAt datetime2 NULL
-  UpdatedAt: UpdatedAt datetime2 NOT NULL
+  TokenRotatedAt: TokenRotatedAt datetime2 NULL converter=DateTime->DateTime
+  UpdatedAt: UpdatedAt datetime2 NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSScimConnections (Id)
   FOREIGN KEY FK_SqlOSScimConnections_SqlOSOrganizations_OrganizationId (OrganizationId) -> SqlOSOrganization (Id) delete=Restrict required
   INDEX IX_SqlOSScimConnections_OrganizationId_ConfigurationOwner_ConfigurationSourceKey UNIQUE (OrganizationId, ConfigurationOwner, ConfigurationSourceKey) WHERE [ConfigurationSourceKey] IS NOT NULL
@@ -680,8 +680,8 @@
 
 ## SqlOSScimExternalId -> dbo.SqlOSScimExternalIds [excluded from migrations]
   ConnectionId: ConnectionId nvarchar(450) NOT NULL
-  CreatedAt: CreatedAt datetime2 NOT NULL
-  DeletedAt: DeletedAt datetime2 NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
+  DeletedAt: DeletedAt datetime2 NULL converter=DateTime->DateTime
   DisplayName: DisplayName nvarchar(300) NULL maxLength=300 collation=Latin1_General_100_CI_AS
   EntityId: EntityId nvarchar(128) NOT NULL maxLength=128
   ExternalId: ExternalId nvarchar(450) NULL maxLength=450 collation=Latin1_General_100_BIN2
@@ -691,11 +691,11 @@
   GivenName: GivenName nvarchar(150) NULL maxLength=150
   Id: Id nvarchar(450) NOT NULL
   IsActive: IsActive bit NOT NULL
-  LastSyncedAt: LastSyncedAt datetime2 NOT NULL
+  LastSyncedAt: LastSyncedAt datetime2 NOT NULL converter=DateTime->DateTime
   OwnsUserLifecycle: OwnsUserLifecycle bit NOT NULL
   PrimaryEmail: PrimaryEmail nvarchar(320) NULL maxLength=320 collation=Latin1_General_100_CI_AS
   ResourceType: ResourceType nvarchar(20) NOT NULL maxLength=20
-  UpdatedAt: UpdatedAt datetime2 NOT NULL
+  UpdatedAt: UpdatedAt datetime2 NOT NULL converter=DateTime->DateTime
   UserName: UserName nvarchar(450) NULL maxLength=450 collation=Latin1_General_100_CI_AS
   PRIMARY KEY PK_SqlOSScimExternalIds (Id)
   FOREIGN KEY FK_SqlOSScimExternalIds_SqlOSScimConnections_ConnectionId (ConnectionId) -> SqlOSScimConnection (Id) delete=Restrict required
@@ -705,7 +705,7 @@
 
 ## SqlOSScimGroupMapping -> dbo.SqlOSScimGroupMappings [excluded from migrations]
   ConnectionId: ConnectionId nvarchar(450) NOT NULL
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   Description: Description nvarchar(500) NULL maxLength=500
   GroupDisplayName: GroupDisplayName nvarchar(300) NULL maxLength=300
   GroupExternalId: GroupExternalId nvarchar(450) NULL maxLength=450
@@ -718,7 +718,7 @@
   RoleKey: RoleKey nvarchar(120) NOT NULL maxLength=120
   Source: Source nvarchar(40) NOT NULL maxLength=40
   SourceKey: SourceKey nvarchar(300) NULL maxLength=300
-  UpdatedAt: UpdatedAt datetime2 NOT NULL
+  UpdatedAt: UpdatedAt datetime2 NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSScimGroupMappings (Id)
   FOREIGN KEY FK_SqlOSScimGroupMappings_SqlOSScimConnections_ConnectionId (ConnectionId) -> SqlOSScimConnection (Id) delete=Restrict required
   INDEX IX_SqlOSScimGroupMappings_ConnectionId_IsEnabled (ConnectionId, IsEnabled)
@@ -726,7 +726,7 @@
 
 ## SqlOSScimManagedGrant -> dbo.SqlOSScimManagedGrants [excluded from migrations]
   ConnectionId: ConnectionId nvarchar(450) NOT NULL
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   FgaGroupId: FgaGroupId nvarchar(128) NOT NULL maxLength=128
   FgaGroupSubjectId: FgaGroupSubjectId nvarchar(128) NOT NULL maxLength=128
   GrantId: GrantId nvarchar(128) NOT NULL maxLength=128
@@ -734,7 +734,7 @@
   Id: Id nvarchar(450) NOT NULL
   MappingId: MappingId nvarchar(450) NOT NULL
   ResourceId: ResourceId nvarchar(256) NOT NULL maxLength=256
-  RevokedAt: RevokedAt datetime2 NULL
+  RevokedAt: RevokedAt datetime2 NULL converter=DateTime->DateTime
   RoleId: RoleId nvarchar(128) NOT NULL maxLength=128
   PRIMARY KEY PK_SqlOSScimManagedGrants (Id)
   FOREIGN KEY FK_SqlOSScimManagedGrants_SqlOSScimConnections_ConnectionId (ConnectionId) -> SqlOSScimConnection (Id) delete=Restrict required
@@ -745,7 +745,7 @@
 
 ## SqlOSScimOperationCommit -> dbo.SqlOSScimOperationCommits [excluded from migrations]
   Id: Id nvarchar(450) NOT NULL
-  OccurredAt: OccurredAt datetime2 NOT NULL
+  OccurredAt: OccurredAt datetime2 NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSScimOperationCommits (Id)
   INDEX IX_SqlOSScimOperationCommits_OccurredAt (OccurredAt)
 
@@ -756,7 +756,7 @@
   Error: Error nvarchar(1000) NULL maxLength=1000
   ExternalId: ExternalId nvarchar(450) NULL maxLength=450
   Id: Id nvarchar(450) NOT NULL
-  OccurredAt: OccurredAt datetime2 NOT NULL
+  OccurredAt: OccurredAt datetime2 NOT NULL converter=DateTime->DateTime
   OrganizationId: OrganizationId nvarchar(450) NOT NULL
   RequestId: RequestId nvarchar(128) NULL maxLength=128
   ResourceId: ResourceId nvarchar(128) NULL maxLength=128
@@ -770,34 +770,34 @@
 
 ## SqlOSScopeDisplayName -> dbo.SqlOSScopeDisplayNames [excluded from migrations]
   ConfigurationFingerprint: ConfigurationFingerprint nvarchar(64) NULL maxLength=64
-  ConfigurationOrphanedAt: ConfigurationOrphanedAt datetime2 NULL
+  ConfigurationOrphanedAt: ConfigurationOrphanedAt datetime2 NULL converter=DateTime->DateTime
   ConfigurationOwner: ConfigurationOwner nvarchar(40) NOT NULL maxLength=40
   ConfigurationSourceKey: ConfigurationSourceKey nvarchar(200) NULL maxLength=200 collation=Latin1_General_100_BIN2
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   Description: Description nvarchar(1000) NULL maxLength=1000
   DisplayName: DisplayName nvarchar(200) NOT NULL maxLength=200
   Id: Id nvarchar(450) NOT NULL
-  LastReconciledAt: LastReconciledAt datetime2 NULL
+  LastReconciledAt: LastReconciledAt datetime2 NULL converter=DateTime->DateTime
   Scope: Scope nvarchar(200) NOT NULL maxLength=200 collation=Latin1_General_100_BIN2
-  UpdatedAt: UpdatedAt datetime2 NOT NULL
+  UpdatedAt: UpdatedAt datetime2 NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSScopeDisplayNames (Id)
   INDEX IX_SqlOSScopeDisplayNames_Scope UNIQUE (Scope)
 
 ## SqlOSSession -> dbo.SqlOSSessions [excluded from migrations]
-  AbsoluteExpiresAt: AbsoluteExpiresAt datetime2 NOT NULL
-  AuthenticatedAt: AuthenticatedAt datetime2 NULL
+  AbsoluteExpiresAt: AbsoluteExpiresAt datetime2 NOT NULL converter=DateTime->DateTime
+  AuthenticatedAt: AuthenticatedAt datetime2 NULL converter=DateTime->DateTime
   AuthenticationMethod: AuthenticationMethod nvarchar(50) NULL maxLength=50
   ClientApplicationId: ClientApplicationId nvarchar(450) NULL
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   EffectiveAudience: EffectiveAudience nvarchar(2048) NULL maxLength=2048
   Id: Id nvarchar(450) NOT NULL
-  IdleExpiresAt: IdleExpiresAt datetime2 NOT NULL
+  IdleExpiresAt: IdleExpiresAt datetime2 NOT NULL converter=DateTime->DateTime
   IpAddress: IpAddress nvarchar(max) NULL
-  LastSeenAt: LastSeenAt datetime2 NOT NULL
+  LastSeenAt: LastSeenAt datetime2 NOT NULL converter=DateTime->DateTime
   OrganizationId: OrganizationId nvarchar(64) NULL maxLength=64
   Resource: Resource nvarchar(2048) NULL maxLength=2048
   RevocationReason: RevocationReason nvarchar(max) NULL
-  RevokedAt: RevokedAt datetime2 NULL concurrency
+  RevokedAt: RevokedAt datetime2 NULL converter=DateTime->DateTime concurrency
   Scope: Scope nvarchar(1000) NULL maxLength=1000
   UserAgent: UserAgent nvarchar(max) NULL
   UserId: UserId nvarchar(450) NOT NULL
@@ -818,11 +818,11 @@
   SigningKeyGraceWindowDays: SigningKeyGraceWindowDays int NOT NULL
   SigningKeyRetiredCleanupDays: SigningKeyRetiredCleanupDays int NOT NULL
   SigningKeyRotationIntervalDays: SigningKeyRotationIntervalDays int NOT NULL
-  UpdatedAt: UpdatedAt datetime2 NOT NULL
+  UpdatedAt: UpdatedAt datetime2 NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSSettings (Id)
 
 ## SqlOSSigningKey -> dbo.SqlOSSigningKeys [excluded from migrations]
-  ActivatedAt: ActivatedAt datetime2 NOT NULL
+  ActivatedAt: ActivatedAt datetime2 NOT NULL converter=DateTime->DateTime
   Algorithm: Algorithm nvarchar(20) NOT NULL maxLength=20
   CustodyProvider: CustodyProvider nvarchar(120) NOT NULL maxLength=120
   Id: Id nvarchar(450) NOT NULL
@@ -830,7 +830,7 @@
   KeyReference: KeyReference nvarchar(max) NOT NULL
   Kid: Kid nvarchar(120) NOT NULL maxLength=120
   PublicKeyPem: PublicKeyPem nvarchar(max) NOT NULL
-  RetiredAt: RetiredAt datetime2 NULL
+  RetiredAt: RetiredAt datetime2 NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSSigningKeys (Id)
   INDEX IX_SqlOSSigningKeys_IsActive UNIQUE (IsActive) WHERE [IsActive] = 1
   INDEX IX_SqlOSSigningKeys_Kid UNIQUE (Kid)
@@ -840,10 +840,10 @@
   AutoLinkByEmail: AutoLinkByEmail bit NOT NULL
   AutoProvisionUsers: AutoProvisionUsers bit NOT NULL
   ConfigurationFingerprint: ConfigurationFingerprint nvarchar(64) NULL maxLength=64
-  ConfigurationOrphanedAt: ConfigurationOrphanedAt datetime2 NULL
+  ConfigurationOrphanedAt: ConfigurationOrphanedAt datetime2 NULL converter=DateTime->DateTime
   ConfigurationOwner: ConfigurationOwner nvarchar(40) NOT NULL maxLength=40
   ConfigurationSourceKey: ConfigurationSourceKey nvarchar(160) NULL maxLength=160
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   DisplayName: DisplayName nvarchar(200) NOT NULL maxLength=200
   EmailAttributeName: EmailAttributeName nvarchar(max) NOT NULL
   FirstNameAttributeName: FirstNameAttributeName nvarchar(max) NOT NULL
@@ -851,12 +851,12 @@
   IdentityProviderEntityId: IdentityProviderEntityId nvarchar(500) NOT NULL maxLength=500
   IsEnabled: IsEnabled bit NOT NULL
   LastNameAttributeName: LastNameAttributeName nvarchar(max) NOT NULL
-  LastReconciledAt: LastReconciledAt datetime2 NULL
+  LastReconciledAt: LastReconciledAt datetime2 NULL converter=DateTime->DateTime
   NameIdFormat: NameIdFormat nvarchar(max) NULL
   OrganizationId: OrganizationId nvarchar(450) NOT NULL
   SingleSignOnUrl: SingleSignOnUrl nvarchar(2000) NOT NULL maxLength=2000
   TrustUpstreamMfa: TrustUpstreamMfa bit NOT NULL
-  UpdatedAt: UpdatedAt datetime2 NOT NULL
+  UpdatedAt: UpdatedAt datetime2 NOT NULL converter=DateTime->DateTime
   X509CertificatePem: X509CertificatePem nvarchar(max) NOT NULL
   PRIMARY KEY PK_SqlOSSsoConnections (Id)
   FOREIGN KEY FK_SqlOSSsoConnections_SqlOSOrganizations_OrganizationId (OrganizationId) -> SqlOSOrganization (Id) delete=Restrict required
@@ -866,21 +866,21 @@
 ## SqlOSSsoPortalSession -> dbo.SqlOSSsoPortalSessions [excluded from migrations]
   ActorType: ActorType nvarchar(80) NOT NULL maxLength=80
   ConnectionId: ConnectionId nvarchar(450) NULL
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   CreatedByUserId: CreatedByUserId nvarchar(max) NULL
-  ExpiresAt: ExpiresAt datetime2 NOT NULL
+  ExpiresAt: ExpiresAt datetime2 NOT NULL converter=DateTime->DateTime
   Id: Id nvarchar(450) NOT NULL
   IpAddress: IpAddress nvarchar(128) NULL maxLength=128
-  LastSeenAt: LastSeenAt datetime2 NULL
+  LastSeenAt: LastSeenAt datetime2 NULL converter=DateTime->DateTime
   LastTestMessage: LastTestMessage nvarchar(500) NULL maxLength=500
   LastTestStatus: LastTestStatus nvarchar(40) NULL maxLength=40
-  LastTestedAt: LastTestedAt datetime2 NULL
+  LastTestedAt: LastTestedAt datetime2 NULL converter=DateTime->DateTime
   LinkTokenHash: LinkTokenHash nvarchar(450) NOT NULL
-  OpenedAt: OpenedAt datetime2 NULL
+  OpenedAt: OpenedAt datetime2 NULL converter=DateTime->DateTime
   OrganizationId: OrganizationId nvarchar(450) NOT NULL
   Provider: Provider nvarchar(40) NULL maxLength=40
   ReturnUrl: ReturnUrl nvarchar(1000) NULL maxLength=1000
-  RevokedAt: RevokedAt datetime2 NULL
+  RevokedAt: RevokedAt datetime2 NULL converter=DateTime->DateTime
   RevokedReason: RevokedReason nvarchar(160) NULL maxLength=160
   SessionTokenHash: SessionTokenHash nvarchar(450) NULL
   UserAgent: UserAgent nvarchar(512) NULL maxLength=512
@@ -895,9 +895,9 @@
 
 ## SqlOSTemporaryToken -> dbo.SqlOSTemporaryTokens [excluded from migrations]
   ClientApplicationId: ClientApplicationId nvarchar(max) NULL
-  ConsumedAt: ConsumedAt datetime2 NULL concurrency
-  CreatedAt: CreatedAt datetime2 NOT NULL
-  ExpiresAt: ExpiresAt datetime2 NOT NULL
+  ConsumedAt: ConsumedAt datetime2 NULL converter=DateTime->DateTime concurrency
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
+  ExpiresAt: ExpiresAt datetime2 NOT NULL converter=DateTime->DateTime
   Id: Id nvarchar(450) NOT NULL
   IssuerSessionFamilyId: AuthPageSessionFamilyId nvarchar(64) NULL maxLength=64
   OrganizationId: OrganizationId nvarchar(max) NULL
@@ -911,27 +911,27 @@
   INDEX IX_SqlOSTemporaryTokens_TokenHash UNIQUE (TokenHash)
 
 ## SqlOSUser -> dbo.SqlOSUsers [excluded from migrations]
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   DefaultEmail: DefaultEmail nvarchar(320) NULL maxLength=320
   DisplayName: DisplayName nvarchar(200) NOT NULL maxLength=200
   Id: Id nvarchar(450) NOT NULL
   IsActive: IsActive bit NOT NULL
-  UpdatedAt: UpdatedAt datetime2 NOT NULL
+  UpdatedAt: UpdatedAt datetime2 NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSUsers (Id)
 
 ## SqlOSUserAuthenticator -> dbo.SqlOSUserAuthenticators [excluded from migrations]
   Algorithm: Algorithm nvarchar(20) NOT NULL maxLength=20
-  ConfirmedAt: ConfirmedAt datetime2 NULL
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  ConfirmedAt: ConfirmedAt datetime2 NULL converter=DateTime->DateTime
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   Digits: Digits int NOT NULL
   DisplayName: DisplayName nvarchar(120) NOT NULL maxLength=120
   Id: Id nvarchar(64) NOT NULL maxLength=64
   IsConfirmed: IsConfirmed bit NOT NULL
   LastAcceptedTimeStep: LastAcceptedTimeStep bigint NULL concurrency
-  LastUsedAt: LastUsedAt datetime2 NULL
+  LastUsedAt: LastUsedAt datetime2 NULL converter=DateTime->DateTime
   PeriodSeconds: PeriodSeconds int NOT NULL
   RevocationReason: RevocationReason nvarchar(120) NULL maxLength=120
-  RevokedAt: RevokedAt datetime2 NULL
+  RevokedAt: RevokedAt datetime2 NULL converter=DateTime->DateTime
   SecretProtected: SecretProtected nvarchar(2048) NOT NULL maxLength=2048
   SecretVersion: SecretVersion int NOT NULL
   Type: Type nvarchar(40) NOT NULL maxLength=40
@@ -942,14 +942,14 @@
   INDEX IX_SqlOSUserAuthenticators_UserId_Type_RevokedAt (UserId, Type, RevokedAt)
 
 ## SqlOSUserEmail -> dbo.SqlOSUserEmails [excluded from migrations]
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   Email: Email nvarchar(320) NOT NULL maxLength=320
   Id: Id nvarchar(450) NOT NULL
   IsPrimary: IsPrimary bit NOT NULL
   IsVerified: IsVerified bit NOT NULL
   NormalizedEmail: NormalizedEmail nvarchar(320) NOT NULL maxLength=320
   UserId: UserId nvarchar(450) NOT NULL
-  VerifiedAt: VerifiedAt datetime2 NULL
+  VerifiedAt: VerifiedAt datetime2 NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSUserEmails (Id)
   FOREIGN KEY FK_SqlOSUserEmails_SqlOSUsers_UserId (UserId) -> SqlOSUser (Id) delete=Restrict required
   INDEX IX_SqlOSUserEmails_NormalizedEmail UNIQUE (NormalizedEmail)
@@ -957,26 +957,26 @@
 
 ## SqlOSUserMfaPolicyOverride -> dbo.SqlOSUserMfaPolicyOverrides [excluded from migrations]
   RequireMfa: RequireMfa bit NULL
-  UpdatedAt: UpdatedAt datetime2 NOT NULL
+  UpdatedAt: UpdatedAt datetime2 NOT NULL converter=DateTime->DateTime
   UserId: UserId nvarchar(64) NOT NULL maxLength=64
   UserSelfEnrollmentEnabled: UserSelfEnrollmentEnabled bit NULL
   PRIMARY KEY PK_SqlOSUserMfaPolicyOverrides (UserId)
   FOREIGN KEY FK_SqlOSUserMfaPolicyOverrides_SqlOSUsers_UserId (UserId) -> SqlOSUser (Id) delete=Restrict required unique
 
 ## SqlOSUserPhoneNumber -> dbo.SqlOSUserPhoneNumbers [excluded from migrations]
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   DisplayValueEncrypted: DisplayValueEncrypted nvarchar(2048) NULL maxLength=2048
   Id: Id nvarchar(450) NOT NULL
   IsPrimary: IsPrimary bit NOT NULL
   IsVerified: IsVerified bit NOT NULL
-  LastUsedAt: LastUsedAt datetime2 NULL
+  LastUsedAt: LastUsedAt datetime2 NULL converter=DateTime->DateTime
   PhoneNumber: PhoneNumber nvarchar(32) NOT NULL maxLength=32
   PhoneNumberHash: PhoneNumberHash nvarchar(128) NOT NULL maxLength=128
   RemovalReason: RemovalReason nvarchar(120) NULL maxLength=120
-  RemovedAt: RemovedAt datetime2 NULL
-  UpdatedAt: UpdatedAt datetime2 NOT NULL
+  RemovedAt: RemovedAt datetime2 NULL converter=DateTime->DateTime
+  UpdatedAt: UpdatedAt datetime2 NOT NULL converter=DateTime->DateTime
   UserId: UserId nvarchar(450) NOT NULL
-  VerifiedAt: VerifiedAt datetime2 NULL
+  VerifiedAt: VerifiedAt datetime2 NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSUserPhoneNumbers (Id)
   FOREIGN KEY FK_SqlOSUserPhoneNumbers_SqlOSUsers_UserId (UserId) -> SqlOSUser (Id) delete=Restrict required
   INDEX IX_SqlOSUserPhoneNumbers_PhoneNumberHash UNIQUE (PhoneNumberHash) WHERE [RemovedAt] IS NULL
@@ -984,13 +984,13 @@
 
 ## SqlOSCalendarConnection -> dbo.SqlOSCalendarConnections [excluded from migrations]
   AccessTokenEncrypted: AccessTokenEncrypted nvarchar(max) NULL
-  AccessTokenExpiresAt: AccessTokenExpiresAt datetime2 NULL
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  AccessTokenExpiresAt: AccessTokenExpiresAt datetime2 NULL converter=DateTime->DateTime
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   DisplayName: DisplayName nvarchar(200) NOT NULL maxLength=200
   Id: Id nvarchar(64) NOT NULL maxLength=64
   LastError: LastError nvarchar(1000) NULL maxLength=1000
-  LastErrorAt: LastErrorAt datetime2 NULL
-  LastSyncAt: LastSyncAt datetime2 NULL
+  LastErrorAt: LastErrorAt datetime2 NULL converter=DateTime->DateTime
+  LastSyncAt: LastSyncAt datetime2 NULL converter=DateTime->DateTime
   Mode: Mode nvarchar(40) NOT NULL maxLength=40
   OidcConnectionId: OidcConnectionId nvarchar(64) NOT NULL maxLength=64
   OrganizationId: OrganizationId nvarchar(64) NULL maxLength=64
@@ -998,11 +998,11 @@
   ProviderAccountSubject: ProviderAccountSubject nvarchar(256) NULL maxLength=256
   ProviderType: ProviderType nvarchar(40) NOT NULL maxLength=40
   RefreshTokenEncrypted: RefreshTokenEncrypted nvarchar(max) NULL
-  RevokedAt: RevokedAt datetime2 NULL concurrency
+  RevokedAt: RevokedAt datetime2 NULL converter=DateTime->DateTime concurrency
   RevokedReason: RevokedReason nvarchar(160) NULL maxLength=160
   ScopesJson: ScopesJson nvarchar(max) NOT NULL
   Status: Status nvarchar(40) NOT NULL maxLength=40
-  UpdatedAt: UpdatedAt datetime2 NOT NULL
+  UpdatedAt: UpdatedAt datetime2 NOT NULL converter=DateTime->DateTime
   UserId: UserId nvarchar(64) NULL maxLength=64
   PRIMARY KEY PK_SqlOSCalendarConnections (Id)
   FOREIGN KEY FK_SqlOSCalendarConnections_SqlOSAuthOidcConnections_OidcConnectionId (OidcConnectionId) -> SqlOSOidcConnection (Id) delete=Restrict required
@@ -1015,8 +1015,8 @@
 
 ## SqlOSCalendarEvent -> dbo.SqlOSCalendarEvents [excluded from migrations]
   CalendarConnectionId: CalendarConnectionId nvarchar(64) NOT NULL maxLength=64
-  CreatedAt: CreatedAt datetime2 NOT NULL
-  EndsAtUtc: EndsAtUtc datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
+  EndsAtUtc: EndsAtUtc datetime2 NOT NULL converter=DateTime->DateTime
   Id: Id nvarchar(64) NOT NULL maxLength=64
   IsAllDay: IsAllDay bit NOT NULL
   Location: Location nvarchar(500) NULL maxLength=500
@@ -1024,10 +1024,10 @@
   ProviderCalendarId: ProviderCalendarId nvarchar(256) NOT NULL maxLength=256
   ProviderEventId: ProviderEventId nvarchar(512) NOT NULL maxLength=512
   ShowAs: ShowAs nvarchar(20) NOT NULL maxLength=20
-  StartsAtUtc: StartsAtUtc datetime2 NOT NULL
+  StartsAtUtc: StartsAtUtc datetime2 NOT NULL converter=DateTime->DateTime
   Status: Status nvarchar(20) NOT NULL maxLength=20
   Subject: Subject nvarchar(500) NULL maxLength=500
-  UpdatedAt: UpdatedAt datetime2 NOT NULL
+  UpdatedAt: UpdatedAt datetime2 NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSCalendarEvents (Id)
   FOREIGN KEY FK_SqlOSCalendarEvents_SqlOSCalendarConnections_CalendarConnectionId (CalendarConnectionId) -> SqlOSCalendarConnection (Id) delete=Cascade required
   INDEX IX_SqlOSCalendarEvents_CalendarConnectionId_StartsAtUtc (CalendarConnectionId, StartsAtUtc)
@@ -1035,25 +1035,25 @@
 
 ## SqlOSCalendarSyncState -> dbo.SqlOSCalendarSyncStates [excluded from migrations]
   CalendarConnectionId: CalendarConnectionId nvarchar(64) NOT NULL maxLength=64
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   DisplayName: DisplayName nvarchar(200) NULL maxLength=200
   EventCount: EventCount int NOT NULL
   Id: Id nvarchar(64) NOT NULL maxLength=64
   IsSyncEnabled: IsSyncEnabled bit NOT NULL
-  LastSyncCompletedAt: LastSyncCompletedAt datetime2 NULL
+  LastSyncCompletedAt: LastSyncCompletedAt datetime2 NULL converter=DateTime->DateTime
   LastSyncError: LastSyncError nvarchar(1000) NULL maxLength=1000
-  LastSyncStartedAt: LastSyncStartedAt datetime2 NULL
+  LastSyncStartedAt: LastSyncStartedAt datetime2 NULL converter=DateTime->DateTime
   LastSyncStatus: LastSyncStatus nvarchar(40) NULL maxLength=40
   ProviderCalendarId: ProviderCalendarId nvarchar(256) NOT NULL maxLength=256
   SyncCursor: SyncCursor nvarchar(max) NULL
-  UpdatedAt: UpdatedAt datetime2 NOT NULL
+  UpdatedAt: UpdatedAt datetime2 NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSCalendarSyncStates (Id)
   FOREIGN KEY FK_SqlOSCalendarSyncStates_SqlOSCalendarConnections_CalendarConnectionId (CalendarConnectionId) -> SqlOSCalendarConnection (Id) delete=Cascade required
   INDEX IX_SqlOSCalendarSyncStates_CalendarConnectionId_ProviderCalendarId UNIQUE (CalendarConnectionId, ProviderCalendarId)
 
 ## SqlOSEmailDelivery -> dbo.SqlOSEmailDeliveries [excluded from migrations]
-  CreatedAt: CreatedAt datetime2 NOT NULL
-  FailedAt: FailedAt datetime2 NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
+  FailedAt: FailedAt datetime2 NULL converter=DateTime->DateTime
   Id: Id nvarchar(64) NOT NULL maxLength=64
   IdempotencyKey: IdempotencyKey nvarchar(200) NULL maxLength=200
   ProviderMessageId: ProviderMessageId nvarchar(200) NULL maxLength=200
@@ -1061,13 +1061,13 @@
   RenderedSubject: RenderedSubject nvarchar(500) NOT NULL maxLength=500
   RenderedTextPreview: RenderedTextPreview nvarchar(max) NOT NULL
   SanitizedError: SanitizedError nvarchar(500) NULL maxLength=500
-  SentAt: SentAt datetime2 NULL
+  SentAt: SentAt datetime2 NULL converter=DateTime->DateTime
   Status: Status nvarchar(32) NOT NULL maxLength=32
   TemplateId: TemplateId nvarchar(64) NULL maxLength=64
   TemplateKey: TemplateKey nvarchar(120) NOT NULL maxLength=120
   TemplateVersion: TemplateVersion int NOT NULL
   To: To nvarchar(320) NOT NULL maxLength=320
-  UpdatedAt: UpdatedAt datetime2 NOT NULL
+  UpdatedAt: UpdatedAt datetime2 NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSEmailDeliveries (Id)
   FOREIGN KEY FK_SqlOSEmailDeliveries_SqlOSEmailTemplates_TemplateId (TemplateId) -> SqlOSEmailTemplate (Id) delete=SetNull optional
   INDEX IX_SqlOSEmailDeliveries_CreatedAt (CreatedAt)
@@ -1078,7 +1078,7 @@
   INDEX IX_SqlOSEmailDeliveries_To_CreatedAt (To, CreatedAt)
 
 ## SqlOSEmailTemplate -> dbo.SqlOSEmailTemplates [excluded from migrations]
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   DisplayName: DisplayName nvarchar(200) NOT NULL maxLength=200
   HtmlBodyTemplate: HtmlBodyTemplate nvarchar(max) NOT NULL
   Id: Id nvarchar(64) NOT NULL maxLength=64
@@ -1086,7 +1086,7 @@
   Key: Key nvarchar(120) NOT NULL maxLength=120
   SubjectTemplate: SubjectTemplate nvarchar(500) NOT NULL maxLength=500
   TextBodyTemplate: TextBodyTemplate nvarchar(max) NOT NULL
-  UpdatedAt: UpdatedAt datetime2 NOT NULL
+  UpdatedAt: UpdatedAt datetime2 NOT NULL converter=DateTime->DateTime
   VariablesJson: VariablesJson nvarchar(max) NOT NULL
   Version: Version int NOT NULL
   PRIMARY KEY PK_SqlOSEmailTemplates (Id)
@@ -1097,26 +1097,26 @@
 
 ## SqlOSFgaAgent -> dbo.SqlOSFgaAgents [excluded from migrations]
   AgentType: AgentType nvarchar(max) NULL
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   Description: Description nvarchar(max) NULL
   Id: Id nvarchar(450) NOT NULL
-  LastRunAt: LastRunAt datetime2 NULL
+  LastRunAt: LastRunAt datetime2 NULL converter=DateTime->DateTime
   SubjectId: SubjectId nvarchar(450) NOT NULL
-  UpdatedAt: UpdatedAt datetime2 NOT NULL
+  UpdatedAt: UpdatedAt datetime2 NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSFgaAgents (Id)
   FOREIGN KEY FK_SqlOSFgaAgents_SqlOSFgaSubjects_SubjectId (SubjectId) -> SqlOSFgaSubject (Id) delete=Restrict required unique
   INDEX IX_SqlOSFgaAgents_SubjectId UNIQUE (SubjectId)
 
 ## SqlOSFgaGrant -> dbo.SqlOSFgaGrants [excluded from migrations]
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   Description: Description nvarchar(max) NULL
-  EffectiveFrom: EffectiveFrom datetime2 NULL
-  EffectiveTo: EffectiveTo datetime2 NULL
+  EffectiveFrom: EffectiveFrom datetime2 NULL converter=DateTime->DateTime
+  EffectiveTo: EffectiveTo datetime2 NULL converter=DateTime->DateTime
   Id: Id nvarchar(450) NOT NULL
   ResourceId: ResourceId nvarchar(450) NOT NULL
   RoleId: RoleId nvarchar(450) NOT NULL
   SubjectId: SubjectId nvarchar(450) NOT NULL
-  UpdatedAt: UpdatedAt datetime2 NOT NULL
+  UpdatedAt: UpdatedAt datetime2 NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSFgaGrants (Id)
   FOREIGN KEY FK_SqlOSFgaGrants_SqlOSFgaResources_ResourceId (ResourceId) -> SqlOSFgaResource (Id) delete=Restrict required
   FOREIGN KEY FK_SqlOSFgaGrants_SqlOSFgaRoles_RoleId (RoleId) -> SqlOSFgaRole (Id) delete=Restrict required
@@ -1137,14 +1137,14 @@
   INDEX IX_SqlOSFgaPermissions_ResourceTypeId (ResourceTypeId)
 
 ## SqlOSFgaResource -> dbo.SqlOSFgaResources [excluded from migrations]
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   Description: Description nvarchar(max) NULL
   Id: Id nvarchar(450) NOT NULL
   IsActive: IsActive bit NOT NULL
   Name: Name nvarchar(max) NOT NULL
   ParentId: ParentId nvarchar(450) NULL
   ResourceTypeId: ResourceTypeId nvarchar(450) NOT NULL
-  UpdatedAt: UpdatedAt datetime2 NOT NULL
+  UpdatedAt: UpdatedAt datetime2 NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSFgaResources (Id)
   FOREIGN KEY FK_SqlOSFgaResources_SqlOSFgaResourceTypes_ResourceTypeId (ResourceTypeId) -> SqlOSFgaResourceType (Id) delete=Restrict required
   FOREIGN KEY FK_SqlOSFgaResources_SqlOSFgaResources_ParentId (ParentId) -> SqlOSFgaResource (Id) delete=Restrict optional
@@ -1177,17 +1177,17 @@
   ClientId: ClientId nvarchar(450) NOT NULL maxLength=450
   ClientSecretHash: ClientSecretHash nvarchar(max) NOT NULL
   ConfigurationFingerprint: ConfigurationFingerprint nvarchar(128) NULL maxLength=128
-  ConfigurationOrphanedAt: ConfigurationOrphanedAt datetime2 NULL
+  ConfigurationOrphanedAt: ConfigurationOrphanedAt datetime2 NULL converter=DateTime->DateTime
   ConfigurationOwner: ConfigurationOwner nvarchar(32) NOT NULL maxLength=32
   ConfigurationSourceKey: ConfigurationSourceKey nvarchar(200) NULL maxLength=200
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   Description: Description nvarchar(max) NULL
-  ExpiresAt: ExpiresAt datetime2 NULL
+  ExpiresAt: ExpiresAt datetime2 NULL converter=DateTime->DateTime
   Id: Id nvarchar(450) NOT NULL
-  LastReconciledAt: LastReconciledAt datetime2 NULL
-  LastUsedAt: LastUsedAt datetime2 NULL
+  LastReconciledAt: LastReconciledAt datetime2 NULL converter=DateTime->DateTime
+  LastUsedAt: LastUsedAt datetime2 NULL converter=DateTime->DateTime
   SubjectId: SubjectId nvarchar(450) NOT NULL
-  UpdatedAt: UpdatedAt datetime2 NOT NULL
+  UpdatedAt: UpdatedAt datetime2 NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSFgaServiceAccounts (Id)
   FOREIGN KEY FK_SqlOSFgaServiceAccounts_SqlOSFgaSubjects_SubjectId (SubjectId) -> SqlOSFgaSubject (Id) delete=Restrict required unique
   INDEX IX_SqlOSFgaServiceAccounts_ClientId UNIQUE (ClientId)
@@ -1195,13 +1195,13 @@
   INDEX IX_SqlOSFgaServiceAccounts_SubjectId UNIQUE (SubjectId)
 
 ## SqlOSFgaSubject -> dbo.SqlOSFgaSubjects [excluded from migrations]
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   DisplayName: DisplayName nvarchar(max) NOT NULL
   ExternalRef: ExternalRef nvarchar(max) NULL
   Id: Id nvarchar(450) NOT NULL
   OrganizationId: OrganizationId nvarchar(max) NULL
   SubjectTypeId: SubjectTypeId nvarchar(450) NOT NULL
-  UpdatedAt: UpdatedAt datetime2 NOT NULL
+  UpdatedAt: UpdatedAt datetime2 NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSFgaSubjects (Id)
   FOREIGN KEY FK_SqlOSFgaSubjects_SqlOSFgaSubjectTypes_SubjectTypeId (SubjectTypeId) -> SqlOSFgaSubjectType (Id) delete=Restrict required
   INDEX IX_SqlOSFgaSubjects_SubjectTypeId (SubjectTypeId)
@@ -1213,32 +1213,32 @@
   PRIMARY KEY PK_SqlOSFgaSubjectTypes (Id)
 
 ## SqlOSFgaUser -> dbo.SqlOSFgaUsers [excluded from migrations]
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   Email: Email nvarchar(max) NULL
   Id: Id nvarchar(450) NOT NULL
   IsActive: IsActive bit NOT NULL
-  LastLoginAt: LastLoginAt datetime2 NULL
+  LastLoginAt: LastLoginAt datetime2 NULL converter=DateTime->DateTime
   SubjectId: SubjectId nvarchar(450) NOT NULL
-  UpdatedAt: UpdatedAt datetime2 NOT NULL
+  UpdatedAt: UpdatedAt datetime2 NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSFgaUsers (Id)
   FOREIGN KEY FK_SqlOSFgaUsers_SqlOSFgaSubjects_SubjectId (SubjectId) -> SqlOSFgaSubject (Id) delete=Restrict required unique
   INDEX IX_SqlOSFgaUsers_SubjectId UNIQUE (SubjectId)
 
 ## SqlOSFgaUserGroup -> dbo.SqlOSFgaUserGroups [excluded from migrations]
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   Description: Description nvarchar(max) NULL
   GroupType: GroupType nvarchar(max) NULL
   Id: Id nvarchar(450) NOT NULL
   IsActive: IsActive bit NOT NULL
   Name: Name nvarchar(max) NOT NULL
   SubjectId: SubjectId nvarchar(450) NOT NULL
-  UpdatedAt: UpdatedAt datetime2 NOT NULL
+  UpdatedAt: UpdatedAt datetime2 NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSFgaUserGroups (Id)
   FOREIGN KEY FK_SqlOSFgaUserGroups_SqlOSFgaSubjects_SubjectId (SubjectId) -> SqlOSFgaSubject (Id) delete=Restrict required unique
   INDEX IX_SqlOSFgaUserGroups_SubjectId UNIQUE (SubjectId)
 
 ## SqlOSFgaUserGroupMembership -> dbo.SqlOSFgaUserGroupMemberships [excluded from migrations]
-  CreatedAt: CreatedAt datetime2 NOT NULL
+  CreatedAt: CreatedAt datetime2 NOT NULL converter=DateTime->DateTime
   SubjectId: SubjectId nvarchar(450) NOT NULL
   UserGroupId: UserGroupId nvarchar(450) NOT NULL
   PRIMARY KEY PK_SqlOSFgaUserGroupMemberships (SubjectId, UserGroupId)

@@ -4,19 +4,19 @@
   Access: Access character varying(20) NOT NULL maxLength=20
   ClientApplicationId: ClientApplicationId character varying(64) NOT NULL maxLength=64
   ConfigurationFingerprint: ConfigurationFingerprint character varying(64) NULL maxLength=64
-  ConfigurationOrphanedAt: ConfigurationOrphanedAt timestamp without time zone NULL
+  ConfigurationOrphanedAt: ConfigurationOrphanedAt timestamp without time zone NULL converter=DateTime->DateTime
   ConfigurationOwner: ConfigurationOwner character varying(40) NOT NULL maxLength=40
   ConfigurationSourceKey: ConfigurationSourceKey character varying(160) NULL maxLength=160
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   CreatedByActorId: CreatedByActorId character varying(128) NULL maxLength=128
   CreatedByActorType: CreatedByActorType character varying(80) NULL maxLength=80
   Id: Id text NOT NULL
-  LastReconciledAt: LastReconciledAt timestamp without time zone NULL
+  LastReconciledAt: LastReconciledAt timestamp without time zone NULL converter=DateTime->DateTime
   OrganizationId: OrganizationId character varying(64) NULL maxLength=64
   PrincipalId: PrincipalId character varying(128) NULL maxLength=128
   PrincipalType: PrincipalType character varying(40) NOT NULL maxLength=40
   Reason: Reason character varying(500) NULL maxLength=500
-  RevokedAt: RevokedAt timestamp without time zone NULL
+  RevokedAt: RevokedAt timestamp without time zone NULL converter=DateTime->DateTime
   RevokedByActorId: RevokedByActorId character varying(128) NULL maxLength=128
   RevokedByActorType: RevokedByActorType character varying(80) NULL maxLength=80
   RoleKey: RoleKey character varying(80) NULL maxLength=80
@@ -42,10 +42,10 @@
   Id: Id text NOT NULL
   IdempotencyKeyHash: IdempotencyKeyHash character varying(128) NULL maxLength=128
   IdempotencyScopeHash: IdempotencyScopeHash character varying(128) NULL maxLength=128
-  IngestedAt: IngestedAt timestamp without time zone NOT NULL
+  IngestedAt: IngestedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   IpAddress: IpAddress text NULL
   MetadataJson: MetadataJson text NULL
-  OccurredAt: OccurredAt timestamp without time zone NOT NULL
+  OccurredAt: OccurredAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   OrganizationId: OrganizationId text NULL
   RequestId: RequestId character varying(128) NULL maxLength=128
   SessionId: SessionId text NULL
@@ -67,19 +67,19 @@
 ## SqlOSAuthPageSettings -> dbo.SqlOSAuthPageSettings [excluded from migrations]
   AccentColor: AccentColor character varying(32) NOT NULL maxLength=32
   AuthPageConfigurationFingerprint: AuthPageConfigurationFingerprint character varying(64) NULL maxLength=64
-  AuthPageConfigurationOrphanedAt: AuthPageConfigurationOrphanedAt timestamp without time zone NULL
+  AuthPageConfigurationOrphanedAt: AuthPageConfigurationOrphanedAt timestamp without time zone NULL converter=DateTime->DateTime
   AuthPageConfigurationOwner: AuthPageConfigurationOwner character varying(40) NOT NULL maxLength=40
   AuthPageConfigurationSourceKey: AuthPageConfigurationSourceKey character varying(160) NULL maxLength=160
-  AuthPageLastReconciledAt: AuthPageLastReconciledAt timestamp without time zone NULL
+  AuthPageLastReconciledAt: AuthPageLastReconciledAt timestamp without time zone NULL converter=DateTime->DateTime
   BackgroundColor: BackgroundColor character varying(32) NOT NULL maxLength=32
   EmailAccentColor: EmailAccentColor character varying(32) NOT NULL maxLength=32
   EmailApplicationName: EmailApplicationName character varying(200) NULL maxLength=200
   EmailBackgroundColor: EmailBackgroundColor character varying(32) NOT NULL maxLength=32
   EmailConfigurationFingerprint: EmailConfigurationFingerprint character varying(64) NULL maxLength=64
-  EmailConfigurationOrphanedAt: EmailConfigurationOrphanedAt timestamp without time zone NULL
+  EmailConfigurationOrphanedAt: EmailConfigurationOrphanedAt timestamp without time zone NULL converter=DateTime->DateTime
   EmailConfigurationOwner: EmailConfigurationOwner character varying(40) NOT NULL maxLength=40
   EmailConfigurationSourceKey: EmailConfigurationSourceKey character varying(160) NULL maxLength=160
-  EmailLastReconciledAt: EmailLastReconciledAt timestamp without time zone NULL
+  EmailLastReconciledAt: EmailLastReconciledAt timestamp without time zone NULL converter=DateTime->DateTime
   EmailLogoBase64: EmailLogoBase64 text NULL
   EmailPrimaryColor: EmailPrimaryColor character varying(32) NOT NULL maxLength=32
   EnablePasswordSignup: EnablePasswordSignup boolean NOT NULL
@@ -90,20 +90,20 @@
   PageSubtitle: PageSubtitle character varying(500) NOT NULL maxLength=500
   PageTitle: PageTitle character varying(200) NOT NULL maxLength=200
   PrimaryColor: PrimaryColor character varying(32) NOT NULL maxLength=32
-  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSAuthPageSettings (Id)
 
 ## SqlOSAuthorizationCode -> dbo.SqlOSAuthorizationCodes [excluded from migrations]
-  AuthTime: AuthTime timestamp without time zone NULL
+  AuthTime: AuthTime timestamp without time zone NULL converter=DateTime->DateTime
   AuthenticationMethod: AuthenticationMethod character varying(50) NOT NULL maxLength=50
   AuthorizationRequestId: AuthorizationRequestId text NOT NULL
   ClientApplicationId: ClientApplicationId text NOT NULL
   CodeChallenge: CodeChallenge character varying(256) NOT NULL maxLength=256
   CodeChallengeMethod: CodeChallengeMethod character varying(32) NOT NULL maxLength=32
   CodeHash: CodeHash character varying(128) NOT NULL maxLength=128
-  ConsumedAt: ConsumedAt timestamp without time zone NULL concurrency
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
-  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL
+  ConsumedAt: ConsumedAt timestamp without time zone NULL converter=DateTime->DateTime concurrency
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
+  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Id: Id text NOT NULL
   Nonce: Nonce character varying(256) NULL maxLength=256
   OrganizationId: OrganizationId text NULL
@@ -124,15 +124,15 @@
   INDEX IX_SqlOSAuthorizationCodes_UserId (UserId)
 
 ## SqlOSAuthorizationRequest -> dbo.SqlOSAuthorizationRequests [excluded from migrations]
-  CancelledAt: CancelledAt timestamp without time zone NULL concurrency
+  CancelledAt: CancelledAt timestamp without time zone NULL converter=DateTime->DateTime concurrency
   ClientApplicationId: ClientApplicationId text NOT NULL
   CodeChallenge: CodeChallenge character varying(256) NOT NULL maxLength=256
   CodeChallengeMethod: CodeChallengeMethod character varying(32) NOT NULL maxLength=32
-  CompletedAt: CompletedAt timestamp without time zone NULL concurrency
+  CompletedAt: CompletedAt timestamp without time zone NULL converter=DateTime->DateTime concurrency
   ConnectionId: ConnectionId text NULL
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   DeviceAuthorizationId: DeviceAuthorizationId character varying(64) NULL maxLength=64
-  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL
+  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Id: Id text NOT NULL
   InvitationId: InvitationId text NULL
   LoginHintEmail: LoginHintEmail character varying(320) NULL maxLength=320
@@ -172,26 +172,26 @@
   ClientType: ClientType character varying(40) NOT NULL maxLength=40
   ClientUri: ClientUri character varying(850) NULL maxLength=850
   ConfigurationFingerprint: ConfigurationFingerprint character varying(64) NULL maxLength=64
-  ConfigurationOrphanedAt: ConfigurationOrphanedAt timestamp without time zone NULL
+  ConfigurationOrphanedAt: ConfigurationOrphanedAt timestamp without time zone NULL converter=DateTime->DateTime
   ConfigurationOwner: ConfigurationOwner character varying(40) NOT NULL maxLength=40
   ConfigurationSourceKey: ConfigurationSourceKey character varying(160) NULL maxLength=160
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Description: Description character varying(500) NULL maxLength=500
-  DisabledAt: DisabledAt timestamp without time zone NULL
+  DisabledAt: DisabledAt timestamp without time zone NULL converter=DateTime->DateTime
   DisabledReason: DisabledReason character varying(500) NULL maxLength=500
   GrantTypesJson: GrantTypesJson text NOT NULL
   Id: Id text NOT NULL
   IsActive: IsActive boolean NOT NULL
   IsFirstParty: IsFirstParty boolean NOT NULL
-  LastReconciledAt: LastReconciledAt timestamp without time zone NULL
-  LastSeenAt: LastSeenAt timestamp without time zone NULL
+  LastReconciledAt: LastReconciledAt timestamp without time zone NULL converter=DateTime->DateTime
+  LastSeenAt: LastSeenAt timestamp without time zone NULL converter=DateTime->DateTime
   LogoUri: LogoUri character varying(850) NULL maxLength=850
   MetadataDocumentUrl: MetadataDocumentUrl character varying(850) NULL maxLength=850
   MetadataEtag: MetadataEtag character varying(256) NULL maxLength=256
-  MetadataExpiresAt: MetadataExpiresAt timestamp without time zone NULL
-  MetadataFetchedAt: MetadataFetchedAt timestamp without time zone NULL
+  MetadataExpiresAt: MetadataExpiresAt timestamp without time zone NULL converter=DateTime->DateTime
+  MetadataFetchedAt: MetadataFetchedAt timestamp without time zone NULL converter=DateTime->DateTime
   MetadataJson: MetadataJson text NULL
-  MetadataLastModifiedAt: MetadataLastModifiedAt timestamp without time zone NULL
+  MetadataLastModifiedAt: MetadataLastModifiedAt timestamp without time zone NULL converter=DateTime->DateTime
   Name: Name character varying(200) NOT NULL maxLength=200
   RedirectUrisJson: RedirectUrisJson text NOT NULL
   RegistrationSource: RegistrationSource character varying(20) NOT NULL maxLength=20
@@ -213,13 +213,13 @@
   ClientApplicationId: ClientApplicationId character varying(64) NOT NULL maxLength=64
   ConfigurationOwner: ConfigurationOwner character varying(40) NOT NULL maxLength=40
   ConfigurationSourceKey: ConfigurationSourceKey character varying(160) NULL maxLength=160
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   DisplayName: DisplayName character varying(200) NULL maxLength=200
-  ExpiresAt: ExpiresAt timestamp without time zone NULL
+  ExpiresAt: ExpiresAt timestamp without time zone NULL converter=DateTime->DateTime
   Id: Id text NOT NULL
-  LastReconciledAt: LastReconciledAt timestamp without time zone NULL
-  LastUsedAt: LastUsedAt timestamp without time zone NULL
-  RevokedAt: RevokedAt timestamp without time zone NULL
+  LastReconciledAt: LastReconciledAt timestamp without time zone NULL converter=DateTime->DateTime
+  LastUsedAt: LastUsedAt timestamp without time zone NULL converter=DateTime->DateTime
+  RevokedAt: RevokedAt timestamp without time zone NULL converter=DateTime->DateTime
   SecretHash: SecretHash text NOT NULL
   PRIMARY KEY PK_SqlOSClientCredentials (Id)
   FOREIGN KEY FK_SqlOSClientCredentials_SqlOSClientApplications_ClientApplic~ (ClientApplicationId) -> SqlOSClientApplication (Id) delete=Restrict required
@@ -229,12 +229,12 @@
 ## SqlOSConsentGrant -> dbo.SqlOSConsentGrants [excluded from migrations]
   ClientApplicationId: ClientApplicationId character varying(64) NOT NULL maxLength=64
   ClientMetadataFingerprint: ClientMetadataFingerprint character varying(64) NULL maxLength=64
-  GrantedAt: GrantedAt timestamp without time zone NOT NULL
+  GrantedAt: GrantedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Id: Id text NOT NULL
   RevocationReason: RevocationReason character varying(200) NULL maxLength=200
-  RevokedAt: RevokedAt timestamp without time zone NULL
+  RevokedAt: RevokedAt timestamp without time zone NULL converter=DateTime->DateTime
   Scope: Scope character varying(4000) NOT NULL maxLength=4000
-  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL concurrency
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime concurrency
   UserId: UserId character varying(64) NOT NULL maxLength=64
   PRIMARY KEY PK_SqlOSConsentGrants (Id)
   FOREIGN KEY FK_SqlOSConsentGrants_SqlOSClientApplications_ClientApplicatio~ (ClientApplicationId) -> SqlOSClientApplication (Id) delete=Restrict required
@@ -243,10 +243,10 @@
   INDEX UX_SqlOSConsentGrants_ActiveUserClient UNIQUE (UserId, ClientApplicationId) WHERE "RevokedAt" IS NULL
 
 ## SqlOSCredential -> dbo.SqlOSCredentials [excluded from migrations]
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Id: Id text NOT NULL
-  LastUsedAt: LastUsedAt timestamp without time zone NULL
-  RevokedAt: RevokedAt timestamp without time zone NULL
+  LastUsedAt: LastUsedAt timestamp without time zone NULL converter=DateTime->DateTime
+  RevokedAt: RevokedAt timestamp without time zone NULL converter=DateTime->DateTime
   SecretHash: SecretHash text NOT NULL
   SecretVersion: SecretVersion integer NOT NULL
   Type: Type character varying(50) NOT NULL maxLength=50
@@ -256,20 +256,20 @@
   INDEX IX_SqlOSCredentials_UserId (UserId)
 
 ## SqlOSDeviceAuthorization -> dbo.SqlOSDeviceAuthorizations [excluded from migrations]
-  ApprovedAt: ApprovedAt timestamp without time zone NULL
+  ApprovedAt: ApprovedAt timestamp without time zone NULL converter=DateTime->DateTime
   ApprovedOrganizationId: ApprovedOrganizationId text NULL
   ApprovedUserId: ApprovedUserId text NULL
-  AuthTime: AuthTime timestamp without time zone NULL
+  AuthTime: AuthTime timestamp without time zone NULL converter=DateTime->DateTime
   AuthenticationMethod: AuthenticationMethod character varying(50) NULL maxLength=50
   ClientApplicationId: ClientApplicationId character varying(64) NOT NULL maxLength=64
-  ConsumedAt: ConsumedAt timestamp without time zone NULL concurrency
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
-  DeniedAt: DeniedAt timestamp without time zone NULL
+  ConsumedAt: ConsumedAt timestamp without time zone NULL converter=DateTime->DateTime concurrency
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
+  DeniedAt: DeniedAt timestamp without time zone NULL converter=DateTime->DateTime
   DeviceCodeHash: DeviceCodeHash text NOT NULL
-  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL
+  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Id: Id text NOT NULL
   IpAddress: IpAddress character varying(64) NULL maxLength=64
-  LastPolledAt: LastPolledAt timestamp without time zone NULL
+  LastPolledAt: LastPolledAt timestamp without time zone NULL converter=DateTime->DateTime
   PollCount: PollCount integer NOT NULL
   PollingIntervalSeconds: PollingIntervalSeconds integer NOT NULL
   Resource: Resource character varying(2048) NULL maxLength=2048
@@ -298,15 +298,15 @@
   ChallengeTokenHash: ChallengeTokenHash character varying(128) NOT NULL maxLength=128
   ClientApplicationId: ClientApplicationId text NULL
   CodeHash: CodeHash character varying(128) NOT NULL maxLength=128
-  ConsumedAt: ConsumedAt timestamp without time zone NULL concurrency
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  ConsumedAt: ConsumedAt timestamp without time zone NULL converter=DateTime->DateTime concurrency
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Email: Email character varying(320) NOT NULL maxLength=320
-  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL
+  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Id: Id text NOT NULL
-  InvalidatedAt: InvalidatedAt timestamp without time zone NULL
+  InvalidatedAt: InvalidatedAt timestamp without time zone NULL converter=DateTime->DateTime
   InvalidatedReason: InvalidatedReason character varying(120) NULL maxLength=120
   IpAddress: IpAddress character varying(128) NULL maxLength=128
-  LastSentAt: LastSentAt timestamp without time zone NOT NULL
+  LastSentAt: LastSentAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   MaxAttempts: MaxAttempts integer NOT NULL
   NormalizedEmail: NormalizedEmail character varying(320) NOT NULL maxLength=320
   RequestedOrganizationId: RequestedOrganizationId text NULL
@@ -327,7 +327,7 @@
   INDEX IX_SqlOSEmailOtpChallenges_UserId (UserId)
 
 ## SqlOSExternalIdentity -> dbo.SqlOSExternalIdentities [excluded from migrations]
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Email: Email text NULL
   Id: Id text NOT NULL
   Issuer: Issuer text NOT NULL
@@ -345,23 +345,23 @@
   INDEX IX_SqlOSExternalIdentities_UserId (UserId)
 
 ## SqlOSInvitation -> dbo.SqlOSInvitations [excluded from migrations]
-  AcceptedAt: AcceptedAt timestamp without time zone NULL concurrency
+  AcceptedAt: AcceptedAt timestamp without time zone NULL converter=DateTime->DateTime concurrency
   AcceptedByUserId: AcceptedByUserId text NULL
   ClientApplicationId: ClientApplicationId text NULL
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   CustomFieldsJson: CustomFieldsJson text NULL
-  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL
+  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Id: Id text NOT NULL
   InvitedByUserId: InvitedByUserId text NULL
   InvitedEmail: InvitedEmail character varying(320) NOT NULL maxLength=320
   IpAddress: IpAddress character varying(128) NULL maxLength=128
   LastSendError: LastSendError character varying(500) NULL maxLength=500
-  LastSentAt: LastSentAt timestamp without time zone NULL
+  LastSentAt: LastSentAt timestamp without time zone NULL converter=DateTime->DateTime
   NormalizedEmail: NormalizedEmail character varying(320) NOT NULL maxLength=320
   OrganizationId: OrganizationId text NOT NULL
   RedirectUri: RedirectUri character varying(2048) NULL maxLength=2048
   Resource: Resource character varying(2048) NULL maxLength=2048
-  RevokedAt: RevokedAt timestamp without time zone NULL
+  RevokedAt: RevokedAt timestamp without time zone NULL converter=DateTime->DateTime
   RevokedReason: RevokedReason character varying(120) NULL maxLength=120
   Role: Role character varying(50) NOT NULL maxLength=50
   Scope: Scope character varying(1000) NULL maxLength=1000
@@ -382,11 +382,11 @@
   INDEX IX_SqlOSInvitations_TokenHash UNIQUE (TokenHash)
 
 ## SqlOSIssuerSessionFamily -> dbo.SqlOSAuthPageSessionFamilies [excluded from migrations]
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Id: Id text NOT NULL
   OrganizationId: OrganizationId character varying(64) NULL maxLength=64
   RevocationReason: RevocationReason character varying(200) NULL maxLength=200
-  RevokedAt: RevokedAt timestamp without time zone NULL concurrency
+  RevokedAt: RevokedAt timestamp without time zone NULL converter=DateTime->DateTime concurrency
   UserId: UserId text NOT NULL
   PRIMARY KEY PK_SqlOSAuthPageSessionFamilies (Id)
   FOREIGN KEY FK_SqlOSAuthPageSessionFamilies_SqlOSOrganizations_Organizatio~ (OrganizationId) -> SqlOSOrganization (Id) delete=Restrict optional
@@ -395,7 +395,7 @@
   INDEX IX_SqlOSAuthPageSessionFamilies_UserId_RevokedAt (UserId, RevokedAt)
 
 ## SqlOSMembership -> dbo.SqlOSMemberships [excluded from migrations]
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   IsActive: IsActive boolean NOT NULL
   OrganizationId: OrganizationId text NOT NULL
   Role: Role character varying(50) NOT NULL maxLength=50
@@ -408,17 +408,17 @@
 ## SqlOSMfaAttemptBucket -> dbo.SqlOSMfaAttemptBuckets [excluded from migrations]
   AttemptCount: AttemptCount integer NOT NULL
   BucketKey: BucketKey character varying(512) NOT NULL maxLength=512
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Id: Id text NOT NULL
   Scope: Scope character varying(40) NOT NULL maxLength=40
-  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
-  WindowStartedAt: WindowStartedAt timestamp without time zone NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
+  WindowStartedAt: WindowStartedAt timestamp without time zone NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSMfaAttemptBuckets (Id)
   INDEX IX_SqlOSMfaAttemptBuckets_Scope_BucketKey UNIQUE (Scope, BucketKey)
 
 ## SqlOSMfaAttemptReservation -> dbo.SqlOSMfaAttemptReservations [excluded from migrations]
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
-  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
+  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Id: Id text NOT NULL
   PRIMARY KEY PK_SqlOSMfaAttemptReservations (Id)
   INDEX IX_SqlOSMfaAttemptReservations_ExpiresAt (ExpiresAt)
@@ -434,18 +434,18 @@
 ## SqlOSMfaSettings -> dbo.SqlOSMfaSettings [excluded from migrations]
   AvailableFactorsJson: AvailableFactorsJson text NOT NULL
   ConfigurationFingerprint: ConfigurationFingerprint character varying(64) NULL maxLength=64
-  ConfigurationOrphanedAt: ConfigurationOrphanedAt timestamp without time zone NULL
+  ConfigurationOrphanedAt: ConfigurationOrphanedAt timestamp without time zone NULL converter=DateTime->DateTime
   ConfigurationOwner: ConfigurationOwner character varying(40) NOT NULL maxLength=40
   ConfigurationSourceKey: ConfigurationSourceKey character varying(160) NULL maxLength=160
   Enabled: Enabled boolean NOT NULL
   Id: Id character varying(64) NOT NULL maxLength=64
-  LastReconciledAt: LastReconciledAt timestamp without time zone NULL
+  LastReconciledAt: LastReconciledAt timestamp without time zone NULL converter=DateTime->DateTime
   RecoveryCodesEnabled: RecoveryCodesEnabled boolean NOT NULL
   RequireForAllUsers: RequireForAllUsers boolean NOT NULL
   RequireForOwnersAndAdmins: RequireForOwnersAndAdmins boolean NOT NULL
   RequiredRolesJson: RequiredRolesJson text NOT NULL
   TotpEnabled: TotpEnabled boolean NOT NULL
-  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   UserSelfEnrollmentEnabled: UserSelfEnrollmentEnabled boolean NOT NULL
   PRIMARY KEY PK_SqlOSMfaSettings (Id)
 
@@ -462,17 +462,17 @@
   ClientId: ClientId character varying(300) NOT NULL maxLength=300
   ClientSecretEncrypted: ClientSecretEncrypted text NULL
   ConfigurationFingerprint: ConfigurationFingerprint character varying(64) NULL maxLength=64
-  ConfigurationOrphanedAt: ConfigurationOrphanedAt timestamp without time zone NULL
+  ConfigurationOrphanedAt: ConfigurationOrphanedAt timestamp without time zone NULL converter=DateTime->DateTime
   ConfigurationOwner: ConfigurationOwner character varying(40) NOT NULL maxLength=40
   ConfigurationSourceKey: ConfigurationSourceKey character varying(160) NULL maxLength=160
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   DiscoveryUrl: DiscoveryUrl character varying(500) NULL maxLength=500
   DisplayName: DisplayName character varying(200) NOT NULL maxLength=200
   Id: Id text NOT NULL
   IsEnabled: IsEnabled boolean NOT NULL
   Issuer: Issuer character varying(500) NULL maxLength=500
   JwksUri: JwksUri character varying(1000) NULL maxLength=1000
-  LastReconciledAt: LastReconciledAt timestamp without time zone NULL
+  LastReconciledAt: LastReconciledAt timestamp without time zone NULL converter=DateTime->DateTime
   LogoDataUrl: LogoDataUrl text NULL
   MicrosoftTenant: MicrosoftTenant character varying(200) NULL maxLength=200
   Protocol: Protocol character varying(40) NOT NULL maxLength=40
@@ -480,7 +480,7 @@
   ScopesJson: ScopesJson text NOT NULL
   TokenEndpoint: TokenEndpoint character varying(1000) NULL maxLength=1000
   TrustUpstreamMfa: TrustUpstreamMfa boolean NOT NULL
-  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   UseDiscovery: UseDiscovery boolean NOT NULL
   UseUserInfo: UseUserInfo boolean NOT NULL
   UserInfoEndpoint: UserInfoEndpoint character varying(1000) NULL maxLength=1000
@@ -488,7 +488,7 @@
   INDEX IX_SqlOSAuthOidcConnections_ConfigurationOwner_ConfigurationSo~ UNIQUE (ConfigurationOwner, ConfigurationSourceKey) WHERE "ConfigurationSourceKey" IS NOT NULL
 
 ## SqlOSOrganization -> dbo.SqlOSOrganizations [excluded from migrations]
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Id: Id text NOT NULL
   IsActive: IsActive boolean NOT NULL
   Name: Name character varying(200) NOT NULL maxLength=200
@@ -499,18 +499,18 @@
   INDEX IX_SqlOSOrganizations_Slug UNIQUE (Slug)
 
 ## SqlOSOrganizationDomain -> dbo.SqlOSOrganizationDomains [excluded from migrations]
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   CreatedByUserId: CreatedByUserId character varying(64) NULL maxLength=64
   Domain: Domain character varying(320) NOT NULL maxLength=320
   Id: Id text NOT NULL
-  LastCheckedAt: LastCheckedAt timestamp without time zone NULL
+  LastCheckedAt: LastCheckedAt timestamp without time zone NULL converter=DateTime->DateTime
   LastError: LastError character varying(1000) NULL maxLength=1000
   OrganizationId: OrganizationId text NOT NULL
-  RevokedAt: RevokedAt timestamp without time zone NULL
+  RevokedAt: RevokedAt timestamp without time zone NULL converter=DateTime->DateTime
   Status: Status character varying(50) NOT NULL maxLength=50
-  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   VerificationToken: VerificationToken character varying(160) NULL maxLength=160
-  VerifiedAt: VerifiedAt timestamp without time zone NULL
+  VerifiedAt: VerifiedAt timestamp without time zone NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSOrganizationDomains (Id)
   FOREIGN KEY FK_SqlOSOrganizationDomains_SqlOSOrganizations_OrganizationId (OrganizationId) -> SqlOSOrganization (Id) delete=Restrict required
   INDEX IX_SqlOSOrganizationDomains_Domain_Status (Domain, Status)
@@ -525,7 +525,7 @@
   RequireMfaForAllUsers: RequireMfaForAllUsers boolean NOT NULL
   RequireMfaForOwnersAndAdmins: RequireMfaForOwnersAndAdmins boolean NOT NULL
   RequiredRolesJson: RequiredRolesJson text NOT NULL
-  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   UserSelfEnrollmentEnabled: UserSelfEnrollmentEnabled boolean NOT NULL
   PRIMARY KEY PK_SqlOSOrganizationMfaPolicies (OrganizationId)
   FOREIGN KEY FK_SqlOSOrganizationMfaPolicies_SqlOSOrganizations_Organizatio~ (OrganizationId) -> SqlOSOrganization (Id) delete=Restrict required unique
@@ -533,20 +533,20 @@
 ## SqlOSPasswordLoginBucket -> dbo.SqlOSPasswordLoginBuckets [excluded from migrations]
   BucketKey: BucketKey character varying(512) NOT NULL maxLength=512
   ClientKey: ClientKey character varying(850) NULL maxLength=850
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   FailureCount: FailureCount integer NOT NULL
   Id: Id text NOT NULL
   IpAddress: IpAddress character varying(128) NULL maxLength=128
-  LastFailureAt: LastFailureAt timestamp without time zone NULL
-  LastSuccessAt: LastSuccessAt timestamp without time zone NULL
-  LockedUntil: LockedUntil timestamp without time zone NULL
+  LastFailureAt: LastFailureAt timestamp without time zone NULL converter=DateTime->DateTime
+  LastSuccessAt: LastSuccessAt timestamp without time zone NULL converter=DateTime->DateTime
+  LockedUntil: LockedUntil timestamp without time zone NULL converter=DateTime->DateTime
   LockoutReason: LockoutReason character varying(120) NULL maxLength=120
   NormalizedEmail: NormalizedEmail character varying(320) NULL maxLength=320
   Scope: Scope character varying(40) NOT NULL maxLength=40
-  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   UserAgentHash: UserAgentHash character varying(128) NULL maxLength=128
   UserId: UserId character varying(64) NULL maxLength=64
-  WindowStartedAt: WindowStartedAt timestamp without time zone NULL
+  WindowStartedAt: WindowStartedAt timestamp without time zone NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSPasswordLoginBuckets (Id)
   FOREIGN KEY FK_SqlOSPasswordLoginBuckets_SqlOSUsers_UserId (UserId) -> SqlOSUser (Id) delete=Restrict optional
   INDEX IX_SqlOSPasswordLoginBuckets_IpAddress_UpdatedAt (IpAddress, UpdatedAt)
@@ -556,8 +556,8 @@
   INDEX IX_SqlOSPasswordLoginBuckets_UserId_UpdatedAt (UserId, UpdatedAt)
 
 ## SqlOSPasswordLoginReservation -> dbo.SqlOSPasswordLoginReservations [excluded from migrations]
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
-  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
+  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Id: Id text NOT NULL
   PRIMARY KEY PK_SqlOSPasswordLoginReservations (Id)
   INDEX IX_SqlOSPasswordLoginReservations_ExpiresAt (ExpiresAt)
@@ -575,14 +575,14 @@
   AuthorizationRequestId: AuthorizationRequestId text NULL
   ChallengeTokenHash: ChallengeTokenHash character varying(128) NOT NULL maxLength=128
   ClientApplicationId: ClientApplicationId text NULL
-  ConsumedAt: ConsumedAt timestamp without time zone NULL concurrency
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
-  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL
+  ConsumedAt: ConsumedAt timestamp without time zone NULL converter=DateTime->DateTime concurrency
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
+  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Id: Id text NOT NULL
-  InvalidatedAt: InvalidatedAt timestamp without time zone NULL
+  InvalidatedAt: InvalidatedAt timestamp without time zone NULL converter=DateTime->DateTime
   InvalidatedReason: InvalidatedReason character varying(120) NULL maxLength=120
   IpAddress: IpAddress character varying(128) NULL maxLength=128
-  LastSentAt: LastSentAt timestamp without time zone NOT NULL
+  LastSentAt: LastSentAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   MaskedPhoneNumber: MaskedPhoneNumber character varying(32) NOT NULL maxLength=32
   PhoneNumberEncrypted: PhoneNumberEncrypted character varying(2048) NOT NULL maxLength=2048
   PhoneNumberHash: PhoneNumberHash character varying(128) NOT NULL maxLength=128
@@ -610,10 +610,10 @@
 
 ## SqlOSRecoveryCode -> dbo.SqlOSRecoveryCodes [excluded from migrations]
   CodeHash: CodeHash character varying(128) NOT NULL maxLength=128
-  ConsumedAt: ConsumedAt timestamp without time zone NULL concurrency
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  ConsumedAt: ConsumedAt timestamp without time zone NULL converter=DateTime->DateTime concurrency
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Id: Id character varying(64) NOT NULL maxLength=64
-  RevokedAt: RevokedAt timestamp without time zone NULL
+  RevokedAt: RevokedAt timestamp without time zone NULL converter=DateTime->DateTime
   UserId: UserId character varying(64) NOT NULL maxLength=64
   PRIMARY KEY PK_SqlOSRecoveryCodes (Id)
   FOREIGN KEY FK_SqlOSRecoveryCodes_SqlOSUsers_UserId (UserId) -> SqlOSUser (Id) delete=Restrict required
@@ -621,16 +621,16 @@
   INDEX IX_SqlOSRecoveryCodes_UserId_ConsumedAt_RevokedAt (UserId, ConsumedAt, RevokedAt)
 
 ## SqlOSRefreshToken -> dbo.SqlOSRefreshTokens [excluded from migrations]
-  ConsumedAt: ConsumedAt timestamp without time zone NULL concurrency
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
-  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL
+  ConsumedAt: ConsumedAt timestamp without time zone NULL converter=DateTime->DateTime concurrency
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
+  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   FamilyId: FamilyId text NOT NULL
   Id: Id text NOT NULL
   ReplacedByTokenId: ReplacedByTokenId text NULL
-  ReplacementAccessTokenExpiresAt: ReplacementAccessTokenExpiresAt timestamp without time zone NULL
+  ReplacementAccessTokenExpiresAt: ReplacementAccessTokenExpiresAt timestamp without time zone NULL converter=DateTime->DateTime
   ReplacementOrganizationId: ReplacementOrganizationId text NULL
   ReplacementTokenResponse: ReplacementAccessToken text NULL
-  RevokedAt: RevokedAt timestamp without time zone NULL
+  RevokedAt: RevokedAt timestamp without time zone NULL converter=DateTime->DateTime
   SessionId: SessionId text NOT NULL
   TokenHash: TokenHash text NOT NULL
   PRIMARY KEY PK_SqlOSRefreshTokens (Id)
@@ -641,8 +641,8 @@
 ## SqlOSSamlReplay -> dbo.SqlOSSamlReplays [excluded from migrations]
   AssertionId: AssertionId character varying(450) NOT NULL maxLength=450
   ConnectionId: ConnectionId text NOT NULL
-  ConsumedAt: ConsumedAt timestamp without time zone NOT NULL
-  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL
+  ConsumedAt: ConsumedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
+  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Id: Id text NOT NULL
   ResponseId: ResponseId character varying(450) NOT NULL maxLength=450
   PRIMARY KEY PK_SqlOSSamlReplays (Id)
@@ -652,24 +652,24 @@
 
 ## SqlOSScimConnection -> dbo.SqlOSScimConnections [excluded from migrations]
   ConfigurationFingerprint: ConfigurationFingerprint character varying(64) NULL maxLength=64
-  ConfigurationOrphanedAt: ConfigurationOrphanedAt timestamp without time zone NULL
+  ConfigurationOrphanedAt: ConfigurationOrphanedAt timestamp without time zone NULL converter=DateTime->DateTime
   ConfigurationOwner: ConfigurationOwner character varying(40) NOT NULL maxLength=40
   ConfigurationSourceKey: ConfigurationSourceKey character varying(160) NULL maxLength=160
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   DisplayName: DisplayName character varying(200) NOT NULL maxLength=200
   GrantBoundaryResourceId: GrantBoundaryResourceId character varying(256) NULL maxLength=256
   Id: Id text NOT NULL
   IsEnabled: IsEnabled boolean NOT NULL
-  LastReconciledAt: LastReconciledAt timestamp without time zone NULL
-  LastSyncAt: LastSyncAt timestamp without time zone NULL
+  LastReconciledAt: LastReconciledAt timestamp without time zone NULL converter=DateTime->DateTime
+  LastSyncAt: LastSyncAt timestamp without time zone NULL converter=DateTime->DateTime
   OrganizationId: OrganizationId text NOT NULL
   SeedKey: SeedKey character varying(160) NULL maxLength=160
   Source: Source character varying(40) NOT NULL maxLength=40
   TokenHash: TokenHash character varying(128) NULL maxLength=128
-  TokenLastUsedAt: TokenLastUsedAt timestamp without time zone NULL
+  TokenLastUsedAt: TokenLastUsedAt timestamp without time zone NULL converter=DateTime->DateTime
   TokenPrefix: TokenPrefix character varying(24) NULL maxLength=24
-  TokenRotatedAt: TokenRotatedAt timestamp without time zone NULL
-  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  TokenRotatedAt: TokenRotatedAt timestamp without time zone NULL converter=DateTime->DateTime
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSScimConnections (Id)
   FOREIGN KEY FK_SqlOSScimConnections_SqlOSOrganizations_OrganizationId (OrganizationId) -> SqlOSOrganization (Id) delete=Restrict required
   INDEX IX_SqlOSScimConnections_OrganizationId_ConfigurationOwner_Conf~ UNIQUE (OrganizationId, ConfigurationOwner, ConfigurationSourceKey) WHERE "ConfigurationSourceKey" IS NOT NULL
@@ -680,8 +680,8 @@
 
 ## SqlOSScimExternalId -> dbo.SqlOSScimExternalIds [excluded from migrations]
   ConnectionId: ConnectionId text NOT NULL
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
-  DeletedAt: DeletedAt timestamp without time zone NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
+  DeletedAt: DeletedAt timestamp without time zone NULL converter=DateTime->DateTime
   DisplayName: DisplayName character varying(300) NULL maxLength=300 collation=Latin1_General_100_CI_AS
   EntityId: EntityId character varying(128) NOT NULL maxLength=128
   ExternalId: ExternalId character varying(450) NULL maxLength=450 collation=Latin1_General_100_BIN2
@@ -691,11 +691,11 @@
   GivenName: GivenName character varying(150) NULL maxLength=150
   Id: Id text NOT NULL
   IsActive: IsActive boolean NOT NULL
-  LastSyncedAt: LastSyncedAt timestamp without time zone NOT NULL
+  LastSyncedAt: LastSyncedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   OwnsUserLifecycle: OwnsUserLifecycle boolean NOT NULL
   PrimaryEmail: PrimaryEmail character varying(320) NULL maxLength=320 collation=Latin1_General_100_CI_AS
   ResourceType: ResourceType character varying(20) NOT NULL maxLength=20
-  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   UserName: UserName character varying(450) NULL maxLength=450 collation=Latin1_General_100_CI_AS
   PRIMARY KEY PK_SqlOSScimExternalIds (Id)
   FOREIGN KEY FK_SqlOSScimExternalIds_SqlOSScimConnections_ConnectionId (ConnectionId) -> SqlOSScimConnection (Id) delete=Restrict required
@@ -705,7 +705,7 @@
 
 ## SqlOSScimGroupMapping -> dbo.SqlOSScimGroupMappings [excluded from migrations]
   ConnectionId: ConnectionId text NOT NULL
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Description: Description character varying(500) NULL maxLength=500
   GroupDisplayName: GroupDisplayName character varying(300) NULL maxLength=300
   GroupExternalId: GroupExternalId character varying(450) NULL maxLength=450
@@ -718,7 +718,7 @@
   RoleKey: RoleKey character varying(120) NOT NULL maxLength=120
   Source: Source character varying(40) NOT NULL maxLength=40
   SourceKey: SourceKey character varying(300) NULL maxLength=300
-  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSScimGroupMappings (Id)
   FOREIGN KEY FK_SqlOSScimGroupMappings_SqlOSScimConnections_ConnectionId (ConnectionId) -> SqlOSScimConnection (Id) delete=Restrict required
   INDEX IX_SqlOSScimGroupMappings_ConnectionId_IsEnabled (ConnectionId, IsEnabled)
@@ -726,7 +726,7 @@
 
 ## SqlOSScimManagedGrant -> dbo.SqlOSScimManagedGrants [excluded from migrations]
   ConnectionId: ConnectionId text NOT NULL
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   FgaGroupId: FgaGroupId character varying(128) NOT NULL maxLength=128
   FgaGroupSubjectId: FgaGroupSubjectId character varying(128) NOT NULL maxLength=128
   GrantId: GrantId character varying(128) NOT NULL maxLength=128
@@ -734,7 +734,7 @@
   Id: Id text NOT NULL
   MappingId: MappingId text NOT NULL
   ResourceId: ResourceId character varying(256) NOT NULL maxLength=256
-  RevokedAt: RevokedAt timestamp without time zone NULL
+  RevokedAt: RevokedAt timestamp without time zone NULL converter=DateTime->DateTime
   RoleId: RoleId character varying(128) NOT NULL maxLength=128
   PRIMARY KEY PK_SqlOSScimManagedGrants (Id)
   FOREIGN KEY FK_SqlOSScimManagedGrants_SqlOSScimConnections_ConnectionId (ConnectionId) -> SqlOSScimConnection (Id) delete=Restrict required
@@ -745,7 +745,7 @@
 
 ## SqlOSScimOperationCommit -> dbo.SqlOSScimOperationCommits [excluded from migrations]
   Id: Id text NOT NULL
-  OccurredAt: OccurredAt timestamp without time zone NOT NULL
+  OccurredAt: OccurredAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSScimOperationCommits (Id)
   INDEX IX_SqlOSScimOperationCommits_OccurredAt (OccurredAt)
 
@@ -756,7 +756,7 @@
   Error: Error character varying(1000) NULL maxLength=1000
   ExternalId: ExternalId character varying(450) NULL maxLength=450
   Id: Id text NOT NULL
-  OccurredAt: OccurredAt timestamp without time zone NOT NULL
+  OccurredAt: OccurredAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   OrganizationId: OrganizationId text NOT NULL
   RequestId: RequestId character varying(128) NULL maxLength=128
   ResourceId: ResourceId character varying(128) NULL maxLength=128
@@ -770,34 +770,34 @@
 
 ## SqlOSScopeDisplayName -> dbo.SqlOSScopeDisplayNames [excluded from migrations]
   ConfigurationFingerprint: ConfigurationFingerprint character varying(64) NULL maxLength=64
-  ConfigurationOrphanedAt: ConfigurationOrphanedAt timestamp without time zone NULL
+  ConfigurationOrphanedAt: ConfigurationOrphanedAt timestamp without time zone NULL converter=DateTime->DateTime
   ConfigurationOwner: ConfigurationOwner character varying(40) NOT NULL maxLength=40
   ConfigurationSourceKey: ConfigurationSourceKey character varying(200) NULL maxLength=200 collation=Latin1_General_100_BIN2
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Description: Description character varying(1000) NULL maxLength=1000
   DisplayName: DisplayName character varying(200) NOT NULL maxLength=200
   Id: Id text NOT NULL
-  LastReconciledAt: LastReconciledAt timestamp without time zone NULL
+  LastReconciledAt: LastReconciledAt timestamp without time zone NULL converter=DateTime->DateTime
   Scope: Scope character varying(200) NOT NULL maxLength=200 collation=Latin1_General_100_BIN2
-  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSScopeDisplayNames (Id)
   INDEX IX_SqlOSScopeDisplayNames_Scope UNIQUE (Scope)
 
 ## SqlOSSession -> dbo.SqlOSSessions [excluded from migrations]
-  AbsoluteExpiresAt: AbsoluteExpiresAt timestamp without time zone NOT NULL
-  AuthenticatedAt: AuthenticatedAt timestamp without time zone NULL
+  AbsoluteExpiresAt: AbsoluteExpiresAt timestamp without time zone NOT NULL converter=DateTime->DateTime
+  AuthenticatedAt: AuthenticatedAt timestamp without time zone NULL converter=DateTime->DateTime
   AuthenticationMethod: AuthenticationMethod character varying(50) NULL maxLength=50
   ClientApplicationId: ClientApplicationId text NULL
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   EffectiveAudience: EffectiveAudience character varying(2048) NULL maxLength=2048
   Id: Id text NOT NULL
-  IdleExpiresAt: IdleExpiresAt timestamp without time zone NOT NULL
+  IdleExpiresAt: IdleExpiresAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   IpAddress: IpAddress text NULL
-  LastSeenAt: LastSeenAt timestamp without time zone NOT NULL
+  LastSeenAt: LastSeenAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   OrganizationId: OrganizationId character varying(64) NULL maxLength=64
   Resource: Resource character varying(2048) NULL maxLength=2048
   RevocationReason: RevocationReason text NULL
-  RevokedAt: RevokedAt timestamp without time zone NULL concurrency
+  RevokedAt: RevokedAt timestamp without time zone NULL converter=DateTime->DateTime concurrency
   Scope: Scope character varying(1000) NULL maxLength=1000
   UserAgent: UserAgent text NULL
   UserId: UserId text NOT NULL
@@ -818,11 +818,11 @@
   SigningKeyGraceWindowDays: SigningKeyGraceWindowDays integer NOT NULL
   SigningKeyRetiredCleanupDays: SigningKeyRetiredCleanupDays integer NOT NULL
   SigningKeyRotationIntervalDays: SigningKeyRotationIntervalDays integer NOT NULL
-  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSSettings (Id)
 
 ## SqlOSSigningKey -> dbo.SqlOSSigningKeys [excluded from migrations]
-  ActivatedAt: ActivatedAt timestamp without time zone NOT NULL
+  ActivatedAt: ActivatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Algorithm: Algorithm character varying(20) NOT NULL maxLength=20
   CustodyProvider: CustodyProvider character varying(120) NOT NULL maxLength=120
   Id: Id text NOT NULL
@@ -830,7 +830,7 @@
   KeyReference: KeyReference text NOT NULL
   Kid: Kid character varying(120) NOT NULL maxLength=120
   PublicKeyPem: PublicKeyPem text NOT NULL
-  RetiredAt: RetiredAt timestamp without time zone NULL
+  RetiredAt: RetiredAt timestamp without time zone NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSSigningKeys (Id)
   INDEX IX_SqlOSSigningKeys_IsActive UNIQUE (IsActive) WHERE "IsActive" = TRUE
   INDEX IX_SqlOSSigningKeys_Kid UNIQUE (Kid)
@@ -840,10 +840,10 @@
   AutoLinkByEmail: AutoLinkByEmail boolean NOT NULL
   AutoProvisionUsers: AutoProvisionUsers boolean NOT NULL
   ConfigurationFingerprint: ConfigurationFingerprint character varying(64) NULL maxLength=64
-  ConfigurationOrphanedAt: ConfigurationOrphanedAt timestamp without time zone NULL
+  ConfigurationOrphanedAt: ConfigurationOrphanedAt timestamp without time zone NULL converter=DateTime->DateTime
   ConfigurationOwner: ConfigurationOwner character varying(40) NOT NULL maxLength=40
   ConfigurationSourceKey: ConfigurationSourceKey character varying(160) NULL maxLength=160
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   DisplayName: DisplayName character varying(200) NOT NULL maxLength=200
   EmailAttributeName: EmailAttributeName text NOT NULL
   FirstNameAttributeName: FirstNameAttributeName text NOT NULL
@@ -851,12 +851,12 @@
   IdentityProviderEntityId: IdentityProviderEntityId character varying(500) NOT NULL maxLength=500
   IsEnabled: IsEnabled boolean NOT NULL
   LastNameAttributeName: LastNameAttributeName text NOT NULL
-  LastReconciledAt: LastReconciledAt timestamp without time zone NULL
+  LastReconciledAt: LastReconciledAt timestamp without time zone NULL converter=DateTime->DateTime
   NameIdFormat: NameIdFormat text NULL
   OrganizationId: OrganizationId text NOT NULL
   SingleSignOnUrl: SingleSignOnUrl character varying(2000) NOT NULL maxLength=2000
   TrustUpstreamMfa: TrustUpstreamMfa boolean NOT NULL
-  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   X509CertificatePem: X509CertificatePem text NOT NULL
   PRIMARY KEY PK_SqlOSSsoConnections (Id)
   FOREIGN KEY FK_SqlOSSsoConnections_SqlOSOrganizations_OrganizationId (OrganizationId) -> SqlOSOrganization (Id) delete=Restrict required
@@ -866,21 +866,21 @@
 ## SqlOSSsoPortalSession -> dbo.SqlOSSsoPortalSessions [excluded from migrations]
   ActorType: ActorType character varying(80) NOT NULL maxLength=80
   ConnectionId: ConnectionId text NULL
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   CreatedByUserId: CreatedByUserId text NULL
-  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL
+  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Id: Id text NOT NULL
   IpAddress: IpAddress character varying(128) NULL maxLength=128
-  LastSeenAt: LastSeenAt timestamp without time zone NULL
+  LastSeenAt: LastSeenAt timestamp without time zone NULL converter=DateTime->DateTime
   LastTestMessage: LastTestMessage character varying(500) NULL maxLength=500
   LastTestStatus: LastTestStatus character varying(40) NULL maxLength=40
-  LastTestedAt: LastTestedAt timestamp without time zone NULL
+  LastTestedAt: LastTestedAt timestamp without time zone NULL converter=DateTime->DateTime
   LinkTokenHash: LinkTokenHash text NOT NULL
-  OpenedAt: OpenedAt timestamp without time zone NULL
+  OpenedAt: OpenedAt timestamp without time zone NULL converter=DateTime->DateTime
   OrganizationId: OrganizationId text NOT NULL
   Provider: Provider character varying(40) NULL maxLength=40
   ReturnUrl: ReturnUrl character varying(1000) NULL maxLength=1000
-  RevokedAt: RevokedAt timestamp without time zone NULL
+  RevokedAt: RevokedAt timestamp without time zone NULL converter=DateTime->DateTime
   RevokedReason: RevokedReason character varying(160) NULL maxLength=160
   SessionTokenHash: SessionTokenHash text NULL
   UserAgent: UserAgent character varying(512) NULL maxLength=512
@@ -895,9 +895,9 @@
 
 ## SqlOSTemporaryToken -> dbo.SqlOSTemporaryTokens [excluded from migrations]
   ClientApplicationId: ClientApplicationId text NULL
-  ConsumedAt: ConsumedAt timestamp without time zone NULL concurrency
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
-  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL
+  ConsumedAt: ConsumedAt timestamp without time zone NULL converter=DateTime->DateTime concurrency
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
+  ExpiresAt: ExpiresAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Id: Id text NOT NULL
   IssuerSessionFamilyId: AuthPageSessionFamilyId character varying(64) NULL maxLength=64
   OrganizationId: OrganizationId text NULL
@@ -911,27 +911,27 @@
   INDEX IX_SqlOSTemporaryTokens_TokenHash UNIQUE (TokenHash)
 
 ## SqlOSUser -> dbo.SqlOSUsers [excluded from migrations]
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   DefaultEmail: DefaultEmail character varying(320) NULL maxLength=320
   DisplayName: DisplayName character varying(200) NOT NULL maxLength=200
   Id: Id text NOT NULL
   IsActive: IsActive boolean NOT NULL
-  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSUsers (Id)
 
 ## SqlOSUserAuthenticator -> dbo.SqlOSUserAuthenticators [excluded from migrations]
   Algorithm: Algorithm character varying(20) NOT NULL maxLength=20
-  ConfirmedAt: ConfirmedAt timestamp without time zone NULL
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  ConfirmedAt: ConfirmedAt timestamp without time zone NULL converter=DateTime->DateTime
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Digits: Digits integer NOT NULL
   DisplayName: DisplayName character varying(120) NOT NULL maxLength=120
   Id: Id character varying(64) NOT NULL maxLength=64
   IsConfirmed: IsConfirmed boolean NOT NULL
   LastAcceptedTimeStep: LastAcceptedTimeStep bigint NULL concurrency
-  LastUsedAt: LastUsedAt timestamp without time zone NULL
+  LastUsedAt: LastUsedAt timestamp without time zone NULL converter=DateTime->DateTime
   PeriodSeconds: PeriodSeconds integer NOT NULL
   RevocationReason: RevocationReason character varying(120) NULL maxLength=120
-  RevokedAt: RevokedAt timestamp without time zone NULL
+  RevokedAt: RevokedAt timestamp without time zone NULL converter=DateTime->DateTime
   SecretProtected: SecretProtected character varying(2048) NOT NULL maxLength=2048
   SecretVersion: SecretVersion integer NOT NULL
   Type: Type character varying(40) NOT NULL maxLength=40
@@ -942,14 +942,14 @@
   INDEX IX_SqlOSUserAuthenticators_UserId_Type_RevokedAt (UserId, Type, RevokedAt)
 
 ## SqlOSUserEmail -> dbo.SqlOSUserEmails [excluded from migrations]
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Email: Email character varying(320) NOT NULL maxLength=320
   Id: Id text NOT NULL
   IsPrimary: IsPrimary boolean NOT NULL
   IsVerified: IsVerified boolean NOT NULL
   NormalizedEmail: NormalizedEmail character varying(320) NOT NULL maxLength=320
   UserId: UserId text NOT NULL
-  VerifiedAt: VerifiedAt timestamp without time zone NULL
+  VerifiedAt: VerifiedAt timestamp without time zone NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSUserEmails (Id)
   FOREIGN KEY FK_SqlOSUserEmails_SqlOSUsers_UserId (UserId) -> SqlOSUser (Id) delete=Restrict required
   INDEX IX_SqlOSUserEmails_NormalizedEmail UNIQUE (NormalizedEmail)
@@ -957,26 +957,26 @@
 
 ## SqlOSUserMfaPolicyOverride -> dbo.SqlOSUserMfaPolicyOverrides [excluded from migrations]
   RequireMfa: RequireMfa boolean NULL
-  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   UserId: UserId character varying(64) NOT NULL maxLength=64
   UserSelfEnrollmentEnabled: UserSelfEnrollmentEnabled boolean NULL
   PRIMARY KEY PK_SqlOSUserMfaPolicyOverrides (UserId)
   FOREIGN KEY FK_SqlOSUserMfaPolicyOverrides_SqlOSUsers_UserId (UserId) -> SqlOSUser (Id) delete=Restrict required unique
 
 ## SqlOSUserPhoneNumber -> dbo.SqlOSUserPhoneNumbers [excluded from migrations]
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   DisplayValueEncrypted: DisplayValueEncrypted character varying(2048) NULL maxLength=2048
   Id: Id text NOT NULL
   IsPrimary: IsPrimary boolean NOT NULL
   IsVerified: IsVerified boolean NOT NULL
-  LastUsedAt: LastUsedAt timestamp without time zone NULL
+  LastUsedAt: LastUsedAt timestamp without time zone NULL converter=DateTime->DateTime
   PhoneNumber: PhoneNumber character varying(32) NOT NULL maxLength=32
   PhoneNumberHash: PhoneNumberHash character varying(128) NOT NULL maxLength=128
   RemovalReason: RemovalReason character varying(120) NULL maxLength=120
-  RemovedAt: RemovedAt timestamp without time zone NULL
-  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  RemovedAt: RemovedAt timestamp without time zone NULL converter=DateTime->DateTime
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   UserId: UserId text NOT NULL
-  VerifiedAt: VerifiedAt timestamp without time zone NULL
+  VerifiedAt: VerifiedAt timestamp without time zone NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSUserPhoneNumbers (Id)
   FOREIGN KEY FK_SqlOSUserPhoneNumbers_SqlOSUsers_UserId (UserId) -> SqlOSUser (Id) delete=Restrict required
   INDEX IX_SqlOSUserPhoneNumbers_PhoneNumberHash UNIQUE (PhoneNumberHash) WHERE "RemovedAt" IS NULL
@@ -984,13 +984,13 @@
 
 ## SqlOSCalendarConnection -> dbo.SqlOSCalendarConnections [excluded from migrations]
   AccessTokenEncrypted: AccessTokenEncrypted text NULL
-  AccessTokenExpiresAt: AccessTokenExpiresAt timestamp without time zone NULL
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  AccessTokenExpiresAt: AccessTokenExpiresAt timestamp without time zone NULL converter=DateTime->DateTime
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   DisplayName: DisplayName character varying(200) NOT NULL maxLength=200
   Id: Id character varying(64) NOT NULL maxLength=64
   LastError: LastError character varying(1000) NULL maxLength=1000
-  LastErrorAt: LastErrorAt timestamp without time zone NULL
-  LastSyncAt: LastSyncAt timestamp without time zone NULL
+  LastErrorAt: LastErrorAt timestamp without time zone NULL converter=DateTime->DateTime
+  LastSyncAt: LastSyncAt timestamp without time zone NULL converter=DateTime->DateTime
   Mode: Mode character varying(40) NOT NULL maxLength=40
   OidcConnectionId: OidcConnectionId character varying(64) NOT NULL maxLength=64
   OrganizationId: OrganizationId character varying(64) NULL maxLength=64
@@ -998,11 +998,11 @@
   ProviderAccountSubject: ProviderAccountSubject character varying(256) NULL maxLength=256
   ProviderType: ProviderType character varying(40) NOT NULL maxLength=40
   RefreshTokenEncrypted: RefreshTokenEncrypted text NULL
-  RevokedAt: RevokedAt timestamp without time zone NULL concurrency
+  RevokedAt: RevokedAt timestamp without time zone NULL converter=DateTime->DateTime concurrency
   RevokedReason: RevokedReason character varying(160) NULL maxLength=160
   ScopesJson: ScopesJson text NOT NULL
   Status: Status character varying(40) NOT NULL maxLength=40
-  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   UserId: UserId character varying(64) NULL maxLength=64
   PRIMARY KEY PK_SqlOSCalendarConnections (Id)
   FOREIGN KEY FK_SqlOSCalendarConnections_SqlOSAuthOidcConnections_OidcConne~ (OidcConnectionId) -> SqlOSOidcConnection (Id) delete=Restrict required
@@ -1015,8 +1015,8 @@
 
 ## SqlOSCalendarEvent -> dbo.SqlOSCalendarEvents [excluded from migrations]
   CalendarConnectionId: CalendarConnectionId character varying(64) NOT NULL maxLength=64
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
-  EndsAtUtc: EndsAtUtc timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
+  EndsAtUtc: EndsAtUtc timestamp without time zone NOT NULL converter=DateTime->DateTime
   Id: Id character varying(64) NOT NULL maxLength=64
   IsAllDay: IsAllDay boolean NOT NULL
   Location: Location character varying(500) NULL maxLength=500
@@ -1024,10 +1024,10 @@
   ProviderCalendarId: ProviderCalendarId character varying(256) NOT NULL maxLength=256
   ProviderEventId: ProviderEventId character varying(512) NOT NULL maxLength=512
   ShowAs: ShowAs character varying(20) NOT NULL maxLength=20
-  StartsAtUtc: StartsAtUtc timestamp without time zone NOT NULL
+  StartsAtUtc: StartsAtUtc timestamp without time zone NOT NULL converter=DateTime->DateTime
   Status: Status character varying(20) NOT NULL maxLength=20
   Subject: Subject character varying(500) NULL maxLength=500
-  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSCalendarEvents (Id)
   FOREIGN KEY FK_SqlOSCalendarEvents_SqlOSCalendarConnections_CalendarConnec~ (CalendarConnectionId) -> SqlOSCalendarConnection (Id) delete=Cascade required
   INDEX IX_SqlOSCalendarEvents_CalendarConnectionId_StartsAtUtc (CalendarConnectionId, StartsAtUtc)
@@ -1035,25 +1035,25 @@
 
 ## SqlOSCalendarSyncState -> dbo.SqlOSCalendarSyncStates [excluded from migrations]
   CalendarConnectionId: CalendarConnectionId character varying(64) NOT NULL maxLength=64
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   DisplayName: DisplayName character varying(200) NULL maxLength=200
   EventCount: EventCount integer NOT NULL
   Id: Id character varying(64) NOT NULL maxLength=64
   IsSyncEnabled: IsSyncEnabled boolean NOT NULL
-  LastSyncCompletedAt: LastSyncCompletedAt timestamp without time zone NULL
+  LastSyncCompletedAt: LastSyncCompletedAt timestamp without time zone NULL converter=DateTime->DateTime
   LastSyncError: LastSyncError character varying(1000) NULL maxLength=1000
-  LastSyncStartedAt: LastSyncStartedAt timestamp without time zone NULL
+  LastSyncStartedAt: LastSyncStartedAt timestamp without time zone NULL converter=DateTime->DateTime
   LastSyncStatus: LastSyncStatus character varying(40) NULL maxLength=40
   ProviderCalendarId: ProviderCalendarId character varying(256) NOT NULL maxLength=256
   SyncCursor: SyncCursor text NULL
-  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSCalendarSyncStates (Id)
   FOREIGN KEY FK_SqlOSCalendarSyncStates_SqlOSCalendarConnections_CalendarCo~ (CalendarConnectionId) -> SqlOSCalendarConnection (Id) delete=Cascade required
   INDEX IX_SqlOSCalendarSyncStates_CalendarConnectionId_ProviderCalend~ UNIQUE (CalendarConnectionId, ProviderCalendarId)
 
 ## SqlOSEmailDelivery -> dbo.SqlOSEmailDeliveries [excluded from migrations]
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
-  FailedAt: FailedAt timestamp without time zone NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
+  FailedAt: FailedAt timestamp without time zone NULL converter=DateTime->DateTime
   Id: Id character varying(64) NOT NULL maxLength=64
   IdempotencyKey: IdempotencyKey character varying(200) NULL maxLength=200
   ProviderMessageId: ProviderMessageId character varying(200) NULL maxLength=200
@@ -1061,13 +1061,13 @@
   RenderedSubject: RenderedSubject character varying(500) NOT NULL maxLength=500
   RenderedTextPreview: RenderedTextPreview text NOT NULL
   SanitizedError: SanitizedError character varying(500) NULL maxLength=500
-  SentAt: SentAt timestamp without time zone NULL
+  SentAt: SentAt timestamp without time zone NULL converter=DateTime->DateTime
   Status: Status character varying(32) NOT NULL maxLength=32
   TemplateId: TemplateId character varying(64) NULL maxLength=64
   TemplateKey: TemplateKey character varying(120) NOT NULL maxLength=120
   TemplateVersion: TemplateVersion integer NOT NULL
   To: To character varying(320) NOT NULL maxLength=320
-  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSEmailDeliveries (Id)
   FOREIGN KEY FK_SqlOSEmailDeliveries_SqlOSEmailTemplates_TemplateId (TemplateId) -> SqlOSEmailTemplate (Id) delete=SetNull optional
   INDEX IX_SqlOSEmailDeliveries_CreatedAt (CreatedAt)
@@ -1078,7 +1078,7 @@
   INDEX IX_SqlOSEmailDeliveries_To_CreatedAt (To, CreatedAt)
 
 ## SqlOSEmailTemplate -> dbo.SqlOSEmailTemplates [excluded from migrations]
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   DisplayName: DisplayName character varying(200) NOT NULL maxLength=200
   HtmlBodyTemplate: HtmlBodyTemplate text NOT NULL
   Id: Id character varying(64) NOT NULL maxLength=64
@@ -1086,7 +1086,7 @@
   Key: Key character varying(120) NOT NULL maxLength=120
   SubjectTemplate: SubjectTemplate character varying(500) NOT NULL maxLength=500
   TextBodyTemplate: TextBodyTemplate text NOT NULL
-  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   VariablesJson: VariablesJson text NOT NULL
   Version: Version integer NOT NULL
   PRIMARY KEY PK_SqlOSEmailTemplates (Id)
@@ -1097,26 +1097,26 @@
 
 ## SqlOSFgaAgent -> dbo.SqlOSFgaAgents [excluded from migrations]
   AgentType: AgentType text NULL
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Description: Description text NULL
   Id: Id text NOT NULL
-  LastRunAt: LastRunAt timestamp without time zone NULL
+  LastRunAt: LastRunAt timestamp without time zone NULL converter=DateTime->DateTime
   SubjectId: SubjectId text NOT NULL
-  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSFgaAgents (Id)
   FOREIGN KEY FK_SqlOSFgaAgents_SqlOSFgaSubjects_SubjectId (SubjectId) -> SqlOSFgaSubject (Id) delete=Restrict required unique
   INDEX IX_SqlOSFgaAgents_SubjectId UNIQUE (SubjectId)
 
 ## SqlOSFgaGrant -> dbo.SqlOSFgaGrants [excluded from migrations]
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Description: Description text NULL
-  EffectiveFrom: EffectiveFrom timestamp without time zone NULL
-  EffectiveTo: EffectiveTo timestamp without time zone NULL
+  EffectiveFrom: EffectiveFrom timestamp without time zone NULL converter=DateTime->DateTime
+  EffectiveTo: EffectiveTo timestamp without time zone NULL converter=DateTime->DateTime
   Id: Id text NOT NULL
   ResourceId: ResourceId text NOT NULL
   RoleId: RoleId text NOT NULL
   SubjectId: SubjectId text NOT NULL
-  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSFgaGrants (Id)
   FOREIGN KEY FK_SqlOSFgaGrants_SqlOSFgaResources_ResourceId (ResourceId) -> SqlOSFgaResource (Id) delete=Restrict required
   FOREIGN KEY FK_SqlOSFgaGrants_SqlOSFgaRoles_RoleId (RoleId) -> SqlOSFgaRole (Id) delete=Restrict required
@@ -1137,14 +1137,14 @@
   INDEX IX_SqlOSFgaPermissions_ResourceTypeId (ResourceTypeId)
 
 ## SqlOSFgaResource -> dbo.SqlOSFgaResources [excluded from migrations]
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Description: Description text NULL
   Id: Id text NOT NULL
   IsActive: IsActive boolean NOT NULL
   Name: Name text NOT NULL
   ParentId: ParentId text NULL
   ResourceTypeId: ResourceTypeId text NOT NULL
-  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSFgaResources (Id)
   FOREIGN KEY FK_SqlOSFgaResources_SqlOSFgaResourceTypes_ResourceTypeId (ResourceTypeId) -> SqlOSFgaResourceType (Id) delete=Restrict required
   FOREIGN KEY FK_SqlOSFgaResources_SqlOSFgaResources_ParentId (ParentId) -> SqlOSFgaResource (Id) delete=Restrict optional
@@ -1177,17 +1177,17 @@
   ClientId: ClientId character varying(450) NOT NULL maxLength=450
   ClientSecretHash: ClientSecretHash text NOT NULL
   ConfigurationFingerprint: ConfigurationFingerprint character varying(128) NULL maxLength=128
-  ConfigurationOrphanedAt: ConfigurationOrphanedAt timestamp without time zone NULL
+  ConfigurationOrphanedAt: ConfigurationOrphanedAt timestamp without time zone NULL converter=DateTime->DateTime
   ConfigurationOwner: ConfigurationOwner character varying(32) NOT NULL maxLength=32
   ConfigurationSourceKey: ConfigurationSourceKey character varying(200) NULL maxLength=200
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Description: Description text NULL
-  ExpiresAt: ExpiresAt timestamp without time zone NULL
+  ExpiresAt: ExpiresAt timestamp without time zone NULL converter=DateTime->DateTime
   Id: Id text NOT NULL
-  LastReconciledAt: LastReconciledAt timestamp without time zone NULL
-  LastUsedAt: LastUsedAt timestamp without time zone NULL
+  LastReconciledAt: LastReconciledAt timestamp without time zone NULL converter=DateTime->DateTime
+  LastUsedAt: LastUsedAt timestamp without time zone NULL converter=DateTime->DateTime
   SubjectId: SubjectId text NOT NULL
-  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSFgaServiceAccounts (Id)
   FOREIGN KEY FK_SqlOSFgaServiceAccounts_SqlOSFgaSubjects_SubjectId (SubjectId) -> SqlOSFgaSubject (Id) delete=Restrict required unique
   INDEX IX_SqlOSFgaServiceAccounts_ClientId UNIQUE (ClientId)
@@ -1195,13 +1195,13 @@
   INDEX IX_SqlOSFgaServiceAccounts_SubjectId UNIQUE (SubjectId)
 
 ## SqlOSFgaSubject -> dbo.SqlOSFgaSubjects [excluded from migrations]
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   DisplayName: DisplayName text NOT NULL
   ExternalRef: ExternalRef text NULL
   Id: Id text NOT NULL
   OrganizationId: OrganizationId text NULL
   SubjectTypeId: SubjectTypeId text NOT NULL
-  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSFgaSubjects (Id)
   FOREIGN KEY FK_SqlOSFgaSubjects_SqlOSFgaSubjectTypes_SubjectTypeId (SubjectTypeId) -> SqlOSFgaSubjectType (Id) delete=Restrict required
   INDEX IX_SqlOSFgaSubjects_SubjectTypeId (SubjectTypeId)
@@ -1213,32 +1213,32 @@
   PRIMARY KEY PK_SqlOSFgaSubjectTypes (Id)
 
 ## SqlOSFgaUser -> dbo.SqlOSFgaUsers [excluded from migrations]
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Email: Email text NULL
   Id: Id text NOT NULL
   IsActive: IsActive boolean NOT NULL
-  LastLoginAt: LastLoginAt timestamp without time zone NULL
+  LastLoginAt: LastLoginAt timestamp without time zone NULL converter=DateTime->DateTime
   SubjectId: SubjectId text NOT NULL
-  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSFgaUsers (Id)
   FOREIGN KEY FK_SqlOSFgaUsers_SqlOSFgaSubjects_SubjectId (SubjectId) -> SqlOSFgaSubject (Id) delete=Restrict required unique
   INDEX IX_SqlOSFgaUsers_SubjectId UNIQUE (SubjectId)
 
 ## SqlOSFgaUserGroup -> dbo.SqlOSFgaUserGroups [excluded from migrations]
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   Description: Description text NULL
   GroupType: GroupType text NULL
   Id: Id text NOT NULL
   IsActive: IsActive boolean NOT NULL
   Name: Name text NOT NULL
   SubjectId: SubjectId text NOT NULL
-  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL
+  UpdatedAt: UpdatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   PRIMARY KEY PK_SqlOSFgaUserGroups (Id)
   FOREIGN KEY FK_SqlOSFgaUserGroups_SqlOSFgaSubjects_SubjectId (SubjectId) -> SqlOSFgaSubject (Id) delete=Restrict required unique
   INDEX IX_SqlOSFgaUserGroups_SubjectId UNIQUE (SubjectId)
 
 ## SqlOSFgaUserGroupMembership -> dbo.SqlOSFgaUserGroupMemberships [excluded from migrations]
-  CreatedAt: CreatedAt timestamp without time zone NOT NULL
+  CreatedAt: CreatedAt timestamp without time zone NOT NULL converter=DateTime->DateTime
   SubjectId: SubjectId text NOT NULL
   UserGroupId: UserGroupId text NOT NULL
   PRIMARY KEY PK_SqlOSFgaUserGroupMemberships (SubjectId, UserGroupId)

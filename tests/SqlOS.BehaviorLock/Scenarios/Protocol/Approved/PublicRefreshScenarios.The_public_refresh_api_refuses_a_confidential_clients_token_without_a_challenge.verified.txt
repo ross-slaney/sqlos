@@ -35,13 +35,13 @@ profile: multi-app
       "correlationId": null,
       "eventType": "oauth.client_authentication.failed",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "clientId": "atlas-confidential",
         "grantType": "refresh_token"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": "{ses#1}",
@@ -86,13 +86,13 @@ profile: multi-app
       "correlationId": null,
       "eventType": "oauth.client_authentication.failed",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "clientId": "atlas-confidential",
         "grantType": "refresh_token"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": "{ses#1}",

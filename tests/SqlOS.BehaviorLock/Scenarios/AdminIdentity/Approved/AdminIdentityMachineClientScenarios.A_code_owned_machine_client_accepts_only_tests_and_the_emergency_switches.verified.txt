@@ -28,7 +28,7 @@ profile: multi-app
             "configurationFingerprint": "{hex#1}",
             "isEditable": false,
             "isOrphaned": false,
-            "lastReconciledAt": "{datetime:unspecified}",
+            "lastReconciledAt": "{datetime:utc-z}",
             "owner": "code",
             "sourceKey": "atlas-worker"
           },
@@ -162,14 +162,14 @@ profile: multi-app
       "emergencyDisabled": true,
       "expiresAt": null,
       "grantCount": 0,
-      "lastUsedAt": "{datetime:unspecified}",
+      "lastUsedAt": "{datetime:utc-z}",
       "organizationId": null,
       "ownership": {
         "canEmergencyDisable": true,
         "configurationFingerprint": "{hex#1}",
         "isEditable": false,
         "isOrphaned": false,
-        "lastReconciledAt": "{datetime:unspecified}",
+        "lastReconciledAt": "{datetime:utc-z}",
         "owner": "code",
         "sourceKey": "atlas-worker"
       },
@@ -215,14 +215,14 @@ profile: multi-app
       "emergencyDisabled": false,
       "expiresAt": null,
       "grantCount": 0,
-      "lastUsedAt": "{datetime:unspecified}",
+      "lastUsedAt": "{datetime:utc-z}",
       "organizationId": null,
       "ownership": {
         "canEmergencyDisable": true,
         "configurationFingerprint": "{hex#1}",
         "isEditable": false,
         "isOrphaned": false,
-        "lastReconciledAt": "{datetime:unspecified}",
+        "lastReconciledAt": "{datetime:utc-z}",
         "owner": "code",
         "sourceKey": "atlas-worker"
       },
@@ -270,7 +270,7 @@ profile: multi-app
       "correlationId": null,
       "eventType": "machine_client.credential_test_succeeded",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "clientId": "atlas-worker",
@@ -279,7 +279,7 @@ profile: multi-app
           "workspace.read"
         ]
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -307,12 +307,12 @@ profile: multi-app
       "correlationId": null,
       "eventType": "oauth.client_authentication.succeeded",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "clientId": "atlas-worker"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -340,13 +340,13 @@ profile: multi-app
       "correlationId": null,
       "eventType": "oauth.client_credentials.issued",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "clientId": "atlas-worker",
         "subjectId": "{sub#1}"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -374,14 +374,14 @@ profile: multi-app
       "correlationId": null,
       "eventType": "machine_client.emergency_disabled",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "clientId": "atlas-worker",
         "reason": "machine_client_emergency_disabled",
         "subjectId": "{sub#1}"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -409,12 +409,12 @@ profile: multi-app
       "correlationId": null,
       "eventType": "oauth.client_authentication.failed",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "clientId": "atlas-worker"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -442,13 +442,13 @@ profile: multi-app
       "correlationId": null,
       "eventType": "machine_client.emergency_enabled",
       "id": "{evt#6}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "clientId": "atlas-worker",
         "subjectId": "{sub#1}"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -476,12 +476,12 @@ profile: multi-app
       "correlationId": null,
       "eventType": "oauth.client_authentication.succeeded",
       "id": "{evt#7}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "clientId": "atlas-worker"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -509,13 +509,13 @@ profile: multi-app
       "correlationId": null,
       "eventType": "oauth.client_credentials.issued",
       "id": "{evt#8}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "clientId": "atlas-worker",
         "subjectId": "{sub#1}"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

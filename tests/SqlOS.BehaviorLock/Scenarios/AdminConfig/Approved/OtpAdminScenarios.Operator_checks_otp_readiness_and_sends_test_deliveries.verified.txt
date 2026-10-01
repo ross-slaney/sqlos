@@ -152,7 +152,7 @@ profile: hosted
           "action": "otp.admin_test.succeeded",
           "maskedDestination": "***0149",
           "method": "phone",
-          "occurredAt": "{datetime:unspecified}",
+          "occurredAt": "{datetime:utc-z}",
           "provider": "twilio_verify",
           "providerStatus": "pending"
         },
@@ -160,7 +160,7 @@ profile: hosted
           "action": "otp.admin_test.succeeded",
           "maskedDestination": "o***@example.test",
           "method": "email",
-          "occurredAt": "{datetime:unspecified}",
+          "occurredAt": "{datetime:utc-z}",
           "provider": "azure_communication_services",
           "providerStatus": null
         }
@@ -187,7 +187,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "otp.admin_test.succeeded",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "maskedDestination": "o***@example.test",
@@ -195,7 +195,7 @@ profile: hosted
         "provider": "azure_communication_services",
         "providerStatus": null
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -223,7 +223,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "otp.admin_test.succeeded",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "maskedDestination": "***0149",
@@ -231,7 +231,7 @@ profile: hosted
         "provider": "twilio_verify",
         "providerStatus": "pending"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

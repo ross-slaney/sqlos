@@ -228,7 +228,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "email.send.queued",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "deliveryId": "{edl#1}",
@@ -236,7 +236,7 @@ profile: hosted
         "templateKey": "auth.email-otp",
         "templateVersion": 1
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -264,7 +264,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "email_otp.challenge_started",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "details": {
@@ -276,7 +276,7 @@ profile: hosted
         "maskedEmail": "er***@example.test",
         "purpose": "signup"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -304,7 +304,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "email_otp.verify_succeeded",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "details": {
@@ -315,7 +315,7 @@ profile: hosted
         "maskedEmail": "er***@example.test",
         "purpose": "signup"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -333,7 +333,7 @@ profile: hosted
     {
       "data": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "isActive": true,
           "organization": "Erin's Studio",
           "organizationId": "{org#1}",

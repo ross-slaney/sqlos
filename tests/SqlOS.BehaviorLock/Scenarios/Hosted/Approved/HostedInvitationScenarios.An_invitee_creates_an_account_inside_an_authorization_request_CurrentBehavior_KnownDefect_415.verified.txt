@@ -250,7 +250,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "invitation.accepted",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "Id": "{inv#1}",
@@ -261,7 +261,7 @@ profile: hosted
         "membershipReactivated": false,
         "membershipRole": "member"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -277,7 +277,7 @@ profile: hosted
 < 200 OK
 < Content-Type: application/json; charset=utf-8
     {
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "defaultEmail": "{email:carol}",
       "displayName": "Carol",
       "externalIdentityCount": 0,
@@ -285,5 +285,5 @@ profile: hosted
       "isActive": true,
       "membershipCount": 1,
       "sessionCount": 1,
-      "updatedAt": "{datetime:unspecified}"
+      "updatedAt": "{datetime:utc-z}"
     }

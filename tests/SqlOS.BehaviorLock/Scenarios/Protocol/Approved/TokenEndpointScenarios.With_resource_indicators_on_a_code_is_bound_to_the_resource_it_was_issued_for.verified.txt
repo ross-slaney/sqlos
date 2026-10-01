@@ -39,7 +39,7 @@ profile: mcp
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -49,7 +49,7 @@ profile: mcp
         "publicMessage": "The authorization grant is invalid or expired.",
         "surface": "OAuthToken"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -97,7 +97,7 @@ profile: mcp
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -107,7 +107,7 @@ profile: mcp
         "publicMessage": "The authorization grant is invalid or expired.",
         "surface": "OAuthToken"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -221,7 +221,7 @@ profile: mcp
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -231,7 +231,7 @@ profile: mcp
         "publicMessage": "The authorization grant is invalid or expired.",
         "surface": "OAuthToken"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -344,7 +344,7 @@ profile: mcp
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -354,7 +354,7 @@ profile: mcp
         "publicMessage": "The authorization grant is invalid or expired.",
         "surface": "OAuthToken"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

@@ -31,7 +31,7 @@ profile: dashboard-callback
         "admin"
       ],
       "totpEnabled": true,
-      "updatedAt": "{datetime:unspecified}",
+      "updatedAt": "{datetime:utc-z}",
       "userSelfEnrollmentEnabled": true
     }
 
@@ -205,7 +205,7 @@ profile: dashboard-callback
         "admin"
       ],
       "totpEnabled": true,
-      "updatedAt": "{datetime:unspecified}",
+      "updatedAt": "{datetime:utc-z}",
       "userSelfEnrollmentEnabled": false
     }
 

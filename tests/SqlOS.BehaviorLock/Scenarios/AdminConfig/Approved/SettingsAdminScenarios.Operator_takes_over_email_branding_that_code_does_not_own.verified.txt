@@ -23,7 +23,7 @@ profile: legacy-host
         "sourceKey": null
       },
       "primaryColor": "#2563eb",
-      "updatedAt": "{datetime:unspecified}"
+      "updatedAt": "{datetime:utc-z}"
     }
 
 ## 2. operator: a value that is not a CSS color is rejected
@@ -157,7 +157,7 @@ profile: legacy-host
         "configurationFingerprint": "{hex#1}",
         "isEditable": false,
         "isOrphaned": false,
-        "lastReconciledAt": "{datetime:unspecified}",
+        "lastReconciledAt": "{datetime:utc-z}",
         "owner": "code",
         "sourceKey": "auth-page:default"
       },
@@ -165,7 +165,7 @@ profile: legacy-host
       "pageTitle": "Sign in",
       "phoneOtpRuntimeConfigured": false,
       "primaryColor": "#2563eb",
-      "updatedAt": "{datetime:unspecified}"
+      "updatedAt": "{datetime:utc-z}"
     }
 
 ## 7. operator: so the dashboard cannot edit it

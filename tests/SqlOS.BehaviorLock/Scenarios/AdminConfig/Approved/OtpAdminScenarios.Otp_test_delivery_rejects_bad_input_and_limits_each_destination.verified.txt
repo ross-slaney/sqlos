@@ -165,7 +165,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "otp.admin_test.succeeded",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "maskedDestination": "l***@example.test",
@@ -173,7 +173,7 @@ profile: hosted
         "provider": "azure_communication_services",
         "providerStatus": null
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -201,7 +201,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "otp.admin_test.succeeded",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "maskedDestination": "l***@example.test",
@@ -209,7 +209,7 @@ profile: hosted
         "provider": "azure_communication_services",
         "providerStatus": null
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -237,7 +237,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "otp.admin_test.succeeded",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "maskedDestination": "l***@example.test",
@@ -245,7 +245,7 @@ profile: hosted
         "provider": "azure_communication_services",
         "providerStatus": null
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -273,7 +273,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "otp.admin_test.rate_limited",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "maskedDestination": "l***@example.test",
@@ -281,7 +281,7 @@ profile: hosted
         "provider": null,
         "providerStatus": null
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

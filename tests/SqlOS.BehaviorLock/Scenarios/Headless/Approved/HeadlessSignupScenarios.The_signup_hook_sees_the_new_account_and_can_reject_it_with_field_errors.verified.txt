@@ -84,7 +84,7 @@ profile: headless
             "configurationFingerprint": "{hex#1}",
             "isEditable": false,
             "isOrphaned": false,
-            "lastReconciledAt": "{datetime:unspecified}",
+            "lastReconciledAt": "{datetime:utc-z}",
             "owner": "code",
             "sourceKey": "auth-page:default"
           },
@@ -92,7 +92,7 @@ profile: headless
           "pageTitle": "Sign in to Behavior Lock",
           "phoneOtpRuntimeConfigured": true,
           "primaryColor": "#2563eb",
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         "signupToken": null,
         "totpEnrollment": null,

@@ -93,7 +93,7 @@ profile: dashboard-callback
     {
       "data": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "defaultEmail": "{email:dana}",
           "displayName": "Dana",
           "id": "{usr#1}",

@@ -27,7 +27,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "oidc_provider_error",
@@ -37,7 +37,7 @@ profile: hosted
         "publicMessage": "The external identity provider returned an error.",
         "surface": "OidcCallback"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -88,12 +88,12 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.login.oidc.error",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "error": "The authorization code is invalid."
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -121,7 +121,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -131,7 +131,7 @@ profile: hosted
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "OidcCallback"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -175,12 +175,12 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.login.oidc.error",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "error": "OIDC nonce validation failed."
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -208,7 +208,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -218,7 +218,7 @@ profile: hosted
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "OidcCallback"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -263,7 +263,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.login.oidc.claim_mismatch",
       "id": "{evt#6}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "anchorSubject": "google-{email:grace}",
@@ -272,7 +272,7 @@ profile: hosted
         "reason": "userinfo_subject_mismatch",
         "userInfoSubject": "mismatched-google-{email:grace}"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -300,12 +300,12 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.login.oidc.error",
       "id": "{evt#7}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "error": "The social login could not be completed."
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -333,7 +333,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#8}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -343,7 +343,7 @@ profile: hosted
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "OidcCallback"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -388,7 +388,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.login.oidc.claim_mismatch",
       "id": "{evt#9}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "claimSource": "userinfo",
@@ -396,7 +396,7 @@ profile: hosted
         "provider": "Google",
         "reason": "verified_email_missing_from_source"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -424,12 +424,12 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.login.oidc.error",
       "id": "{evt#10}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "error": "The social login could not be completed."
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -457,7 +457,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#11}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -467,7 +467,7 @@ profile: hosted
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "OidcCallback"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -512,12 +512,12 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.login.oidc.error",
       "id": "{evt#12}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "error": "The social login provider did not return a usable email address."
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -545,7 +545,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#13}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -555,7 +555,7 @@ profile: hosted
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "OidcCallback"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -600,13 +600,13 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.login.oidc.provisioned",
       "id": "{evt#14}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "oidcConnectionId": "{oidc#2}",
         "provider": "Custom"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -634,7 +634,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.login.oidc.success",
       "id": "{evt#15}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "oidcConnectionId": "{oidc#2}",
@@ -650,7 +650,7 @@ profile: hosted
           "Reason": "evidence_missing"
         }
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -689,12 +689,12 @@ token: '[PII of type 'System.IdentityModel.Tokens.Jwt.JwtSecurityToken' is hidde
       "correlationId": null,
       "eventType": "user.login.oidc.error",
       "id": "{evt#16}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "error": "IDX10511: Signature validation failed. Keys tried: 'Microsoft.IdentityModel.Tokens.RsaSecurityKey, KeyId: 'fake-oidc-key', InternalId: '{token#1}'.'. \nNumber of keys in TokenValidationParameters: '1'. \nNumber of keys in Configuration: '0'. \nMatched key was in 'TokenValidationParameters'. \nkid: 'fake-oidc-key'. \nExceptions caught:\n '[PII of type 'System.String' is hidden. For more details, see https://aka.ms/IdentityModel/PII.]'.\ntoken: '[PII of type 'System.IdentityModel.Tokens.Jwt.JwtSecurityToken' is hidden. For more details, see https://aka.ms/IdentityModel/PII.]'. See https://aka.ms/IDX10511 for details."
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

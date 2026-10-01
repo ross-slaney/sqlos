@@ -17,7 +17,7 @@ profile: modules
           "claimMapping": "{\"SubjectClaim\":\"sub\",\"EmailClaim\":\"email\",\"EmailVerifiedClaim\":\"email_verified\",\"DisplayNameClaim\":\"name\",\"FirstNameClaim\":\"given_name\",\"LastNameClaim\":\"family_name\",\"PreferredUsernameClaim\":\"preferred_username\"}",
           "clientAuthMethod": "ClientSecretPost",
           "clientId": "google-client-id",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "discoveryUrl": "https://accounts.google.com/.well-known/openid-configuration",
           "displayName": "Google",
           "effectiveLogoDataUrl": "{data-uri:image/svg+xml}",
@@ -32,7 +32,7 @@ profile: modules
             "configurationFingerprint": "{hex#1}",
             "isEditable": false,
             "isOrphaned": false,
-            "lastReconciledAt": "{datetime:unspecified}",
+            "lastReconciledAt": "{datetime:utc-z}",
             "owner": "code",
             "sourceKey": "google"
           },
@@ -40,7 +40,7 @@ profile: modules
           "providerType": "Google",
           "scopes": "[]",
           "tokenEndpoint": null,
-          "updatedAt": "{datetime:unspecified}",
+          "updatedAt": "{datetime:utc-z}",
           "useDiscovery": true,
           "useUserInfo": true,
           "userInfoEndpoint": null
@@ -53,7 +53,7 @@ profile: modules
           "claimMapping": "{\"SubjectClaim\":\"sub\",\"EmailClaim\":\"email\",\"EmailVerifiedClaim\":\"email_verified\",\"DisplayNameClaim\":\"name\",\"FirstNameClaim\":\"given_name\",\"LastNameClaim\":\"family_name\",\"PreferredUsernameClaim\":\"preferred_username\"}",
           "clientAuthMethod": "ClientSecretPost",
           "clientId": "microsoft-client-id",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "discoveryUrl": "https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration",
           "displayName": "Microsoft",
           "effectiveLogoDataUrl": "{data-uri:image/svg+xml}",
@@ -68,7 +68,7 @@ profile: modules
             "configurationFingerprint": "{hex#2}",
             "isEditable": false,
             "isOrphaned": false,
-            "lastReconciledAt": "{datetime:unspecified}",
+            "lastReconciledAt": "{datetime:utc-z}",
             "owner": "code",
             "sourceKey": "microsoft"
           },
@@ -76,7 +76,7 @@ profile: modules
           "providerType": "Microsoft",
           "scopes": "[]",
           "tokenEndpoint": null,
-          "updatedAt": "{datetime:unspecified}",
+          "updatedAt": "{datetime:utc-z}",
           "useDiscovery": true,
           "useUserInfo": true,
           "userInfoEndpoint": null

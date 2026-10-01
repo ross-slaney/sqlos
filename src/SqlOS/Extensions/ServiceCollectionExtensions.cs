@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using SqlOS.AuditLogs;
 using SqlOS.Configuration;
@@ -42,6 +43,10 @@ public static class ServiceCollectionExtensions
         SqlOSOptionsValidator.ValidateOrThrow(options);
 
         services.AddRouting();
+
+        // Processes read the time once per execution from TimeProvider; a host may register its own
+        // (for example a fake clock in tests) before or after AddSqlOS.
+        services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<SqlOSEndpointMappingState>();
         services.AddSingleton(Options.Create(options));
         services.AddSingleton(Options.Create(options.AuthServer));

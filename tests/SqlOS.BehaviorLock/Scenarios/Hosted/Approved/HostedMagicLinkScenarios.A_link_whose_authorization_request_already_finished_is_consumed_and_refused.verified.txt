@@ -146,7 +146,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.email.claimed",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "emailId": "{eml#1}",
@@ -163,7 +163,7 @@ profile: hosted
           "recoveryCodes": 0
         }
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -197,7 +197,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "magic_link.completed",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "details": {
@@ -209,7 +209,7 @@ profile: hosted
         "maskedEmail": "al***@example.test",
         "phase": "complete"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -237,7 +237,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "magic_link.rejected",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "details": {
@@ -246,7 +246,7 @@ profile: hosted
         "maskedEmail": null,
         "phase": "complete"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

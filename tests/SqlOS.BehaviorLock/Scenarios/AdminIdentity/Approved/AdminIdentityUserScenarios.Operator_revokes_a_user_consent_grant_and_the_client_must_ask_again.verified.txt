@@ -13,7 +13,7 @@ profile: multi-app
           "clientApplicationId": "{cli#1}",
           "clientId": "atlas-partner",
           "clientName": "Atlas Partner",
-          "grantedAt": "{datetime:unspecified}",
+          "grantedAt": "{datetime:utc-z}",
           "id": "{cgr#1}",
           "scopes": [
             "openid",
@@ -21,7 +21,7 @@ profile: multi-app
             "email",
             "offline_access"
           ],
-          "updatedAt": "{datetime:unspecified}",
+          "updatedAt": "{datetime:utc-z}",
           "userId": "{usr#1}"
         }
       ]
@@ -92,7 +92,7 @@ profile: multi-app
           "clientApplicationId": "{cli#1}",
           "clientId": "atlas-partner",
           "clientName": "Atlas Partner",
-          "grantedAt": "{datetime:unspecified}",
+          "grantedAt": "{datetime:utc-z}",
           "id": "{cgr#2}",
           "scopes": [
             "openid",
@@ -100,7 +100,7 @@ profile: multi-app
             "email",
             "offline_access"
           ],
-          "updatedAt": "{datetime:unspecified}",
+          "updatedAt": "{datetime:utc-z}",
           "userId": "{usr#2}"
         }
       ]
@@ -126,14 +126,14 @@ profile: multi-app
       "correlationId": null,
       "eventType": "oauth.consent.revoked",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "client_id": "atlas-partner",
         "grant_id": "{cgr#1}",
         "reason": "admin_revoked"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

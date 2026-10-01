@@ -246,7 +246,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "email.send.queued",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "deliveryId": "{edl#1}",
@@ -254,7 +254,7 @@ profile: hosted
         "templateKey": "auth.magic-link",
         "templateVersion": 1
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -282,7 +282,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "magic_link.requested",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "details": {
@@ -294,7 +294,7 @@ profile: hosted
         "maskedEmail": "al***@example.test",
         "phase": "start"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -316,7 +316,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "email.send.queued",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "deliveryId": "{edl#2}",
@@ -324,7 +324,7 @@ profile: hosted
         "templateKey": "auth.magic-link",
         "templateVersion": 1
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -352,7 +352,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "magic_link.requested",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "details": {
@@ -364,7 +364,7 @@ profile: hosted
         "maskedEmail": "al***@example.test",
         "phase": "start"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -386,7 +386,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "email.send.queued",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "deliveryId": "{edl#3}",
@@ -394,7 +394,7 @@ profile: hosted
         "templateKey": "auth.magic-link",
         "templateVersion": 1
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -422,7 +422,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "magic_link.requested",
       "id": "{evt#6}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "details": {
@@ -434,7 +434,7 @@ profile: hosted
         "maskedEmail": "al***@example.test",
         "phase": "start"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -456,7 +456,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "email.send.queued",
       "id": "{evt#7}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "deliveryId": "{edl#4}",
@@ -464,7 +464,7 @@ profile: hosted
         "templateKey": "auth.magic-link",
         "templateVersion": 1
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -492,7 +492,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "magic_link.requested",
       "id": "{evt#8}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "details": {
@@ -504,7 +504,7 @@ profile: hosted
         "maskedEmail": "al***@example.test",
         "phase": "start"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -526,7 +526,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "email.send.queued",
       "id": "{evt#9}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "deliveryId": "{edl#5}",
@@ -534,7 +534,7 @@ profile: hosted
         "templateKey": "auth.magic-link",
         "templateVersion": 1
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -562,7 +562,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "magic_link.requested",
       "id": "{evt#10}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "details": {
@@ -574,7 +574,7 @@ profile: hosted
         "maskedEmail": "al***@example.test",
         "phase": "start"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -602,7 +602,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "magic_link.rate_limit_rejected",
       "id": "{evt#11}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "details": {
@@ -613,7 +613,7 @@ profile: hosted
         "maskedEmail": "al***@example.test",
         "phase": "start"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

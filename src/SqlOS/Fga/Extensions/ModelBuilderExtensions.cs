@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using SqlOS.Database;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
 
@@ -24,7 +25,7 @@ public static class ModelBuilderExtensions
 
         SqlOSFgaModelConfiguration.Configure(modelBuilder, options, contextType);
 
-        return modelBuilder;
+        return modelBuilder.ApplyUtcDateTimeConvention();
     }
 
     /// <summary>
@@ -40,6 +41,6 @@ public static class ModelBuilderExtensions
 
         SqlOSFgaModelConfiguration.Configure(modelBuilder, options, contextType: null);
 
-        return modelBuilder;
+        return modelBuilder.ApplyUtcDateTimeConvention();
     }
 }

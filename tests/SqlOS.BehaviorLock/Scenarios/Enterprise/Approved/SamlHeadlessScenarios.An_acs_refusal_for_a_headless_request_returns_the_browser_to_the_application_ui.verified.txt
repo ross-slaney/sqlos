@@ -131,7 +131,7 @@ profile: headless
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -141,7 +141,7 @@ profile: headless
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "SamlAcs"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -169,7 +169,7 @@ profile: headless
       "correlationId": null,
       "eventType": "user.login.saml.assurance",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "Accepted": false,
@@ -181,7 +181,7 @@ profile: headless
         "assertionIssuer": "urn:behavior-lock:idp",
         "connectionId": "{sso#1}"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,

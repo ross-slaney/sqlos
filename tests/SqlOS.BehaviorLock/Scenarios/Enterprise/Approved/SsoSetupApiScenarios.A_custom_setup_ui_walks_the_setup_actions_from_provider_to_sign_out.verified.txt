@@ -27,7 +27,7 @@ profile: enterprise
         "connection": {
           "autoLinkByEmail": true,
           "autoProvisionUsers": false,
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Acme SSO",
           "enrollmentPolicy": {
             "allowJitProvisioning": false,
@@ -38,7 +38,7 @@ profile: enterprise
           "isEnabled": false,
           "setupStatus": "draft",
           "singleSignOnUrl": null,
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         "domain": null,
         "error": null,
@@ -140,7 +140,7 @@ profile: enterprise
         "connection": {
           "autoLinkByEmail": true,
           "autoProvisionUsers": false,
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Acme SSO",
           "enrollmentPolicy": {
             "allowJitProvisioning": false,
@@ -151,7 +151,7 @@ profile: enterprise
           "isEnabled": false,
           "setupStatus": "draft",
           "singleSignOnUrl": null,
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         "domain": null,
         "error": null,
@@ -253,7 +253,7 @@ profile: enterprise
         "connection": {
           "autoLinkByEmail": true,
           "autoProvisionUsers": false,
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Acme SSO",
           "enrollmentPolicy": {
             "allowJitProvisioning": false,
@@ -264,7 +264,7 @@ profile: enterprise
           "isEnabled": false,
           "setupStatus": "draft",
           "singleSignOnUrl": null,
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         "domain": null,
         "error": null,
@@ -372,7 +372,7 @@ profile: enterprise
         "connection": {
           "autoLinkByEmail": true,
           "autoProvisionUsers": false,
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Acme SSO",
           "enrollmentPolicy": {
             "allowJitProvisioning": false,
@@ -383,7 +383,7 @@ profile: enterprise
           "isEnabled": false,
           "setupStatus": "draft",
           "singleSignOnUrl": null,
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         "domain": null,
         "error": null,
@@ -492,7 +492,7 @@ profile: enterprise
         "connection": {
           "autoLinkByEmail": false,
           "autoProvisionUsers": true,
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Acme SSO",
           "enrollmentPolicy": {
             "allowJitProvisioning": true,
@@ -611,7 +611,7 @@ profile: enterprise
         "connection": {
           "autoLinkByEmail": false,
           "autoProvisionUsers": true,
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Acme SSO",
           "enrollmentPolicy": {
             "allowJitProvisioning": true,
@@ -622,10 +622,10 @@ profile: enterprise
           "isEnabled": false,
           "setupStatus": "draft",
           "singleSignOnUrl": null,
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         "domain": {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "domain": "{domain:acme}",
           "id": "{dom#1}",
           "lastCheckedAt": null,
@@ -743,7 +743,7 @@ profile: enterprise
         "connection": {
           "autoLinkByEmail": false,
           "autoProvisionUsers": true,
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Acme SSO",
           "enrollmentPolicy": {
             "allowJitProvisioning": true,
@@ -754,13 +754,13 @@ profile: enterprise
           "isEnabled": false,
           "setupStatus": "draft",
           "singleSignOnUrl": null,
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         "domain": {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "domain": "{domain:acme}",
           "id": "{dom#1}",
-          "lastCheckedAt": "{datetime:unspecified}",
+          "lastCheckedAt": "{datetime:utc-z}",
           "lastError": "TXT record not found. Create TXT _sqlos-verify.{domain:acme} with value {dns-verification#1}.",
           "organizationId": "{org#1}",
           "ownershipRecord": {
@@ -878,7 +878,7 @@ profile: enterprise
         "connection": {
           "autoLinkByEmail": false,
           "autoProvisionUsers": true,
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Acme SSO",
           "enrollmentPolicy": {
             "allowJitProvisioning": true,
@@ -889,19 +889,19 @@ profile: enterprise
           "isEnabled": false,
           "setupStatus": "draft",
           "singleSignOnUrl": null,
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         "domain": {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "domain": "{domain:acme}",
           "id": "{dom#1}",
-          "lastCheckedAt": "{datetime:unspecified}",
+          "lastCheckedAt": "{datetime:utc-z}",
           "lastError": null,
           "organizationId": "{org#1}",
           "ownershipRecord": null,
           "revokedAt": null,
           "status": "active",
-          "verifiedAt": "{datetime:unspecified}"
+          "verifiedAt": "{datetime:utc-z}"
         },
         "error": null,
         "fieldErrors": {},
@@ -1028,7 +1028,7 @@ profile: enterprise
         "connection": {
           "autoLinkByEmail": false,
           "autoProvisionUsers": true,
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Acme SSO",
           "enrollmentPolicy": {
             "allowJitProvisioning": true,
@@ -1042,16 +1042,16 @@ profile: enterprise
           "updatedAt": "{datetime:utc-z}"
         },
         "domain": {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "domain": "{domain:acme}",
           "id": "{dom#1}",
-          "lastCheckedAt": "{datetime:unspecified}",
+          "lastCheckedAt": "{datetime:utc-z}",
           "lastError": null,
           "organizationId": "{org#1}",
           "ownershipRecord": null,
           "revokedAt": null,
           "status": "active",
-          "verifiedAt": "{datetime:unspecified}"
+          "verifiedAt": "{datetime:utc-z}"
         },
         "error": null,
         "fieldErrors": {},
@@ -1156,7 +1156,7 @@ profile: enterprise
         "connection": {
           "autoLinkByEmail": false,
           "autoProvisionUsers": true,
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Acme SSO",
           "enrollmentPolicy": {
             "allowJitProvisioning": true,
@@ -1170,16 +1170,16 @@ profile: enterprise
           "updatedAt": "{datetime:utc-z}"
         },
         "domain": {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "domain": "{domain:acme}",
           "id": "{dom#1}",
-          "lastCheckedAt": "{datetime:unspecified}",
+          "lastCheckedAt": "{datetime:utc-z}",
           "lastError": null,
           "organizationId": "{org#1}",
           "ownershipRecord": null,
           "revokedAt": null,
           "status": "active",
-          "verifiedAt": "{datetime:unspecified}"
+          "verifiedAt": "{datetime:utc-z}"
         },
         "error": null,
         "fieldErrors": {},
@@ -1284,7 +1284,7 @@ profile: enterprise
         "connection": {
           "autoLinkByEmail": false,
           "autoProvisionUsers": true,
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Acme SSO",
           "enrollmentPolicy": {
             "allowJitProvisioning": true,
@@ -1295,19 +1295,19 @@ profile: enterprise
           "isEnabled": true,
           "setupStatus": "active",
           "singleSignOnUrl": "https://idp.example.test/sso",
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         "domain": {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "domain": "{domain:acme}",
           "id": "{dom#1}",
-          "lastCheckedAt": "{datetime:unspecified}",
+          "lastCheckedAt": "{datetime:utc-z}",
           "lastError": null,
           "organizationId": "{org#1}",
           "ownershipRecord": null,
           "revokedAt": null,
           "status": "active",
-          "verifiedAt": "{datetime:unspecified}"
+          "verifiedAt": "{datetime:utc-z}"
         },
         "error": null,
         "fieldErrors": {},
@@ -1423,7 +1423,7 @@ profile: enterprise
         "connection": {
           "autoLinkByEmail": false,
           "autoProvisionUsers": true,
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Acme SSO",
           "enrollmentPolicy": {
             "allowJitProvisioning": true,
@@ -1434,19 +1434,19 @@ profile: enterprise
           "isEnabled": true,
           "setupStatus": "active",
           "singleSignOnUrl": "https://idp.example.test/sso",
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         "domain": {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "domain": "{domain:acme}",
           "id": "{dom#1}",
-          "lastCheckedAt": "{datetime:unspecified}",
+          "lastCheckedAt": "{datetime:utc-z}",
           "lastError": null,
           "organizationId": "{org#1}",
           "ownershipRecord": null,
           "revokedAt": null,
           "status": "active",
-          "verifiedAt": "{datetime:unspecified}"
+          "verifiedAt": "{datetime:utc-z}"
         },
         "error": null,
         "fieldErrors": {},
@@ -1575,7 +1575,7 @@ profile: enterprise
         "connection": {
           "autoLinkByEmail": false,
           "autoProvisionUsers": true,
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Acme SSO",
           "enrollmentPolicy": {
             "allowJitProvisioning": true,
@@ -1589,16 +1589,16 @@ profile: enterprise
           "updatedAt": "{datetime:utc-z}"
         },
         "domain": {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "domain": "{domain:acme}",
           "id": "{dom#1}",
-          "lastCheckedAt": "{datetime:unspecified}",
+          "lastCheckedAt": "{datetime:utc-z}",
           "lastError": null,
           "organizationId": "{org#1}",
           "ownershipRecord": null,
           "revokedAt": null,
           "status": "active",
-          "verifiedAt": "{datetime:unspecified}"
+          "verifiedAt": "{datetime:utc-z}"
         },
         "error": null,
         "fieldErrors": {},
@@ -1606,7 +1606,7 @@ profile: enterprise
           "authorizationUrl": null,
           "message": "SAML sign-in test redirect created.",
           "status": "started",
-          "testedAt": "{datetime:unspecified}"
+          "testedAt": "{datetime:utc-z}"
         },
         "organization": {
           "id": "{org#1}",
@@ -1723,12 +1723,12 @@ profile: enterprise
       "correlationId": null,
       "eventType": "sso.portal.provider.selected",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "Provider": "google-workspace"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -1756,14 +1756,14 @@ profile: enterprise
       "correlationId": null,
       "eventType": "sso.portal.enrollment_policy.updated",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "AllowJitProvisioning": true,
         "RequireSsoForExistingMembers": false,
         "connectionId": "{sso#1}"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -1791,13 +1791,13 @@ profile: enterprise
       "correlationId": null,
       "eventType": "organization.domain.verification.started",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "Domain": "{domain:acme}",
         "Status": "pending_ownership"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -1825,13 +1825,13 @@ profile: enterprise
       "correlationId": null,
       "eventType": "organization.domain.verification.failed",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "Domain": "{domain:acme}",
         "Name": "_sqlos-verify.{domain:acme}"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -1859,13 +1859,13 @@ profile: enterprise
       "correlationId": null,
       "eventType": "organization.domain.verification.confirmed",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "Domain": "{domain:acme}",
         "Name": "_sqlos-verify.{domain:acme}"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -1893,13 +1893,13 @@ profile: enterprise
       "correlationId": null,
       "eventType": "saml.connection.metadata-imported",
       "id": "{evt#6}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "Id": "{sso#1}",
         "IdentityProviderEntityId": "urn:behavior-lock:idp"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -1927,14 +1927,14 @@ profile: enterprise
       "correlationId": null,
       "eventType": "sso.portal.metadata.imported",
       "id": "{evt#7}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "connectionId": "{sso#1}",
         "identityProviderEntityId": "urn:behavior-lock:idp",
         "singleSignOnUrl": "https://idp.example.test/sso"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -1962,12 +1962,12 @@ profile: enterprise
       "correlationId": null,
       "eventType": "sso.portal.connection.activated",
       "id": "{evt#8}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "connectionId": "{sso#1}"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -1995,14 +1995,14 @@ profile: enterprise
       "correlationId": null,
       "eventType": "sso.portal.connection.tested",
       "id": "{evt#9}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "hasAuthorizationUrl": "[redacted]",
         "message": "Connection is active and ready for a SAML sign-in test.",
         "status": "ready"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -2030,14 +2030,14 @@ profile: enterprise
       "correlationId": null,
       "eventType": "sso.portal.connection.tested",
       "id": "{evt#10}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "hasAuthorizationUrl": "[redacted]",
         "message": "SAML sign-in test redirect created.",
         "status": "started"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -2065,7 +2065,7 @@ profile: enterprise
       "correlationId": null,
       "eventType": "sso.portal.organization_sessions.revoked",
       "id": "{evt#11}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "connectionId": "{sso#1}",
@@ -2073,7 +2073,7 @@ profile: enterprise
         "invalidatedAuthPageSessions": 0,
         "revokedSessions": 0
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -2101,12 +2101,12 @@ profile: enterprise
       "correlationId": null,
       "eventType": "sso.portal.connection.disabled",
       "id": "{evt#12}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "connectionId": "{sso#1}"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -2134,13 +2134,13 @@ profile: enterprise
       "correlationId": null,
       "eventType": "sso.portal.session.closed",
       "id": "{evt#13}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "Id": "{ssp#1}",
         "RevokedReason": "signed_out"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,

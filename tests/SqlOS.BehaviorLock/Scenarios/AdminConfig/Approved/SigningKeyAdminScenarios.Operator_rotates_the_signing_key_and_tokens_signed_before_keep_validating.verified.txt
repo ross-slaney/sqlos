@@ -21,7 +21,7 @@ profile: dashboard-callback
       "graceWindowDays": 7,
       "keys": [
         {
-          "activatedAt": "{datetime:unspecified}",
+          "activatedAt": "{datetime:utc-z}",
           "ageDays": 0,
           "algorithm": "RS256",
           "id": "{key#1}",
@@ -30,7 +30,7 @@ profile: dashboard-callback
           "retiredAt": null
         }
       ],
-      "nextRotationDue": "{datetime:unspecified}",
+      "nextRotationDue": "{datetime:utc-z}",
       "rotationIntervalDays": 90
     }
 
@@ -57,7 +57,7 @@ profile: dashboard-callback
       "graceWindowDays": 7,
       "keys": [
         {
-          "activatedAt": "{datetime:unspecified}",
+          "activatedAt": "{datetime:utc-z}",
           "ageDays": 0,
           "algorithm": "RS256",
           "id": "{key#2}",
@@ -66,16 +66,16 @@ profile: dashboard-callback
           "retiredAt": null
         },
         {
-          "activatedAt": "{datetime:unspecified}",
+          "activatedAt": "{datetime:utc-z}",
           "ageDays": 0,
           "algorithm": "RS256",
           "id": "{key#1}",
           "isActive": false,
           "kid": "{kid#1}",
-          "retiredAt": "{datetime:unspecified}"
+          "retiredAt": "{datetime:utc-z}"
         }
       ],
-      "nextRotationDue": "{datetime:unspecified}",
+      "nextRotationDue": "{datetime:utc-z}",
       "rotationIntervalDays": 90
     }
 
@@ -205,13 +205,13 @@ profile: dashboard-callback
       "correlationId": null,
       "eventType": "signing_key_rotated_manual",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "newKeyId": "{key#2}",
         "newKid": "{kid#2}"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

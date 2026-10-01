@@ -174,8 +174,8 @@ profile: enterprise-scim-path
       "groups": [],
       "id": "{usr:judy}",
       "meta": {
-        "created": "{datetime:unspecified}",
-        "lastModified": "{datetime:unspecified}",
+        "created": "{datetime:utc-z}",
+        "lastModified": "{datetime:utc-z}",
         "location": "/scim/v2/Users/{usr:judy}",
         "resourceType": "User"
       },
@@ -240,7 +240,7 @@ profile: enterprise-scim-path
 < 200 OK
 < Content-Type: application/json; charset=utf-8
     {
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "defaultEmail": "{email:judy}",
       "displayName": "Judy Hopps",
       "externalIdentityCount": 0,
@@ -248,7 +248,7 @@ profile: enterprise-scim-path
       "isActive": true,
       "membershipCount": 1,
       "sessionCount": 0,
-      "updatedAt": "{datetime:unspecified}"
+      "updatedAt": "{datetime:utc-z}"
     }
 
 ## 8. operator: dashboard: rejected writes are recorded as failed sync events
@@ -265,7 +265,7 @@ profile: enterprise-scim-path
           "error": null,
           "externalId": "directory-no-email",
           "id": "{scevt#1}",
-          "occurredAt": "{datetime:unspecified}",
+          "occurredAt": "{datetime:utc-z}",
           "organizationId": "{org#1}",
           "requestId": null,
           "resourceId": "{usr#1}",
@@ -279,7 +279,7 @@ profile: enterprise-scim-path
           "error": "SCIM email domain is not verified for this organization.",
           "externalId": null,
           "id": "{scevt#2}",
-          "occurredAt": "{datetime:unspecified}",
+          "occurredAt": "{datetime:utc-z}",
           "organizationId": "{org#1}",
           "requestId": null,
           "resourceId": "{usr:judy}",
@@ -293,7 +293,7 @@ profile: enterprise-scim-path
           "error": "SCIM email domain is not verified for this organization.",
           "externalId": null,
           "id": "{scevt#3}",
-          "occurredAt": "{datetime:unspecified}",
+          "occurredAt": "{datetime:utc-z}",
           "organizationId": "{org#1}",
           "requestId": null,
           "resourceId": "{usr:judy}",
@@ -307,7 +307,7 @@ profile: enterprise-scim-path
           "error": null,
           "externalId": "directory-judy",
           "id": "{scevt#4}",
-          "occurredAt": "{datetime:unspecified}",
+          "occurredAt": "{datetime:utc-z}",
           "organizationId": "{org#1}",
           "requestId": null,
           "resourceId": "{usr:judy}",
@@ -321,7 +321,7 @@ profile: enterprise-scim-path
           "error": "SCIM email domain is not verified for this organization.",
           "externalId": null,
           "id": "{scevt#5}",
-          "occurredAt": "{datetime:unspecified}",
+          "occurredAt": "{datetime:utc-z}",
           "organizationId": "{org#1}",
           "requestId": null,
           "resourceId": null,
@@ -348,7 +348,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.user.created",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-judy",
@@ -374,7 +374,7 @@ profile: enterprise-scim-path
         "resourceId": "{usr:judy}",
         "resourceType": "User"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -402,7 +402,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.user.created",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-no-email",
@@ -421,7 +421,7 @@ profile: enterprise-scim-path
         "resourceId": "{usr#1}",
         "resourceType": "User"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,

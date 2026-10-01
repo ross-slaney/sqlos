@@ -41,13 +41,13 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.login.oidc.provisioned",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "oidcConnectionId": "{oidc#1}",
         "provider": "Google"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -75,7 +75,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.login.oidc.success",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "oidcConnectionId": "{oidc#1}",
@@ -91,7 +91,7 @@ profile: hosted
           "Reason": "evidence_missing"
         }
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -201,12 +201,12 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.login.oidc.error",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "error": "The social login provider did not return a usable email address."
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -234,7 +234,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -244,7 +244,7 @@ profile: hosted
         "publicMessage": "The external sign-in request could not be completed.",
         "surface": "OidcCallback"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -262,7 +262,7 @@ profile: hosted
     {
       "data": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "defaultEmail": "{email:bob-real}",
           "displayName": "Bob Real",
           "id": "{usr#2}",
@@ -270,7 +270,7 @@ profile: hosted
           "membershipCount": 0
         },
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "defaultEmail": "{email:bob-look-alike}",
           "displayName": "Google {email:bob-look-alike}",
           "id": "{usr#1}",

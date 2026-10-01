@@ -33,14 +33,14 @@ profile: headless
         "invitation": {
           "acceptedAt": null,
           "acceptedByUserId": null,
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "customFields": null,
           "email": "{email:erin}",
-          "expiresAt": "{datetime:unspecified}",
+          "expiresAt": "{datetime:utc-z}",
           "id": "{inv#1}",
           "inviteUrl": null,
           "lastSendError": null,
-          "lastSentAt": "{datetime:unspecified}",
+          "lastSentAt": "{datetime:utc-z}",
           "organizationId": "{org#1}",
           "organizationName": "Acme",
           "revokedAt": null,
@@ -93,7 +93,7 @@ profile: headless
             "configurationFingerprint": "{hex#1}",
             "isEditable": false,
             "isOrphaned": false,
-            "lastReconciledAt": "{datetime:unspecified}",
+            "lastReconciledAt": "{datetime:utc-z}",
             "owner": "code",
             "sourceKey": "auth-page:default"
           },
@@ -101,7 +101,7 @@ profile: headless
           "pageTitle": "Sign in to Behavior Lock",
           "phoneOtpRuntimeConfigured": true,
           "primaryColor": "#2563eb",
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         "signupToken": null,
         "totpEnrollment": null,

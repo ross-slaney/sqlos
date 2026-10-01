@@ -100,7 +100,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -110,7 +110,7 @@ profile: hosted
         "publicMessage": "The authorization grant is invalid or expired.",
         "surface": "OAuthToken"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -155,7 +155,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -165,7 +165,7 @@ profile: hosted
         "publicMessage": "The authorization grant is invalid or expired.",
         "surface": "OAuthToken"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -194,16 +194,16 @@ profile: hosted
     {
       "data": [
         {
-          "absoluteExpiresAt": "{datetime:unspecified}",
+          "absoluteExpiresAt": "{datetime:utc-z}",
           "authenticationMethod": "password",
           "clientApplicationId": "{cli#1}",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "id": "{ses#1}",
-          "idleExpiresAt": "{datetime:unspecified}",
+          "idleExpiresAt": "{datetime:utc-z}",
           "ipAddress": "203.0.113.10",
-          "lastSeenAt": "{datetime:unspecified}",
+          "lastSeenAt": "{datetime:utc-z}",
           "revocationReason": "refresh_token_reuse",
-          "revokedAt": "{datetime:unspecified}",
+          "revokedAt": "{datetime:utc-z}",
           "user": "Alice",
           "userAgent": "",
           "userId": "{usr#1}"

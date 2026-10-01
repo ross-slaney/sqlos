@@ -114,7 +114,7 @@ profile: enterprise
       "correlationId": null,
       "eventType": "user.login.saml.assurance",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "Accepted": true,
@@ -128,7 +128,7 @@ profile: enterprise
         "assertionIssuer": "urn:behavior-lock:idp",
         "connectionId": "{sso#1}"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -156,7 +156,7 @@ profile: enterprise
       "correlationId": null,
       "eventType": "user.login.saml.assurance",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "Accepted": false,
@@ -170,7 +170,7 @@ profile: enterprise
         "assertionIssuer": "urn:behavior-lock:idp",
         "connectionId": "{sso#1}"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,

@@ -32,13 +32,13 @@ profile: modules
       "correlationId": "corr-1001",
       "eventType": "invoice.paid",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "198.51.100.7",
       "metadata": {
         "amount": 42,
         "note": "line one\nline two"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": "req-1001",
       "sessionId": null,

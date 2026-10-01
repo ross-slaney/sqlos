@@ -98,7 +98,7 @@ profile: enterprise-scim-path
         {
           "activeGrantCount": 0,
           "connectionId": "{scim#1}",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "description": null,
           "grantBoundaryStatus": "resource_not_found",
           "groupDisplayName": null,
@@ -112,12 +112,12 @@ profile: enterprise-scim-path
           "roleKey": "workspace_reader",
           "source": "dashboard",
           "sourceKey": null,
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         {
           "activeGrantCount": 0,
           "connectionId": "{scim#1}",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "description": null,
           "grantBoundaryStatus": "within",
           "groupDisplayName": "Auditors",
@@ -131,7 +131,7 @@ profile: enterprise-scim-path
           "roleKey": "workspace_auditor",
           "source": "dashboard",
           "sourceKey": null,
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         }
       ],
       "hasNextPage": false,
@@ -173,7 +173,7 @@ profile: enterprise-scim-path
         {
           "activeGrantCount": 1,
           "connectionId": "{scim#1}",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "description": null,
           "grantBoundaryStatus": "within",
           "groupDisplayName": null,
@@ -187,12 +187,12 @@ profile: enterprise-scim-path
           "roleKey": "workspace_reader",
           "source": "dashboard",
           "sourceKey": null,
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         {
           "activeGrantCount": 0,
           "connectionId": "{scim#1}",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "description": null,
           "grantBoundaryStatus": "within",
           "groupDisplayName": "Auditors",
@@ -206,7 +206,7 @@ profile: enterprise-scim-path
           "roleKey": "workspace_auditor",
           "source": "dashboard",
           "sourceKey": null,
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         }
       ],
       "hasNextPage": false,
@@ -228,7 +228,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.member_added",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-auditors",
@@ -243,7 +243,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp#1}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -271,7 +271,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.grant.role_missing",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-auditors",
@@ -284,7 +284,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp#1}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -312,7 +312,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.created",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-auditors",
@@ -331,7 +331,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp#1}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -359,7 +359,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.member_added",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-archivists",
@@ -374,7 +374,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:archivists}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -402,7 +402,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.grant.resource_missing",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-archivists",
@@ -415,7 +415,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:archivists}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -443,7 +443,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.created",
       "id": "{evt#6}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-archivists",
@@ -462,7 +462,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:archivists}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -490,7 +490,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.grant.mapped",
       "id": "{evt#7}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-archivists",
@@ -503,7 +503,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:archivists}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -531,7 +531,7 @@ profile: enterprise-scim-path
       "correlationId": null,
       "eventType": "scim.group.updated",
       "id": "{evt#8}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "externalId": "directory-archivists",
@@ -554,7 +554,7 @@ profile: enterprise-scim-path
         "resourceId": "{grp:archivists}",
         "resourceType": "Group"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,

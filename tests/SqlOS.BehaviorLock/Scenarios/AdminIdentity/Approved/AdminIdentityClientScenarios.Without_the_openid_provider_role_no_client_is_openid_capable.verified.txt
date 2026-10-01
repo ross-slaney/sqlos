@@ -53,7 +53,7 @@ profile: oauth-only
         "configurationFingerprint": "{hex#1}",
         "isEditable": false,
         "isOrphaned": false,
-        "lastReconciledAt": "{datetime:unspecified}",
+        "lastReconciledAt": "{datetime:utc-z}",
         "owner": "code",
         "sourceKey": "behavior-lock-app"
       },
@@ -64,7 +64,7 @@ profile: oauth-only
           "dataJson": "{\"resourceType\":\"oauth_client\",\"resourceId\":\"behavior-lock-app\",\"owner\":\"code\",\"sourceKey\":\"behavior-lock-app\",\"outcome\":\"created\",\"fingerprint\":\"{hex#1}\"}",
           "eventType": "configuration.reconciled",
           "id": "{evt#1}",
-          "occurredAt": "{datetime:unspecified}"
+          "occurredAt": "{datetime:utc-z}"
         }
       ],
       "redirectUris": [
@@ -132,7 +132,7 @@ profile: oauth-only
             "configurationFingerprint": "{hex#1}",
             "isEditable": false,
             "isOrphaned": false,
-            "lastReconciledAt": "{datetime:unspecified}",
+            "lastReconciledAt": "{datetime:utc-z}",
             "owner": "code",
             "sourceKey": "behavior-lock-app"
           },

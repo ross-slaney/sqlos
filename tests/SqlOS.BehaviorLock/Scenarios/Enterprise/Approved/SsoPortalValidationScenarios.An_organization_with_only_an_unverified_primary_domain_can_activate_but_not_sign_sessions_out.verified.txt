@@ -33,7 +33,7 @@ profile: enterprise
       "connection": {
         "autoLinkByEmail": true,
         "autoProvisionUsers": false,
-        "createdAt": "{datetime:unspecified}",
+        "createdAt": "{datetime:utc-z}",
         "displayName": "Acme SSO",
         "enrollmentPolicy": {
           "allowJitProvisioning": false,
@@ -139,7 +139,7 @@ profile: enterprise
       "connection": {
         "autoLinkByEmail": true,
         "autoProvisionUsers": false,
-        "createdAt": "{datetime:unspecified}",
+        "createdAt": "{datetime:utc-z}",
         "displayName": "Acme SSO",
         "enrollmentPolicy": {
           "allowJitProvisioning": false,
@@ -270,13 +270,13 @@ profile: enterprise
       "correlationId": null,
       "eventType": "saml.connection.metadata-imported",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "Id": "{sso#1}",
         "IdentityProviderEntityId": "urn:behavior-lock:idp"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -304,14 +304,14 @@ profile: enterprise
       "correlationId": null,
       "eventType": "sso.portal.metadata.imported",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "connectionId": "{sso#1}",
         "identityProviderEntityId": "urn:behavior-lock:idp",
         "singleSignOnUrl": "https://idp.example.test/sso"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -339,12 +339,12 @@ profile: enterprise
       "correlationId": null,
       "eventType": "sso.portal.connection.activated",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "connectionId": "{sso#1}"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,

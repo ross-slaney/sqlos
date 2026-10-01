@@ -283,7 +283,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.login.oidc.start",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "CallbackUri": "https://sqlos.example.test/sqlos/auth/oidc/callback",
@@ -291,7 +291,7 @@ profile: hosted
         "Email": "",
         "provider": "Custom"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -319,13 +319,13 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.login.oidc.provisioned",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "oidcConnectionId": "{oidc#1}",
         "provider": "Custom"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -353,7 +353,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.login.oidc.success",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "oidcConnectionId": "{oidc#1}",
@@ -369,7 +369,7 @@ profile: hosted
           "Reason": "evidence_missing"
         }
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -397,7 +397,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.login.oidc.start",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "CallbackUri": "https://sqlos.example.test/sqlos/auth/oidc/callback",
@@ -405,7 +405,7 @@ profile: hosted
         "Email": "",
         "provider": "Microsoft"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -433,13 +433,13 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.login.oidc.provisioned",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "oidcConnectionId": "{oidc#2}",
         "provider": "Microsoft"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -467,7 +467,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.login.oidc.success",
       "id": "{evt#6}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "oidcConnectionId": "{oidc#2}",
@@ -483,7 +483,7 @@ profile: hosted
           "Reason": "evidence_missing"
         }
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -511,7 +511,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.login.oidc.start",
       "id": "{evt#7}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "CallbackUri": "https://sqlos.example.test/sqlos/auth/oidc/callback",
@@ -519,7 +519,7 @@ profile: hosted
         "Email": "",
         "provider": "GitHub"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -547,13 +547,13 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.login.oidc.provisioned",
       "id": "{evt#8}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "oidcConnectionId": "{oidc#3}",
         "provider": "GitHub"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -581,7 +581,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.login.oidc.success",
       "id": "{evt#9}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "oidcConnectionId": "{oidc#3}",
@@ -597,7 +597,7 @@ profile: hosted
           "Reason": "evidence_missing"
         }
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

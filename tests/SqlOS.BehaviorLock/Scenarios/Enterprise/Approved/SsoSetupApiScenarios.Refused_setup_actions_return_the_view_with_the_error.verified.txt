@@ -33,7 +33,7 @@ profile: enterprise
         "connection": {
           "autoLinkByEmail": true,
           "autoProvisionUsers": false,
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Acme SSO",
           "enrollmentPolicy": {
             "allowJitProvisioning": false,
@@ -44,7 +44,7 @@ profile: enterprise
           "isEnabled": false,
           "setupStatus": "draft",
           "singleSignOnUrl": null,
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         "domain": null,
         "error": "Unsupported SSO provider 'adfs'.",
@@ -154,7 +154,7 @@ profile: enterprise
         "connection": {
           "autoLinkByEmail": true,
           "autoProvisionUsers": false,
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Acme SSO",
           "enrollmentPolicy": {
             "allowJitProvisioning": false,
@@ -165,7 +165,7 @@ profile: enterprise
           "isEnabled": false,
           "setupStatus": "draft",
           "singleSignOnUrl": null,
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         "domain": null,
         "error": "Wildcard domains cannot be verified.",
@@ -273,7 +273,7 @@ profile: enterprise
         "connection": {
           "autoLinkByEmail": true,
           "autoProvisionUsers": false,
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Acme SSO",
           "enrollmentPolicy": {
             "allowJitProvisioning": false,
@@ -284,7 +284,7 @@ profile: enterprise
           "isEnabled": false,
           "setupStatus": "draft",
           "singleSignOnUrl": null,
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         "domain": null,
         "error": "Domain verification request was not found.",
@@ -411,7 +411,7 @@ profile: enterprise
         "connection": {
           "autoLinkByEmail": true,
           "autoProvisionUsers": false,
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Acme SSO",
           "enrollmentPolicy": {
             "allowJitProvisioning": false,
@@ -422,7 +422,7 @@ profile: enterprise
           "isEnabled": false,
           "setupStatus": "draft",
           "singleSignOnUrl": null,
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         "domain": null,
         "error": "Federation metadata is missing the entityID attribute.",
@@ -530,7 +530,7 @@ profile: enterprise
         "connection": {
           "autoLinkByEmail": true,
           "autoProvisionUsers": false,
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Acme SSO",
           "enrollmentPolicy": {
             "allowJitProvisioning": false,
@@ -541,7 +541,7 @@ profile: enterprise
           "isEnabled": false,
           "setupStatus": "draft",
           "singleSignOnUrl": null,
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         "domain": null,
         "error": "Import valid SAML metadata before activating the connection.",
@@ -647,7 +647,7 @@ profile: enterprise
         "connection": {
           "autoLinkByEmail": true,
           "autoProvisionUsers": false,
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Acme SSO",
           "enrollmentPolicy": {
             "allowJitProvisioning": false,
@@ -658,7 +658,7 @@ profile: enterprise
           "isEnabled": false,
           "setupStatus": "draft",
           "singleSignOnUrl": null,
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         "domain": null,
         "error": null,
@@ -790,14 +790,14 @@ profile: enterprise
       "correlationId": null,
       "eventType": "sso.portal.connection.tested",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "hasAuthorizationUrl": "[redacted]",
         "message": "Activate the SSO connection before starting a test sign-in.",
         "status": "blocked"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,

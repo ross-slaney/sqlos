@@ -79,7 +79,7 @@ profile: headless
             "configurationFingerprint": "{hex#1}",
             "isEditable": false,
             "isOrphaned": false,
-            "lastReconciledAt": "{datetime:unspecified}",
+            "lastReconciledAt": "{datetime:utc-z}",
             "owner": "code",
             "sourceKey": "auth-page:default"
           },
@@ -87,7 +87,7 @@ profile: headless
           "pageTitle": "Sign in to Behavior Lock",
           "phoneOtpRuntimeConfigured": true,
           "primaryColor": "#2563eb",
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         "signupToken": null,
         "totpEnrollment": null,
@@ -212,7 +212,7 @@ profile: headless
           "configurationFingerprint": "{hex#1}",
           "isEditable": false,
           "isOrphaned": false,
-          "lastReconciledAt": "{datetime:unspecified}",
+          "lastReconciledAt": "{datetime:utc-z}",
           "owner": "code",
           "sourceKey": "auth-page:default"
         },
@@ -220,7 +220,7 @@ profile: headless
         "pageTitle": "Sign in to Behavior Lock",
         "phoneOtpRuntimeConfigured": true,
         "primaryColor": "#2563eb",
-        "updatedAt": "{datetime:unspecified}"
+        "updatedAt": "{datetime:utc-z}"
       },
       "signupToken": null,
       "totpEnrollment": null,
@@ -248,7 +248,7 @@ profile: headless
       "correlationId": null,
       "eventType": "password.login.succeeded",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "AuthorizationRequestId": "[redacted]",
@@ -264,7 +264,7 @@ profile: headless
         },
         "maskedEmail": "GR***@EXAMPLE.TEST"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -292,7 +292,7 @@ profile: headless
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -302,7 +302,7 @@ profile: headless
         "publicMessage": "The request could not be completed.",
         "surface": "HeadlessView"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -330,10 +330,10 @@ profile: headless
       "correlationId": null,
       "eventType": "user.login.mfa",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": null,
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -361,7 +361,7 @@ profile: headless
       "correlationId": null,
       "eventType": "password.login.succeeded",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "AuthorizationRequestId": "[redacted]",
@@ -377,7 +377,7 @@ profile: headless
         },
         "maskedEmail": "GR***@EXAMPLE.TEST"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -405,10 +405,10 @@ profile: headless
       "correlationId": null,
       "eventType": "user.login.mfa",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": null,
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

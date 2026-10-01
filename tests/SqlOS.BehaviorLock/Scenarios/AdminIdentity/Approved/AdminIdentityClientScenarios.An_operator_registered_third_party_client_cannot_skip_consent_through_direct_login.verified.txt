@@ -82,14 +82,14 @@ profile: dashboard-callback
       "correlationId": null,
       "eventType": "oauth.direct_login.rejected",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "client_application_id": "{cli#1}",
         "client_id": "partner",
         "route": "/sqlos/auth/password/login"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

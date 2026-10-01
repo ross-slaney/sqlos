@@ -263,7 +263,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "password.login.succeeded",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "AuthorizationRequestId": "[redacted]",
@@ -279,7 +279,7 @@ profile: hosted
         },
         "maskedEmail": "AL***@EXAMPLE.TEST"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -307,7 +307,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.mfa.challenge_failed",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "challengeId": "{tmp#1}",
@@ -316,7 +316,7 @@ profile: hosted
           "challengeLocked": false
         }
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -344,7 +344,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.mfa.challenge_failed",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "challengeId": "{tmp#1}",
@@ -353,7 +353,7 @@ profile: hosted
           "challengeLocked": false
         }
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -381,7 +381,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.mfa.challenge_failed",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "challengeId": "{tmp#1}",
@@ -390,7 +390,7 @@ profile: hosted
           "challengeLocked": false
         }
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -418,7 +418,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.mfa.challenge_failed",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "challengeId": "{tmp#1}",
@@ -427,7 +427,7 @@ profile: hosted
           "challengeLocked": false
         }
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -455,7 +455,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.mfa.challenge_failed",
       "id": "{evt#6}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "challengeId": "{tmp#1}",
@@ -464,7 +464,7 @@ profile: hosted
           "challengeLocked": true
         }
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -492,7 +492,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "password.login.succeeded",
       "id": "{evt#7}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "AuthorizationRequestId": "[redacted]",
@@ -508,7 +508,7 @@ profile: hosted
         },
         "maskedEmail": "AL***@EXAMPLE.TEST"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -536,7 +536,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.mfa.challenge_failed",
       "id": "{evt#8}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "challengeId": "{tmp#2}",
@@ -545,7 +545,7 @@ profile: hosted
           "challengeLocked": false
         }
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -573,7 +573,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.mfa.challenge_failed",
       "id": "{evt#9}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "challengeId": "{tmp#2}",
@@ -582,7 +582,7 @@ profile: hosted
           "challengeLocked": false
         }
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -610,7 +610,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.mfa.challenge_failed",
       "id": "{evt#10}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "challengeId": "{tmp#2}",
@@ -619,7 +619,7 @@ profile: hosted
           "challengeLocked": false
         }
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -647,7 +647,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.mfa.challenge_failed",
       "id": "{evt#11}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "challengeId": "{tmp#2}",
@@ -656,7 +656,7 @@ profile: hosted
           "challengeLocked": false
         }
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -684,7 +684,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.mfa.challenge_failed",
       "id": "{evt#12}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "challengeId": "{tmp#2}",
@@ -693,7 +693,7 @@ profile: hosted
           "challengeLocked": true
         }
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,
@@ -721,7 +721,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "password.login.succeeded",
       "id": "{evt#13}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "AuthorizationRequestId": "[redacted]",
@@ -737,7 +737,7 @@ profile: hosted
         },
         "maskedEmail": "AL***@EXAMPLE.TEST"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -765,12 +765,12 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.mfa.challenge_issue_rejected",
       "id": "{evt#14}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "reason": "user_budget_exhausted"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,

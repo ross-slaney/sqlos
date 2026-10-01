@@ -19,9 +19,9 @@ profile: dashboard-callback
 < X-Content-Type-Options: nosniff
 < X-Frame-Options: DENY
     {
-      "createdAt": "{datetime:unspecified}",
-      "effectiveFrom": "{datetime:unspecified}",
-      "effectiveTo": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
+      "effectiveFrom": "{datetime:utc-z}",
+      "effectiveTo": "{datetime:utc-z}",
       "id": "{grant#1}",
       "resourceId": "workspace::alpha",
       "resourceName": "Alpha",
@@ -47,8 +47,8 @@ profile: dashboard-callback
 < X-Content-Type-Options: nosniff
 < X-Frame-Options: DENY
     {
-      "createdAt": "{datetime:unspecified}",
-      "effectiveFrom": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
+      "effectiveFrom": "{datetime:utc-z}",
       "effectiveTo": null,
       "id": "{grant#2}",
       "resourceId": "workspace::beta",
@@ -75,9 +75,9 @@ profile: dashboard-callback
 < X-Content-Type-Options: nosniff
 < X-Frame-Options: DENY
     {
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "effectiveFrom": null,
-      "effectiveTo": "{datetime:unspecified}",
+      "effectiveTo": "{datetime:utc-z}",
       "id": "{grant#3}",
       "resourceId": "workspace::gamma",
       "resourceName": "Gamma",
@@ -98,8 +98,8 @@ profile: dashboard-callback
     {
       "data": [
         {
-          "effectiveFrom": "{datetime:unspecified}",
-          "effectiveTo": "{datetime:unspecified}",
+          "effectiveFrom": "{datetime:utc-z}",
+          "effectiveTo": "{datetime:utc-z}",
           "id": "{grant#1}",
           "roleId": "workspace_reader",
           "roleName": "Workspace reader",
@@ -124,9 +124,9 @@ profile: dashboard-callback
     {
       "data": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "effectiveFrom": null,
-          "effectiveTo": "{datetime:unspecified}",
+          "effectiveTo": "{datetime:utc-z}",
           "id": "{grant#3}",
           "resourceId": "workspace::gamma",
           "resourceName": "Gamma",
@@ -134,8 +134,8 @@ profile: dashboard-callback
           "roleName": "Workspace reader"
         },
         {
-          "createdAt": "{datetime:unspecified}",
-          "effectiveFrom": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
+          "effectiveFrom": "{datetime:utc-z}",
           "effectiveTo": null,
           "id": "{grant#2}",
           "resourceId": "workspace::beta",
@@ -144,9 +144,9 @@ profile: dashboard-callback
           "roleName": "Workspace reader"
         },
         {
-          "createdAt": "{datetime:unspecified}",
-          "effectiveFrom": "{datetime:unspecified}",
-          "effectiveTo": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
+          "effectiveFrom": "{datetime:utc-z}",
+          "effectiveTo": "{datetime:utc-z}",
           "id": "{grant#1}",
           "resourceId": "workspace::alpha",
           "resourceName": "Alpha",

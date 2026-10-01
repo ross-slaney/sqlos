@@ -391,7 +391,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "email.send.queued",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "deliveryId": "{edl#1}",
@@ -399,7 +399,7 @@ profile: hosted
         "templateKey": "auth.email-otp",
         "templateVersion": 1
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -427,7 +427,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "email_otp.challenge_started",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "details": {
@@ -439,7 +439,7 @@ profile: hosted
         "maskedEmail": "al***@example.test",
         "purpose": "login"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -461,7 +461,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "user.email.claimed",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "emailId": "{eml#1}",
@@ -478,7 +478,7 @@ profile: hosted
           "recoveryCodes": 0
         }
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -512,7 +512,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "email_otp.verify_succeeded",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "details": {
@@ -523,7 +523,7 @@ profile: hosted
         "maskedEmail": "al***@example.test",
         "purpose": "login"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -551,14 +551,14 @@ profile: hosted
       "correlationId": null,
       "eventType": "oauth.direct_login.rejected",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "client_application_id": "{cli#1}",
         "client_id": "partner-app",
         "route": "/sqlos/auth/email-otp/verify"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

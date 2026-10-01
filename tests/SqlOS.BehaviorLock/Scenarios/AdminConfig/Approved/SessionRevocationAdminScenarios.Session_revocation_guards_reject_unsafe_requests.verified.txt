@@ -10,14 +10,14 @@ profile: dashboard-callback
     {
       "data": [
         {
-          "absoluteExpiresAt": "{datetime:unspecified}",
+          "absoluteExpiresAt": "{datetime:utc-z}",
           "authenticationMethod": "password",
           "clientApplicationId": "{cli#1}",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "id": "{ses#1}",
-          "idleExpiresAt": "{datetime:unspecified}",
+          "idleExpiresAt": "{datetime:utc-z}",
           "ipAddress": "203.0.113.10",
-          "lastSeenAt": "{datetime:unspecified}",
+          "lastSeenAt": "{datetime:utc-z}",
           "revocationReason": null,
           "revokedAt": null,
           "user": "Alice",
@@ -211,7 +211,7 @@ profile: dashboard-callback
       "correlationId": "incident-7",
       "eventType": "session.admin-revoked",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "already_revoked_sessions": 0,
@@ -222,7 +222,7 @@ profile: dashboard-callback
         "reason": "admin_revoked",
         "selector_fingerprint": "{hex#1}"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": "{ses#1}",

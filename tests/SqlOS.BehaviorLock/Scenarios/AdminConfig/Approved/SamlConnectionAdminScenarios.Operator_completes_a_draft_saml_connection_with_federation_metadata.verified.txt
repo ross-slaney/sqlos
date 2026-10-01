@@ -145,13 +145,13 @@ profile: enterprise
       "correlationId": null,
       "eventType": "saml.connection.metadata-imported",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "Id": "{sso#1}",
         "IdentityProviderEntityId": "urn:behavior-lock:acme-idp"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
       "requestId": null,
       "sessionId": null,

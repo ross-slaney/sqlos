@@ -289,7 +289,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "phone_otp.challenge_started",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "details": {
@@ -301,7 +301,7 @@ profile: hosted
         "maskedPhone": "+1******0173",
         "purpose": "login"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -329,7 +329,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "phone_otp.verify_succeeded",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "details": {
@@ -341,7 +341,7 @@ profile: hosted
         "maskedPhone": "+1******0173",
         "purpose": "login"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

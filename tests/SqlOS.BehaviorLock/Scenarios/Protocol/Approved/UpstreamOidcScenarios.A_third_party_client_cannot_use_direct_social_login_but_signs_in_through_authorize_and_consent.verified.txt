@@ -56,14 +56,14 @@ profile: dcr
       "correlationId": null,
       "eventType": "oauth.direct_login.rejected",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "client_application_id": "{cli#1}",
         "client_id": "{dcrcli#1}",
         "route": "/sqlos/auth/oidc/authorization-url"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -113,14 +113,14 @@ profile: dcr
       "correlationId": null,
       "eventType": "oauth.direct_login.rejected",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "client_application_id": "{cli#2}",
         "client_id": "https://client.example.test/taskrail-web.json",
         "route": "/sqlos/auth/oidc/authorization-url"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -245,7 +245,7 @@ profile: dcr
       "correlationId": null,
       "eventType": "user.login.oidc.start",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "CallbackUri": "https://sqlos.example.test/sqlos/auth/oidc/callback",
@@ -253,7 +253,7 @@ profile: dcr
         "Email": "",
         "provider": "Google"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -281,13 +281,13 @@ profile: dcr
       "correlationId": null,
       "eventType": "user.login.oidc.provisioned",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "oidcConnectionId": "{oidc#1}",
         "provider": "Google"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -315,7 +315,7 @@ profile: dcr
       "correlationId": null,
       "eventType": "user.login.oidc.success",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "oidcConnectionId": "{oidc#1}",
@@ -331,7 +331,7 @@ profile: dcr
           "Reason": "evidence_missing"
         }
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -525,7 +525,7 @@ profile: dcr
       "correlationId": null,
       "eventType": "auth.public_error.mapped",
       "id": "{evt#6}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "auditReason": "opaque_auth_error",
@@ -535,7 +535,7 @@ profile: dcr
         "publicMessage": "The authorization request is invalid.",
         "surface": "OAuthAuthorize"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -563,13 +563,13 @@ profile: dcr
       "correlationId": null,
       "eventType": "oauth.consent.granted",
       "id": "{evt#7}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "client_id": "https://client.example.test/taskrail-web.json",
         "scope": "openid profile email offline_access"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

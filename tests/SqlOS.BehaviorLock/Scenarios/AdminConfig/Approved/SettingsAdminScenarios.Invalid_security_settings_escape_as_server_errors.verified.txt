@@ -119,5 +119,5 @@ profile: dashboard-callback
       "signingKeyGraceWindowDays": 7,
       "signingKeyRetiredCleanupDays": 30,
       "signingKeyRotationIntervalDays": 90,
-      "updatedAt": "{datetime:unspecified}"
+      "updatedAt": "{datetime:utc-z}"
     }

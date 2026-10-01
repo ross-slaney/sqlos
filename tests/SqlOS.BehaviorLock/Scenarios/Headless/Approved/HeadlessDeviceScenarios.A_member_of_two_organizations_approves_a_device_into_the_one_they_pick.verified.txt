@@ -41,7 +41,7 @@ profile: headless
         "deviceAuthorization": {
           "clientId": "lock-cli",
           "clientName": "Lock CLI",
-          "expiresAt": "{datetime:unspecified}",
+          "expiresAt": "{datetime:utc-z}",
           "resource": null,
           "scope": "openid profile offline_access",
           "status": "pending",
@@ -112,7 +112,7 @@ profile: headless
             "configurationFingerprint": "{hex#1}",
             "isEditable": false,
             "isOrphaned": false,
-            "lastReconciledAt": "{datetime:unspecified}",
+            "lastReconciledAt": "{datetime:utc-z}",
             "owner": "code",
             "sourceKey": "auth-page:default"
           },
@@ -120,7 +120,7 @@ profile: headless
           "pageTitle": "Sign in to Behavior Lock",
           "phoneOtpRuntimeConfigured": true,
           "primaryColor": "#2563eb",
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         "signupToken": null,
         "totpEnrollment": null,
@@ -170,7 +170,7 @@ profile: headless
         "deviceAuthorization": {
           "clientId": "lock-cli",
           "clientName": "Lock CLI",
-          "expiresAt": "{datetime:unspecified}",
+          "expiresAt": "{datetime:utc-z}",
           "resource": null,
           "scope": "openid profile offline_access",
           "status": "approved",
@@ -241,7 +241,7 @@ profile: headless
             "configurationFingerprint": "{hex#1}",
             "isEditable": false,
             "isOrphaned": false,
-            "lastReconciledAt": "{datetime:unspecified}",
+            "lastReconciledAt": "{datetime:utc-z}",
             "owner": "code",
             "sourceKey": "auth-page:default"
           },
@@ -249,7 +249,7 @@ profile: headless
           "pageTitle": "Sign in to Behavior Lock",
           "phoneOtpRuntimeConfigured": true,
           "primaryColor": "#2563eb",
-          "updatedAt": "{datetime:unspecified}"
+          "updatedAt": "{datetime:utc-z}"
         },
         "signupToken": null,
         "totpEnrollment": null,
@@ -341,10 +341,10 @@ profile: headless
       "correlationId": null,
       "eventType": "oauth.device.approved",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": null,
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#3}",
       "requestId": null,
       "sessionId": null,
@@ -372,10 +372,10 @@ profile: headless
       "correlationId": null,
       "eventType": "oauth.device.token-issued",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": null,
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": "{org#3}",
       "requestId": null,
       "sessionId": null,

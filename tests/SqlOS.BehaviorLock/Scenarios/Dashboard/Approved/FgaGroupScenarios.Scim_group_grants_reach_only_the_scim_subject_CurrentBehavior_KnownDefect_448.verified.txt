@@ -15,7 +15,7 @@ profile: enterprise-scim-path
     {
       "data": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "description": "SCIM mirrored group",
           "groupType": "scim",
           "id": "{grp#1}",
@@ -40,7 +40,7 @@ profile: enterprise-scim-path
     {
       "data": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Judy Hopps",
           "externalRef": "{usr#1}",
           "id": "{subj#2}",
@@ -66,21 +66,21 @@ profile: enterprise-scim-path
       "groups": [],
       "members": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "displayName": "Judy Hopps",
           "id": "{subj#2}",
           "subjectTypeId": "user"
         }
       ],
       "subject": {
-        "createdAt": "{datetime:unspecified}",
+        "createdAt": "{datetime:utc-z}",
         "displayName": "Support",
         "externalRef": "directory-support",
         "id": "{subj#1}",
         "organizationId": "{org#1}",
         "subjectType": "Group",
         "subjectTypeId": "group",
-        "updatedAt": "{datetime:unspecified}"
+        "updatedAt": "{datetime:utc-z}"
       }
     }
 
@@ -95,7 +95,7 @@ profile: enterprise-scim-path
     {
       "groups": [
         {
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "groupType": "scim",
           "id": "{grp#1}",
           "name": "Support",
@@ -104,14 +104,14 @@ profile: enterprise-scim-path
       ],
       "members": [],
       "subject": {
-        "createdAt": "{datetime:unspecified}",
+        "createdAt": "{datetime:utc-z}",
         "displayName": "Judy Hopps",
         "externalRef": "{usr#1}",
         "id": "{subj#2}",
         "organizationId": "{org#1}",
         "subjectType": "User",
         "subjectTypeId": "user",
-        "updatedAt": "{datetime:unspecified}"
+        "updatedAt": "{datetime:utc-z}"
       }
     }
 
@@ -130,7 +130,7 @@ profile: enterprise-scim-path
 < X-Content-Type-Options: nosniff
 < X-Frame-Options: DENY
     {
-      "createdAt": "{datetime:unspecified}",
+      "createdAt": "{datetime:utc-z}",
       "effectiveFrom": null,
       "effectiveTo": null,
       "id": "{grant#1}",

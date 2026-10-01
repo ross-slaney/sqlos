@@ -29,7 +29,7 @@ profile: hosted
         "configurationFingerprint": "{hex#1}",
         "isEditable": false,
         "isOrphaned": false,
-        "lastReconciledAt": "{datetime:unspecified}",
+        "lastReconciledAt": "{datetime:utc-z}",
         "owner": "code",
         "sourceKey": "auth-page:default"
       },
@@ -37,7 +37,7 @@ profile: hosted
       "pageTitle": "Sign in to Behavior Lock",
       "phoneOtpRuntimeConfigured": true,
       "primaryColor": "#1d4ed8",
-      "updatedAt": "{datetime:unspecified}"
+      "updatedAt": "{datetime:utc-z}"
     }
 
 ## 2. operator: an unknown layout is rejected before ownership is checked
@@ -106,12 +106,12 @@ profile: hosted
         "configurationFingerprint": "{hex#2}",
         "isEditable": false,
         "isOrphaned": false,
-        "lastReconciledAt": "{datetime:unspecified}",
+        "lastReconciledAt": "{datetime:utc-z}",
         "owner": "code",
         "sourceKey": "auth-email:default"
       },
       "primaryColor": "#2563eb",
-      "updatedAt": "{datetime:unspecified}"
+      "updatedAt": "{datetime:utc-z}"
     }
 
 ## 5. operator: an edit is rejected because code owns the email branding

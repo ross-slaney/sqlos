@@ -68,7 +68,7 @@ profile: hosted
           "action": "otp.admin_test.failed",
           "maskedDestination": "***0149",
           "method": "phone",
-          "occurredAt": "{datetime:unspecified}",
+          "occurredAt": "{datetime:utc-z}",
           "provider": null,
           "providerStatus": "provider_error"
         }
@@ -95,7 +95,7 @@ profile: hosted
       "correlationId": null,
       "eventType": "otp.admin_test.failed",
       "id": "{evt#1}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "maskedDestination": "***0149",
@@ -103,7 +103,7 @@ profile: hosted
         "provider": null,
         "providerStatus": "provider_error"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

@@ -53,7 +53,7 @@ profile: dashboard-callback
         "configurationFingerprint": "{hex#1}",
         "isEditable": false,
         "isOrphaned": false,
-        "lastReconciledAt": "{datetime:unspecified}",
+        "lastReconciledAt": "{datetime:utc-z}",
         "owner": "code",
         "sourceKey": "behavior-lock-app"
       },
@@ -64,7 +64,7 @@ profile: dashboard-callback
           "dataJson": "{\"resourceType\":\"oauth_client\",\"resourceId\":\"behavior-lock-app\",\"owner\":\"code\",\"sourceKey\":\"behavior-lock-app\",\"outcome\":\"created\",\"fingerprint\":\"{hex#1}\"}",
           "eventType": "configuration.reconciled",
           "id": "{evt#1}",
-          "occurredAt": "{datetime:unspecified}"
+          "occurredAt": "{datetime:utc-z}"
         }
       ],
       "redirectUris": [
@@ -144,7 +144,7 @@ profile: dashboard-callback
 < Content-Type: application/json; charset=utf-8
     {
       "clientId": "behavior-lock-app",
-      "disabledAt": "{datetime:unspecified}",
+      "disabledAt": "{datetime:utc-z}",
       "disabledReason": "oauth_client_emergency_disabled",
       "id": "{cli#1}",
       "isActive": false
@@ -274,14 +274,14 @@ profile: dashboard-callback
       "correlationId": null,
       "eventType": "client.emergency_disabled",
       "id": "{evt#2}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "client_id": "behavior-lock-app",
         "reason": "oauth_client_emergency_disabled",
         "source": "seeded"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -309,12 +309,12 @@ profile: dashboard-callback
       "correlationId": null,
       "eventType": "oauth.client_authentication.failed",
       "id": "{evt#3}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "clientId": "behavior-lock-app"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -342,13 +342,13 @@ profile: dashboard-callback
       "correlationId": null,
       "eventType": "client.emergency_enabled",
       "id": "{evt#4}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
         "client_id": "behavior-lock-app",
         "source": "seeded"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -376,7 +376,7 @@ profile: dashboard-callback
       "correlationId": null,
       "eventType": "password.login.succeeded",
       "id": "{evt#5}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "AuthorizationRequestId": "[redacted]",
@@ -392,7 +392,7 @@ profile: dashboard-callback
         },
         "maskedEmail": "AL***@EXAMPLE.TEST"
       },
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,
@@ -420,10 +420,10 @@ profile: dashboard-callback
       "correlationId": null,
       "eventType": "user.login.password",
       "id": "{evt#6}",
-      "ingestedAt": "{datetime:unspecified}",
+      "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": null,
-      "occurredAt": "{datetime:unspecified}",
+      "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
       "requestId": null,
       "sessionId": null,

@@ -364,7 +364,7 @@ profile: dashboard-callback
           "claimMapping": "{\"SubjectClaim\":\"sub\",\"EmailClaim\":\"email\",\"EmailVerifiedClaim\":\"email_verified\",\"DisplayNameClaim\":\"name\",\"FirstNameClaim\":\"given_name\",\"LastNameClaim\":\"family_name\",\"PreferredUsernameClaim\":\"preferred_username\"}",
           "clientAuthMethod": "ClientSecretPost",
           "clientId": "google-client",
-          "createdAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:utc-z}",
           "discoveryUrl": "https://accounts.google.com/.well-known/openid-configuration",
           "displayName": "Google",
           "effectiveLogoDataUrl": "{data-uri:image/svg+xml}",
@@ -387,7 +387,7 @@ profile: dashboard-callback
           "providerType": "Google",
           "scopes": "[]",
           "tokenEndpoint": null,
-          "updatedAt": "{datetime:unspecified}",
+          "updatedAt": "{datetime:utc-z}",
           "useDiscovery": true,
           "useUserInfo": true,
           "userInfoEndpoint": null
