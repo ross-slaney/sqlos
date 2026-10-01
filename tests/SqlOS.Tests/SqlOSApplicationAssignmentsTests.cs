@@ -511,88 +511,25 @@ public sealed class SqlOSApplicationAssignmentsTests
 
         public async Task<SqlOSFgaUserGroup> SeedFgaGroupMembershipAsync()
         {
-            var subject = new SqlOSFgaSubject
-            {
-                Id = "subj_ada",
-                SubjectTypeId = "user",
-                DisplayName = "Ada Lovelace",
-                ExternalRef = User.Id,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-            var groupSubject = new SqlOSFgaSubject
-            {
-                Id = "subj_group_app",
-                SubjectTypeId = "group",
-                DisplayName = "App Group",
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-            var user = new SqlOSFgaUser
-            {
-                Id = "fga_user_ada",
-                SubjectId = subject.Id,
-                Email = "ada@example.com",
-                IsActive = true
-            };
-            var group = new SqlOSFgaUserGroup
-            {
-                Id = "grp_app",
-                Name = "App Group",
-                SubjectId = groupSubject.Id,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
+            var subject = FgaTestModel.Subject("subj_ada", "user", displayName: "Ada Lovelace", externalRef: User.Id);
+            var groupSubject = FgaTestModel.Subject("subj_group_app", "group", displayName: "App Group");
+            var user = FgaTestModel.User("fga_user_ada", subject.Id, email: "ada@example.com");
+            var group = FgaTestModel.Group("grp_app", groupSubject.Id, "App Group");
 
             Context.Set<SqlOSFgaSubject>().AddRange(subject, groupSubject);
             Context.Set<SqlOSFgaUser>().Add(user);
             Context.Set<SqlOSFgaUserGroup>().Add(group);
-            Context.Set<SqlOSFgaUserGroupMembership>().Add(new SqlOSFgaUserGroupMembership
-            {
-                SubjectId = subject.Id,
-                UserGroupId = group.Id,
-                CreatedAt = DateTime.UtcNow
-            });
+            Context.Set<SqlOSFgaUserGroupMembership>().Add(FgaTestModel.Membership(subject.Id, group.Id));
             await Context.SaveChangesAsync();
             return group;
         }
 
         public async Task<(string ServiceAccountId, string AgentId)> SeedFgaMachinePrincipalsAsync()
         {
-            var serviceSubject = new SqlOSFgaSubject
-            {
-                Id = "subj_service_app",
-                SubjectTypeId = "service_account",
-                OrganizationId = "org_allowed",
-                DisplayName = "Application worker",
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-            var agentSubject = new SqlOSFgaSubject
-            {
-                Id = "subj_agent_app",
-                SubjectTypeId = "agent",
-                OrganizationId = "org_allowed",
-                DisplayName = "Application agent",
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-            var serviceAccount = new SqlOSFgaServiceAccount
-            {
-                Id = "sa_app",
-                SubjectId = serviceSubject.Id,
-                ClientId = "sa-app",
-                ClientSecretHash = "not-used-in-assignment-test",
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-            var agent = new SqlOSFgaAgent
-            {
-                Id = "agt_app",
-                SubjectId = agentSubject.Id,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
+            var serviceSubject = FgaTestModel.Subject("subj_service_app", "service_account", displayName: "Application worker", organizationId: "org_allowed");
+            var agentSubject = FgaTestModel.Subject("subj_agent_app", "agent", displayName: "Application agent", organizationId: "org_allowed");
+            var serviceAccount = FgaTestModel.ServiceAccount("sa_app", serviceSubject.Id, "sa-app", clientSecretHash: "not-used-in-assignment-test");
+            var agent = FgaTestModel.Agent("agt_app", agentSubject.Id);
             Context.Set<SqlOSFgaSubject>().AddRange(serviceSubject, agentSubject);
             Context.Set<SqlOSFgaServiceAccount>().Add(serviceAccount);
             Context.Set<SqlOSFgaAgent>().Add(agent);

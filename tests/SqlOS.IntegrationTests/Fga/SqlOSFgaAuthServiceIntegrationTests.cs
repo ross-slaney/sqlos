@@ -181,7 +181,7 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
 
         await AssertPointAndFilterAsync(user.SubjectId, resourceId, expected: true);
 
-        user.IsActive = false;
+        user.Subject!.ChangeActivity(false, FgaActor.Host, DateTime.UtcNow);
         await Context.SaveChangesAsync();
 
         await AssertPointAndFilterAsync(user.SubjectId, resourceId, expected: false);
@@ -231,7 +231,7 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
 
         await AssertPointAndFilterAsync(serviceAccount.SubjectId, resourceId, expected: true);
 
-        serviceAccount.ExpiresAt = DateTime.UtcNow.AddSeconds(-1);
+        serviceAccount.Subject!.ChangeServiceAccountExpiry(DateTime.UtcNow.AddSeconds(-1), FgaActor.Host, DateTime.UtcNow);
         await Context.SaveChangesAsync();
 
         await AssertPointAndFilterAsync(serviceAccount.SubjectId, resourceId, expected: false);
@@ -248,7 +248,7 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
 
         await AssertPointAndFilterAsync(user.SubjectId, resourceId, expected: true);
 
-        group.IsActive = false;
+        group.Subject!.ChangeActivity(false, FgaActor.Host, DateTime.UtcNow);
         await Context.SaveChangesAsync();
 
         await AssertPointAndFilterAsync(user.SubjectId, resourceId, expected: false);
@@ -264,7 +264,7 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
         var resourceId = await CreateProtectedResourceWithGrantAsync(group.SubjectId);
         var filter = await _authService.BuildFilterAsync<LifecycleProtectedEntity>(user.SubjectId, "TEST_VIEW");
 
-        user.IsActive = false;
+        user.Subject!.ChangeActivity(false, FgaActor.Host, DateTime.UtcNow);
         await Context.SaveChangesAsync();
 
         var listed = await Context.Set<LifecycleProtectedEntity>()
@@ -281,11 +281,11 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
         var victimSubjectId = $"subj_victim_{suffix}";
         var attackerSubjectId = $"subj_attacker_{suffix},{victimSubjectId}";
         Context.Set<SqlOSFgaSubject>().AddRange(
-            new SqlOSFgaSubject { Id = victimSubjectId, SubjectTypeId = "user", DisplayName = "Victim" },
-            new SqlOSFgaSubject { Id = attackerSubjectId, SubjectTypeId = "user", DisplayName = "Attacker" });
+            FgaTestModel.Subject(victimSubjectId, "user", displayName: "Victim"),
+            FgaTestModel.Subject(attackerSubjectId, "user", displayName: "Attacker"));
         Context.Set<SqlOSFgaUser>().AddRange(
-            new SqlOSFgaUser { Id = $"usr_victim_{suffix}", SubjectId = victimSubjectId, IsActive = true },
-            new SqlOSFgaUser { Id = $"usr_attacker_{suffix}", SubjectId = attackerSubjectId, IsActive = true });
+            FgaTestModel.User($"usr_victim_{suffix}", victimSubjectId),
+            FgaTestModel.User($"usr_attacker_{suffix}", attackerSubjectId));
         await Context.SaveChangesAsync();
         var resourceId = await CreateProtectedResourceWithGrantAsync(victimSubjectId);
 

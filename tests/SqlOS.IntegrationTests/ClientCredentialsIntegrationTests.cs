@@ -166,22 +166,9 @@ public sealed class ClientCredentialsIntegrationTests
                 ConfigurationOwner = SqlOSConfigurationOwners.Code,
                 ConfigurationSourceKey = clientId
             });
-            context.Set<SqlOSFgaSubject>().Add(new SqlOSFgaSubject
-            {
-                Id = "service_account::code-owned-machine-client",
-                SubjectTypeId = "service_account",
-                DisplayName = "Code-owned machine client"
-            });
+            context.Set<SqlOSFgaSubject>().Add(FgaTestModel.Subject("service_account::code-owned-machine-client", "service_account", displayName: "Code-owned machine client"));
             var secretHash = crypto.HashPassword(secret);
-            context.Set<SqlOSFgaServiceAccount>().Add(new SqlOSFgaServiceAccount
-            {
-                Id = "sa_code_owned",
-                SubjectId = "service_account::code-owned-machine-client",
-                ClientId = clientId,
-                ClientSecretHash = secretHash,
-                ConfigurationOwner = SqlOSConfigurationOwners.Code,
-                ConfigurationSourceKey = clientId
-            });
+            context.Set<SqlOSFgaServiceAccount>().Add(FgaTestModel.ServiceAccount("sa_code_owned", "service_account::code-owned-machine-client", clientId, clientSecretHash: secretHash, configurationOwner: SqlOSConfigurationOwners.Code, configurationSourceKey: clientId));
             context.Set<SqlOSClientCredential>().Add(new SqlOSClientCredential
             {
                 Id = "clcred_code_owned",
@@ -305,19 +292,8 @@ public sealed class ClientCredentialsIntegrationTests
             SecretHash = crypto.HashPassword(secret),
             CreatedAt = DateTime.UtcNow
         });
-        context.Set<SqlOSFgaSubject>().Add(new SqlOSFgaSubject
-        {
-            Id = subjectId,
-            SubjectTypeId = "service_account",
-            DisplayName = "Integration Worker"
-        });
-        context.Set<SqlOSFgaServiceAccount>().Add(new SqlOSFgaServiceAccount
-        {
-            Id = $"sa_{suffix}",
-            SubjectId = subjectId,
-            ClientId = clientId,
-            ClientSecretHash = crypto.HashPassword(secret)
-        });
+        context.Set<SqlOSFgaSubject>().Add(FgaTestModel.Subject(subjectId, "service_account", displayName: "Integration Worker"));
+        context.Set<SqlOSFgaServiceAccount>().Add(FgaTestModel.ServiceAccount($"sa_{suffix}", subjectId, clientId, clientSecretHash: crypto.HashPassword(secret)));
         await context.SaveChangesAsync();
 
         var issued = await service.ExchangeAsync(

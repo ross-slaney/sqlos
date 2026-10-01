@@ -15,6 +15,7 @@ using SqlOS.Database;
 using SqlOS.Domain;
 using SqlOS.Fga;
 using SqlOS.Fga.Models;
+using SqlOS.Fga.Processes;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -592,14 +593,19 @@ internal sealed class SqlOSScimService
         {
             await LockAndEnsureConnectionAuthorityAsync(connection, cancellationToken);
             var link = await GetRequiredGroupLinkAsync(connection.Id, id, includeDeleted: false, cancellationToken);
-            var group = await _context.Set<SqlOSFgaUserGroup>().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
-            if (group != null)
+            var groupSubject = await ChangeFgaGroupMembership.GroupAsync(_context.Set<SqlOSFgaUserGroup>(), id, cancellationToken);
+            if (groupSubject != null)
             {
                 var memberships = await _context.Set<SqlOSFgaUserGroupMembership>()
-                    .Where(x => x.UserGroupId == group.Id)
+                    .Where(x => x.UserGroupId == id)
                     .ToListAsync(cancellationToken);
+                foreach (var membership in memberships)
+                {
+                    groupSubject.RemoveMember(membership, FgaActor.Directory(connection.Id));
+                }
+
                 _context.Set<SqlOSFgaUserGroupMembership>().RemoveRange(memberships);
-                await RevokeManagedGrantsForGroupAsync(connection, group.Id, cancellationToken);
+                await RevokeManagedGrantsForGroupAsync(connection, id, cancellationToken);
             }
 
             link.IsActive = false;
@@ -819,50 +825,29 @@ internal sealed class SqlOSScimService
 
         var now = DateTime.UtcNow;
         var externalId = request.ExternalId;
-        SqlOSFgaUserGroup? group = null;
-        if (link != null)
-        {
-            group = await _context.Set<SqlOSFgaUserGroup>().FirstOrDefaultAsync(x => x.Id == link.EntityId, cancellationToken);
-        }
-
-        if (group == null)
+        var groupSubject = link == null ? null : await ChangeFgaGroupMembership.GroupAsync(_context.Set<SqlOSFgaUserGroup>(), link.EntityId, cancellationToken);
+        if (groupSubject == null)
         {
             await EnsureFgaSubjectTypeAsync("group", "Group", cancellationToken);
-            var subject = new SqlOSFgaSubject
-            {
-                Id = _cryptoService.GenerateId("subj"),
-                SubjectTypeId = "group",
-                DisplayName = request.DisplayName,
-                OrganizationId = connection.OrganizationId,
-                ExternalRef = externalId,
-                CreatedAt = now,
-                UpdatedAt = now
-            };
-            group = new SqlOSFgaUserGroup
-            {
-                Id = _cryptoService.GenerateId("grp"),
-                SubjectId = subject.Id,
-                Name = request.DisplayName,
-                Description = "SCIM mirrored group",
-                GroupType = "scim",
-                CreatedAt = now,
-                UpdatedAt = now
-            };
-            _context.Set<SqlOSFgaSubject>().Add(subject);
-            _context.Set<SqlOSFgaUserGroup>().Add(group);
+            groupSubject = SqlOSFgaSubject.CreateGroup(
+                _cryptoService.GenerateId("subj"),
+                request.DisplayName,
+                connection.OrganizationId,
+                externalId,
+                _cryptoService.GenerateId("grp"),
+                "SCIM mirrored group",
+                "scim",
+                FgaActor.Directory(connection.Id),
+                now);
+            _context.Set<SqlOSFgaSubject>().Add(groupSubject);
         }
         else
         {
-            group.Name = request.DisplayName;
-            group.UpdatedAt = now;
-            var subject = await _context.Set<SqlOSFgaSubject>().FirstOrDefaultAsync(x => x.Id == group.SubjectId, cancellationToken);
-            if (subject != null)
-            {
-                subject.DisplayName = request.DisplayName;
-                subject.ExternalRef = externalId;
-                subject.UpdatedAt = now;
-            }
+            groupSubject.DescribeGroup(request.DisplayName, groupSubject.UserGroup!.Description, groupSubject.UserGroup.GroupType, now);
+            groupSubject.Describe(request.DisplayName, groupSubject.OrganizationId, externalId, now);
         }
+
+        var group = groupSubject.UserGroup!;
 
         link = await UpsertExternalLinkAsync(
             connection.Id,
@@ -881,7 +866,7 @@ internal sealed class SqlOSScimService
             cancellationToken,
             link);
         link.DeletedAt = null;
-        await ReplaceGroupMembersAsync(connection, group, externalId, desiredMemberSubjectIds, cancellationToken);
+        await ReplaceGroupMembersAsync(connection, groupSubject, externalId, desiredMemberSubjectIds, cancellationToken);
         await ApplyGroupMappingsAsync(connection, group, externalId, request.DisplayName, cancellationToken);
 
         connection.LastSyncAt = now;
@@ -1256,43 +1241,34 @@ internal sealed class SqlOSScimService
         var existingSubjectId = await FindFgaSubjectIdForUserAsync(connection.Id, connection.OrganizationId, user.Id, cancellationToken);
         if (!string.IsNullOrWhiteSpace(existingSubjectId))
         {
-            var subject = await _context.Set<SqlOSFgaSubject>().FirstOrDefaultAsync(x => x.Id == existingSubjectId, cancellationToken);
+            var subject = await _context.Set<SqlOSFgaSubject>()
+                .Include(x => x.User)
+                .FirstOrDefaultAsync(x => x.Id == existingSubjectId, cancellationToken);
             if (subject != null)
             {
-                subject.DisplayName = displayName;
-                subject.UpdatedAt = now;
-            }
-
-            var fgaUser = await _context.Set<SqlOSFgaUser>().FirstOrDefaultAsync(x => x.SubjectId == existingSubjectId, cancellationToken);
-            if (fgaUser != null)
-            {
-                fgaUser.Email = email;
-                fgaUser.IsActive = active;
+                subject.Describe(displayName, subject.OrganizationId, subject.ExternalRef, now);
+                if (subject.User != null)
+                {
+                    subject.DescribeUser(email, now);
+                    subject.ChangeActivity(active, FgaActor.Directory(connection.Id), now);
+                }
             }
 
             return existingSubjectId;
         }
 
         await EnsureFgaSubjectTypeAsync("user", "User", cancellationToken);
-        var newSubject = new SqlOSFgaSubject
-        {
-            Id = _cryptoService.GenerateId("subj"),
-            SubjectTypeId = "user",
-            DisplayName = displayName,
-            OrganizationId = connection.OrganizationId,
-            ExternalRef = user.Id,
-            CreatedAt = now,
-            UpdatedAt = now
-        };
-        var newUser = new SqlOSFgaUser
-        {
-            Id = _cryptoService.GenerateId("fusr"),
-            SubjectId = newSubject.Id,
-            Email = email,
-            IsActive = active
-        };
+        var newSubject = SqlOSFgaSubject.CreateUser(
+            _cryptoService.GenerateId("subj"),
+            displayName,
+            connection.OrganizationId,
+            user.Id,
+            _cryptoService.GenerateId("fusr"),
+            email,
+            active,
+            FgaActor.Directory(connection.Id),
+            now);
         _context.Set<SqlOSFgaSubject>().Add(newSubject);
-        _context.Set<SqlOSFgaUser>().Add(newUser);
         return newSubject.Id;
     }
 
@@ -1338,11 +1314,13 @@ internal sealed class SqlOSScimService
 
         if (!string.IsNullOrWhiteSpace(fgaSubjectId))
         {
-            var fgaUser = await _context.Set<SqlOSFgaUser>()
-                .FirstOrDefaultAsync(x => x.SubjectId == fgaSubjectId, cancellationToken);
-            if (fgaUser != null)
+            var actor = FgaActor.Directory(connection.Id);
+            var subject = await _context.Set<SqlOSFgaSubject>()
+                .Include(x => x.User)
+                .FirstOrDefaultAsync(x => x.Id == fgaSubjectId, cancellationToken);
+            if (subject?.User != null)
             {
-                fgaUser.IsActive = false;
+                subject.ChangeActivity(false, actor, DateTime.UtcNow);
             }
             var scimGroups = await _context.Set<SqlOSScimExternalId>()
                 .Where(x => x.ConnectionId == connection.Id && x.ResourceType == "Group")
@@ -1351,21 +1329,34 @@ internal sealed class SqlOSScimService
             var memberships = await _context.Set<SqlOSFgaUserGroupMembership>()
                 .Where(x => x.SubjectId == fgaSubjectId && scimGroups.Contains(x.UserGroupId))
                 .ToListAsync(cancellationToken);
+            foreach (var groupMembership in memberships)
+            {
+                var group = await ChangeFgaGroupMembership.GroupAsync(_context.Set<SqlOSFgaUserGroup>(), groupMembership.UserGroupId, cancellationToken);
+                group!.RemoveMember(groupMembership, actor);
+            }
+
             _context.Set<SqlOSFgaUserGroupMembership>().RemoveRange(memberships);
         }
     }
 
     private async Task ReplaceGroupMembersAsync(
         SqlOSScimConnection connection,
-        SqlOSFgaUserGroup group,
+        SqlOSFgaSubject groupSubject,
         string? groupExternalId,
         IReadOnlySet<string> desiredSubjectIds,
         CancellationToken cancellationToken)
     {
+        var group = groupSubject.UserGroup!;
+        var actor = FgaActor.Directory(connection.Id);
         var existing = await _context.Set<SqlOSFgaUserGroupMembership>()
             .Where(x => x.UserGroupId == group.Id)
             .ToListAsync(cancellationToken);
         var remove = existing.Where(x => !desiredSubjectIds.Contains(x.SubjectId)).ToList();
+        foreach (var membership in remove)
+        {
+            groupSubject.RemoveMember(membership, actor);
+        }
+
         _context.Set<SqlOSFgaUserGroupMembership>().RemoveRange(remove);
 
         var existingSubjectIds = existing.Select(x => x.SubjectId).ToHashSet(StringComparer.Ordinal);
@@ -1373,14 +1364,12 @@ internal sealed class SqlOSScimService
             .Where(subjectId => !existingSubjectIds.Contains(subjectId))
             .OrderBy(subjectId => subjectId, StringComparer.Ordinal)
             .ToList();
+        var members = await _context.Set<SqlOSFgaSubject>()
+            .Where(subject => addSubjectIds.Contains(subject.Id))
+            .ToDictionaryAsync(subject => subject.Id, StringComparer.Ordinal, cancellationToken);
         foreach (var subjectId in addSubjectIds)
         {
-            _context.Set<SqlOSFgaUserGroupMembership>().Add(new SqlOSFgaUserGroupMembership
-            {
-                SubjectId = subjectId,
-                UserGroupId = group.Id,
-                CreatedAt = DateTime.UtcNow
-            });
+            _context.Set<SqlOSFgaUserGroupMembership>().Add(groupSubject.AddMember(members[subjectId], actor, DateTime.UtcNow));
         }
 
         await RecordGroupMembershipDeltaAsync(

@@ -9,3 +9,9 @@ SqlOS.AuthServer.Models.SqlOSUserAuthenticator <- SqlOS.AuthServer.Models.SqlOSU
 SqlOS.AuthServer.Models.SqlOSUserEmail <- SqlOS.AuthServer.Models.SqlOSUser
 SqlOS.AuthServer.Models.SqlOSUserMfaPolicyOverride <- SqlOS.AuthServer.Models.SqlOSUser
 SqlOS.AuthServer.Models.SqlOSUserPhoneNumber <- SqlOS.AuthServer.Models.SqlOSUser
+SqlOS.Fga.Models.SqlOSFgaAgent <- SqlOS.Fga.Models.SqlOSFgaSubject
+SqlOS.Fga.Models.SqlOSFgaRolePermission <- SqlOS.Fga.Models.SqlOSFgaRole
+SqlOS.Fga.Models.SqlOSFgaServiceAccount <- SqlOS.Fga.Models.SqlOSFgaSubject
+SqlOS.Fga.Models.SqlOSFgaUser <- SqlOS.Fga.Models.SqlOSFgaSubject
+SqlOS.Fga.Models.SqlOSFgaUserGroup <- SqlOS.Fga.Models.SqlOSFgaSubject
+SqlOS.Fga.Models.SqlOSFgaUserGroupMembership <- SqlOS.Fga.Models.SqlOSFgaSubject

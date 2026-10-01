@@ -179,10 +179,3 @@ SqlOS.Email.Services.SqlOSTransactionalEmailService::MarkFailedAsync
 SqlOS.Email.Services.SqlOSTransactionalEmailService::SendAsync
 SqlOS.Fga.Dashboard.SqlOSFgaDashboardMiddleware::HandleCreateGrant
 SqlOS.Fga.Dashboard.SqlOSFgaDashboardMiddleware::HandleDeleteGrant
-SqlOS.Fga.Services.SqlOSFgaSubjectService::AddToGroupAsync
-SqlOS.Fga.Services.SqlOSFgaSubjectService::CreateAgentAsync
-SqlOS.Fga.Services.SqlOSFgaSubjectService::CreateGroupAsync
-SqlOS.Fga.Services.SqlOSFgaSubjectService::CreateServiceAccountAsync
-SqlOS.Fga.Services.SqlOSFgaSubjectService::CreateSubjectAsync
-SqlOS.Fga.Services.SqlOSFgaSubjectService::CreateUserAsync
-SqlOS.Fga.Services.SqlOSFgaSubjectService::RemoveFromGroupAsync

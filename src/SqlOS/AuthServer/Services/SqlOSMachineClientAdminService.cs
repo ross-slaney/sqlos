@@ -78,17 +78,11 @@ public sealed class SqlOSMachineClientAdminService
 
             var now = DateTime.UtcNow;
             var client = CreateClient(normalized, now);
-            var subject = new SqlOSFgaSubject
-            {
-                Id = _crypto.GenerateId("sub"), SubjectTypeId = "service_account", OrganizationId = normalized.OrganizationId,
-                DisplayName = normalized.DisplayName, ExternalRef = normalized.ClientId, CreatedAt = now, UpdatedAt = now
-            };
-            var account = new SqlOSFgaServiceAccount
-            {
-                Id = _crypto.GenerateId("sa"), SubjectId = subject.Id, ClientId = normalized.ClientId,
-                ClientSecretHash = secretHash, Description = normalized.Description, ExpiresAt = normalized.ExpiresAt,
-                ConfigurationOwner = SqlOSConfigurationOwners.Dashboard, CreatedAt = now, UpdatedAt = now
-            };
+            var subject = SqlOSFgaSubject.CreateServiceAccount(
+                _crypto.GenerateId("sub"), normalized.DisplayName, normalized.OrganizationId, normalized.ClientId,
+                _crypto.GenerateId("sa"), normalized.ClientId, secretHash, normalized.Description, normalized.ExpiresAt,
+                SqlOSConfigurationOwners.Dashboard, configurationSourceKey: null, FgaActor.Operator, now);
+            var account = subject.ServiceAccount!;
             var credential = new SqlOSClientCredential
             {
                 Id = _crypto.GenerateId("clcred"), ClientApplicationId = client.Id, SecretHash = secretHash,
@@ -97,7 +91,6 @@ public sealed class SqlOSMachineClientAdminService
             };
             _context.Set<SqlOSClientApplication>().Add(client);
             _context.Set<SqlOSFgaSubject>().Add(subject);
-            _context.Set<SqlOSFgaServiceAccount>().Add(account);
             _context.Set<SqlOSClientCredential>().Add(credential);
             AddGrants(subject.Id, normalized.Grants, now, marker: null);
             await _context.SaveChangesAsync(cancellationToken);
@@ -173,8 +166,7 @@ public sealed class SqlOSMachineClientAdminService
         var secret = GenerateSecret();
         var now = DateTime.UtcNow;
         var secretHash = _crypto.HashPassword(secret);
-        account.ClientSecretHash = secretHash;
-        account.UpdatedAt = now;
+        subject.ChangeServiceAccountCredential(account.ClientId, secretHash, now);
         var activeCredentials = await _context.Set<SqlOSClientCredential>()
             .Where(x => x.ClientApplicationId == client.Id && x.RevokedAt == null)
             .ToListAsync(cancellationToken);
@@ -231,8 +223,8 @@ public sealed class SqlOSMachineClientAdminService
     {
         var (client, account, subject) = await RequireAsync(clientId, cancellationToken);
         EnsureDashboardOwned(account);
-        account.ExpiresAt = DateTime.UtcNow;
-        account.UpdatedAt = account.ExpiresAt.Value;
+        var now = DateTime.UtcNow;
+        subject.ChangeServiceAccountExpiry(now, FgaActor.Operator, now);
         client.IsActive = false;
         client.DisabledAt = account.ExpiresAt;
         client.DisabledReason = RevokedReason;
@@ -265,7 +257,7 @@ public sealed class SqlOSMachineClientAdminService
         client.IsActive = false;
         client.DisabledAt = now;
         client.DisabledReason = EmergencyDisabledReason;
-        account.UpdatedAt = now;
+        subject.TouchServiceAccount(now);
         await _context.SaveChangesAsync(cancellationToken);
         await _admin.RecordAuditAsync("machine_client.emergency_disabled", "admin", null, organizationId: subject.OrganizationId,
             data: new { clientId, subjectId = subject.Id, reason = EmergencyDisabledReason }, cancellationToken: cancellationToken);
@@ -293,7 +285,7 @@ public sealed class SqlOSMachineClientAdminService
         client.IsActive = true;
         client.DisabledAt = null;
         client.DisabledReason = null;
-        account.UpdatedAt = DateTime.UtcNow;
+        subject.TouchServiceAccount(DateTime.UtcNow);
         await _context.SaveChangesAsync(cancellationToken);
         await _admin.RecordAuditAsync("machine_client.emergency_enabled", "admin", null, organizationId: subject.OrganizationId,
             data: new { clientId, subjectId = subject.Id }, cancellationToken: cancellationToken);
@@ -375,12 +367,13 @@ public sealed class SqlOSMachineClientAdminService
         var keys = seeds.Select(x => x.ClientId.Trim()).ToHashSet(StringComparer.Ordinal);
         var now = DateTime.UtcNow;
         var orphans = await _context.Set<SqlOSFgaServiceAccount>()
+            .Include(x => x.Subject)
             .Where(x => x.ConfigurationOwner == SqlOSConfigurationOwners.Code && x.ConfigurationSourceKey != null && !keys.Contains(x.ConfigurationSourceKey))
             .ToListAsync(cancellationToken);
         foreach (var orphan in orphans)
         {
             if (orphan.ConfigurationOrphanedAt != null) continue;
-            orphan.ConfigurationOrphanedAt = now;
+            orphan.Subject!.OrphanServiceAccount(now);
             await _admin.RecordAuditAsync("configuration.orphaned", "system", "startup",
                 data: new { resourceType = "machine_client", clientId = orphan.ClientId, sourceKey = orphan.ConfigurationSourceKey }, cancellationToken: cancellationToken);
         }
@@ -411,19 +404,11 @@ public sealed class SqlOSMachineClientAdminService
             var isNew = account == null;
             if (account == null)
             {
-                var subject = new SqlOSFgaSubject
-                {
-                    Id = _crypto.GenerateId("sub"), SubjectTypeId = "service_account", OrganizationId = organizationId,
-                    DisplayName = seed.Name, ExternalRef = sourceKey, CreatedAt = now, UpdatedAt = now
-                };
-                account = new SqlOSFgaServiceAccount
-                {
-                    Id = _crypto.GenerateId("sa"), SubjectId = subject.Id, Subject = subject, ClientId = sourceKey,
-                    ClientSecretHash = secretHash, Description = seed.Description, ExpiresAt = machine.ExpiresAt,
-                    ConfigurationOwner = SqlOSConfigurationOwners.Code, ConfigurationSourceKey = sourceKey, CreatedAt = now
-                };
+                var subject = SqlOSFgaSubject.CreateServiceAccount(
+                    _crypto.GenerateId("sub"), seed.Name, organizationId, sourceKey, _crypto.GenerateId("sa"), sourceKey, secretHash,
+                    seed.Description, machine.ExpiresAt, SqlOSConfigurationOwners.Code, sourceKey, FgaActor.Startup, now);
+                account = subject.ServiceAccount!;
                 _context.Set<SqlOSFgaSubject>().Add(subject);
-                _context.Set<SqlOSFgaServiceAccount>().Add(account);
             }
             var marker = $"[sqlos-machine:{sourceKey}]";
             var old = await _context.Set<SqlOSFgaGrant>().Where(x => x.SubjectId == account.SubjectId && x.Description != null && x.Description.StartsWith(marker)).ToListAsync(cancellationToken);
@@ -436,14 +421,12 @@ public sealed class SqlOSMachineClientAdminService
                 || account.ClientSecretHash != secretHash || grantDrift;
             if (!changed) continue;
 
-            account.Subject!.DisplayName = seed.Name;
-            account.Description = seed.Description;
-            account.ClientSecretHash = secretHash;
-            account.ExpiresAt = machine.ExpiresAt;
-            account.ConfigurationFingerprint = fingerprint;
-            account.LastReconciledAt = now;
-            account.ConfigurationOrphanedAt = null;
-            account.UpdatedAt = now;
+            var accountSubject = account.Subject!;
+            accountSubject.Describe(seed.Name, accountSubject.OrganizationId, accountSubject.ExternalRef, now);
+            accountSubject.DescribeServiceAccount(seed.Description, now);
+            accountSubject.ChangeServiceAccountCredential(account.ClientId, secretHash, now);
+            accountSubject.ChangeServiceAccountExpiry(machine.ExpiresAt, FgaActor.Startup, now);
+            accountSubject.ReconcileServiceAccount(fingerprint, now);
             // Emergency disable lives on the OAuth client DisabledAt flag. Do not
             // expire, revoke credentials, or otherwise mutate that runtime override here.
 

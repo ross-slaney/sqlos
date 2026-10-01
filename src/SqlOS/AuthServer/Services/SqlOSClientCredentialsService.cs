@@ -5,6 +5,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Domain;
 using SqlOS.Fga.Models;
 
 namespace SqlOS.AuthServer.Services;
@@ -120,8 +121,7 @@ public sealed class SqlOSClientCredentialsService
             cancellationToken);
         if (account != null)
         {
-            account.LastUsedAt = now;
-            account.UpdatedAt = now;
+            account.Subject!.RecordActivity(now);
         }
         client.LastSeenAt = now;
         await _context.SaveChangesAsync(cancellationToken);
@@ -148,8 +148,7 @@ public sealed class SqlOSClientCredentialsService
             .SingleAsync(x => x.ClientId == clientId, cancellationToken);
         var now = DateTime.UtcNow;
         var secretHash = _crypto.HashPassword(newSecret);
-        account.ClientSecretHash = secretHash;
-        account.UpdatedAt = now;
+        account.Subject!.ChangeServiceAccountCredential(account.ClientId, secretHash, now);
         var activeCredentials = await _context.Set<SqlOSClientCredential>()
             .Where(x => x.ClientApplicationId == client.Id && x.RevokedAt == null)
             .ToListAsync(cancellationToken);
@@ -189,8 +188,8 @@ public sealed class SqlOSClientCredentialsService
             $"Machine client '{clientId}'");
         var client = await _context.Set<SqlOSClientApplication>()
             .SingleAsync(x => x.ClientId == clientId, cancellationToken);
-        account.ExpiresAt = DateTime.UtcNow;
-        account.UpdatedAt = account.ExpiresAt.Value;
+        var now = DateTime.UtcNow;
+        account.Subject!.ChangeServiceAccountExpiry(now, new FgaActor("admin", actorId), now);
         var credentials = await _context.Set<SqlOSClientCredential>()
             .Where(x => x.ClientApplicationId == client.Id && x.RevokedAt == null)
             .ToListAsync(cancellationToken);

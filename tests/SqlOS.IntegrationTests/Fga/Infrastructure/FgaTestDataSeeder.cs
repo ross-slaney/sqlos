@@ -93,61 +93,43 @@ public static class FgaTestDataSeeder
 
         // Subjects
         context.Set<SqlOSFgaSubject>().AddRange(
-            new SqlOSFgaSubject { Id = SystemAdminSubjectId, SubjectTypeId = "user", DisplayName = "System Admin" },
-            new SqlOSFgaSubject { Id = AgencyAdminSubjectId, SubjectTypeId = "user", DisplayName = "Agency Admin" },
-            new SqlOSFgaSubject { Id = AgencyMemberSubjectId, SubjectTypeId = "user", DisplayName = "Agency Member" },
-            new SqlOSFgaSubject { Id = GroupMemberSubjectId, SubjectTypeId = "user", DisplayName = "Group Member" },
-            new SqlOSFgaSubject { Id = UnauthorizedSubjectId, SubjectTypeId = "user", DisplayName = "Unauthorized User" },
-            new SqlOSFgaSubject { Id = TestGroupSubjectId, SubjectTypeId = "group", DisplayName = "Test Group" },
-            new SqlOSFgaSubject { Id = TestUserSubjectId, SubjectTypeId = "user", DisplayName = "Test User" },
-            new SqlOSFgaSubject { Id = TestAgentSubjectId, SubjectTypeId = "agent", DisplayName = "Test Agent" },
-            new SqlOSFgaSubject { Id = TestServiceAccountSubjectId, SubjectTypeId = "service_account", DisplayName = "Test Service Account" }
+            FgaTestModel.Subject(SystemAdminSubjectId, "user", displayName: "System Admin"),
+            FgaTestModel.Subject(AgencyAdminSubjectId, "user", displayName: "Agency Admin"),
+            FgaTestModel.Subject(AgencyMemberSubjectId, "user", displayName: "Agency Member"),
+            FgaTestModel.Subject(GroupMemberSubjectId, "user", displayName: "Group Member"),
+            FgaTestModel.Subject(UnauthorizedSubjectId, "user", displayName: "Unauthorized User"),
+            FgaTestModel.Subject(TestGroupSubjectId, "group", displayName: "Test Group"),
+            FgaTestModel.Subject(TestUserSubjectId, "user", displayName: "Test User"),
+            FgaTestModel.Subject(TestAgentSubjectId, "agent", displayName: "Test Agent"),
+            FgaTestModel.Subject(TestServiceAccountSubjectId, "service_account", displayName: "Test Service Account")
         );
 
         // User extension
         context.Set<SqlOSFgaUser>().AddRange(
-            new SqlOSFgaUser { Id = "usr_test_sysadmin", SubjectId = SystemAdminSubjectId, IsActive = true },
-            new SqlOSFgaUser { Id = "usr_test_agencyadmin", SubjectId = AgencyAdminSubjectId, IsActive = true },
-            new SqlOSFgaUser { Id = "usr_test_member", SubjectId = AgencyMemberSubjectId, IsActive = true },
-            new SqlOSFgaUser { Id = "usr_test_groupmember", SubjectId = GroupMemberSubjectId, IsActive = true },
-            new SqlOSFgaUser { Id = "usr_test_unauth", SubjectId = UnauthorizedSubjectId, IsActive = true },
-            new SqlOSFgaUser
-            {
-                Id = TestUserId,
-                SubjectId = TestUserSubjectId,
-                Email = "testuser@example.com",
-                IsActive = true
-            });
+            FgaTestModel.User("usr_test_sysadmin", SystemAdminSubjectId),
+            FgaTestModel.User("usr_test_agencyadmin", AgencyAdminSubjectId),
+            FgaTestModel.User("usr_test_member", AgencyMemberSubjectId),
+            FgaTestModel.User("usr_test_groupmember", GroupMemberSubjectId),
+            FgaTestModel.User("usr_test_unauth", UnauthorizedSubjectId),
+            FgaTestModel.User(TestUserId, TestUserSubjectId, email: "testuser@example.com"));
 
         // Agent extension
-        context.Set<SqlOSFgaAgent>().Add(new SqlOSFgaAgent
-        {
-            Id = TestAgentId,
-            SubjectId = TestAgentSubjectId,
-            AgentType = "background_job",
-            Description = "Test background job agent"
-        });
+        context.Set<SqlOSFgaAgent>().Add(FgaTestModel.Agent(TestAgentId, TestAgentSubjectId, agentType: "background_job", description: "Test background job agent"));
 
         // Service account extension
-        context.Set<SqlOSFgaServiceAccount>().Add(new SqlOSFgaServiceAccount
-        {
-            Id = TestServiceAccountId,
-            SubjectId = TestServiceAccountSubjectId,
-            ClientId = "test_client_id",
-            ClientSecretHash = "test_hash"
-        });
+        context.Set<SqlOSFgaServiceAccount>().Add(FgaTestModel.ServiceAccount(TestServiceAccountId, TestServiceAccountSubjectId, "test_client_id", clientSecretHash: "test_hash"));
 
         // User group
         context.Set<SqlOSFgaUserGroup>().Add(
-            new SqlOSFgaUserGroup { Id = TestGroupId, Name = "Test Group", SubjectId = TestGroupSubjectId }
+            FgaTestModel.Group(TestGroupId, TestGroupSubjectId, "Test Group")
         );
 
         await context.SaveChangesAsync();
 
         // Group membership (GroupMember belongs to TestGroup, Agent also in TestGroup for inheritance tests)
         context.Set<SqlOSFgaUserGroupMembership>().AddRange(
-            new SqlOSFgaUserGroupMembership { SubjectId = GroupMemberSubjectId, UserGroupId = TestGroupId },
-            new SqlOSFgaUserGroupMembership { SubjectId = TestAgentSubjectId, UserGroupId = TestGroupId }
+            FgaTestModel.Membership(GroupMemberSubjectId, TestGroupId),
+            FgaTestModel.Membership(TestAgentSubjectId, TestGroupId)
         );
 
         // Grants

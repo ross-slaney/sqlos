@@ -163,12 +163,7 @@ public sealed class SqlOSFgaDashboardSchemaWriteTests
                 context.Set<SqlOSFgaSubjectType>().Add(FgaTestModel.SubjectType("user", "User"));
                 context.Set<SqlOSFgaResourceType>().Add(FgaTestModel.ResourceType("root", "Root"));
                 context.Set<SqlOSFgaResource>().Add(FgaTestModel.Resource("root", "Root", "root"));
-                context.Set<SqlOSFgaSubject>().Add(new SqlOSFgaSubject
-                {
-                    Id = "user-1",
-                    SubjectTypeId = "user",
-                    DisplayName = "Ada"
-                });
+                context.Set<SqlOSFgaSubject>().Add(FgaTestModel.Subject("user-1", "user", displayName: "Ada"));
                 context.Set<SqlOSFgaRole>().Add(FgaTestModel.Role("admin", key: "admin", name: "Admin"));
                 context.Set<SqlOSFgaPermission>().AddRange(
                     FgaTestModel.Permission("delete_users", "delete_users", name: "Delete users", resourceTypeId: "root"),

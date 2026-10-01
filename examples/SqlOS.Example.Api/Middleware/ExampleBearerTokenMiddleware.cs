@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Services;
 using SqlOS.Example.Api.Data;
+using SqlOS.Extensions;
 using SqlOS.Fga.Models;
 
 namespace SqlOS.Example.Api.Middleware;
@@ -66,7 +67,7 @@ public sealed class ExampleBearerTokenMiddleware
 
                 if (serviceAccount != null && (serviceAccount.ExpiresAt == null || serviceAccount.ExpiresAt > DateTime.UtcNow))
                 {
-                    serviceAccount.LastUsedAt = DateTime.UtcNow;
+                    await dbContext.RecordSubjectActivityAsync(serviceAccount.SubjectId, context.RequestAborted);
                     await dbContext.SaveChangesAsync(context.RequestAborted);
                     context.Items["SubjectId"] = serviceAccount.SubjectId;
                     await _next(context);
@@ -90,7 +91,7 @@ public sealed class ExampleBearerTokenMiddleware
 
                 if (agent != null)
                 {
-                    agent.LastRunAt = DateTime.UtcNow;
+                    await dbContext.RecordSubjectActivityAsync(agent.SubjectId, context.RequestAborted);
                     await dbContext.SaveChangesAsync(context.RequestAborted);
                     context.Items["SubjectId"] = agent.SubjectId;
                     await _next(context);

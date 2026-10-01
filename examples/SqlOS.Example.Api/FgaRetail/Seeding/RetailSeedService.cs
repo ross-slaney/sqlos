@@ -35,7 +35,6 @@ public class RetailSeedService
     public const string NoGrantsEmail = "nogrants@retail.demo";
 
     public const string WalmartRegionalGroupSubjectId = "subj_walmart_regional_group";
-    public const string WalmartRegionalGroupId = "grp_walmart_regional";
 
     public const string ApiIntegrationClientId = "retail_api_client";
 
@@ -120,21 +119,13 @@ public class RetailSeedService
         var bobId = await CreateDemoUserAsync("Bob (Regional)", RegionalUserBobEmail, "member", orgId, ct);
         await CreateDemoUserAsync("No Grants User", NoGrantsEmail, "member", orgId, ct);
 
-        _context.Set<SqlOSFgaSubject>().Add(
-            new SqlOSFgaSubject { Id = WalmartRegionalGroupSubjectId, SubjectTypeId = "group", DisplayName = "Walmart Regional Managers" }
-        );
+        var walmartRegionalGroup = await _context.ProvisionGroupSubjectAsync(
+            WalmartRegionalGroupSubjectId,
+            "Walmart Regional Managers",
+            cancellationToken: ct);
         await _context.SaveChangesAsync(ct);
-
-        _context.Set<SqlOSFgaUserGroup>().Add(
-            new SqlOSFgaUserGroup { Id = WalmartRegionalGroupId, Name = "Walmart Regional Managers", SubjectId = WalmartRegionalGroupSubjectId }
-        );
-        await _context.SaveChangesAsync(ct);
-
-        _context.Set<SqlOSFgaUserGroupMembership>().AddRange(
-            new SqlOSFgaUserGroupMembership { SubjectId = aliceId, UserGroupId = WalmartRegionalGroupId },
-            new SqlOSFgaUserGroupMembership { SubjectId = bobId, UserGroupId = WalmartRegionalGroupId }
-        );
-        await _context.SaveChangesAsync(ct);
+        await _subjectService.AddToGroupAsync(aliceId, walmartRegionalGroup.Id, ct);
+        await _subjectService.AddToGroupAsync(bobId, walmartRegionalGroup.Id, ct);
 
         var inventorySyncAgent = await _subjectService.CreateAgentAsync(
             "Inventory Sync Agent",
@@ -147,7 +138,7 @@ public class RetailSeedService
             clientSecretHash: "hashed_secret_placeholder",
             description: "External API integration service");
 
-        await _subjectService.AddToGroupAsync(inventorySyncAgent.SubjectId, WalmartRegionalGroupId);
+        await _subjectService.AddToGroupAsync(inventorySyncAgent.SubjectId, walmartRegionalGroup.Id, ct);
         await _context.SaveChangesAsync(ct);
 
         await _context.CreateResourceWithIdAsync("retail_root", "root", "Retail Root", parentResourceId: "root", cancellationToken: ct);

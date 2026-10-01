@@ -58,20 +58,9 @@ public sealed class SqlOSMachineClientAdminServiceTests
         var service = new SqlOSMachineClientAdminService(context, admin, crypto, options);
         var (organization, resource, role) = await SeedDependenciesAsync(context, admin);
 
-        context.Set<SqlOSFgaSubject>().Add(new()
-        {
-            Id = "sub_sa_bulk_0001",
-            SubjectTypeId = "service_account",
-            DisplayName = "Bulk Service Account 0001"
-        });
-        context.Set<SqlOSFgaServiceAccount>().Add(new()
-        {
-            Id = "sa_bulk_0001",
-            SubjectId = "sub_sa_bulk_0001",
-            ClientId = "aaa-bulk-only",
-            ClientSecretHash = "bulk-not-a-real-hash",
-            Description = "FGA-only account"
-        });
+        context.Set<SqlOSFgaSubject>().Add(FgaTestModel.Subject("sub_sa_bulk_0001", "service_account", "Bulk Service Account 0001"));
+        context.Set<SqlOSFgaServiceAccount>().Add(FgaTestModel.ServiceAccount(
+            "sa_bulk_0001", "sub_sa_bulk_0001", "aaa-bulk-only", "bulk-not-a-real-hash", description: "FGA-only account"));
         await context.SaveChangesAsync();
 
         await service.CreateAsync(new SqlOSCreateMachineClientRequest(
@@ -272,19 +261,9 @@ public sealed class SqlOSMachineClientAdminServiceTests
             IsActive = true,
             CreatedAt = DateTime.UtcNow
         });
-        context.Set<SqlOSFgaSubject>().Add(new()
-        {
-            Id = "service_account::legacy-worker",
-            SubjectTypeId = "service_account",
-            DisplayName = "Legacy worker"
-        });
-        context.Set<SqlOSFgaServiceAccount>().Add(new()
-        {
-            Id = "legacy-account",
-            SubjectId = "service_account::legacy-worker",
-            ClientId = "legacy-worker",
-            ClientSecretHash = crypto.HashPassword(secret)
-        });
+        context.Set<SqlOSFgaSubject>().Add(FgaTestModel.Subject("service_account::legacy-worker", "service_account", "Legacy worker"));
+        context.Set<SqlOSFgaServiceAccount>().Add(FgaTestModel.ServiceAccount(
+            "legacy-account", "service_account::legacy-worker", "legacy-worker", crypto.HashPassword(secret)));
         await context.SaveChangesAsync();
 
         await service.MigrateLegacyClientCredentialsAsync();

@@ -1,7 +1,10 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using SqlOS.AuthServer.Contracts;
+using SqlOS.Domain;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
+using SqlOS.Fga.Processes;
 
 namespace SqlOS.Fga.Services;
 
@@ -25,21 +28,10 @@ public class SqlOSFgaSubjectService : ISqlOSFgaSubjectService
         string? externalRef = null,
         CancellationToken cancellationToken = default)
     {
-        var subject = new SqlOSFgaSubject
-        {
-            Id = $"subj_{Guid.NewGuid():N}"[..30],
-            SubjectTypeId = subjectTypeId,
-            DisplayName = displayName,
-            OrganizationId = organizationId,
-            ExternalRef = externalRef,
-        };
-
-        _context.Set<SqlOSFgaSubject>().Add(subject);
-        await _context.SaveChangesAsync(cancellationToken);
-
+        var subject = await CreateAsync(now => SqlOSFgaSubject.Create(
+            NewSubjectId(), subjectTypeId, displayName, organizationId, externalRef, FgaActor.Host, now), cancellationToken);
         _logger.LogInformation("Created subject {SubjectId} ({DisplayName}) of type {Type}",
             subject.Id, displayName, subjectTypeId);
-
         return subject;
     }
 
@@ -49,23 +41,10 @@ public class SqlOSFgaSubjectService : ISqlOSFgaSubjectService
         string? groupType = null,
         CancellationToken cancellationToken = default)
     {
-        var subject = await CreateSubjectAsync(name, "group", cancellationToken: cancellationToken);
-
-        var group = new SqlOSFgaUserGroup
-        {
-            Id = $"grp_{Guid.NewGuid():N}"[..30],
-            Name = name,
-            Description = description,
-            GroupType = groupType,
-            SubjectId = subject.Id,
-        };
-
-        _context.Set<SqlOSFgaUserGroup>().Add(group);
-        await _context.SaveChangesAsync(cancellationToken);
-
-        _logger.LogInformation("Created group {GroupId} ({Name})", group.Id, name);
-
-        return group;
+        var subject = await CreateAsync(now => SqlOSFgaSubject.CreateGroup(
+            NewSubjectId(), name, null, null, NewId("grp"), description, groupType, FgaActor.Host, now), cancellationToken);
+        _logger.LogInformation("Created group {GroupId} ({Name})", subject.UserGroup!.Id, name);
+        return subject.UserGroup;
     }
 
     public async Task<SqlOSFgaUser> CreateUserAsync(
@@ -76,22 +55,10 @@ public class SqlOSFgaSubjectService : ISqlOSFgaSubjectService
         string? externalRef = null,
         CancellationToken cancellationToken = default)
     {
-        var subject = await CreateSubjectAsync(displayName, "user", organizationId, externalRef, cancellationToken);
-
-        var user = new SqlOSFgaUser
-        {
-            Id = $"usr_{Guid.NewGuid():N}"[..30],
-            SubjectId = subject.Id,
-            Email = email,
-            IsActive = isActive,
-        };
-
-        _context.Set<SqlOSFgaUser>().Add(user);
-        await _context.SaveChangesAsync(cancellationToken);
-
-        _logger.LogInformation("Created user {UserId} ({DisplayName})", user.Id, displayName);
-
-        return user;
+        var subject = await CreateAsync(now => SqlOSFgaSubject.CreateUser(
+            NewSubjectId(), displayName, organizationId, externalRef, NewId("usr"), email, isActive, FgaActor.Host, now), cancellationToken);
+        _logger.LogInformation("Created user {UserId} ({DisplayName})", subject.User!.Id, displayName);
+        return subject.User;
     }
 
     public async Task<SqlOSFgaAgent> CreateAgentAsync(
@@ -102,22 +69,10 @@ public class SqlOSFgaSubjectService : ISqlOSFgaSubjectService
         string? externalRef = null,
         CancellationToken cancellationToken = default)
     {
-        var subject = await CreateSubjectAsync(displayName, "agent", organizationId, externalRef, cancellationToken);
-
-        var agent = new SqlOSFgaAgent
-        {
-            Id = $"agt_{Guid.NewGuid():N}"[..30],
-            SubjectId = subject.Id,
-            AgentType = agentType,
-            Description = description,
-        };
-
-        _context.Set<SqlOSFgaAgent>().Add(agent);
-        await _context.SaveChangesAsync(cancellationToken);
-
-        _logger.LogInformation("Created agent {AgentId} ({DisplayName})", agent.Id, displayName);
-
-        return agent;
+        var subject = await CreateAsync(now => SqlOSFgaSubject.CreateAgent(
+            NewSubjectId(), displayName, organizationId, externalRef, NewId("agt"), agentType, description, FgaActor.Host, now), cancellationToken);
+        _logger.LogInformation("Created agent {AgentId} ({DisplayName})", subject.Agent!.Id, displayName);
+        return subject.Agent;
     }
 
     public async Task<SqlOSFgaServiceAccount> CreateServiceAccountAsync(
@@ -130,66 +85,38 @@ public class SqlOSFgaSubjectService : ISqlOSFgaSubjectService
         string? externalRef = null,
         CancellationToken cancellationToken = default)
     {
-        var subject = await CreateSubjectAsync(displayName, "service_account", organizationId, externalRef, cancellationToken);
-
-        var serviceAccount = new SqlOSFgaServiceAccount
-        {
-            Id = $"sa_{Guid.NewGuid():N}"[..30],
-            SubjectId = subject.Id,
-            ClientId = clientId,
-            ClientSecretHash = clientSecretHash,
-            Description = description,
-            ExpiresAt = expiresAt,
-        };
-
-        _context.Set<SqlOSFgaServiceAccount>().Add(serviceAccount);
-        await _context.SaveChangesAsync(cancellationToken);
-
-        _logger.LogInformation("Created service account {ServiceAccountId} ({DisplayName})", serviceAccount.Id, displayName);
-
-        return serviceAccount;
+        var subject = await CreateAsync(now => SqlOSFgaSubject.CreateServiceAccount(
+            NewSubjectId(),
+            displayName,
+            organizationId,
+            externalRef,
+            NewId("sa"),
+            clientId,
+            clientSecretHash,
+            description,
+            expiresAt,
+            SqlOSConfigurationOwners.Dashboard,
+            configurationSourceKey: null,
+            FgaActor.Host,
+            now), cancellationToken);
+        _logger.LogInformation("Created service account {ServiceAccountId} ({DisplayName})", subject.ServiceAccount!.Id, displayName);
+        return subject.ServiceAccount;
     }
 
     public async Task AddToGroupAsync(string subjectId, string userGroupId, CancellationToken cancellationToken = default)
     {
-        // Validate subject is NOT a group type (no nested groups allowed)
-        var subject = await _context.Set<SqlOSFgaSubject>()
-            .FirstOrDefaultAsync(s => s.Id == subjectId, cancellationToken)
-            ?? throw new InvalidOperationException($"Subject '{subjectId}' not found");
-
-        if (subject.SubjectTypeId == "group")
+        if (await new ChangeFgaGroupMembership(_context).AddAsync(subjectId, userGroupId, FgaActor.Host, cancellationToken))
         {
-            throw new InvalidOperationException("Groups cannot be members of other groups");
+            _logger.LogInformation("Added subject {SubjectId} to group {GroupId}", subjectId, userGroupId);
         }
-
-        var exists = await _context.Set<SqlOSFgaUserGroupMembership>()
-            .AnyAsync(m => m.SubjectId == subjectId && m.UserGroupId == userGroupId, cancellationToken);
-
-        if (exists) return;
-
-        var membership = new SqlOSFgaUserGroupMembership
-        {
-            SubjectId = subjectId,
-            UserGroupId = userGroupId,
-        };
-
-        _context.Set<SqlOSFgaUserGroupMembership>().Add(membership);
-        await _context.SaveChangesAsync(cancellationToken);
-
-        _logger.LogInformation("Added subject {SubjectId} to group {GroupId}", subjectId, userGroupId);
     }
 
     public async Task RemoveFromGroupAsync(string subjectId, string userGroupId, CancellationToken cancellationToken = default)
     {
-        var membership = await _context.Set<SqlOSFgaUserGroupMembership>()
-            .FirstOrDefaultAsync(m => m.SubjectId == subjectId && m.UserGroupId == userGroupId, cancellationToken);
-
-        if (membership == null) return;
-
-        _context.Set<SqlOSFgaUserGroupMembership>().Remove(membership);
-        await _context.SaveChangesAsync(cancellationToken);
-
-        _logger.LogInformation("Removed subject {SubjectId} from group {GroupId}", subjectId, userGroupId);
+        if (await new ChangeFgaGroupMembership(_context).RemoveAsync(subjectId, userGroupId, FgaActor.Host, cancellationToken))
+        {
+            _logger.LogInformation("Removed subject {SubjectId} from group {GroupId}", subjectId, userGroupId);
+        }
     }
 
     public async Task<List<string>> ResolveSubjectIdsAsync(string subjectId, CancellationToken cancellationToken = default)
@@ -218,4 +145,12 @@ public class SqlOSFgaSubjectService : ISqlOSFgaSubjectService
                 (m, g) => g)
             .ToListAsync(cancellationToken);
     }
+
+    private Task<SqlOSFgaSubject> CreateAsync(Func<DateTime, SqlOSFgaSubject> create, CancellationToken cancellationToken)
+        => new CreateFgaSubject(_context).ExecuteAsync(create, cancellationToken);
+
+    // The 7.x formats: the prefix, an underscore, then the start of a GUID, 30 characters in all.
+    private static string NewSubjectId() => NewId("subj");
+
+    private static string NewId(string prefix) => $"{prefix}_{Guid.NewGuid():N}"[..30];
 }

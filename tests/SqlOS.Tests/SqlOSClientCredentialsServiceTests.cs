@@ -91,7 +91,7 @@ public sealed class SqlOSClientCredentialsServiceTests
             () => client.ClientType = "public_pkce",
             () => { client.ClientType = "confidential"; client.IsActive = false; },
             () => { client.IsActive = true; client.GrantTypesJson = "[]"; },
-            () => { client.GrantTypesJson = "[\"client_credentials\"]"; account.ExpiresAt = DateTime.UtcNow.AddMinutes(-1); }
+            () => { client.GrantTypesJson = "[\"client_credentials\"]"; FgaTestModel.Set(account, nameof(account.ExpiresAt), DateTime.UtcNow.AddMinutes(-1)); }
         })
         {
             mutation();
@@ -166,8 +166,8 @@ public sealed class SqlOSClientCredentialsServiceTests
         await using var harness = await CreateHarnessAsync();
         var account = await harness.Context.Set<SqlOSFgaServiceAccount>().SingleAsync();
         var credential = await harness.Context.Set<SqlOSClientCredential>().SingleAsync();
-        account.ConfigurationOwner = SqlOSConfigurationOwners.Code;
-        account.ConfigurationSourceKey = "ledger-worker";
+        FgaTestModel.Set(account, nameof(account.ConfigurationOwner), SqlOSConfigurationOwners.Code);
+        FgaTestModel.Set(account, nameof(account.ConfigurationSourceKey), "ledger-worker");
         credential.ConfigurationOwner = SqlOSConfigurationOwners.Code;
         credential.ConfigurationSourceKey = "primary";
         await harness.Context.SaveChangesAsync();
@@ -191,8 +191,8 @@ public sealed class SqlOSClientCredentialsServiceTests
         await using var harness = await CreateHarnessAsync();
         var account = await harness.Context.Set<SqlOSFgaServiceAccount>().SingleAsync();
         var credential = await harness.Context.Set<SqlOSClientCredential>().SingleAsync();
-        account.ConfigurationOwner = SqlOSConfigurationOwners.Code;
-        account.ConfigurationSourceKey = "ledger-worker";
+        FgaTestModel.Set(account, nameof(account.ConfigurationOwner), SqlOSConfigurationOwners.Code);
+        FgaTestModel.Set(account, nameof(account.ConfigurationSourceKey), "ledger-worker");
         credential.ConfigurationOwner = SqlOSConfigurationOwners.Code;
         credential.ConfigurationSourceKey = "primary";
         await harness.Context.SaveChangesAsync();
@@ -243,19 +243,8 @@ public sealed class SqlOSClientCredentialsServiceTests
             SecretHash = crypto.HashPassword(secret),
             CreatedAt = DateTime.UtcNow
         });
-        context.Set<SqlOSFgaSubject>().Add(new SqlOSFgaSubject
-        {
-            Id = "service_account::ledger-worker",
-            SubjectTypeId = "service_account",
-            DisplayName = "Ledger Worker"
-        });
-        context.Set<SqlOSFgaServiceAccount>().Add(new SqlOSFgaServiceAccount
-        {
-            Id = "sa-worker",
-            SubjectId = "service_account::ledger-worker",
-            ClientId = "ledger-worker",
-            ClientSecretHash = crypto.HashPassword(secret)
-        });
+        context.Set<SqlOSFgaSubject>().Add(FgaTestModel.Subject("service_account::ledger-worker", "service_account", displayName: "Ledger Worker"));
+        context.Set<SqlOSFgaServiceAccount>().Add(FgaTestModel.ServiceAccount("sa-worker", "service_account::ledger-worker", "ledger-worker", clientSecretHash: crypto.HashPassword(secret)));
         await context.SaveChangesAsync();
         return new Harness(context, crypto, new SqlOSClientCredentialsService(context, crypto, admin, options), secret);
     }

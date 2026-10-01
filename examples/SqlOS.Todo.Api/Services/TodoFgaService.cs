@@ -41,15 +41,14 @@ public sealed class TodoFgaService
 
         var tenantResourceId = GetTenantResourceId(subjectId);
 
-        var user = await _context.ProvisionUserSubjectAsync(
+        await _context.ProvisionUserSubjectAsync(
             subjectId,
             displayName,
             email,
             externalRef: subjectId,
             isActive: true,
             cancellationToken: cancellationToken);
-        user.LastLoginAt = DateTime.UtcNow;
-        user.UpdatedAt = DateTime.UtcNow;
+        await _context.RecordSubjectActivityAsync(subjectId, cancellationToken);
 
         await _context.ProvisionResourceWithIdAsync(
             tenantResourceId,

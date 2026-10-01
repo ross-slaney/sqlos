@@ -15,16 +15,16 @@ internal static class ReadPathPinData
             FgaTestModel.SubjectType("user", "User"),
             FgaTestModel.SubjectType("group", "Group"));
         context.Set<SqlOSFgaSubject>().AddRange(
-            new SqlOSFgaSubject { Id = "pin-user", SubjectTypeId = "user", DisplayName = "Pin user" },
-            new SqlOSFgaSubject { Id = "pin-group-subject", SubjectTypeId = "group", DisplayName = "Pin group" },
-            new SqlOSFgaSubject { Id = "pin-inactive-group-subject", SubjectTypeId = "group", DisplayName = "Inactive pin group" });
-        context.Set<SqlOSFgaUser>().Add(new SqlOSFgaUser { Id = "pin-user-row", SubjectId = "pin-user", IsActive = true });
+            FgaTestModel.Subject("pin-user", "user", displayName: "Pin user"),
+            FgaTestModel.Subject("pin-group-subject", "group", displayName: "Pin group"),
+            FgaTestModel.Subject("pin-inactive-group-subject", "group", displayName: "Inactive pin group"));
+        context.Set<SqlOSFgaUser>().Add(FgaTestModel.User("pin-user-row", "pin-user"));
         context.Set<SqlOSFgaUserGroup>().AddRange(
-            new SqlOSFgaUserGroup { Id = "pin-group", SubjectId = "pin-group-subject", Name = "Pin group", IsActive = true },
-            new SqlOSFgaUserGroup { Id = "pin-inactive-group", SubjectId = "pin-inactive-group-subject", Name = "Inactive pin group", IsActive = false });
+            FgaTestModel.Group("pin-group", "pin-group-subject", "Pin group"),
+            FgaTestModel.Group("pin-inactive-group", "pin-inactive-group-subject", "Inactive pin group", isActive: false));
         context.Set<SqlOSFgaUserGroupMembership>().AddRange(
-            new SqlOSFgaUserGroupMembership { SubjectId = "pin-user", UserGroupId = "pin-group" },
-            new SqlOSFgaUserGroupMembership { SubjectId = "pin-user", UserGroupId = "pin-inactive-group" });
+            FgaTestModel.Membership("pin-user", "pin-group"),
+            FgaTestModel.Membership("pin-user", "pin-inactive-group"));
         context.Set<SqlOSFgaPermission>().Add(FgaTestModel.Permission("perm-pin-read", "pin.read", name: "Read"));
         await context.SaveChangesAsync();
     }

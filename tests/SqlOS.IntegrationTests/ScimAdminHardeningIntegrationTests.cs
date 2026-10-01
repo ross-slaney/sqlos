@@ -144,24 +144,8 @@ public sealed class ScimAdminHardeningIntegrationTests
 
             var now = DateTime.UtcNow;
             setupContext.Set<SqlOSFgaSubjectType>().Add(FgaTestModel.SubjectType("batch_group_type", "Batch group"));
-            setupContext.Set<SqlOSFgaSubject>().Add(new SqlOSFgaSubject
-            {
-                Id = "batch_group_subject",
-                SubjectTypeId = "batch_group_type",
-                OrganizationId = organization.Id,
-                DisplayName = "Grant batch group",
-                CreatedAt = now,
-                UpdatedAt = now
-            });
-            setupContext.Set<SqlOSFgaUserGroup>().Add(new SqlOSFgaUserGroup
-            {
-                Id = "batch_group",
-                SubjectId = "batch_group_subject",
-                Name = "Grant batch group",
-                GroupType = "scim",
-                CreatedAt = now,
-                UpdatedAt = now
-            });
+            setupContext.Set<SqlOSFgaSubject>().Add(FgaTestModel.Subject("batch_group_subject", "batch_group_type", displayName: "Grant batch group", organizationId: organization.Id));
+            setupContext.Set<SqlOSFgaUserGroup>().Add(FgaTestModel.Group("batch_group", "batch_group_subject", "Grant batch group", groupType: "scim"));
             setupContext.Set<SqlOSFgaRole>().Add(FgaTestModel.Role("batch_role", key: "batch_role", name: "Batch role"));
             const int grantCount = 129;
             setupContext.Set<SqlOSFgaGrant>().AddRange(Enumerable.Range(0, grantCount).Select(index =>

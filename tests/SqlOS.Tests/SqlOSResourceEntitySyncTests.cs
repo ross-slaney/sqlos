@@ -28,12 +28,7 @@ public sealed class SqlOSResourceEntitySyncTests
     {
         using var context = CreateContext();
         SeedFgaCore(context);
-        context.Set<SqlOSFgaSubject>().Add(new SqlOSFgaSubject
-        {
-            Id = "usr_1",
-            SubjectTypeId = "user",
-            DisplayName = "User One"
-        });
+        context.Set<SqlOSFgaSubject>().Add(FgaTestModel.Subject("usr_1", "user", displayName: "User One"));
         var entity = new ResourceBackedEntity
         {
             Id = "workspace_1",

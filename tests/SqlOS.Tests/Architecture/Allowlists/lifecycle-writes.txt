@@ -98,7 +98,6 @@ SqlOS.AuthServer.Services.SqlOSCimdClientService::UpsertDiscoveredClientAsync ->
 SqlOS.AuthServer.Services.SqlOSClientAuthenticationService::CreateCredentialCoreAsync -> SqlOSClientCredential.ExpiresAt
 SqlOS.AuthServer.Services.SqlOSClientAuthenticationService::RevokeCredentialAsync -> SqlOSClientCredential.RevokedAt
 SqlOS.AuthServer.Services.SqlOSClientCredentialsService::RevokeAsync -> SqlOSClientCredential.RevokedAt
-SqlOS.AuthServer.Services.SqlOSClientCredentialsService::RevokeAsync -> SqlOSFgaServiceAccount.ExpiresAt
 SqlOS.AuthServer.Services.SqlOSClientCredentialsService::RotateSecretAsync -> SqlOSClientCredential.RevokedAt
 SqlOS.AuthServer.Services.SqlOSConsentService::MarkGrantsRevokedForClientAsync -> SqlOSConsentGrant.RevocationReason
 SqlOS.AuthServer.Services.SqlOSConsentService::MarkGrantsRevokedForClientAsync -> SqlOSConsentGrant.RevokedAt
@@ -120,7 +119,6 @@ SqlOS.AuthServer.Services.SqlOSInvitationService::CreateEmailInvitationAsync -> 
 SqlOS.AuthServer.Services.SqlOSInvitationService::RevokeEmailInvitationAsync -> SqlOSInvitation.RevokedAt
 SqlOS.AuthServer.Services.SqlOSIssuerSessionService::RevokeFamilyAsync -> SqlOSIssuerSessionFamily.RevocationReason
 SqlOS.AuthServer.Services.SqlOSIssuerSessionService::RevokeFamilyAsync -> SqlOSIssuerSessionFamily.RevokedAt
-SqlOS.AuthServer.Services.SqlOSMachineClientAdminService::CreateAsync -> SqlOSFgaServiceAccount.ExpiresAt
 SqlOS.AuthServer.Services.SqlOSMachineClientAdminService::CreateClient -> SqlOSClientApplication.IsActive
 SqlOS.AuthServer.Services.SqlOSMachineClientAdminService::EmergencyDisableAsync -> SqlOSClientApplication.DisabledAt
 SqlOS.AuthServer.Services.SqlOSMachineClientAdminService::EmergencyDisableAsync -> SqlOSClientApplication.DisabledReason
@@ -132,9 +130,7 @@ SqlOS.AuthServer.Services.SqlOSMachineClientAdminService::RevokeAsync -> SqlOSCl
 SqlOS.AuthServer.Services.SqlOSMachineClientAdminService::RevokeAsync -> SqlOSClientApplication.DisabledReason
 SqlOS.AuthServer.Services.SqlOSMachineClientAdminService::RevokeAsync -> SqlOSClientApplication.IsActive
 SqlOS.AuthServer.Services.SqlOSMachineClientAdminService::RevokeAsync -> SqlOSClientCredential.RevokedAt
-SqlOS.AuthServer.Services.SqlOSMachineClientAdminService::RevokeAsync -> SqlOSFgaServiceAccount.ExpiresAt
 SqlOS.AuthServer.Services.SqlOSMachineClientAdminService::RotateAsync -> SqlOSClientCredential.RevokedAt
-SqlOS.AuthServer.Services.SqlOSMachineClientAdminService::UpsertSeededMachineClientsCoreAsync -> SqlOSFgaServiceAccount.ExpiresAt
 SqlOS.AuthServer.Services.SqlOSMfaAttemptAdmissionService::CleanupExpiredReservationsForBucketsAsync -> SqlOSMfaAttemptBucket.AttemptCount
 SqlOS.AuthServer.Services.SqlOSMfaAttemptAdmissionService::FinalizeAsync -> SqlOSMfaAttemptBucket.AttemptCount
 SqlOS.AuthServer.Services.SqlOSMfaAttemptAdmissionService::RebaseIfWindowExpiredAsync -> SqlOSMfaAttemptBucket.AttemptCount
@@ -150,11 +146,9 @@ SqlOS.AuthServer.Services.SqlOSSamlService::EnsureMembershipAsync -> SqlOSMember
 SqlOS.AuthServer.Services.SqlOSSamlService::HandleAuthorizationRequestAcsAsync -> SqlOSAuthorizationCode.ExpiresAt
 SqlOS.AuthServer.Services.SqlOSScimService::DeleteGroupAsync -> SqlOSScimExternalId.IsActive
 SqlOS.AuthServer.Services.SqlOSScimService::DeleteUserAsync -> SqlOSScimExternalId.IsActive
-SqlOS.AuthServer.Services.SqlOSScimService::DeprovisionUserAccessAsync -> SqlOSFgaUser.IsActive
 SqlOS.AuthServer.Services.SqlOSScimService::DeprovisionUserAccessAsync -> SqlOSMembership.IsActive
 SqlOS.AuthServer.Services.SqlOSScimService::DeprovisionUserAccessAsync -> SqlOSSession.RevocationReason
 SqlOS.AuthServer.Services.SqlOSScimService::DeprovisionUserAccessAsync -> SqlOSSession.RevokedAt
-SqlOS.AuthServer.Services.SqlOSScimService::EnsureFgaUserAsync -> SqlOSFgaUser.IsActive
 SqlOS.AuthServer.Services.SqlOSScimService::RevokeManagedGrantEntityAsync -> SqlOSScimManagedGrant.RevokedAt
 SqlOS.AuthServer.Services.SqlOSScimService::UpsertExternalLinkAsync -> SqlOSScimExternalId.IsActive
 SqlOS.AuthServer.Services.SqlOSScimService::UpsertMembershipAsync -> SqlOSMembership.IsActive
@@ -186,7 +180,3 @@ SqlOS.Email.Services.SqlOSEmailAdminService::CreateTemplateAsync -> SqlOSEmailTe
 SqlOS.Email.Services.SqlOSEmailAdminService::DeleteTemplateAsync -> SqlOSEmailTemplate.IsActive
 SqlOS.Email.Services.SqlOSEmailAdminService::EnsureBuiltInTemplatesAsync -> SqlOSEmailTemplate.IsActive
 SqlOS.Email.Services.SqlOSEmailAdminService::UpdateTemplateAsync -> SqlOSEmailTemplate.IsActive
-SqlOS.Extensions.SqlOSErgonomicsExtensions::ProvisionServiceAccountSubjectAsync -> SqlOSFgaServiceAccount.ExpiresAt
-SqlOS.Extensions.SqlOSErgonomicsExtensions::ProvisionUserSubjectAsync -> SqlOSFgaUser.IsActive
-SqlOS.Fga.Services.SqlOSFgaSubjectService::CreateServiceAccountAsync -> SqlOSFgaServiceAccount.ExpiresAt
-SqlOS.Fga.Services.SqlOSFgaSubjectService::CreateUserAsync -> SqlOSFgaUser.IsActive

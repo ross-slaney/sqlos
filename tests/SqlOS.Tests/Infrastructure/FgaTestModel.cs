@@ -54,6 +54,37 @@ internal static class FgaTestModel
         return Existing(resource);
     }
 
+    /// <summary>A stored subject without a typed record; add the typed record as its own row.</summary>
+    public static SqlOSFgaSubject Subject(string id, string subjectTypeId, string? displayName = null, string? organizationId = null, string? externalRef = null)
+        => Existing(SqlOSFgaSubject.Create(id, subjectTypeId, displayName ?? id, organizationId, externalRef, FgaActor.Host, Now));
+
+    public static SqlOSFgaUser User(string id, string subjectId, string? email = null, bool isActive = true)
+        => new(id, subjectId, email, isActive, Now);
+
+    public static SqlOSFgaAgent Agent(string id, string subjectId, string? agentType = null, string? description = null)
+        => new(id, subjectId, agentType, description, Now);
+
+    public static SqlOSFgaServiceAccount ServiceAccount(
+        string id,
+        string subjectId,
+        string clientId,
+        string clientSecretHash = "hash",
+        DateTime? expiresAt = null,
+        string? description = null,
+        string configurationOwner = "dashboard",
+        string? configurationSourceKey = null)
+        => new(id, subjectId, clientId, clientSecretHash, description, expiresAt, configurationOwner, configurationSourceKey, Now);
+
+    public static SqlOSFgaUserGroup Group(string id, string subjectId, string name, bool isActive = true, string? description = null, string? groupType = null)
+    {
+        var group = new SqlOSFgaUserGroup(id, subjectId, name, description, groupType, Now);
+        group.ChangeActivity(isActive, Now);
+        return group;
+    }
+
+    public static SqlOSFgaUserGroupMembership Membership(string subjectId, string userGroupId)
+        => new(subjectId, userGroupId, Now);
+
     /// <summary>Sets a persisted property directly, for state the write model would not produce.</summary>
     public static T Set<T>(T entity, string property, object? value)
         where T : class
