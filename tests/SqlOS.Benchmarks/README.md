@@ -86,6 +86,40 @@ against SqlOS's rebuild.
 The previous function's sparse pages cost minutes, so they run only at the first and last scales, which are
 the two the scale gate compares. The lineage and scope-columns pages run at every scale.
 
+## Results of the latest full run
+
+Run 36917634660 (2026-10-01, hosted `ubuntu-latest`, 4 vCPU, 17 GB, 8 GB to the engine), 1M → 10M → 50M on
+both engines. Median milliseconds per page, **previous function · lineage · scope columns**; the full tables
+with every scenario, rows read, and server time are on the run's summary page and in its artifacts.
+
+| Page (k = 20) | σ | PostgreSQL 1M | PostgreSQL 50M | SQL Server 1M | SQL Server 50M |
+|---|---:|---|---|---|---|
+| Company admin, first page | 1 | 10.8 · 2.07 · 1.82 | 11.6 · 2.15 · 1.90 | 25.2 · 1.46 · 1.63 | 138 · 1.34 · 1.35 |
+| Chain manager (D = 5) | 7.1% | 34.0 · 3.26 · 1.89 | 36.6 · 3.72 · 1.89 | 112 · 2.36 · 1.57 | 764 · 2.44 · 1.74 |
+| Region manager (D = 5) | 0.97% | 186 · 11.7 · 1.88 | 201 · 14.5 · 1.89 | 677 · 5.29 · 1.70 | 5,194 · 5.99 · 1.94 |
+| Region manager, by price | 0.97% | 259 · 21.1 · 2.02 | 320 · 33.7 · 1.78 | 909 · 13.0 · 1.29 | 4,625 · 24.6 · 1.33 |
+| Store manager, sparse | 0.0065% | 44.6 s · 2.48 · 1.84 | 48.4 s · 39.3 · 1.86 | 163 s · 2.64 · 1.13 | 573 s · 57.4 · 1.27 |
+| Store manager, sparse, by price | 0.0065% | 50.2 s · 2.46 · 1.87 | 40.5 s · 39.2 · 1.81 | 177 s · 2.02 · 1.18 | > 600 s · 56.7 · 1.48 |
+| Store manager, filtered to the store | 0.0065% | 13.0 · 2.37 · 2.05 | 243 · 9.47 · 6.62 | 24.1 · 1.28 · 1.92 | 25.9 · 1.65 · 22.4 |
+| 10,000 single-product grants (row by row) | 0.02% | – · 85.8 · 85.5 | – · 89.9 · 89.1 | – · 84.2 · 84.6 | – · 87.3 · 88.9 |
+| 100,000 single-product grants (row by row) | 0.2% | – · 14.6 · 14.6 | – · 15.1 · 15.1 | – · 13.9 · 14.0 | – · 14.1 · 14.3 |
+
+Point checks (`fn_IsResourceAccessible`, one product): PostgreSQL 8.5 ms → 2.0 ms, SQL Server 2.5 ms → 0.8 ms,
+flat from 1M to 50M; for a caller with 100,000 grants, 390 ms → 0.9 ms on SQL Server.
+
+The store manager's lineage page grows with the catalog (2.5 → 39 ms on PostgreSQL, 2.6 → 57 ms on SQL
+Server) because the store itself does: 65 products at 1M, 3,315 at 50M, and the page reads the whole scope
+(min(k / σ, σN)). The scope-columns page reads 21 rows at either size. The page filtered to the store reads
+the store's rows through the `StoreId` index on either engine; at 50M, SQL Server's optimizer took that path
+for the scope-columns form (22 ms) and the ancestor index for the lineage form (1.7 ms).
+
+Costs measured in the same run, at 1M: a single-row resource insert 3.96 ms with the lineage triggers and
+0.76 ms without on PostgreSQL (2.89 ms and 1.23 ms on SQL Server); reparenting a region of 9,959 resources
+with scope columns on about 1.7 s on SQL Server; the first-start rebuild of 1,074,481 resources and 1,000,000
+scope-column rows 120 s on PostgreSQL and 56 s on SQL Server. Storage at 50M products with scope columns and
+their per-level indexes: 62.7 GB on PostgreSQL, 71.1 GB on SQL Server, of which the lineage and scope
+columns with their indexes are about half.
+
 ## Gates (`gates.json`)
 
 - **correctness**: every scenario returned exactly the authorized answer.
@@ -97,7 +131,8 @@ the two the scale gate compares. The lineage and scope-columns pages run at ever
   the requested order and the caller's scope): flat for a dense caller, growing with the catalog for a sparse
   one whose scope grows with it. The previous function touches min(k / σ, N). A page filtered to a store
   touches that store's σN rows through its own index. The scope-columns pages use `scopedMaxRatio` (1.5) and
-  no growth term: one index seek and k rows at any N.
+  no growth term: one index seek and k rows at any N. The previous function's pages are measured at every
+  scale but not gated: how its cost grows is a finding about it, not a regression of the current filter.
 - **regression**: the lineage and the scope-columns pages against the previous function, at every scale: at
   most `maxRatio` (1.15) times the previous median, plus slack.
 - **improvement**: for the sparse pages, the lineage page must take at most `lineageMaxRatio` (0.2) of the

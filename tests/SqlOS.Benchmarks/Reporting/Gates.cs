@@ -20,7 +20,9 @@ namespace SqlOS.Benchmarks.Reporting;
 /// scope grows with it (the store manager's store gains products as the catalog does). The previous
 /// function has only the first plan: min(k / σ, N). A page filtered to a store touches that store's σN rows
 /// through its own index. The scope-columns pages have their own, tighter ratio (<c>scopedMaxRatio</c>) and
-/// no growth term: a caller's page is one index seek and k rows at any N.</item>
+/// no growth term: a caller's page is one index seek and k rows at any N. The previous function's pages are
+/// measured at every scale but not gated: how its cost grows is a finding about it (its per-row walk gets
+/// dearer as the tree outgrows memory), not a regression of the current filter.</item>
 /// <item><b>regression</b>: the current filter against the previous release's, on the same data in the same
 /// job, for both the lineage and the scope-columns pages: the median may be at most <c>maxRatio</c> times
 /// the previous one, plus slack.</item>
@@ -115,7 +117,7 @@ internal static class GateEvaluator
         {
             var smallest = report.Steps[0];
             var largest = report.Steps[^1];
-            foreach (var scenario in largest.Scenarios.Where(s => !config.Scale.Exempt.Contains(s.Id)))
+            foreach (var scenario in largest.Scenarios.Where(s => !config.Scale.Exempt.Contains(s.Id) && !IsReference(s)))
             {
                 var baseline = smallest.Scenarios.FirstOrDefault(s => s.Id == scenario.Id);
                 if (baseline is null || !baseline.FullPage || !scenario.FullPage || baseline.TimedOut || scenario.TimedOut)
@@ -212,6 +214,10 @@ internal static class GateEvaluator
 
         return results;
     }
+
+    /// <summary>The previous release's function, measured for comparison.</summary>
+    private static bool IsReference(ScenarioResult scenario)
+        => scenario.Kind is "ListReference" or "PointFunctionReference";
 
     /// <summary>
     /// The rows a page has to touch at a catalog of <paramref name="products"/> rows, from the paper: a
