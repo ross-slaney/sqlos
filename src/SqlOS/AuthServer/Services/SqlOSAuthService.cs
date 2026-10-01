@@ -3159,7 +3159,12 @@ public sealed class SqlOSAuthService
             MfaMethods: evaluation.AvailableFactors);
     }
 
-    private async Task<SqlOSLoginResult> FinalizeClientLoginAsync(
+    /// <summary>
+    /// Completes a first-party client's direct login: an MFA challenge, an organization choice, or
+    /// a session and tokens with the <c>user.login.*</c> audit. The hub adapter's direct-login
+    /// completion (<see cref="SqlOSHttpLoginCompletion"/>).
+    /// </summary>
+    internal async Task<SqlOSLoginResult> FinalizeClientLoginAsync(
         SqlOSUser user,
         SqlOSClientApplication client,
         string? requestedOrganizationId,

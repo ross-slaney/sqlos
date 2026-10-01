@@ -62,6 +62,12 @@ public sealed class SqlOSAuthorizationServerService
         _consentService = consentService ?? new SqlOSConsentService(context, cryptoService);
     }
 
+    /// <summary>The crypto service: the headless facade builds its identity processes with it.</summary>
+    internal SqlOSCryptoService Crypto => _cryptoService;
+
+    /// <summary>The admission gate the hosted and headless password sign-ins pass.</summary>
+    internal IAdmissionGate PasswordAdmission => _admission;
+
     public async Task<SqlOSAuthorizationServerMetadataDto> GetMetadataAsync(HttpContext httpContext, CancellationToken cancellationToken = default)
     {
         var configuredScopes = await _context.Set<SqlOSClientApplication>()

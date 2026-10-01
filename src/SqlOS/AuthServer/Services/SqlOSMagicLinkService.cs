@@ -57,6 +57,18 @@ public sealed class SqlOSMagicLinkService
 
     public bool IsRuntimeConfigured => _options.BuildMessage == null || _emailSender.IsConfigured;
 
+    /// <summary>The sign-in link options: lifetime, cooldown and limits.</summary>
+    internal SqlOSMagicLinkOptions Options => _options;
+
+    /// <summary>The admission gate sign-in links pass (the delivery buckets, #424).</summary>
+    internal IAdmissionGate Admission => _admission;
+
+    /// <summary>Records the failures sign-in links audit without a state change.</summary>
+    internal IAuditRecorder AuditRecorder => _auditRecorder;
+
+    /// <summary>Delivers sign-in links for the request <paramref name="httpContext"/> serves.</summary>
+    internal SqlOSSignInLinkDelivery Delivery(HttpContext? httpContext) => new(this, httpContext);
+
     public async Task<SqlOSMagicLinkStartResult> StartForAuthorizationRequestAsync(
         SqlOSAuthorizationRequest? authorizationRequest,
         string email,
@@ -367,6 +379,21 @@ public sealed class SqlOSMagicLinkService
         }
     }
 
+    /// <summary>
+    /// Sends a sign-in link to its stored recipient: through the host's message builder when it
+    /// configured one, else as the built-in transactional email.
+    /// </summary>
+    internal async Task SendLinkAsync(
+        MagicLinkPayload payload,
+        string rawToken,
+        DateTime expiresAt,
+        HttpContext? httpContext,
+        CancellationToken cancellationToken)
+    {
+        var context = await BuildMessageContextAsync(payload.Email, Masked.Email(payload.Email), rawToken, expiresAt, httpContext, cancellationToken);
+        await SendEmailAsync(context, rawToken, cancellationToken);
+    }
+
     private async Task SendEmailAsync(
         SqlOSMagicLinkMessageContext context,
         string rawToken,
@@ -491,3 +518,13 @@ internal sealed record SqlOSMagicLinkVerificationResult(
     SqlOSUserEmail UserEmail,
     IReadOnlyList<SqlOSOrganizationOption> Organizations,
     string AuthenticationMethod);
+
+/// <summary>
+/// Delivers sign-in links for one request: the host's link builder
+/// (<see cref="SqlOSMagicLinkOptions.BuildLoginUrl"/>) receives that request.
+/// </summary>
+internal sealed class SqlOSSignInLinkDelivery(SqlOSMagicLinkService links, HttpContext? httpContext)
+{
+    public Task SendAsync(MagicLinkPayload payload, string rawToken, DateTime expiresAt, CancellationToken cancellationToken)
+        => links.SendLinkAsync(payload, rawToken, expiresAt, httpContext, cancellationToken);
+}

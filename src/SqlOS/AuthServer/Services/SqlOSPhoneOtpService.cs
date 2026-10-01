@@ -8,6 +8,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.AuthServer.Processes.Identity;
 using SqlOS.Domain;
 using SqlOS.Domain.Events;
 
@@ -16,7 +17,7 @@ namespace SqlOS.AuthServer.Services;
 public sealed class SqlOSPhoneOtpService
 {
     private const string PublicInvalidMessage = "The sign-in code is invalid or expired.";
-    private const string PublicStartMessage = "If an account exists for that phone number, check your messages for a sign-in code.";
+    internal const string PublicStartMessage = "If an account exists for that phone number, check your messages for a sign-in code.";
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSAdminService _adminService;
     private readonly SqlOSCryptoService _cryptoService;
@@ -51,6 +52,18 @@ public sealed class SqlOSPhoneOtpService
     }
 
     public bool IsRuntimeConfigured => _options.IsConfigured;
+
+    /// <summary>The phone-code options: lifetimes, cooldown, limits and allowed countries.</summary>
+    internal SqlOSPhoneOtpOptions Options => _options;
+
+    /// <summary>The admission gate phone codes pass (the delivery buckets).</summary>
+    internal IAdmissionGate Admission => _admission;
+
+    /// <summary>Records the failures phone codes audit without a state change.</summary>
+    internal IAuditRecorder AuditRecorder => _auditRecorder;
+
+    /// <summary>The provider that sends codes and checks them against the stored recipient.</summary>
+    internal ISqlOSOtpDeliveryChannel DeliveryChannel => _deliveryChannel;
 
     public async Task<SqlOSPhoneOtpStartResult> StartForAuthorizationRequestAsync(
         SqlOSAuthorizationRequest? authorizationRequest,
@@ -656,6 +669,29 @@ public sealed class SqlOSPhoneOtpService
 
         return normalized;
     }
+
+    /// <summary>
+    /// <paramref name="phoneNumber"/> in E.164, parsed with the host's default region and allowed by
+    /// its country lists, or why not.
+    /// </summary>
+    internal PhoneNumberCheck Normalize(string? phoneNumber)
+    {
+        var defaultRegion = string.IsNullOrWhiteSpace(_options.DefaultRegion) ? null : _options.DefaultRegion.Trim().ToUpperInvariant();
+        if (!PhoneNumber.TryParse(phoneNumber, defaultRegion, out var normalized, out var error))
+        {
+            return new PhoneNumberCheck.Invalid(new IdentityRefusal("phone_number_invalid", error));
+        }
+
+        return IsCountryAllowed(normalized.Region)
+            ? new PhoneNumberCheck.Valid(normalized)
+            : new PhoneNumberCheck.Invalid(new IdentityRefusal("phone_country_not_allowed", "Phone number country is not allowed."));
+    }
+
+    /// <summary>The number as the challenge stores it, protected with the host's data protection.</summary>
+    internal string Protect(string e164PhoneNumber) => _cryptoService.ProtectSecret(e164PhoneNumber);
+
+    /// <summary>The number a challenge stores.</summary>
+    internal string Unprotect(string protectedPhoneNumber) => _cryptoService.UnprotectSecret(protectedPhoneNumber);
 
     private bool IsCountryAllowed(string? region)
     {

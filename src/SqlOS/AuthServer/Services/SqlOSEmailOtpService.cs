@@ -55,6 +55,18 @@ public sealed class SqlOSEmailOtpService
 
     public bool IsRuntimeConfigured => _options.BuildMessage == null || _emailSender.IsConfigured;
 
+    /// <summary>The email-code options: code length, attempts, lifetimes and cooldown.</summary>
+    internal SqlOSEmailOtpOptions Options => _options;
+
+    /// <summary>The admission gate email codes pass (the delivery buckets, #424).</summary>
+    internal IAdmissionGate Admission => _admission;
+
+    /// <summary>Spends email-code attempts in the database before a code is compared (#424).</summary>
+    internal SqlOSEmailOtpAttemptLedger Attempts => _attempts;
+
+    /// <summary>Records the failures email codes audit without a state change.</summary>
+    internal IAuditRecorder AuditRecorder => _auditRecorder;
+
     public async Task<SqlOSEmailOtpStartResult> StartForAuthorizationRequestAsync(
         SqlOSAuthorizationRequest? authorizationRequest,
         string email,
@@ -605,7 +617,7 @@ public sealed class SqlOSEmailOtpService
     }
 
     /// <summary>Sends the code to the challenge's stored recipient, the only address it ever goes to.</summary>
-    private async Task SendCodeAsync(
+    internal async Task SendCodeAsync(
         IssuedEmailOtpChallenge issued,
         string purpose,
         CancellationToken cancellationToken)

@@ -213,6 +213,36 @@ public sealed class SqlOSInvitationService
         return ToResult(invitation, invitation.Organization!, BuildAcceptUrl(invitationToken.Trim(), httpContext));
     }
 
+    /// <summary>
+    /// The pending invitation <paramref name="invitationToken"/> names, for an invitation sign-up
+    /// (as <see cref="ResolveEmailInvitationAsync"/>, which processes cannot call: it takes the HTTP
+    /// request).
+    /// </summary>
+    internal Task<SqlOSEmailInvitationResult> ResolveForSignupAsync(string? invitationToken, CancellationToken cancellationToken)
+        => ResolveEmailInvitationAsync(invitationToken!, httpContext: null, cancellationToken);
+
+    /// <summary>
+    /// Accepts the invitation <paramref name="invitationToken"/> names for the account an invitation
+    /// sign-up just created, inside the sign-up's transaction; the <c>invitation.accepted</c> row
+    /// records <paramref name="ipAddress"/> (as <see cref="AcceptEmailInvitationInCurrentTransactionAsync"/>).
+    /// </summary>
+    internal async Task<SqlOSInvitationAcceptanceResult> AcceptInCurrentTransactionAsync(
+        string invitationToken,
+        string userId,
+        string authenticationMethod,
+        string? ipAddress,
+        CancellationToken cancellationToken)
+    {
+        var invitation = await FindInvitationByTokenAsync(invitationToken, cancellationToken);
+        return await AcceptInvitationForUserAsync(
+            invitation,
+            userId,
+            saveChanges: false,
+            ipAddress,
+            PresentedCredentials.FromAuthenticationMethod(authenticationMethod),
+            cancellationToken);
+    }
+
     public async Task<SqlOSEmailInvitationResult> BindInvitationToAuthorizationRequestAsync(
         string invitationToken,
         SqlOSAuthorizationRequest authorizationRequest,
@@ -369,11 +399,26 @@ public sealed class SqlOSInvitationService
             cancellationToken);
     }
 
-    private async Task<SqlOSInvitationAcceptanceResult> AcceptInvitationForUserAsync(
+    private Task<SqlOSInvitationAcceptanceResult> AcceptInvitationForUserAsync(
         SqlOSInvitation invitation,
         string userId,
         bool saveChanges,
         HttpContext? httpContext,
+        PresentedCredentials presented,
+        CancellationToken cancellationToken)
+        => AcceptInvitationForUserAsync(
+            invitation,
+            userId,
+            saveChanges,
+            httpContext?.Connection.RemoteIpAddress?.ToString(),
+            presented,
+            cancellationToken);
+
+    private async Task<SqlOSInvitationAcceptanceResult> AcceptInvitationForUserAsync(
+        SqlOSInvitation invitation,
+        string userId,
+        bool saveChanges,
+        string? ipAddress,
         PresentedCredentials presented,
         CancellationToken cancellationToken)
     {
@@ -441,7 +486,7 @@ public sealed class SqlOSInvitationService
             "user",
             user.Id,
             invitation.OrganizationId,
-            httpContext?.Connection.RemoteIpAddress?.ToString(),
+            ipAddress,
             new
             {
                 invitation.Id,
