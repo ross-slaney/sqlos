@@ -134,34 +134,36 @@ The Markdown summary is on the run page, and the JSON results and plans are uplo
 
 ## Results
 
-From CI calibration runs (4 vCPU runner, warm cache, median ms). Current numbers are in each run's summary.
+From the PR-tier CI runs of this harness (4 vCPU runners, warm cache, median ms, 1M → 10M), with the previous
+release's function measured beside the current one in the same job. The PostgreSQL run was on an AMD EPYC
+9V74, the SQL Server run on an Intel Xeon Platinum 8573C; current numbers are in each run's summary.
 
-The row-filter columns are the previous release's calibration (PR #446); the closure page and the
-current-versus-previous ratios are filled in from the first full run of this harness.
-
-| Scenario | PostgreSQL 16, 1M → 100M | SQL Server 2022, 1M → 100M |
+| Scenario | PostgreSQL 16: current · previous · `ListVisibleAsync` | SQL Server 2022: current · previous · `ListVisibleAsync` |
 |---|---|---|
-| Company admin, first page (k = 20) | 10.1 → 10.6 | 25.9 → 27.0 |
-| Company admin, page from the middle | 10.1 → 10.6 | 25.6 → 28.9 |
-| Chain manager, σ = 7.1% | 33 → 27 | 108 → 116 |
-| Region manager, σ = 0.97% (1,592 rows examined) | 189 → 137 | 645 → 679 |
-| Chain manager at D = 10 | 31 → 26 | 112 → 118 |
-| Store manager, sparse, σ = 0.0065% (399,129 rows examined) | 31.8 s → 33.3 s | 160.7 s → 161.8 s |
-| Store manager, filtered to the store | 10.5 → 9.7 | 27.5 → 26.6 |
-| `fn_IsResourceAccessible`, one product | 6.6 → 6.0 | 2.6 → 2.7 |
-| `Allows`, product at depth 9 | 37.7 → 34.4 | 56.0 → 55.8 |
+| Company admin, first page (k = 20) | 6.4 → 7.9 · 9.4 → 10.4 · 5.4 → 6.5 | 15.8 → 16.2 · 16.6 → 17.3 · 6.4 → 6.3 |
+| Company admin, first page (k = 100) | 9.4 → 11.5 · 17.4 → 19.8 · 6.2 → 7.4 | 59.9 → 61.5 · 75.9 → 76.5 · 6.2 → 6.9 |
+| Chain manager, σ = 7.1% | 13.7 → 16.9 · 29.4 → 32.4 · 5.4 → 6.3 | 54.0 → 55.0 · 72.4 → 75.0 · 5.8 → 6.2 |
+| Region manager, σ = 0.97% (1,592 rows examined) | 64 → 72 · 166 → 174 · 5.4 → 5.6 | 298 → 299 · 434 → 441 · 5.9 → 6.3 |
+| Chain manager at D = 10 | 13.2 → 14.2 · 27.9 → 30.7 · 5.5 → 6.4 | 59.4 → 59.0 · 78.7 → 77.8 · 6.0 → 6.6 |
+| Store manager, sparse, σ = 0.0065% | (row filter: 33 s at every scale, full tier) · – · 5.5 → 6.3 | (161 s, full tier) · – · 6.1 → 6.4 |
+| Store manager, filtered to the store | 6.5 → 7.6 · 8.3 → 9.1 · – | 16.0 → 16.0 · 17.0 → 17.7 · – |
+| `fn_IsResourceAccessible`, one product (depth 4 / 9 / denied) | 2.7 / 2.7 / 2.7 · 7.6 / 7.4 / 7.3 · – | 4.1 / 4.5 / 3.1 · 2.8 / 3.3 / 2.0 · – |
+| `Allows`, product at depth 9 | 44.9 → 45.8 | 54.8 → 54.2 |
 
-Per-page cost does not grow with N on either engine across 100 times the data: every ratio is between ×0.71
-and ×1.13. What sets the cost is the number of rows the scan examines, k / σ, times a per-row constant. That
-constant is about 90–130 µs of server execution on PostgreSQL. On SQL Server it is about 165 µs on one runner
-CPU and about 420 µs on the AMD EPYC 7763.
+Three things to read off the table:
 
-Hosted runners come from a mixed pool of CPU models, and the engines respond to it differently. On SQL Server,
-identical plans (same operators, same execution counts) have used 2.5 times more CPU on one runner than on
-another. The SQL Server column above ran on AMD EPYC 7763 runners; a faster runner gave 11.6 ms for the admin
-page and 251 ms for the region page. PostgreSQL varies about 1.3 times: the admin page ran in 10–11 ms on
-earlier runs and 13 ms on an Intel Xeon Platinum 8370C. The report records the CPU model, and the scale gate
-compares within one job on one machine. The ceilings were set from the slower hardware for each engine.
+- **The row filter did not get slower.** On every list page the current function is at or below the previous
+  release's (PostgreSQL ×0.60–0.85 at 10M, SQL Server ×0.68–0.94). Point checks on PostgreSQL went from
+  7.5 ms to 2.7 ms; on SQL Server they cost about 1 ms more (the root set is built once into a spool, which
+  a single-row check does not amortize).
+- **The closure page is flat in both N and σ.** Every principal, both engines, both scales: 5–7 ms and 20
+  closure entries read, including the store manager whose row-filter page takes 33 s and 161 s.
+- **Per-page cost does not grow with N** for either path: the 10M ÷ 1M ratios are ×0.96–1.26, within the
+  scale gate.
+
+Hosted runners come from a mixed pool of CPU models, and the engines respond to it differently; identical
+SQL Server plans have run 2.5 times apart on different CPUs, and PostgreSQL about 1.3 times. The report
+records the CPU model, and every gate compares within one job on one machine.
 
 ## Findings
 
@@ -175,6 +177,18 @@ compares within one job on one machine. The ceilings were set from the slower ha
 - **`fn_AccessRoots` moves the grant conditions out of the per-row walk.** The current row filter examines
   the same rows as the previous release's and evaluates the caller's grants once per query instead of once
   per ancestor per row; the `regression` gate compares the two on every run.
+- **Each engine needs its own cue to build the roots once, from the grant side; the plans show both failure
+  modes.** The first CI run passed on PostgreSQL at 1M and failed at 10M: inlined into the queries,
+  `fn_AccessRoots` was planned as a merge join along the resource primary-key index to feed its `DISTINCT`,
+  scanning 60K resource rows per evaluation (the denied point check went from 5 ms to 168 ms, the store
+  manager's page from 8 ms to 172 ms). The PostgreSQL function now materializes the caller's grants in a CTE
+  first and looks their resources up by key. On SQL Server the `DISTINCT` is what makes the optimizer build
+  the root set once into a spool; a run without it recomputed the roots for every candidate row (the grants
+  seek ran 21 times for a 21-row page) and the admin page went from ×0.94 to ×1.36 of the previous function.
+  The `regression` gate and the 1M → 10M growth are what caught both.
+- **On SQL Server the point check costs about 1 ms more than before** (3.6 ms against 2.6 ms at 10M): for a
+  single row, the inline roots join costs a little more than the old per-ancestor grant probe. List pages
+  are ×0.68–0.94 of the previous function's, and the closure page is 6 ms for every principal.
 - **On PostgreSQL, a caller used to pay for other people's grants.** With 100 other users' grants added to
   the root, the previous function's region page went from 189 ms to 1,126 ms (×6.0) with the same rows
   examined: the plan probed grants by `ResourceId` alone and applied the subject filter last. The density

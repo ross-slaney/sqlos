@@ -56,6 +56,8 @@ public class SqlOSFgaFunctionInitializerTests
         sql.Should().Contain("g.EffectiveTo IS NULL OR g.EffectiveTo >= GETUTCDATE()");
         sql.Should().Contain("sa.ExpiresAt > GETUTCDATE()");
         sql.Should().Contain("parent.Seq AS ParentSeq, parent.IsActive AS ParentIsActive");
+        // The DISTINCT is what makes SQL Server build the root set once per query (a spool) instead of per row.
+        sql.Should().Contain("SELECT DISTINCT r.Id AS ResourceId");
         sql.Should().Contain("LEFT JOIN [tenant]]one].[SqlOSFgaResources] parent ON parent.Id = r.ParentId");
     }
 

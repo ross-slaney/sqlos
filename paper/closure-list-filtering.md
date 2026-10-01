@@ -253,6 +253,17 @@ join through four subject tables. Rows examined per page are therefore identical
 is not larger. The benchmark's `regression` gate checks the constant against the previous release's
 function, kept beside the current one on the same data in the same job.
 
+A is small (the caller's grants) and each engine needs its own cue to build it once and from the grant
+side; the benchmark's captured plans at 10M showed both failure modes. On PostgreSQL the function
+materializes the caller's live grants in a CTE before joining them to the resource table by primary key;
+inlined, the planner once chose a merge join along the resource index to feed the function's `DISTINCT`,
+scanning tens of thousands of resource rows per evaluation. On SQL Server the function keeps its
+`DISTINCT`: it makes the root set a blocking subtree that the optimizer builds once into a spool and
+rewinds for every candidate row; without it the inlined set was recomputed per row (the grants seek ran
+once per candidate). The per-query cost of building A is paid once, about a millisecond on SQL Server for
+a point check with a single grant; the per-row cost is a spool probe instead of a join through the grant
+and subject tables.
+
 ---
 
 ## 6. What maintenance costs

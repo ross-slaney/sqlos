@@ -17,7 +17,6 @@ internal sealed partial class SqlServerDatabaseProvider
     /// subjects holds an active grant whose role includes the permission. Every grant condition the row
     /// filter used to evaluate per candidate row lives here, evaluated once per query. The parent's sequence
     /// number and state let the page query confirm a root's own chain is well formed with one closure lookup.
-    /// Duplicate roots (two grants on one resource) are fine; the consumers treat the result as a set.
     /// </summary>
     public string BuildAccessRootsFunctionSql(SqlOSFgaOptions options)
     {
@@ -42,7 +41,10 @@ internal sealed partial class SqlServerDatabaseProvider
             AS
             RETURN
             (
-                SELECT r.Id AS ResourceId, r.Seq AS ResourceSeq, rt.Seq AS TypeSeq,
+                -- DISTINCT is load-bearing: it makes the root set a blocking subtree that the optimizer builds
+                -- once into a spool and rewinds for every candidate row of a query. Without it the inlined set
+                -- is recomputed per row (seen in captured plans: the grants seek ran once per row).
+                SELECT DISTINCT r.Id AS ResourceId, r.Seq AS ResourceSeq, rt.Seq AS TypeSeq,
                        parent.Seq AS ParentSeq, parent.IsActive AS ParentIsActive
                 FROM [{schema}].[{grants}] g
                 INNER JOIN [{schema}].[{rolePermissions}] rp ON g.RoleId = rp.RoleId
