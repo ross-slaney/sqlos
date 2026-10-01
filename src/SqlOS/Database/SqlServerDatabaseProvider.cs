@@ -180,10 +180,29 @@ internal sealed partial class SqlServerDatabaseProvider : ISqlOSDatabaseProvider
         string failureMessage,
         CancellationToken cancellationToken)
     {
+        await database.ExecuteSqlRawAsync(
+            BuildAcquireSessionLockSql(timeout, failureMessage),
+            [CreateParameter("@resource", resource)],
+            cancellationToken);
+    }
+
+    public Task ReleaseSessionLockAsync(DatabaseFacade database, string resource, CancellationToken cancellationToken)
+        => database.ExecuteSqlRawAsync(
+            ReleaseSessionLockSql,
+            [CreateParameter("@resource", resource)],
+            cancellationToken);
+
+    /// <summary>
+    /// Takes the session lock. The DDL run under it takes schema-modification locks that can deadlock with
+    /// the schema-stability locks of queries running beside it; the session volunteers as the deadlock
+    /// victim, so a query never is, and the caller retries.
+    /// </summary>
+    internal static string BuildAcquireSessionLockSql(TimeSpan timeout, string failureMessage)
+    {
         var timeoutMs = Math.Max(0, (int)timeout.TotalMilliseconds);
         var escaped = failureMessage.Replace("'", "''", StringComparison.Ordinal);
-        await database.ExecuteSqlRawAsync(
-            $"""
+        return $"""
+            SET DEADLOCK_PRIORITY LOW;
             DECLARE @result int;
             EXEC @result = sys.sp_getapplock
                 @Resource = @resource,
@@ -191,16 +210,11 @@ internal sealed partial class SqlServerDatabaseProvider : ISqlOSDatabaseProvider
                 @LockOwner = 'Session',
                 @LockTimeout = {timeoutMs};
             IF @result < 0 THROW 51000, '{escaped}', 1;
-            """,
-            [CreateParameter("@resource", resource)],
-            cancellationToken);
+            """;
     }
 
-    public Task ReleaseSessionLockAsync(DatabaseFacade database, string resource, CancellationToken cancellationToken)
-        => database.ExecuteSqlRawAsync(
-            "EXEC sys.sp_releaseapplock @Resource = @resource, @LockOwner = 'Session';",
-            [CreateParameter("@resource", resource)],
-            cancellationToken);
+    internal const string ReleaseSessionLockSql =
+        "EXEC sys.sp_releaseapplock @Resource = @resource, @LockOwner = 'Session'; SET DEADLOCK_PRIORITY NORMAL;";
 
     private static string Escape(string identifier)
         => identifier.Replace("]", "]]", StringComparison.Ordinal);

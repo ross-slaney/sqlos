@@ -83,7 +83,9 @@ internal interface ISqlOSDatabaseProvider
     /// <summary>
     /// Takes an exclusive lock held by the connection rather than a transaction, so DDL batches can run in
     /// their own transactions while other processes are kept out. The connection must stay open until
-    /// <see cref="ReleaseSessionLockAsync"/>.
+    /// <see cref="ReleaseSessionLockAsync"/>. While the lock is held the session is the preferred deadlock
+    /// victim where the engine has such a notion (SQL Server), so a query running beside the DDL never is;
+    /// the holder retries a lost deadlock.
     /// </summary>
     Task AcquireSessionLockAsync(
         DatabaseFacade database,

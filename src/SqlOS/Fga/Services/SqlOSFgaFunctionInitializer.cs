@@ -25,6 +25,7 @@ namespace SqlOS.Fga.Services;
 public class SqlOSFgaFunctionInitializer
 {
     private const string LockName = "SqlOS:FgaFunctionInitializer";
+    private const int DeadlockAttempts = 5;
     private readonly ISqlOSFgaDbContext _context;
     private readonly SqlOSFgaOptions _options;
     private readonly ILogger<SqlOSFgaFunctionInitializer> _logger;
@@ -77,23 +78,37 @@ public class SqlOSFgaFunctionInitializer
                     return;
                 }
 
-                await provider.AcquireSessionLockAsync(
-                    _context.Database,
-                    LockName,
-                    TimeSpan.FromSeconds(30),
-                    "Could not acquire the SqlOS FGA function lock.",
-                    cancellationToken);
-                try
+                // The routines' DDL takes schema-modification locks that can deadlock with queries running
+                // beside the initializer; the engine then picks a victim. The session asks to be it (so a query
+                // never is) and tries again.
+                for (var attempt = 1; ; attempt++)
                 {
-                    // Another process may have applied the same definitions while this one waited.
-                    if (!await IsCurrentAsync(provider, scopeTables, hash, cancellationToken))
+                    await provider.AcquireSessionLockAsync(
+                        _context.Database,
+                        LockName,
+                        TimeSpan.FromSeconds(30),
+                        "Could not acquire the SqlOS FGA function lock.",
+                        cancellationToken);
+                    try
                     {
-                        await ApplyAsync(provider, batches, scopeTables, hash, cancellationToken);
+                        // Another process may have applied the same definitions while this one waited.
+                        if (!await IsCurrentAsync(provider, scopeTables, hash, cancellationToken))
+                        {
+                            await ApplyAsync(provider, batches, scopeTables, hash, cancellationToken);
+                        }
+
+                        break;
                     }
-                }
-                finally
-                {
-                    await provider.ReleaseSessionLockAsync(_context.Database, LockName, cancellationToken);
+                    catch (Exception ex) when (attempt < DeadlockAttempts && SqlOSDatabaseErrors.IsDeadlock(ex))
+                    {
+                        _logger.LogWarning(ex, "The SqlOS FGA function initializer lost a deadlock (attempt {Attempt} of {Attempts}); retrying.", attempt, DeadlockAttempts);
+                    }
+                    finally
+                    {
+                        await provider.ReleaseSessionLockAsync(_context.Database, LockName, cancellationToken);
+                    }
+
+                    await Task.Delay(TimeSpan.FromMilliseconds(250 * attempt), cancellationToken);
                 }
             }
             finally

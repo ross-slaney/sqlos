@@ -13,6 +13,21 @@ namespace SqlOS.Tests;
 public class SqlOSDatabaseProviderTests
 {
     [TestMethod]
+    public void SqlServerSessionLock_VolunteersAsDeadlockVictim_WhileHeld()
+    {
+        // The routines' DDL under the lock can deadlock with queries running beside the initializer. The
+        // locked session must lose that deadlock (and retry), never the query.
+        var acquire = SqlServerDatabaseProvider.BuildAcquireSessionLockSql(TimeSpan.FromSeconds(30), "Could not acquire the 'lock'.");
+
+        acquire.Should().StartWith("SET DEADLOCK_PRIORITY LOW;");
+        acquire.Should().Contain("@LockOwner = 'Session'");
+        acquire.Should().Contain("@LockTimeout = 30000");
+        acquire.Should().Contain("THROW 51000, 'Could not acquire the ''lock''.', 1;");
+        SqlServerDatabaseProvider.ReleaseSessionLockSql.Should().Contain("sp_releaseapplock");
+        SqlServerDatabaseProvider.ReleaseSessionLockSql.Should().EndWith("SET DEADLOCK_PRIORITY NORMAL;");
+    }
+
+    [TestMethod]
     public void MigrationManifest_IsProviderComplete()
     {
         var act = () => SqlOSMigrationManifest.EnsureProviderComplete(typeof(SqlOSDatabase).Assembly);
