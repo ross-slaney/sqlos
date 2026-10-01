@@ -1,0 +1,514 @@
+# SqlOS behavior lock transcript
+scenario: ScimGroupScenarios.Group_writes_that_break_scim_rules_are_refused
+profile: enterprise-scim-path
+
+# Ann exists; Gone was provisioned and then deleted; Engineering holds Ann.
+
+## 1. directory: no displayName
+> POST /scim/v2/Groups
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:Group"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM group displayName is required.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidValue",
+      "status": "400"
+    }
+
+## 2. directory: the User schema on a group
+> POST /scim/v2/Groups
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "displayName": "Design",
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM payload schemas must contain unique values including 'urn:ietf:params:scim:schemas:core:2.0:Group'.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidSyntax",
+      "status": "400"
+    }
+
+## 3. directory: members as strings
+> POST /scim/v2/Groups
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "displayName": "Design",
+>     "members": [
+>       "{usr:ann}"
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:Group"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "Every SCIM member must be an object.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidValue",
+      "status": "400"
+    }
+
+## 4. directory: members as a string
+> POST /scim/v2/Groups
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "displayName": "Design",
+>     "members": "{usr:ann}",
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:Group"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM members must be an array of objects.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidValue",
+      "status": "400"
+    }
+
+## 5. directory: a member without a value
+> POST /scim/v2/Groups
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "displayName": "Design",
+>     "members": [
+>       {
+>         "display": "Ann"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:Group"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "Every SCIM member requires a value.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidValue",
+      "status": "400"
+    }
+
+## 6. directory: a member this directory never provisioned
+> POST /scim/v2/Groups
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "displayName": "Design",
+>     "externalId": "directory-design",
+>     "members": [
+>       {
+>         "value": "{usr#1}"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:Group"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM group member '{usr#1}' was not found in this directory connection.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidValue",
+      "status": "400"
+    }
+
+## 7. directory: a member this directory deleted
+> POST /scim/v2/Groups
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "displayName": "Design",
+>     "externalId": "directory-design",
+>     "members": [
+>       {
+>         "value": "{usr:gone}"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:Group"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM group member '{usr:gone}' was not found in this directory connection.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidValue",
+      "status": "400"
+    }
+
+## 8. directory: an externalId another group holds
+> POST /scim/v2/Groups
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "displayName": "Design",
+>     "externalId": "directory-engineering",
+>     "members": [],
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:Group"
+>     ]
+>   }
+< 409 Conflict
+< Content-Type: application/scim+json
+    {
+      "detail": "A SCIM group with the same displayName or externalId already exists.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "uniqueness",
+      "status": "409"
+    }
+
+## 9. directory: adding through a filtered members path
+> PATCH /scim/v2/Groups/{grp:engineering}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "add",
+>         "path": "members[value eq \"{usr:ann}\"]",
+>         "value": [
+>           {
+>             "value": "{usr:ann}"
+>           }
+>         ]
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "Filtered SCIM members paths only support remove.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidPath",
+      "status": "400"
+    }
+
+## 10. directory: removing displayName
+> PATCH /scim/v2/Groups/{grp:engineering}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "remove",
+>         "path": "displayName"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM group displayName is required.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "mutability",
+      "status": "400"
+    }
+
+## 11. directory: an attribute groups do not have
+> PATCH /scim/v2/Groups/{grp:engineering}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "description",
+>         "value": "Builders"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "Unsupported SCIM group PATCH path 'description'.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidPath",
+      "status": "400"
+    }
+
+## 12. directory: changing the group id
+> PATCH /scim/v2/Groups/{grp:engineering}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "id",
+>         "value": "{grp#1}"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM resource id cannot be changed.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "mutability",
+      "status": "400"
+    }
+
+## 13. directory: writing meta
+> PATCH /scim/v2/Groups/{grp:engineering}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "meta",
+>         "value": {
+>           "resourceType": "Group"
+>         }
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM attribute 'meta' is not writable.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "mutability",
+      "status": "400"
+    }
+
+## 14. directory: adding a member given as a string
+> PATCH /scim/v2/Groups/{grp:engineering}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "add",
+>         "path": "members",
+>         "value": "{usr:ann}"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM members must be an array of objects.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidValue",
+      "status": "400"
+    }
+
+## 15. directory: reading an unknown group
+> GET /scim/v2/Groups/{grp#1}
+> Authorization: Bearer {scim-token#1}
+< 404 Not Found
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM group not found.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "status": "404"
+    }
+
+## 16. directory: replacing an unknown group
+> PUT /scim/v2/Groups/{grp#1}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "displayName": "Design",
+>     "members": [],
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:Group"
+>     ]
+>   }
+< 404 Not Found
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM group not found.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "status": "404"
+    }
+
+## 17. directory: patching an unknown group
+> PATCH /scim/v2/Groups/{grp#1}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Design"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 404 Not Found
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM group not found.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "status": "404"
+    }
+
+## 18. directory: deleting an unknown group
+> DELETE /scim/v2/Groups/{grp#1}
+> Authorization: Bearer {scim-token#1}
+< 404 Not Found
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM group not found.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "status": "404"
+    }
+
+## 19. directory: delete Engineering
+> DELETE /scim/v2/Groups/{grp:engineering}
+> Authorization: Bearer {scim-token#1}
+< 204 No Content
+
+## 20. directory: the deleted displayName cannot be taken by a different externalId
+> POST /scim/v2/Groups
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "displayName": "Engineering",
+>     "externalId": "directory-someone-else",
+>     "members": [],
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:Group"
+>     ]
+>   }
+< 409 Conflict
+< Content-Type: application/scim+json
+    {
+      "detail": "The SCIM group displayName belongs to a deleted resource with a different externalId and cannot be reassigned implicitly.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "uniqueness",
+      "status": "409"
+    }
+
+## 21. directory: Engineering stays deleted
+> GET /scim/v2/Groups/{grp:engineering}
+> Authorization: Bearer {scim-token#1}
+< 404 Not Found
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM group not found.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "status": "404"
+    }
+
+## audit: only the accepted writes are audited
+  - {
+      "action": "scim.group.deleted",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.deleted",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": null,
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }

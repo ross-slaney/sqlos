@@ -1,0 +1,118 @@
+# SqlOS behavior lock transcript
+scenario: ScimOwnershipScenarios.A_directory_never_links_an_account_whose_email_is_unverified
+profile: enterprise-scim-path
+
+# Before the directory syncs, someone registered an account for the CEO's address and never verified it.
+
+## 1. directory: the directory's user matches the unverified account by email: refused
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "emails": [
+>       {
+>         "primary": true,
+>         "type": "work",
+>         "value": "{email:ceo}"
+>       }
+>     ],
+>     "externalId": "directory-ceo",
+>     "name": {
+>       "familyName": "Ceo",
+>       "givenName": "Cara"
+>     },
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:ceo}"
+>   }
+< 409 Conflict
+< Content-Type: application/scim+json
+    {
+      "detail": "An account with this email exists but has not verified it. The directory user can be linked after the address is verified.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "uniqueness",
+      "status": "409"
+    }
+
+## 2. directory: matching through userName alone is refused the same way
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "externalId": "directory-ceo",
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:ceo}"
+>   }
+< 409 Conflict
+< Content-Type: application/scim+json
+    {
+      "detail": "An account with this email exists but has not verified it. The directory user can be linked after the address is verified.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "uniqueness",
+      "status": "409"
+    }
+
+## 3. operator: dashboard: the unverified account gained no membership
+> GET /sqlos/admin/auth/api/users/{usr:squatter}/memberships
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 4. operator: dashboard: both refusals recorded
+> GET /sqlos/admin/auth/api/scim-connections/{scim#1}/sync-events
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "action": "scim.user.rejected",
+          "connectionId": "{scim#1}",
+          "dataJson": "{\"reason\":\"unverified_email_match\",\"operation\":\"create\"}",
+          "error": "An account with this email exists but has not verified it. The directory user can be linked after the address is verified.",
+          "externalId": null,
+          "id": "{scevt#1}",
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "resourceId": null,
+          "resourceType": "User",
+          "result": "failed"
+        },
+        {
+          "action": "scim.user.rejected",
+          "connectionId": "{scim#1}",
+          "dataJson": "{\"reason\":\"unverified_email_match\",\"operation\":\"create\"}",
+          "error": "An account with this email exists but has not verified it. The directory user can be linked after the address is verified.",
+          "externalId": null,
+          "id": "{scevt#2}",
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "resourceId": null,
+          "resourceType": "User",
+          "result": "failed"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## audit: refusals write no audit events
+  (no new events)

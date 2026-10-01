@@ -1,0 +1,246 @@
+# SqlOS behavior lock transcript
+scenario: SsoPortalAdminScenarios.Setup_link_administration_refuses_invalid_requests
+profile: enterprise
+
+## 1. operator: an unknown organization
+> POST /sqlos/admin/auth/api/organizations/{org#1}/sso-portal/sessions
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Organization not found."
+    }
+
+## 2. operator: an unknown organization through the top-level route
+> POST /sqlos/admin/auth/api/sso-portal/sessions
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "organizationId": "{org#1}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Organization not found."
+    }
+
+## 3. operator: no organization at all
+> POST /sqlos/admin/auth/api/sso-portal/sessions
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Organization not found."
+    }
+
+## 4. operator: an expiry in the past
+> POST /sqlos/admin/auth/api/organizations/{org#2}/sso-portal/sessions
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "expiresAt": "{datetime:utc-z}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Portal session expiration must be in the future."
+    }
+
+## 5. operator: a provider the portal has no guide for
+> POST /sqlos/admin/auth/api/organizations/{org#2}/sso-portal/sessions
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "provider": "adfs"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Unsupported SSO provider 'adfs'."
+    }
+
+## 6. operator: the route's organization wins over one in the body
+> POST /sqlos/admin/auth/api/organizations/{org#2}/sso-portal/sessions
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "organizationId": "{org#3}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "connectionId": "{sso#1}",
+      "createdAt": "{datetime:utc-z}",
+      "expiresAt": "{datetime:utc-z}",
+      "id": "{ssp#1}",
+      "lastSeenAt": null,
+      "openedAt": null,
+      "organizationId": "{org#2}",
+      "organizationName": "Acme",
+      "portalUrl": "https://sqlos.example.test/sqlos/admin/auth/sso-portal",
+      "primaryDomain": null,
+      "provider": null,
+      "revokedAt": null,
+      "revokedReason": null,
+      "setupUrl": "https://sqlos.example.test/sqlos/admin/auth/sso-portal/start?token={link-token#1}",
+      "status": "pending"
+    }
+
+## 7. operator: so Globex has no links
+> GET /sqlos/admin/auth/api/organizations/{org#3}/sso-portal/sessions
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 20
+    }
+
+## 8. operator: listing an unknown organization's links
+> GET /sqlos/admin/auth/api/organizations/{org#1}/sso-portal/sessions
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Organization not found."
+    }
+
+## 9. operator: offset pagination is refused
+> GET /sqlos/admin/auth/api/organizations/{org#2}/sso-portal/sessions?page=2
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_cursor",
+      "message": "Offset pagination is no longer supported. Omit page or pass page=1 for the first window, then follow nextCursor."
+    }
+
+## 10. operator: revoking an unknown link
+> POST /sqlos/admin/auth/api/sso-portal/sessions/{ssp#2}/revoke
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Portal session not found."
+    }
+
+## 11. operator: deactivate Globex
+> PUT /sqlos/admin/auth/api/organizations/{org#3}
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "isActive": false,
+>     "name": "Globex",
+>     "slug": "{slug:globex}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "id": "{org#3}",
+      "isActive": false,
+      "name": "Globex",
+      "primaryDomain": null,
+      "slug": "{slug:globex}"
+    }
+
+## 12. operator: an inactive organization gets no setup link
+> POST /sqlos/admin/auth/api/organizations/{org#3}/sso-portal/sessions
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Organization not found."
+    }
+
+## 13. operator: without the operator credential
+> POST /sqlos/admin/auth/api/organizations/{org#2}/sso-portal/sessions
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## 14. operator: listing without the operator credential
+> GET /sqlos/admin/auth/api/organizations/{org#2}/sso-portal/sessions
+< 404 Not Found
+
+## audit: portal session events
+  - {
+      "action": "sso.portal.session.created",
+      "actor": {
+        "displayName": null,
+        "id": "{ssp#1}",
+        "type": "sso_portal"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "sso.portal.session.created",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "Id": "{ssp#1}",
+        "connectionId": "{sso#1}",
+        "expiresAt": "{datetime:utc-z}",
+        "provider": null
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#2}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "sso.portal.sessions.revoked",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "sso.portal.sessions.revoked",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "reason": "organization_deactivated",
+        "revokedSessions": 0
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#3}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

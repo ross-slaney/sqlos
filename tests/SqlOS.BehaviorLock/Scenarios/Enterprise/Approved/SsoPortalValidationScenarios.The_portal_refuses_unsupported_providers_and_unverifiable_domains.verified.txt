@@ -1,0 +1,499 @@
+# SqlOS behavior lock transcript
+scenario: SsoPortalValidationScenarios.The_portal_refuses_unsupported_providers_and_unverifiable_domains
+profile: enterprise
+
+# Globex has already verified {domain:taken}.
+
+## 1. customer-admin: a provider the portal has no guide for
+> PUT /sqlos/admin/auth/sso-portal/api/provider
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_sso_portal={cookie#1}
+> Origin: https://sqlos.example.test
+> X-SqlOS-Request: 1
+>   {
+>     "provider": "adfs"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Unsupported SSO provider 'adfs'."
+    }
+
+## 2. customer-admin: a blank provider
+> PUT /sqlos/admin/auth/sso-portal/api/provider
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_sso_portal={cookie#1}
+> Origin: https://sqlos.example.test
+> X-SqlOS-Request: 1
+>   {
+>     "provider": " "
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Provider is required."
+    }
+
+## 3. customer-admin: a blank domain
+> POST /sqlos/admin/auth/sso-portal/api/domain
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_sso_portal={cookie#1}
+> Origin: https://sqlos.example.test
+> X-SqlOS-Request: 1
+>   {
+>     "domain": " "
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Domain is required."
+    }
+
+## 4. customer-admin: a wildcard domain
+> POST /sqlos/admin/auth/sso-portal/api/domain
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_sso_portal={cookie#1}
+> Origin: https://sqlos.example.test
+> X-SqlOS-Request: 1
+>   {
+>     "domain": "*.acme.example.test"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Wildcard domains cannot be verified."
+    }
+
+## 5. customer-admin: an IP address
+> POST /sqlos/admin/auth/sso-portal/api/domain
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_sso_portal={cookie#1}
+> Origin: https://sqlos.example.test
+> X-SqlOS-Request: 1
+>   {
+>     "domain": "203.0.113.5"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "IP addresses cannot be verified as organization domains."
+    }
+
+## 6. customer-admin: localhost
+> POST /sqlos/admin/auth/sso-portal/api/domain
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_sso_portal={cookie#1}
+> Origin: https://sqlos.example.test
+> X-SqlOS-Request: 1
+>   {
+>     "domain": "localhost"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Localhost domain verification is disabled."
+    }
+
+## 7. customer-admin: a name without a public suffix
+> POST /sqlos/admin/auth/sso-portal/api/domain
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_sso_portal={cookie#1}
+> Origin: https://sqlos.example.test
+> X-SqlOS-Request: 1
+>   {
+>     "domain": "intranet"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Domain must include a public DNS suffix."
+    }
+
+## 8. customer-admin: an underscore in a label
+> POST /sqlos/admin/auth/sso-portal/api/domain
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_sso_portal={cookie#1}
+> Origin: https://sqlos.example.test
+> X-SqlOS-Request: 1
+>   {
+>     "domain": "acme_corp.example.test"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Domain contains characters that are not valid in DNS labels."
+    }
+
+## 9. customer-admin: a label that starts with a hyphen
+> POST /sqlos/admin/auth/sso-portal/api/domain
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_sso_portal={cookie#1}
+> Origin: https://sqlos.example.test
+> X-SqlOS-Request: 1
+>   {
+>     "domain": "-acme.example.test"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Domain is not a valid DNS name."
+    }
+
+## 10. customer-admin: a label longer than 63 characters
+> POST /sqlos/admin/auth/sso-portal/api/domain
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_sso_portal={cookie#1}
+> Origin: https://sqlos.example.test
+> X-SqlOS-Request: 1
+>   {
+>     "domain": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example.test"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Domain is not a valid DNS name."
+    }
+
+## 11. customer-admin: a domain another organization has verified
+> POST /sqlos/admin/auth/sso-portal/api/domain
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_sso_portal={cookie#1}
+> Origin: https://sqlos.example.test
+> X-SqlOS-Request: 1
+>   {
+>     "domain": "{domain:taken}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Domain is already verified by another organization."
+    }
+
+## 12. customer-admin: a pasted URL is reduced to its lower-case host
+> POST /sqlos/admin/auth/sso-portal/api/domain
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_sso_portal={cookie#1}
+> Origin: https://sqlos.example.test
+> X-SqlOS-Request: 1
+>   {
+>     "domain": "https://{domain:ACME}/login"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowedActions": {
+        "canActivate": false,
+        "canConfirmDomainVerification": true,
+        "canDisable": false,
+        "canImportMetadata": true,
+        "canRevokeOrganizationSessions": false,
+        "canSelectProvider": true,
+        "canSignOut": true,
+        "canStartDomainVerification": true,
+        "canTest": false,
+        "canUpdateEnrollmentPolicy": true,
+        "canValidateMetadata": true
+      },
+      "assertionConsumerServiceUrl": "https://sqlos.example.test/sqlos/auth/saml/acs/{sso#1}",
+      "connection": {
+        "autoLinkByEmail": true,
+        "autoProvisionUsers": false,
+        "createdAt": "{datetime:unspecified}",
+        "displayName": "Acme SSO",
+        "enrollmentPolicy": {
+          "allowJitProvisioning": false,
+          "requireSsoForExistingMembers": true
+        },
+        "id": "{sso#1}",
+        "identityProviderEntityId": null,
+        "isEnabled": false,
+        "setupStatus": "draft",
+        "singleSignOnUrl": null,
+        "updatedAt": "{datetime:unspecified}"
+      },
+      "domain": {
+        "createdAt": "{datetime:unspecified}",
+        "domain": "{domain:acme}",
+        "id": "{dom#1}",
+        "lastCheckedAt": null,
+        "lastError": null,
+        "organizationId": "{org#1}",
+        "ownershipRecord": {
+          "name": "_sqlos-verify.{domain:acme}",
+          "type": "TXT",
+          "value": "{dns-verification#1}"
+        },
+        "revokedAt": null,
+        "status": "pending_ownership",
+        "verifiedAt": null
+      },
+      "latestTest": null,
+      "organization": {
+        "id": "{org#1}",
+        "name": "Acme",
+        "primaryDomain": null,
+        "slug": "{slug:acme}"
+      },
+      "provider": null,
+      "providers": [
+        {
+          "acsUrlLabel": "Reply URL (ACS URL)",
+          "entityIdLabel": "Identifier (Entity ID)",
+          "key": "microsoft-entra",
+          "label": "Microsoft Entra",
+          "metadataLabel": "Federation Metadata XML",
+          "steps": [
+            "Create an Enterprise Application, then choose SAML as the single sign-on method.",
+            "Paste the SP Entity ID into Identifier and the ACS URL into Reply URL.",
+            "Download or copy the Federation Metadata XML and import it here.",
+            "Review the IdP Entity ID and SSO URL, activate the connection, then test sign-in."
+          ]
+        },
+        {
+          "acsUrlLabel": "Single sign-on URL",
+          "entityIdLabel": "Audience URI (SP Entity ID)",
+          "key": "okta",
+          "label": "Okta",
+          "metadataLabel": "IdP metadata",
+          "steps": [
+            "Create a SAML 2.0 application integration in Okta.",
+            "Use the ACS URL as Single sign-on URL and the SP Entity ID as Audience URI.",
+            "Set Name ID format to EmailAddress and map email, first_name, and last_name attributes.",
+            "Copy the IdP metadata XML into this portal, activate, and run a test."
+          ]
+        },
+        {
+          "acsUrlLabel": "ACS URL",
+          "entityIdLabel": "Entity ID",
+          "key": "google-workspace",
+          "label": "Google Workspace",
+          "metadataLabel": "IdP metadata",
+          "steps": [
+            "Create a custom SAML app in Google Admin Console.",
+            "Paste the ACS URL and Entity ID from this page into the service provider details.",
+            "Download Google IdP metadata and import it here.",
+            "Activate the connection and verify that a user in the primary domain routes to SSO."
+          ]
+        },
+        {
+          "acsUrlLabel": "ACS URL",
+          "entityIdLabel": "SP Entity ID",
+          "key": "generic-saml",
+          "label": "Generic SAML",
+          "metadataLabel": "SAML metadata XML",
+          "steps": [
+            "Create a SAML application in your identity provider.",
+            "Use the SP Entity ID and ACS URL shown here as the service provider values.",
+            "Export IdP metadata with a signing certificate and HTTP-Redirect or HTTP-POST SSO endpoint.",
+            "Import metadata, activate the connection, and run a test from a matching email domain."
+          ]
+        }
+      ],
+      "serviceProviderEntityId": "https://sqlos.example.test/sqlos/auth"
+    }
+
+## 13. customer-admin: an email address is reduced to its domain: the same pending claim
+> POST /sqlos/admin/auth/sso-portal/api/domain
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_sso_portal={cookie#1}
+> Origin: https://sqlos.example.test
+> X-SqlOS-Request: 1
+>   {
+>     "domain": "it-admin@{domain:acme}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowedActions": {
+        "canActivate": false,
+        "canConfirmDomainVerification": true,
+        "canDisable": false,
+        "canImportMetadata": true,
+        "canRevokeOrganizationSessions": false,
+        "canSelectProvider": true,
+        "canSignOut": true,
+        "canStartDomainVerification": true,
+        "canTest": false,
+        "canUpdateEnrollmentPolicy": true,
+        "canValidateMetadata": true
+      },
+      "assertionConsumerServiceUrl": "https://sqlos.example.test/sqlos/auth/saml/acs/{sso#1}",
+      "connection": {
+        "autoLinkByEmail": true,
+        "autoProvisionUsers": false,
+        "createdAt": "{datetime:unspecified}",
+        "displayName": "Acme SSO",
+        "enrollmentPolicy": {
+          "allowJitProvisioning": false,
+          "requireSsoForExistingMembers": true
+        },
+        "id": "{sso#1}",
+        "identityProviderEntityId": null,
+        "isEnabled": false,
+        "setupStatus": "draft",
+        "singleSignOnUrl": null,
+        "updatedAt": "{datetime:unspecified}"
+      },
+      "domain": {
+        "createdAt": "{datetime:unspecified}",
+        "domain": "{domain:acme}",
+        "id": "{dom#1}",
+        "lastCheckedAt": null,
+        "lastError": null,
+        "organizationId": "{org#1}",
+        "ownershipRecord": {
+          "name": "_sqlos-verify.{domain:acme}",
+          "type": "TXT",
+          "value": "{dns-verification#1}"
+        },
+        "revokedAt": null,
+        "status": "pending_ownership",
+        "verifiedAt": null
+      },
+      "latestTest": null,
+      "organization": {
+        "id": "{org#1}",
+        "name": "Acme",
+        "primaryDomain": null,
+        "slug": "{slug:acme}"
+      },
+      "provider": null,
+      "providers": [
+        {
+          "acsUrlLabel": "Reply URL (ACS URL)",
+          "entityIdLabel": "Identifier (Entity ID)",
+          "key": "microsoft-entra",
+          "label": "Microsoft Entra",
+          "metadataLabel": "Federation Metadata XML",
+          "steps": [
+            "Create an Enterprise Application, then choose SAML as the single sign-on method.",
+            "Paste the SP Entity ID into Identifier and the ACS URL into Reply URL.",
+            "Download or copy the Federation Metadata XML and import it here.",
+            "Review the IdP Entity ID and SSO URL, activate the connection, then test sign-in."
+          ]
+        },
+        {
+          "acsUrlLabel": "Single sign-on URL",
+          "entityIdLabel": "Audience URI (SP Entity ID)",
+          "key": "okta",
+          "label": "Okta",
+          "metadataLabel": "IdP metadata",
+          "steps": [
+            "Create a SAML 2.0 application integration in Okta.",
+            "Use the ACS URL as Single sign-on URL and the SP Entity ID as Audience URI.",
+            "Set Name ID format to EmailAddress and map email, first_name, and last_name attributes.",
+            "Copy the IdP metadata XML into this portal, activate, and run a test."
+          ]
+        },
+        {
+          "acsUrlLabel": "ACS URL",
+          "entityIdLabel": "Entity ID",
+          "key": "google-workspace",
+          "label": "Google Workspace",
+          "metadataLabel": "IdP metadata",
+          "steps": [
+            "Create a custom SAML app in Google Admin Console.",
+            "Paste the ACS URL and Entity ID from this page into the service provider details.",
+            "Download Google IdP metadata and import it here.",
+            "Activate the connection and verify that a user in the primary domain routes to SSO."
+          ]
+        },
+        {
+          "acsUrlLabel": "ACS URL",
+          "entityIdLabel": "SP Entity ID",
+          "key": "generic-saml",
+          "label": "Generic SAML",
+          "metadataLabel": "SAML metadata XML",
+          "steps": [
+            "Create a SAML application in your identity provider.",
+            "Use the SP Entity ID and ACS URL shown here as the service provider values.",
+            "Export IdP metadata with a signing certificate and HTTP-Redirect or HTTP-POST SSO endpoint.",
+            "Import metadata, activate the connection, and run a test from a matching email domain."
+          ]
+        }
+      ],
+      "serviceProviderEntityId": "https://sqlos.example.test/sqlos/auth"
+    }
+
+## 14. customer-admin: confirming a domain that was never started
+> POST /sqlos/admin/auth/sso-portal/api/domains/{dom#2}/confirm
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_sso_portal={cookie#1}
+> Origin: https://sqlos.example.test
+> X-SqlOS-Request: 1
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Domain verification request was not found."
+    }
+
+## audit: provider and domain events
+  - {
+      "action": "organization.domain.verification.started",
+      "actor": {
+        "displayName": null,
+        "id": "{dom#1}",
+        "type": "organization_domain"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "organization.domain.verification.started",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "Domain": "{domain:acme}",
+        "Status": "pending_ownership"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "organization.domain.verification.started",
+      "actor": {
+        "displayName": null,
+        "id": "{dom#1}",
+        "type": "organization_domain"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "organization.domain.verification.started",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "Domain": "{domain:acme}",
+        "Status": "pending_ownership"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

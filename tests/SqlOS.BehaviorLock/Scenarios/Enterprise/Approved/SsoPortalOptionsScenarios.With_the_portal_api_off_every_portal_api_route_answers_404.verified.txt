@@ -1,0 +1,37 @@
+# SqlOS behavior lock transcript
+scenario: SsoPortalOptionsScenarios.With_the_portal_api_off_every_portal_api_route_answers_404
+profile: enterprise
+
+## 1. customer-admin: the setup link still opens a session
+> GET /sqlos/admin/auth/sso-portal/start?token={link-token#1}
+< 302 Found
+< Location: https://sqlos.example.test/sqlos/admin/auth/sso-portal
+< Set-Cookie: sqlos_sso_portal={cookie#1}; expires=+7d; path=/sqlos/admin/auth/sso-portal; secure; samesite=lax; httponly
+
+## 2. customer-admin: the portal API state
+> GET /sqlos/admin/auth/sso-portal/api/state
+> Cookie: sqlos_sso_portal={cookie#1}
+< 404 Not Found
+
+## 3. customer-admin: portal sign-out
+> POST /sqlos/admin/auth/sso-portal/api/signout
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_sso_portal={cookie#1}
+> Origin: https://sqlos.example.test
+> X-SqlOS-Request: 1
+>   {}
+< 404 Not Found
+
+## 4. customer-admin: the setup API view
+> GET /sqlos/admin/auth/sso-portal/api/setup
+> Cookie: sqlos_sso_portal={cookie#1}
+< 404 Not Found
+
+## 5. customer-admin: setup API sign-out
+> POST /sqlos/admin/auth/sso-portal/api/setup/signout
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_sso_portal={cookie#1}
+> Origin: https://sqlos.example.test
+> X-SqlOS-Request: 1
+>   {}
+< 404 Not Found

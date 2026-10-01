@@ -1,0 +1,759 @@
+# SqlOS behavior lock transcript
+scenario: ScimValidationScenarios.User_writes_with_malformed_or_conflicting_bodies_are_refused
+profile: enterprise-scim-path
+
+## 1. directory: provision Judy
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "emails": [
+>       {
+>         "primary": true,
+>         "type": "work",
+>         "value": "{email:judy}"
+>       }
+>     ],
+>     "externalId": "directory-judy",
+>     "name": {
+>       "familyName": "Hopps",
+>       "givenName": "Judy"
+>     },
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:judy}"
+>   }
+< 201 Created
+< Content-Location: /scim/v2/Users/{usr:judy}
+< Content-Type: application/scim+json
+< Location: /scim/v2/Users/{usr:judy}
+    {
+      "active": true,
+      "displayName": "Judy Hopps",
+      "emails": [
+        {
+          "primary": true,
+          "type": "work",
+          "value": "{email:judy}"
+        }
+      ],
+      "externalId": "directory-judy",
+      "groups": [],
+      "id": "{usr:judy}",
+      "meta": {
+        "created": "{datetime:utc-z}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Users/{usr:judy}",
+        "resourceType": "User"
+      },
+      "name": {
+        "familyName": "Hopps",
+        "formatted": "Judy Hopps",
+        "givenName": "Judy"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:judy}"
+    }
+
+## 2. directory: a body that is not JSON by media type
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: text/plain; charset=utf-8
+>   {
+>     "active": true,
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:ann}"
+>   }
+< 415 Unsupported Media Type
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM requests require application/scim+json or application/json.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "status": "415"
+    }
+
+## 3. directory: an empty body
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM JSON body is required.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidSyntax",
+      "status": "400"
+    }
+
+## 4. directory: a JSON array instead of an object
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   []
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM JSON body must be a JSON object.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidSyntax",
+      "status": "400"
+    }
+
+## 5. directory: JSON with a syntax error
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {"schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"], "userName": }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "'}' is an invalid start of a value. LineNumber: 0 | BytePositionInLine: 72.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidSyntax",
+      "status": "400"
+    }
+
+## 6. directory: no schemas
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "userName": "{email:ann}"
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM payload schemas must include 'urn:ietf:params:scim:schemas:core:2.0:User'.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidSyntax",
+      "status": "400"
+    }
+
+## 7. directory: a repeated schema URN
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User",
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:ann}"
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM payload schemas must contain unique values including 'urn:ietf:params:scim:schemas:core:2.0:User'.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidSyntax",
+      "status": "400"
+    }
+
+## 8. directory: the User and Group core schemas together
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User",
+>       "urn:ietf:params:scim:schemas:core:2.0:Group"
+>     ],
+>     "userName": "{email:ann}"
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM payload contains an incompatible core resource schema.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidSyntax",
+      "status": "400"
+    }
+
+## 9. directory: the Group schema on a user
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:Group"
+>     ],
+>     "userName": "{email:ann}"
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM payload schemas must contain unique values including 'urn:ietf:params:scim:schemas:core:2.0:User'.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidSyntax",
+      "status": "400"
+    }
+
+## 10. directory: no userName
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "externalId": "directory-ann",
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM userName is required.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidValue",
+      "status": "400"
+    }
+
+## 11. directory: a numeric userName
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": 42
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM attribute value must be a string.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidValue",
+      "status": "400"
+    }
+
+## 12. directory: a userName longer than 450 characters
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu"
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM attribute exceeds 450 characters.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidValue",
+      "status": "400"
+    }
+
+## 13. directory: emails as an object instead of an array
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "emails": {
+>       "value": "{email:ann}"
+>     },
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:ann}"
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM emails must be an array.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidValue",
+      "status": "400"
+    }
+
+## 14. directory: emails as strings instead of objects
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "emails": [
+>       "{email:ann}"
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:ann}"
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "Every SCIM email must be an object.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidValue",
+      "status": "400"
+    }
+
+## 15. directory: two primary emails
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "emails": [
+>       {
+>         "primary": true,
+>         "value": "{email:ann}"
+>       },
+>       {
+>         "primary": true,
+>         "value": "second@{domain:acme}"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:ann}"
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM emails may contain at most one primary value.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidValue",
+      "status": "400"
+    }
+
+## 16. directory: an email without a value
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "emails": [
+>       {
+>         "type": "work"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:ann}"
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "Every SCIM email requires a value.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidValue",
+      "status": "400"
+    }
+
+## 17. directory: active as a string
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": "yes",
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:ann}"
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM active must be a boolean.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidValue",
+      "status": "400"
+    }
+
+## 18. directory: an email value that is not an address
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "emails": [
+>       {
+>         "primary": true,
+>         "type": "work",
+>         "value": "not-an-email-address"
+>       }
+>     ],
+>     "externalId": "directory-ann",
+>     "name": {
+>       "familyName": "Archer",
+>       "givenName": "Ann"
+>     },
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:ann}"
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM email value is not a valid email address.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidValue",
+      "status": "400"
+    }
+
+## 19. directory: a second user with Judy's userName
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "emails": [
+>       {
+>         "primary": true,
+>         "type": "work",
+>         "value": "{email:judy}"
+>       }
+>     ],
+>     "externalId": "directory-judy-2",
+>     "name": {
+>       "familyName": "Hopps",
+>       "givenName": "Judy"
+>     },
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:judy}"
+>   }
+< 409 Conflict
+< Content-Type: application/scim+json
+    {
+      "detail": "A SCIM user with the same userName or externalId already exists.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "uniqueness",
+      "status": "409"
+    }
+
+## 20. directory: a second user with Judy's externalId
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "emails": [
+>       {
+>         "primary": true,
+>         "type": "work",
+>         "value": "{email:ann}"
+>       }
+>     ],
+>     "externalId": "directory-judy",
+>     "name": {
+>       "familyName": "Archer",
+>       "givenName": "Ann"
+>     },
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:ann}"
+>   }
+< 409 Conflict
+< Content-Type: application/scim+json
+    {
+      "detail": "A SCIM user with the same userName or externalId already exists.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "uniqueness",
+      "status": "409"
+    }
+
+## 21. directory: attributes and excludedAttributes together on a write
+> POST /scim/v2/Users?attributes=userName&excludedAttributes=emails
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "emails": [
+>       {
+>         "primary": true,
+>         "type": "work",
+>         "value": "{email:ann}"
+>       }
+>     ],
+>     "externalId": "directory-ann",
+>     "name": {
+>       "familyName": "Archer",
+>       "givenName": "Ann"
+>     },
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:ann}"
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM attributes and excludedAttributes cannot be used together.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidSyntax",
+      "status": "400"
+    }
+
+## 22. directory: a body larger than 256 KiB
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "displayName": "{token#1}",
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:ann}"
+>   }
+< 413 Payload Too Large
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM JSON body exceeds the allowed size.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "tooMany",
+      "status": "413"
+    }
+
+## 23. directory: a replace that keeps Judy's externalId but takes a new userName is accepted
+> PUT /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "emails": [
+>       {
+>         "primary": true,
+>         "type": "work",
+>         "value": "{email:judy}"
+>       }
+>     ],
+>     "externalId": "directory-judy",
+>     "name": {
+>       "familyName": "Hopps",
+>       "givenName": "Judy"
+>     },
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:ann}"
+>   }
+< 200 OK
+< Content-Location: /scim/v2/Users/{usr:judy}
+< Content-Type: application/scim+json
+    {
+      "active": true,
+      "displayName": "Judy Hopps",
+      "emails": [
+        {
+          "primary": true,
+          "type": "work",
+          "value": "{email:judy}"
+        }
+      ],
+      "externalId": "directory-judy",
+      "groups": [],
+      "id": "{usr:judy}",
+      "meta": {
+        "created": "{datetime:unspecified}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Users/{usr:judy}",
+        "resourceType": "User"
+      },
+      "name": {
+        "familyName": "Hopps",
+        "formatted": "Judy Hopps",
+        "givenName": "Judy"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:ann}"
+    }
+
+## 24. directory: Judy's email now belongs to a user this directory already links
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "emails": [
+>       {
+>         "primary": true,
+>         "type": "work",
+>         "value": "{email:judy}"
+>       }
+>     ],
+>     "externalId": "directory-judy-3",
+>     "name": {
+>       "familyName": "Again",
+>       "givenName": "Judy"
+>     },
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:judy}"
+>   }
+< 409 Conflict
+< Content-Type: application/scim+json
+    {
+      "detail": "A SCIM user in this directory connection already owns that email identity.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "uniqueness",
+      "status": "409"
+    }
+
+## audit: only the accepted writes are audited
+  - {
+      "action": "scim.user.created",
+      "actor": {
+        "displayName": null,
+        "id": "directory-judy",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.created",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-judy",
+        "payload": {
+          "active": true,
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:judy}"
+            }
+          ],
+          "externalId": "directory-judy",
+          "name": {
+            "familyName": "Hopps",
+            "givenName": "Judy"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:judy}"
+        },
+        "resourceId": "{usr:judy}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:judy}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.user.updated",
+      "actor": {
+        "displayName": null,
+        "id": "directory-judy",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.updated",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-judy",
+        "payload": {
+          "active": true,
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:judy}"
+            }
+          ],
+          "externalId": "directory-judy",
+          "name": {
+            "familyName": "Hopps",
+            "givenName": "Judy"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:ann}"
+        },
+        "resourceId": "{usr:judy}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:judy}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }

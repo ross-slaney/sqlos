@@ -1,0 +1,148 @@
+# SqlOS behavior lock transcript
+scenario: SsoSetupApiScenarios.The_setup_api_requires_a_portal_session
+profile: enterprise
+
+## 1. visitor: the view
+> GET /sqlos/admin/auth/sso-portal/api/setup
+< 401 Unauthorized
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Portal session is invalid or expired."
+    }
+
+## 2. visitor: choose a provider
+> PUT /sqlos/admin/auth/sso-portal/api/setup/provider
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "provider": "okta"
+>   }
+< 401 Unauthorized
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Portal session is invalid or expired."
+    }
+
+## 3. visitor: change the enrollment policy
+> PUT /sqlos/admin/auth/sso-portal/api/setup/enrollment-policy
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "allowJitProvisioning": false,
+>     "requireSsoForExistingMembers": true
+>   }
+< 401 Unauthorized
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Portal session is invalid or expired."
+    }
+
+## 4. visitor: start domain verification
+> POST /sqlos/admin/auth/sso-portal/api/setup/domain
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "domain": "acme.example.test"
+>   }
+< 401 Unauthorized
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Portal session is invalid or expired."
+    }
+
+## 5. visitor: confirm a domain
+> POST /sqlos/admin/auth/sso-portal/api/setup/domains/{dom#1}/confirm
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {}
+< 401 Unauthorized
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Portal session is invalid or expired."
+    }
+
+## 6. visitor: validate metadata
+> POST /sqlos/admin/auth/sso-portal/api/setup/metadata/validate
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "metadataXml": "<x/>"
+>   }
+< 401 Unauthorized
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Portal session is invalid or expired."
+    }
+
+## 7. visitor: import metadata
+> POST /sqlos/admin/auth/sso-portal/api/setup/metadata
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "metadataXml": "<x/>"
+>   }
+< 401 Unauthorized
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Portal session is invalid or expired."
+    }
+
+## 8. visitor: activate
+> POST /sqlos/admin/auth/sso-portal/api/setup/activate
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {}
+< 401 Unauthorized
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Portal session is invalid or expired."
+    }
+
+## 9. visitor: disable
+> POST /sqlos/admin/auth/sso-portal/api/setup/disable
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {}
+< 401 Unauthorized
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Portal session is invalid or expired."
+    }
+
+## 10. visitor: sign out the organization's sessions
+> POST /sqlos/admin/auth/sso-portal/api/setup/organization-sessions/revoke
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "confirm": true
+>   }
+< 401 Unauthorized
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Portal session is invalid or expired."
+    }
+
+## 11. visitor: test
+> POST /sqlos/admin/auth/sso-portal/api/setup/test
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {}
+< 401 Unauthorized
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Portal session is invalid or expired."
+    }
+
+## 12. visitor: sign out with no session still answers the redirect action
+> POST /sqlos/admin/auth/sso-portal/api/setup/signout
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+< Set-Cookie: sqlos_sso_portal=; expires={unix-epoch}; path=/sqlos/admin/auth/sso-portal; secure; samesite=lax; httponly
+    {
+      "redirectUrl": null,
+      "type": "redirect",
+      "viewModel": null
+    }

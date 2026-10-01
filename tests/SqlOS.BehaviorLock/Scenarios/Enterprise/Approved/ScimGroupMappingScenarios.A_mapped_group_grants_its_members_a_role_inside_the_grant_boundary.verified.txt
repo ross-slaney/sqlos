@@ -1,0 +1,768 @@
+# SqlOS behavior lock transcript
+scenario: ScimGroupMappingScenarios.A_mapped_group_grants_its_members_a_role_inside_the_grant_boundary
+profile: enterprise-scim-path
+
+# The connection's grant boundary is workspace::acme; the mapping grants workspace_reader on workspace::acme-projects to Engineering.
+
+## 1. directory: the directory pushes Engineering with Ann
+> POST /scim/v2/Groups
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "displayName": "Engineering",
+>     "externalId": "directory-engineering",
+>     "members": [
+>       {
+>         "value": "{usr:ann}"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:Group"
+>     ]
+>   }
+< 201 Created
+< Content-Location: /scim/v2/Groups/{grp:engineering}
+< Content-Type: application/scim+json
+< Location: /scim/v2/Groups/{grp:engineering}
+    {
+      "displayName": "Engineering",
+      "externalId": "directory-engineering",
+      "id": "{grp:engineering}",
+      "members": [
+        {
+          "$ref": "/scim/v2/Users/{usr:ann}",
+          "display": "Ann Archer",
+          "value": "{usr:ann}"
+        }
+      ],
+      "meta": {
+        "created": "{datetime:utc-z}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Groups/{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:Group"
+      ]
+    }
+
+## 2. operator: dashboard: SCIM mirrored Ann into an FGA user subject
+> GET /sqlos/admin/fga/api/users?search=Ann
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "displayName": "Ann Archer",
+          "email": "{email:ann}",
+          "id": "{fusr#1}",
+          "isActive": true,
+          "lastLoginAt": null,
+          "subjectId": "{subj:ann}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 3. probe: Ann reads the projects workspace through the group
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::acme-projects",
+>     "subjectId": "{subj:ann}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": true,
+      "error": null,
+      "trace": [
+        {
+          "detail": "Checking access to Acme projects (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme projects",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Read workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"Ann Archer\" + 1 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": "Ann Archer"
+        },
+        {
+          "detail": "Checking 2 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Acme projects",
+          "grantId": null,
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme projects",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Role \"Workspace reader\" provides permission \"Read workspace\" via grant at Acme projects",
+          "grantId": "{grant#1}",
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme projects",
+          "roleName": "Workspace reader",
+          "step": "Access Granted",
+          "subjectName": "Engineering"
+        }
+      ]
+    }
+
+## 4. probe: the reader role does not write
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.write",
+>     "resourceId": "workspace::acme-projects",
+>     "subjectId": "{subj:ann}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": false,
+      "error": null,
+      "trace": [
+        {
+          "detail": "Checking access to Acme projects (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme projects",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Write workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"Ann Archer\" + 1 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": "Ann Archer"
+        },
+        {
+          "detail": "Checking 2 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Acme projects",
+          "grantId": null,
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme projects",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Role \"Workspace reader\" does not provide permission \"Write workspace\"",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": "Workspace reader",
+          "step": "Role Checked",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Acme",
+          "grantId": null,
+          "resourceId": "workspace::acme",
+          "resourceName": "Acme",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "No matching grants found that provide permission \"Write workspace\"",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Access Denied",
+          "subjectName": null
+        }
+      ]
+    }
+
+## 5. probe: the grant does not reach the parent
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::acme",
+>     "subjectId": "{subj:ann}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": false,
+      "error": null,
+      "trace": [
+        {
+          "detail": "Checking access to Acme (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::acme",
+          "resourceName": "Acme",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Read workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"Ann Archer\" + 1 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": "Ann Archer"
+        },
+        {
+          "detail": "Checking 1 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Acme",
+          "grantId": null,
+          "resourceId": "workspace::acme",
+          "resourceName": "Acme",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "No matching grants found that provide permission \"Read workspace\"",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Access Denied",
+          "subjectName": null
+        }
+      ]
+    }
+
+## 6. operator: dashboard: the mapping has one active grant, inside the boundary
+> GET /sqlos/admin/auth/api/scim-connections/{scim#1}/mappings
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "activeGrantCount": 1,
+          "connectionId": "{scim#1}",
+          "createdAt": "{datetime:unspecified}",
+          "description": "Engineering reads projects",
+          "grantBoundaryStatus": "within",
+          "groupDisplayName": "Engineering",
+          "groupExternalId": null,
+          "groupPattern": null,
+          "id": "{scmap:engineering}",
+          "isEnabled": true,
+          "matchType": "display_name",
+          "resourceId": "workspace::acme-projects",
+          "resourceIdTemplate": null,
+          "roleKey": "workspace_reader",
+          "source": "dashboard",
+          "sourceKey": null,
+          "updatedAt": "{datetime:unspecified}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 7. directory: the directory removes Ann from Engineering
+> PATCH /scim/v2/Groups/{grp:engineering}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "remove",
+>         "path": "members[value eq \"{usr:ann}\"]"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 204 No Content
+
+## 8. probe: Ann no longer reads the projects workspace
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::acme-projects",
+>     "subjectId": "{subj:ann}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": false,
+      "error": null,
+      "trace": [
+        {
+          "detail": "Checking access to Acme projects (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme projects",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Read workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"Ann Archer\" + 0 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": "Ann Archer"
+        },
+        {
+          "detail": "Checking 2 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Acme projects",
+          "grantId": null,
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme projects",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Acme",
+          "grantId": null,
+          "resourceId": "workspace::acme",
+          "resourceName": "Acme",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "No matching grants found that provide permission \"Read workspace\"",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Access Denied",
+          "subjectName": null
+        }
+      ]
+    }
+
+## 9. directory: the directory deletes Engineering
+> DELETE /scim/v2/Groups/{grp:engineering}
+> Authorization: Bearer {scim-token#1}
+< 204 No Content
+
+## 10. operator: dashboard: deleting the group revoked the managed grant
+> GET /sqlos/admin/auth/api/scim-connections/{scim#1}/mappings
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "activeGrantCount": 0,
+          "connectionId": "{scim#1}",
+          "createdAt": "{datetime:unspecified}",
+          "description": "Engineering reads projects",
+          "grantBoundaryStatus": "within",
+          "groupDisplayName": "Engineering",
+          "groupExternalId": null,
+          "groupPattern": null,
+          "id": "{scmap:engineering}",
+          "isEnabled": true,
+          "matchType": "display_name",
+          "resourceId": "workspace::acme-projects",
+          "resourceIdTemplate": null,
+          "roleKey": "workspace_reader",
+          "source": "dashboard",
+          "sourceKey": null,
+          "updatedAt": "{datetime:unspecified}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## audit: grant mapping and revocation events
+  - {
+      "action": "scim.group.member_added",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.member_added",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": {
+          "groupId": "{grp:engineering}",
+          "memberCount": 1,
+          "subjectIds": [
+            "{subj:ann}"
+          ],
+          "truncated": false
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.grant.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.grant.mapped",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": {
+          "grantId": "{grant#1}",
+          "mappingId": "{scmap:engineering}",
+          "resourceId": "workspace::acme-projects",
+          "roleId": "workspace_reader"
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.created",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.created",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": {
+          "displayName": "Engineering",
+          "externalId": "directory-engineering",
+          "members": [
+            {
+              "value": "{usr:ann}"
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:Group"
+          ]
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.member_removed",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.member_removed",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": {
+          "groupId": "{grp:engineering}",
+          "memberCount": 1,
+          "subjectIds": [
+            "{subj:ann}"
+          ],
+          "truncated": false
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.updated",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.updated",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": {
+          "Operations": [
+            {
+              "op": "remove",
+              "path": "members[value eq \"{usr:ann}\"]"
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ]
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.grant.revoked",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.grant.revoked",
+      "id": "{evt#6}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": {
+          "grantId": "{grant#1}",
+          "mappingId": "{scmap:engineering}",
+          "resourceId": "workspace::acme-projects",
+          "roleId": "workspace_reader"
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.deleted",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.deleted",
+      "id": "{evt#7}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": null,
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }

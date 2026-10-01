@@ -1,0 +1,1730 @@
+# SqlOS behavior lock transcript
+scenario: ScimGroupScenarios.A_directory_creates_lists_replaces_patches_and_deletes_a_group
+profile: enterprise-scim-path
+
+# Ann, Bob, and Cy were provisioned first; their creates are not shown.
+
+## 1. directory: create Engineering with Ann
+> POST /scim/v2/Groups
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "displayName": "Engineering",
+>     "externalId": "directory-engineering",
+>     "members": [
+>       {
+>         "value": "{usr:ann}"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:Group"
+>     ]
+>   }
+< 201 Created
+< Content-Location: /scim/v2/Groups/{grp:engineering}
+< Content-Type: application/scim+json
+< Location: /scim/v2/Groups/{grp:engineering}
+    {
+      "displayName": "Engineering",
+      "externalId": "directory-engineering",
+      "id": "{grp:engineering}",
+      "members": [
+        {
+          "$ref": "/scim/v2/Users/{usr:ann}",
+          "display": "Ann Archer",
+          "value": "{usr:ann}"
+        }
+      ],
+      "meta": {
+        "created": "{datetime:utc-z}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Groups/{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:Group"
+      ]
+    }
+
+## 2. directory: create Design with no members
+> POST /scim/v2/Groups
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "displayName": "Design",
+>     "externalId": "directory-design",
+>     "members": [],
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:Group"
+>     ]
+>   }
+< 201 Created
+< Content-Location: /scim/v2/Groups/{grp#1}
+< Content-Type: application/scim+json
+< Location: /scim/v2/Groups/{grp#1}
+    {
+      "displayName": "Design",
+      "externalId": "directory-design",
+      "id": "{grp#1}",
+      "members": [],
+      "meta": {
+        "created": "{datetime:utc-z}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Groups/{grp#1}",
+        "resourceType": "Group"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:Group"
+      ]
+    }
+
+## 3. directory: list groups, ordered by displayName
+> GET /scim/v2/Groups
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "Resources": [
+        {
+          "displayName": "Design",
+          "externalId": "directory-design",
+          "id": "{grp#1}",
+          "members": [],
+          "meta": {
+            "created": "{datetime:unspecified}",
+            "lastModified": "{datetime:unspecified}",
+            "location": "/scim/v2/Groups/{grp#1}",
+            "resourceType": "Group"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:Group"
+          ]
+        },
+        {
+          "displayName": "Engineering",
+          "externalId": "directory-engineering",
+          "id": "{grp:engineering}",
+          "members": [
+            {
+              "$ref": "/scim/v2/Users/{usr:ann}",
+              "display": "Ann Archer",
+              "value": "{usr:ann}"
+            }
+          ],
+          "meta": {
+            "created": "{datetime:unspecified}",
+            "lastModified": "{datetime:unspecified}",
+            "location": "/scim/v2/Groups/{grp:engineering}",
+            "resourceType": "Group"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:Group"
+          ]
+        }
+      ],
+      "itemsPerPage": 2,
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+      ],
+      "startIndex": 1,
+      "totalResults": 2
+    }
+
+## 4. directory: filter by displayName
+> GET /scim/v2/Groups?filter=displayName%20eq%20%22Engineering%22
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "Resources": [
+        {
+          "displayName": "Engineering",
+          "externalId": "directory-engineering",
+          "id": "{grp:engineering}",
+          "members": [
+            {
+              "$ref": "/scim/v2/Users/{usr:ann}",
+              "display": "Ann Archer",
+              "value": "{usr:ann}"
+            }
+          ],
+          "meta": {
+            "created": "{datetime:unspecified}",
+            "lastModified": "{datetime:unspecified}",
+            "location": "/scim/v2/Groups/{grp:engineering}",
+            "resourceType": "Group"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:Group"
+          ]
+        }
+      ],
+      "itemsPerPage": 1,
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+      ],
+      "startIndex": 1,
+      "totalResults": 1
+    }
+
+## 5. directory: filter by externalId
+> GET /scim/v2/Groups?filter=externalId%20eq%20%22directory-design%22
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "Resources": [
+        {
+          "displayName": "Design",
+          "externalId": "directory-design",
+          "id": "{grp#1}",
+          "members": [],
+          "meta": {
+            "created": "{datetime:unspecified}",
+            "lastModified": "{datetime:unspecified}",
+            "location": "/scim/v2/Groups/{grp#1}",
+            "resourceType": "Group"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:Group"
+          ]
+        }
+      ],
+      "itemsPerPage": 1,
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+      ],
+      "startIndex": 1,
+      "totalResults": 1
+    }
+
+## 6. directory: filter by id without members
+> GET /scim/v2/Groups?filter=id%20eq%20%{token#1}%22&excludedAttributes=members
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "Resources": [
+        {
+          "displayName": "Engineering",
+          "externalId": "directory-engineering",
+          "id": "{grp:engineering}",
+          "meta": {
+            "created": "{datetime:unspecified}",
+            "lastModified": "{datetime:unspecified}",
+            "location": "/scim/v2/Groups/{grp:engineering}",
+            "resourceType": "Group"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:Group"
+          ]
+        }
+      ],
+      "itemsPerPage": 1,
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+      ],
+      "startIndex": 1,
+      "totalResults": 1
+    }
+
+## 7. directory: filtering on members is not supported
+> GET /scim/v2/Groups?filter=members%20eq%20%{token#2}%22
+> Authorization: Bearer {scim-token#1}
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "Unsupported SCIM filter attribute.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidFilter",
+      "status": "400"
+    }
+
+## 8. directory: the second page of one
+> GET /scim/v2/Groups?startIndex=2&count=1
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "Resources": [
+        {
+          "displayName": "Engineering",
+          "externalId": "directory-engineering",
+          "id": "{grp:engineering}",
+          "members": [
+            {
+              "$ref": "/scim/v2/Users/{usr:ann}",
+              "display": "Ann Archer",
+              "value": "{usr:ann}"
+            }
+          ],
+          "meta": {
+            "created": "{datetime:unspecified}",
+            "lastModified": "{datetime:unspecified}",
+            "location": "/scim/v2/Groups/{grp:engineering}",
+            "resourceType": "Group"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:Group"
+          ]
+        }
+      ],
+      "itemsPerPage": 1,
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+      ],
+      "startIndex": 2,
+      "totalResults": 2
+    }
+
+## 9. directory: read Engineering
+> GET /scim/v2/Groups/{grp:engineering}
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Location: /scim/v2/Groups/{grp:engineering}
+< Content-Type: application/scim+json
+    {
+      "displayName": "Engineering",
+      "externalId": "directory-engineering",
+      "id": "{grp:engineering}",
+      "members": [
+        {
+          "$ref": "/scim/v2/Users/{usr:ann}",
+          "display": "Ann Archer",
+          "value": "{usr:ann}"
+        }
+      ],
+      "meta": {
+        "created": "{datetime:unspecified}",
+        "lastModified": "{datetime:unspecified}",
+        "location": "/scim/v2/Groups/{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:Group"
+      ]
+    }
+
+## 10. directory: Ann's groups
+> GET /scim/v2/Users/{usr:ann}?attributes=groups
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "groups": [
+        {
+          "$ref": "/scim/v2/Groups/{grp:engineering}",
+          "display": "Engineering",
+          "value": "{grp:engineering}"
+        }
+      ],
+      "id": "{usr:ann}",
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ]
+    }
+
+## 11. directory: add Bob (Okta style)
+> PATCH /scim/v2/Groups/{grp:engineering}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "add",
+>         "path": "members",
+>         "value": [
+>           {
+>             "value": "{usr:bob}"
+>           }
+>         ]
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 204 No Content
+
+## 12. directory: read Engineering without its two members
+> GET /scim/v2/Groups/{grp:engineering}?excludedAttributes=members
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Location: /scim/v2/Groups/{grp:engineering}
+< Content-Type: application/scim+json
+    {
+      "displayName": "Engineering",
+      "externalId": "directory-engineering",
+      "id": "{grp:engineering}",
+      "meta": {
+        "created": "{datetime:unspecified}",
+        "lastModified": "{datetime:unspecified}",
+        "location": "/scim/v2/Groups/{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:Group"
+      ]
+    }
+
+## 13. directory: Bob's groups
+> GET /scim/v2/Users/{usr:bob}?attributes=groups,userName
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "groups": [
+        {
+          "$ref": "/scim/v2/Groups/{grp:engineering}",
+          "display": "Engineering",
+          "value": "{grp:engineering}"
+        }
+      ],
+      "id": "{usr:bob}",
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:bob}"
+    }
+
+## 14. directory: replace: rename to Platform with Bob and Cy, so Ann leaves and Cy joins
+> PUT /scim/v2/Groups/{grp:engineering}?excludedAttributes=members
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "displayName": "Platform",
+>     "externalId": "directory-engineering",
+>     "members": [
+>       {
+>         "value": "{usr:bob}"
+>       },
+>       {
+>         "value": "{usr:cy}"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:Group"
+>     ]
+>   }
+< 200 OK
+< Content-Location: /scim/v2/Groups/{grp:engineering}
+< Content-Type: application/scim+json
+    {
+      "displayName": "Platform",
+      "externalId": "directory-engineering",
+      "id": "{grp:engineering}",
+      "meta": {
+        "created": "{datetime:unspecified}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Groups/{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:Group"
+      ]
+    }
+
+## 15. directory: remove Bob with a filtered path (Entra style)
+> PATCH /scim/v2/Groups/{grp:engineering}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "remove",
+>         "path": "members[value eq \"{usr:bob}\"]"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 204 No Content
+
+## 16. directory: remove Cy by value
+> PATCH /scim/v2/Groups/{grp:engineering}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "remove",
+>         "path": "members",
+>         "value": [
+>           {
+>             "value": "{usr:cy}"
+>           }
+>         ]
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 204 No Content
+
+## 17. directory: add Ann back
+> PATCH /scim/v2/Groups/{grp:engineering}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "add",
+>         "path": "members",
+>         "value": [
+>           {
+>             "value": "{usr:ann}"
+>           }
+>         ]
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 204 No Content
+
+## 18. directory: a pathless rename that asks for the resource back
+> PATCH /scim/v2/Groups/{grp:engineering}?attributes=displayName,members
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "value": {
+>           "displayName": "Platform Team"
+>         }
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 200 OK
+< Content-Location: /scim/v2/Groups/{grp:engineering}
+< Content-Type: application/scim+json
+    {
+      "displayName": "Platform Team",
+      "id": "{grp:engineering}",
+      "members": [
+        {
+          "$ref": "/scim/v2/Users/{usr:ann}",
+          "display": "Ann Archer",
+          "value": "{usr:ann}"
+        }
+      ],
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:Group"
+      ]
+    }
+
+## 19. directory: replace the member list and the externalId
+> PATCH /scim/v2/Groups/{grp:engineering}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "members",
+>         "value": [
+>           {
+>             "value": "{usr:bob}"
+>           }
+>         ]
+>       },
+>       {
+>         "op": "replace",
+>         "path": "externalId",
+>         "value": "directory-platform"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 204 No Content
+
+## 20. directory: remove every member
+> PATCH /scim/v2/Groups/{grp:engineering}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "remove",
+>         "path": "members"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 204 No Content
+
+## 21. directory: the renamed, emptied group
+> GET /scim/v2/Groups/{grp:engineering}
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Location: /scim/v2/Groups/{grp:engineering}
+< Content-Type: application/scim+json
+    {
+      "displayName": "Platform Team",
+      "externalId": "directory-platform",
+      "id": "{grp:engineering}",
+      "members": [],
+      "meta": {
+        "created": "{datetime:unspecified}",
+        "lastModified": "{datetime:unspecified}",
+        "location": "/scim/v2/Groups/{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:Group"
+      ]
+    }
+
+## 22. directory: delete the group
+> DELETE /scim/v2/Groups/{grp:engineering}
+> Authorization: Bearer {scim-token#1}
+< 204 No Content
+
+## 23. directory: a deleted group is gone
+> GET /scim/v2/Groups/{grp:engineering}
+> Authorization: Bearer {scim-token#1}
+< 404 Not Found
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM group not found.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "status": "404"
+    }
+
+## 24. directory: recreating it with the same externalId
+> POST /scim/v2/Groups
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "displayName": "Platform Team",
+>     "externalId": "directory-platform",
+>     "members": [
+>       {
+>         "value": "{usr:ann}"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:Group"
+>     ]
+>   }
+< 201 Created
+< Content-Location: /scim/v2/Groups/{grp:engineering}
+< Content-Type: application/scim+json
+< Location: /scim/v2/Groups/{grp:engineering}
+    {
+      "displayName": "Platform Team",
+      "externalId": "directory-platform",
+      "id": "{grp:engineering}",
+      "members": [
+        {
+          "$ref": "/scim/v2/Users/{usr:ann}",
+          "display": "Ann Archer",
+          "value": "{usr:ann}"
+        }
+      ],
+      "meta": {
+        "created": "{datetime:unspecified}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Groups/{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:Group"
+      ]
+    }
+
+## 25. operator: dashboard: SCIM groups are FGA user groups
+> GET /sqlos/admin/fga/api/user-groups
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "description": "SCIM mirrored group",
+          "groupType": "scim",
+          "id": "{grp#1}",
+          "memberCount": 0,
+          "name": "Design",
+          "subjectId": "{subj#1}"
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "description": "SCIM mirrored group",
+          "groupType": "scim",
+          "id": "{grp:engineering}",
+          "memberCount": 1,
+          "name": "Platform Team",
+          "subjectId": "{subj#2}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## audit: group and membership events
+  - {
+      "action": "scim.group.member_added",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.member_added",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": {
+          "groupId": "{grp:engineering}",
+          "memberCount": 1,
+          "subjectIds": [
+            "{subj#3}"
+          ],
+          "truncated": false
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.created",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.created",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": {
+          "displayName": "Engineering",
+          "externalId": "directory-engineering",
+          "members": [
+            {
+              "value": "{usr:ann}"
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:Group"
+          ]
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.created",
+      "actor": {
+        "displayName": null,
+        "id": "directory-design",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.created",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-design",
+        "payload": {
+          "displayName": "Design",
+          "externalId": "directory-design",
+          "members": [],
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:Group"
+          ]
+        },
+        "resourceId": "{grp#1}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp#1}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.member_added",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.member_added",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": {
+          "groupId": "{grp:engineering}",
+          "memberCount": 1,
+          "subjectIds": [
+            "{subj#4}"
+          ],
+          "truncated": false
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.updated",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.updated",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": {
+          "Operations": [
+            {
+              "op": "add",
+              "path": "members",
+              "value": [
+                {
+                  "value": "{usr:bob}"
+                }
+              ]
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ]
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.member_removed",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.member_removed",
+      "id": "{evt#6}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": {
+          "groupId": "{grp:engineering}",
+          "memberCount": 1,
+          "subjectIds": [
+            "{subj#3}"
+          ],
+          "truncated": false
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.member_added",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.member_added",
+      "id": "{evt#7}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": {
+          "groupId": "{grp:engineering}",
+          "memberCount": 1,
+          "subjectIds": [
+            "{subj#5}"
+          ],
+          "truncated": false
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.updated",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.updated",
+      "id": "{evt#8}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": {
+          "displayName": "Platform",
+          "externalId": "directory-engineering",
+          "members": [
+            {
+              "value": "{usr:bob}"
+            },
+            {
+              "value": "{usr:cy}"
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:Group"
+          ]
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.member_removed",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.member_removed",
+      "id": "{evt#9}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": {
+          "groupId": "{grp:engineering}",
+          "memberCount": 1,
+          "subjectIds": [
+            "{subj#4}"
+          ],
+          "truncated": false
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.updated",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.updated",
+      "id": "{evt#10}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": {
+          "Operations": [
+            {
+              "op": "remove",
+              "path": "members[value eq \"{usr:bob}\"]"
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ]
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.member_removed",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.member_removed",
+      "id": "{evt#11}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": {
+          "groupId": "{grp:engineering}",
+          "memberCount": 1,
+          "subjectIds": [
+            "{subj#5}"
+          ],
+          "truncated": false
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.updated",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.updated",
+      "id": "{evt#12}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": {
+          "Operations": [
+            {
+              "op": "remove",
+              "path": "members",
+              "value": [
+                {
+                  "value": "{usr:cy}"
+                }
+              ]
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ]
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.member_added",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.member_added",
+      "id": "{evt#13}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": {
+          "groupId": "{grp:engineering}",
+          "memberCount": 1,
+          "subjectIds": [
+            "{subj#3}"
+          ],
+          "truncated": false
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.updated",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.updated",
+      "id": "{evt#14}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": {
+          "Operations": [
+            {
+              "op": "add",
+              "path": "members",
+              "value": [
+                {
+                  "value": "{usr:ann}"
+                }
+              ]
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ]
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.updated",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.updated",
+      "id": "{evt#15}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": {
+          "Operations": [
+            {
+              "op": "replace",
+              "value": {
+                "displayName": "Platform Team"
+              }
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ]
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.member_removed",
+      "actor": {
+        "displayName": null,
+        "id": "directory-platform",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.member_removed",
+      "id": "{evt#16}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-platform",
+        "payload": {
+          "groupId": "{grp:engineering}",
+          "memberCount": 1,
+          "subjectIds": [
+            "{subj#3}"
+          ],
+          "truncated": false
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.member_added",
+      "actor": {
+        "displayName": null,
+        "id": "directory-platform",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.member_added",
+      "id": "{evt#17}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-platform",
+        "payload": {
+          "groupId": "{grp:engineering}",
+          "memberCount": 1,
+          "subjectIds": [
+            "{subj#4}"
+          ],
+          "truncated": false
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.updated",
+      "actor": {
+        "displayName": null,
+        "id": "directory-platform",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.updated",
+      "id": "{evt#18}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-platform",
+        "payload": {
+          "Operations": [
+            {
+              "op": "replace",
+              "path": "members",
+              "value": [
+                {
+                  "value": "{usr:bob}"
+                }
+              ]
+            },
+            {
+              "op": "replace",
+              "path": "externalId",
+              "value": "directory-platform"
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ]
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.member_removed",
+      "actor": {
+        "displayName": null,
+        "id": "directory-platform",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.member_removed",
+      "id": "{evt#19}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-platform",
+        "payload": {
+          "groupId": "{grp:engineering}",
+          "memberCount": 1,
+          "subjectIds": [
+            "{subj#4}"
+          ],
+          "truncated": false
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.updated",
+      "actor": {
+        "displayName": null,
+        "id": "directory-platform",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.updated",
+      "id": "{evt#20}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-platform",
+        "payload": {
+          "Operations": [
+            {
+              "op": "remove",
+              "path": "members"
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ]
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.deleted",
+      "actor": {
+        "displayName": null,
+        "id": "directory-platform",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.deleted",
+      "id": "{evt#21}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-platform",
+        "payload": null,
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.member_added",
+      "actor": {
+        "displayName": null,
+        "id": "directory-platform",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.member_added",
+      "id": "{evt#22}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-platform",
+        "payload": {
+          "groupId": "{grp:engineering}",
+          "memberCount": 1,
+          "subjectIds": [
+            "{subj#3}"
+          ],
+          "truncated": false
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.created",
+      "actor": {
+        "displayName": null,
+        "id": "directory-platform",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.created",
+      "id": "{evt#23}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-platform",
+        "payload": {
+          "displayName": "Platform Team",
+          "externalId": "directory-platform",
+          "members": [
+            {
+              "value": "{usr:ann}"
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:Group"
+          ]
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }

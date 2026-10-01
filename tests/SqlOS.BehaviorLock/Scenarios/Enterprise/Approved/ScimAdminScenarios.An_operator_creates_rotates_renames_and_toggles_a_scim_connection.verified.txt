@@ -1,0 +1,725 @@
+# SqlOS behavior lock transcript
+scenario: ScimAdminScenarios.An_operator_creates_rotates_renames_and_toggles_a_scim_connection
+profile: enterprise-scim-path
+
+## 1. operator: create a connection: the bearer token is shown once, never cached
+> POST /sqlos/admin/auth/api/organizations/{org#1}/scim-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Acme Entra",
+>     "enabled": true,
+>     "grantBoundaryResourceId": "workspace::acme"
+>   }
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "baseUrl": "/scim/v2",
+      "connectionId": "{scim#1}",
+      "displayName": "Acme Entra",
+      "groupsUrl": "/scim/v2/Groups",
+      "isEnabled": true,
+      "organizationId": "{org#1}",
+      "token": "{scim-token#1}",
+      "tokenPrefix": "{token-prefix#1}",
+      "tokenRotatedAt": "{datetime:utc-z}",
+      "usersUrl": "/scim/v2/Users"
+    }
+
+## 2. directory: the directory connects with it
+> GET /scim/v2/ServiceProviderConfig
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "authenticationSchemes": [
+        {
+          "description": "Opaque bearer token scoped to one SqlOS organization and directory connection.",
+          "name": "Bearer Token",
+          "primary": true,
+          "type": "oauthbearertoken"
+        }
+      ],
+      "bulk": {
+        "maxOperations": 0,
+        "maxPayloadSize": 0,
+        "supported": false
+      },
+      "changePassword": {
+        "supported": false
+      },
+      "documentationUri": "https://sqlos.dev/docs/authserver/scim-directory-sync",
+      "etag": {
+        "supported": false
+      },
+      "filter": {
+        "maxResults": 200,
+        "supported": true
+      },
+      "meta": {
+        "location": "/scim/v2/ServiceProviderConfig"
+      },
+      "patch": {
+        "supported": true
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"
+      ],
+      "sort": {
+        "supported": false
+      }
+    }
+
+## 3. operator: list the organization's connections
+> GET /sqlos/admin/auth/api/organizations/{org#1}/scim-connections
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "displayName": "Acme Entra",
+          "grantBoundary": {
+            "resourceId": "workspace::acme",
+            "resourceName": "Acme",
+            "resourceTypeId": "workspace",
+            "status": "configured"
+          },
+          "grantBoundaryResourceId": "workspace::acme",
+          "id": "{scim#1}",
+          "isEnabled": true,
+          "lastSyncAt": null,
+          "mappingCount": 0,
+          "organizationId": "{org#1}",
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "seedKey": null,
+          "source": "dashboard",
+          "syncEventCount": 0,
+          "tokenLastUsedAt": "{datetime:unspecified}",
+          "tokenPrefix": "{token-prefix#1}",
+          "tokenRotatedAt": "{datetime:unspecified}",
+          "updatedAt": "{datetime:unspecified}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 4. operator: read the connection: no token, only its prefix
+> GET /sqlos/admin/auth/api/scim-connections/{scim#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "baseUrl": "/scim/v2",
+      "createdAt": "{datetime:unspecified}",
+      "displayName": "Acme Entra",
+      "grantBoundary": {
+        "resourceId": "workspace::acme",
+        "resourceName": "Acme",
+        "resourceTypeId": "workspace",
+        "status": "configured"
+      },
+      "grantBoundaryResourceId": "workspace::acme",
+      "groupsUrl": "/scim/v2/Groups",
+      "id": "{scim#1}",
+      "isEnabled": true,
+      "lastSyncAt": null,
+      "organizationId": "{org#1}",
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "seedKey": null,
+      "source": "dashboard",
+      "tokenLastUsedAt": "{datetime:unspecified}",
+      "tokenPrefix": "{token-prefix#1}",
+      "tokenRotatedAt": "{datetime:unspecified}",
+      "updatedAt": "{datetime:unspecified}",
+      "usersUrl": "/scim/v2/Users"
+    }
+
+## 5. operator: rotate the token
+> POST /sqlos/admin/auth/api/scim-connections/{scim#1}/token/rotate
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "connectionId": "{scim#1}",
+      "token": "{scim-token#2}",
+      "tokenPrefix": "{token-prefix#2}",
+      "tokenRotatedAt": "{datetime:utc-z}"
+    }
+
+## 6. directory: the old token stops working at once
+> GET /scim/v2/ServiceProviderConfig
+> Authorization: Bearer {scim-token#1}
+< 401 Unauthorized
+< Content-Type: application/scim+json
+< WWW-Authenticate: Bearer realm="SqlOS SCIM"
+    {
+      "detail": "Invalid SCIM bearer token.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "status": "401"
+    }
+
+## 7. directory: the new one works
+> GET /scim/v2/ServiceProviderConfig
+> Authorization: Bearer {scim-token#2}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "authenticationSchemes": [
+        {
+          "description": "Opaque bearer token scoped to one SqlOS organization and directory connection.",
+          "name": "Bearer Token",
+          "primary": true,
+          "type": "oauthbearertoken"
+        }
+      ],
+      "bulk": {
+        "maxOperations": 0,
+        "maxPayloadSize": 0,
+        "supported": false
+      },
+      "changePassword": {
+        "supported": false
+      },
+      "documentationUri": "https://sqlos.dev/docs/authserver/scim-directory-sync",
+      "etag": {
+        "supported": false
+      },
+      "filter": {
+        "maxResults": 200,
+        "supported": true
+      },
+      "meta": {
+        "location": "/scim/v2/ServiceProviderConfig"
+      },
+      "patch": {
+        "supported": true
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"
+      ],
+      "sort": {
+        "supported": false
+      }
+    }
+
+## 8. operator: rename it; omitting the boundary keeps it
+> PUT /sqlos/admin/auth/api/scim-connections/{scim#1}
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Acme Entra ID",
+>     "enabled": true
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "displayName": "Acme Entra ID",
+      "grantBoundaryResourceId": "workspace::acme",
+      "id": "{scim#1}",
+      "isEnabled": true,
+      "lastSyncAt": null,
+      "organizationId": "{org#1}",
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "seedKey": null,
+      "source": "dashboard",
+      "tokenLastUsedAt": "{datetime:unspecified}",
+      "tokenPrefix": "{token-prefix#2}",
+      "tokenRotatedAt": "{datetime:unspecified}",
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 9. operator: disable it through the edit form
+> PUT /sqlos/admin/auth/api/scim-connections/{scim#1}
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Acme Entra ID",
+>     "enabled": false
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "displayName": "Acme Entra ID",
+      "grantBoundaryResourceId": "workspace::acme",
+      "id": "{scim#1}",
+      "isEnabled": false,
+      "lastSyncAt": null,
+      "organizationId": "{org#1}",
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "seedKey": null,
+      "source": "dashboard",
+      "tokenLastUsedAt": "{datetime:unspecified}",
+      "tokenPrefix": "{token-prefix#2}",
+      "tokenRotatedAt": "{datetime:unspecified}",
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 10. directory: a disabled connection refuses its token
+> GET /scim/v2/ServiceProviderConfig
+> Authorization: Bearer {scim-token#2}
+< 401 Unauthorized
+< Content-Type: application/scim+json
+< WWW-Authenticate: Bearer realm="SqlOS SCIM"
+    {
+      "detail": "Invalid SCIM bearer token.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "status": "401"
+    }
+
+## 11. operator: enable it
+> POST /sqlos/admin/auth/api/scim-connections/{scim#1}/enable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "displayName": "Acme Entra ID",
+      "grantBoundaryResourceId": "workspace::acme",
+      "id": "{scim#1}",
+      "isEnabled": true,
+      "lastSyncAt": null,
+      "organizationId": "{org#1}",
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "seedKey": null,
+      "source": "dashboard",
+      "tokenLastUsedAt": "{datetime:unspecified}",
+      "tokenPrefix": "{token-prefix#2}",
+      "tokenRotatedAt": "{datetime:unspecified}",
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 12. operator: enabling again changes nothing but is audited again
+> POST /sqlos/admin/auth/api/scim-connections/{scim#1}/enable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "displayName": "Acme Entra ID",
+      "grantBoundaryResourceId": "workspace::acme",
+      "id": "{scim#1}",
+      "isEnabled": true,
+      "lastSyncAt": null,
+      "organizationId": "{org#1}",
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "seedKey": null,
+      "source": "dashboard",
+      "tokenLastUsedAt": "{datetime:unspecified}",
+      "tokenPrefix": "{token-prefix#2}",
+      "tokenRotatedAt": "{datetime:unspecified}",
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 13. operator: disable it with the emergency control
+> POST /sqlos/admin/auth/api/scim-connections/{scim#1}/disable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "displayName": "Acme Entra ID",
+      "grantBoundaryResourceId": "workspace::acme",
+      "id": "{scim#1}",
+      "isEnabled": false,
+      "lastSyncAt": null,
+      "organizationId": "{org#1}",
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "seedKey": null,
+      "source": "dashboard",
+      "tokenLastUsedAt": "{datetime:unspecified}",
+      "tokenPrefix": "{token-prefix#2}",
+      "tokenRotatedAt": "{datetime:unspecified}",
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 14. operator: no directory writes yet, so no sync events
+> GET /sqlos/admin/auth/api/scim-connections/{scim#1}/sync-events
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 15. operator: the list reflects the disabled connection
+> GET /sqlos/admin/auth/api/organizations/{org#1}/scim-connections
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "displayName": "Acme Entra ID",
+          "grantBoundary": {
+            "resourceId": "workspace::acme",
+            "resourceName": "Acme",
+            "resourceTypeId": "workspace",
+            "status": "configured"
+          },
+          "grantBoundaryResourceId": "workspace::acme",
+          "id": "{scim#1}",
+          "isEnabled": false,
+          "lastSyncAt": null,
+          "mappingCount": 0,
+          "organizationId": "{org#1}",
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "seedKey": null,
+          "source": "dashboard",
+          "syncEventCount": 0,
+          "tokenLastUsedAt": "{datetime:unspecified}",
+          "tokenPrefix": "{token-prefix#2}",
+          "tokenRotatedAt": "{datetime:unspecified}",
+          "updatedAt": "{datetime:unspecified}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## audit: connection administration events
+  - {
+      "action": "scim.connection.created",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "scim.connection.created",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "DisplayName": "Acme Entra",
+        "GrantBoundaryResourceId": "workspace::acme"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.token.rotated",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "scim.token.rotated",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "TokenPrefix": "[redacted]"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.token.rotated",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "scim.token.rotated",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "TokenPrefix": "[redacted]"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.connection.enabled",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "scim.connection.enabled",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.connection.disabled",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "scim.connection.disabled",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.connection.enabled",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "scim.connection.enabled",
+      "id": "{evt#6}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.connection.enabled",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "scim.connection.enabled",
+      "id": "{evt#7}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.connection.disabled",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "scim.connection.disabled",
+      "id": "{evt#8}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

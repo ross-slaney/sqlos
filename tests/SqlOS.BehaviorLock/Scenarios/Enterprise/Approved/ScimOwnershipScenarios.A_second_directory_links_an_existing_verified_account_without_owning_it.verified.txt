@@ -1,0 +1,722 @@
+# SqlOS behavior lock transcript
+scenario: ScimOwnershipScenarios.A_second_directory_links_an_existing_verified_account_without_owning_it
+profile: enterprise-scim-path
+
+## 1. globex-directory: Globex's directory creates Bob and owns his account
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "emails": [
+>       {
+>         "primary": true,
+>         "type": "work",
+>         "value": "{email:bob}"
+>       }
+>     ],
+>     "externalId": "globex-bob",
+>     "name": {
+>       "familyName": "Builder",
+>       "givenName": "Bob"
+>     },
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:bob}"
+>   }
+< 201 Created
+< Content-Location: /scim/v2/Users/{usr:bob}
+< Content-Type: application/scim+json
+< Location: /scim/v2/Users/{usr:bob}
+    {
+      "active": true,
+      "displayName": "Bob Builder",
+      "emails": [
+        {
+          "primary": true,
+          "type": "work",
+          "value": "{email:bob}"
+        }
+      ],
+      "externalId": "globex-bob",
+      "groups": [],
+      "id": "{usr:bob}",
+      "meta": {
+        "created": "{datetime:utc-z}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Users/{usr:bob}",
+        "resourceType": "User"
+      },
+      "name": {
+        "familyName": "Builder",
+        "formatted": "Bob Builder",
+        "givenName": "Bob"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:bob}"
+    }
+
+## 2. acme-directory: Acme's directory provisions the same address: it links the existing account
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#2}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "emails": [
+>       {
+>         "primary": true,
+>         "type": "work",
+>         "value": "{email:bob}"
+>       }
+>     ],
+>     "externalId": "acme-contractor-bob",
+>     "name": {
+>       "familyName": "Builder",
+>       "givenName": "Robert"
+>     },
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:bob}"
+>   }
+< 201 Created
+< Content-Location: /scim/v2/Users/{usr:bob}
+< Content-Type: application/scim+json
+< Location: /scim/v2/Users/{usr:bob}
+    {
+      "active": true,
+      "displayName": "Robert Builder",
+      "emails": [
+        {
+          "primary": true,
+          "type": "work",
+          "value": "{email:bob}"
+        }
+      ],
+      "externalId": "acme-contractor-bob",
+      "groups": [],
+      "id": "{usr:bob}",
+      "meta": {
+        "created": "{datetime:utc-z}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Users/{usr:bob}",
+        "resourceType": "User"
+      },
+      "name": {
+        "familyName": "Builder",
+        "formatted": "Robert Builder",
+        "givenName": "Robert"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:bob}"
+    }
+
+## 3. acme-directory: Acme renames Bob and moves his work email: only Acme's view changes
+> PATCH /scim/v2/Users/{usr:bob}
+> Authorization: Bearer {scim-token#2}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Robert (contractor)"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "emails[type eq \"work\"].value",
+>         "value": "{email:bob.contractor}"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 200 OK
+< Content-Location: /scim/v2/Users/{usr:bob}
+< Content-Type: application/scim+json
+    {
+      "active": true,
+      "displayName": "Robert (contractor)",
+      "emails": [
+        {
+          "primary": true,
+          "type": "work",
+          "value": "{email:bob.contractor}"
+        }
+      ],
+      "externalId": "acme-contractor-bob",
+      "groups": [],
+      "id": "{usr:bob}",
+      "meta": {
+        "created": "{datetime:unspecified}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Users/{usr:bob}",
+        "resourceType": "User"
+      },
+      "name": {
+        "familyName": "Builder",
+        "formatted": "Robert Builder",
+        "givenName": "Robert"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:bob}"
+    }
+
+## 4. acme-directory: Acme deactivates Bob
+> PATCH /scim/v2/Users/{usr:bob}
+> Authorization: Bearer {scim-token#2}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "active",
+>         "value": false
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 200 OK
+< Content-Location: /scim/v2/Users/{usr:bob}
+< Content-Type: application/scim+json
+    {
+      "active": false,
+      "displayName": "Robert (contractor)",
+      "emails": [
+        {
+          "primary": true,
+          "type": "work",
+          "value": "{email:bob.contractor}"
+        }
+      ],
+      "externalId": "acme-contractor-bob",
+      "groups": [],
+      "id": "{usr:bob}",
+      "meta": {
+        "created": "{datetime:unspecified}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Users/{usr:bob}",
+        "resourceType": "User"
+      },
+      "name": {
+        "familyName": "Builder",
+        "formatted": "Robert Builder",
+        "givenName": "Robert"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:bob}"
+    }
+
+## 5. acme-directory: Acme's view of Bob
+> GET /scim/v2/Users/{usr:bob}
+> Authorization: Bearer {scim-token#2}
+< 200 OK
+< Content-Location: /scim/v2/Users/{usr:bob}
+< Content-Type: application/scim+json
+    {
+      "active": false,
+      "displayName": "Robert (contractor)",
+      "emails": [
+        {
+          "primary": true,
+          "type": "work",
+          "value": "{email:bob.contractor}"
+        }
+      ],
+      "externalId": "acme-contractor-bob",
+      "groups": [],
+      "id": "{usr:bob}",
+      "meta": {
+        "created": "{datetime:unspecified}",
+        "lastModified": "{datetime:unspecified}",
+        "location": "/scim/v2/Users/{usr:bob}",
+        "resourceType": "User"
+      },
+      "name": {
+        "familyName": "Builder",
+        "formatted": "Robert Builder",
+        "givenName": "Robert"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:bob}"
+    }
+
+## 6. globex-directory: Globex's view of Bob is untouched
+> GET /scim/v2/Users/{usr:bob}
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Location: /scim/v2/Users/{usr:bob}
+< Content-Type: application/scim+json
+    {
+      "active": true,
+      "displayName": "Bob Builder",
+      "emails": [
+        {
+          "primary": true,
+          "type": "work",
+          "value": "{email:bob}"
+        }
+      ],
+      "externalId": "globex-bob",
+      "groups": [],
+      "id": "{usr:bob}",
+      "meta": {
+        "created": "{datetime:unspecified}",
+        "lastModified": "{datetime:unspecified}",
+        "location": "/scim/v2/Users/{usr:bob}",
+        "resourceType": "User"
+      },
+      "name": {
+        "familyName": "Builder",
+        "formatted": "Bob Builder",
+        "givenName": "Bob"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:bob}"
+    }
+
+## 7. operator: dashboard: Bob's global account keeps Globex's name, email, and active state
+> GET /sqlos/admin/auth/api/users/{usr:bob}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "defaultEmail": "{email:bob}",
+      "displayName": "Bob Builder",
+      "externalIdentityCount": 0,
+      "id": "{usr:bob}",
+      "isActive": true,
+      "membershipCount": 1,
+      "sessionCount": 0,
+      "updatedAt": "{datetime:unspecified}"
+    }
+
+## 8. operator: dashboard: Bob's memberships
+> GET /sqlos/admin/auth/api/users/{usr:bob}/memberships
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "isActive": false,
+          "organization": "Acme",
+          "organizationId": "{org#1}",
+          "role": "member",
+          "user": "Bob Builder",
+          "userEmail": "{email:bob}",
+          "userId": "{usr:bob}"
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "isActive": true,
+          "organization": "Globex",
+          "organizationId": "{org#2}",
+          "role": "member",
+          "user": "Bob Builder",
+          "userEmail": "{email:bob}",
+          "userId": "{usr:bob}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 9. globex-directory: Globex, the owning directory, deletes Bob
+> DELETE /scim/v2/Users/{usr:bob}
+> Authorization: Bearer {scim-token#1}
+< 204 No Content
+
+## 10. operator: dashboard: with no other active membership, Bob is deactivated globally
+> GET /sqlos/admin/auth/api/users/{usr:bob}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "defaultEmail": "{email:bob}",
+      "displayName": "Bob Builder",
+      "externalIdentityCount": 0,
+      "id": "{usr:bob}",
+      "isActive": false,
+      "membershipCount": 0,
+      "sessionCount": 0,
+      "updatedAt": "{datetime:unspecified}"
+    }
+
+## 11. acme-directory: Acme reactivates Bob: its own membership returns
+> PATCH /scim/v2/Users/{usr:bob}
+> Authorization: Bearer {scim-token#2}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "active",
+>         "value": true
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 200 OK
+< Content-Location: /scim/v2/Users/{usr:bob}
+< Content-Type: application/scim+json
+    {
+      "active": true,
+      "displayName": "Robert (contractor)",
+      "emails": [
+        {
+          "primary": true,
+          "type": "work",
+          "value": "{email:bob.contractor}"
+        }
+      ],
+      "externalId": "acme-contractor-bob",
+      "groups": [],
+      "id": "{usr:bob}",
+      "meta": {
+        "created": "{datetime:unspecified}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Users/{usr:bob}",
+        "resourceType": "User"
+      },
+      "name": {
+        "familyName": "Builder",
+        "formatted": "Robert Builder",
+        "givenName": "Robert"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:bob}"
+    }
+
+## 12. operator: dashboard: Acme's link does not own Bob, so it cannot reactivate his account
+> GET /sqlos/admin/auth/api/users/{usr:bob}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "defaultEmail": "{email:bob}",
+      "displayName": "Bob Builder",
+      "externalIdentityCount": 0,
+      "id": "{usr:bob}",
+      "isActive": false,
+      "membershipCount": 1,
+      "sessionCount": 0,
+      "updatedAt": "{datetime:unspecified}"
+    }
+
+## audit: provisioning events from both directories
+  - {
+      "action": "scim.user.created",
+      "actor": {
+        "displayName": null,
+        "id": "globex-bob",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.created",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "globex-bob",
+        "payload": {
+          "active": true,
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:bob}"
+            }
+          ],
+          "externalId": "globex-bob",
+          "name": {
+            "familyName": "Builder",
+            "givenName": "Bob"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:bob}"
+        },
+        "resourceId": "{usr:bob}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#2}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:bob}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.user.reactivated",
+      "actor": {
+        "displayName": null,
+        "id": "acme-contractor-bob",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.reactivated",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "acme-contractor-bob",
+        "payload": {
+          "active": true,
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:bob}"
+            }
+          ],
+          "externalId": "acme-contractor-bob",
+          "name": {
+            "familyName": "Builder",
+            "givenName": "Robert"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:bob}"
+        },
+        "resourceId": "{usr:bob}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:bob}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.user.updated",
+      "actor": {
+        "displayName": null,
+        "id": "acme-contractor-bob",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.updated",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "acme-contractor-bob",
+        "payload": {
+          "Operations": [
+            {
+              "op": "replace",
+              "path": "displayName",
+              "value": "Robert (contractor)"
+            },
+            {
+              "op": "replace",
+              "path": "emails[type eq \"work\"].value",
+              "value": "{email:bob.contractor}"
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ]
+        },
+        "resourceId": "{usr:bob}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:bob}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.user.deactivated",
+      "actor": {
+        "displayName": null,
+        "id": "acme-contractor-bob",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.deactivated",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "acme-contractor-bob",
+        "payload": {
+          "Operations": [
+            {
+              "op": "replace",
+              "path": "active",
+              "value": false
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ]
+        },
+        "resourceId": "{usr:bob}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:bob}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.user.deleted",
+      "actor": {
+        "displayName": null,
+        "id": "globex-bob",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.deleted",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "globex-bob",
+        "payload": null,
+        "resourceId": "{usr:bob}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#2}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:bob}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.user.updated",
+      "actor": {
+        "displayName": null,
+        "id": "acme-contractor-bob",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.updated",
+      "id": "{evt#6}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "acme-contractor-bob",
+        "payload": {
+          "Operations": [
+            {
+              "op": "replace",
+              "path": "active",
+              "value": true
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ]
+        },
+        "resourceId": "{usr:bob}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:bob}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
