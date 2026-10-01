@@ -345,7 +345,7 @@ public sealed class EmailOtpAttemptIntegrationTests
     /// on either provider, including SQL Server's set-based <c>UPDATE [c] SET ... FROM [dbo].[...]</c>)
     /// until <c>participants</c> of them are waiting there, or ten seconds pass.
     /// </summary>
-    private sealed class FirstChallengeWriteBarrier(int participants) : DbCommandInterceptor
+    internal sealed class FirstChallengeWriteBarrier(int participants) : DbCommandInterceptor
     {
         private static readonly Regex ChallengeUpdate = new(
             @"\bUPDATE\b[\s\S]*\bSqlOSEmailOtpChallenges\b",
