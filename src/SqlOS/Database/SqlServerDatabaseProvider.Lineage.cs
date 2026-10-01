@@ -362,16 +362,16 @@ internal sealed partial class SqlServerDatabaseProvider
             END
             """;
 
+        // Changed rows are found with EXCEPT, a hashed set operation: a join of inserted and deleted has no
+        // index or statistics to plan by, and a bulk update would pay for it quadratically.
         var typeChanges = new StringBuilder();
         foreach (var table in scopeTables)
         {
             typeChanges.AppendLine(CultureInfo.InvariantCulture, $"""
                 UPDATE t SET [{SqlOSFgaLineage.ScopeTypeSeqColumn}] = rt.Seq
                 FROM {ScopeTable(table)} t
-                INNER JOIN inserted i ON i.Id = t.[{Escape(table.ResourceIdColumn)}]
-                INNER JOIN deleted d ON d.Id = i.Id
-                INNER JOIN {resourceTypes} rt ON rt.Id = i.ResourceTypeId
-                WHERE i.ResourceTypeId <> d.ResourceTypeId;
+                INNER JOIN (SELECT Id, ResourceTypeId FROM inserted EXCEPT SELECT Id, ResourceTypeId FROM deleted) i ON i.Id = t.[{Escape(table.ResourceIdColumn)}]
+                INNER JOIN {resourceTypes} rt ON rt.Id = i.ResourceTypeId;
                 """);
         }
 
@@ -382,18 +382,18 @@ internal sealed partial class SqlServerDatabaseProvider
             BEGIN
                 SET NOCOUNT ON;
                 IF NOT (UPDATE(ParentId) OR UPDATE(IsActive) OR UPDATE(ResourceTypeId)) RETURN;
-                IF EXISTS (
-                    SELECT 1 FROM inserted i INNER JOIN deleted d ON d.Id = i.Id
-                    WHERE ISNULL(i.ParentId, N'') <> ISNULL(d.ParentId, N'') OR i.IsActive <> d.IsActive)
+                {changedTable}
+                INSERT INTO #SqlOSLineageChanged (Id)
+                SELECT Id FROM (SELECT Id, ParentId, IsActive FROM inserted EXCEPT SELECT Id, ParentId, IsActive FROM deleted) changed;
+                IF EXISTS (SELECT 1 FROM #SqlOSLineageChanged)
                 BEGIN
-                    {changedTable}
-                    INSERT INTO #SqlOSLineageChanged (Id)
-                    SELECT i.Id FROM inserted i INNER JOIN deleted d ON d.Id = i.Id
-                    WHERE ISNULL(i.ParentId, N'') <> ISNULL(d.ParentId, N'') OR i.IsActive <> d.IsActive;
                     EXEC {refresh} @RejectMalformed = 1, @WalkAll = 1;
-                    DROP TABLE #SqlOSLineageChanged;
                 END
-                {typeChanges}
+                DROP TABLE #SqlOSLineageChanged;
+                IF UPDATE(ResourceTypeId)
+                BEGIN
+                    {typeChanges}
+                END
             END
             """;
 

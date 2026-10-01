@@ -127,6 +127,8 @@ public class SqlOSFgaFunctionInitializerTests
         all.Should().Contain("INNER JOIN #SqlOSLineageAffected s ON s.Id = t.[ResourceId]");
         all.Should().Contain("[SqlOSFgaReach] = NULL, [SqlOSFgaTypeSeq] = NULL");
         all.Should().Contain("IF NOT UPDATE([ResourceId]) RETURN;");
+        all.Should().Contain("SELECT Id FROM (SELECT Id, ParentId, IsActive FROM inserted EXCEPT SELECT Id, ParentId, IsActive FROM deleted) changed");
+        all.Should().NotContain("INNER JOIN deleted d ON d.Id = i.Id", "a join of inserted and deleted has nothing to plan by");
     }
 
     [TestMethod]

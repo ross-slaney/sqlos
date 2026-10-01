@@ -114,8 +114,10 @@ public class SqlOSDatabaseProviderTests
         all.Should().Contain("\"Ancestor4\" = CASE WHEN nd.\"Depth\" = 4 THEN n.\"Seq\" WHEN nd.\"Depth\" > 4 THEN p.\"Ancestor4\" ELSE NULL END");
         all.Should().Contain("CREATE OR REPLACE FUNCTION \"ten\"\"ant\".\"fn_SqlOSFgaScope_app_Items_Insert\"()");
         all.Should().Contain("CREATE OR REPLACE FUNCTION \"ten\"\"ant\".\"fn_SqlOSFgaScope_app_Items_Update\"()");
-        all.Should().Contain("n.\"ResourceId\" IS DISTINCT FROM o.\"ResourceId\"");
-        all.Should().Contain("IF NOT EXISTS (\n        SELECT 1 FROM new_rows n INNER JOIN old_rows o ON o.\"Id\" = n.\"Id\"", "the update function must leave before updating, or its own update fires it forever");
+        all.Should().Contain("SELECT \"Id\", \"ParentId\", \"IsActive\" FROM new_rows\n        EXCEPT\n        SELECT \"Id\", \"ParentId\", \"IsActive\" FROM old_rows", "changed rows come from a hashed set operation");
+        all.Should().Contain("SELECT \"Id\", \"ResourceId\" FROM new_rows\n            EXCEPT\n            SELECT \"Id\", \"ResourceId\" FROM old_rows");
+        all.Should().NotContain("JOIN old_rows", "a join of the transition tables has nothing to plan by");
+        all.Should().Contain("IF NOT EXISTS (", "the update function must leave before updating, or its own update fires it forever");
         all.Should().Contain("AFTER UPDATE ON \"app\".\"Items\"");
         all.Should().Contain("\"SqlOSFgaAncestor4\" = r.\"Ancestor4\", \"SqlOSFgaReach\" = r.\"Reach\", \"SqlOSFgaTypeSeq\" = rt.\"Seq\"");
 

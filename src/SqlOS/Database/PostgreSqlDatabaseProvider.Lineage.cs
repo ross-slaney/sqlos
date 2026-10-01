@@ -388,10 +388,9 @@ internal sealed partial class PostgreSqlDatabaseProvider
         {
             typeChanges.AppendLine(CultureInfo.InvariantCulture, $"""
                 UPDATE {ScopeTable(table)} t SET {QuoteIdentifier(SqlOSFgaLineage.ScopeTypeSeqColumn)} = rt."Seq"
-                FROM new_rows n
-                INNER JOIN old_rows o ON o."Id" = n."Id"
+                FROM (SELECT "Id", "ResourceTypeId" FROM new_rows EXCEPT SELECT "Id", "ResourceTypeId" FROM old_rows) n
                 INNER JOIN {resourceTypes} rt ON rt."Id" = n."ResourceTypeId"
-                WHERE n."ResourceTypeId" <> o."ResourceTypeId" AND t.{QuoteIdentifier(table.ResourceIdColumn)} = n."Id";
+                WHERE t.{QuoteIdentifier(table.ResourceIdColumn)} = n."Id";
                 """);
         }
 
@@ -407,15 +406,24 @@ internal sealed partial class PostgreSqlDatabaseProvider
                 -- A statement trigger with transition tables cannot name columns, so this fires for every
                 -- update of the table, the lineage's own included (and for statements that touched no row);
                 -- only a changed parent, activity, or type matters.
-                SELECT array_agg(n."Id") FILTER (WHERE n."ParentId" IS DISTINCT FROM o."ParentId" OR n."IsActive" <> o."IsActive"),
-                       bool_or(n."ResourceTypeId" <> o."ResourceTypeId")
-                INTO v_ids, v_types
-                FROM new_rows n
-                INNER JOIN old_rows o ON o."Id" = n."Id";
+                -- Changed rows are found with EXCEPT, a hashed set operation: a join of the two transition
+                -- tables has no index or statistics to plan by, and a bulk update would pay for it quadratically.
+                SELECT array_agg("Id") INTO v_ids
+                FROM (
+                    SELECT "Id", "ParentId", "IsActive" FROM new_rows
+                    EXCEPT
+                    SELECT "Id", "ParentId", "IsActive" FROM old_rows
+                ) changed;
                 IF v_ids IS NOT NULL THEN
                     PERFORM {refresh}(v_ids, true);
                 END IF;
-                IF COALESCE(v_types, false) THEN
+                SELECT EXISTS (
+                    SELECT 1 FROM (
+                        SELECT "Id", "ResourceTypeId" FROM new_rows
+                        EXCEPT
+                        SELECT "Id", "ResourceTypeId" FROM old_rows
+                    ) retyped) INTO v_types;
+                IF v_types THEN
                     {typeChanges}
                 END IF;
                 RETURN NULL;
@@ -483,7 +491,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
         var triggers = SqlOSFgaLineage.ScopeTriggerNames(table.Table);
         var resourceId = QuoteIdentifier(table.ResourceIdColumn);
         var keys = string.Join(" AND ", table.KeyColumns.Select(k => $"t.{QuoteIdentifier(k)} = n.{QuoteIdentifier(k)}"));
-        var oldKeys = string.Join(" AND ", table.KeyColumns.Select(k => $"o.{QuoteIdentifier(k)} = n.{QuoteIdentifier(k)}"));
+        var keyList = string.Join(", ", table.KeyColumns.Select(QuoteIdentifier));
         return $"""
             CREATE OR REPLACE FUNCTION {onInsert}()
             RETURNS trigger
@@ -504,19 +512,26 @@ internal sealed partial class PostgreSqlDatabaseProvider
             AS $sqlos$
             BEGIN
                 -- Statement triggers fire for every update of the table, this function's own included and
-                -- statements that touched no row: leave unless some row's resource id changed.
+                -- statements that touched no row: leave unless some row's resource id changed. The changed
+                -- rows come from EXCEPT, a hashed set operation, never from a join of the transition tables.
                 IF NOT EXISTS (
-                    SELECT 1 FROM new_rows n INNER JOIN old_rows o ON {oldKeys}
-                    WHERE n.{resourceId} IS DISTINCT FROM o.{resourceId}) THEN
+                    SELECT 1 FROM (
+                        SELECT {keyList}, {resourceId} FROM new_rows
+                        EXCEPT
+                        SELECT {keyList}, {resourceId} FROM old_rows
+                    ) changed) THEN
                     RETURN NULL;
                 END IF;
 
                 UPDATE {ScopeTable(table)} t SET {ScopeAssignments(levels, "r", "rt")}
-                FROM new_rows n
-                INNER JOIN old_rows o ON {oldKeys}
+                FROM (
+                    SELECT {keyList}, {resourceId} FROM new_rows
+                    EXCEPT
+                    SELECT {keyList}, {resourceId} FROM old_rows
+                ) n
                 LEFT JOIN {resources} r ON r."Id" = n.{resourceId}
                 LEFT JOIN {resourceTypes} rt ON rt."Id" = r."ResourceTypeId"
-                WHERE {keys} AND n.{resourceId} IS DISTINCT FROM o.{resourceId};
+                WHERE {keys};
                 RETURN NULL;
             END
             $sqlos$;
