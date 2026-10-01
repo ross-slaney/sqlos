@@ -40,8 +40,11 @@ scripts/behavior-lock.sh                                   # source build, SQL S
 SQLOS_TEST_PROVIDER=postgresql scripts/behavior-lock.sh    # source build, PostgreSQL
 scripts/behavior-lock.sh --mode package                    # the released 7.2.1 package
 scripts/behavior-lock.sh --filter "FullyQualifiedName~Scenarios.Saml"
+scripts/behavior-lock.sh --shard auth-pages                # one CI shard (see below)
 scripts/behavior-lock.sh --no-build                        # reuse ./scripts/build.sh output (source mode only)
 ```
+
+CI (`.github/workflows/pull-request.yml`) runs the suite on SQL Server, on PostgreSQL, and against the released package, each as three shards split by scenario area so every job stays well under 20 minutes: `auth-pages` (`Hosted`, `Headless`), `protocol-enterprise` (`Protocol`, `Enterprise`, and the small `Saml`, `Scim`, `Social`, `Tokens`, `Dcr`, and `Upgrade` areas), and `admin-and-rest` (everything else, including the gates and any new area).
 
 Or directly: `dotnet test tests/SqlOS.BehaviorLock -p:SqlOSUnderTest=package`. `-p:SqlOSBaselineVersion=7.2.1` picks the package version, and the upgrade seed takes `-p:SqlOSUpgradeFromVersion`.
 
@@ -85,12 +88,12 @@ public sealed class HostedPasswordScenarios
 }
 ```
 
-1. **Pick the profile** that matches the deployment model you are locking (see [Profiles](#profiles)). Prefer an existing profile. `Transcript.StartAsync(profile, options => ...)` accepts scenario-specific `ConfigureSqlOS` and `ConfigureServices`; use them rarely, and only for the one knob the scenario is about.
+1. **Pick the profile** that matches the deployment model you are locking (see [Profiles](#profiles)). Prefer an existing profile. `Transcript.StartAsync(profile, options => ...)` accepts scenario-specific `ConfigureSqlOS` and `ConfigureServices`; use them rarely, and only for the one knob the scenario is about. To lock a route whose failure escapes as an unhandled exception, set `options.AnswerUnhandledExceptionsAsServerErrors = true`: the host then answers as Kestrel does in production (an empty `500`, every header and cookie cleared) instead of TestServer rethrowing the exception into the scenario, and names the exception in the harness-only `X-BehaviorLock-Unhandled-Exception` response header. It wraps the application pipeline inside SqlOS's dashboard middleware, so an exception the dashboard middleware throws itself still reaches the scenario.
 2. **Name the scenario as a behavior**, in a sentence: `A_directory_provisions_a_user_at_a_verified_domain`. Put it in `Scenarios/<Area>/<Area>Scenarios.cs`; one class may hold many scenarios. Use `[Scenario]` instead of `[TestMethod]`.
 3. **Arrange with `t.Setup`**, which is never recorded: `CreateUserAsync`, `CreateOrganizationAsync`, `AddMembershipAsync`, `VerifyDomainAsync`, `CreateSamlConnectionAsync`, `CreateScimConnectionAsync`, `SignInWithPasswordAsync`, `PublishDnsTxt`, `PublishClientMetadata`, `OperatorPostAsync`. Setup goes through the admin API (or probes when the profile has no operator access) and skips the audit events it causes. Never write to tables directly: setup must behave the same against the package and the source.
-4. **Act with actors.** `t.Browser` (the default browser; `t.GetAsync`, `t.SubmitAsync`, and `t.PostFormAsync` use it), `t.Api` (an API client with no cookies), `t.Operator` (carries the profile's dashboard credential), and more with `t.NewBrowser("name")` and `t.NewClient("name")`. Browsers keep cookies and send `Origin` on unsafe methods. Per request, `options => options.Bearer(token)`, `.Header(...)`, `.WithoutCredentials()`, `.WithoutOrigin()`, `.WithOrigin(...)`, `.WithoutCookies()`, `.Cookie("name=value")`, `.FromAddress("198.51.100.7")`. `browser.SetCookie(name, value)` seeds a cookie from an earlier visit.
+4. **Act with actors.** `t.Browser` (the default browser; `t.GetAsync`, `t.SubmitAsync`, and `t.PostFormAsync` use it), `t.Api` (an API client with no cookies), `t.Operator` (carries the profile's dashboard credential), and more with `t.NewBrowser("name")` and `t.NewClient("name")`. Browsers keep cookies and send `Origin` on unsafe methods. Per request, `options => options.Bearer(token)`, `.Header(...)`, `.WithoutCredentials()`, `.WithoutOrigin()`, `.WithOrigin(...)`, `.WithoutCookies()`, `.Cookie("name=value")`, `.FromAddress("198.51.100.7")`. `browser.SetCookie(name, value)` seeds a cookie from an earlier visit, and `browser.Tab("tab-2")` is another tab of the same browser that starts with a copy of its cookies. Actors may send requests concurrently, for race scenarios: start them, await them with `Task.WhenAll`, and observe the results in the order you started them. The transcript records the order you observe, never the order requests finished.
 5. **Record every exchange.** Each request returns an `HttpExchange`; pass it to `t.Observe(exchange, "caption")` to lock it or `t.Discard(exchange)` when it is only a precondition. `ApproveAsync` fails if one is neither. Read responses with `JsonString("data.0.id")`, `Location`, `NextUrl` and `NextUrlParameter("code")` (they follow the meta-refresh interstitial too), `Form("/action")` with `.With(...)` and `.Without(...)`, `SetCookieValue(name)`, and `Header(name)`.
-6. **Observe side effects and state.** `t.ObserveAuditAsync("caption")` records the audit events written since the last audit observation. `t.ObserveStateAsync(route, "caption")` records a dashboard or admin read. `t.ObserveDocument(caption, text)` records a document; `t.Note(text)` adds a line for the reader. Effects (email, SMS, HTTP, DNS) attach to the exchange that caused them automatically; `t.ObserveUnattributedEffects(caption)` records ones no exchange caused. `t.LatestEmailTo(email)` and `t.LatestSmsCodeTo(phone)` read what the fakes captured.
+6. **Observe side effects and state.** `t.ObserveAuditAsync("caption")` records the audit events written since the last audit observation, oldest first. When SqlOS writes them in no defined order (a lockout writes one event per locked bucket in database order; parallel requests write in thread order), use `t.ObserveAuditAsync("caption", AuditOrder.Content)`, which sorts them by action and then by content with every per-run value masked. `t.ObserveStateAsync(route, "caption")` records a dashboard or admin read. `t.ObserveDocument(caption, text)` records a document; `t.Note(text)` adds a line for the reader. Effects (email, SMS, HTTP, DNS) attach to the exchange that caused them automatically; `t.ObserveUnattributedEffects(caption)` records ones no exchange caused. `t.LatestEmailTo(email)` and `t.LatestSmsCodeTo(phone)` read what the fakes captured.
 7. **Call library APIs through probes.** Scenarios only talk HTTP. For an API hosts call in-process, use or add a route in `tests/SqlOS.BehaviorLock.Host/Probes/ProbeEndpoints.cs` that calls one documented member and returns its result as JSON. Probes compile against both the package and the source, which makes them, with `SourceCompatibilityCanary.cs`, the source-compatibility canary.
 8. **Approve.** End with `await t.ApproveAsync()`. Run the scenario with `BEHAVIOR_LOCK_REPEAT=2 BEHAVIOR_LOCK_ACCEPT=1`, then read the whole `.verified.txt`: it is the behavior you are locking, so check it says what the product should do, and say so in the caption when it does not (see known defects below).
 
@@ -100,9 +103,9 @@ Nothing leaves the process. The host replaces every outbound seam (`BehaviorLock
 
 ### Coverage tags
 
-`[Covers("METHOD /route/template")]` names a route the scenario exercises, exactly as the endpoint's route pattern (`[Covers("GET /sqlos/admin/auth/api/users/{userId}")]`) or as a line of `Coverage/dashboard-routes.manifest` for string-routed dashboard APIs. A transcript fails if a declared route was not hit by an observed exchange, and `Every_covers_declaration_names_a_known_route` fails on a tag that names no route.
+`[Covers("METHOD /route/template")]` names a route the scenario exercises, exactly as the endpoint's route pattern (`[Covers("GET /sqlos/admin/auth/api/users/{userId}")]`) or as a line of `Coverage/dashboard-routes.manifest` for string-routed dashboard APIs. A transcript fails if a declared route was not hit by an observed exchange, `Every_covers_declaration_names_a_known_route` fails on a tag that names no route, and `Every_scenario_covers_routes_its_own_profile_exposes` fails on a tag that the profile named in the scenario's approved transcript does not expose.
 
-`Route_coverage_report` inventories every route of every profile (endpoint data sources plus the dashboard manifest) and writes `TestResults/BehaviorLock/route-coverage/route-coverage.md` and `uncovered-routes.txt`, in a stable order, as the worklist for catalog authors. `Every_route_in_every_profile_has_a_scenario` turns that list into a failing gate; it is ignored until the scenario catalog is complete. `Dashboard_scripts_only_call_known_routes` scans the dashboard JavaScript for API calls and fails on a path that no route or manifest line answers, so a new string-routed dashboard API cannot go unnoticed.
+`Every_route_in_every_profile_has_a_scenario` is the coverage gate: it fails for any method and route a profile exposes (endpoint data sources plus the dashboard manifest) that no `[Covers]` scenario exercises in a profile exposing it. A new endpoint therefore needs a scenario in the same change. `Route_coverage_report` writes `TestResults/BehaviorLock/route-coverage/route-coverage.md` and `uncovered-routes.txt`, in a stable order: per profile, the routes it exposes, how many any scenario covers, how many scenarios run in it, and how many of its routes those scenarios exercise. `Dashboard_scripts_only_call_known_routes` scans the dashboard JavaScript for API calls and fails on a path that no route or manifest line answers, so a new string-routed dashboard API cannot go unnoticed.
 
 ## Reading a transcript
 
@@ -123,14 +126,17 @@ Nothing leaves the process. The host replaces every outbound seam (`BehaviorLock
     ...
 ```
 
-An effect sits under the exchange that caused it:
+An effect sits under the exchange that caused it, and so do the decoded JWTs the exchange returned and the lifetimes of claims a resource route echoed (`/api/me` lists its caller's claims, whose times read `{epoch}`):
 
 ```
   ~ email (transactional) to {email:alice}
       subject: Your Behavior Lock sign-in code
       text:
         Your Behavior Lock sign-in code is {otp#1}. It expires in 10 minute(s).
+  claim lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
 ```
+
+`## audit: caption` lists audit events oldest first, and `## audit, sorted by content: caption` in content order (`AuditOrder.Content`). A `< X-BehaviorLock-Unhandled-Exception: Type: message` response header is the harness naming an exception the application left unhandled; production clients get the same empty `500` without it.
 
 `>` lines are the request, `<` lines the response status and headers (sorted; `Date`, `Server`, `Content-Length`, `Transfer-Encoding`, `Connection`, `Keep-Alive`, `ETag`, `Last-Modified`, and tracing headers are dropped). Bodies are indented: JSON is canonical (members sorted, arrays in order), forms one field per line, HTML normalized with AngleSharp (inline `<style>` and `<script>` become content digests such as `{script-sha256:…}`, data URIs become `{data-uri:type}`), and stylesheet and script responses (the dashboard assets) become the same digests.
 
@@ -139,10 +145,10 @@ An effect sits under the exchange that caused it:
 Transcripts must be byte-identical across runs, machines, providers, and the package and source builds. The scrubber replaces every per-run value with a placeholder, numbered in order of first appearance, and keeps everything else, so a changed format or a new field still shows up.
 
 - **Named values** read as `{kind:name}`: `t.Unique.Email("alice")` is `{email:alice}` (its upper-case normalized form `{email:ALICE}`), `t.Unique.Password`, `Domain`, and `Slug` likewise. Register your own with `t.Scrub(value, kind, name)`.
-- **Role values** read as `{kind#n}`: a JSON property, form field, query parameter, hidden input, or JWT claim whose name is in `ValueRoles` (`code`, `state`, `refresh_token`, `mfaToken`, `tokenPrefix`, ...) registers its value, in URL, form, and HTML encodings too. Add a role there when a new secret or handle appears. `t.Scrub(value, kind)` registers one by hand, for example a code shown only as page text.
-- **Detected patterns**: JWTs (`{access-token#1}`, keyed by identity so tokens minted in different seconds for the same session and claims share a placeholder), SqlOS IDs by prefix (`usr_…` is `{usr#1}`), GUIDs, timestamps by format class (`{datetime:utc-z}`, `{datetime:unspecified}`, `{datetime:offset}`, so a change from `Z` to no suffix is visible), RFC 1123 dates, hex digests, and high-entropy tokens.
-- **Clock values**: epoch seconds in JSON are `{epoch}`; JWT lifetimes are exact (`exp-iat=10m`); remaining-seconds fields such as `expires_in` are rounded (`~600`); cookie expiry is relative (`expires=+7d`, `max-age=900`, `{unix-epoch}` for deletion).
-- **Unordered data**: a JSON array SqlOS builds without an order (listed in `CanonicalJson.UnorderedArrayFields`, with the reason) is sorted before rendering.
+- **Role values** read as `{kind#n}`: a JSON property, form field, query parameter, hidden input, or JWT claim whose name is in `ValueRoles` (`code`, `state`, `refresh_token`, `mfaToken`, `tokenPrefix`, ...) registers its value, in URL, form, and HTML encodings too. Add a role there when a new secret or handle appears. `t.Scrub(value, kind)` registers one by hand, for example a code shown only as page text, and `t.ScrubSlugSuffix(slug, baseSlug)` names the random suffix SqlOS adds to a colliding slug (`acme-{slug-suffix#1}`). A redaction marker such as `[redacted]` is never registered, even under a field named `password`. A URL in text never takes the sentence punctuation after it (`...?token={link-token#1}. This link`), so a link's token reads the same in an email's text and HTML.
+- **Detected patterns**: JWTs (`{access-token#1}`, keyed by identity so tokens minted in different seconds for the same session and claims share a placeholder), SqlOS IDs by prefix (`usr_…` is `{usr#1}`), GUIDs, timestamps by format class (`{datetime:utc-z}`, `{datetime:unspecified}`, `{datetime:offset}`, so a change from `Z` to no suffix is visible; `{datetime:utc-z,url-encoded}` in a query string; `{datetime:MM/dd/yyyy_HH:mm}` for the expiry hosted pages print), RFC 1123 dates, hex digests, and high-entropy tokens.
+- **Clock values**: epoch seconds in JSON are `{epoch}`, and so are the time claims (`iat`, `nbf`, `exp`, `auth_time`) a host echoes as `{ "type", "value" }` strings; JWT and echoed-claim lifetimes are exact (`exp-iat=10m`); remaining-seconds fields such as `expires_in` are rounded (`~600`); cookie expiry is relative (`expires=+7d`, `max-age=900`, `{unix-epoch}` for deletion).
+- **Unordered data**: a JSON array SqlOS builds without an order (listed in `CanonicalJson.UnorderedArrayFields` with the reason: `resetScopes`, `lockedScopes`, `organizationSelection`) is sorted before rendering, and audit events SqlOS writes in no defined order are observed with `AuditOrder.Content`. `SqlOSAdminService.GetUserOrganizationsAsync` lists a user's organizations without an `ORDER BY`; scenarios that show such a list give the organizations one name, create them in ID order, or record the page sorted by name, and say which.
 
 Never scrub behavior away. Before adding a rule, find where the nondeterminism comes from; if SqlOS itself is nondeterministic (an unordered query, a clock read twice), lock it with the narrowest rule and a comment naming the source.
 
@@ -170,7 +176,7 @@ Each profile is one documented deployment model, defined in `tests/SqlOS.Behavio
 | --- | --- |
 | `hosted` | Single application, hosted AuthPage, every first factor (password, email OTP, magic link, SMS OTP), Google, Microsoft, GitHub, and a custom OIDC connection. |
 | `headless` | Single application whose own UI drives sign-in through the headless API, native headless clients allowed. |
-| `multi-app` | Standalone identity server (`ConfigureApplication`) with first-party, access-restricted, partner, confidential, native, CLI, and machine clients, and resource APIs validated with `AddJwtBearer` and `AddSqlOSJwt`. |
+| `multi-app` | Standalone identity server (`ConfigureApplication`) with first-party, access-restricted, partner, confidential, native, CLI, and machine clients, and resource APIs validated with `AddJwtBearer` and `AddSqlOSJwt`. Seeded client secrets are 43 characters or longer, as SqlOS requires (`HostProfiles.ConfidentialClientSecret`, `MachineClientSecret`). |
 | `mcp` | Single application with a same-host MCP resource (`app.Mcp`) and the `SqlOS.Mcp` policy on the host's MCP route. |
 | `dcr` | Dedicated authorization server with dynamic client registration (`EnableChatGptCompatibility`) and client ID metadata documents. |
 | `dashboard-password` | Dashboard protected by `AuthMode = Password`; `t.Operator` signs in at start. |
@@ -182,16 +188,17 @@ Each profile is one documented deployment model, defined in `tests/SqlOS.Behavio
 | `modules` | Calendar, transactional email, and audit admin modules. |
 | `oauth-only` | OAuth 2.0 authorization server with the OpenID Provider role disabled. |
 | `upgrade` | Standalone identity server with every persisted feature in use and TOTP required; used by the upgrade gate. |
-| `legacy-host` | Explicit wiring: `AddDbContext` plus `AddSqlOS<T>(options)`, a context implementing the SqlOS interfaces, a manual `MapAuthServer()`. |
+| `legacy-host` | Explicit wiring: `AddDbContext` plus `AddSqlOS<T>(options)`, a context implementing the SqlOS interfaces, a manual `MapAuthServer()`. The manual call withdraws the audit-log, email, and calendar admin APIs, so audit cannot be observed here (`t.ObserveAuditAsync` throws; `SkipAuditAsync` does nothing). |
 
 `tests/SqlOS.BehaviorLock.Host` also runs as a Kestrel app for exploring a profile by hand: `dotnet run --project tests/SqlOS.BehaviorLock.Host -- --BehaviorLock:Profile=hosted --BehaviorLock:Provider=SqlServer --ConnectionStrings:BehaviorLock="..."`.
 
 ## Known defects and limits
 
-Scenarios lock what 7.2.1 does, including defects; a caption says so when a transcript records one, and the fix arrives with a ledger entry. Recorded so far:
+Scenarios lock what 7.2.1 does, including defects; a caption says so when a transcript records one, and the fix arrives with a ledger entry. A scenario that locks a defect is named `…_CurrentBehavior_KnownDefect_<issue>` (`…_KnownDefect_Unfiled` until it has an issue), so a later layer can find the approvals its fix will change: #415 (missing audit rows), #424 (racy attempt and send limits), #427 (revocation that misses sessions), #429 (resource indicators not validated), #325 (timestamps read back without `Z`), #447, #448, and #236 (CSV formula neutralization). Recorded so far:
 
-- With the default `ScimBasePath`, the dashboard middleware answers every unlisted path under `/sqlos`, so a directory client never reaches SCIM (`ScimUserScenarios.A_directory_client_cannot_reach_scim_under_the_dashboard_prefix`).
-- SCIM creates FGA subjects with IDs of their own (`subj_…`, with `ExternalRef` set to the user ID), so an FGA check by user ID, as the FGA guides write it, does not see grants from SCIM group mappings unless the host provisioned that user's subject first with the same `ExternalRef` and organization (the upgrade gate records this).
+- With the default `ScimBasePath`, the dashboard middleware answers every unlisted path under `/sqlos`, so a directory client never reaches SCIM (#447, `ScimUserScenarios.A_directory_client_cannot_reach_scim_under_the_dashboard_prefix`).
+- SCIM creates FGA subjects with IDs of their own (`subj_…`, with `ExternalRef` set to the user ID), so an FGA check by user ID, as the FGA guides write it, does not see grants from SCIM group mappings unless the host provisioned that user's subject first with the same `ExternalRef` and organization (#448; the upgrade gate records this).
+- A host that keeps a manual `MapAuthServer()` after `AddSqlOS` loses the audit-log, email, and calendar admin APIs and the calendar callback (`LegacyWiringScenarios`, unfiled).
 
 Limits of the harness:
 
@@ -199,3 +206,4 @@ Limits of the harness:
 - `IHttpClientFactory` is replaced wholesale, so SqlOS's own outbound handlers (for example the CIMD fetch's address filtering) are not exercised; their policy checks before the request still are.
 - The hourly signing-key rotation service and the calendar sync scheduler are off; scenarios trigger rotation and sync explicitly.
 - Data protection is ephemeral per host except in the upgrade gate, which persists the key ring across the seed and the host.
+- An exception the dashboard middleware throws itself (outside the application pipeline) reaches the scenario even with `AnswerUnhandledExceptionsAsServerErrors`; `ProbeCalls.ObserveOrUnhandledAsync` and `ProtocolObservations.ObserveUnhandledAsync` record such a failure as a note naming the exception.
