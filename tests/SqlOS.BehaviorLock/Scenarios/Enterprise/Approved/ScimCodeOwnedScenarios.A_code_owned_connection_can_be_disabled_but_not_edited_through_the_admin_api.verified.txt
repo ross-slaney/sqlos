@@ -406,6 +406,40 @@ profile: enterprise-scim-path
       "userId": null
     }
   - {
+      "action": "fga.subject.created",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.subject.created",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "subjectId": "{usr:ann}",
+        "subjectType": "user"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:ann}",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
       "action": "scim.group.member_added",
       "actor": {
         "displayName": null,
@@ -417,7 +451,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.group.member_added",
-      "id": "{evt#2}",
+      "id": "{evt#3}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -426,7 +460,7 @@ profile: enterprise-scim-path
           "groupId": "{grp#1}",
           "memberCount": 1,
           "subjectIds": [
-            "{subj#1}"
+            "{usr:ann}"
           ],
           "truncated": false
         },
@@ -449,6 +483,80 @@ profile: enterprise-scim-path
       "userId": null
     }
   - {
+      "action": "fga.subject.created",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.subject.created",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "subjectId": "{subj#1}",
+        "subjectType": "group"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{subj#1}",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "fga.group.member_added",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.group.member_added",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "groupId": "{grp#1}",
+        "groupSubjectId": "{subj#1}",
+        "memberSubjectId": "{usr:ann}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{subj#1}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "{usr:ann}",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
       "action": "scim.grant.mapped",
       "actor": {
         "displayName": null,
@@ -460,7 +568,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.grant.mapped",
-      "id": "{evt#3}",
+      "id": "{evt#6}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -490,6 +598,59 @@ profile: enterprise-scim-path
       "userId": null
     }
   - {
+      "action": "fga.grant.created",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.grant.created",
+      "id": "{evt#7}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "effectiveFrom": null,
+        "effectiveTo": null,
+        "grantId": "{grant#1}",
+        "resourceId": "workspace::acme-projects",
+        "roleId": "workspace_reader",
+        "subjectId": "{subj#1}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grant#1}",
+          "type": "fga_grant"
+        },
+        {
+          "displayName": null,
+          "id": "{subj#1}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "workspace::acme-projects",
+          "type": "fga_resource"
+        },
+        {
+          "displayName": null,
+          "id": "workspace_reader",
+          "type": "fga_role"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
       "action": "scim.group.created",
       "actor": {
         "displayName": null,
@@ -501,7 +662,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.group.created",
-      "id": "{evt#4}",
+      "id": "{evt#8}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -548,7 +709,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.grant.revoked",
-      "id": "{evt#5}",
+      "id": "{evt#9}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -590,6 +751,58 @@ profile: enterprise-scim-path
       "userId": null
     }
   - {
+      "action": "fga.grant.revoked",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.grant.revoked",
+      "id": "{evt#10}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "grantId": "{grant#1}",
+        "reason": null,
+        "resourceId": "workspace::acme-projects",
+        "roleId": "workspace_reader",
+        "subjectId": "{subj#1}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grant#1}",
+          "type": "fga_grant"
+        },
+        {
+          "displayName": null,
+          "id": "{subj#1}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "workspace::acme-projects",
+          "type": "fga_resource"
+        },
+        {
+          "displayName": null,
+          "id": "workspace_reader",
+          "type": "fga_role"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
       "action": "scim.connection.disabled",
       "actor": {
         "displayName": null,
@@ -607,7 +820,7 @@ profile: enterprise-scim-path
       },
       "correlationId": null,
       "eventType": "scim.connection.disabled",
-      "id": "{evt#6}",
+      "id": "{evt#11}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": null,
@@ -638,7 +851,7 @@ profile: enterprise-scim-path
       },
       "correlationId": null,
       "eventType": "scim.connection.enabled",
-      "id": "{evt#7}",
+      "id": "{evt#12}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": null,

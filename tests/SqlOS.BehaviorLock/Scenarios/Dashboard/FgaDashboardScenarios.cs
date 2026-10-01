@@ -178,7 +178,7 @@ public sealed class FgaDashboardScenarios
         t.Observe(await op.GetAsync($"{Api}/subjects/{alice.Id}"), "a subject's detail, groups, and members");
         t.Observe(await op.GetAsync($"{Api}/subjects/{alice.Id}/grants"), "a subject's grants");
         t.Observe(await op.GetAsync($"{Api}/subjects/no-such-subject"), "an unknown subject is 404");
-        t.Observe(await op.DeleteAsync($"{Api}/subjects/{alice.Id}"), "DELETE on a subject answers its detail and deletes nothing");
+        t.Observe(await op.DeleteAsync($"{Api}/subjects/{alice.Id}"), "DELETE on a subject that holds a grant is refused with the reason");
         t.Observe(await op.GetAsync($"{Api}/subjects?search=Alice"), "the subject is still there");
         t.Observe(await op.GetAsync($"{Api}/subjects/no-such-subject/grants"), "but its grants are an empty page");
         t.Observe(await op.GetAsync($"{Api}/users"), "user subjects");
@@ -193,10 +193,42 @@ public sealed class FgaDashboardScenarios
     }
 
     /// <summary>
-    /// The dashboard writes grants directly: it validates that the subject, role, and resource
-    /// exist, but not that the role applies to the resource's type, and it creates a new grant
-    /// (with its own random ID) for an identical request instead of reusing the existing one.
-    /// Grant changes write no audit events.
+    /// Deleting a subject: one nothing depends on is deleted and audited; one that holds a grant or
+    /// backs a group membership is refused with the reason. (7.2.1 answered every DELETE with the
+    /// subject's detail and deleted nothing.)
+    /// </summary>
+    [Scenario]
+    [Covers("DELETE /sqlos/admin/fga/api/subjects/{subjectId}")]
+    [Covers("GET /sqlos/admin/fga/api/subjects/{subjectId}")]
+    public async Task The_operator_deletes_a_subject_nothing_depends_on()
+    {
+        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback);
+        var alice = await t.Setup.CreateUserAsync("alice");
+        var fga = new FgaFixture(t);
+        await fga.UserSubjectAsync(alice);
+        await fga.AgentSubjectAsync("agent-retired", "Retired agent");
+        var alpha = await fga.WorkspaceAsync("alpha", "Alpha");
+        var grant = await fga.GrantAsync(alice.Id, alpha, BehaviorLockAuthorization.ReaderRole);
+        await t.SkipAuditAsync();
+        var op = t.Operator;
+
+        t.Observe(await op.DeleteAsync($"{Api}/subjects/no-such-subject"), "an unknown subject is 404");
+        t.Observe(await op.DeleteAsync($"{Api}/subjects/{alice.Id}"), "a subject that holds a grant is refused");
+        t.Observe(await op.DeleteAsync($"{Api}/grants/{grant}"), "revoke the grant");
+        t.Observe(await op.DeleteAsync($"{Api}/subjects/{alice.Id}"), "now nothing depends on it, so it is deleted");
+        t.Observe(await op.GetAsync($"{Api}/subjects/{alice.Id}"), "and is gone");
+        t.Observe(await op.DeleteAsync($"{Api}/subjects/agent-retired"), "an agent nothing depends on is deleted too");
+
+        await t.ObserveAuditAsync("the revocation and the deletions");
+        await t.ApproveAsync();
+    }
+
+    /// <summary>
+    /// The dashboard grants as the operator: it validates that the subject, role, and resource
+    /// exist, but not that the role applies to the resource's type, and refuses an identical
+    /// request, naming the existing grant (7.2.1 created a second grant with its own random ID). A
+    /// body that is not JSON is a validation error (7.2.1 failed with an unhandled exception).
+    /// Grant writes are audited with the writer: the operator or host code (7.2.1 audited none).
     /// </summary>
     [Scenario]
     [Covers("POST /sqlos/admin/fga/api/grants")]
@@ -243,10 +275,10 @@ public sealed class FgaDashboardScenarios
             "grant the reader role on Alpha");
         var second = t.Observe(
             await op.PostJsonAsync($"{Api}/grants", new { subjectId = alice.Id, roleId = BehaviorLockAuthorization.ReaderRole, resourceId = alpha }),
-            "the identical request creates a second grant");
-        t.Observe(await op.GetAsync($"{Api}/grants"), "both grants are listed");
-        // With two identical grants, which one a check's trace names depends on the order the
-        // database returns them in (no ORDER BY), so this step records only the decision.
+            "the identical request is refused, naming the existing grant");
+        t.Observe(await op.GetAsync($"{Api}/grants"), "one grant is listed");
+        // 7.2.1 created two identical grants, and which one a check's trace names depends on the
+        // order the database returns them in (no ORDER BY), so this step records only the decision.
         t.Observe(
             await probe.PostJsonAsync("/__probe/fga/allows", new { subjectId = alice.Id, permissionKey = read, resourceId = alpha }),
             "read is allowed on Alpha");
@@ -255,8 +287,10 @@ public sealed class FgaDashboardScenarios
         t.Observe(await op.DeleteAsync($"{Api}/grants/{first.JsonString("id")}"), "deleting it again is 404");
         t.Observe(
             await probe.PostJsonAsync("/__probe/fga/check", new { subjectId = alice.Id, permissionKey = read, resourceId = alpha }),
-            "the duplicate still allows read");
-        t.Observe(await op.DeleteAsync($"{Api}/grants/{second.JsonString("id")}"), "delete the duplicate");
+            "with it gone, read is denied");
+        // 7.2.1 answered the identical request with a second grant; 8.0 names the first one.
+        var secondId = second.Json?["id"]?.GetValue<string>() ?? second.JsonString("grantId");
+        t.Observe(await op.DeleteAsync($"{Api}/grants/{secondId}"), "the grant the refusal named is already deleted");
         t.Observe(
             await probe.PostJsonAsync("/__probe/fga/check", new { subjectId = alice.Id, permissionKey = read, resourceId = alpha }),
             "now read is denied");
@@ -274,7 +308,7 @@ public sealed class FgaDashboardScenarios
             await probe.PostJsonAsync("/__probe/fga/check", new { subjectId = alice.Id, permissionKey = read, resourceId = alpha }),
             "a top-level workspace is not under the root resource and does not");
 
-        await t.ObserveAuditAsync("grant writes are not audited");
+        await t.ObserveAuditAsync("grant writes are audited, naming the operator or host code");
         await t.ApproveAsync();
     }
 
@@ -405,12 +439,14 @@ public sealed class FgaDashboardScenarios
             "a same-origin Referer is accepted");
         var viaFetchMetadata = t.Observe(
             await op.PostJsonAsync($"{Api}/grants", grant, options => options.WithoutCredentials().Header("X-SqlOS-Request", "1").Header("Sec-Fetch-Site", "same-origin")),
-            "so is Sec-Fetch-Site: same-origin");
+            "so is Sec-Fetch-Site: same-origin, which reaches the grant the request repeats");
+        // 7.2.1 created a second, identical grant here; 8.0 refuses it and names the first one.
+        var grantId = viaFetchMetadata.Json?["id"]?.GetValue<string>() ?? viaFetchMetadata.JsonString("grantId");
         t.Observe(
-            await op.DeleteAsync($"{Api}/grants/{viaFetchMetadata.JsonString("id")}", options => options.WithoutCredentials()),
+            await op.DeleteAsync($"{Api}/grants/{grantId}", options => options.WithoutCredentials()),
             "a delete without the proof is refused");
         t.Observe(
-            await op.DeleteAsync($"{Api}/grants/{viaFetchMetadata.JsonString("id")}"),
+            await op.DeleteAsync($"{Api}/grants/{grantId}"),
             "a delete with the proof and the dashboard's Origin");
         t.Observe(
             await op.PostJsonAsync($"{Api}/trace", new { subjectId = alice.Id, resourceId = alpha, permissionKey = BehaviorLockAuthorization.ReadPermission }, options => options.WithoutCredentials()),

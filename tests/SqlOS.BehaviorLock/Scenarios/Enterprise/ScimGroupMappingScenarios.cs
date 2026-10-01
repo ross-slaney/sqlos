@@ -224,17 +224,17 @@ public sealed class ScimGroupMappingScenarios
     }
 
     /// <summary>
-    /// Known defect #448 (7.2.1): SCIM creates its own FGA subject for a user (<c>subj_…</c> with
-    /// <c>ExternalRef</c> set to the user ID) instead of the subject keyed by the user ID that the
-    /// FGA guides provision, so grants a SCIM group mapping creates are invisible to an access
-    /// check by user ID even when the host provisioned that subject first.
+    /// #448: SCIM keys a user's FGA subject by the user ID, the subject the FGA guides provision, and
+    /// reuses it when the host provisions it too, so grants a SCIM group mapping creates reach an
+    /// access check by user ID. (7.2.1 created a second subject, <c>subj_…</c> with
+    /// <c>ExternalRef</c> set to the user ID, which a check by user ID never saw.)
     /// </summary>
     [Scenario]
     [Covers("POST /scim/v2/Groups")]
     [Covers("POST /__probe/fga/subjects")]
     [Covers("GET /sqlos/admin/fga/api/users")]
     [Covers("POST /__probe/fga/check")]
-    public async Task A_directory_user_is_granted_through_a_second_fga_subject_CurrentBehavior_KnownDefect_448()
+    public async Task A_directory_user_is_granted_through_the_subject_keyed_by_their_user_id()
     {
         await using var t = await Transcript.StartAsync(HostProfiles.EnterpriseScimPath);
         var acme = await t.Setup.CreateOrganizationAsync("acme");
@@ -255,22 +255,22 @@ public sealed class ScimGroupMappingScenarios
 
         t.Observe(
             await probe.PostJsonAsync("/__probe/fga/subjects", new { type = "user", subjectId = ann, displayName = "Ann Archer (app)", organizationId = acme.Id }),
-            "the host provisions Ann's FGA subject by her user ID, as the FGA guides teach");
+            "the host provisions Ann's FGA subject by her user ID, as the FGA guides teach: the subject SCIM keyed by it");
         t.Observe(
             await directory.PostAsync($"{Scim.Root}/Groups", Scim.Group("Engineering", "directory-engineering", ann), connection.Token),
             "the directory pushes Engineering with Ann");
         var subjects = t.Observe(
             await t.Operator.GetAsync("/sqlos/admin/fga/api/users?search=Ann"),
-            "dashboard: Ann now has two FGA user subjects");
+            "dashboard: Ann has one FGA user subject");
         var scimSubject = subjects.JsonString("data.0.subjectId");
         t.Scrub(scimSubject, "subj", "ann-scim");
 
         t.Observe(
             await probe.PostJsonAsync("/__probe/fga/check", new { subjectId = ann, permissionKey = BehaviorLockAuthorization.ReadPermission, resourceId = AcmeProjects }),
-            "a check by Ann's user ID does not see the mapped grant");
+            "a check by Ann's user ID sees the mapped grant");
         t.Observe(
             await probe.PostJsonAsync("/__probe/fga/check", new { subjectId = scimSubject, permissionKey = BehaviorLockAuthorization.ReadPermission, resourceId = AcmeProjects }),
-            "a check by the subject SCIM created does");
+            "as does a check by the subject the dashboard lists, the same one");
 
         await t.ObserveAuditAsync("group and grant events");
         await t.ApproveAsync();

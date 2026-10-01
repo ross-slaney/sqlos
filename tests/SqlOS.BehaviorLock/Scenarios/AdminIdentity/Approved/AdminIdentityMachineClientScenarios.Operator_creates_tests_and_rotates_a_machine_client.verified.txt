@@ -61,6 +61,93 @@ profile: multi-app
 
 ## audit: creation is audited
   - {
+      "action": "fga.subject.created",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.subject.created",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "subjectId": "{sub#1}",
+        "subjectType": "service_account"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{sub#1}",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "fga.grant.created",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.grant.created",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "effectiveFrom": null,
+        "effectiveTo": null,
+        "grantId": "{grant#1}",
+        "resourceId": "workspace::alpha",
+        "roleId": "workspace_reader",
+        "subjectId": "{sub#1}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grant#1}",
+          "type": "fga_grant"
+        },
+        {
+          "displayName": null,
+          "id": "{sub#1}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "workspace::alpha",
+          "type": "fga_resource"
+        },
+        {
+          "displayName": null,
+          "id": "workspace_reader",
+          "type": "fga_role"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
       "action": "machine_client.created",
       "actor": {
         "displayName": null,
@@ -78,7 +165,7 @@ profile: multi-app
       },
       "correlationId": null,
       "eventType": "machine_client.created",
-      "id": "{evt#1}",
+      "id": "{evt#3}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -252,7 +339,7 @@ profile: multi-app
       },
       "correlationId": null,
       "eventType": "machine_client.credential_test_succeeded",
-      "id": "{evt#2}",
+      "id": "{evt#4}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -289,7 +376,7 @@ profile: multi-app
       },
       "correlationId": null,
       "eventType": "machine_client.credential_test_failed",
-      "id": "{evt#3}",
+      "id": "{evt#5}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -324,7 +411,7 @@ profile: multi-app
       },
       "correlationId": null,
       "eventType": "machine_client.credential_test_failed",
-      "id": "{evt#4}",
+      "id": "{evt#6}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -359,7 +446,7 @@ profile: multi-app
       },
       "correlationId": null,
       "eventType": "machine_client.credential_test_failed",
-      "id": "{evt#5}",
+      "id": "{evt#7}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -614,7 +701,7 @@ profile: multi-app
       },
       "correlationId": null,
       "eventType": "oauth.client_authentication.succeeded",
-      "id": "{evt#6}",
+      "id": "{evt#8}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
@@ -647,7 +734,7 @@ profile: multi-app
       },
       "correlationId": null,
       "eventType": "oauth.client_credentials.issued",
-      "id": "{evt#7}",
+      "id": "{evt#9}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
@@ -681,7 +768,7 @@ profile: multi-app
       },
       "correlationId": null,
       "eventType": "machine_client.secret_rotated",
-      "id": "{evt#8}",
+      "id": "{evt#10}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -715,7 +802,7 @@ profile: multi-app
       },
       "correlationId": null,
       "eventType": "oauth.client_authentication.failed",
-      "id": "{evt#9}",
+      "id": "{evt#11}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
@@ -748,7 +835,7 @@ profile: multi-app
       },
       "correlationId": null,
       "eventType": "oauth.client_authentication.succeeded",
-      "id": "{evt#10}",
+      "id": "{evt#12}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
@@ -781,7 +868,7 @@ profile: multi-app
       },
       "correlationId": null,
       "eventType": "oauth.client_credentials.issued",
-      "id": "{evt#11}",
+      "id": "{evt#13}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {

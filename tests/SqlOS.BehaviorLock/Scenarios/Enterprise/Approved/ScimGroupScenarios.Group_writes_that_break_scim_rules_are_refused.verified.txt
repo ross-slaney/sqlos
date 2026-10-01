@@ -512,3 +512,43 @@ profile: enterprise-scim-path
       "userAgent": null,
       "userId": null
     }
+  - {
+      "action": "fga.group.member_removed",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.group.member_removed",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "groupId": "{grp:engineering}",
+        "groupSubjectId": "{subj#1}",
+        "memberSubjectId": "{usr:ann}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{subj#1}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "{usr:ann}",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }

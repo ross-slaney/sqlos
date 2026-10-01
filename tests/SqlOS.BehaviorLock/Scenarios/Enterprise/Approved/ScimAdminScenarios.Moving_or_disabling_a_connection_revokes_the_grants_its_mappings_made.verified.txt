@@ -224,6 +224,58 @@ profile: enterprise-scim-path
       "userId": null
     }
   - {
+      "action": "fga.grant.revoked",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.grant.revoked",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "grantId": "{grant#1}",
+        "reason": "grant_boundary_changed",
+        "resourceId": "workspace::acme-finance",
+        "roleId": "workspace_reader",
+        "subjectId": "{subj#1}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grant#1}",
+          "type": "fga_grant"
+        },
+        {
+          "displayName": null,
+          "id": "{subj#1}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "workspace::acme-finance",
+          "type": "fga_resource"
+        },
+        {
+          "displayName": null,
+          "id": "workspace_reader",
+          "type": "fga_role"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
       "action": "scim.connection.grant_boundary_changed",
       "actor": {
         "displayName": null,
@@ -241,7 +293,7 @@ profile: enterprise-scim-path
       },
       "correlationId": null,
       "eventType": "scim.connection.grant_boundary_changed",
-      "id": "{evt#2}",
+      "id": "{evt#3}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -277,7 +329,7 @@ profile: enterprise-scim-path
       },
       "correlationId": null,
       "eventType": "scim.connection.enabled",
-      "id": "{evt#3}",
+      "id": "{evt#4}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": null,
@@ -302,7 +354,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.grant.revoked",
-      "id": "{evt#4}",
+      "id": "{evt#5}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -344,6 +396,58 @@ profile: enterprise-scim-path
       "userId": null
     }
   - {
+      "action": "fga.grant.revoked",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.grant.revoked",
+      "id": "{evt#6}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "grantId": "{grant#2}",
+        "reason": null,
+        "resourceId": "workspace::acme-projects",
+        "roleId": "workspace_reader",
+        "subjectId": "{subj#2}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grant#2}",
+          "type": "fga_grant"
+        },
+        {
+          "displayName": null,
+          "id": "{subj#2}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "workspace::acme-projects",
+          "type": "fga_resource"
+        },
+        {
+          "displayName": null,
+          "id": "workspace_reader",
+          "type": "fga_role"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
       "action": "scim.connection.disabled",
       "actor": {
         "displayName": null,
@@ -361,7 +465,7 @@ profile: enterprise-scim-path
       },
       "correlationId": null,
       "eventType": "scim.connection.disabled",
-      "id": "{evt#5}",
+      "id": "{evt#7}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": null,

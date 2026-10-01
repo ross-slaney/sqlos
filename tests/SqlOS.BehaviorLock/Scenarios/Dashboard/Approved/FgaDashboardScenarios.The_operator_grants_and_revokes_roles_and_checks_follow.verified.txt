@@ -16,11 +16,40 @@ profile: dashboard-callback
       "error": "subjectId, roleId, and resourceId are required"
     }
 
-# a body that is not JSON: no response, the request fails with an unhandled JsonException
+## 2. operator: a body that is not JSON
+> POST /sqlos/admin/fga/api/grants
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {"subjectId":
+< 400 Bad Request
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "The request body is not valid JSON."
+    }
 
-# a window that is not a date: no response, the request fails with an unhandled JsonException
+## 3. operator: a window that is not a date
+> POST /sqlos/admin/fga/api/grants
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "effectiveFrom": "next tuesday",
+>     "resourceId": "workspace::alpha",
+>     "roleId": "workspace_reader",
+>     "subjectId": "{usr#1}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "The request body is not valid JSON."
+    }
 
-## 2. operator: an unknown subject is refused
+## 4. operator: an unknown subject is refused
 > POST /sqlos/admin/fga/api/grants
 > Content-Type: application/json; charset=utf-8
 > X-BehaviorLock-Operator: behavior-lock-operator
@@ -38,7 +67,7 @@ profile: dashboard-callback
       "error": "Subject not found"
     }
 
-## 3. operator: an unknown role is refused
+## 5. operator: an unknown role is refused
 > POST /sqlos/admin/fga/api/grants
 > Content-Type: application/json; charset=utf-8
 > X-BehaviorLock-Operator: behavior-lock-operator
@@ -56,7 +85,7 @@ profile: dashboard-callback
       "error": "Role not found"
     }
 
-## 4. operator: an unknown resource is refused
+## 6. operator: an unknown resource is refused
 > POST /sqlos/admin/fga/api/grants
 > Content-Type: application/json; charset=utf-8
 > X-BehaviorLock-Operator: behavior-lock-operator
@@ -74,7 +103,7 @@ profile: dashboard-callback
       "error": "Resource not found"
     }
 
-## 5. operator: the role key is not accepted as a resource ID
+## 7. operator: the role key is not accepted as a resource ID
 > POST /sqlos/admin/fga/api/grants
 > Content-Type: application/json; charset=utf-8
 > X-BehaviorLock-Operator: behavior-lock-operator
@@ -92,7 +121,7 @@ profile: dashboard-callback
       "error": "Resource not found"
     }
 
-## 6. operator: grant the reader role on Alpha
+## 8. operator: grant the reader role on Alpha
 > POST /sqlos/admin/fga/api/grants
 > Content-Type: application/json; charset=utf-8
 > X-BehaviorLock-Operator: behavior-lock-operator
@@ -119,7 +148,7 @@ profile: dashboard-callback
       "subjectName": "Alice"
     }
 
-## 7. operator: the identical request creates a second grant
+## 9. operator: the identical request is refused, naming the existing grant
 > POST /sqlos/admin/fga/api/grants
 > Content-Type: application/json; charset=utf-8
 > X-BehaviorLock-Operator: behavior-lock-operator
@@ -128,25 +157,17 @@ profile: dashboard-callback
 >     "roleId": "workspace_reader",
 >     "subjectId": "{usr#1}"
 >   }
-< 201 Created
+< 409 Conflict
 < Content-Type: application/json
 < Referrer-Policy: same-origin
 < X-Content-Type-Options: nosniff
 < X-Frame-Options: DENY
     {
-      "createdAt": "{datetime:utc-z}",
-      "effectiveFrom": null,
-      "effectiveTo": null,
-      "id": "{grant#2}",
-      "resourceId": "workspace::alpha",
-      "resourceName": "Alpha",
-      "roleId": "workspace_reader",
-      "roleName": "Workspace reader",
-      "subjectId": "{usr#1}",
-      "subjectName": "Alice"
+      "error": "An identical grant already exists.",
+      "grantId": "{grant#1}"
     }
 
-## 8. operator: both grants are listed
+## 10. operator: one grant is listed
 > GET /sqlos/admin/fga/api/grants
 > X-BehaviorLock-Operator: behavior-lock-operator
 < 200 OK
@@ -156,18 +177,6 @@ profile: dashboard-callback
 < X-Frame-Options: DENY
     {
       "data": [
-        {
-          "createdAt": "{datetime:utc-z}",
-          "effectiveFrom": null,
-          "effectiveTo": null,
-          "id": "{grant#2}",
-          "resourceId": "workspace::alpha",
-          "resourceName": "Alpha",
-          "roleId": "workspace_reader",
-          "roleName": "Workspace reader",
-          "subjectId": "{usr#1}",
-          "subjectName": "Alice"
-        },
         {
           "createdAt": "{datetime:utc-z}",
           "effectiveFrom": null,
@@ -186,7 +195,7 @@ profile: dashboard-callback
       "pageSize": 25
     }
 
-## 9. probe: read is allowed on Alpha
+## 11. probe: read is allowed on Alpha
 > POST /__probe/fga/allows
 > Content-Type: application/json; charset=utf-8
 >   {
@@ -200,7 +209,7 @@ profile: dashboard-callback
       "allowed": true
     }
 
-## 10. operator: delete the first grant
+## 12. operator: delete the first grant
 > DELETE /sqlos/admin/fga/api/grants/{grant#1}
 > X-BehaviorLock-Operator: behavior-lock-operator
 < 204 No Content
@@ -209,7 +218,7 @@ profile: dashboard-callback
 < X-Content-Type-Options: nosniff
 < X-Frame-Options: DENY
 
-## 11. operator: deleting it again is 404
+## 13. operator: deleting it again is 404
 > DELETE /sqlos/admin/fga/api/grants/{grant#1}
 > X-BehaviorLock-Operator: behavior-lock-operator
 < 404 Not Found
@@ -221,87 +230,7 @@ profile: dashboard-callback
       "error": "Grant not found"
     }
 
-## 12. probe: the duplicate still allows read
-> POST /__probe/fga/check
-> Content-Type: application/json; charset=utf-8
->   {
->     "permissionKey": "workspace.read",
->     "resourceId": "workspace::alpha",
->     "subjectId": "{usr#1}"
->   }
-< 200 OK
-< Content-Type: application/json; charset=utf-8
-    {
-      "allowed": true,
-      "error": null,
-      "trace": [
-        {
-          "detail": "Checking access to Alpha (workspace)",
-          "grantId": null,
-          "resourceId": "workspace::alpha",
-          "resourceName": "Alpha",
-          "roleName": null,
-          "step": "Target Resource",
-          "subjectName": null
-        },
-        {
-          "detail": "Looking for permission: Read workspace",
-          "grantId": null,
-          "resourceId": null,
-          "resourceName": null,
-          "roleName": null,
-          "step": "Permission",
-          "subjectName": null
-        },
-        {
-          "detail": "Subject \"Alice\" + 0 group membership(s)",
-          "grantId": null,
-          "resourceId": null,
-          "resourceName": null,
-          "roleName": null,
-          "step": "Subject Resolution",
-          "subjectName": "Alice"
-        },
-        {
-          "detail": "Checking 1 resource(s) in hierarchy",
-          "grantId": null,
-          "resourceId": null,
-          "resourceName": null,
-          "roleName": null,
-          "step": "Resource Path",
-          "subjectName": null
-        },
-        {
-          "detail": "[Workspace] Alpha",
-          "grantId": null,
-          "resourceId": "workspace::alpha",
-          "resourceName": "Alpha",
-          "roleName": null,
-          "step": "Checking Resource",
-          "subjectName": null
-        },
-        {
-          "detail": "Role \"Workspace reader\" provides permission \"Read workspace\" via grant at Alpha",
-          "grantId": "{grant#2}",
-          "resourceId": "workspace::alpha",
-          "resourceName": "Alpha",
-          "roleName": "Workspace reader",
-          "step": "Access Granted",
-          "subjectName": "Alice"
-        }
-      ]
-    }
-
-## 13. operator: delete the duplicate
-> DELETE /sqlos/admin/fga/api/grants/{grant#2}
-> X-BehaviorLock-Operator: behavior-lock-operator
-< 204 No Content
-< Content-Type: application/json
-< Referrer-Policy: same-origin
-< X-Content-Type-Options: nosniff
-< X-Frame-Options: DENY
-
-## 14. probe: now read is denied
+## 14. probe: with it gone, read is denied
 > POST /__probe/fga/check
 > Content-Type: application/json; charset=utf-8
 >   {
@@ -372,7 +301,90 @@ profile: dashboard-callback
       ]
     }
 
-## 15. operator: a workspace role can be granted on the root resource
+## 15. operator: the grant the refusal named is already deleted
+> DELETE /sqlos/admin/fga/api/grants/{grant#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 404 Not Found
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "Grant not found"
+    }
+
+## 16. probe: now read is denied
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::alpha",
+>     "subjectId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": false,
+      "error": null,
+      "trace": [
+        {
+          "detail": "Checking access to Alpha (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Read workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"Alice\" + 0 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": "Alice"
+        },
+        {
+          "detail": "Checking 1 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Alpha",
+          "grantId": null,
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "No matching grants found that provide permission \"Read workspace\"",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Access Denied",
+          "subjectName": null
+        }
+      ]
+    }
+
+## 17. operator: a workspace role can be granted on the root resource
 > POST /sqlos/admin/fga/api/grants
 > Content-Type: application/json; charset=utf-8
 > X-BehaviorLock-Operator: behavior-lock-operator
@@ -390,7 +402,7 @@ profile: dashboard-callback
       "createdAt": "{datetime:utc-z}",
       "effectiveFrom": null,
       "effectiveTo": null,
-      "id": "{grant#3}",
+      "id": "{grant#2}",
       "resourceId": "root",
       "resourceName": "Root",
       "roleId": "workspace_reader",
@@ -399,7 +411,7 @@ profile: dashboard-callback
       "subjectName": "Alice"
     }
 
-## 16. probe: the root is not a workspace, so the permission does not apply there
+## 18. probe: the root is not a workspace, so the permission does not apply there
 > POST /__probe/fga/check
 > Content-Type: application/json; charset=utf-8
 >   {
@@ -434,7 +446,7 @@ profile: dashboard-callback
       ]
     }
 
-## 17. probe: but a workspace under the root inherits the grant
+## 19. probe: but a workspace under the root inherits the grant
 > POST /__probe/fga/check
 > Content-Type: application/json; charset=utf-8
 >   {
@@ -504,7 +516,7 @@ profile: dashboard-callback
         },
         {
           "detail": "Role \"Workspace reader\" provides permission \"Read workspace\" via grant at Root",
-          "grantId": "{grant#3}",
+          "grantId": "{grant#2}",
           "resourceId": "root",
           "resourceName": "Root",
           "roleName": "Workspace reader",
@@ -514,7 +526,7 @@ profile: dashboard-callback
       ]
     }
 
-## 18. probe: a top-level workspace is not under the root resource and does not
+## 20. probe: a top-level workspace is not under the root resource and does not
 > POST /__probe/fga/check
 > Content-Type: application/json; charset=utf-8
 >   {
@@ -585,5 +597,214 @@ profile: dashboard-callback
       ]
     }
 
-## audit: grant writes are not audited
-  (no new events)
+## audit: grant writes are audited, naming the operator or host code
+  - {
+      "action": "fga.subject.created",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "application"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.subject.created",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "subjectId": "{usr#1}",
+        "subjectType": "user"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr#1}",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "fga.grant.created",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": "{trace#1}",
+        "sessionId": null,
+        "userAgent": ""
+      },
+      "correlationId": null,
+      "eventType": "fga.grant.created",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "effectiveFrom": null,
+        "effectiveTo": null,
+        "grantId": "{grant#1}",
+        "resourceId": "workspace::alpha",
+        "roleId": "workspace_reader",
+        "subjectId": "{usr#1}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": "{trace#1}",
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grant#1}",
+          "type": "fga_grant"
+        },
+        {
+          "displayName": null,
+          "id": "{usr#1}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "workspace::alpha",
+          "type": "fga_resource"
+        },
+        {
+          "displayName": null,
+          "id": "workspace_reader",
+          "type": "fga_role"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "fga.grant.revoked",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": "{trace#2}",
+        "sessionId": null,
+        "userAgent": ""
+      },
+      "correlationId": null,
+      "eventType": "fga.grant.revoked",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "grantId": "{grant#1}",
+        "reason": null,
+        "resourceId": "workspace::alpha",
+        "roleId": "workspace_reader",
+        "subjectId": "{usr#1}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": "{trace#2}",
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grant#1}",
+          "type": "fga_grant"
+        },
+        {
+          "displayName": null,
+          "id": "{usr#1}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "workspace::alpha",
+          "type": "fga_resource"
+        },
+        {
+          "displayName": null,
+          "id": "workspace_reader",
+          "type": "fga_role"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "fga.grant.created",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": "{trace#3}",
+        "sessionId": null,
+        "userAgent": ""
+      },
+      "correlationId": null,
+      "eventType": "fga.grant.created",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "effectiveFrom": null,
+        "effectiveTo": null,
+        "grantId": "{grant#2}",
+        "resourceId": "root",
+        "roleId": "workspace_reader",
+        "subjectId": "{usr#1}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": "{trace#3}",
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grant#2}",
+          "type": "fga_grant"
+        },
+        {
+          "displayName": null,
+          "id": "{usr#1}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "root",
+          "type": "fga_resource"
+        },
+        {
+          "displayName": null,
+          "id": "workspace_reader",
+          "type": "fga_role"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }

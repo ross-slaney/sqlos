@@ -824,6 +824,40 @@ profile: enterprise-scim-path
       "userId": null
     }
   - {
+      "action": "fga.subject.created",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.subject.created",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "subjectId": "{usr:ann}",
+        "subjectType": "user"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:ann}",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
       "action": "scim.user.created",
       "actor": {
         "displayName": null,
@@ -835,7 +869,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.user.created",
-      "id": "{evt#2}",
+      "id": "{evt#3}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -878,6 +912,40 @@ profile: enterprise-scim-path
       "userId": null
     }
   - {
+      "action": "fga.subject.created",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.subject.created",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "subjectId": "{usr:bob}",
+        "subjectType": "user"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:bob}",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
       "action": "scim.user.created",
       "actor": {
         "displayName": null,
@@ -889,7 +957,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.user.created",
-      "id": "{evt#3}",
+      "id": "{evt#5}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -926,6 +994,40 @@ profile: enterprise-scim-path
           "displayName": null,
           "id": "{usr#1}",
           "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "fga.subject.created",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.subject.created",
+      "id": "{evt#6}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "subjectId": "{usr#1}",
+        "subjectType": "user"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr#1}",
+          "type": "fga_subject"
         }
       ],
       "userAgent": null,

@@ -37,6 +37,7 @@ GET /sqlos/admin/fga/api/resources/{resourceId}/grants  direct grants on a resou
 GET /sqlos/admin/fga/api/subjects  subject list
 GET /sqlos/admin/fga/api/subjects/{subjectId}  subject detail
 GET /sqlos/admin/fga/api/subjects/{subjectId}/grants  a subject's grants
+DELETE /sqlos/admin/fga/api/subjects/{subjectId}  delete a subject nothing depends on
 GET /sqlos/admin/fga/api/users  FGA user subjects
 GET /sqlos/admin/fga/api/agents  FGA agent subjects
 GET /sqlos/admin/fga/api/service-accounts  FGA service-account subjects

@@ -704,6 +704,40 @@ profile: enterprise-scim-path
       "userId": null
     }
   - {
+      "action": "fga.subject.created",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.subject.created",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "subjectId": "{usr:judy}",
+        "subjectType": "user"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:judy}",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
       "action": "scim.user.updated",
       "actor": {
         "displayName": null,
@@ -715,7 +749,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.user.updated",
-      "id": "{evt#2}",
+      "id": "{evt#3}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {

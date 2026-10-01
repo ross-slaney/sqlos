@@ -5596,12 +5596,22 @@ namespace SqlOS.Extensions
         public static System.Threading.Tasks.Task DeleteResourceAsync(this SqlOS.Fga.Interfaces.ISqlOSFgaDbContext context, string resourceId, System.Threading.CancellationToken cancellationToken = default) { }
         public static System.Threading.Tasks.Task<SqlOS.Fga.Models.SqlOSFgaGrant> GrantRoleAsync(this SqlOS.Fga.Interfaces.ISqlOSFgaDbContext context, string subjectId, SqlOS.Fga.Interfaces.ISqlOSResourceEntity resource, string roleKeyOrId, System.Threading.CancellationToken cancellationToken = default) { }
         public static System.Threading.Tasks.Task<SqlOS.Fga.Models.SqlOSFgaGrant> GrantRoleAsync(this SqlOS.Fga.Interfaces.ISqlOSFgaDbContext context, string subjectId, string resourceId, string roleKeyOrId, System.Threading.CancellationToken cancellationToken = default) { }
+        public static System.Threading.Tasks.Task<SqlOS.Fga.Models.SqlOSFgaGrant> GrantRoleAsync(this SqlOS.Fga.Interfaces.ISqlOSFgaDbContext context, string subjectId, string resourceId, string roleKeyOrId, SqlOS.Extensions.SqlOSFgaGrantOptions options, System.Threading.CancellationToken cancellationToken = default) { }
         public static System.Threading.Tasks.Task<SqlOS.Fga.Models.SqlOSFgaAgent> ProvisionAgentSubjectAsync(this SqlOS.Fga.Interfaces.ISqlOSFgaDbContext context, string subjectId, string displayName, string? agentType = null, string? description = null, string? organizationId = null, string? externalRef = null, System.Threading.CancellationToken cancellationToken = default) { }
+        public static System.Threading.Tasks.Task<SqlOS.Fga.Models.SqlOSFgaUserGroup> ProvisionGroupSubjectAsync(this SqlOS.Fga.Interfaces.ISqlOSFgaDbContext context, string subjectId, string name, string? description = null, string? groupType = null, string? organizationId = null, string? externalRef = null, System.Threading.CancellationToken cancellationToken = default) { }
         public static System.Threading.Tasks.Task<SqlOS.Fga.Models.SqlOSFgaResource> ProvisionResourceWithIdAsync(this SqlOS.Fga.Interfaces.ISqlOSFgaDbContext context, string resourceId, string resourceTypeId, string name, string? parentResourceId = null, string? description = null, bool? isActive = default, System.Threading.CancellationToken cancellationToken = default) { }
         public static System.Threading.Tasks.Task<SqlOS.Fga.Models.SqlOSFgaServiceAccount> ProvisionServiceAccountSubjectAsync(this SqlOS.Fga.Interfaces.ISqlOSFgaDbContext context, string subjectId, string displayName, string clientId, string clientSecretHash, string? description = null, System.DateTime? expiresAt = default, string? organizationId = null, string? externalRef = null, System.Threading.CancellationToken cancellationToken = default) { }
         public static System.Threading.Tasks.Task<SqlOS.Fga.Models.SqlOSFgaUser> ProvisionUserSubjectAsync(this SqlOS.Fga.Interfaces.ISqlOSFgaDbContext context, string subjectId, string displayName, string? email = null, string? organizationId = null, string? externalRef = null, bool? isActive = default, System.Threading.CancellationToken cancellationToken = default) { }
+        public static System.Threading.Tasks.Task RecordSubjectActivityAsync(this SqlOS.Fga.Interfaces.ISqlOSFgaDbContext context, string subjectId, System.Threading.CancellationToken cancellationToken = default) { }
         public static System.Threading.Tasks.Task RevokeRoleAsync(this SqlOS.Fga.Interfaces.ISqlOSFgaDbContext context, string subjectId, SqlOS.Fga.Interfaces.ISqlOSResourceEntity resource, string roleKeyOrId, System.Threading.CancellationToken cancellationToken = default) { }
         public static System.Threading.Tasks.Task RevokeRoleAsync(this SqlOS.Fga.Interfaces.ISqlOSFgaDbContext context, string subjectId, string resourceId, string roleKeyOrId, System.Threading.CancellationToken cancellationToken = default) { }
+    }
+    public sealed class SqlOSFgaGrantOptions : System.IEquatable<SqlOS.Extensions.SqlOSFgaGrantOptions>
+    {
+        public SqlOSFgaGrantOptions() { }
+        public string? Description { get; init; }
+        public System.DateTime? EffectiveFrom { get; init; }
+        public System.DateTime? EffectiveTo { get; init; }
     }
     public static class WebApplicationBuilderExtensions
     {
@@ -5754,33 +5764,31 @@ namespace SqlOS.Fga.Models
         public SqlOSFgaAccessibleResource() { }
         public string Id { get; set; }
     }
-    public class SqlOSFgaAgent
+    public sealed class SqlOSFgaAgent
     {
-        public SqlOSFgaAgent() { }
-        public string? AgentType { get; set; }
-        public System.DateTime CreatedAt { get; set; }
-        public string? Description { get; set; }
-        public string Id { get; set; }
-        public System.DateTime? LastRunAt { get; set; }
-        public SqlOS.Fga.Models.SqlOSFgaSubject? Subject { get; set; }
-        public string SubjectId { get; set; }
-        public System.DateTime UpdatedAt { get; set; }
+        public string? AgentType { get; }
+        public System.DateTime CreatedAt { get; }
+        public string? Description { get; }
+        public string Id { get; }
+        public System.DateTime? LastRunAt { get; }
+        public SqlOS.Fga.Models.SqlOSFgaSubject? Subject { get; }
+        public string SubjectId { get; }
+        public System.DateTime UpdatedAt { get; }
     }
-    public class SqlOSFgaGrant
+    public sealed class SqlOSFgaGrant
     {
-        public SqlOSFgaGrant() { }
-        public System.DateTime CreatedAt { get; set; }
-        public string? Description { get; set; }
-        public System.DateTime? EffectiveFrom { get; set; }
-        public System.DateTime? EffectiveTo { get; set; }
-        public string Id { get; set; }
-        public SqlOS.Fga.Models.SqlOSFgaResource? Resource { get; set; }
-        public string ResourceId { get; set; }
-        public SqlOS.Fga.Models.SqlOSFgaRole? Role { get; set; }
-        public string RoleId { get; set; }
-        public SqlOS.Fga.Models.SqlOSFgaSubject? Subject { get; set; }
-        public string SubjectId { get; set; }
-        public System.DateTime UpdatedAt { get; set; }
+        public System.DateTime CreatedAt { get; }
+        public string? Description { get; }
+        public System.DateTime? EffectiveFrom { get; }
+        public System.DateTime? EffectiveTo { get; }
+        public string Id { get; }
+        public SqlOS.Fga.Models.SqlOSFgaResource? Resource { get; }
+        public string ResourceId { get; }
+        public SqlOS.Fga.Models.SqlOSFgaRole? Role { get; }
+        public string RoleId { get; }
+        public SqlOS.Fga.Models.SqlOSFgaSubject? Subject { get; }
+        public string SubjectId { get; }
+        public System.DateTime UpdatedAt { get; }
     }
     public class SqlOSFgaGrantTrace
     {
@@ -5798,16 +5806,15 @@ namespace SqlOS.Fga.Models
         public string SubjectId { get; set; }
         public string? ViaGroupName { get; set; }
     }
-    public class SqlOSFgaPermission
+    public sealed class SqlOSFgaPermission
     {
-        public SqlOSFgaPermission() { }
-        public string? Description { get; set; }
-        public string Id { get; set; }
-        public string Key { get; set; }
-        public string Name { get; set; }
-        public SqlOS.Fga.Models.SqlOSFgaResourceType? ResourceType { get; set; }
-        public string? ResourceTypeId { get; set; }
-        public System.Collections.Generic.ICollection<SqlOS.Fga.Models.SqlOSFgaRolePermission> RolePermissions { get; set; }
+        public string? Description { get; }
+        public string Id { get; }
+        public string Key { get; }
+        public string Name { get; }
+        public SqlOS.Fga.Models.SqlOSFgaResourceType? ResourceType { get; }
+        public string? ResourceTypeId { get; }
+        public System.Collections.Generic.ICollection<SqlOS.Fga.Models.SqlOSFgaRolePermission> RolePermissions { get; }
     }
     public class SqlOSFgaPermissionAssignmentTrace
     {
@@ -5816,21 +5823,20 @@ namespace SqlOS.Fga.Models
         public string PermissionName { get; set; }
         public bool UsedForDecision { get; set; }
     }
-    public class SqlOSFgaResource
+    public sealed class SqlOSFgaResource
     {
-        public SqlOSFgaResource() { }
-        public System.Collections.Generic.ICollection<SqlOS.Fga.Models.SqlOSFgaResource> Children { get; set; }
-        public System.DateTime CreatedAt { get; set; }
-        public string? Description { get; set; }
-        public System.Collections.Generic.ICollection<SqlOS.Fga.Models.SqlOSFgaGrant> Grants { get; set; }
-        public string Id { get; set; }
-        public bool IsActive { get; set; }
-        public string Name { get; set; }
-        public SqlOS.Fga.Models.SqlOSFgaResource? Parent { get; set; }
-        public string? ParentId { get; set; }
-        public SqlOS.Fga.Models.SqlOSFgaResourceType? ResourceType { get; set; }
-        public string ResourceTypeId { get; set; }
-        public System.DateTime UpdatedAt { get; set; }
+        public System.Collections.Generic.ICollection<SqlOS.Fga.Models.SqlOSFgaResource> Children { get; }
+        public System.DateTime CreatedAt { get; }
+        public string? Description { get; }
+        public System.Collections.Generic.ICollection<SqlOS.Fga.Models.SqlOSFgaGrant> Grants { get; }
+        public string Id { get; }
+        public bool IsActive { get; }
+        public string Name { get; }
+        public SqlOS.Fga.Models.SqlOSFgaResource? Parent { get; }
+        public string? ParentId { get; }
+        public SqlOS.Fga.Models.SqlOSFgaResourceType? ResourceType { get; }
+        public string ResourceTypeId { get; }
+        public System.DateTime UpdatedAt { get; }
     }
     public class SqlOSFgaResourceAccessTrace
     {
@@ -5863,33 +5869,30 @@ namespace SqlOS.Fga.Models
         public string ResourceId { get; set; }
         public string ResourceType { get; set; }
     }
-    public class SqlOSFgaResourceType
+    public sealed class SqlOSFgaResourceType
     {
-        public SqlOSFgaResourceType() { }
-        public string? Description { get; set; }
-        public string Id { get; set; }
-        public string Name { get; set; }
-        public System.Collections.Generic.ICollection<SqlOS.Fga.Models.SqlOSFgaPermission> Permissions { get; set; }
-        public System.Collections.Generic.ICollection<SqlOS.Fga.Models.SqlOSFgaResource> Resources { get; set; }
+        public string? Description { get; }
+        public string Id { get; }
+        public string Name { get; }
+        public System.Collections.Generic.ICollection<SqlOS.Fga.Models.SqlOSFgaPermission> Permissions { get; }
+        public System.Collections.Generic.ICollection<SqlOS.Fga.Models.SqlOSFgaResource> Resources { get; }
     }
-    public class SqlOSFgaRole
+    public sealed class SqlOSFgaRole
     {
-        public SqlOSFgaRole() { }
-        public string? Description { get; set; }
-        public System.Collections.Generic.ICollection<SqlOS.Fga.Models.SqlOSFgaGrant> Grants { get; set; }
-        public string Id { get; set; }
-        public bool IsVirtual { get; set; }
-        public string Key { get; set; }
-        public string Name { get; set; }
-        public System.Collections.Generic.ICollection<SqlOS.Fga.Models.SqlOSFgaRolePermission> RolePermissions { get; set; }
+        public string? Description { get; }
+        public System.Collections.Generic.ICollection<SqlOS.Fga.Models.SqlOSFgaGrant> Grants { get; }
+        public string Id { get; }
+        public bool IsVirtual { get; }
+        public string Key { get; }
+        public string Name { get; }
+        public System.Collections.Generic.ICollection<SqlOS.Fga.Models.SqlOSFgaRolePermission> RolePermissions { get; }
     }
-    public class SqlOSFgaRolePermission
+    public sealed class SqlOSFgaRolePermission
     {
-        public SqlOSFgaRolePermission() { }
-        public SqlOS.Fga.Models.SqlOSFgaPermission? Permission { get; set; }
-        public string PermissionId { get; set; }
-        public SqlOS.Fga.Models.SqlOSFgaRole? Role { get; set; }
-        public string RoleId { get; set; }
+        public SqlOS.Fga.Models.SqlOSFgaPermission? Permission { get; }
+        public string PermissionId { get; }
+        public SqlOS.Fga.Models.SqlOSFgaRole? Role { get; }
+        public string RoleId { get; }
     }
     public class SqlOSFgaRoleTrace
     {
@@ -5904,41 +5907,39 @@ namespace SqlOS.Fga.Models
         public string? SourceResourceName { get; set; }
         public string? SourceResourceType { get; set; }
     }
-    public class SqlOSFgaServiceAccount
+    public sealed class SqlOSFgaServiceAccount
     {
-        public SqlOSFgaServiceAccount() { }
-        public string ClientId { get; set; }
-        public string ClientSecretHash { get; set; }
-        public string? ConfigurationFingerprint { get; set; }
-        public System.DateTime? ConfigurationOrphanedAt { get; set; }
-        public string ConfigurationOwner { get; set; }
-        public string? ConfigurationSourceKey { get; set; }
-        public System.DateTime CreatedAt { get; set; }
-        public string? Description { get; set; }
-        public System.DateTime? ExpiresAt { get; set; }
-        public string Id { get; set; }
-        public System.DateTime? LastReconciledAt { get; set; }
-        public System.DateTime? LastUsedAt { get; set; }
-        public SqlOS.Fga.Models.SqlOSFgaSubject? Subject { get; set; }
-        public string SubjectId { get; set; }
-        public System.DateTime UpdatedAt { get; set; }
+        public string ClientId { get; }
+        public string ClientSecretHash { get; }
+        public string? ConfigurationFingerprint { get; }
+        public System.DateTime? ConfigurationOrphanedAt { get; }
+        public string ConfigurationOwner { get; }
+        public string? ConfigurationSourceKey { get; }
+        public System.DateTime CreatedAt { get; }
+        public string? Description { get; }
+        public System.DateTime? ExpiresAt { get; }
+        public string Id { get; }
+        public System.DateTime? LastReconciledAt { get; }
+        public System.DateTime? LastUsedAt { get; }
+        public SqlOS.Fga.Models.SqlOSFgaSubject? Subject { get; }
+        public string SubjectId { get; }
+        public System.DateTime UpdatedAt { get; }
     }
-    public class SqlOSFgaSubject
+    public sealed class SqlOSFgaSubject
     {
-        public SqlOSFgaSubject() { }
-        public SqlOS.Fga.Models.SqlOSFgaAgent? Agent { get; set; }
-        public System.DateTime CreatedAt { get; set; }
-        public string DisplayName { get; set; }
-        public string? ExternalRef { get; set; }
-        public System.Collections.Generic.ICollection<SqlOS.Fga.Models.SqlOSFgaGrant> Grants { get; set; }
-        public string Id { get; set; }
-        public string? OrganizationId { get; set; }
-        public SqlOS.Fga.Models.SqlOSFgaServiceAccount? ServiceAccount { get; set; }
-        public SqlOS.Fga.Models.SqlOSFgaSubjectType? SubjectType { get; set; }
-        public string SubjectTypeId { get; set; }
-        public System.DateTime UpdatedAt { get; set; }
-        public SqlOS.Fga.Models.SqlOSFgaUser? User { get; set; }
-        public SqlOS.Fga.Models.SqlOSFgaUserGroup? UserGroup { get; set; }
+        public SqlOS.Fga.Models.SqlOSFgaAgent? Agent { get; }
+        public System.DateTime CreatedAt { get; }
+        public string DisplayName { get; }
+        public string? ExternalRef { get; }
+        public System.Collections.Generic.ICollection<SqlOS.Fga.Models.SqlOSFgaGrant> Grants { get; }
+        public string Id { get; }
+        public string? OrganizationId { get; }
+        public SqlOS.Fga.Models.SqlOSFgaServiceAccount? ServiceAccount { get; }
+        public SqlOS.Fga.Models.SqlOSFgaSubjectType? SubjectType { get; }
+        public string SubjectTypeId { get; }
+        public System.DateTime UpdatedAt { get; }
+        public SqlOS.Fga.Models.SqlOSFgaUser? User { get; }
+        public SqlOS.Fga.Models.SqlOSFgaUserGroup? UserGroup { get; }
     }
     public class SqlOSFgaSubjectInfo
     {
@@ -5948,48 +5949,44 @@ namespace SqlOS.Fga.Models
         public string SubjectId { get; set; }
         public string Type { get; set; }
     }
-    public class SqlOSFgaSubjectType
+    public sealed class SqlOSFgaSubjectType
     {
-        public SqlOSFgaSubjectType() { }
-        public string? Description { get; set; }
-        public string Id { get; set; }
-        public string Name { get; set; }
-        public System.Collections.Generic.ICollection<SqlOS.Fga.Models.SqlOSFgaSubject> Subjects { get; set; }
+        public string? Description { get; }
+        public string Id { get; }
+        public string Name { get; }
+        public System.Collections.Generic.ICollection<SqlOS.Fga.Models.SqlOSFgaSubject> Subjects { get; }
     }
-    public class SqlOSFgaUser
+    public sealed class SqlOSFgaUser
     {
-        public SqlOSFgaUser() { }
-        public System.DateTime CreatedAt { get; set; }
-        public string? Email { get; set; }
-        public string Id { get; set; }
-        public bool IsActive { get; set; }
-        public System.DateTime? LastLoginAt { get; set; }
-        public SqlOS.Fga.Models.SqlOSFgaSubject? Subject { get; set; }
-        public string SubjectId { get; set; }
-        public System.DateTime UpdatedAt { get; set; }
+        public System.DateTime CreatedAt { get; }
+        public string? Email { get; }
+        public string Id { get; }
+        public bool IsActive { get; }
+        public System.DateTime? LastLoginAt { get; }
+        public SqlOS.Fga.Models.SqlOSFgaSubject? Subject { get; }
+        public string SubjectId { get; }
+        public System.DateTime UpdatedAt { get; }
     }
-    public class SqlOSFgaUserGroup
+    public sealed class SqlOSFgaUserGroup
     {
-        public SqlOSFgaUserGroup() { }
-        public System.DateTime CreatedAt { get; set; }
-        public string? Description { get; set; }
-        public string? GroupType { get; set; }
-        public string Id { get; set; }
-        public bool IsActive { get; set; }
-        public System.Collections.Generic.ICollection<SqlOS.Fga.Models.SqlOSFgaUserGroupMembership> Memberships { get; set; }
-        public string Name { get; set; }
-        public SqlOS.Fga.Models.SqlOSFgaSubject? Subject { get; set; }
-        public string SubjectId { get; set; }
-        public System.DateTime UpdatedAt { get; set; }
+        public System.DateTime CreatedAt { get; }
+        public string? Description { get; }
+        public string? GroupType { get; }
+        public string Id { get; }
+        public bool IsActive { get; }
+        public System.Collections.Generic.ICollection<SqlOS.Fga.Models.SqlOSFgaUserGroupMembership> Memberships { get; }
+        public string Name { get; }
+        public SqlOS.Fga.Models.SqlOSFgaSubject? Subject { get; }
+        public string SubjectId { get; }
+        public System.DateTime UpdatedAt { get; }
     }
-    public class SqlOSFgaUserGroupMembership
+    public sealed class SqlOSFgaUserGroupMembership
     {
-        public SqlOSFgaUserGroupMembership() { }
-        public System.DateTime CreatedAt { get; set; }
-        public SqlOS.Fga.Models.SqlOSFgaSubject? Subject { get; set; }
-        public string SubjectId { get; set; }
-        public SqlOS.Fga.Models.SqlOSFgaUserGroup? UserGroup { get; set; }
-        public string UserGroupId { get; set; }
+        public System.DateTime CreatedAt { get; }
+        public SqlOS.Fga.Models.SqlOSFgaSubject? Subject { get; }
+        public string SubjectId { get; }
+        public SqlOS.Fga.Models.SqlOSFgaUserGroup? UserGroup { get; }
+        public string UserGroupId { get; }
     }
 }
 namespace SqlOS.Fga.Services
@@ -6013,6 +6010,31 @@ namespace SqlOS.Fga.Services
         public SqlOSFgaHierarchyValidator(SqlOS.Fga.Interfaces.ISqlOSFgaDbContext context, Microsoft.Extensions.Options.IOptions<SqlOS.Fga.Configuration.SqlOSFgaOptions> options) { }
         public System.Threading.Tasks.Task ValidateExistingDataAsync(System.Threading.CancellationToken cancellationToken = default) { }
     }
+    public sealed class SqlOSFgaPermissionSeed : System.IEquatable<SqlOS.Fga.Services.SqlOSFgaPermissionSeed>
+    {
+        public SqlOSFgaPermissionSeed() { }
+        public string? Description { get; init; }
+        public required string Id { get; init; }
+        public required string Key { get; init; }
+        public required string Name { get; init; }
+        public string? ResourceTypeId { get; init; }
+    }
+    public sealed class SqlOSFgaResourceTypeSeed : System.IEquatable<SqlOS.Fga.Services.SqlOSFgaResourceTypeSeed>
+    {
+        public SqlOSFgaResourceTypeSeed() { }
+        public string? Description { get; init; }
+        public required string Id { get; init; }
+        public required string Name { get; init; }
+    }
+    public sealed class SqlOSFgaRoleSeed : System.IEquatable<SqlOS.Fga.Services.SqlOSFgaRoleSeed>
+    {
+        public SqlOSFgaRoleSeed() { }
+        public string? Description { get; init; }
+        public required string Id { get; init; }
+        public bool IsVirtual { get; init; }
+        public required string Key { get; init; }
+        public required string Name { get; init; }
+    }
     public class SqlOSFgaSchemaInitializer
     {
         public SqlOSFgaSchemaInitializer(SqlOS.Fga.Interfaces.ISqlOSFgaDbContext context, Microsoft.Extensions.Options.IOptions<SqlOS.Fga.Configuration.SqlOSFgaOptions> options, Microsoft.Extensions.Logging.ILogger<SqlOS.Fga.Services.SqlOSFgaSchemaInitializer> logger) { }
@@ -6021,13 +6043,13 @@ namespace SqlOS.Fga.Services
     public class SqlOSFgaSeedData
     {
         public SqlOSFgaSeedData() { }
-        public System.Collections.Generic.List<SqlOS.Fga.Models.SqlOSFgaPermission>? Permissions { get; set; }
-        public System.Collections.Generic.List<SqlOS.Fga.Models.SqlOSFgaResourceType>? ResourceTypes { get; set; }
+        public System.Collections.Generic.List<SqlOS.Fga.Services.SqlOSFgaPermissionSeed>? Permissions { get; set; }
+        public System.Collections.Generic.List<SqlOS.Fga.Services.SqlOSFgaResourceTypeSeed>? ResourceTypes { get; set; }
         [System.Runtime.CompilerServices.TupleElementNames(new string[] {
                 "RoleKey",
                 "PermissionKeys"})]
         public System.Collections.Generic.List<System.ValueTuple<string, string[]>>? RolePermissions { get; set; }
-        public System.Collections.Generic.List<SqlOS.Fga.Models.SqlOSFgaRole>? Roles { get; set; }
+        public System.Collections.Generic.List<SqlOS.Fga.Services.SqlOSFgaRoleSeed>? Roles { get; set; }
     }
     public class SqlOSFgaSeedService
     {

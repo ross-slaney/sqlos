@@ -499,10 +499,10 @@ profile: upgrade
           "createdAt": "{datetime:utc-z}",
           "displayName": "Dave Lister",
           "email": "{email:dave}",
-          "id": "{fusr#1}",
+          "id": "usr::{hex#1}",
           "isActive": true,
           "lastLoginAt": null,
-          "subjectId": "{subj:dave}"
+          "subjectId": "{usr:dave}"
         }
       ],
       "hasNextPage": false,
@@ -580,7 +580,7 @@ profile: upgrade
         },
         {
           "detail": "Role \"Workspace admin\" provides permission \"Write workspace\" via grant at Acme",
-          "grantId": "grant::{hex#1}",
+          "grantId": "grant::{hex#2}",
           "resourceId": "workspace::acme",
           "resourceName": "Acme",
           "roleName": "Workspace admin",
@@ -651,7 +651,7 @@ profile: upgrade
         },
         {
           "detail": "Role \"Workspace reader\" provides permission \"Read workspace\" via grant at Acme Projects",
-          "grantId": "grant::{hex#2}",
+          "grantId": "grant::{hex#3}",
           "resourceId": "workspace::acme-projects",
           "resourceName": "Acme Projects",
           "roleName": "Workspace reader",
@@ -750,13 +750,101 @@ profile: upgrade
       ]
     }
 
-## 15. probe: Bob reads the child through the SCIM group mapping
+## 15. probe: the upgrade merged the subject SCIM created for Bob into his user ID's, so a check by the old subject ID finds no subject
 > POST /__probe/fga/check
 > Content-Type: application/json; charset=utf-8
 >   {
 >     "permissionKey": "workspace.read",
 >     "resourceId": "workspace::acme-projects",
 >     "subjectId": "{subj:bob}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": false,
+      "error": "No subjects found",
+      "trace": [
+        {
+          "detail": "Checking access to Acme Projects (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme Projects",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Read workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"{subj:bob}\" was not found",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": null
+        }
+      ]
+    }
+
+## 16. probe: on the root either
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::acme",
+>     "subjectId": "{subj:bob}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": false,
+      "error": "No subjects found",
+      "trace": [
+        {
+          "detail": "Checking access to Acme (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::acme",
+          "resourceName": "Acme",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Read workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"{subj:bob}\" was not found",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": null
+        }
+      ]
+    }
+
+## 17. probe: a check by Bob's user ID reads the child through the SCIM group mapping
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::acme-projects",
+>     "subjectId": "{usr:bob}"
 >   }
 < 200 OK
 < Content-Type: application/json; charset=utf-8
@@ -821,128 +909,13 @@ profile: upgrade
       ]
     }
 
-## 16. probe: the mapping grants the child only
-> POST /__probe/fga/check
-> Content-Type: application/json; charset=utf-8
->   {
->     "permissionKey": "workspace.read",
->     "resourceId": "workspace::acme",
->     "subjectId": "{subj:bob}"
->   }
-< 200 OK
-< Content-Type: application/json; charset=utf-8
-    {
-      "allowed": false,
-      "error": null,
-      "trace": [
-        {
-          "detail": "Checking access to Acme (workspace)",
-          "grantId": null,
-          "resourceId": "workspace::acme",
-          "resourceName": "Acme",
-          "roleName": null,
-          "step": "Target Resource",
-          "subjectName": null
-        },
-        {
-          "detail": "Looking for permission: Read workspace",
-          "grantId": null,
-          "resourceId": null,
-          "resourceName": null,
-          "roleName": null,
-          "step": "Permission",
-          "subjectName": null
-        },
-        {
-          "detail": "Subject \"Bob Builder\" + 1 group membership(s)",
-          "grantId": null,
-          "resourceId": null,
-          "resourceName": null,
-          "roleName": null,
-          "step": "Subject Resolution",
-          "subjectName": "Bob Builder"
-        },
-        {
-          "detail": "Checking 1 resource(s) in hierarchy",
-          "grantId": null,
-          "resourceId": null,
-          "resourceName": null,
-          "roleName": null,
-          "step": "Resource Path",
-          "subjectName": null
-        },
-        {
-          "detail": "[Workspace] Acme",
-          "grantId": null,
-          "resourceId": "workspace::acme",
-          "resourceName": "Acme",
-          "roleName": null,
-          "step": "Checking Resource",
-          "subjectName": null
-        },
-        {
-          "detail": "No matching grants found that provide permission \"Read workspace\"",
-          "grantId": null,
-          "resourceId": null,
-          "resourceName": null,
-          "roleName": null,
-          "step": "Access Denied",
-          "subjectName": null
-        }
-      ]
-    }
-
-## 17. probe: a check by Bob's user ID finds no subject: SCIM keys the subjects it creates by their own ID
-> POST /__probe/fga/check
-> Content-Type: application/json; charset=utf-8
->   {
->     "permissionKey": "workspace.read",
->     "resourceId": "workspace::acme-projects",
->     "subjectId": "{usr:bob}"
->   }
-< 200 OK
-< Content-Type: application/json; charset=utf-8
-    {
-      "allowed": false,
-      "error": "No subjects found",
-      "trace": [
-        {
-          "detail": "Checking access to Acme Projects (workspace)",
-          "grantId": null,
-          "resourceId": "workspace::acme-projects",
-          "resourceName": "Acme Projects",
-          "roleName": null,
-          "step": "Target Resource",
-          "subjectName": null
-        },
-        {
-          "detail": "Looking for permission: Read workspace",
-          "grantId": null,
-          "resourceId": null,
-          "resourceName": null,
-          "roleName": null,
-          "step": "Permission",
-          "subjectName": null
-        },
-        {
-          "detail": "Subject \"\" + -1 group membership(s)",
-          "grantId": null,
-          "resourceId": null,
-          "resourceName": null,
-          "roleName": null,
-          "step": "Subject Resolution",
-          "subjectName": null
-        }
-      ]
-    }
-
 ## 18. probe: the existing mapping grants Dave after the upgrade
 > POST /__probe/fga/check
 > Content-Type: application/json; charset=utf-8
 >   {
 >     "permissionKey": "workspace.read",
 >     "resourceId": "workspace::acme-projects",
->     "subjectId": "{subj:dave}"
+>     "subjectId": "{usr:dave}"
 >   }
 < 200 OK
 < Content-Type: application/json; charset=utf-8
@@ -1016,7 +989,7 @@ profile: upgrade
 < Referrer-Policy: same-origin
 < X-Content-Type-Options: nosniff
 < X-Frame-Options: DENY
-< Set-Cookie: sqlos_auth_page_csrf_{hex#3}={cookie#2}; expires=+15m; max-age=900; path=/sqlos/auth; secure; samesite=strict; httponly
+< Set-Cookie: sqlos_auth_page_csrf_{hex#4}={cookie#2}; expires=+15m; max-age=900; path=/sqlos/auth; secure; samesite=strict; httponly
     <!DOCTYPE html>
     <html lang="en">
       <head>
@@ -1088,7 +1061,7 @@ profile: upgrade
 ## 20. browser: the password step asks for the authenticator Alice enrolled before the upgrade
 > POST /sqlos/auth/login/password
 > Content-Type: application/x-www-form-urlencoded
-> Cookie: sqlos_auth_page_csrf_{hex#3}={cookie#2}
+> Cookie: sqlos_auth_page_csrf_{hex#4}={cookie#2}
 > Origin: https://sqlos.example.test
 >   __RequestVerificationToken={csrf#1}
 >   requestId={req#1}
@@ -1155,7 +1128,7 @@ profile: upgrade
 ## 21. browser: the authenticator code verifies
 > POST /sqlos/auth/mfa/verify
 > Content-Type: application/x-www-form-urlencoded
-> Cookie: sqlos_auth_page_csrf_{hex#3}={cookie#2}
+> Cookie: sqlos_auth_page_csrf_{hex#4}={cookie#2}
 > Origin: https://sqlos.example.test
 >   __RequestVerificationToken={csrf#2}
 >   requestId={req#1}
@@ -1517,7 +1490,7 @@ profile: upgrade
           "omittedOpenIdWarning": null,
           "ownership": {
             "canEmergencyDisable": true,
-            "configurationFingerprint": "{hex#4}",
+            "configurationFingerprint": "{hex#5}",
             "isEditable": false,
             "isOrphaned": false,
             "lastReconciledAt": "{datetime:utc-z}",
@@ -1697,7 +1670,7 @@ profile: upgrade
           "omittedOpenIdWarning": null,
           "ownership": {
             "canEmergencyDisable": true,
-            "configurationFingerprint": "{hex#5}",
+            "configurationFingerprint": "{hex#6}",
             "isEditable": false,
             "isOrphaned": false,
             "lastReconciledAt": "{datetime:utc-z}",
@@ -1758,7 +1731,7 @@ profile: upgrade
           "omittedOpenIdWarning": null,
           "ownership": {
             "canEmergencyDisable": true,
-            "configurationFingerprint": "{hex#6}",
+            "configurationFingerprint": "{hex#7}",
             "isEditable": false,
             "isOrphaned": false,
             "lastReconciledAt": "{datetime:utc-z}",
@@ -1971,7 +1944,7 @@ profile: upgrade
           "createdAt": "{datetime:utc-z}",
           "effectiveFrom": null,
           "effectiveTo": null,
-          "id": "grant::{hex#1}",
+          "id": "grant::{hex#2}",
           "resourceId": "workspace::acme",
           "resourceName": "Acme",
           "roleId": "workspace_admin",
@@ -2039,6 +2012,40 @@ profile: upgrade
       "userId": null
     }
   - {
+      "action": "fga.subject.created",
+      "actor": {
+        "displayName": null,
+        "id": "{scim:acme}",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.subject.created",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "subjectId": "{usr:dave}",
+        "subjectType": "user"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": "{org:acme}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:dave}",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
       "action": "scim.group.member_added",
       "actor": {
         "displayName": null,
@@ -2050,7 +2057,7 @@ profile: upgrade
       "context": null,
       "correlationId": null,
       "eventType": "scim.group.member_added",
-      "id": "{evt#2}",
+      "id": "{evt#3}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -2059,7 +2066,7 @@ profile: upgrade
           "groupId": "{grp:engineering}",
           "memberCount": 1,
           "subjectIds": [
-            "{subj:dave}"
+            "{usr:dave}"
           ],
           "truncated": false
         },
@@ -2082,6 +2089,46 @@ profile: upgrade
       "userId": null
     }
   - {
+      "action": "fga.group.member_added",
+      "actor": {
+        "displayName": null,
+        "id": "{scim:acme}",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.group.member_added",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "groupId": "{grp:engineering}",
+        "groupSubjectId": "{subj#1}",
+        "memberSubjectId": "{usr:dave}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{subj#1}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "{usr:dave}",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
       "action": "scim.group.updated",
       "actor": {
         "displayName": null,
@@ -2093,7 +2140,7 @@ profile: upgrade
       "context": null,
       "correlationId": null,
       "eventType": "scim.group.updated",
-      "id": "{evt#3}",
+      "id": "{evt#5}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -2150,7 +2197,7 @@ profile: upgrade
       },
       "correlationId": null,
       "eventType": "password.login.succeeded",
-      "id": "{evt#4}",
+      "id": "{evt#6}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
@@ -2194,7 +2241,7 @@ profile: upgrade
       },
       "correlationId": null,
       "eventType": "user.login.mfa",
-      "id": "{evt#5}",
+      "id": "{evt#7}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": null,

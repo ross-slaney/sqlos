@@ -156,27 +156,16 @@ profile: dashboard-callback
       "error": "Subject not found"
     }
 
-## 7. operator: DELETE on a subject answers its detail and deletes nothing
+## 7. operator: DELETE on a subject that holds a grant is refused with the reason
 > DELETE /sqlos/admin/fga/api/subjects/{usr#1}
 > X-BehaviorLock-Operator: behavior-lock-operator
-< 200 OK
+< 409 Conflict
 < Content-Type: application/json
 < Referrer-Policy: same-origin
 < X-Content-Type-Options: nosniff
 < X-Frame-Options: DENY
     {
-      "groups": [],
-      "members": [],
-      "subject": {
-        "createdAt": "{datetime:utc-z}",
-        "displayName": "Alice",
-        "externalRef": "{usr#1}",
-        "id": "{usr#1}",
-        "organizationId": null,
-        "subjectType": "User",
-        "subjectTypeId": "user",
-        "updatedAt": "{datetime:utc-z}"
-      }
+      "error": "Subject '{usr#1}' still holds 1 grant(s). Revoke them before deleting the subject."
     }
 
 ## 8. operator: the subject is still there

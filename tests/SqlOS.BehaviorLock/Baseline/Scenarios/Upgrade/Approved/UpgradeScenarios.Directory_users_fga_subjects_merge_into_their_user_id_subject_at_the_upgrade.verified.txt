@@ -1,0 +1,570 @@
+# SqlOS behavior lock transcript
+scenario: UpgradeScenarios.Directory_users_fga_subjects_merge_into_their_user_id_subject_at_the_upgrade
+profile: upgrade
+
+# SqlOS 7.2.1 seeded the database: its SCIM directory provisioned Bob and Ann into the mapped Engineering group, the host provisioned Ann's subject by her user ID and made it admin on the child workspace, and an operator made Ann's SCIM subject admin on the child and reader on the root.
+
+## audit: events the upgrade wrote
+  (no new events)
+
+## 1. operator: dashboard: Ann has one FGA user subject, the one the host keyed by her user ID
+> GET /sqlos/admin/fga/api/users?search=Ann
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "displayName": "Ann Archer",
+          "email": "{email:ann}",
+          "id": "{fusr#1}",
+          "isActive": true,
+          "lastLoginAt": null,
+          "subjectId": "{subj:ann}"
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "displayName": "Ann Archer (app)",
+          "email": "{email:ann}",
+          "id": "usr::{hex#1}",
+          "isActive": true,
+          "lastLoginAt": null,
+          "subjectId": "{usr:ann}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 2. operator: it is in Engineering, where her SCIM subject was
+> GET /sqlos/admin/fga/api/subjects/{usr:ann}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "groups": [],
+      "members": [],
+      "subject": {
+        "createdAt": "{datetime:unspecified}",
+        "displayName": "Ann Archer (app)",
+        "externalRef": "{usr:ann}",
+        "id": "{usr:ann}",
+        "organizationId": "{org:acme}",
+        "subjectType": "User",
+        "subjectTypeId": "user",
+        "updatedAt": "{datetime:unspecified}"
+      }
+    }
+
+## 3. operator: it holds the admin grant once and the reader grant her SCIM subject held
+> GET /sqlos/admin/fga/api/subjects/{usr:ann}/grants
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "effectiveFrom": null,
+          "effectiveTo": null,
+          "id": "grant::{hex#2}",
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme Projects",
+          "roleId": "workspace_admin",
+          "roleName": "Workspace admin"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 4. operator: her SCIM subject is gone
+> GET /sqlos/admin/fga/api/subjects/{subj:ann}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "groups": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "groupType": "scim",
+          "id": "{grp:engineering}",
+          "name": "Engineering",
+          "subjectId": "{subj#1}"
+        }
+      ],
+      "members": [],
+      "subject": {
+        "createdAt": "{datetime:unspecified}",
+        "displayName": "Ann Archer",
+        "externalRef": "{usr:ann}",
+        "id": "{subj:ann}",
+        "organizationId": "{org:acme}",
+        "subjectType": "User",
+        "subjectTypeId": "user",
+        "updatedAt": "{datetime:unspecified}"
+      }
+    }
+
+## 5. probe: a check by Ann's user ID reads the root through the reader grant
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::acme",
+>     "subjectId": "{usr:ann}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": false,
+      "error": null,
+      "trace": [
+        {
+          "detail": "Checking access to Acme (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::acme",
+          "resourceName": "Acme",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Read workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"Ann Archer (app)\" + 0 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": "Ann Archer (app)"
+        },
+        {
+          "detail": "Checking 1 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Acme",
+          "grantId": null,
+          "resourceId": "workspace::acme",
+          "resourceName": "Acme",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "No matching grants found that provide permission \"Read workspace\"",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Access Denied",
+          "subjectName": null
+        }
+      ]
+    }
+
+## 6. probe: and writes the child through the admin grant
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.write",
+>     "resourceId": "workspace::acme-projects",
+>     "subjectId": "{usr:ann}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": true,
+      "error": null,
+      "trace": [
+        {
+          "detail": "Checking access to Acme Projects (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme Projects",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Write workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"Ann Archer (app)\" + 0 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": "Ann Archer (app)"
+        },
+        {
+          "detail": "Checking 2 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Acme Projects",
+          "grantId": null,
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme Projects",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Role \"Workspace admin\" provides permission \"Write workspace\" via grant at Acme Projects",
+          "grantId": "grant::{hex#2}",
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme Projects",
+          "roleName": "Workspace admin",
+          "step": "Access Granted",
+          "subjectName": "Ann Archer (app)"
+        }
+      ]
+    }
+
+## 7. operator: dashboard: Bob's subject is keyed by his user ID
+> GET /sqlos/admin/fga/api/users?search=Bob
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "displayName": "Bob Builder",
+          "email": "{email:bob}",
+          "id": "{fusr#2}",
+          "isActive": true,
+          "lastLoginAt": null,
+          "subjectId": "{subj:bob}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 8. probe: a check by Bob's user ID reads the child through the SCIM group mapping
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::acme-projects",
+>     "subjectId": "{usr:bob}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": false,
+      "error": "No subjects found",
+      "trace": [
+        {
+          "detail": "Checking access to Acme Projects (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme Projects",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Read workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"\" + -1 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": null
+        }
+      ]
+    }
+
+## 9. probe: so does the list filter by his user ID
+> POST /__probe/fga/filter
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "subjectId": "{usr:bob}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "count": 0,
+      "workspaces": []
+    }
+
+## 10. probe: a check by his SCIM subject finds no subject
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::acme-projects",
+>     "subjectId": "{subj:bob}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": true,
+      "error": null,
+      "trace": [
+        {
+          "detail": "Checking access to Acme Projects (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme Projects",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Read workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"Bob Builder\" + 1 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": "Bob Builder"
+        },
+        {
+          "detail": "Checking 2 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Acme Projects",
+          "grantId": null,
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme Projects",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Role \"Workspace reader\" provides permission \"Read workspace\" via grant at Acme Projects",
+          "grantId": "{grant#1}",
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme Projects",
+          "roleName": "Workspace reader",
+          "step": "Access Granted",
+          "subjectName": "Engineering"
+        }
+      ]
+    }
+
+## 11. directory: the directory removes Bob from Engineering
+> PATCH /scim/v2/Groups/{grp:engineering}
+> Authorization: Bearer {scim-token:acme}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "remove",
+>         "path": "members[value eq \"{usr:bob}\"]"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 204 No Content
+
+## 12. probe: so a check by his user ID no longer reads the child
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::acme-projects",
+>     "subjectId": "{usr:bob}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": false,
+      "error": "No subjects found",
+      "trace": [
+        {
+          "detail": "Checking access to Acme Projects (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme Projects",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Read workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"\" + -1 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": null
+        }
+      ]
+    }
+
+## audit: events written after the upgrade
+  - {
+      "action": "scim.group.member_removed",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.member_removed",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": {
+          "groupId": "{grp:engineering}",
+          "memberCount": 1,
+          "subjectIds": [
+            "{subj:bob}"
+          ],
+          "truncated": false
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org:acme}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.updated",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.updated",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": {
+          "Operations": [
+            {
+              "op": "remove",
+              "path": "members[value eq \"{usr:bob}\"]"
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ]
+        },
+        "resourceId": "{grp:engineering}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org:acme}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:engineering}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }

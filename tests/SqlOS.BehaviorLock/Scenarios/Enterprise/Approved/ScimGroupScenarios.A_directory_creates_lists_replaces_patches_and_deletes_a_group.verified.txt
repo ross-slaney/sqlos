@@ -704,7 +704,7 @@ profile: enterprise-scim-path
           "groupId": "{grp:engineering}",
           "memberCount": 1,
           "subjectIds": [
-            "{subj#3}"
+            "{usr:ann}"
           ],
           "truncated": false
         },
@@ -727,6 +727,80 @@ profile: enterprise-scim-path
       "userId": null
     }
   - {
+      "action": "fga.subject.created",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.subject.created",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "subjectId": "{subj#2}",
+        "subjectType": "group"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{subj#2}",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "fga.group.member_added",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.group.member_added",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "groupId": "{grp:engineering}",
+        "groupSubjectId": "{subj#2}",
+        "memberSubjectId": "{usr:ann}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{subj#2}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "{usr:ann}",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
       "action": "scim.group.created",
       "actor": {
         "displayName": null,
@@ -738,7 +812,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.group.created",
-      "id": "{evt#2}",
+      "id": "{evt#4}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -785,7 +859,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.group.created",
-      "id": "{evt#3}",
+      "id": "{evt#5}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -817,6 +891,40 @@ profile: enterprise-scim-path
       "userId": null
     }
   - {
+      "action": "fga.subject.created",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.subject.created",
+      "id": "{evt#6}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "subjectId": "{subj#1}",
+        "subjectType": "group"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{subj#1}",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
       "action": "scim.group.member_added",
       "actor": {
         "displayName": null,
@@ -828,7 +936,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.group.member_added",
-      "id": "{evt#4}",
+      "id": "{evt#7}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -837,7 +945,7 @@ profile: enterprise-scim-path
           "groupId": "{grp:engineering}",
           "memberCount": 1,
           "subjectIds": [
-            "{subj#4}"
+            "{usr:bob}"
           ],
           "truncated": false
         },
@@ -860,6 +968,46 @@ profile: enterprise-scim-path
       "userId": null
     }
   - {
+      "action": "fga.group.member_added",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.group.member_added",
+      "id": "{evt#8}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "groupId": "{grp:engineering}",
+        "groupSubjectId": "{subj#2}",
+        "memberSubjectId": "{usr:bob}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{subj#2}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "{usr:bob}",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
       "action": "scim.group.updated",
       "actor": {
         "displayName": null,
@@ -871,7 +1019,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.group.updated",
-      "id": "{evt#5}",
+      "id": "{evt#9}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -922,7 +1070,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.group.member_removed",
-      "id": "{evt#6}",
+      "id": "{evt#10}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -931,7 +1079,7 @@ profile: enterprise-scim-path
           "groupId": "{grp:engineering}",
           "memberCount": 1,
           "subjectIds": [
-            "{subj#3}"
+            "{usr:ann}"
           ],
           "truncated": false
         },
@@ -954,6 +1102,86 @@ profile: enterprise-scim-path
       "userId": null
     }
   - {
+      "action": "fga.group.member_removed",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.group.member_removed",
+      "id": "{evt#11}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "groupId": "{grp:engineering}",
+        "groupSubjectId": "{subj#2}",
+        "memberSubjectId": "{usr:ann}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{subj#2}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "{usr:ann}",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "fga.group.member_added",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.group.member_added",
+      "id": "{evt#12}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "groupId": "{grp:engineering}",
+        "groupSubjectId": "{subj#2}",
+        "memberSubjectId": "{usr:cy}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{subj#2}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "{usr:cy}",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
       "action": "scim.group.member_added",
       "actor": {
         "displayName": null,
@@ -965,7 +1193,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.group.member_added",
-      "id": "{evt#7}",
+      "id": "{evt#13}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -974,7 +1202,7 @@ profile: enterprise-scim-path
           "groupId": "{grp:engineering}",
           "memberCount": 1,
           "subjectIds": [
-            "{subj#5}"
+            "{usr:cy}"
           ],
           "truncated": false
         },
@@ -1008,7 +1236,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.group.updated",
-      "id": "{evt#8}",
+      "id": "{evt#14}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -1058,7 +1286,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.group.member_removed",
-      "id": "{evt#9}",
+      "id": "{evt#15}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -1067,7 +1295,7 @@ profile: enterprise-scim-path
           "groupId": "{grp:engineering}",
           "memberCount": 1,
           "subjectIds": [
-            "{subj#4}"
+            "{usr:bob}"
           ],
           "truncated": false
         },
@@ -1090,6 +1318,46 @@ profile: enterprise-scim-path
       "userId": null
     }
   - {
+      "action": "fga.group.member_removed",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.group.member_removed",
+      "id": "{evt#16}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "groupId": "{grp:engineering}",
+        "groupSubjectId": "{subj#2}",
+        "memberSubjectId": "{usr:bob}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{subj#2}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "{usr:bob}",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
       "action": "scim.group.updated",
       "actor": {
         "displayName": null,
@@ -1101,7 +1369,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.group.updated",
-      "id": "{evt#10}",
+      "id": "{evt#17}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -1147,7 +1415,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.group.member_removed",
-      "id": "{evt#11}",
+      "id": "{evt#18}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -1156,7 +1424,7 @@ profile: enterprise-scim-path
           "groupId": "{grp:engineering}",
           "memberCount": 1,
           "subjectIds": [
-            "{subj#5}"
+            "{usr:cy}"
           ],
           "truncated": false
         },
@@ -1179,6 +1447,46 @@ profile: enterprise-scim-path
       "userId": null
     }
   - {
+      "action": "fga.group.member_removed",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.group.member_removed",
+      "id": "{evt#19}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "groupId": "{grp:engineering}",
+        "groupSubjectId": "{subj#2}",
+        "memberSubjectId": "{usr:cy}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{subj#2}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "{usr:cy}",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
       "action": "scim.group.updated",
       "actor": {
         "displayName": null,
@@ -1190,7 +1498,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.group.updated",
-      "id": "{evt#12}",
+      "id": "{evt#20}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -1241,7 +1549,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.group.member_added",
-      "id": "{evt#13}",
+      "id": "{evt#21}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -1250,7 +1558,7 @@ profile: enterprise-scim-path
           "groupId": "{grp:engineering}",
           "memberCount": 1,
           "subjectIds": [
-            "{subj#3}"
+            "{usr:ann}"
           ],
           "truncated": false
         },
@@ -1273,6 +1581,46 @@ profile: enterprise-scim-path
       "userId": null
     }
   - {
+      "action": "fga.group.member_added",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.group.member_added",
+      "id": "{evt#22}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "groupId": "{grp:engineering}",
+        "groupSubjectId": "{subj#2}",
+        "memberSubjectId": "{usr:ann}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{subj#2}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "{usr:ann}",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
       "action": "scim.group.updated",
       "actor": {
         "displayName": null,
@@ -1284,7 +1632,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.group.updated",
-      "id": "{evt#14}",
+      "id": "{evt#23}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -1335,7 +1683,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.group.updated",
-      "id": "{evt#15}",
+      "id": "{evt#24}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -1383,7 +1731,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.group.member_removed",
-      "id": "{evt#16}",
+      "id": "{evt#25}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -1392,7 +1740,7 @@ profile: enterprise-scim-path
           "groupId": "{grp:engineering}",
           "memberCount": 1,
           "subjectIds": [
-            "{subj#3}"
+            "{usr:ann}"
           ],
           "truncated": false
         },
@@ -1415,6 +1763,86 @@ profile: enterprise-scim-path
       "userId": null
     }
   - {
+      "action": "fga.group.member_removed",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.group.member_removed",
+      "id": "{evt#26}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "groupId": "{grp:engineering}",
+        "groupSubjectId": "{subj#2}",
+        "memberSubjectId": "{usr:ann}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{subj#2}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "{usr:ann}",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "fga.group.member_added",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.group.member_added",
+      "id": "{evt#27}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "groupId": "{grp:engineering}",
+        "groupSubjectId": "{subj#2}",
+        "memberSubjectId": "{usr:bob}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{subj#2}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "{usr:bob}",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
       "action": "scim.group.member_added",
       "actor": {
         "displayName": null,
@@ -1426,7 +1854,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.group.member_added",
-      "id": "{evt#17}",
+      "id": "{evt#28}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -1435,7 +1863,7 @@ profile: enterprise-scim-path
           "groupId": "{grp:engineering}",
           "memberCount": 1,
           "subjectIds": [
-            "{subj#4}"
+            "{usr:bob}"
           ],
           "truncated": false
         },
@@ -1469,7 +1897,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.group.updated",
-      "id": "{evt#18}",
+      "id": "{evt#29}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -1525,7 +1953,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.group.member_removed",
-      "id": "{evt#19}",
+      "id": "{evt#30}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -1534,7 +1962,7 @@ profile: enterprise-scim-path
           "groupId": "{grp:engineering}",
           "memberCount": 1,
           "subjectIds": [
-            "{subj#4}"
+            "{usr:bob}"
           ],
           "truncated": false
         },
@@ -1557,6 +1985,46 @@ profile: enterprise-scim-path
       "userId": null
     }
   - {
+      "action": "fga.group.member_removed",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.group.member_removed",
+      "id": "{evt#31}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "groupId": "{grp:engineering}",
+        "groupSubjectId": "{subj#2}",
+        "memberSubjectId": "{usr:bob}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{subj#2}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "{usr:bob}",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
       "action": "scim.group.updated",
       "actor": {
         "displayName": null,
@@ -1568,7 +2036,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.group.updated",
-      "id": "{evt#20}",
+      "id": "{evt#32}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -1614,7 +2082,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.group.deleted",
-      "id": "{evt#21}",
+      "id": "{evt#33}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -1650,7 +2118,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.group.member_added",
-      "id": "{evt#22}",
+      "id": "{evt#34}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -1659,7 +2127,7 @@ profile: enterprise-scim-path
           "groupId": "{grp:engineering}",
           "memberCount": 1,
           "subjectIds": [
-            "{subj#3}"
+            "{usr:ann}"
           ],
           "truncated": false
         },
@@ -1682,6 +2150,46 @@ profile: enterprise-scim-path
       "userId": null
     }
   - {
+      "action": "fga.group.member_added",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.group.member_added",
+      "id": "{evt#35}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "groupId": "{grp:engineering}",
+        "groupSubjectId": "{subj#2}",
+        "memberSubjectId": "{usr:ann}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{subj#2}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "{usr:ann}",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
       "action": "scim.group.created",
       "actor": {
         "displayName": null,
@@ -1693,7 +2201,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.group.created",
-      "id": "{evt#23}",
+      "id": "{evt#36}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {

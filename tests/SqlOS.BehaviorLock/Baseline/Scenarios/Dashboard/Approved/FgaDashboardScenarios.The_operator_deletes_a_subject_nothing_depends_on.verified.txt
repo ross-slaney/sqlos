@@ -1,0 +1,119 @@
+# SqlOS behavior lock transcript
+scenario: FgaDashboardScenarios.The_operator_deletes_a_subject_nothing_depends_on
+profile: dashboard-callback
+
+## 1. operator: an unknown subject is 404
+> DELETE /sqlos/admin/fga/api/subjects/no-such-subject
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 404 Not Found
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "Subject not found"
+    }
+
+## 2. operator: a subject that holds a grant is refused
+> DELETE /sqlos/admin/fga/api/subjects/{usr#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "groups": [],
+      "members": [],
+      "subject": {
+        "createdAt": "{datetime:unspecified}",
+        "displayName": "Alice",
+        "externalRef": "{usr#1}",
+        "id": "{usr#1}",
+        "organizationId": null,
+        "subjectType": "User",
+        "subjectTypeId": "user",
+        "updatedAt": "{datetime:unspecified}"
+      }
+    }
+
+## 3. operator: revoke the grant
+> DELETE /sqlos/admin/fga/api/grants/grant::{hex#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 204 No Content
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 4. operator: now nothing depends on it, so it is deleted
+> DELETE /sqlos/admin/fga/api/subjects/{usr#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "groups": [],
+      "members": [],
+      "subject": {
+        "createdAt": "{datetime:unspecified}",
+        "displayName": "Alice",
+        "externalRef": "{usr#1}",
+        "id": "{usr#1}",
+        "organizationId": null,
+        "subjectType": "User",
+        "subjectTypeId": "user",
+        "updatedAt": "{datetime:unspecified}"
+      }
+    }
+
+## 5. operator: and is gone
+> GET /sqlos/admin/fga/api/subjects/{usr#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "groups": [],
+      "members": [],
+      "subject": {
+        "createdAt": "{datetime:unspecified}",
+        "displayName": "Alice",
+        "externalRef": "{usr#1}",
+        "id": "{usr#1}",
+        "organizationId": null,
+        "subjectType": "User",
+        "subjectTypeId": "user",
+        "updatedAt": "{datetime:unspecified}"
+      }
+    }
+
+## 6. operator: an agent nothing depends on is deleted too
+> DELETE /sqlos/admin/fga/api/subjects/agent-retired
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "groups": [],
+      "members": [],
+      "subject": {
+        "createdAt": "{datetime:unspecified}",
+        "displayName": "Retired agent",
+        "externalRef": "agent-retired",
+        "id": "agent-retired",
+        "organizationId": null,
+        "subjectType": "Agent",
+        "subjectTypeId": "agent",
+        "updatedAt": "{datetime:unspecified}"
+      }
+    }
+
+## audit: the revocation and the deletions
+  (no new events)

@@ -8,7 +8,7 @@ profile: legacy-host
 < 200 OK
 < Content-Type: application/json; charset=utf-8
     {
-      "auditEvents": 7,
+      "auditEvents": 12,
       "clients": 1,
       "oidcConnections": 0,
       "organizations": 0,

@@ -159,7 +159,7 @@ profile: dashboard-dev
 < 200 OK
 < Content-Type: application/json; charset=utf-8
     {
-      "auditEvents": 8,
+      "auditEvents": 13,
       "clients": 1,
       "oidcConnections": 0,
       "organizations": 0,

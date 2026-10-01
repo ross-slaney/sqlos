@@ -468,7 +468,7 @@ profile: dashboard-callback
           "subjectName": null
         },
         {
-          "detail": "Subject \"\" + -1 group membership(s)",
+          "detail": "Subject \"no-such-subject\" was not found",
           "grantId": null,
           "resourceId": null,
           "resourceName": null,

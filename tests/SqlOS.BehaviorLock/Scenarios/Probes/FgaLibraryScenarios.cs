@@ -1,6 +1,7 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.BehaviorLock.Host;
 using SqlOS.BehaviorLock.Host.Profiles;
+using SqlOS.BehaviorLock.Infrastructure;
 using SqlOS.BehaviorLock.Infrastructure.Scenarios;
 using SqlOS.BehaviorLock.Infrastructure.Transcripts;
 using SqlOS.BehaviorLock.Scenarios.Dashboard;
@@ -131,7 +132,11 @@ public sealed class FgaLibraryScenarios
         await ProbeCalls.ObserveOrUnhandledAsync(
             t,
             () => probe.PostJsonAsync("/__probe/fga/resources", new { mode = "create", resourceTypeId = type, name = "Stray", resourceId = "workspace::stray", parentResourceId = "workspace::missing" }),
-            "CreateResource does not look the parent up, so the save fails in the database");
+            // The released package fails in the save, which the transcript records as a note
+            // carrying this caption, so it keeps the caption its baseline holds.
+            SqlOSUnderTest.IsPackage
+                ? "CreateResource does not look the parent up, so the save fails in the database"
+                : "CreateResource refuses an unknown parent before anything is saved");
 
         await fga.GrantAsync("agent-indexer", "workspace::reports", BehaviorLockAuthorization.AdminRole);
         t.Observe(await probe.DeleteAsync("/__probe/fga/resources/workspace::ledger"), "a resource with children cannot be deleted");
@@ -248,7 +253,7 @@ public sealed class FgaLibraryScenarios
             await probe.PostJsonAsync("/__probe/fga/grants/revoke", new { subjectId = "no-such-subject", resourceId = alpha, role = reader }),
             "but the subject must exist");
 
-        await t.ObserveAuditAsync("FGA helper writes are not audited");
+        await t.ObserveAuditAsync("FGA helper writes are audited as host code");
         await t.ApproveAsync();
     }
 

@@ -18,10 +18,10 @@ public sealed class FgaGroupScenarios
     private const string Api = "/sqlos/admin/fga/api";
 
     /// <summary>
-    /// Known defect #448 (7.2.1): SCIM gives a provisioned user a second FGA subject with a
-    /// generated ID (its <c>externalRef</c> is the SqlOS user ID) and puts that subject in the SCIM
-    /// group. A grant to the group reaches the generated subject, but a check or list filter by the
-    /// SqlOS user ID, as the FGA guides write it, finds no subject at all.
+    /// #448: SCIM keys a provisioned user's FGA subject by the SqlOS user ID and puts that subject in
+    /// the SCIM group, so a grant to the group reaches a check or list filter by the user ID, as the
+    /// FGA guides write it. (7.2.1 gave the user a second subject with a generated ID, which no
+    /// check by user ID could see.)
     /// </summary>
     [Scenario]
     [Covers("GET /sqlos/admin/fga/api/user-groups")]
@@ -31,7 +31,7 @@ public sealed class FgaGroupScenarios
     [Covers("POST /sqlos/admin/fga/api/trace")]
     [Covers("POST /__probe/fga/check")]
     [Covers("POST /__probe/fga/filter")]
-    public async Task Scim_group_grants_reach_only_the_scim_subject_CurrentBehavior_KnownDefect_448()
+    public async Task Scim_group_grants_reach_the_subject_keyed_by_the_user_id()
     {
         await using var t = await Transcript.StartAsync(HostProfiles.EnterpriseScimPath);
         var acme = await t.Setup.CreateOrganizationAsync("acme");
@@ -70,7 +70,7 @@ public sealed class FgaGroupScenarios
         var groupSubjectId = groups.JsonString("data.0.subjectId");
         var subjects = t.Observe(
             await op.GetAsync($"{Api}/subjects?type=user"),
-            "SCIM created a user subject of its own, with the SqlOS user ID as its external reference");
+            "SCIM keyed the user's subject by the SqlOS user ID");
         var scimSubjectId = subjects.JsonString("data.0.id");
         t.Observe(await op.GetAsync($"{Api}/subjects/{groupSubjectId}"), "the group subject lists its member");
         t.Observe(await op.GetAsync($"{Api}/subjects/{scimSubjectId}"), "the member subject lists its group");
@@ -79,21 +79,21 @@ public sealed class FgaGroupScenarios
             "grant the group read on Alpha");
         t.Observe(
             await probe.PostJsonAsync("/__probe/fga/check", new { subjectId = scimSubjectId, permissionKey = read, resourceId = alpha }),
-            "the SCIM subject reads Alpha through the group");
+            "the user reads Alpha through the group");
         t.Observe(
             await op.PostJsonAsync($"{Api}/trace", new { subjectId = scimSubjectId, resourceId = alpha, permissionKey = read }),
             "the trace names the group that granted it");
         t.Observe(
             await probe.PostJsonAsync("/__probe/fga/check", new { subjectId = userId, permissionKey = read, resourceId = alpha }),
-            "a check by the SqlOS user ID finds no subject");
+            "a check by the SqlOS user ID is that same check");
         t.Observe(
             await probe.PostJsonAsync("/__probe/fga/filter", new { subjectId = userId, permissionKey = read }),
-            "so the list filter by user ID is empty");
+            "so the list filter by user ID includes Alpha");
         t.Observe(
             await probe.PostJsonAsync("/__probe/fga/filter", new { subjectId = scimSubjectId, permissionKey = read }),
-            "while the SCIM subject's list includes Alpha");
+            "as the subject's list does");
 
-        await t.ObserveAuditAsync("the dashboard grant is not audited");
+        await t.ObserveAuditAsync("the dashboard grant is audited");
         await t.ApproveAsync();
     }
 

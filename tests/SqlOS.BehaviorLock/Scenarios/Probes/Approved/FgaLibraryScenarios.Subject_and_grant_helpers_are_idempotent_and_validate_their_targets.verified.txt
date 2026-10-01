@@ -363,5 +363,211 @@ profile: dashboard-callback
       "message": "FGA subject 'no-such-subject' was not found. Provision the subject explicitly before granting roles."
     }
 
-## audit: FGA helper writes are not audited
-  (no new events)
+## audit: FGA helper writes are audited as host code
+  - {
+      "action": "fga.subject.created",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "application"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.subject.created",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "subjectId": "{usr#1}",
+        "subjectType": "user"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr#1}",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "fga.subject.created",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "application"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.subject.created",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "subjectId": "agent-indexer",
+        "subjectType": "agent"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "agent-indexer",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "fga.subject.created",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "application"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.subject.created",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "subjectId": "sa-reporter",
+        "subjectType": "service_account"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "sa-reporter",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "fga.grant.created",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "application"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.grant.created",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "effectiveFrom": null,
+        "effectiveTo": null,
+        "grantId": "grant::{hex#1}",
+        "resourceId": "workspace::alpha",
+        "roleId": "workspace_reader",
+        "subjectId": "{usr#1}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "grant::{hex#1}",
+          "type": "fga_grant"
+        },
+        {
+          "displayName": null,
+          "id": "{usr#1}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "workspace::alpha",
+          "type": "fga_resource"
+        },
+        {
+          "displayName": null,
+          "id": "workspace_reader",
+          "type": "fga_role"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "fga.grant.revoked",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "application"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.grant.revoked",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "grantId": "grant::{hex#1}",
+        "reason": null,
+        "resourceId": "workspace::alpha",
+        "roleId": "workspace_reader",
+        "subjectId": "{usr#1}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "grant::{hex#1}",
+          "type": "fga_grant"
+        },
+        {
+          "displayName": null,
+          "id": "{usr#1}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "workspace::alpha",
+          "type": "fga_resource"
+        },
+        {
+          "displayName": null,
+          "id": "workspace_reader",
+          "type": "fga_role"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }

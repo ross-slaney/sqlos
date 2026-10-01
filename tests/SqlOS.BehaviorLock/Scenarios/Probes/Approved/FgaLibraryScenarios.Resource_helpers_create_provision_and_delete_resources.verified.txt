@@ -217,9 +217,24 @@ profile: dashboard-callback
       "message": "FGA resource hierarchy contains a cycle."
     }
 
-# CreateResource does not look the parent up, so the save fails in the database: no response, the request fails with an unhandled DbUpdateException
+## 13. probe: CreateResource refuses an unknown parent before anything is saved
+> POST /__probe/fga/resources
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "mode": "create",
+>     "name": "Stray",
+>     "parentResourceId": "workspace::missing",
+>     "resourceId": "workspace::stray",
+>     "resourceTypeId": "workspace"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "FGA resource 'workspace::missing' was not found."
+    }
 
-## 13. probe: a resource with children cannot be deleted
+## 14. probe: a resource with children cannot be deleted
 > DELETE /__probe/fga/resources/workspace::ledger
 < 422 Unprocessable Entity
 < Content-Type: application/json; charset=utf-8
@@ -228,7 +243,7 @@ profile: dashboard-callback
       "message": "FGA resource 'workspace::ledger' has child resources. Delete or reparent child resources before deleting this resource."
     }
 
-## 14. probe: DeleteResourceAsync removes a leaf resource and its grants
+## 15. probe: DeleteResourceAsync removes a leaf resource and its grants
 > DELETE /__probe/fga/resources/workspace::reports
 < 200 OK
 < Content-Type: application/json; charset=utf-8
@@ -236,7 +251,7 @@ profile: dashboard-callback
       "deleted": "workspace::reports"
     }
 
-## 15. probe: the deleted resource is gone
+## 16. probe: the deleted resource is gone
 > POST /__probe/fga/check
 > Content-Type: application/json; charset=utf-8
 >   {
@@ -252,7 +267,7 @@ profile: dashboard-callback
       "trace": []
     }
 
-## 16. probe: deleting it again is refused
+## 17. probe: deleting it again is refused
 > DELETE /__probe/fga/resources/workspace::reports
 < 422 Unprocessable Entity
 < Content-Type: application/json; charset=utf-8

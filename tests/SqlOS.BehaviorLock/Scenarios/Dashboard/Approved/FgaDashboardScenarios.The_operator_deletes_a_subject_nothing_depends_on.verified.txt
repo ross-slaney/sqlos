@@ -1,0 +1,206 @@
+# SqlOS behavior lock transcript
+scenario: FgaDashboardScenarios.The_operator_deletes_a_subject_nothing_depends_on
+profile: dashboard-callback
+
+## 1. operator: an unknown subject is 404
+> DELETE /sqlos/admin/fga/api/subjects/no-such-subject
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 404 Not Found
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "Subject not found"
+    }
+
+## 2. operator: a subject that holds a grant is refused
+> DELETE /sqlos/admin/fga/api/subjects/{usr#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 409 Conflict
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "Subject '{usr#1}' still holds 1 grant(s). Revoke them before deleting the subject."
+    }
+
+## 3. operator: revoke the grant
+> DELETE /sqlos/admin/fga/api/grants/grant::{hex#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 204 No Content
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 4. operator: now nothing depends on it, so it is deleted
+> DELETE /sqlos/admin/fga/api/subjects/{usr#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 204 No Content
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## 5. operator: and is gone
+> GET /sqlos/admin/fga/api/subjects/{usr#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 404 Not Found
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "error": "Subject not found"
+    }
+
+## 6. operator: an agent nothing depends on is deleted too
+> DELETE /sqlos/admin/fga/api/subjects/agent-retired
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 204 No Content
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+
+## audit: the revocation and the deletions
+  - {
+      "action": "fga.grant.revoked",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": "{trace#1}",
+        "sessionId": null,
+        "userAgent": ""
+      },
+      "correlationId": null,
+      "eventType": "fga.grant.revoked",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "grantId": "grant::{hex#1}",
+        "reason": null,
+        "resourceId": "workspace::alpha",
+        "roleId": "workspace_reader",
+        "subjectId": "{usr#1}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": "{trace#1}",
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "grant::{hex#1}",
+          "type": "fga_grant"
+        },
+        {
+          "displayName": null,
+          "id": "{usr#1}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "workspace::alpha",
+          "type": "fga_resource"
+        },
+        {
+          "displayName": null,
+          "id": "workspace_reader",
+          "type": "fga_role"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "fga.subject.deleted",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": "{trace#2}",
+        "sessionId": null,
+        "userAgent": ""
+      },
+      "correlationId": null,
+      "eventType": "fga.subject.deleted",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "subjectId": "{usr#1}",
+        "subjectType": "user"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": "{trace#2}",
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr#1}",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "fga.subject.deleted",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": "{trace#3}",
+        "sessionId": null,
+        "userAgent": ""
+      },
+      "correlationId": null,
+      "eventType": "fga.subject.deleted",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "subjectId": "agent-retired",
+        "subjectType": "agent"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": "{trace#3}",
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "agent-retired",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }

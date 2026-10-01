@@ -106,6 +106,59 @@ profile: multi-app
 
 ## audit: grant changes
   - {
+      "action": "fga.grant.created",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.grant.created",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "effectiveFrom": null,
+        "effectiveTo": null,
+        "grantId": "{grant#1}",
+        "resourceId": "workspace::beta",
+        "roleId": "workspace_admin",
+        "subjectId": "{sub#1}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grant#1}",
+          "type": "fga_grant"
+        },
+        {
+          "displayName": null,
+          "id": "{sub#1}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "workspace::beta",
+          "type": "fga_resource"
+        },
+        {
+          "displayName": null,
+          "id": "workspace_admin",
+          "type": "fga_role"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
       "action": "machine_client.grant_added",
       "actor": {
         "displayName": null,
@@ -123,7 +176,7 @@ profile: multi-app
       },
       "correlationId": null,
       "eventType": "machine_client.grant_added",
-      "id": "{evt#1}",
+      "id": "{evt#2}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -137,6 +190,58 @@ profile: multi-app
       "sessionId": null,
       "source": "authserver",
       "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "fga.grant.revoked",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.grant.revoked",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "grantId": "{grant#1}",
+        "reason": null,
+        "resourceId": "workspace::beta",
+        "roleId": "workspace_admin",
+        "subjectId": "{sub#1}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grant#1}",
+          "type": "fga_grant"
+        },
+        {
+          "displayName": null,
+          "id": "{sub#1}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "workspace::beta",
+          "type": "fga_resource"
+        },
+        {
+          "displayName": null,
+          "id": "workspace_admin",
+          "type": "fga_role"
+        }
+      ],
       "userAgent": null,
       "userId": null
     }
@@ -158,7 +263,7 @@ profile: multi-app
       },
       "correlationId": null,
       "eventType": "machine_client.grant_removed",
-      "id": "{evt#2}",
+      "id": "{evt#4}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -594,7 +699,7 @@ profile: multi-app
       },
       "correlationId": null,
       "eventType": "machine_client.emergency_disabled",
-      "id": "{evt#3}",
+      "id": "{evt#5}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -629,7 +734,7 @@ profile: multi-app
       },
       "correlationId": null,
       "eventType": "oauth.client_authentication.failed",
-      "id": "{evt#4}",
+      "id": "{evt#6}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
@@ -662,7 +767,7 @@ profile: multi-app
       },
       "correlationId": null,
       "eventType": "machine_client.emergency_enabled",
-      "id": "{evt#5}",
+      "id": "{evt#7}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -696,7 +801,7 @@ profile: multi-app
       },
       "correlationId": null,
       "eventType": "oauth.client_authentication.succeeded",
-      "id": "{evt#6}",
+      "id": "{evt#8}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
@@ -729,7 +834,7 @@ profile: multi-app
       },
       "correlationId": null,
       "eventType": "oauth.client_credentials.issued",
-      "id": "{evt#7}",
+      "id": "{evt#9}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
@@ -742,6 +847,40 @@ profile: multi-app
       "sessionId": null,
       "source": "authserver",
       "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "fga.subject.expiry_changed",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.subject.expiry_changed",
+      "id": "{evt#10}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "expiresAt": "{datetime:utc-z}",
+        "subjectId": "{sub#1}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{sub#1}",
+          "type": "fga_subject"
+        }
+      ],
       "userAgent": null,
       "userId": null
     }
@@ -763,7 +902,7 @@ profile: multi-app
       },
       "correlationId": null,
       "eventType": "machine_client.revoked",
-      "id": "{evt#8}",
+      "id": "{evt#11}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -797,7 +936,7 @@ profile: multi-app
       },
       "correlationId": null,
       "eventType": "oauth.client_authentication.failed",
-      "id": "{evt#9}",
+      "id": "{evt#12}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
@@ -830,7 +969,7 @@ profile: multi-app
       },
       "correlationId": null,
       "eventType": "machine_client.secret_rotated",
-      "id": "{evt#10}",
+      "id": "{evt#13}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -864,7 +1003,7 @@ profile: multi-app
       },
       "correlationId": null,
       "eventType": "oauth.client_authentication.failed",
-      "id": "{evt#11}",
+      "id": "{evt#14}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {

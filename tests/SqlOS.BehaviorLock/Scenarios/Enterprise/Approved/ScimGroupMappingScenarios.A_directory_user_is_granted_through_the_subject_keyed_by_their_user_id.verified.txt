@@ -1,8 +1,8 @@
 # SqlOS behavior lock transcript
-scenario: ScimGroupMappingScenarios.A_directory_user_is_granted_through_a_second_fga_subject_CurrentBehavior_KnownDefect_448
+scenario: ScimGroupMappingScenarios.A_directory_user_is_granted_through_the_subject_keyed_by_their_user_id
 profile: enterprise-scim-path
 
-## 1. probe: the host provisions Ann's FGA subject by her user ID, as the FGA guides teach
+## 1. probe: the host provisions Ann's FGA subject by her user ID, as the FGA guides teach: the subject SCIM keyed by it
 > POST /__probe/fga/subjects
 > Content-Type: application/json; charset=utf-8
 >   {
@@ -61,7 +61,7 @@ profile: enterprise-scim-path
       ]
     }
 
-## 3. operator: dashboard: Ann now has two FGA user subjects
+## 3. operator: dashboard: Ann has one FGA user subject
 > GET /sqlos/admin/fga/api/users?search=Ann
 > X-BehaviorLock-Operator: behavior-lock-operator
 < 200 OK
@@ -73,17 +73,8 @@ profile: enterprise-scim-path
       "data": [
         {
           "createdAt": "{datetime:utc-z}",
-          "displayName": "Ann Archer",
-          "email": "{email:ann}",
-          "id": "{fusr#1}",
-          "isActive": true,
-          "lastLoginAt": null,
-          "subjectId": "{subj:ann-scim}"
-        },
-        {
-          "createdAt": "{datetime:utc-z}",
           "displayName": "Ann Archer (app)",
-          "email": null,
+          "email": "{email:ann}",
           "id": "usr::{hex#1}",
           "isActive": true,
           "lastLoginAt": null,
@@ -95,93 +86,13 @@ profile: enterprise-scim-path
       "pageSize": 25
     }
 
-## 4. probe: a check by Ann's user ID does not see the mapped grant
+## 4. probe: a check by Ann's user ID sees the mapped grant
 > POST /__probe/fga/check
 > Content-Type: application/json; charset=utf-8
 >   {
 >     "permissionKey": "workspace.read",
 >     "resourceId": "workspace::acme-projects",
 >     "subjectId": "{usr:ann}"
->   }
-< 200 OK
-< Content-Type: application/json; charset=utf-8
-    {
-      "allowed": false,
-      "error": null,
-      "trace": [
-        {
-          "detail": "Checking access to Acme projects (workspace)",
-          "grantId": null,
-          "resourceId": "workspace::acme-projects",
-          "resourceName": "Acme projects",
-          "roleName": null,
-          "step": "Target Resource",
-          "subjectName": null
-        },
-        {
-          "detail": "Looking for permission: Read workspace",
-          "grantId": null,
-          "resourceId": null,
-          "resourceName": null,
-          "roleName": null,
-          "step": "Permission",
-          "subjectName": null
-        },
-        {
-          "detail": "Subject \"Ann Archer (app)\" + 0 group membership(s)",
-          "grantId": null,
-          "resourceId": null,
-          "resourceName": null,
-          "roleName": null,
-          "step": "Subject Resolution",
-          "subjectName": "Ann Archer (app)"
-        },
-        {
-          "detail": "Checking 2 resource(s) in hierarchy",
-          "grantId": null,
-          "resourceId": null,
-          "resourceName": null,
-          "roleName": null,
-          "step": "Resource Path",
-          "subjectName": null
-        },
-        {
-          "detail": "[Workspace] Acme projects",
-          "grantId": null,
-          "resourceId": "workspace::acme-projects",
-          "resourceName": "Acme projects",
-          "roleName": null,
-          "step": "Checking Resource",
-          "subjectName": null
-        },
-        {
-          "detail": "[Workspace] Acme",
-          "grantId": null,
-          "resourceId": "workspace::acme",
-          "resourceName": "Acme",
-          "roleName": null,
-          "step": "Checking Resource",
-          "subjectName": null
-        },
-        {
-          "detail": "No matching grants found that provide permission \"Read workspace\"",
-          "grantId": null,
-          "resourceId": null,
-          "resourceName": null,
-          "roleName": null,
-          "step": "Access Denied",
-          "subjectName": null
-        }
-      ]
-    }
-
-## 5. probe: a check by the subject SCIM created does
-> POST /__probe/fga/check
-> Content-Type: application/json; charset=utf-8
->   {
->     "permissionKey": "workspace.read",
->     "resourceId": "workspace::acme-projects",
->     "subjectId": "{subj:ann-scim}"
 >   }
 < 200 OK
 < Content-Type: application/json; charset=utf-8
@@ -208,13 +119,84 @@ profile: enterprise-scim-path
           "subjectName": null
         },
         {
-          "detail": "Subject \"Ann Archer\" + 1 group membership(s)",
+          "detail": "Subject \"Ann Archer (app)\" + 1 group membership(s)",
           "grantId": null,
           "resourceId": null,
           "resourceName": null,
           "roleName": null,
           "step": "Subject Resolution",
-          "subjectName": "Ann Archer"
+          "subjectName": "Ann Archer (app)"
+        },
+        {
+          "detail": "Checking 2 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Acme projects",
+          "grantId": null,
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme projects",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Role \"Workspace reader\" provides permission \"Read workspace\" via grant at Acme projects",
+          "grantId": "{grant#1}",
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme projects",
+          "roleName": "Workspace reader",
+          "step": "Access Granted",
+          "subjectName": "Engineering"
+        }
+      ]
+    }
+
+## 5. probe: as does a check by the subject the dashboard lists, the same one
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::acme-projects",
+>     "subjectId": "{usr:ann}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": true,
+      "error": null,
+      "trace": [
+        {
+          "detail": "Checking access to Acme projects (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::acme-projects",
+          "resourceName": "Acme projects",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Read workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"Ann Archer (app)\" + 1 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": "Ann Archer (app)"
         },
         {
           "detail": "Checking 2 resource(s) in hierarchy",
@@ -268,7 +250,7 @@ profile: enterprise-scim-path
           "groupId": "{grp#1}",
           "memberCount": 1,
           "subjectIds": [
-            "{subj:ann-scim}"
+            "{usr:ann}"
           ],
           "truncated": false
         },
@@ -291,6 +273,80 @@ profile: enterprise-scim-path
       "userId": null
     }
   - {
+      "action": "fga.subject.created",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.subject.created",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "subjectId": "{subj#1}",
+        "subjectType": "group"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{subj#1}",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "fga.group.member_added",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.group.member_added",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "groupId": "{grp#1}",
+        "groupSubjectId": "{subj#1}",
+        "memberSubjectId": "{usr:ann}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{subj#1}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "{usr:ann}",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
       "action": "scim.grant.mapped",
       "actor": {
         "displayName": null,
@@ -302,7 +358,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.grant.mapped",
-      "id": "{evt#2}",
+      "id": "{evt#4}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {
@@ -332,6 +388,59 @@ profile: enterprise-scim-path
       "userId": null
     }
   - {
+      "action": "fga.grant.created",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.grant.created",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "effectiveFrom": null,
+        "effectiveTo": null,
+        "grantId": "{grant#1}",
+        "resourceId": "workspace::acme-projects",
+        "roleId": "workspace_reader",
+        "subjectId": "{subj#1}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grant#1}",
+          "type": "fga_grant"
+        },
+        {
+          "displayName": null,
+          "id": "{subj#1}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "workspace::acme-projects",
+          "type": "fga_resource"
+        },
+        {
+          "displayName": null,
+          "id": "workspace_reader",
+          "type": "fga_role"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
       "action": "scim.group.created",
       "actor": {
         "displayName": null,
@@ -343,7 +452,7 @@ profile: enterprise-scim-path
       "context": null,
       "correlationId": null,
       "eventType": "scim.group.created",
-      "id": "{evt#3}",
+      "id": "{evt#6}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": null,
       "metadata": {

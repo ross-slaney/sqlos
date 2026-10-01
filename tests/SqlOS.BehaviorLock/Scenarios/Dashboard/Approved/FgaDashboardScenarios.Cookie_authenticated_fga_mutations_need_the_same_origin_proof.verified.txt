@@ -196,7 +196,7 @@ profile: dashboard-password
       "subjectName": "Alice"
     }
 
-## 10. operator: so is Sec-Fetch-Site: same-origin
+## 10. operator: so is Sec-Fetch-Site: same-origin, which reaches the grant the request repeats
 > POST /sqlos/admin/fga/api/grants
 > Content-Type: application/json; charset=utf-8
 > Cookie: SqlOS.Dashboard.Session={cookie#1}
@@ -207,26 +207,18 @@ profile: dashboard-password
 >     "roleId": "workspace_reader",
 >     "subjectId": "{usr#1}"
 >   }
-< 201 Created
+< 409 Conflict
 < Content-Type: application/json
 < Referrer-Policy: same-origin
 < X-Content-Type-Options: nosniff
 < X-Frame-Options: DENY
     {
-      "createdAt": "{datetime:utc-z}",
-      "effectiveFrom": null,
-      "effectiveTo": null,
-      "id": "{grant#2}",
-      "resourceId": "workspace::alpha",
-      "resourceName": "Alpha",
-      "roleId": "workspace_reader",
-      "roleName": "Workspace reader",
-      "subjectId": "{usr#1}",
-      "subjectName": "Alice"
+      "error": "An identical grant already exists.",
+      "grantId": "{grant#1}"
     }
 
 ## 11. operator: a delete without the proof is refused
-> DELETE /sqlos/admin/fga/api/grants/{grant#2}
+> DELETE /sqlos/admin/fga/api/grants/{grant#1}
 > Cookie: SqlOS.Dashboard.Session={cookie#1}
 < 403 Forbidden
 < Cache-Control: no-store
@@ -240,7 +232,7 @@ profile: dashboard-password
     }
 
 ## 12. operator: a delete with the proof and the dashboard's Origin
-> DELETE /sqlos/admin/fga/api/grants/{grant#2}
+> DELETE /sqlos/admin/fga/api/grants/{grant#1}
 > Cookie: SqlOS.Dashboard.Session={cookie#1}
 > Origin: https://sqlos.example.test
 > X-SqlOS-Request: 1
@@ -279,26 +271,47 @@ profile: dashboard-password
 < X-Content-Type-Options: nosniff
 < X-Frame-Options: DENY
     {
-      "data": [
-        {
-          "createdAt": "{datetime:utc-z}",
-          "effectiveFrom": null,
-          "effectiveTo": null,
-          "id": "{grant#1}",
-          "resourceId": "workspace::alpha",
-          "resourceName": "Alpha",
-          "roleId": "workspace_reader",
-          "roleName": "Workspace reader",
-          "subjectId": "{usr#1}",
-          "subjectName": "Alice"
-        }
-      ],
+      "data": [],
       "hasNextPage": false,
       "nextCursor": null,
       "pageSize": 25
     }
 
 ## audit: each refusal is audited
+  - {
+      "action": "fga.subject.created",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "application"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "fga.subject.created",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": null,
+      "metadata": {
+        "subjectId": "{usr#1}",
+        "subjectType": "user"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr#1}",
+          "type": "fga_subject"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
   - {
       "action": "security.csrf_rejected",
       "actor": {
@@ -317,7 +330,7 @@ profile: dashboard-password
       },
       "correlationId": null,
       "eventType": "security.csrf_rejected",
-      "id": "{evt#1}",
+      "id": "{evt#2}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
@@ -352,48 +365,13 @@ profile: dashboard-password
       },
       "correlationId": null,
       "eventType": "security.csrf_rejected",
-      "id": "{evt#2}",
-      "ingestedAt": "{datetime:utc-z}",
-      "ipAddress": "203.0.113.10",
-      "metadata": {
-        "method": "POST",
-        "path": "/sqlos/admin/fga/api/grants",
-        "reason": "ambiguous_header"
-      },
-      "occurredAt": "{datetime:utc-z}",
-      "organizationId": null,
-      "requestId": null,
-      "sessionId": null,
-      "source": "authserver",
-      "targets": [],
-      "userAgent": null,
-      "userId": null
-    }
-  - {
-      "action": "security.csrf_rejected",
-      "actor": {
-        "displayName": null,
-        "id": null,
-        "type": "security"
-      },
-      "applicationId": null,
-      "applicationKey": null,
-      "context": {
-        "correlationId": null,
-        "ipAddress": "203.0.113.10",
-        "requestId": null,
-        "sessionId": null,
-        "userAgent": null
-      },
-      "correlationId": null,
-      "eventType": "security.csrf_rejected",
       "id": "{evt#3}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
         "method": "POST",
         "path": "/sqlos/admin/fga/api/grants",
-        "reason": "untrusted_origin"
+        "reason": "ambiguous_header"
       },
       "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
@@ -463,7 +441,7 @@ profile: dashboard-password
       "metadata": {
         "method": "POST",
         "path": "/sqlos/admin/fga/api/grants",
-        "reason": "ambiguous_origin"
+        "reason": "untrusted_origin"
       },
       "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
@@ -498,7 +476,7 @@ profile: dashboard-password
       "metadata": {
         "method": "POST",
         "path": "/sqlos/admin/fga/api/grants",
-        "reason": "untrusted_origin"
+        "reason": "ambiguous_origin"
       },
       "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
@@ -566,9 +544,9 @@ profile: dashboard-password
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {
-        "method": "DELETE",
-        "path": "/sqlos/admin/fga/api/grants/{grant#2}",
-        "reason": "missing_header"
+        "method": "POST",
+        "path": "/sqlos/admin/fga/api/grants",
+        "reason": "untrusted_origin"
       },
       "occurredAt": "{datetime:utc-z}",
       "organizationId": null,
@@ -576,6 +554,65 @@ profile: dashboard-password
       "sessionId": null,
       "source": "authserver",
       "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "fga.grant.created",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": "{trace#1}",
+        "sessionId": null,
+        "userAgent": ""
+      },
+      "correlationId": null,
+      "eventType": "fga.grant.created",
+      "id": "{evt#9}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "effectiveFrom": null,
+        "effectiveTo": null,
+        "grantId": "{grant#1}",
+        "resourceId": "workspace::alpha",
+        "roleId": "workspace_reader",
+        "subjectId": "{usr#1}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": "{trace#1}",
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grant#1}",
+          "type": "fga_grant"
+        },
+        {
+          "displayName": null,
+          "id": "{usr#1}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "workspace::alpha",
+          "type": "fga_resource"
+        },
+        {
+          "displayName": null,
+          "id": "workspace_reader",
+          "type": "fga_role"
+        }
+      ],
       "userAgent": null,
       "userId": null
     }
@@ -597,7 +634,100 @@ profile: dashboard-password
       },
       "correlationId": null,
       "eventType": "security.csrf_rejected",
-      "id": "{evt#9}",
+      "id": "{evt#10}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "method": "DELETE",
+        "path": "/sqlos/admin/fga/api/grants/{grant#1}",
+        "reason": "missing_header"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "fga.grant.revoked",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": "{trace#2}",
+        "sessionId": null,
+        "userAgent": ""
+      },
+      "correlationId": null,
+      "eventType": "fga.grant.revoked",
+      "id": "{evt#11}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "grantId": "{grant#1}",
+        "reason": null,
+        "resourceId": "workspace::alpha",
+        "roleId": "workspace_reader",
+        "subjectId": "{usr#1}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": null,
+      "requestId": "{trace#2}",
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grant#1}",
+          "type": "fga_grant"
+        },
+        {
+          "displayName": null,
+          "id": "{usr#1}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "workspace::alpha",
+          "type": "fga_resource"
+        },
+        {
+          "displayName": null,
+          "id": "workspace_reader",
+          "type": "fga_role"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "security.csrf_rejected",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "security"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "security.csrf_rejected",
+      "id": "{evt#12}",
       "ingestedAt": "{datetime:utc-z}",
       "ipAddress": "203.0.113.10",
       "metadata": {

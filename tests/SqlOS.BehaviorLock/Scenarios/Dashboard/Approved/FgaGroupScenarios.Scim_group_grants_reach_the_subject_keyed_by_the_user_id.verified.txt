@@ -1,5 +1,5 @@
 # SqlOS behavior lock transcript
-scenario: FgaGroupScenarios.Scim_group_grants_reach_only_the_scim_subject_CurrentBehavior_KnownDefect_448
+scenario: FgaGroupScenarios.Scim_group_grants_reach_the_subject_keyed_by_the_user_id
 profile: enterprise-scim-path
 
 # Setup: a SCIM directory provisioned Judy and a Support group with Judy as its member (not recorded).
@@ -29,7 +29,7 @@ profile: enterprise-scim-path
       "pageSize": 25
     }
 
-## 2. operator: SCIM created a user subject of its own, with the SqlOS user ID as its external reference
+## 2. operator: SCIM keyed the user's subject by the SqlOS user ID
 > GET /sqlos/admin/fga/api/subjects?type=user
 > X-BehaviorLock-Operator: behavior-lock-operator
 < 200 OK
@@ -43,7 +43,7 @@ profile: enterprise-scim-path
           "createdAt": "{datetime:utc-z}",
           "displayName": "Judy Hopps",
           "externalRef": "{usr#1}",
-          "id": "{subj#2}",
+          "id": "{usr#1}",
           "organizationId": "{org#1}",
           "subjectType": "User",
           "subjectTypeId": "user"
@@ -68,7 +68,7 @@ profile: enterprise-scim-path
         {
           "createdAt": "{datetime:utc-z}",
           "displayName": "Judy Hopps",
-          "id": "{subj#2}",
+          "id": "{usr#1}",
           "subjectTypeId": "user"
         }
       ],
@@ -85,7 +85,7 @@ profile: enterprise-scim-path
     }
 
 ## 4. operator: the member subject lists its group
-> GET /sqlos/admin/fga/api/subjects/{subj#2}
+> GET /sqlos/admin/fga/api/subjects/{usr#1}
 > X-BehaviorLock-Operator: behavior-lock-operator
 < 200 OK
 < Content-Type: application/json
@@ -107,7 +107,7 @@ profile: enterprise-scim-path
         "createdAt": "{datetime:utc-z}",
         "displayName": "Judy Hopps",
         "externalRef": "{usr#1}",
-        "id": "{subj#2}",
+        "id": "{usr#1}",
         "organizationId": "{org#1}",
         "subjectType": "User",
         "subjectTypeId": "user",
@@ -142,13 +142,13 @@ profile: enterprise-scim-path
       "subjectName": "Support"
     }
 
-## 6. probe: the SCIM subject reads Alpha through the group
+## 6. probe: the user reads Alpha through the group
 > POST /__probe/fga/check
 > Content-Type: application/json; charset=utf-8
 >   {
 >     "permissionKey": "workspace.read",
 >     "resourceId": "workspace::alpha",
->     "subjectId": "{subj#2}"
+>     "subjectId": "{usr#1}"
 >   }
 < 200 OK
 < Content-Type: application/json; charset=utf-8
@@ -220,7 +220,7 @@ profile: enterprise-scim-path
 >   {
 >     "permissionKey": "workspace.read",
 >     "resourceId": "workspace::alpha",
->     "subjectId": "{subj#2}"
+>     "subjectId": "{usr#1}"
 >   }
 < 200 OK
 < Content-Type: application/json
@@ -298,12 +298,12 @@ profile: enterprise-scim-path
       "permissionKey": "workspace.read",
       "permissionName": "Read workspace",
       "subjectDisplayName": "Judy Hopps",
-      "subjectId": "{subj#2}",
+      "subjectId": "{usr#1}",
       "subjectsChecked": [
         {
           "displayName": "Judy Hopps",
           "isDirect": true,
-          "subjectId": "{subj#2}",
+          "subjectId": "{usr#1}",
           "type": "user"
         },
         {
@@ -319,7 +319,7 @@ profile: enterprise-scim-path
       "targetResourceType": "Workspace"
     }
 
-## 8. probe: a check by the SqlOS user ID finds no subject
+## 8. probe: a check by the SqlOS user ID is that same check
 > POST /__probe/fga/check
 > Content-Type: application/json; charset=utf-8
 >   {
@@ -330,8 +330,8 @@ profile: enterprise-scim-path
 < 200 OK
 < Content-Type: application/json; charset=utf-8
     {
-      "allowed": false,
-      "error": "No subjects found",
+      "allowed": true,
+      "error": null,
       "trace": [
         {
           "detail": "Checking access to Alpha (workspace)",
@@ -352,37 +352,50 @@ profile: enterprise-scim-path
           "subjectName": null
         },
         {
-          "detail": "Subject \"\" + -1 group membership(s)",
+          "detail": "Subject \"Judy Hopps\" + 1 group membership(s)",
           "grantId": null,
           "resourceId": null,
           "resourceName": null,
           "roleName": null,
           "step": "Subject Resolution",
+          "subjectName": "Judy Hopps"
+        },
+        {
+          "detail": "Checking 1 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
           "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Alpha",
+          "grantId": null,
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Role \"Workspace reader\" provides permission \"Read workspace\" via grant at Alpha",
+          "grantId": "{grant#1}",
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleName": "Workspace reader",
+          "step": "Access Granted",
+          "subjectName": "Support"
         }
       ]
     }
 
-## 9. probe: so the list filter by user ID is empty
+## 9. probe: so the list filter by user ID includes Alpha
 > POST /__probe/fga/filter
 > Content-Type: application/json; charset=utf-8
 >   {
 >     "permissionKey": "workspace.read",
 >     "subjectId": "{usr#1}"
->   }
-< 200 OK
-< Content-Type: application/json; charset=utf-8
-    {
-      "count": 0,
-      "workspaces": []
-    }
-
-## 10. probe: while the SCIM subject's list includes Alpha
-> POST /__probe/fga/filter
-> Content-Type: application/json; charset=utf-8
->   {
->     "permissionKey": "workspace.read",
->     "subjectId": "{subj#2}"
 >   }
 < 200 OK
 < Content-Type: application/json; charset=utf-8
@@ -396,5 +409,82 @@ profile: enterprise-scim-path
       ]
     }
 
-## audit: the dashboard grant is not audited
-  (no new events)
+## 10. probe: as the subject's list does
+> POST /__probe/fga/filter
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "subjectId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "count": 1,
+      "workspaces": [
+        {
+          "name": "Alpha",
+          "resourceId": "workspace::alpha"
+        }
+      ]
+    }
+
+## audit: the dashboard grant is audited
+  - {
+      "action": "fga.grant.created",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": "{trace#1}",
+        "sessionId": null,
+        "userAgent": ""
+      },
+      "correlationId": null,
+      "eventType": "fga.grant.created",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:utc-z}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "effectiveFrom": null,
+        "effectiveTo": null,
+        "grantId": "{grant#1}",
+        "resourceId": "workspace::alpha",
+        "roleId": "workspace_reader",
+        "subjectId": "{subj#1}"
+      },
+      "occurredAt": "{datetime:utc-z}",
+      "organizationId": "{org#1}",
+      "requestId": "{trace#1}",
+      "sessionId": null,
+      "source": "fga",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grant#1}",
+          "type": "fga_grant"
+        },
+        {
+          "displayName": null,
+          "id": "{subj#1}",
+          "type": "fga_subject"
+        },
+        {
+          "displayName": null,
+          "id": "workspace::alpha",
+          "type": "fga_resource"
+        },
+        {
+          "displayName": null,
+          "id": "workspace_reader",
+          "type": "fga_role"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
