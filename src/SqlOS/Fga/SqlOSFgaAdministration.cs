@@ -17,8 +17,16 @@ internal sealed class SqlOSFgaAdministration(IServiceProvider services, ISqlOSFg
     private const int DefaultPageSize = 25;
     private const int MaxAncestorTraversalDepth = 50;
 
-    public static SqlOSFgaAdministration For(IServiceProvider services)
-        => new(services, services.GetRequiredService<ISqlOSFgaDbContext>());
+    /// <summary>The administration of the scope <paramref name="services"/>, whose writes record <paramref name="request"/>.</summary>
+    public static SqlOSFgaAdministration For(IServiceProvider services, SqlOSRequestContext request)
+    {
+        if (services.GetService<SqlOSRequestContextAccessor>() is { } accessor)
+        {
+            accessor.Current = request;
+        }
+
+        return new(services, services.GetRequiredService<ISqlOSFgaDbContext>());
+    }
 
     // --- Operator writes and the trace ---
 

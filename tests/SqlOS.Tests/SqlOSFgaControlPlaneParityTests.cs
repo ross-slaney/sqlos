@@ -140,6 +140,8 @@ public sealed class SqlOSFgaControlPlaneParityTests
         // Both are audited alike, naming who granted: host code or the operator.
         (await GrantAuditAsync(host)).Should().Equal("fga.grant.created application:", "fga.grant.revoked application:");
         (await GrantAuditAsync(dashboard)).Should().Equal("fga.grant.created admin:", "fga.grant.revoked admin:");
+        (await RequestIdsAsync(dashboard)).Should().AllSatisfy(id => id.Should().NotBeNull("the operator's request is recorded"));
+        (await RequestIdsAsync(host)).Should().AllSatisfy(id => id.Should().BeNull("host code outside a request has none"));
     }
 
     [TestMethod]
@@ -220,6 +222,12 @@ public sealed class SqlOSFgaControlPlaneParityTests
             .Where(row => row.Source == "fga" && row.EventType.StartsWith("fga.grant."))
             .OrderBy(row => row.IngestedAt)
             .Select(row => row.EventType + " " + row.ActorType + ":" + row.ActorId)
+            .ToListAsync();
+
+    private static async Task<List<string?>> RequestIdsAsync(ControlPlaneParityHarness harness)
+        => await harness.Context.Set<SqlOSAuditEvent>().AsNoTracking()
+            .Where(row => row.Source == "fga" && row.EventType.StartsWith("fga.grant."))
+            .Select(row => row.RequestId)
             .ToListAsync();
 
     private static string RepositoryRoot()

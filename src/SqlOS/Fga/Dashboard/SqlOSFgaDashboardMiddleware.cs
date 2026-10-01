@@ -8,6 +8,7 @@ using SqlOS.Configuration;
 using SqlOS.Dashboard;
 using SqlOS.Domain;
 using SqlOS.Fga.Processes;
+using SqlOS.Hosting;
 using SqlOS.Pagination;
 using SqlOS.Security;
 
@@ -149,7 +150,7 @@ public class SqlOSFgaDashboardMiddleware
     private async Task HandleApiRequestCore(HttpContext context, string endpoint)
     {
         using var scope = context.RequestServices.CreateScope();
-        var fga = SqlOSFgaAdministration.For(scope.ServiceProvider);
+        var fga = SqlOSFgaAdministration.For(scope.ServiceProvider, SqlOSHttpRequestContext.From(context, SqlOSRequestSurface.Admin));
         var method = context.Request.Method;
         var aborted = context.RequestAborted;
 

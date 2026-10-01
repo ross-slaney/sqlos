@@ -159,14 +159,20 @@ internal static class FgaAuditProjections
                 Source: "fga",
                 Actor: new SqlOSAuditActor(actor.Type, actor.Id),
                 Targets: targets,
-                Context: new SqlOSAuditContext(
-                    IpAddress: context.Request.IpAddress,
-                    UserAgent: context.Request.UserAgent,
-                    RequestId: context.Request.RequestId,
-                    CorrelationId: context.Request.CorrelationId),
+                Context: Context(context.Request),
                 Metadata: SqlOSAuditRows.Metadata(metadata)),
             SqlOSIds.New("evt"),
             context.Now);
+
+    /// <summary>The request that made the change; none for a write outside one (startup, host code, a directory).</summary>
+    private static SqlOSAuditContext? Context(SqlOSRequestContext request)
+        => request.IpAddress == null && request.UserAgent == null && request.RequestId == null && request.CorrelationId == null
+            ? null
+            : new SqlOSAuditContext(
+                IpAddress: request.IpAddress,
+                UserAgent: request.UserAgent,
+                RequestId: request.RequestId,
+                CorrelationId: request.CorrelationId);
 
     private static SqlOSAuditTarget Grant(string id) => new("fga_grant", id);
 
