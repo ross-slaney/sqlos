@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Http;
 using SqlOS.AuthServer.Errors;
 using SqlOS.AuthServer.Models;
+using SqlOS.Domain;
+using SqlOS.Hosting;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -23,13 +25,31 @@ internal static class SqlOSDirectLoginPolicy
     /// <see cref="RejectedAuditEvent"/> and throws the generic public <c>invalid_client</c> error.
     /// Callers run this before minting any token, challenge, email, provider state, or session.
     /// </summary>
-    public static async Task EnsureFirstPartyAsync(
+    public static Task EnsureFirstPartyAsync(
         SqlOSAdminService adminService,
         SqlOSClientApplication client,
         HttpContext? httpContext,
         string? userId,
         CancellationToken cancellationToken)
+        => EnsureFirstPartyAsync(
+            adminService,
+            client,
+            SqlOSHttpRequestContext.FromOptional(httpContext, SqlOSRequestSurface.PublicApi),
+            userId,
+            cancellationToken);
+
+    /// <summary>
+    /// The same gate for a process, which knows the request only as a
+    /// <see cref="SqlOSRequestContext"/>: its address and route are the ones the refusal records.
+    /// </summary>
+    public static async Task EnsureFirstPartyAsync(
+        SqlOSAdminService adminService,
+        SqlOSClientApplication client,
+        SqlOSRequestContext request,
+        string? userId,
+        CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(request);
         if (client.IsFirstParty)
         {
             return;
@@ -40,12 +60,12 @@ internal static class SqlOSDirectLoginPolicy
             "client",
             client.Id,
             userId: userId,
-            ipAddress: httpContext?.Connection.RemoteIpAddress?.ToString(),
+            ipAddress: request.IpAddress,
             data: new
             {
                 client_application_id = client.Id,
                 client_id = client.ClientId,
-                route = ResolveRoute(httpContext)
+                route = request.Route
             },
             cancellationToken: cancellationToken);
 
@@ -54,16 +74,5 @@ internal static class SqlOSDirectLoginPolicy
             RejectedMessage,
             StatusCodes.Status400BadRequest,
             auditReason: "direct_login_client_not_first_party");
-    }
-
-    private static string? ResolveRoute(HttpContext? httpContext)
-    {
-        if (httpContext == null)
-        {
-            return null;
-        }
-
-        var route = httpContext.Request.PathBase.Add(httpContext.Request.Path).Value;
-        return string.IsNullOrEmpty(route) ? null : route;
     }
 }

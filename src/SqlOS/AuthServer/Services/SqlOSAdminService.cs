@@ -1128,6 +1128,14 @@ public sealed partial class SqlOSAdminService
         return resolved.Client;
     }
 
+    /// <summary>
+    /// The client a direct login names, resolved as <see cref="RequireClientAsync(string?, string?, CancellationToken, HttpContext?)"/>
+    /// resolves it for a request without a redirect URI: the overload processes call, which never
+    /// see the HTTP request.
+    /// </summary>
+    internal Task<SqlOSClientApplication> RequireClientAsync(string? clientId, CancellationToken cancellationToken)
+        => RequireClientAsync(clientId, redirectUri: null, cancellationToken);
+
     public async Task<List<SqlOSOrganizationOption>> GetUserOrganizationsAsync(string userId, CancellationToken cancellationToken = default)
         => await _context.Set<SqlOSMembership>()
             .AsNoTracking()
@@ -1856,6 +1864,9 @@ public sealed partial class SqlOSAdminService
         return await CheckApplicationAccessAsync(client, userId, organizationId, cancellationToken: cancellationToken);
     }
 
+    /// <summary>The refusal a client that does not admit the user answers with.</summary>
+    internal const string ApplicationAccessDeniedMessage = "Application access is not allowed.";
+
     public async Task EnsureApplicationAccessAsync(
         SqlOSClientApplication client,
         string? userId,
@@ -1867,7 +1878,7 @@ public sealed partial class SqlOSAdminService
         var decision = await CheckApplicationAccessAsync(client, userId, organizationId, recordDeniedAudit: true, eventType, ipAddress, cancellationToken);
         if (!decision.Allowed)
         {
-            throw new InvalidOperationException("Application access is not allowed.");
+            throw new InvalidOperationException(ApplicationAccessDeniedMessage);
         }
     }
 

@@ -5,18 +5,21 @@ namespace SqlOS.Domain;
 /// the audit projection read it for audit rows and admission; they never see the HTTP request.
 /// </summary>
 /// <remarks>
-/// Adapters capture it from the HTTP request (<c>SqlOSHttpRequestContext</c>) and set it on the
-/// scope's <see cref="SqlOSRequestContextAccessor"/> before they call a process. Values are kept as
-/// captured; whoever records them normalizes them as 7.x did (for example an absent user agent is
-/// an empty string, which an audit row stores as no user agent). Work outside a request, such as
-/// startup reconciliation and hosted services, runs with <see cref="System"/>.
+/// Adapters capture it from the HTTP request (<c>SqlOSHttpRequestContext</c>) and pass it to the
+/// process they call, or set it on the scope's <see cref="SqlOSRequestContextAccessor"/>. Values are
+/// kept as captured; whoever records them normalizes them as 7.x did (for example an absent user
+/// agent is an empty string, which an audit row stores as no user agent). Work outside a request,
+/// such as startup reconciliation and hosted services, runs with <see cref="System"/>.
+/// <see cref="Route"/> is the request's path (path base and path), which the direct-login refusal
+/// records as 7.x did, or null when the request has none.
 /// </remarks>
 internal sealed record SqlOSRequestContext(
     SqlOSRequestSurface Surface,
     string? IpAddress,
     string? UserAgent,
     string? RequestId,
-    string? CorrelationId)
+    string? CorrelationId,
+    string? Route = null)
 {
     /// <summary>No request: startup, background work and code that runs outside an HTTP request.</summary>
     public static SqlOSRequestContext System { get; } = new(SqlOSRequestSurface.System, null, null, null, null);
