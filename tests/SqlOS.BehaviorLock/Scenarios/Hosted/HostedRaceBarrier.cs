@@ -39,9 +39,16 @@ internal sealed class HostedRaceBarrier : DbCommandInterceptor
     {
         _path = path;
         // SQL Server writes [dbo].[Table]; PostgreSQL writes dbo."Table" (or "dbo"."Table").
-        _statement = new Regex(
-            $@"\b{Regex.Escape(statement).Replace(@"\ ", @"\s+", StringComparison.Ordinal)}\s+(?:[\[""]?dbo[\]""]?\.)?[\[""]?{Regex.Escape(table)}\b",
-            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        var qualifiedTable = $@"(?:[\[""]?dbo[\]""]?\.)?[\[""]?{Regex.Escape(table)}\b";
+        var pattern = $@"\b{Regex.Escape(statement).Replace(@"\ ", @"\s+", StringComparison.Ordinal)}\s+{qualifiedTable}";
+        if (string.Equals(statement, "UPDATE", StringComparison.OrdinalIgnoreCase))
+        {
+            // A set-based update (ExecuteUpdate) on SQL Server names its alias first and the table
+            // in its FROM clause: UPDATE [c] SET ... FROM [dbo].[Table] AS [c].
+            pattern += $@"|\bUPDATE\s+\[\w+\]\s+SET\b[\s\S]*?\bFROM\s+{qualifiedTable}";
+        }
+
+        _statement = new Regex(pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         _participants = participants;
     }
 

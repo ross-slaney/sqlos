@@ -35,6 +35,9 @@ internal sealed class SqlOSAuditProjection
     /// <summary>SqlOS's projection, registered once in dependency injection.</summary>
     public static SqlOSAuditProjection Default { get; } = new SqlOSAuditProjectionBuilder()
         .AddTemporaryTokenEvents()
+        .AddEmailOtpEvents()
+        .AddPhoneOtpEvents()
+        .AddMagicLinkEvents()
         .Build();
 
     /// <summary>The registered event types, audited or not.</summary>

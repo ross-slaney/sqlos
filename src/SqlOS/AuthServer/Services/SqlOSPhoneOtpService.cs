@@ -3,11 +3,13 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
+using SqlOS.AuditLogs;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 using SqlOS.Domain;
+using SqlOS.Domain.Events;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -21,6 +23,7 @@ public sealed class SqlOSPhoneOtpService
     private readonly SqlOSSettingsService _settingsService;
     private readonly ISqlOSOtpDeliveryChannel _deliveryChannel;
     private readonly SqlOSDeliveryAdmissionService _deliveryAdmission;
+    private readonly IAuditRecorder _auditRecorder;
     private readonly SqlOSPhoneOtpOptions _options;
 
     public SqlOSPhoneOtpService(
@@ -38,6 +41,7 @@ public sealed class SqlOSPhoneOtpService
         _settingsService = settingsService;
         _deliveryChannel = deliveryChannel;
         _deliveryAdmission = deliveryAdmissionService ?? new SqlOSDeliveryAdmissionService();
+        _auditRecorder = new SqlOSAuditRecorder(context);
         _options = options.Value.PhoneOtp;
     }
 
@@ -59,7 +63,7 @@ public sealed class SqlOSPhoneOtpService
             userId: null,
             userPhoneNumberId: null,
             sendWhenNoUser: false,
-            purpose: "login",
+            purpose: PhoneOtpPurposes.Login,
             httpContext,
             cancellationToken);
     }
@@ -81,7 +85,7 @@ public sealed class SqlOSPhoneOtpService
             userId: null,
             userPhoneNumberId: null,
             sendWhenNoUser: false,
-            purpose: "login",
+            purpose: PhoneOtpPurposes.Login,
             httpContext,
             cancellationToken);
     }
@@ -109,7 +113,7 @@ public sealed class SqlOSPhoneOtpService
             userId: null,
             userPhoneNumberId: null,
             sendWhenNoUser: true,
-            purpose: "signup",
+            purpose: PhoneOtpPurposes.Signup,
             httpContext,
             cancellationToken);
 
@@ -160,7 +164,7 @@ public sealed class SqlOSPhoneOtpService
             userId: null,
             userPhoneNumberId: null,
             sendWhenNoUser: true,
-            purpose: "signup",
+            purpose: PhoneOtpPurposes.Signup,
             httpContext,
             cancellationToken);
 
@@ -210,7 +214,7 @@ public sealed class SqlOSPhoneOtpService
             userId: authenticatedUser.Id,
             userPhoneNumberId: null,
             sendWhenNoUser: true,
-            purpose: "enrollment",
+            purpose: PhoneOtpPurposes.Enrollment,
             httpContext,
             cancellationToken);
     }
@@ -230,7 +234,7 @@ public sealed class SqlOSPhoneOtpService
             new SqlOSPhoneOtpVerifyRequest(request.ChallengeToken, request.Code),
             expectedAuthorizationRequestId: null,
             requireAuthorizationRequestMatch: false,
-            expectedPurpose: "enrollment",
+            expectedPurpose: PhoneOtpPurposes.Enrollment,
             cancellationToken);
 
         if (!string.Equals(challenge.UserId, authenticatedUser.Id, StringComparison.Ordinal))
@@ -239,15 +243,7 @@ public sealed class SqlOSPhoneOtpService
         }
 
         var phoneNumber = UnprotectPhoneNumber(challenge.PhoneNumberEncrypted);
-        var record = await AddVerifiedPhoneNumberAsync(authenticatedUser, phoneNumber, cancellationToken);
-        await RecordPhoneOtpAuditAsync(
-            "phone_otp.phone_added",
-            challenge.MaskedPhoneNumber,
-            "enrollment",
-            challenge.IpAddress,
-            new { userId = authenticatedUser.Id, phoneNumberId = record.Id },
-            cancellationToken);
-        return record;
+        return await AddVerifiedPhoneNumberAsync(authenticatedUser, phoneNumber, enrollment: challenge, cancellationToken);
     }
 
     public async Task<SqlOSPhoneOtpVerificationResult> VerifyAsync(
@@ -271,7 +267,7 @@ public sealed class SqlOSPhoneOtpService
             request,
             expectedAuthorizationRequestId,
             requireAuthorizationRequestMatch,
-            expectedPurpose: "login",
+            expectedPurpose: PhoneOtpPurposes.Login,
             cancellationToken);
 
         if (challenge.User == null || !challenge.User.IsActive)
@@ -333,7 +329,7 @@ public sealed class SqlOSPhoneOtpService
             new SqlOSPhoneOtpVerifyRequest(rawChallengeToken, request.Code),
             expectedAuthorizationRequestId,
             requireAuthorizationRequestMatch,
-            expectedPurpose: "signup",
+            expectedPurpose: PhoneOtpPurposes.Signup,
             cancellationToken);
 
         if (challenge.User != null)
@@ -370,10 +366,21 @@ public sealed class SqlOSPhoneOtpService
             ?? throw new InvalidOperationException(PublicInvalidMessage);
     }
 
-    public async Task<SqlOSUserPhoneNumber> AddVerifiedPhoneNumberAsync(
+    public Task<SqlOSUserPhoneNumber> AddVerifiedPhoneNumberAsync(
         SqlOSUser user,
         string e164PhoneNumber,
         CancellationToken cancellationToken = default)
+        => AddVerifiedPhoneNumberAsync(user, e164PhoneNumber, enrollment: null, cancellationToken);
+
+    /// <summary>
+    /// Adds a verified number to <paramref name="user"/>'s account. An enrollment challenge that
+    /// proved the number records the enrollment in the same save.
+    /// </summary>
+    private async Task<SqlOSUserPhoneNumber> AddVerifiedPhoneNumberAsync(
+        SqlOSUser user,
+        string e164PhoneNumber,
+        SqlOSPhoneOtpChallenge? enrollment,
+        CancellationToken cancellationToken)
     {
         var phoneHash = _cryptoService.HashToken(e164PhoneNumber);
         var existing = await _context.Set<SqlOSUserPhoneNumber>()
@@ -391,6 +398,7 @@ public sealed class SqlOSPhoneOtpService
             existing.PhoneNumber = e164PhoneNumber;
             existing.DisplayValueEncrypted = _cryptoService.ProtectSecret(e164PhoneNumber);
             existing.UpdatedAt = now;
+            enrollment?.RecordEnrollment(user.Id, existing.Id);
             await _context.SaveChangesAsync(cancellationToken);
             return existing;
         }
@@ -411,6 +419,7 @@ public sealed class SqlOSPhoneOtpService
             UpdatedAt = now
         };
         _context.Set<SqlOSUserPhoneNumber>().Add(record);
+        enrollment?.RecordEnrollment(user.Id, record.Id);
         await _context.SaveChangesAsync(cancellationToken);
         return record;
     }
@@ -435,33 +444,20 @@ public sealed class SqlOSPhoneOtpService
             .FirstOrDefaultAsync(x => x.ChallengeTokenHash == challengeHash, cancellationToken)
             ?? throw new InvalidOperationException(PublicInvalidMessage);
 
-        if (!IsChallengeActive(challenge)
-            || !string.Equals(challenge.Purpose, expectedPurpose, StringComparison.Ordinal))
+        if (!challenge.IsOpen(DateTime.UtcNow)
+            || !challenge.IsFor(expectedPurpose)
+            || (requireAuthorizationRequestMatch && !challenge.AnswersAuthorizationRequest(expectedAuthorizationRequestId)))
         {
             throw new InvalidOperationException(PublicInvalidMessage);
-        }
-
-        if (requireAuthorizationRequestMatch)
-        {
-            if (string.IsNullOrWhiteSpace(expectedAuthorizationRequestId))
-            {
-                if (!string.IsNullOrWhiteSpace(challenge.AuthorizationRequestId))
-                {
-                    throw new InvalidOperationException(PublicInvalidMessage);
-                }
-            }
-            else if (!string.Equals(challenge.AuthorizationRequestId, expectedAuthorizationRequestId, StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException(PublicInvalidMessage);
-            }
         }
 
         if (!challenge.ProviderStarted)
         {
-            await RejectChallengeAsync(challenge, "not_started", cancellationToken);
+            await RejectChallengeAsync(challenge, SqlOSPhoneOtpChallenge.NotStartedReason, cancellationToken);
             throw new InvalidOperationException(PublicInvalidMessage);
         }
 
+        // The provider checks the code against the stored recipient, never a number from the request.
         var phoneNumber = UnprotectPhoneNumber(challenge.PhoneNumberEncrypted);
         var check = await _deliveryChannel.CheckAsync(
             phoneNumber,
@@ -475,20 +471,16 @@ public sealed class SqlOSPhoneOtpService
                 challenge.ProviderChallengeId),
             cancellationToken);
 
-        challenge.AttemptCount++;
-        challenge.ProviderStatus = check.ProviderStatus;
-        if (!string.IsNullOrWhiteSpace(check.ProviderChallengeId))
+        if (challenge.RegisterCheck(check) == PhoneOtpCheckOutcome.Rejected)
         {
-            challenge.ProviderChallengeId = check.ProviderChallengeId;
-        }
-
-        if (!check.Approved)
-        {
-            await RejectChallengeAsync(challenge, check.SanitizedError ?? check.ProviderStatus ?? "provider_rejected", cancellationToken);
+            await RejectChallengeAsync(
+                challenge,
+                check.SanitizedError ?? check.ProviderStatus ?? SqlOSPhoneOtpChallenge.ProviderRejectedReason,
+                cancellationToken);
             throw new InvalidOperationException(PublicInvalidMessage);
         }
 
-        challenge.ConsumedAt = DateTime.UtcNow;
+        challenge.Complete(DateTime.UtcNow);
 
         try
         {
@@ -496,22 +488,11 @@ public sealed class SqlOSPhoneOtpService
         }
         catch (DbUpdateConcurrencyException)
         {
+            // A concurrent verification spent the challenge first; nothing this one staged may
+            // reach a later save of the same unit of work.
+            ((DbContext)_context).Entry(challenge).State = EntityState.Detached;
             throw new InvalidOperationException(PublicInvalidMessage);
         }
-
-        await RecordPhoneOtpAuditAsync(
-            "phone_otp.verify_succeeded",
-            challenge.MaskedPhoneNumber,
-            challenge.Purpose,
-            challenge.IpAddress,
-            new
-            {
-                challenge.UserId,
-                challenge.ClientApplicationId,
-                challenge.AuthorizationRequestId,
-                providerStatus = check.ProviderStatus
-            },
-            cancellationToken);
 
         return challenge;
     }
@@ -521,21 +502,8 @@ public sealed class SqlOSPhoneOtpService
         string reason,
         CancellationToken cancellationToken)
     {
-        challenge.InvalidatedAt = DateTime.UtcNow;
-        challenge.InvalidatedReason = reason.Length > 120 ? reason[..120] : reason;
+        challenge.RejectCode(reason, DateTime.UtcNow);
         await _context.SaveChangesAsync(cancellationToken);
-        await RecordPhoneOtpAuditAsync(
-            "phone_otp.verify_failed",
-            challenge.MaskedPhoneNumber,
-            challenge.Purpose,
-            challenge.IpAddress,
-            new
-            {
-                challenge.ClientApplicationId,
-                challenge.AuthorizationRequestId,
-                reason = challenge.InvalidatedReason
-            },
-            cancellationToken);
     }
 
     private async Task<SqlOSPhoneOtpStartResult> CreateChallengeAsync(
@@ -554,7 +522,8 @@ public sealed class SqlOSPhoneOtpService
         var now = DateTime.UtcNow;
         var ipAddress = httpContext?.Connection.RemoteIpAddress?.ToString();
         var phoneHash = _cryptoService.HashToken(normalized.E164);
-        var maskedPhone = MaskPhoneNumber(normalized.E164);
+        var maskedPhone = Masked.Phone(normalized.E164);
+        var context = new PhoneOtpChallengeContext(authorizationRequestId, clientApplicationId, requestedOrganizationId);
 
         var phoneRecord = await _context.Set<SqlOSUserPhoneNumber>()
             .Include(x => x.User)
@@ -562,16 +531,27 @@ public sealed class SqlOSPhoneOtpService
 
         var effectiveUserId = userId ?? phoneRecord?.UserId;
         var effectiveUserPhoneNumberId = userPhoneNumberId ?? phoneRecord?.Id;
-        await EnsureSendAllowedAsync(
+        var admission = await _deliveryAdmission.ReservePhoneOtpAsync(
             phoneHash,
             effectiveUserId,
-            clientApplicationId,
-            requestedOrganizationId,
-            purpose,
-            maskedPhone,
             ipAddress,
+            clientApplicationId,
+            _options,
             now,
             cancellationToken);
+        if (!admission.Admitted)
+        {
+            _auditRecorder.Record(new PhoneOtpSendRateLimited(
+                purpose,
+                maskedPhone,
+                ipAddress,
+                admission.RejectedScope ?? "phone",
+                clientApplicationId,
+                requestedOrganizationId));
+            await _context.SaveChangesAsync(cancellationToken);
+            throw new InvalidOperationException("Too many sign-in code requests. Try again later.");
+        }
+
         now = DateTime.UtcNow;
 
         var recentChallenges = await _context.Set<SqlOSPhoneOtpChallenge>()
@@ -580,13 +560,8 @@ public sealed class SqlOSPhoneOtpService
             .ToListAsync(cancellationToken);
 
         var latestContextChallenge = recentChallenges
-            .FirstOrDefault(x => string.Equals(x.AuthorizationRequestId, authorizationRequestId, StringComparison.Ordinal)
-                && string.Equals(x.ClientApplicationId, clientApplicationId, StringComparison.Ordinal)
-                && string.Equals(x.RequestedOrganizationId, requestedOrganizationId, StringComparison.Ordinal)
-                && string.Equals(x.Purpose, purpose, StringComparison.Ordinal)
-                && x.InvalidatedAt == null);
-
-        if (latestContextChallenge != null && latestContextChallenge.LastSentAt > now.Subtract(_options.ResendCooldown))
+            .FirstOrDefault(x => x.WasStartedIn(context, purpose) && !x.IsInvalidated);
+        if (latestContextChallenge != null && latestContextChallenge.WasSentWithin(_options.ResendCooldown, now))
         {
             throw new InvalidOperationException($"Wait {(int)Math.Ceiling(_options.ResendCooldown.TotalSeconds)} seconds before requesting another code.");
         }
@@ -604,145 +579,62 @@ public sealed class SqlOSPhoneOtpService
 
         foreach (var activeChallenge in activeChallenges)
         {
-            activeChallenge.InvalidatedAt = now;
-            activeChallenge.InvalidatedReason = "superseded";
+            activeChallenge.Supersede(now);
         }
 
-        var rawChallengeToken = _cryptoService.GenerateOpaqueToken();
-        var challenge = new SqlOSPhoneOtpChallenge
-        {
-            Id = _cryptoService.GenerateId("potp"),
-            ChallengeTokenHash = _cryptoService.HashToken(rawChallengeToken),
-            PhoneNumberHash = phoneHash,
-            PhoneNumberEncrypted = _cryptoService.ProtectSecret(normalized.E164),
-            MaskedPhoneNumber = maskedPhone,
-            Purpose = purpose,
-            UserId = effectiveUserId,
-            UserPhoneNumberId = effectiveUserPhoneNumberId,
-            AuthorizationRequestId = authorizationRequestId,
-            ClientApplicationId = clientApplicationId,
-            RequestedOrganizationId = requestedOrganizationId,
-            ProviderStarted = false,
-            Provider = "twilio_verify",
-            AttemptCount = 0,
-            CreatedAt = now,
-            ExpiresAt = now.Add(_options.ChallengeLifetime),
-            LastSentAt = now,
-            IpAddress = ipAddress,
-            UserAgent = httpContext?.Request.Headers.UserAgent.ToString()
-        };
-
+        var issued = SqlOSPhoneOtpChallenge.Issue(
+            new PhoneOtpChallengeRequest(
+                normalized,
+                purpose,
+                context,
+                effectiveUserId,
+                effectiveUserPhoneNumberId,
+                ipAddress,
+                httpContext?.Request.Headers.UserAgent.ToString()),
+            _cryptoService.ProtectSecret(normalized.E164),
+            _options.ChallengeLifetime,
+            now);
+        var challenge = issued.Challenge;
         _context.Set<SqlOSPhoneOtpChallenge>().Add(challenge);
         await _context.SaveChangesAsync(cancellationToken);
 
         var shouldSend = (phoneRecord?.User != null && phoneRecord.User.IsActive) || sendWhenNoUser;
         if (shouldSend)
         {
+            // The provider sends to the challenge's recipient, the only number the code goes to.
             var delivery = await _deliveryChannel.StartAsync(
-                normalized.E164,
+                issued.Recipient.E164,
                 new SqlOSOtpDeliveryContext(purpose, clientApplicationId, authorizationRequestId, ipAddress, challenge.UserAgent),
                 cancellationToken);
 
             if (!delivery.Accepted)
             {
-                challenge.InvalidatedAt = DateTime.UtcNow;
-                challenge.InvalidatedReason = "delivery_failed";
-                challenge.ProviderStatus = delivery.ProviderStatus;
+                challenge.FailDelivery(delivery, DateTime.UtcNow);
                 await _context.SaveChangesAsync(cancellationToken);
-                await RecordPhoneOtpAuditAsync(
-                    "phone_otp.send_failed",
-                    maskedPhone,
-                    purpose,
-                    ipAddress,
-                    new { clientApplicationId, requestedOrganizationId, providerStatus = delivery.ProviderStatus },
-                    cancellationToken);
                 throw new InvalidOperationException("We couldn't send a sign-in code right now.");
             }
 
-            challenge.ProviderStarted = true;
-            challenge.Provider = delivery.Provider;
-            challenge.ProviderChallengeId = delivery.ProviderChallengeId;
-            challenge.ProviderStatus = delivery.ProviderStatus;
-            await _context.SaveChangesAsync(cancellationToken);
+            challenge.RecordProviderStart(delivery);
+        }
+        else
+        {
+            challenge.RecordStartWithoutSending();
         }
 
-        await RecordPhoneOtpAuditAsync(
-            "phone_otp.challenge_started",
-            maskedPhone,
-            purpose,
-            ipAddress,
-            new
-            {
-                clientApplicationId,
-                authorizationRequestId,
-                requestedOrganizationId,
-                sent = shouldSend
-            },
-            cancellationToken);
+        await _context.SaveChangesAsync(cancellationToken);
 
         return new SqlOSPhoneOtpStartResult(
-            rawChallengeToken,
+            issued.ChallengeToken,
             normalized.E164,
             maskedPhone,
-            purpose == "signup"
+            purpose == PhoneOtpPurposes.Signup
                 ? $"Check {maskedPhone} for a sign-up code."
-                : purpose == "enrollment"
+                : purpose == PhoneOtpPurposes.Enrollment
                     ? $"Check {maskedPhone} for a phone verification code."
                     : PublicStartMessage,
             challenge.ExpiresAt,
             challenge.LastSentAt.Add(_options.ResendCooldown));
     }
-
-    private async Task EnsureSendAllowedAsync(
-        string phoneHash,
-        string? userId,
-        string? clientApplicationId,
-        string? requestedOrganizationId,
-        string purpose,
-        string maskedPhone,
-        string? ipAddress,
-        DateTime now,
-        CancellationToken cancellationToken)
-    {
-        var admission = await _deliveryAdmission.ReservePhoneOtpAsync(
-            phoneHash,
-            userId,
-            ipAddress,
-            clientApplicationId,
-            _options,
-            now,
-            cancellationToken);
-        if (admission.Admitted)
-        {
-            return;
-        }
-
-        await RecordRateLimitAuditAsync(
-            admission.RejectedScope ?? "phone",
-            maskedPhone,
-            purpose,
-            ipAddress,
-            clientApplicationId,
-            requestedOrganizationId,
-            cancellationToken);
-        throw new InvalidOperationException("Too many sign-in code requests. Try again later.");
-    }
-
-    private async Task RecordRateLimitAuditAsync(
-        string limit,
-        string maskedPhone,
-        string purpose,
-        string? ipAddress,
-        string? clientApplicationId,
-        string? requestedOrganizationId,
-        CancellationToken cancellationToken)
-        => await RecordPhoneOtpAuditAsync(
-            "phone_otp.rate_limit_rejected",
-            maskedPhone,
-            purpose,
-            ipAddress,
-            new { limit, clientApplicationId, requestedOrganizationId },
-            cancellationToken);
 
     private async Task<string> EnsurePhoneNumberAvailableForSignupAsync(
         string phoneNumber,
@@ -813,10 +705,6 @@ public sealed class SqlOSPhoneOtpService
     private string UnprotectPhoneNumber(string protectedPhoneNumber)
         => _cryptoService.UnprotectSecret(protectedPhoneNumber);
 
-    private static bool IsChallengeActive(SqlOSPhoneOtpChallenge challenge)
-        => challenge.ConsumedAt == null
-            && challenge.InvalidatedAt == null
-            && challenge.ExpiresAt > DateTime.UtcNow;
 
     private static string NormalizeCode(string? value)
     {
@@ -832,17 +720,6 @@ public sealed class SqlOSPhoneOtpService
         return normalized;
     }
 
-    private static string MaskPhoneNumber(string e164PhoneNumber)
-    {
-        if (e164PhoneNumber.Length <= 5)
-        {
-            return e164PhoneNumber;
-        }
-
-        var prefix = e164PhoneNumber[..Math.Min(2, e164PhoneNumber.Length)];
-        var suffix = e164PhoneNumber[^Math.Min(4, e164PhoneNumber.Length)..];
-        return $"{prefix}{new string('*', Math.Max(3, e164PhoneNumber.Length - prefix.Length - suffix.Length))}{suffix}";
-    }
 
     private static string RequireText(string? value, string message)
     {
@@ -855,25 +732,6 @@ public sealed class SqlOSPhoneOtpService
         return trimmed;
     }
 
-    private async Task RecordPhoneOtpAuditAsync(
-        string eventType,
-        string maskedPhone,
-        string purpose,
-        string? ipAddress,
-        object? data,
-        CancellationToken cancellationToken)
-        => await _adminService.RecordAuditAsync(
-            eventType,
-            "system",
-            null,
-            ipAddress: ipAddress,
-            data: new
-            {
-                purpose,
-                maskedPhone,
-                details = data
-            },
-            cancellationToken: cancellationToken);
 
 }
 

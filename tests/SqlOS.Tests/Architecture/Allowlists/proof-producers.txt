@@ -3,3 +3,10 @@
 # producers, not an allowlist: one line per producer, ProofType <- ProducerType, sorted ordinally.
 # A proof implements SqlOS.Domain.ISqlOSProof, is sealed, has no public or protected constructor and
 # is constructed (or copied with `with`) only by the types listed for it here.
+SqlOS.AuthServer.Models.EmailOtpAttemptReservation <- SqlOS.AuthServer.Services.SqlOSEmailOtpAttemptLedger
+SqlOS.Domain.OwnershipProof <- SqlOS.AuthServer.Models.SqlOSEmailOtpChallenge
+SqlOS.Domain.OwnershipProof <- SqlOS.AuthServer.Services.SqlOSAuthService
+SqlOS.Domain.OwnershipProof <- SqlOS.AuthServer.Services.SqlOSInvitationService
+SqlOS.Domain.OwnershipProof <- SqlOS.AuthServer.Services.SqlOSMagicLinkService
+SqlOS.Domain.OwnershipProof <- SqlOS.AuthServer.Services.SqlOSOidcAuthService
+SqlOS.Domain.OwnershipProof <- SqlOS.AuthServer.Services.SqlOSSamlService

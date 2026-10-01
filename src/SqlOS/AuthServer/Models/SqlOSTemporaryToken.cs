@@ -55,9 +55,10 @@ public sealed class SqlOSTemporaryToken : ISqlOSAggregate
 
     /// <summary>
     /// Issues a token of <paramref name="kind"/>: a new random raw token, of which only the hash is
-    /// kept, bound to <paramref name="binding"/> and carrying <paramref name="payload"/>.
+    /// kept, bound to <paramref name="binding"/> and carrying <paramref name="payload"/>. The
+    /// <paramref name="lifetime"/> is the kind's, resolved by <see cref="TemporaryTokenLifetime.Resolve"/>,
+    /// and the token lives from <paramref name="now"/>.
     /// </summary>
-    /// <param name="lifetime">How long the token lives, resolved from the kind (<see cref="TemporaryTokenLifetime.Resolve"/>).</param>
     internal static IssuedTemporaryToken Issue<TPayload>(
         TemporaryTokenKind<TPayload> kind,
         TPayload? payload,

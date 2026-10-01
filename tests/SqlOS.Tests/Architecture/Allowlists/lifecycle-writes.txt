@@ -127,10 +127,6 @@ SqlOS.AuthServer.Services.SqlOSDeviceAuthorizationService::PollAsync -> SqlOSAut
 SqlOS.AuthServer.Services.SqlOSDeviceAuthorizationService::PollAsync -> SqlOSDeviceAuthorization.ConsumedAt
 SqlOS.AuthServer.Services.SqlOSDeviceAuthorizationService::StartAsync -> SqlOSDeviceAuthorization.ExpiresAt
 SqlOS.AuthServer.Services.SqlOSDynamicClientRegistrationService::RegisterAsync -> SqlOSClientApplication.IsActive
-SqlOS.AuthServer.Services.SqlOSEmailOtpService::CreateChallengeAsync -> SqlOSEmailOtpChallenge.AttemptCount
-SqlOS.AuthServer.Services.SqlOSEmailOtpService::CreateChallengeAsync -> SqlOSEmailOtpChallenge.ExpiresAt
-SqlOS.AuthServer.Services.SqlOSEmailOtpService::VerifyChallengeAsync -> SqlOSEmailOtpChallenge.AttemptCount
-SqlOS.AuthServer.Services.SqlOSEmailOtpService::VerifyChallengeAsync -> SqlOSEmailOtpChallenge.ConsumedAt
 SqlOS.AuthServer.Services.SqlOSEmailOwnershipClaim::ClaimAsync -> SqlOSConsentGrant.RevocationReason
 SqlOS.AuthServer.Services.SqlOSEmailOwnershipClaim::ClaimAsync -> SqlOSConsentGrant.RevokedAt
 SqlOS.AuthServer.Services.SqlOSEmailOwnershipClaim::ClaimAsync -> SqlOSCredential.RevokedAt
@@ -172,10 +168,6 @@ SqlOS.AuthServer.Services.SqlOSOrganizationDomainService::RevokeAsync -> SqlOSOr
 SqlOS.AuthServer.Services.SqlOSPasswordLoginAbuseService::ReserveCoreAsync -> SqlOSPasswordLoginReservation.ExpiresAt
 SqlOS.AuthServer.Services.SqlOSPhoneOtpService::AddVerifiedPhoneNumberAsync -> SqlOSUserPhoneNumber.IsVerified
 SqlOS.AuthServer.Services.SqlOSPhoneOtpService::AddVerifiedPhoneNumberAsync -> SqlOSUserPhoneNumber.VerifiedAt
-SqlOS.AuthServer.Services.SqlOSPhoneOtpService::CreateChallengeAsync -> SqlOSPhoneOtpChallenge.AttemptCount
-SqlOS.AuthServer.Services.SqlOSPhoneOtpService::CreateChallengeAsync -> SqlOSPhoneOtpChallenge.ExpiresAt
-SqlOS.AuthServer.Services.SqlOSPhoneOtpService::VerifyChallengeAsync -> SqlOSPhoneOtpChallenge.AttemptCount
-SqlOS.AuthServer.Services.SqlOSPhoneOtpService::VerifyChallengeAsync -> SqlOSPhoneOtpChallenge.ConsumedAt
 SqlOS.AuthServer.Services.SqlOSSamlService::ConsumeReplayIdentifiersAsync -> SqlOSSamlReplay.ConsumedAt
 SqlOS.AuthServer.Services.SqlOSSamlService::ConsumeReplayIdentifiersAsync -> SqlOSSamlReplay.ExpiresAt
 SqlOS.AuthServer.Services.SqlOSSamlService::CreateAuthorizationUrlAsync -> SqlOSAuthorizationRequest.ExpiresAt

@@ -319,12 +319,16 @@ public sealed class HostedEmailOtpScenarios
 
     [Scenario]
     [Covers("POST /sqlos/auth/login/email-otp/verify")]
-    public async Task Concurrent_wrong_codes_lose_their_attempt_counts_CurrentBehavior_KnownDefect_424()
+    public async Task Concurrent_wrong_codes_spend_at_most_the_attempt_limit_and_close_the_challenge()
     {
-        // #424: verify loads the challenge, compares, and saves AttemptCount + 1 with no lock or
-        // conditional update. Ten wrong codes that all load the challenge before any saves (the
-        // barrier forces that interleaving) each write AttemptCount = 1, so the five-attempt limit
-        // never trips and the right code still signs in afterwards.
+        // #424, fixed: verify spends the attempt with one conditional update (AttemptCount <
+        // MaxAttempts) before it compares the code. Ten wrong codes that all load the challenge
+        // before any writes (the barrier holds each at that update, its first write) are spent
+        // one by one by the database: five spend the five attempts, the wrong code that spent the
+        // last one closes the challenge (max_attempts), and the other five find no attempt left
+        // and are refused without one. The right code no longer signs in afterwards. 7.2.1 saved
+        // AttemptCount + 1 from the count each request had loaded, so all ten wrote 1, the limit
+        // never tripped, and the right code still signed in.
         var barrier = new HostedRaceBarrier("/sqlos/auth/login/email-otp/verify", "UPDATE", "SqlOSEmailOtpChallenges", participants: 10);
         await using var t = await Transcript.StartAsync(HostProfiles.Hosted, barrier.Install);
         var alice = await HostedFlows.CreateVerifiedEmailUserAsync(t, "alice");
@@ -340,10 +344,18 @@ public sealed class HostedEmailOtpScenarios
         var (shown, others) = await HostedRaceBarrier.PostTogetherAsync(t, Enumerable.Repeat(wrong, 10).ToList());
         t.Observe(shown, "ten wrong codes at once from ten tabs: each is answered 'invalid or expired' (one shown)");
         t.Note($"The other nine tabs were answered {string.Join(", ", others)}.");
-        t.Note($"{barrier.Held} verify requests were held at their write until all had loaded the challenge.");
+        t.Note(
+            $"{barrier.Held} verify requests were held at their attempt reservation until all had loaded the challenge.",
+            baselineText: $"{barrier.Held} verify requests were held at their write until all had loaded the challenge.");
 
-        await t.ObserveAuditAsync("ten failures, every one counted as the first: no max_attempts");
-        t.Observe(await t.SubmitAsync(verify.With("code", code)), "the right code still signs in after ten wrong ones");
+        // Which of the five counted failures spent the last attempt depends on thread timing, so
+        // the failures are recorded in content order; 7.2.1's ten identical failures kept their
+        // write order.
+        await t.ObserveAuditAsync(
+            "five counted failures, the last attempt closing the challenge (max_attempts); the other five found no attempt left",
+            AuditOrder.Content,
+            baselineOrder: AuditOrder.Chronological);
+        t.Observe(await t.SubmitAsync(verify.With("code", code)), "the right code is refused: the challenge is closed");
 
         await t.ApproveAsync();
     }

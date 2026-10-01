@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
+using SqlOS.Domain;
 using SqlOS.Calendar.Models;
 using SqlOS.Tests.Infrastructure;
 
@@ -20,7 +21,7 @@ public sealed class SqlOSEmailOwnershipClaimTests
         var outcome = await SqlOSEmailOwnershipClaim.ClaimAsync(
             context,
             seeded.Email,
-            "email_otp",
+            Proof(seeded.Email, OwnershipProofMethod.EmailOtp),
             SqlOSEmailClaimPresentation.None,
             DateTime.UtcNow,
             default);
@@ -53,7 +54,7 @@ public sealed class SqlOSEmailOwnershipClaimTests
         var outcome = await SqlOSEmailOwnershipClaim.ClaimAsync(
             context,
             seeded.Email,
-            "oidc",
+            Proof(seeded.Email, OwnershipProofMethod.Oidc),
             SqlOSEmailClaimPresentation.None,
             DateTime.UtcNow,
             default);
@@ -72,7 +73,7 @@ public sealed class SqlOSEmailOwnershipClaimTests
         await SqlOSEmailOwnershipClaim.ClaimAsync(
             context,
             seeded.Email,
-            "invitation",
+            Proof(seeded.Email, OwnershipProofMethod.Invitation),
             SqlOSEmailClaimPresentation.FromAuthenticationMethod("password+totp"),
             DateTime.UtcNow,
             default);
@@ -95,7 +96,7 @@ public sealed class SqlOSEmailOwnershipClaimTests
         await SqlOSEmailOwnershipClaim.ClaimAsync(
             context,
             seeded.Email,
-            "email_otp",
+            Proof(seeded.Email, OwnershipProofMethod.EmailOtp),
             SqlOSEmailClaimPresentation.None,
             DateTime.UtcNow,
             default);
@@ -162,7 +163,7 @@ public sealed class SqlOSEmailOwnershipClaimTests
         var outcome = await SqlOSEmailOwnershipClaim.ClaimAsync(
             context,
             seeded.Email,
-            "saml",
+            Proof(seeded.Email, OwnershipProofMethod.Saml),
             SqlOSEmailClaimPresentation.None,
             DateTime.UtcNow,
             default);
@@ -184,6 +185,50 @@ public sealed class SqlOSEmailOwnershipClaimTests
         (await context.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == SqlOSEmailOwnershipClaim.AuditEventType)).Should().Be(0);
         (await context.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == "calendar.connection.disconnected")).Should().Be(0);
     }
+
+    [TestMethod]
+    public async Task Claim_RefusesAProofForAnotherMailbox()
+    {
+        await using var context = CreateContext();
+        var seeded = await SeedAccountAsync(context, verified: false);
+        var otherMailbox = new OwnershipProof(EmailAddress.Parse("someone-else@example.com"), OwnershipProofMethod.EmailOtp);
+
+        await FluentActions.Invoking(() => SqlOSEmailOwnershipClaim.ClaimAsync(
+                context,
+                seeded.Email,
+                otherMailbox,
+                SqlOSEmailClaimPresentation.None,
+                DateTime.UtcNow,
+                default))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("The ownership proof is for another mailbox.");
+        context.ChangeTracker.Entries().Should().OnlyContain(entry => entry.State == EntityState.Unchanged, "a refused claim stages nothing");
+        (await context.Set<SqlOSUserEmail>().SingleAsync()).IsVerified.Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task Claim_AcceptsAProofForAnotherSpellingOfTheSameMailbox()
+    {
+        await using var context = CreateContext();
+        var seeded = await SeedAccountAsync(context, verified: false);
+        var otherSpelling = new OwnershipProof(EmailAddress.Parse("  OWNER@Example.COM "), OwnershipProofMethod.MagicLink);
+
+        var outcome = await SqlOSEmailOwnershipClaim.ClaimAsync(
+            context,
+            seeded.Email,
+            otherSpelling,
+            SqlOSEmailClaimPresentation.None,
+            DateTime.UtcNow,
+            default);
+        await context.SaveChangesAsync();
+
+        outcome.Claimed.Should().BeTrue();
+        var audit = await context.Set<SqlOSAuditEvent>().SingleAsync(x => x.EventType == SqlOSEmailOwnershipClaim.AuditEventType);
+        audit.MetadataJson.Should().Contain("\"proof\":\"magic_link\"");
+    }
+
+    private static OwnershipProof Proof(SqlOSUserEmail email, OwnershipProofMethod method)
+        => new(EmailAddress.Parse(email.Email), method);
 
     private static TestSqlOSInMemoryDbContext CreateContext()
         => new(new DbContextOptionsBuilder<TestSqlOSInMemoryDbContext>()

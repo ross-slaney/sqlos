@@ -9,6 +9,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Domain;
 using SqlOS.Email.Contracts;
 using SqlOS.Email.Interfaces;
 using SqlOS.Email.Models;
@@ -401,7 +402,7 @@ public sealed class SqlOSInvitationService
             await SqlOSEmailOwnershipClaim.ClaimAsync(
                 _context,
                 email,
-                "invitation",
+                new OwnershipProof(EmailAddress.Parse(email.Email), OwnershipProofMethod.Invitation),
                 presented,
                 now,
                 cancellationToken);

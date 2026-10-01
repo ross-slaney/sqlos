@@ -6,11 +6,12 @@ namespace SqlOS.Domain;
 /// (<c>AttemptCount &gt;= MaxAttempts</c> invalidates the challenge).
 /// </summary>
 /// <remarks>
-/// Spending an attempt from an exhausted budget is a broken invariant. An entity spends one
-/// attempt per wrong guess and, when the budget becomes exhausted, invalidates itself; its
-/// <c>AttemptCount</c> column is a concurrency token, so parallel wrong guesses each spend an
-/// attempt (#424). Stored rows may hold more attempts than the limit (a lowered limit), which
-/// simply reads as exhausted. The default value has a limit of zero and is exhausted.
+/// Spending an attempt from an exhausted budget is a broken invariant. An email-code challenge
+/// spends one attempt per verification, in the database with one conditional update before the
+/// code is compared, and is invalidated once the budget is exhausted, so parallel guesses each
+/// spend an attempt and never more than the limit between them (#424). Stored rows may hold more
+/// attempts than the limit (a lowered limit), which simply reads as exhausted. The default value
+/// has a limit of zero and is exhausted.
 /// </remarks>
 internal readonly record struct AttemptBudget
 {

@@ -4,9 +4,12 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuditLogs;
+using SqlOS.AuthServer.Interfaces;
 using SqlOS.Database;
 using SqlOS.Domain;
 using SqlOS.Extensions;
+using SqlOS.Fga.Interfaces;
+using SqlOS.Fga.Models;
 using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.Tests.DomainEvents;
@@ -33,10 +36,10 @@ public sealed class PipelineRegistrationTests
     [TestMethod]
     public void AddSqlOS_attaches_one_interceptor_to_the_hosts_context()
     {
-        using var services = CreateServices();
+        using var services = CreateServices<UnattachedHostDbContext>();
         using var scope = services.CreateScope();
 
-        var context = scope.ServiceProvider.GetRequiredService<TestSqlOSInMemoryDbContext>();
+        var context = scope.ServiceProvider.GetRequiredService<UnattachedHostDbContext>();
 
         context.GetService<IDbContextOptions>().FindExtension<CoreOptionsExtension>()!.Interceptors!
             .Count(interceptor => interceptor is SqlOSDomainEventsInterceptor).Should().Be(1);
@@ -91,14 +94,34 @@ public sealed class PipelineRegistrationTests
     private static ServiceProvider CreateServices(
         Action<IServiceCollection>? beforeSqlOS = null,
         Action<IServiceCollection>? afterSqlOS = null)
+        => CreateServices<TestSqlOSInMemoryDbContext>(beforeSqlOS, afterSqlOS);
+
+    private static ServiceProvider CreateServices<TContext>(
+        Action<IServiceCollection>? beforeSqlOS = null,
+        Action<IServiceCollection>? afterSqlOS = null)
+        where TContext : DbContext, ISqlOSAuthServerDbContext, ISqlOSFgaDbContext
     {
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddDbContext<TestSqlOSInMemoryDbContext>(options => options.UseInMemoryDatabase(Guid.NewGuid().ToString("N")));
+        services.AddDbContext<TContext>(options => options.UseInMemoryDatabase(Guid.NewGuid().ToString("N")));
         beforeSqlOS?.Invoke(services);
-        services.AddSqlOS<TestSqlOSInMemoryDbContext>(options => options.AuthServer.Issuer = "https://tests.example/sqlos/auth");
+        services.AddSqlOS<TContext>(options => options.AuthServer.Issuer = "https://tests.example/sqlos/auth");
         afterSqlOS?.Invoke(services);
         return services.BuildServiceProvider();
+    }
+
+    /// <summary>A 7.x host context: it neither derives from SqlOSDbContext nor attaches the interceptor itself.</summary>
+    private sealed class UnattachedHostDbContext(DbContextOptions<UnattachedHostDbContext> options)
+        : DbContext(options), ISqlOSAuthServerDbContext, ISqlOSFgaDbContext
+    {
+        public IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessible(string resourceId, string subjectIds, string permissionId)
+            => throw new NotSupportedException();
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            base.OnModelCreating(modelBuilder);
+            modelBuilder.UseSqlOS();
+        }
     }
 
     private sealed class FixedClock : TimeProvider

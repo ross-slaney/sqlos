@@ -9,6 +9,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
+using SqlOS.Domain;
 using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.Tests;
@@ -332,31 +333,29 @@ public sealed class SqlOSAuthLifecycleTests
             ApprovedAt = now,
             ExpiresAt = now.AddMinutes(10)
         };
-        var emailChallenge = new SqlOSEmailOtpChallenge
-        {
-            Id = $"emc_{Guid.NewGuid():N}",
-            ChallengeTokenHash = harness.Crypto.HashToken("email-challenge"),
-            CodeHash = harness.Crypto.HashToken("email-code"),
-            Email = subject.User.DefaultEmail!,
-            NormalizedEmail = SqlOSAdminService.NormalizeEmail(subject.User.DefaultEmail!),
-            UserId = subject.User.Id,
-            RequestedOrganizationId = subject.Organization.Id,
-            CreatedAt = now,
-            LastSentAt = now,
-            ExpiresAt = now.AddMinutes(10)
-        };
-        var phoneChallenge = new SqlOSPhoneOtpChallenge
-        {
-            Id = $"phc_{Guid.NewGuid():N}",
-            PhoneNumberHash = harness.Crypto.HashToken("+15555550199"),
-            PhoneNumberEncrypted = "protected",
-            MaskedPhoneNumber = "+1******0199",
-            UserId = subject.User.Id,
-            RequestedOrganizationId = subject.Organization.Id,
-            CreatedAt = now,
-            LastSentAt = now,
-            ExpiresAt = now.AddMinutes(10)
-        };
+        var accountEmail = await harness.Context.Set<SqlOSUserEmail>().SingleAsync(x => x.UserId == subject.User.Id);
+        var emailChallenge = SqlOSEmailOtpChallenge.Issue(
+            new EmailOtpChallengeRequest(
+                EmailAddress.Parse(subject.User.DefaultEmail),
+                EmailOtpPurposes.Login,
+                new EmailOtpChallengeContext(AuthorizationRequestId: null, ClientApplicationId: null, subject.Organization.Id),
+                IpAddress: null,
+                UserAgent: null),
+            accountEmail,
+            new EmailOtpChallengeSettings(CodeLength: 6, MaxAttempts: 5, Lifetime: TimeSpan.FromMinutes(10)),
+            now).Challenge;
+        var phoneChallenge = SqlOSPhoneOtpChallenge.Issue(
+            new PhoneOtpChallengeRequest(
+                PhoneNumber.Parse("+12025550199", "US"),
+                PhoneOtpPurposes.Login,
+                new PhoneOtpChallengeContext(AuthorizationRequestId: null, ClientApplicationId: null, subject.Organization.Id),
+                subject.User.Id,
+                UserPhoneNumberId: null,
+                IpAddress: null,
+                UserAgent: null),
+            protectedRecipient: "protected",
+            TimeSpan.FromMinutes(10),
+            now).Challenge;
         harness.Context.Set<SqlOSDeviceAuthorization>().Add(pendingDevice);
         harness.Context.Set<SqlOSEmailOtpChallenge>().Add(emailChallenge);
         harness.Context.Set<SqlOSPhoneOtpChallenge>().Add(phoneChallenge);

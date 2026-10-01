@@ -3,11 +3,13 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using SqlOS.AuditLogs;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 using SqlOS.Domain;
+using SqlOS.Domain.Events;
 using SqlOS.Email.Contracts;
 using SqlOS.Email.Interfaces;
 using SqlOS.Email.Models;
@@ -26,6 +28,7 @@ public sealed class SqlOSMagicLinkService
     private readonly SqlOSSettingsService _settingsService;
     private readonly ISqlOSAuthEmailSender _emailSender;
     private readonly ISqlOSTransactionalEmailService? _transactionalEmailService;
+    private readonly IAuditRecorder _auditRecorder;
     private readonly SqlOSAuthServerOptions _authOptions;
     private readonly SqlOSMagicLinkOptions _options;
 
@@ -44,6 +47,7 @@ public sealed class SqlOSMagicLinkService
         _settingsService = settingsService;
         _emailSender = emailSender;
         _transactionalEmailService = transactionalEmailService;
+        _auditRecorder = new SqlOSAuditRecorder(context);
         _authOptions = options.Value;
         _options = options.Value.MagicLink;
     }
@@ -109,13 +113,8 @@ public sealed class SqlOSMagicLinkService
         var token = await _cryptoService.FindTemporaryTokenAsync(SqlOSTemporaryTokenKinds.MagicLink, rawToken, cancellationToken);
         if (token == null)
         {
-            await RecordMagicLinkAuditAsync(
-                "magic_link.rejected",
-                null,
-                "complete",
-                ipAddress: null,
-                new { reason = "missing_expired_or_replayed" },
-                cancellationToken);
+            _auditRecorder.Record(new MagicLinkNotFound());
+            await _context.SaveChangesAsync(cancellationToken);
             throw new InvalidOperationException(InvalidLinkMessage);
         }
 
@@ -127,18 +126,12 @@ public sealed class SqlOSMagicLinkService
         var consumed = await _cryptoService.ConsumeTemporaryTokenAsync(SqlOSTemporaryTokenKinds.MagicLink, rawToken, cancellationToken);
         if (consumed == null)
         {
-            await RecordMagicLinkAuditAsync(
-                "magic_link.rejected",
+            _auditRecorder.Record(new MagicLinkReplayed(
                 payload.MaskedEmail,
-                "complete",
                 payload.IpAddress,
-                new
-                {
-                    reason = "replayed",
-                    payload.ClientApplicationId,
-                    payload.AuthorizationRequestId
-                },
-                cancellationToken);
+                payload.ClientApplicationId,
+                payload.AuthorizationRequestId));
+            await _context.SaveChangesAsync(cancellationToken);
             throw new InvalidOperationException(InvalidLinkMessage);
         }
 
@@ -162,34 +155,29 @@ public sealed class SqlOSMagicLinkService
             throw new InvalidOperationException(InvalidLinkMessage);
         }
 
-        // The link proved the mailbox. An unverified address is claimed: whatever was attached
-        // before the owner proved it is evicted in this same save.
+        // The link proved the mailbox it was delivered to. An unverified address is claimed:
+        // whatever was attached before the owner proved it is evicted in this same save.
         await SqlOSEmailOwnershipClaim.ClaimAsync(
             _context,
             userEmail,
-            "magic_link",
+            new OwnershipProof(EmailAddress.Parse(payload.Email), OwnershipProofMethod.MagicLink),
             SqlOSEmailClaimPresentation.None,
             DateTime.UtcNow,
             cancellationToken);
 
         user.UpdatedAt = DateTime.UtcNow;
         user.DefaultEmail = userEmail.Email;
+        consumed.Record(new MagicLinkCompleted(
+            consumed.Id,
+            payload.MaskedEmail,
+            payload.IpAddress,
+            user.Id,
+            payload.ClientApplicationId,
+            payload.AuthorizationRequestId,
+            payload.RequestedOrganizationId));
         await _context.SaveChangesAsync(cancellationToken);
 
         var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
-        await RecordMagicLinkAuditAsync(
-            "magic_link.completed",
-            payload.MaskedEmail,
-            "complete",
-            payload.IpAddress,
-            new
-            {
-                user.Id,
-                payload.ClientApplicationId,
-                payload.AuthorizationRequestId,
-                payload.RequestedOrganizationId
-            },
-            cancellationToken);
 
         return new SqlOSMagicLinkVerificationResult(
             consumed,
@@ -222,7 +210,7 @@ public sealed class SqlOSMagicLinkService
         trimmedEmail = typedAddress;
         var now = DateTime.UtcNow;
         var ipAddress = httpContext?.Connection.RemoteIpAddress?.ToString();
-        var maskedEmail = MaskEmail(trimmedEmail);
+        var maskedEmail = Masked.Email(trimmedEmail);
 
         var recentTokens = await _context.Set<SqlOSTemporaryToken>()
             .Where(SqlOSTemporaryToken.OfKind(SqlOSTemporaryTokenKinds.MagicLink))
@@ -233,23 +221,19 @@ public sealed class SqlOSMagicLinkService
             .Where(x => x.Payload != null)
             .ToArray();
 
-        if (recent.Count(x => string.Equals(x.Payload!.NormalizedEmail, normalizedEmail, StringComparison.Ordinal)) >= _options.MaxLinksPerEmailPerWindow)
+        var exceededLimit = recent.Count(x => string.Equals(x.Payload!.NormalizedEmail, normalizedEmail, StringComparison.Ordinal)) >= _options.MaxLinksPerEmailPerWindow
+            ? "email"
+            : !string.IsNullOrWhiteSpace(ipAddress)
+                && recent.Count(x => string.Equals(x.Payload!.IpAddress, ipAddress, StringComparison.Ordinal)) >= _options.MaxLinksPerIpPerWindow
+                ? "ip"
+                : !string.IsNullOrWhiteSpace(clientApplicationId)
+                    && recent.Count(x => string.Equals(x.Token.ClientApplicationId, clientApplicationId, StringComparison.Ordinal)) >= _options.MaxLinksPerClientPerWindow
+                    ? "client"
+                    : null;
+        if (exceededLimit != null)
         {
-            await RecordMagicLinkRateLimitAsync("email", maskedEmail, ipAddress, clientApplicationId, requestedOrganizationId, cancellationToken);
-            throw new InvalidOperationException("Too many sign-in link requests. Try again later.");
-        }
-
-        if (!string.IsNullOrWhiteSpace(ipAddress)
-            && recent.Count(x => string.Equals(x.Payload!.IpAddress, ipAddress, StringComparison.Ordinal)) >= _options.MaxLinksPerIpPerWindow)
-        {
-            await RecordMagicLinkRateLimitAsync("ip", maskedEmail, ipAddress, clientApplicationId, requestedOrganizationId, cancellationToken);
-            throw new InvalidOperationException("Too many sign-in link requests. Try again later.");
-        }
-
-        if (!string.IsNullOrWhiteSpace(clientApplicationId)
-            && recent.Count(x => string.Equals(x.Token.ClientApplicationId, clientApplicationId, StringComparison.Ordinal)) >= _options.MaxLinksPerClientPerWindow)
-        {
-            await RecordMagicLinkRateLimitAsync("client", maskedEmail, ipAddress, clientApplicationId, requestedOrganizationId, cancellationToken);
+            _auditRecorder.Record(new MagicLinkSendRateLimited(maskedEmail, ipAddress, exceededLimit, clientApplicationId, requestedOrganizationId));
+            await _context.SaveChangesAsync(cancellationToken);
             throw new InvalidOperationException("Too many sign-in link requests. Try again later.");
         }
 
@@ -297,56 +281,45 @@ public sealed class SqlOSMagicLinkService
             ipAddress,
             httpContext?.Request.Headers.UserAgent.ToString(),
             shouldSend);
-        var rawToken = (await _cryptoService.CreateTemporaryTokenAsync(
+        var link = await _cryptoService.CreateTemporaryTokenAsync(
             SqlOSTemporaryTokenKinds.MagicLink,
             payload,
             new TemporaryTokenBinding(emailRecord?.UserId, clientApplicationId, requestedOrganizationId),
             _options.TokenLifetime,
-            cancellationToken)).RawToken;
+            cancellationToken);
+        var rawToken = link.RawToken;
 
         if (shouldSend)
         {
             try
             {
-                var context = await BuildMessageContextAsync(deliveryAddress, MaskEmail(deliveryAddress), rawToken, expiresAt, httpContext, cancellationToken);
+                var context = await BuildMessageContextAsync(payload.Email, Masked.Email(payload.Email), rawToken, expiresAt, httpContext, cancellationToken);
                 await SendEmailAsync(context, rawToken, cancellationToken);
             }
             catch
             {
-                var createdToken = await _context.Set<SqlOSTemporaryToken>()
-                    .Where(SqlOSTemporaryToken.OfKind(SqlOSTemporaryTokenKinds.MagicLink))
-                    .Where(SqlOSTemporaryToken.Presented(rawToken))
-                    .FirstOrDefaultAsync(cancellationToken);
-                if (createdToken != null)
-                {
-                    createdToken.Retire(DateTime.UtcNow);
-                    await _context.SaveChangesAsync(cancellationToken);
-                }
-
-                await RecordMagicLinkAuditAsync(
-                    "magic_link.send_failed",
+                link.Token.Retire(DateTime.UtcNow);
+                link.Token.Record(new MagicLinkDeliveryFailed(
+                    link.Token.Id,
                     maskedEmail,
-                    "start",
                     ipAddress,
-                    new { clientApplicationId, authorizationRequestId, requestedOrganizationId },
-                    cancellationToken);
+                    clientApplicationId,
+                    authorizationRequestId,
+                    requestedOrganizationId));
+                await _context.SaveChangesAsync(cancellationToken);
                 throw new InvalidOperationException("We couldn't send a sign-in link right now.");
             }
         }
 
-        await RecordMagicLinkAuditAsync(
-            "magic_link.requested",
+        link.Token.Record(new MagicLinkRequested(
+            link.Token.Id,
             maskedEmail,
-            "start",
             ipAddress,
-            new
-            {
-                clientApplicationId,
-                authorizationRequestId,
-                requestedOrganizationId,
-                sent = shouldSend
-            },
-            cancellationToken);
+            clientApplicationId,
+            authorizationRequestId,
+            requestedOrganizationId,
+            shouldSend));
+        await _context.SaveChangesAsync(cancellationToken);
 
         return new SqlOSMagicLinkStartResult(
             trimmedEmail,
@@ -506,56 +479,6 @@ public sealed class SqlOSMagicLinkService
             ["backgroundColor"] = context.Branding.BackgroundColor
         };
     }
-
-    private async Task RecordMagicLinkRateLimitAsync(
-        string limit,
-        string maskedEmail,
-        string? ipAddress,
-        string? clientApplicationId,
-        string? requestedOrganizationId,
-        CancellationToken cancellationToken)
-        => await RecordMagicLinkAuditAsync(
-            "magic_link.rate_limit_rejected",
-            maskedEmail,
-            "start",
-            ipAddress,
-            new { limit, clientApplicationId, requestedOrganizationId },
-            cancellationToken);
-
-    private async Task RecordMagicLinkAuditAsync(
-        string eventType,
-        string? maskedEmail,
-        string phase,
-        string? ipAddress,
-        object? data,
-        CancellationToken cancellationToken)
-        => await _adminService.RecordAuditAsync(
-            eventType,
-            "system",
-            null,
-            ipAddress: ipAddress,
-            data: new
-            {
-                phase,
-                maskedEmail,
-                details = data
-            },
-            cancellationToken: cancellationToken);
-
-    private static string MaskEmail(string email)
-    {
-        var atIndex = email.IndexOf('@');
-        if (atIndex <= 1 || atIndex == email.Length - 1)
-        {
-            return email;
-        }
-
-        var local = email[..atIndex];
-        var domain = email[(atIndex + 1)..];
-        var visibleCount = Math.Min(2, local.Length);
-        return $"{local[..visibleCount]}***@{domain}";
-    }
-
 
     private sealed record RecentMagicLinkToken(SqlOSTemporaryToken Token, MagicLinkPayload? Payload);
 }

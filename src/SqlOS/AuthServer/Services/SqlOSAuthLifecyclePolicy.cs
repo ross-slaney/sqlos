@@ -278,16 +278,14 @@ internal static class SqlOSAuthLifecyclePolicy
             deviceAuthorization.DeniedAt = now;
         }
 
-        foreach (var emailOtpChallenge in emailOtpChallenges.Where(x => x.ConsumedAt == null && x.InvalidatedAt == null))
+        foreach (var emailOtpChallenge in emailOtpChallenges)
         {
-            emailOtpChallenge.InvalidatedAt = now;
-            emailOtpChallenge.InvalidatedReason = reason;
+            emailOtpChallenge.Withdraw(reason, now);
         }
 
-        foreach (var phoneOtpChallenge in phoneOtpChallenges.Where(x => x.ConsumedAt == null && x.InvalidatedAt == null))
+        foreach (var phoneOtpChallenge in phoneOtpChallenges)
         {
-            phoneOtpChallenge.InvalidatedAt = now;
-            phoneOtpChallenge.InvalidatedReason = reason;
+            phoneOtpChallenge.Withdraw(reason, now);
         }
     }
 

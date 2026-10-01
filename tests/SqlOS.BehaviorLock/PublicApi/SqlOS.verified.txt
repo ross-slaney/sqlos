@@ -3099,31 +3099,30 @@ namespace SqlOS.AuthServer.Models
     }
     public sealed class SqlOSEmailOtpChallenge
     {
-        public SqlOSEmailOtpChallenge() { }
-        public int AttemptCount { get; set; }
-        public SqlOS.AuthServer.Models.SqlOSAuthorizationRequest? AuthorizationRequest { get; set; }
-        public string? AuthorizationRequestId { get; set; }
-        public string ChallengeTokenHash { get; set; }
-        public SqlOS.AuthServer.Models.SqlOSClientApplication? ClientApplication { get; set; }
-        public string? ClientApplicationId { get; set; }
-        public string CodeHash { get; set; }
-        public System.DateTime? ConsumedAt { get; set; }
-        public System.DateTime CreatedAt { get; set; }
-        public string Email { get; set; }
-        public System.DateTime ExpiresAt { get; set; }
-        public string Id { get; set; }
-        public System.DateTime? InvalidatedAt { get; set; }
-        public string? InvalidatedReason { get; set; }
-        public string? IpAddress { get; set; }
-        public System.DateTime LastSentAt { get; set; }
-        public int MaxAttempts { get; set; }
-        public string NormalizedEmail { get; set; }
-        public string? RequestedOrganizationId { get; set; }
-        public SqlOS.AuthServer.Models.SqlOSUser? User { get; set; }
-        public string? UserAgent { get; set; }
-        public SqlOS.AuthServer.Models.SqlOSUserEmail? UserEmail { get; set; }
-        public string? UserEmailId { get; set; }
-        public string? UserId { get; set; }
+        public int AttemptCount { get; }
+        public SqlOS.AuthServer.Models.SqlOSAuthorizationRequest? AuthorizationRequest { get; }
+        public string? AuthorizationRequestId { get; }
+        public string ChallengeTokenHash { get; }
+        public SqlOS.AuthServer.Models.SqlOSClientApplication? ClientApplication { get; }
+        public string? ClientApplicationId { get; }
+        public string CodeHash { get; }
+        public System.DateTime? ConsumedAt { get; }
+        public System.DateTime CreatedAt { get; }
+        public string Email { get; }
+        public System.DateTime ExpiresAt { get; }
+        public string Id { get; }
+        public System.DateTime? InvalidatedAt { get; }
+        public string? InvalidatedReason { get; }
+        public string? IpAddress { get; }
+        public System.DateTime LastSentAt { get; }
+        public int MaxAttempts { get; }
+        public string NormalizedEmail { get; }
+        public string? RequestedOrganizationId { get; }
+        public SqlOS.AuthServer.Models.SqlOSUser? User { get; }
+        public string? UserAgent { get; }
+        public SqlOS.AuthServer.Models.SqlOSUserEmail? UserEmail { get; }
+        public string? UserEmailId { get; }
+        public string? UserId { get; }
     }
     public sealed class SqlOSExternalIdentity
     {
@@ -3373,35 +3372,34 @@ namespace SqlOS.AuthServer.Models
     }
     public sealed class SqlOSPhoneOtpChallenge
     {
-        public SqlOSPhoneOtpChallenge() { }
-        public int AttemptCount { get; set; }
-        public SqlOS.AuthServer.Models.SqlOSAuthorizationRequest? AuthorizationRequest { get; set; }
-        public string? AuthorizationRequestId { get; set; }
-        public string ChallengeTokenHash { get; set; }
-        public SqlOS.AuthServer.Models.SqlOSClientApplication? ClientApplication { get; set; }
-        public string? ClientApplicationId { get; set; }
-        public System.DateTime? ConsumedAt { get; set; }
-        public System.DateTime CreatedAt { get; set; }
-        public System.DateTime ExpiresAt { get; set; }
-        public string Id { get; set; }
-        public System.DateTime? InvalidatedAt { get; set; }
-        public string? InvalidatedReason { get; set; }
-        public string? IpAddress { get; set; }
-        public System.DateTime LastSentAt { get; set; }
-        public string MaskedPhoneNumber { get; set; }
-        public string PhoneNumberEncrypted { get; set; }
-        public string PhoneNumberHash { get; set; }
-        public string Provider { get; set; }
-        public string? ProviderChallengeId { get; set; }
-        public bool ProviderStarted { get; set; }
-        public string? ProviderStatus { get; set; }
-        public string Purpose { get; set; }
-        public string? RequestedOrganizationId { get; set; }
-        public SqlOS.AuthServer.Models.SqlOSUser? User { get; set; }
-        public string? UserAgent { get; set; }
-        public string? UserId { get; set; }
-        public SqlOS.AuthServer.Models.SqlOSUserPhoneNumber? UserPhoneNumber { get; set; }
-        public string? UserPhoneNumberId { get; set; }
+        public int AttemptCount { get; }
+        public SqlOS.AuthServer.Models.SqlOSAuthorizationRequest? AuthorizationRequest { get; }
+        public string? AuthorizationRequestId { get; }
+        public string ChallengeTokenHash { get; }
+        public SqlOS.AuthServer.Models.SqlOSClientApplication? ClientApplication { get; }
+        public string? ClientApplicationId { get; }
+        public System.DateTime? ConsumedAt { get; }
+        public System.DateTime CreatedAt { get; }
+        public System.DateTime ExpiresAt { get; }
+        public string Id { get; }
+        public System.DateTime? InvalidatedAt { get; }
+        public string? InvalidatedReason { get; }
+        public string? IpAddress { get; }
+        public System.DateTime LastSentAt { get; }
+        public string MaskedPhoneNumber { get; }
+        public string PhoneNumberEncrypted { get; }
+        public string PhoneNumberHash { get; }
+        public string Provider { get; }
+        public string? ProviderChallengeId { get; }
+        public bool ProviderStarted { get; }
+        public string? ProviderStatus { get; }
+        public string Purpose { get; }
+        public string? RequestedOrganizationId { get; }
+        public SqlOS.AuthServer.Models.SqlOSUser? User { get; }
+        public string? UserAgent { get; }
+        public string? UserId { get; }
+        public SqlOS.AuthServer.Models.SqlOSUserPhoneNumber? UserPhoneNumber { get; }
+        public string? UserPhoneNumberId { get; }
     }
     public sealed class SqlOSRecoveryCode
     {

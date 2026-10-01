@@ -11,6 +11,7 @@ using Microsoft.IdentityModel.Tokens;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Domain;
 using SqlOS.AuthServer.Security;
 
 namespace SqlOS.AuthServer.Services;
@@ -765,7 +766,7 @@ public sealed class SqlOSOidcAuthService
             await SqlOSEmailOwnershipClaim.ClaimAsync(
                 _context,
                 existingEmail,
-                "oidc",
+                new OwnershipProof(EmailAddress.Parse(providerAddress), OwnershipProofMethod.Oidc),
                 SqlOSEmailClaimPresentation.None,
                 DateTime.UtcNow,
                 cancellationToken);

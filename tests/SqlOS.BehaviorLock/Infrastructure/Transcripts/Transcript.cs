@@ -189,6 +189,16 @@ public sealed class Transcript : IAsyncDisposable
         Add(TranscriptEntry.ForAudit(caption, events, order));
     }
 
+    /// <summary>
+    /// Records the audit events of a step whose order the refactor changed on purpose: the build
+    /// under test records them in <paramref name="order"/>, and the released package in
+    /// <paramref name="baselineOrder"/>, which must be the order its frozen baseline holds. For
+    /// example, events 7.2.1 wrote identically, in a defined order, that a fix makes differ while
+    /// their order stays defined by thread timing only.
+    /// </summary>
+    public Task ObserveAuditAsync(string? caption, AuditOrder order, AuditOrder baselineOrder)
+        => ObserveAuditAsync(caption, SqlOSUnderTest.IsPackage ? baselineOrder : order);
+
     /// <summary>Reads and forgets the audit events written so far (setup noise).</summary>
     public async Task SkipAuditAsync()
     {

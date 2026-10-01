@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Domain;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -17,10 +18,18 @@ namespace SqlOS.AuthServer.Services;
 /// commits atomically with the sign-in that proved the mailbox.
 /// </summary>
 /// <remarks>
+/// <para>
+/// A claim needs an <see cref="OwnershipProof"/> for the address: the decision that the person
+/// signing in controls the mailbox is made by the proof's producer (a completed challenge, or an
+/// upstream that may vouch for the address), never by the claim's caller, and a proof for another
+/// mailbox is refused. The <c>User</c> aggregate takes the claim over in the next slice.
+/// </para>
+/// <para>
 /// The explicit "verify this email" link is the signup confirmation step and is deliberately not
 /// a claim: it only marks the address verified. Verified addresses are never claimed again.
 /// Organization memberships are kept: organizations control them, so an organization admin
 /// reviews the memberships of a claimed account.
+/// </para>
 /// </remarks>
 internal static class SqlOSEmailOwnershipClaim
 {
@@ -30,12 +39,18 @@ internal static class SqlOSEmailOwnershipClaim
     public static async Task<SqlOSEmailClaimOutcome> ClaimAsync(
         ISqlOSAuthServerDbContext context,
         SqlOSUserEmail email,
-        string proof,
+        OwnershipProof proof,
         SqlOSEmailClaimPresentation presented,
         DateTime now,
         CancellationToken cancellationToken,
         string sessionRevocationReason = RevocationReason)
     {
+        ArgumentNullException.ThrowIfNull(proof);
+        if (!proof.Covers(email.Email))
+        {
+            throw new InvalidOperationException("The ownership proof is for another mailbox.");
+        }
+
         if (email.IsVerified)
         {
             return SqlOSEmailClaimOutcome.NotClaimed;
@@ -132,7 +147,7 @@ internal static class SqlOSEmailOwnershipClaim
         var data = JsonSerializer.Serialize(new
         {
             emailId = email.Id,
-            proof,
+            proof = proof.MethodName,
             revoked = new
             {
                 passwordCredentialIds = passwords.Select(x => x.Id).ToArray(),

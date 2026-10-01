@@ -14,6 +14,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Domain;
 using SqlOS.AuthServer.Security;
 
 namespace SqlOS.AuthServer.Services;
@@ -997,7 +998,7 @@ public sealed class SqlOSSamlService
             claim = await SqlOSEmailOwnershipClaim.ClaimAsync(
                 _context,
                 existingEmail,
-                "saml",
+                new OwnershipProof(EmailAddress.Parse(assertedAddress), OwnershipProofMethod.Saml),
                 SqlOSEmailClaimPresentation.None,
                 DateTime.UtcNow,
                 cancellationToken);

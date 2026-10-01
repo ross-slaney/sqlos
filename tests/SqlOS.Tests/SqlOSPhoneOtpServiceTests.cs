@@ -174,7 +174,8 @@ public sealed class SqlOSPhoneOtpServiceTests
         var start = await harness.Service.StartForClientAsync(new SqlOSPhoneOtpStartRequest("+12025550137", "test-client", null));
         var challenge = await harness.Context.Set<SqlOSPhoneOtpChallenge>()
             .SingleAsync(x => x.ChallengeTokenHash == harness.Crypto.HashToken(start.ChallengeToken));
-        challenge.ProviderChallengeId = "ve-from-admin-test";
+        // Store a provider challenge the code was never sent for.
+        harness.Context.Entry(challenge).Property(x => x.ProviderChallengeId).CurrentValue = "ve-from-admin-test";
         await harness.Context.SaveChangesAsync();
 
         await FluentActions.Invoking(() => harness.Service.VerifyAsync(new SqlOSPhoneOtpVerifyRequest(start.ChallengeToken, "123456")))
@@ -193,7 +194,8 @@ public sealed class SqlOSPhoneOtpServiceTests
         var expiredChallengeHash = expired.Crypto.HashToken(expiredStart.ChallengeToken);
         var expiredChallenge = await expired.Context.Set<SqlOSPhoneOtpChallenge>()
             .SingleAsync(x => x.ChallengeTokenHash == expiredChallengeHash);
-        expiredChallenge.ExpiresAt = DateTime.UtcNow.AddMinutes(-1);
+        // Store the challenge as if it had expired a minute ago.
+        expired.Context.Entry(expiredChallenge).Property(x => x.ExpiresAt).CurrentValue = DateTime.UtcNow.AddMinutes(-1);
         await expired.Context.SaveChangesAsync();
 
         var expiredAct = async () => await expired.Service.VerifyAsync(new SqlOSPhoneOtpVerifyRequest(expiredStart.ChallengeToken, "123456"));

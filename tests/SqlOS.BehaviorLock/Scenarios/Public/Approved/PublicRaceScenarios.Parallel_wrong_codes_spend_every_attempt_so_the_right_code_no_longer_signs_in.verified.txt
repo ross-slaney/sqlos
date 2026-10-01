@@ -1,5 +1,5 @@
 # SqlOS behavior lock transcript
-scenario: PublicRaceScenarios.Parallel_wrong_codes_count_as_one_attempt_so_the_right_code_still_signs_in_CurrentBehavior_KnownDefect_424
+scenario: PublicRaceScenarios.Parallel_wrong_codes_spend_every_attempt_so_the_right_code_no_longer_signs_in
 profile: hosted
 
 ## 1. client: an attacker who knows Alice's address starts a challenge (the code goes to Alice)
@@ -171,7 +171,7 @@ profile: hosted
 < 500 Internal Server Error
 < X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: The sign-in code is invalid or expired.
 
-## audit, sorted by content: every guess saw an attempt count of zero, so each wrote one
+## audit, sorted by content: five guesses spent the five attempts, the last closing the challenge (max_attempts); the sixth found none left
   - {
       "action": "email_otp.verify_failed",
       "actor": {
@@ -197,7 +197,7 @@ profile: hosted
         "details": {
           "AuthorizationRequestId": "[redacted]",
           "ClientApplicationId": "{cli#1}",
-          "reason": "wrong_code"
+          "reason": "max_attempts"
         },
         "maskedEmail": "al***@example.test",
         "purpose": "login"
@@ -367,209 +367,16 @@ profile: hosted
       "userAgent": null,
       "userId": null
     }
-  - {
-      "action": "email_otp.verify_failed",
-      "actor": {
-        "displayName": null,
-        "id": null,
-        "type": "system"
-      },
-      "applicationId": null,
-      "applicationKey": null,
-      "context": {
-        "correlationId": null,
-        "ipAddress": "203.0.113.10",
-        "requestId": null,
-        "sessionId": null,
-        "userAgent": null
-      },
-      "correlationId": null,
-      "eventType": "email_otp.verify_failed",
-      "id": "{evt#8}",
-      "ingestedAt": "{datetime:utc-z}",
-      "ipAddress": "203.0.113.10",
-      "metadata": {
-        "details": {
-          "AuthorizationRequestId": "[redacted]",
-          "ClientApplicationId": "{cli#1}",
-          "reason": "wrong_code"
-        },
-        "maskedEmail": "al***@example.test",
-        "purpose": "login"
-      },
-      "occurredAt": "{datetime:utc-z}",
-      "organizationId": null,
-      "requestId": null,
-      "sessionId": null,
-      "source": "authserver",
-      "targets": [],
-      "userAgent": null,
-      "userId": null
-    }
 
-## 8. client: six wrong guesses exceeded the limit of five, yet the challenge is still open: the right code signs in
+## 8. client: the six wrong guesses closed the challenge: the right code is refused
 > POST /sqlos/auth/email-otp/verify
 > Content-Type: application/json; charset=utf-8
 >   {
 >     "challengeToken": "{challenge-token#1}",
 >     "code": "{otp#1}"
 >   }
-< 200 OK
-< Content-Type: application/json; charset=utf-8
-    {
-      "mfaMethods": null,
-      "mfaToken": null,
-      "organizations": [],
-      "pendingAuthToken": null,
-      "requiresMfa": false,
-      "requiresMfaEnrollment": false,
-      "requiresOrganizationSelection": false,
-      "tokens": {
-        "accessToken": "{access-token#1}",
-        "accessTokenExpiresAt": "{datetime:utc-z}",
-        "clientId": "behavior-lock-app",
-        "idToken": null,
-        "organizationId": null,
-        "refreshToken": "{refresh-token#1}",
-        "refreshTokenExpiresAt": "{datetime:utc-z}",
-        "sessionId": "{ses#1}"
-      }
-    }
-  jwt {access-token#1}
-    header: {
-      "alg": "RS256",
-      "kid": "{kid#1}",
-      "typ": "at+jwt"
-    }
-    claims: {
-      "amr": [
-        "email_otp"
-      ],
-      "aud": "https://sqlos.example.test/api",
-      "client_id": "behavior-lock-app",
-      "email": "{email:alice}",
-      "exp": {epoch},
-      "iat": {epoch},
-      "iss": "https://sqlos.example.test/sqlos/auth",
-      "nbf": {epoch},
-      "sid": "{ses#1}",
-      "sub": "{usr#1}"
-    }
-    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: The sign-in code is invalid or expired.
 
-## audit: the successful sign-in
-  - {
-      "action": "user.email.claimed",
-      "actor": {
-        "displayName": null,
-        "id": "{usr#1}",
-        "type": "user"
-      },
-      "applicationId": null,
-      "applicationKey": null,
-      "context": null,
-      "correlationId": null,
-      "eventType": "user.email.claimed",
-      "id": "{evt#9}",
-      "ingestedAt": "{datetime:utc-z}",
-      "ipAddress": null,
-      "metadata": {
-        "emailId": "{eml#1}",
-        "proof": "email_otp",
-        "revoked": {
-          "authenticatorIds": [],
-          "calendarConnectionIds": [],
-          "consentGrantIds": [],
-          "externalIdentities": [],
-          "passwordCredentialIds": [
-            "{cred#1}"
-          ],
-          "phoneNumberIds": [],
-          "recoveryCodes": 0
-        }
-      },
-      "occurredAt": "{datetime:utc-z}",
-      "organizationId": null,
-      "requestId": null,
-      "sessionId": null,
-      "source": "authserver",
-      "targets": [
-        {
-          "displayName": null,
-          "id": "{usr#1}",
-          "type": "user"
-        }
-      ],
-      "userAgent": null,
-      "userId": "{usr#1}"
-    }
-  - {
-      "action": "email_otp.verify_succeeded",
-      "actor": {
-        "displayName": null,
-        "id": null,
-        "type": "system"
-      },
-      "applicationId": null,
-      "applicationKey": null,
-      "context": {
-        "correlationId": null,
-        "ipAddress": "203.0.113.10",
-        "requestId": null,
-        "sessionId": null,
-        "userAgent": null
-      },
-      "correlationId": null,
-      "eventType": "email_otp.verify_succeeded",
-      "id": "{evt#10}",
-      "ingestedAt": "{datetime:utc-z}",
-      "ipAddress": "203.0.113.10",
-      "metadata": {
-        "details": {
-          "AuthorizationRequestId": "[redacted]",
-          "ClientApplicationId": "{cli#1}",
-          "UserId": "{usr#1}"
-        },
-        "maskedEmail": "al***@example.test",
-        "purpose": "login"
-      },
-      "occurredAt": "{datetime:utc-z}",
-      "organizationId": null,
-      "requestId": null,
-      "sessionId": null,
-      "source": "authserver",
-      "targets": [],
-      "userAgent": null,
-      "userId": null
-    }
-  - {
-      "action": "user.login.email_otp",
-      "actor": {
-        "displayName": null,
-        "id": "{usr#1}",
-        "type": "user"
-      },
-      "applicationId": null,
-      "applicationKey": null,
-      "context": {
-        "correlationId": null,
-        "ipAddress": "203.0.113.10",
-        "requestId": null,
-        "sessionId": null,
-        "userAgent": null
-      },
-      "correlationId": null,
-      "eventType": "user.login.email_otp",
-      "id": "{evt#11}",
-      "ingestedAt": "{datetime:utc-z}",
-      "ipAddress": "203.0.113.10",
-      "metadata": null,
-      "occurredAt": "{datetime:utc-z}",
-      "organizationId": null,
-      "requestId": null,
-      "sessionId": null,
-      "source": "authserver",
-      "targets": [],
-      "userAgent": null,
-      "userId": "{usr#1}"
-    }
+## audit: nothing more: a closed challenge spends no attempt
+  (no new events)

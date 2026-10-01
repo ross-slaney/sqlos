@@ -7,9 +7,15 @@ using SqlOS.Fga.Models;
 
 namespace SqlOS.IntegrationTests.Infrastructure;
 
+/// <summary>
+/// The host context SqlOS services see in integration tests. Like <see cref="SqlOSDbContext{TContext}"/>
+/// and every context <c>AddSqlOS</c> configures, it runs SqlOS's domain events interceptor, so
+/// services built by hand in a test write the audit rows of their events the way they do in a host.
+/// </summary>
 public sealed class TestSqlOSDbContext : DbContext, ISqlOSAuthServerDbContext, ISqlOSFgaDbContext
 {
-    public TestSqlOSDbContext(DbContextOptions<TestSqlOSDbContext> options) : base(options)
+    public TestSqlOSDbContext(DbContextOptions<TestSqlOSDbContext> options)
+        : base(SqlOSDomainEventsInterceptor.AttachTo(options))
     {
         if (SqlOSDatabase.IsPostgreSql(Database.ProviderName))
         {

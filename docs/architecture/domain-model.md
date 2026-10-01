@@ -191,7 +191,7 @@ public sealed class SqlOSRefreshToken : ISqlOSAggregate
 - Hosts read and filter on these properties today (`user.IsActive`, `session.RevokedAt`), and complex types would change every one of those host-visible shapes.
 - EF Core 9 complex types must be non-null.
 - They can't take part in keys or indexes, and the existing filtered indexes use these columns.
-- They complicate concurrency tokens, which `ConsumedAt` and `AttemptCount` rely on.
+- They complicate concurrency tokens and set-based updates, which `ConsumedAt` and `AttemptCount` rely on.
 
 With flat columns, the rule has one home (the part) and the entities compose it, and the public shape, LINQ and schema stay unchanged.
 
@@ -259,7 +259,7 @@ A policy is a pure decision object, composed of small rules, with no I/O. Proces
 | Root | Owns | Key invariants |
 |---|---|---|
 | `SqlOSUser` | `SqlOSUserEmail`, `SqlOSUserPhoneNumber`, `SqlOSCredential`, `SqlOSUserAuthenticator`, `SqlOSRecoveryCode`, `SqlOSExternalIdentity`, `SqlOSUserMfaPolicyOverride` | See the rules below. |
-| `SqlOSEmailOtpChallenge`, `SqlOSPhoneOtpChallenge` | — | Built from `Expiry`, `Consumption`, `AttemptBudget` and `HashedSecret`, plus the **stored** recipient. Codes go only to the stored recipient. Attempts can't be lost under concurrency, because `AttemptCount` is a concurrency token (#424). |
+| `SqlOSEmailOtpChallenge`, `SqlOSPhoneOtpChallenge` | — | Built from `Expiry`, `Consumption`, `AttemptBudget` and `HashedSecret`, plus the **stored** recipient. Codes go only to the stored recipient. Attempts can't be lost under concurrency: an email-code attempt is spent with one conditional update before the code is compared (#424, §15 Amendment 2). |
 | `SqlOSTemporaryToken` | — | Issued and consumed only through **typed token kinds** (`TemporaryTokenKind<TPayload>`), one per purpose, carrying the payload type, lifetime, single use and bindings (§15 Amendment 1). Built from `Expiry`, `Consumption` and `HashedSecret`. Payload JSON is unchanged. |
 | Infrastructure | password-login and MFA-attempt buckets and reservations | Behind one internal admission gate. The algorithms are unchanged. |
 
@@ -333,8 +333,9 @@ The read path is unchanged.
 - One save per process execution (§3.7).
 - **Contested state uses concurrency tokens on existing columns where they already capture the contention:**
   - `ConsumedAt` on codes, tokens and challenges
-  - `AttemptCount` on OTP challenges, which is new as a token (#424)
   - refresh-token rotation state
+
+  Email-code attempts are contested too, but a token would only detect a lost update after the code was compared. An attempt is spent with one conditional update (`AttemptCount < MaxAttempts`) before the comparison instead, outside any transaction the caller could roll back (#424, §15 Amendment 2).
 
   Add a row version (SQL Server `rowversion`, PostgreSQL `xmin`) only where no existing column works, for example the `AuthorizationRequest` state. Each addition is a ledgered schema change covered by the upgrade gate.
 - **Cross-aggregate uniqueness stays a database constraint**: the canonical email, active domain claims and the SAML entity ID. Processes translate violations into the 7.x errors.
@@ -448,3 +449,11 @@ Each layer keeps every gate green, and every external difference is ledgered.
 | Time (§7) | `TimeProvider.System` is registered, but ASP.NET Core 9's `AddAuthentication`, which `AddSqlOS` calls, already registers it. That's no external change, so there's no ledger entry. | Accuracy. |
 | Architecture tests (§11) | Mono.Cecil (test-only) scans the compiled IL. Allowlists are sorted, checked-in files. Growth is capped by a committed `high-water-marks.txt`. A stale entry fails. Self-tests prove that each rule fires. | Rules hold in CI without a deep clone of main. |
 | Behavior lock (§12) | Layer 1's approvals are **frozen as the 7.2.1 baseline set**. Package runs compare every scenario against the baseline, and source runs compare against the current approvals. A gate requires the difference between the baseline and current sets to be exactly the files the ledger names. | The before/after proof keeps full strength as intended changes accumulate. |
+
+### Amendment 2: after the challenges slice (layer 2, T2-B)
+
+| Topic | Amendment | Why |
+|---|---|---|
+| OTP attempts (§4, §5) | `AttemptCount` is **not** a concurrency token. The attempt ledger spends an email-code attempt with one conditional update (`AttemptCount < MaxAttempts`, open and unexpired) **before** the code is compared, and only that update produces the `EmailOtpAttemptReservation` proof the challenge's `RegisterAttempt` requires. The wrong code that spent the last attempt invalidates the challenge with a second conditional update, exactly once. Both expressions are the challenge's own (`AtomicAttempts`), and neither goes through the change tracker. Sign-in verification refuses to run inside a database or ambient transaction, whose rollback would erase the attempt. Sign-up verification still runs inside the sign-up transaction until the 7.2.2 change that moves it out (#449, PR #460) is carried forward. | A token detects a lost update only at save time, after every concurrent guess has compared its code, so parallel guesses still get more comparisons than the budget. Reserving first bounds comparisons by the budget, and it is the 7.2.2 fix's semantics, so carrying PR #460 forward reconciles trivially. |
+| Failure records | A process that must persist a failure record before it throws saves inside an existing save site; a refusal that needs a database read is returned by a query (for example the sign-up refusal for an address an account already owns) and recorded by the caller. | The save-call-site allowlist only shrinks until processes move into `*.Processes` namespaces (T2-D). |
+| Test contexts | The hand-built test contexts (`TestSqlOSInMemoryDbContext`, `TestSqlOSDbContext`) attach the domain-events interceptor in their constructors, as `SqlOSDbContext` does. | Services that tests build by hand must write the audit rows of their events, as every host context does through `AddSqlOS` or `SqlOSDbContext`. |

@@ -8,14 +8,15 @@ using SqlOS.BehaviorLock.Infrastructure.Transcripts;
 namespace SqlOS.BehaviorLock.Scenarios.Public;
 
 /// <summary>
-/// #424: the email-code attempt limit and the email-code and sign-in-link send limits are checked
-/// with a read, then a write, and nothing makes the pair atomic. Requests sent together all pass
-/// the read before any of them writes. Each scenario sends six requests in parallel and uses a
-/// <see cref="SqlCommandBarrier"/> to hold every request's write until all six have done their
-/// reads, which is the interleaving an attacker gets by sending them together; without it the
-/// outcome would depend on timing. The parallel step's audit events are recorded in content order,
-/// because parallel requests write them in whatever order their threads run
-/// (<see cref="AuditOrder.Content"/>). When the limits become atomic, these approvals change.
+/// #424: in 7.2.1 the email-code attempt limit and the email-code and sign-in-link send limits are
+/// checked with a read, then a write, and nothing makes the pair atomic, so requests sent together
+/// all pass the read before any of them writes. Each scenario sends six requests in parallel and
+/// uses a <see cref="SqlCommandBarrier"/> to hold every request's write until all six have done
+/// their reads, which is the interleaving an attacker gets by sending them together; without it
+/// the outcome would depend on timing. A limit that is atomic meets the barrier at its own
+/// reservation, and the transcript shows that it holds. The parallel step's audit events are
+/// recorded in content order, because parallel requests write them in whatever order their
+/// threads run (<see cref="AuditOrder.Content"/>).
 /// </summary>
 [TestClass]
 public sealed class PublicRaceScenarios
@@ -26,8 +27,12 @@ public sealed class PublicRaceScenarios
     [Scenario]
     [Covers("POST /sqlos/auth/email-otp/start")]
     [Covers("POST /sqlos/auth/email-otp/verify")]
-    public async Task Parallel_wrong_codes_count_as_one_attempt_so_the_right_code_still_signs_in_CurrentBehavior_KnownDefect_424()
+    public async Task Parallel_wrong_codes_spend_every_attempt_so_the_right_code_no_longer_signs_in()
     {
+        // #424, fixed: each guess spends its attempt with one conditional update before its code is
+        // compared, so the six guesses spend the five attempts one by one, the guess that spent the
+        // last one closes the challenge, and the sixth finds no attempt left. 7.2.1 let every guess
+        // write an attempt count of one, and the right code still signed in.
         var barrier = new SqlCommandBarrier(Parallel, "UPDATE", "SqlOSEmailOtpChallenges");
         await using var t = await PublicHost.StartAsync(HostProfiles.Hosted, options => options.ConfigureServices = PublicHost.Interleave(barrier));
         var alice = await t.Setup.CreateUserAsync("alice");
@@ -44,13 +49,13 @@ public sealed class PublicRaceScenarios
             barrier,
             guess => t.Api.PostJsonAsync("/sqlos/auth/email-otp/verify", new { challengeToken, code = PublicSetup.WrongCode(code, guess) }),
             guess => $"parallel wrong guess {guess}",
-            "every guess saw an attempt count of zero, so each wrote one");
+            "five guesses spent the five attempts, the last closing the challenge (max_attempts); the sixth found none left");
 
         t.Observe(
             await t.Api.PostJsonAsync("/sqlos/auth/email-otp/verify", new { challengeToken, code }),
-            "six wrong guesses exceeded the limit of five, yet the challenge is still open: the right code signs in");
+            "the six wrong guesses closed the challenge: the right code is refused");
 
-        await t.ObserveAuditAsync("the successful sign-in");
+        await t.ObserveAuditAsync("nothing more: a closed challenge spends no attempt");
         await t.ApproveAsync();
     }
 

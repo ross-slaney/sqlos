@@ -1584,7 +1584,7 @@ public sealed class SqlOSAuthService
             claim = await SqlOSEmailOwnershipClaim.ClaimAsync(
                 _context,
                 resetEmail,
-                "password_reset",
+                new OwnershipProof(EmailAddress.Parse(resetEmail.Email), OwnershipProofMethod.PasswordReset),
                 new SqlOSEmailClaimPresentation { PasswordCredentialId = credential.Id },
                 now,
                 cancellationToken,

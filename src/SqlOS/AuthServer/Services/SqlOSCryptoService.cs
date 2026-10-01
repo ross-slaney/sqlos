@@ -230,10 +230,11 @@ public sealed class SqlOSCryptoService
 
     /// <summary>
     /// Issues a temporary token of a host's own purpose (for example an OIDC hand-off) and returns
-    /// the raw token, which is never stored. SqlOS's own tokens are issued through their
-    /// <see cref="TemporaryTokenKind"/> (<see cref="SqlOSTemporaryTokenKinds"/>).
+    /// the raw token, which is never stored. The token lives for <paramref name="lifetime"/>, or
+    /// <see cref="SqlOSAuthServerOptions.TemporaryTokenLifetime"/> when it is null. SqlOS's own
+    /// tokens are issued through their <see cref="TemporaryTokenKind"/>
+    /// (<see cref="SqlOSTemporaryTokenKinds"/>).
     /// </summary>
-    /// <param name="lifetime">How long the token lives; <see cref="SqlOSAuthServerOptions.TemporaryTokenLifetime"/> when null.</param>
     public async Task<string> CreateTemporaryTokenAsync(
         string purpose,
         string? userId,
@@ -280,9 +281,9 @@ public sealed class SqlOSCryptoService
 
     /// <summary>
     /// Issues a token of <paramref name="kind"/> and saves it. The kind decides the purpose, the
-    /// payload format, the allowed bindings and, unless it is configured, the lifetime.
+    /// payload format, the allowed bindings and the lifetime: pass <paramref name="configuredLifetime"/>
+    /// for a kind whose lifetime is configured, and null for one whose lifetime is fixed.
     /// </summary>
-    /// <param name="configuredLifetime">The configured lifetime of a kind whose lifetime is configured; null for a fixed one.</param>
     internal async Task<IssuedTemporaryToken> CreateTemporaryTokenAsync<TPayload>(
         TemporaryTokenKind<TPayload> kind,
         TPayload? payload,
