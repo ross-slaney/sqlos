@@ -1,0 +1,123 @@
+# SqlOS behavior lock transcript
+scenario: SettingsAdminScenarios.Invalid_security_settings_escape_as_server_errors
+profile: dashboard-callback
+
+## 1. operator: a non-positive minute value
+> PUT /sqlos/admin/auth/api/settings/security
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "refreshTokenGraceWindowSeconds": 30,
+>     "refreshTokenLifetimeMinutes": 0,
+>     "sessionAbsoluteLifetimeMinutes": 20160,
+>     "sessionIdleTimeoutMinutes": 1440,
+>     "signingKeyGraceWindowDays": 5,
+>     "signingKeyRetiredCleanupDays": 10,
+>     "signingKeyRotationIntervalDays": 30
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Security settings must be positive minute values.
+
+## 2. operator: a non-positive day value
+> PUT /sqlos/admin/auth/api/settings/security
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "refreshTokenGraceWindowSeconds": 30,
+>     "refreshTokenLifetimeMinutes": 43200,
+>     "sessionAbsoluteLifetimeMinutes": 20160,
+>     "sessionIdleTimeoutMinutes": 1440,
+>     "signingKeyGraceWindowDays": 5,
+>     "signingKeyRetiredCleanupDays": 10,
+>     "signingKeyRotationIntervalDays": -1
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Signing key rotation settings must be positive day values.
+
+## 3. operator: a grace window as long as the rotation interval
+> PUT /sqlos/admin/auth/api/settings/security
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "refreshTokenGraceWindowSeconds": 30,
+>     "refreshTokenLifetimeMinutes": 43200,
+>     "sessionAbsoluteLifetimeMinutes": 20160,
+>     "sessionIdleTimeoutMinutes": 1440,
+>     "signingKeyGraceWindowDays": 7,
+>     "signingKeyRetiredCleanupDays": 10,
+>     "signingKeyRotationIntervalDays": 7
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Grace window must be shorter than the rotation interval.
+
+## 4. operator: retired-key cleanup before the grace window ends
+> PUT /sqlos/admin/auth/api/settings/security
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "refreshTokenGraceWindowSeconds": 30,
+>     "refreshTokenLifetimeMinutes": 43200,
+>     "sessionAbsoluteLifetimeMinutes": 20160,
+>     "sessionIdleTimeoutMinutes": 1440,
+>     "signingKeyGraceWindowDays": 7,
+>     "signingKeyRetiredCleanupDays": 6,
+>     "signingKeyRotationIntervalDays": 30
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Retired signing-key cleanup must not run before the JWKS grace window ends.
+
+## 5. operator: a negative refresh-token grace window
+> PUT /sqlos/admin/auth/api/settings/security
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "refreshTokenGraceWindowSeconds": -1,
+>     "refreshTokenLifetimeMinutes": 43200,
+>     "sessionAbsoluteLifetimeMinutes": 20160,
+>     "sessionIdleTimeoutMinutes": 1440,
+>     "signingKeyGraceWindowDays": 5,
+>     "signingKeyRetiredCleanupDays": 10,
+>     "signingKeyRotationIntervalDays": 30
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Refresh token grace window must be 0 or greater.
+
+## 6. operator: a refresh-token grace window longer than the access-token lifetime
+> PUT /sqlos/admin/auth/api/settings/security
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "refreshTokenGraceWindowSeconds": 601,
+>     "refreshTokenLifetimeMinutes": 43200,
+>     "sessionAbsoluteLifetimeMinutes": 20160,
+>     "sessionIdleTimeoutMinutes": 1440,
+>     "signingKeyGraceWindowDays": 5,
+>     "signingKeyRetiredCleanupDays": 10,
+>     "signingKeyRotationIntervalDays": 30
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Refresh token grace window must not exceed the access token lifetime (600 seconds).
+
+## 7. operator: an empty body binds every value to zero
+> PUT /sqlos/admin/auth/api/settings/security
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Security settings must be positive minute values.
+
+## 8. operator: the settings are unchanged
+> GET /sqlos/admin/auth/api/settings/security
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "refreshTokenGraceWindowSeconds": 30,
+      "refreshTokenLifetimeMinutes": 43200,
+      "sessionAbsoluteLifetimeMinutes": 43200,
+      "sessionIdleTimeoutMinutes": 10080,
+      "signingKeyGraceWindowDays": 7,
+      "signingKeyRetiredCleanupDays": 30,
+      "signingKeyRotationIntervalDays": 90,
+      "updatedAt": "{datetime:unspecified}"
+    }

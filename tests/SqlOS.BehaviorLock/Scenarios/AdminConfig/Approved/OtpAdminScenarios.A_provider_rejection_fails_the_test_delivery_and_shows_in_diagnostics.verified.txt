@@ -1,0 +1,114 @@
+# SqlOS behavior lock transcript
+scenario: OtpAdminScenarios.A_provider_rejection_fails_the_test_delivery_and_shows_in_diagnostics
+profile: hosted
+
+## 1. operator: the SMS provider rejects the send; the operator sees a generic failure
+> POST /sqlos/admin/auth/api/otp/test-delivery
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "destination": "+12025550149",
+>     "method": "phone"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "The OTP provider could not complete the test delivery. Review recent diagnostics."
+    }
+
+## 2. operator: the failure appears in the readiness diagnostics
+> GET /sqlos/admin/auth/api/otp/readiness
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "email": {
+        "configurationKeys": [
+          "SqlOS:EmailOtp:AzureCommunicationServicesConnectionString",
+          "SqlOS:EmailOtp:FromAddress"
+        ],
+        "enabled": true,
+        "locallyConfigured": false,
+        "method": "email",
+        "policy": {
+          "challengeLifetimeMinutes": 10,
+          "codeLength": 6,
+          "fromAddress": null,
+          "maxAttempts": 5,
+          "maxChallengesPerHour": 5
+        },
+        "provider": "azure_communication_services",
+        "reasonCodes": [
+          "missing_from_address"
+        ]
+      },
+      "phone": {
+        "configurationKeys": [
+          "SqlOS:PhoneOtp:Enabled",
+          "SqlOS:PhoneOtp:TwilioAccountSid",
+          "SqlOS:PhoneOtp:TwilioAuthToken",
+          "SqlOS:PhoneOtp:TwilioVerifyServiceSid"
+        ],
+        "enabled": true,
+        "locallyConfigured": true,
+        "method": "phone",
+        "policy": {
+          "challengeLifetimeMinutes": 10,
+          "countryAllowList": [],
+          "countryDenyList": [],
+          "defaultRegion": "US",
+          "maxSendsPerPhone": 5,
+          "serviceSidSuffix": "***lock"
+        },
+        "provider": "twilio_verify",
+        "reasonCodes": []
+      },
+      "recentDiagnostics": [
+        {
+          "action": "otp.admin_test.failed",
+          "maskedDestination": "***0149",
+          "method": "phone",
+          "occurredAt": "{datetime:unspecified}",
+          "provider": null,
+          "providerStatus": "provider_error"
+        }
+      ]
+    }
+
+## audit: the failed test delivery is audited
+  - {
+      "action": "otp.admin_test.failed",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "otp.admin_test.failed",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "maskedDestination": "***0149",
+        "method": "phone",
+        "provider": null,
+        "providerStatus": "provider_error"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

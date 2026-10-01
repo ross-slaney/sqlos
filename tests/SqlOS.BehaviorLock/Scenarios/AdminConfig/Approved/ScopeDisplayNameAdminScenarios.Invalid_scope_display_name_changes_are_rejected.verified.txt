@@ -1,0 +1,142 @@
+# SqlOS behavior lock transcript
+scenario: ScopeDisplayNameAdminScenarios.Invalid_scope_display_name_changes_are_rejected
+profile: dashboard-callback
+
+## 1. operator: a blank scope
+> POST /sqlos/admin/auth/api/scope-display-names
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Nothing",
+>     "scope": " "
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Scope is required."
+    }
+
+## 2. operator: a display name over 200 characters
+> POST /sqlos/admin/auth/api/scope-display-names
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+>     "scope": "email"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Display name cannot exceed 200 characters."
+    }
+
+## 3. operator: a description over 1000 characters
+> POST /sqlos/admin/auth/api/scope-display-names
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "description": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+>     "displayName": "Email",
+>     "scope": "email"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Description cannot exceed 1000 characters."
+    }
+
+## 4. operator: a scope that already has a display name, even a code-owned one
+> POST /sqlos/admin/auth/api/scope-display-names
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Read",
+>     "scope": "workspace.read"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "A display name for scope 'workspace.read' already exists."
+    }
+
+## 5. operator: an edit that blanks the display name
+> PUT /sqlos/admin/auth/api/scope-display-names/{sdn#1}
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": ""
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Display name is required."
+    }
+
+## 6. operator: editing an unknown entry
+> PUT /sqlos/admin/auth/api/scope-display-names/{sdn#2}
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Ghost"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Scope display name was not found."
+    }
+
+## 7. operator: deleting an unknown entry
+> DELETE /sqlos/admin/auth/api/scope-display-names/{sdn#2}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Scope display name was not found."
+    }
+
+## 8. operator: the entries are unchanged
+> GET /sqlos/admin/auth/api/scope-display-names
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "description": null,
+          "displayName": "Your profile",
+          "id": "{sdn#1}",
+          "ownership": {
+            "canEmergencyDisable": false,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "scope": "profile",
+          "updatedAt": "{datetime:unspecified}"
+        },
+        {
+          "createdAt": "{datetime:unspecified}",
+          "description": "View workspaces you can access.",
+          "displayName": "Read workspaces",
+          "id": "{sdn#3}",
+          "ownership": {
+            "canEmergencyDisable": false,
+            "configurationFingerprint": "{hex#1}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "workspace.read"
+          },
+          "scope": "workspace.read",
+          "updatedAt": "{datetime:unspecified}"
+        }
+      ]
+    }
+
+## audit: rejected changes write no audit events
+  (no new events)

@@ -1,0 +1,181 @@
+# SqlOS behavior lock transcript
+scenario: SettingsAdminScenarios.Operator_sets_an_organization_mfa_policy
+profile: dashboard-callback
+
+## 1. operator: without a policy the organization inherits the global MFA settings
+> GET /sqlos/admin/auth/api/organizations/{org#1}/mfa-policy
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "availableFactors": [
+        "totp",
+        "recovery_code"
+      ],
+      "isEnabled": false,
+      "organizationId": "{org#1}",
+      "organizationName": "Acme",
+      "organizationSlug": "{slug:acme}",
+      "recoveryCodesEnabled": true,
+      "requireMfaForAllUsers": false,
+      "requireMfaForOwnersAndAdmins": false,
+      "requiredRoles": [
+        "owner",
+        "admin"
+      ],
+      "updatedAt": "{datetime:unspecified}",
+      "userSelfEnrollmentEnabled": true
+    }
+
+## 2. operator: the policy can be read by organization slug
+> GET /sqlos/admin/auth/api/organizations/{slug:acme}/mfa-policy
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "availableFactors": [
+        "totp",
+        "recovery_code"
+      ],
+      "isEnabled": false,
+      "organizationId": "{org#1}",
+      "organizationName": "Acme",
+      "organizationSlug": "{slug:acme}",
+      "recoveryCodesEnabled": true,
+      "requireMfaForAllUsers": false,
+      "requireMfaForOwnersAndAdmins": false,
+      "requiredRoles": [
+        "owner",
+        "admin"
+      ],
+      "updatedAt": "{datetime:unspecified}",
+      "userSelfEnrollmentEnabled": true
+    }
+
+## 3. probe: Alice needs no second factor in Acme
+> POST /__probe/auth/mfa-status
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "organizationId": "{org#1}",
+>     "userId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "availableFactors": [
+        "totp",
+        "recovery_code"
+      ],
+      "enrollmentRequired": false,
+      "hasTotp": false,
+      "mfaEnabled": true,
+      "policyReason": null,
+      "recoveryCodeCount": 0,
+      "required": false,
+      "userSelfEnrollmentEnabled": true
+    }
+
+## 4. operator: require MFA for every Acme member
+> PUT /sqlos/admin/auth/api/organizations/{org#1}/mfa-policy
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "availableFactors": [
+>       "totp"
+>     ],
+>     "isEnabled": true,
+>     "recoveryCodesEnabled": false,
+>     "requireMfaForAllUsers": true,
+>     "requireMfaForOwnersAndAdmins": true,
+>     "requiredRoles": [
+>       "Billing",
+>       "billing"
+>     ],
+>     "userSelfEnrollmentEnabled": true
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "availableFactors": [
+        "totp"
+      ],
+      "isEnabled": true,
+      "organizationId": "{org#1}",
+      "organizationName": "Acme",
+      "organizationSlug": "{slug:acme}",
+      "recoveryCodesEnabled": false,
+      "requireMfaForAllUsers": true,
+      "requireMfaForOwnersAndAdmins": true,
+      "requiredRoles": [
+        "billing"
+      ],
+      "updatedAt": "{datetime:utc-z}",
+      "userSelfEnrollmentEnabled": true
+    }
+
+## 5. probe: Alice must enroll a second factor in Acme
+> POST /__probe/auth/mfa-status
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "organizationId": "{org#1}",
+>     "userId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "availableFactors": [
+        "totp"
+      ],
+      "enrollmentRequired": true,
+      "hasTotp": false,
+      "mfaEnabled": true,
+      "policyReason": "all_users",
+      "recoveryCodeCount": 0,
+      "required": true,
+      "userSelfEnrollmentEnabled": true
+    }
+
+## 6. probe: outside Acme the global settings still apply
+> POST /__probe/auth/mfa-status
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "userId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "availableFactors": [
+        "totp",
+        "recovery_code"
+      ],
+      "enrollmentRequired": false,
+      "hasTotp": false,
+      "mfaEnabled": true,
+      "policyReason": null,
+      "recoveryCodeCount": 0,
+      "required": false,
+      "userSelfEnrollmentEnabled": true
+    }
+
+## 7. operator: reading the policy of an unknown organization escapes as a server error
+> GET /sqlos/admin/auth/api/organizations/{org#2}/mfa-policy
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Organization not found.
+
+## 8. operator: writing the policy of an unknown organization escapes as a server error
+> PUT /sqlos/admin/auth/api/organizations/{org#2}/mfa-policy
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "isEnabled": true,
+>     "recoveryCodesEnabled": true,
+>     "requireMfaForAllUsers": true,
+>     "requireMfaForOwnersAndAdmins": true,
+>     "userSelfEnrollmentEnabled": true
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Organization not found.
+
+## audit: organization MFA policy changes write no audit events
+  (no new events)

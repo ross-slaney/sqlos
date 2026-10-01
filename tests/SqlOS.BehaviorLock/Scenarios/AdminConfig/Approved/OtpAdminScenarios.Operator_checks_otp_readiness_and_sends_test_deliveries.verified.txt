@@ -1,0 +1,242 @@
+# SqlOS behavior lock transcript
+scenario: OtpAdminScenarios.Operator_checks_otp_readiness_and_sends_test_deliveries
+profile: hosted
+
+## 1. operator: without operator credentials the readiness report is not found
+> GET /sqlos/admin/auth/api/otp/readiness
+< 404 Not Found
+
+## 2. operator: email and SMS codes are both ready
+> GET /sqlos/admin/auth/api/otp/readiness
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "email": {
+        "configurationKeys": [
+          "SqlOS:EmailOtp:AzureCommunicationServicesConnectionString",
+          "SqlOS:EmailOtp:FromAddress"
+        ],
+        "enabled": true,
+        "locallyConfigured": true,
+        "method": "email",
+        "policy": {
+          "challengeLifetimeMinutes": 10,
+          "codeLength": 6,
+          "fromAddress": "c***@sqlos.example.test",
+          "maxAttempts": 5,
+          "maxChallengesPerHour": 5
+        },
+        "provider": "azure_communication_services",
+        "reasonCodes": []
+      },
+      "phone": {
+        "configurationKeys": [
+          "SqlOS:PhoneOtp:Enabled",
+          "SqlOS:PhoneOtp:TwilioAccountSid",
+          "SqlOS:PhoneOtp:TwilioAuthToken",
+          "SqlOS:PhoneOtp:TwilioVerifyServiceSid"
+        ],
+        "enabled": true,
+        "locallyConfigured": true,
+        "method": "phone",
+        "policy": {
+          "challengeLifetimeMinutes": 10,
+          "countryAllowList": [],
+          "countryDenyList": [],
+          "defaultRegion": "US",
+          "maxSendsPerPhone": 5,
+          "serviceSidSuffix": "***lock"
+        },
+        "provider": "twilio_verify",
+        "reasonCodes": []
+      },
+      "recentDiagnostics": []
+    }
+
+## 3. operator: send a test email: the destination is normalized and masked
+> POST /sqlos/admin/auth/api/otp/test-delivery
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "destination": " Ops.Team@Example.Test ",
+>     "method": " Email "
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "maskedDestination": "o***@example.test",
+      "method": "email",
+      "provider": "azure_communication_services",
+      "providerStatus": null,
+      "sentAt": "{datetime:utc-z}"
+    }
+  ~ email (auth) to ops.team@example.test
+      subject: SqlOS delivery test
+      text:
+        Your SqlOS email delivery configuration is working. This message is not a sign-in code.
+      html:
+        <html>
+          <head></head>
+          <body>
+            <p>Your SqlOS email delivery configuration is working. This message is not a sign-in code.</p>
+          </body>
+        </html>
+
+## 4. operator: send a test SMS through the provider
+> POST /sqlos/admin/auth/api/otp/test-delivery
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "destination": "+1 (202) 555-0149",
+>     "method": "phone"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "maskedDestination": "***0149",
+      "method": "phone",
+      "provider": "twilio_verify",
+      "providerStatus": "pending",
+      "sentAt": "{datetime:utc-z}"
+    }
+  ~ sms send to +12025550149 (admin_test) code {sms-code#1}
+
+## 5. operator: the readiness report lists both deliveries as recent diagnostics
+> GET /sqlos/admin/auth/api/otp/readiness
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "email": {
+        "configurationKeys": [
+          "SqlOS:EmailOtp:AzureCommunicationServicesConnectionString",
+          "SqlOS:EmailOtp:FromAddress"
+        ],
+        "enabled": true,
+        "locallyConfigured": true,
+        "method": "email",
+        "policy": {
+          "challengeLifetimeMinutes": 10,
+          "codeLength": 6,
+          "fromAddress": "c***@sqlos.example.test",
+          "maxAttempts": 5,
+          "maxChallengesPerHour": 5
+        },
+        "provider": "azure_communication_services",
+        "reasonCodes": []
+      },
+      "phone": {
+        "configurationKeys": [
+          "SqlOS:PhoneOtp:Enabled",
+          "SqlOS:PhoneOtp:TwilioAccountSid",
+          "SqlOS:PhoneOtp:TwilioAuthToken",
+          "SqlOS:PhoneOtp:TwilioVerifyServiceSid"
+        ],
+        "enabled": true,
+        "locallyConfigured": true,
+        "method": "phone",
+        "policy": {
+          "challengeLifetimeMinutes": 10,
+          "countryAllowList": [],
+          "countryDenyList": [],
+          "defaultRegion": "US",
+          "maxSendsPerPhone": 5,
+          "serviceSidSuffix": "***lock"
+        },
+        "provider": "twilio_verify",
+        "reasonCodes": []
+      },
+      "recentDiagnostics": [
+        {
+          "action": "otp.admin_test.succeeded",
+          "maskedDestination": "***0149",
+          "method": "phone",
+          "occurredAt": "{datetime:unspecified}",
+          "provider": "twilio_verify",
+          "providerStatus": "pending"
+        },
+        {
+          "action": "otp.admin_test.succeeded",
+          "maskedDestination": "o***@example.test",
+          "method": "email",
+          "occurredAt": "{datetime:unspecified}",
+          "provider": "azure_communication_services",
+          "providerStatus": null
+        }
+      ]
+    }
+
+## audit: each test delivery is audited with a masked destination
+  - {
+      "action": "otp.admin_test.succeeded",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "otp.admin_test.succeeded",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "maskedDestination": "o***@example.test",
+        "method": "email",
+        "provider": "azure_communication_services",
+        "providerStatus": null
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "otp.admin_test.succeeded",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "otp.admin_test.succeeded",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "maskedDestination": "***0149",
+        "method": "phone",
+        "provider": "twilio_verify",
+        "providerStatus": "pending"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

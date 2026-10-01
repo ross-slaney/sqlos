@@ -1,0 +1,321 @@
+# SqlOS behavior lock transcript
+scenario: CalendarAdminScenarios.Calendar_connect_callback_failures_return_to_the_app_or_render_an_error
+profile: modules
+
+## 1. browser: a callback without state renders an error page
+> GET /sqlos/auth/calendar/callback
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#1}'; style-src 'self' 'nonce-{csp-nonce#1}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <html>
+      <head>
+        <title>SqlOS calendar connect error</title>
+        <style nonce="{csp-nonce#1}">{style-sha256:90d857ded0b576a7}</style>
+      </head>
+      <body>
+        <h1>SqlOS calendar connect error</h1>
+        <p>The calendar connect callback was missing the provider state.</p>
+      </body>
+    </html>
+
+## 2. browser: a callback with an unknown state renders an error page
+> GET /sqlos/auth/calendar/callback?state=not-a-state&code=anything
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#2}'; style-src 'self' 'nonce-{csp-nonce#2}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <html>
+      <head>
+        <title>SqlOS calendar connect error</title>
+        <style nonce="{csp-nonce#2}">{style-sha256:90d857ded0b576a7}</style>
+      </head>
+      <body>
+        <h1>SqlOS calendar connect error</h1>
+        <p>The calendar connect request is invalid or expired.</p>
+      </body>
+    </html>
+
+## 3. browser: a provider error returns to the app with the provider's description
+> GET /sqlos/auth/calendar/callback?state={state#1}&error=access_denied&error_description=The%20user%20denied%20access.
+< 302 Found
+< Location: https://sqlos.example.test/calendar/connected?error=The%20user%20denied%20access.
+
+## 4. browser: the state is single use, even after an error
+> GET /sqlos/auth/calendar/callback?state={state#1}&code=success%3Aalice@calendar.example.test
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#3}'; style-src 'self' 'nonce-{csp-nonce#3}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <html>
+      <head>
+        <title>SqlOS calendar connect error</title>
+        <style nonce="{csp-nonce#3}">{style-sha256:90d857ded0b576a7}</style>
+      </head>
+      <body>
+        <h1>SqlOS calendar connect error</h1>
+        <p>The calendar connect request is invalid or expired.</p>
+      </body>
+    </html>
+
+## 5. browser: a callback without a code returns to the app with an error
+> GET /sqlos/auth/calendar/callback?state={state#2}
+< 302 Found
+< Location: https://sqlos.example.test/calendar/connected?error=The%20calendar%20connect%20callback%20was%20missing%20the%20provider%20code.
+
+## 6. browser: a code the provider rejects returns to the app with the exchange error
+> GET /sqlos/auth/calendar/callback?state={state#3}&code=bad-code
+< 302 Found
+< Location: https://sqlos.example.test/calendar/connected?error=The%20authorization%20code%20is%20invalid.
+  ~ http SqlOSGoogleCalendarAdapter: POST https://oauth2.googleapis.com/token -> 400
+      grant_type=authorization_code
+      client_id=google-client-id
+      client_secret=google-client-secret
+      code=bad-code
+      redirect_uri=https://sqlos.example.test/sqlos/auth/calendar/callback
+      code_verifier={pkce-verifier#1}
+
+## 7. browser: a read-pull connection without a refresh token is refused
+> GET /sqlos/auth/calendar/callback?state={state#4}&code=norefresh%3Aalice@calendar.example.test
+< 302 Found
+< Location: https://sqlos.example.test/calendar/connected?error=The%20provider%20did%20not%20return%20a%20refresh%20token,%20which%20read-pull%20and%20two-way%20connections%20require.%20Ensure%20offline%20access%20is%20granted%20and%20consent%20was%20not%20silently%20skipped.
+  ~ http SqlOSGoogleCalendarAdapter: POST https://oauth2.googleapis.com/token -> 200
+      grant_type=authorization_code
+      client_id=google-client-id
+      client_secret=google-client-secret
+      code=norefresh:alice@calendar.example.test
+      redirect_uri=https://sqlos.example.test/sqlos/auth/calendar/callback
+      code_verifier={pkce-verifier#2}
+
+## audit: connect starts and failed completions
+  - {
+      "action": "calendar.connect.start",
+      "actor": {
+        "displayName": null,
+        "id": "{oidc#1}",
+        "type": "oidc_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "calendar.connect.start",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "mode": "ReadPull",
+        "provider": "Google",
+        "scopes": [
+          "openid",
+          "email",
+          "https://www.googleapis.com/auth/calendar.readonly"
+        ]
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "calendar.connect.start",
+      "actor": {
+        "displayName": null,
+        "id": "{oidc#1}",
+        "type": "oidc_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "calendar.connect.start",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "mode": "ReadPull",
+        "provider": "Google",
+        "scopes": [
+          "openid",
+          "email",
+          "https://www.googleapis.com/auth/calendar.readonly"
+        ]
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "calendar.connect.start",
+      "actor": {
+        "displayName": null,
+        "id": "{oidc#1}",
+        "type": "oidc_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "calendar.connect.start",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "mode": "ReadPull",
+        "provider": "Google",
+        "scopes": [
+          "openid",
+          "email",
+          "https://www.googleapis.com/auth/calendar.readonly"
+        ]
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "calendar.connect.error",
+      "actor": {
+        "displayName": null,
+        "id": "{oidc#1}",
+        "type": "oidc_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "calendar.connect.error",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "error": "The authorization code is invalid."
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "calendar.connect.start",
+      "actor": {
+        "displayName": null,
+        "id": "{oidc#1}",
+        "type": "oidc_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "calendar.connect.start",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "mode": "ReadPull",
+        "provider": "Google",
+        "scopes": [
+          "openid",
+          "email",
+          "https://www.googleapis.com/auth/calendar.readonly"
+        ]
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "calendar.connect.error",
+      "actor": {
+        "displayName": null,
+        "id": "{oidc#1}",
+        "type": "oidc_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "calendar.connect.error",
+      "id": "{evt#6}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "error": "The provider did not return a refresh token, which read-pull and two-way connections require. Ensure offline access is granted and consent was not silently skipped."
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }

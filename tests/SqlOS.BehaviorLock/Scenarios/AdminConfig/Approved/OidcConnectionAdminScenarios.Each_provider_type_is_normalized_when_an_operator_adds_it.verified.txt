@@ -1,0 +1,501 @@
+# SqlOS behavior lock transcript
+scenario: OidcConnectionAdminScenarios.Each_provider_type_is_normalized_when_an_operator_adds_it
+profile: dashboard-callback
+
+## 1. operator: Microsoft: discovery is forced and derived from the tenant
+> POST /sqlos/admin/auth/api/oidc-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "allowedCallbackUris": [
+>       "https://sqlos.example.test/sqlos/auth/oidc/callback"
+>     ],
+>     "clientId": "entra-client",
+>     "clientSecret": "entra-secret",
+>     "discoveryUrl": "https://ignored.example.test/.well-known/openid-configuration",
+>     "displayName": "Microsoft Entra",
+>     "microsoftTenant": " contoso.example ",
+>     "providerType": "Microsoft",
+>     "useDiscovery": false
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "acceptedAcrValues": [],
+      "acceptedAmrValues": [],
+      "allowedCallbackUris": "[\"https://sqlos.example.test/sqlos/auth/oidc/callback\"]",
+      "appleKeyId": null,
+      "appleTeamId": null,
+      "authorizationEndpoint": null,
+      "claimMapping": "{\"SubjectClaim\":\"sub\",\"EmailClaim\":\"email\",\"EmailVerifiedClaim\":\"email_verified\",\"DisplayNameClaim\":\"name\",\"FirstNameClaim\":\"given_name\",\"LastNameClaim\":\"family_name\",\"PreferredUsernameClaim\":\"preferred_username\"}",
+      "clientAuthMethod": "ClientSecretPost",
+      "clientId": "entra-client",
+      "createdAt": "{datetime:utc-z}",
+      "discoveryUrl": "https://login.microsoftonline.com/contoso.example/v2.0/.well-known/openid-configuration",
+      "displayName": "Microsoft Entra",
+      "effectiveLogoDataUrl": "{data-uri:image/svg+xml}",
+      "id": "{oidc#1}",
+      "isEnabled": true,
+      "issuer": null,
+      "jwksUri": null,
+      "logoDataUrl": null,
+      "microsoftTenant": "contoso.example",
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "protocol": "Oidc",
+      "providerType": "Microsoft",
+      "scopes": "[]",
+      "tokenEndpoint": null,
+      "trustUpstreamMfa": false,
+      "updatedAt": "{datetime:utc-z}",
+      "useDiscovery": true,
+      "useUserInfo": true,
+      "userInfoEndpoint": null
+    }
+
+## 2. operator: GitHub: an OAuth profile provider with fixed endpoints, default scopes, and its own claim mapping
+> POST /sqlos/admin/auth/api/oidc-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "allowedCallbackUris": [
+>       "https://sqlos.example.test/sqlos/auth/oidc/callback"
+>     ],
+>     "clientId": "github-client",
+>     "clientSecret": "github-secret",
+>     "displayName": "GitHub",
+>     "providerType": "GitHub",
+>     "useDiscovery": true,
+>     "useUserInfo": false
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "acceptedAcrValues": [],
+      "acceptedAmrValues": [],
+      "allowedCallbackUris": "[\"https://sqlos.example.test/sqlos/auth/oidc/callback\"]",
+      "appleKeyId": null,
+      "appleTeamId": null,
+      "authorizationEndpoint": "https://github.com/login/oauth/authorize",
+      "claimMapping": "{\"SubjectClaim\":\"id\",\"EmailClaim\":\"email\",\"EmailVerifiedClaim\":\"email_verified\",\"DisplayNameClaim\":\"name\",\"FirstNameClaim\":null,\"LastNameClaim\":null,\"PreferredUsernameClaim\":\"login\"}",
+      "clientAuthMethod": "ClientSecretPost",
+      "clientId": "github-client",
+      "createdAt": "{datetime:utc-z}",
+      "discoveryUrl": null,
+      "displayName": "GitHub",
+      "effectiveLogoDataUrl": "{data-uri:image/svg+xml}",
+      "id": "{oidc#2}",
+      "isEnabled": true,
+      "issuer": "https://github.com",
+      "jwksUri": null,
+      "logoDataUrl": null,
+      "microsoftTenant": null,
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "protocol": "OAuthProfile",
+      "providerType": "GitHub",
+      "scopes": "[\"read:user\",\"user:email\"]",
+      "tokenEndpoint": "https://github.com/login/oauth/access_token",
+      "trustUpstreamMfa": false,
+      "updatedAt": "{datetime:utc-z}",
+      "useDiscovery": false,
+      "useUserInfo": true,
+      "userInfoEndpoint": "https://api.github.com/user"
+    }
+
+## 3. operator: Apple: a team ID, key ID, and private key replace the client secret; the key is never returned
+> POST /sqlos/admin/auth/api/oidc-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "allowedCallbackUris": [
+>       "https://sqlos.example.test/sqlos/auth/oidc/callback"
+>     ],
+>     "appleKeyId": "KEY1234567",
+>     "applePrivateKeyPem": "-----BEGIN PRIVATE KEY-----\r\nbehavior-lock-apple-key\r\n-----END PRIVATE KEY-----",
+>     "appleTeamId": " TEAM123456 ",
+>     "clientAuthMethod": "ClientSecretBasic",
+>     "clientId": "com.example.behavior-lock",
+>     "displayName": "Apple",
+>     "providerType": "Apple",
+>     "useDiscovery": false
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "acceptedAcrValues": [],
+      "acceptedAmrValues": [],
+      "allowedCallbackUris": "[\"https://sqlos.example.test/sqlos/auth/oidc/callback\"]",
+      "appleKeyId": "KEY1234567",
+      "appleTeamId": "TEAM123456",
+      "authorizationEndpoint": null,
+      "claimMapping": "{\"SubjectClaim\":\"sub\",\"EmailClaim\":\"email\",\"EmailVerifiedClaim\":\"email_verified\",\"DisplayNameClaim\":null,\"FirstNameClaim\":\"given_name\",\"LastNameClaim\":\"family_name\",\"PreferredUsernameClaim\":null}",
+      "clientAuthMethod": "ClientSecretPost",
+      "clientId": "com.example.behavior-lock",
+      "createdAt": "{datetime:utc-z}",
+      "discoveryUrl": "https://appleid.apple.com/.well-known/openid-configuration",
+      "displayName": "Apple",
+      "effectiveLogoDataUrl": "{data-uri:image/svg+xml}",
+      "id": "{oidc#3}",
+      "isEnabled": true,
+      "issuer": null,
+      "jwksUri": null,
+      "logoDataUrl": null,
+      "microsoftTenant": null,
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "protocol": "Oidc",
+      "providerType": "Apple",
+      "scopes": "[]",
+      "tokenEndpoint": null,
+      "trustUpstreamMfa": false,
+      "updatedAt": "{datetime:utc-z}",
+      "useDiscovery": true,
+      "useUserInfo": false,
+      "userInfoEndpoint": null
+    }
+
+## 4. operator: Custom with discovery: the claim mapping keeps defaults for blank claims and a custom logo overrides the built-in one
+> POST /sqlos/admin/auth/api/oidc-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "allowedCallbackUris": [
+>       "https://sqlos.example.test/sqlos/auth/oidc/callback"
+>     ],
+>     "claimMapping": {
+>       "displayNameClaim": "display_name",
+>       "emailClaim": "",
+>       "subjectClaim": " oid "
+>     },
+>     "clientId": "acme-client",
+>     "clientSecret": "acme-secret",
+>     "discoveryUrl": " https://sso.acme.example.test/.well-known/openid-configuration ",
+>     "displayName": "Acme SSO",
+>     "logoDataUrl": "{data-uri:image/png}",
+>     "providerType": "Custom",
+>     "useDiscovery": true
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "acceptedAcrValues": [],
+      "acceptedAmrValues": [],
+      "allowedCallbackUris": "[\"https://sqlos.example.test/sqlos/auth/oidc/callback\"]",
+      "appleKeyId": null,
+      "appleTeamId": null,
+      "authorizationEndpoint": null,
+      "claimMapping": "{\"SubjectClaim\":\"oid\",\"EmailClaim\":\"email\",\"EmailVerifiedClaim\":\"email_verified\",\"DisplayNameClaim\":\"display_name\",\"FirstNameClaim\":\"given_name\",\"LastNameClaim\":\"family_name\",\"PreferredUsernameClaim\":\"preferred_username\"}",
+      "clientAuthMethod": "ClientSecretPost",
+      "clientId": "acme-client",
+      "createdAt": "{datetime:utc-z}",
+      "discoveryUrl": "https://sso.acme.example.test/.well-known/openid-configuration",
+      "displayName": "Acme SSO",
+      "effectiveLogoDataUrl": "{data-uri:image/png}",
+      "id": "{oidc#4}",
+      "isEnabled": true,
+      "issuer": null,
+      "jwksUri": null,
+      "logoDataUrl": "{data-uri:image/png}",
+      "microsoftTenant": null,
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "protocol": "Oidc",
+      "providerType": "Custom",
+      "scopes": "[]",
+      "tokenEndpoint": null,
+      "trustUpstreamMfa": false,
+      "updatedAt": "{datetime:utc-z}",
+      "useDiscovery": true,
+      "useUserInfo": true,
+      "userInfoEndpoint": null
+    }
+
+## 5. operator: Custom with manual endpoints
+> POST /sqlos/admin/auth/api/oidc-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "acceptedAcrValues": [
+>       "urn:beta:acr:mfa"
+>     ],
+>     "allowedCallbackUris": [
+>       "https://sqlos.example.test/sqlos/auth/oidc/callback"
+>     ],
+>     "authorizationEndpoint": "https://beta.example.test/authorize",
+>     "clientAuthMethod": "ClientSecretBasic",
+>     "clientId": "beta-client",
+>     "clientSecret": "beta-secret",
+>     "displayName": "Beta Manual",
+>     "issuer": "https://beta.example.test",
+>     "jwksUri": "https://beta.example.test/jwks",
+>     "providerType": "Custom",
+>     "tokenEndpoint": "https://beta.example.test/token",
+>     "useDiscovery": false,
+>     "useUserInfo": false,
+>     "userInfoEndpoint": " "
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "acceptedAcrValues": [
+        "urn:beta:acr:mfa"
+      ],
+      "acceptedAmrValues": [],
+      "allowedCallbackUris": "[\"https://sqlos.example.test/sqlos/auth/oidc/callback\"]",
+      "appleKeyId": null,
+      "appleTeamId": null,
+      "authorizationEndpoint": "https://beta.example.test/authorize",
+      "claimMapping": "{\"SubjectClaim\":\"sub\",\"EmailClaim\":\"email\",\"EmailVerifiedClaim\":\"email_verified\",\"DisplayNameClaim\":\"name\",\"FirstNameClaim\":\"given_name\",\"LastNameClaim\":\"family_name\",\"PreferredUsernameClaim\":\"preferred_username\"}",
+      "clientAuthMethod": "ClientSecretBasic",
+      "clientId": "beta-client",
+      "createdAt": "{datetime:utc-z}",
+      "discoveryUrl": null,
+      "displayName": "Beta Manual",
+      "effectiveLogoDataUrl": null,
+      "id": "{oidc#5}",
+      "isEnabled": true,
+      "issuer": "https://beta.example.test",
+      "jwksUri": "https://beta.example.test/jwks",
+      "logoDataUrl": null,
+      "microsoftTenant": null,
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "protocol": "Oidc",
+      "providerType": "Custom",
+      "scopes": "[]",
+      "tokenEndpoint": "https://beta.example.test/token",
+      "trustUpstreamMfa": false,
+      "updatedAt": "{datetime:utc-z}",
+      "useDiscovery": false,
+      "useUserInfo": false,
+      "userInfoEndpoint": null
+    }
+
+## 6. operator: the list orders connections by display name
+> GET /sqlos/admin/auth/api/oidc-connections
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "allowedCallbackUris": "[\"https://sqlos.example.test/sqlos/auth/oidc/callback\"]",
+          "appleKeyId": null,
+          "appleTeamId": null,
+          "authorizationEndpoint": null,
+          "claimMapping": "{\"SubjectClaim\":\"oid\",\"EmailClaim\":\"email\",\"EmailVerifiedClaim\":\"email_verified\",\"DisplayNameClaim\":\"display_name\",\"FirstNameClaim\":\"given_name\",\"LastNameClaim\":\"family_name\",\"PreferredUsernameClaim\":\"preferred_username\"}",
+          "clientAuthMethod": "ClientSecretPost",
+          "clientId": "acme-client",
+          "createdAt": "{datetime:unspecified}",
+          "discoveryUrl": "https://sso.acme.example.test/.well-known/openid-configuration",
+          "displayName": "Acme SSO",
+          "effectiveLogoDataUrl": "{data-uri:image/png}",
+          "id": "{oidc#4}",
+          "isEnabled": true,
+          "issuer": null,
+          "jwksUri": null,
+          "logoDataUrl": "{data-uri:image/png}",
+          "microsoftTenant": null,
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "protocol": "Oidc",
+          "providerType": "Custom",
+          "scopes": "[]",
+          "tokenEndpoint": null,
+          "updatedAt": "{datetime:unspecified}",
+          "useDiscovery": true,
+          "useUserInfo": true,
+          "userInfoEndpoint": null
+        },
+        {
+          "allowedCallbackUris": "[\"https://sqlos.example.test/sqlos/auth/oidc/callback\"]",
+          "appleKeyId": "KEY1234567",
+          "appleTeamId": "TEAM123456",
+          "authorizationEndpoint": null,
+          "claimMapping": "{\"SubjectClaim\":\"sub\",\"EmailClaim\":\"email\",\"EmailVerifiedClaim\":\"email_verified\",\"DisplayNameClaim\":null,\"FirstNameClaim\":\"given_name\",\"LastNameClaim\":\"family_name\",\"PreferredUsernameClaim\":null}",
+          "clientAuthMethod": "ClientSecretPost",
+          "clientId": "com.example.behavior-lock",
+          "createdAt": "{datetime:unspecified}",
+          "discoveryUrl": "https://appleid.apple.com/.well-known/openid-configuration",
+          "displayName": "Apple",
+          "effectiveLogoDataUrl": "{data-uri:image/svg+xml}",
+          "id": "{oidc#3}",
+          "isEnabled": true,
+          "issuer": null,
+          "jwksUri": null,
+          "logoDataUrl": null,
+          "microsoftTenant": null,
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "protocol": "Oidc",
+          "providerType": "Apple",
+          "scopes": "[]",
+          "tokenEndpoint": null,
+          "updatedAt": "{datetime:unspecified}",
+          "useDiscovery": true,
+          "useUserInfo": false,
+          "userInfoEndpoint": null
+        },
+        {
+          "allowedCallbackUris": "[\"https://sqlos.example.test/sqlos/auth/oidc/callback\"]",
+          "appleKeyId": null,
+          "appleTeamId": null,
+          "authorizationEndpoint": "https://beta.example.test/authorize",
+          "claimMapping": "{\"SubjectClaim\":\"sub\",\"EmailClaim\":\"email\",\"EmailVerifiedClaim\":\"email_verified\",\"DisplayNameClaim\":\"name\",\"FirstNameClaim\":\"given_name\",\"LastNameClaim\":\"family_name\",\"PreferredUsernameClaim\":\"preferred_username\"}",
+          "clientAuthMethod": "ClientSecretBasic",
+          "clientId": "beta-client",
+          "createdAt": "{datetime:unspecified}",
+          "discoveryUrl": null,
+          "displayName": "Beta Manual",
+          "effectiveLogoDataUrl": null,
+          "id": "{oidc#5}",
+          "isEnabled": true,
+          "issuer": "https://beta.example.test",
+          "jwksUri": "https://beta.example.test/jwks",
+          "logoDataUrl": null,
+          "microsoftTenant": null,
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "protocol": "Oidc",
+          "providerType": "Custom",
+          "scopes": "[]",
+          "tokenEndpoint": "https://beta.example.test/token",
+          "updatedAt": "{datetime:unspecified}",
+          "useDiscovery": false,
+          "useUserInfo": false,
+          "userInfoEndpoint": null
+        },
+        {
+          "allowedCallbackUris": "[\"https://sqlos.example.test/sqlos/auth/oidc/callback\"]",
+          "appleKeyId": null,
+          "appleTeamId": null,
+          "authorizationEndpoint": "https://github.com/login/oauth/authorize",
+          "claimMapping": "{\"SubjectClaim\":\"id\",\"EmailClaim\":\"email\",\"EmailVerifiedClaim\":\"email_verified\",\"DisplayNameClaim\":\"name\",\"FirstNameClaim\":null,\"LastNameClaim\":null,\"PreferredUsernameClaim\":\"login\"}",
+          "clientAuthMethod": "ClientSecretPost",
+          "clientId": "github-client",
+          "createdAt": "{datetime:unspecified}",
+          "discoveryUrl": null,
+          "displayName": "GitHub",
+          "effectiveLogoDataUrl": "{data-uri:image/svg+xml}",
+          "id": "{oidc#2}",
+          "isEnabled": true,
+          "issuer": "https://github.com",
+          "jwksUri": null,
+          "logoDataUrl": null,
+          "microsoftTenant": null,
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "protocol": "OAuthProfile",
+          "providerType": "GitHub",
+          "scopes": "[\"read:user\",\"user:email\"]",
+          "tokenEndpoint": "https://github.com/login/oauth/access_token",
+          "updatedAt": "{datetime:unspecified}",
+          "useDiscovery": false,
+          "useUserInfo": true,
+          "userInfoEndpoint": "https://api.github.com/user"
+        },
+        {
+          "allowedCallbackUris": "[\"https://sqlos.example.test/sqlos/auth/oidc/callback\"]",
+          "appleKeyId": null,
+          "appleTeamId": null,
+          "authorizationEndpoint": null,
+          "claimMapping": "{\"SubjectClaim\":\"sub\",\"EmailClaim\":\"email\",\"EmailVerifiedClaim\":\"email_verified\",\"DisplayNameClaim\":\"name\",\"FirstNameClaim\":\"given_name\",\"LastNameClaim\":\"family_name\",\"PreferredUsernameClaim\":\"preferred_username\"}",
+          "clientAuthMethod": "ClientSecretPost",
+          "clientId": "entra-client",
+          "createdAt": "{datetime:unspecified}",
+          "discoveryUrl": "https://login.microsoftonline.com/contoso.example/v2.0/.well-known/openid-configuration",
+          "displayName": "Microsoft Entra",
+          "effectiveLogoDataUrl": "{data-uri:image/svg+xml}",
+          "id": "{oidc#1}",
+          "isEnabled": true,
+          "issuer": null,
+          "jwksUri": null,
+          "logoDataUrl": null,
+          "microsoftTenant": "contoso.example",
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "protocol": "Oidc",
+          "providerType": "Microsoft",
+          "scopes": "[]",
+          "tokenEndpoint": null,
+          "updatedAt": "{datetime:unspecified}",
+          "useDiscovery": true,
+          "useUserInfo": true,
+          "userInfoEndpoint": null
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }

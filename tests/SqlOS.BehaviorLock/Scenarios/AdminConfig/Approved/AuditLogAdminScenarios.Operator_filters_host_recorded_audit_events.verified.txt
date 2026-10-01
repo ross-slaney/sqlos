@@ -1,0 +1,913 @@
+# SqlOS behavior lock transcript
+scenario: AuditLogAdminScenarios.Operator_filters_host_recorded_audit_events
+profile: modules
+
+## 1. host: the host records a billing event for Acme; the application key resolves to the client and the API key is redacted
+> POST /__probe/audit
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "action": "invoice.paid",
+>     "actor": {
+>       "displayName": "Alice",
+>       "id": "{usr#1}",
+>       "type": "user"
+>     },
+>     "applicationKey": "behavior-lock-app",
+>     "context": {
+>       "correlationId": "corr-1001",
+>       "ipAddress": "198.51.100.7",
+>       "requestId": "req-1001",
+>       "userAgent": "BillingWorker/1.0"
+>     },
+>     "metadata": {
+>       "amount": 42,
+>       "apiKey": "not-to-be-stored",
+>       "currency": "USD"
+>     },
+>     "occurredAt": "{datetime:utc-z}",
+>     "organizationId": "{org#1}",
+>     "source": "billing",
+>     "targets": [
+>       {
+>         "displayName": "Invoice 1001",
+>         "id": "inv-1001",
+>         "type": "invoice"
+>       }
+>     ]
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "created": true,
+      "eventId": "{evt#1}"
+    }
+
+## 2. host: a service refunds part of it
+> POST /__probe/audit
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "action": "invoice.refunded",
+>     "actor": {
+>       "id": "billing-worker",
+>       "type": "service"
+>     },
+>     "metadata": {
+>       "result": "partial"
+>     },
+>     "occurredAt": "{datetime:utc-z}",
+>     "organizationId": "{org#1}",
+>     "source": "billing",
+>     "targets": [
+>       {
+>         "id": "inv-1001",
+>         "type": "invoice"
+>       }
+>     ]
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "created": true,
+      "eventId": "{evt#2}"
+    }
+
+## 3. host: an application event with an idempotency key
+> POST /__probe/audit
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "action": "report.exported",
+>     "actor": {
+>       "id": "{usr#1}",
+>       "type": "user"
+>     },
+>     "idempotencyKey": "export-7",
+>     "metadata": {
+>       "format": "csv",
+>       "userPassword": "hunter2"
+>     },
+>     "occurredAt": "{datetime:utc-z}",
+>     "source": "application",
+>     "targets": [
+>       {
+>         "id": "rpt-7",
+>         "type": "report"
+>       }
+>     ]
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "created": true,
+      "eventId": "{evt#3}"
+    }
+
+## 4. host: replaying the idempotency key returns the first event instead of recording another
+> POST /__probe/audit
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "action": "report.exported",
+>     "actor": {
+>       "id": "{usr#1}",
+>       "type": "user"
+>     },
+>     "idempotencyKey": "export-7",
+>     "occurredAt": "{datetime:utc-z}",
+>     "source": "application"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "created": false,
+      "eventId": "{evt#3}"
+    }
+
+## 5. host: an event in another organization
+> POST /__probe/audit
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "action": "workspace.deleted",
+>     "actor": {
+>       "type": "admin"
+>     },
+>     "occurredAt": "{datetime:utc-z}",
+>     "organizationId": "{org#2}",
+>     "source": "application"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "created": true,
+      "eventId": "{evt#4}"
+    }
+
+## 6. operator: without operator credentials the audit API is not found
+> GET /sqlos/admin/audit/api/events?source=billing
+< 404 Not Found
+
+## 7. operator: by source, newest first
+> GET /sqlos/admin/audit/api/events?source=billing
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "action": "invoice.refunded",
+          "actor": {
+            "displayName": null,
+            "id": "billing-worker",
+            "type": "service"
+          },
+          "applicationId": null,
+          "applicationKey": null,
+          "context": null,
+          "correlationId": null,
+          "eventType": "invoice.refunded",
+          "id": "{evt#2}",
+          "ingestedAt": "{datetime:unspecified}",
+          "ipAddress": null,
+          "metadata": {
+            "result": "partial"
+          },
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "sessionId": null,
+          "source": "billing",
+          "targets": [
+            {
+              "displayName": null,
+              "id": "inv-1001",
+              "type": "invoice"
+            }
+          ],
+          "userAgent": null,
+          "userId": null
+        },
+        {
+          "action": "invoice.paid",
+          "actor": {
+            "displayName": "Alice",
+            "id": "{usr#1}",
+            "type": "user"
+          },
+          "applicationId": "{cli#1}",
+          "applicationKey": "behavior-lock-app",
+          "context": {
+            "correlationId": "corr-1001",
+            "ipAddress": "198.51.100.7",
+            "requestId": "req-1001",
+            "sessionId": null,
+            "userAgent": "BillingWorker/1.0"
+          },
+          "correlationId": "corr-1001",
+          "eventType": "invoice.paid",
+          "id": "{evt#1}",
+          "ingestedAt": "{datetime:unspecified}",
+          "ipAddress": "198.51.100.7",
+          "metadata": {
+            "amount": 42,
+            "apiKey": "[redacted]",
+            "currency": "USD"
+          },
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": "req-1001",
+          "sessionId": null,
+          "source": "billing",
+          "targets": [
+            {
+              "displayName": "Invoice 1001",
+              "id": "inv-1001",
+              "type": "invoice"
+            }
+          ],
+          "userAgent": "BillingWorker/1.0",
+          "userId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 8. operator: by organization
+> GET /sqlos/admin/audit/api/events?organizationId={org#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "action": "invoice.refunded",
+          "actor": {
+            "displayName": null,
+            "id": "billing-worker",
+            "type": "service"
+          },
+          "applicationId": null,
+          "applicationKey": null,
+          "context": null,
+          "correlationId": null,
+          "eventType": "invoice.refunded",
+          "id": "{evt#2}",
+          "ingestedAt": "{datetime:unspecified}",
+          "ipAddress": null,
+          "metadata": {
+            "result": "partial"
+          },
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "sessionId": null,
+          "source": "billing",
+          "targets": [
+            {
+              "displayName": null,
+              "id": "inv-1001",
+              "type": "invoice"
+            }
+          ],
+          "userAgent": null,
+          "userId": null
+        },
+        {
+          "action": "invoice.paid",
+          "actor": {
+            "displayName": "Alice",
+            "id": "{usr#1}",
+            "type": "user"
+          },
+          "applicationId": "{cli#1}",
+          "applicationKey": "behavior-lock-app",
+          "context": {
+            "correlationId": "corr-1001",
+            "ipAddress": "198.51.100.7",
+            "requestId": "req-1001",
+            "sessionId": null,
+            "userAgent": "BillingWorker/1.0"
+          },
+          "correlationId": "corr-1001",
+          "eventType": "invoice.paid",
+          "id": "{evt#1}",
+          "ingestedAt": "{datetime:unspecified}",
+          "ipAddress": "198.51.100.7",
+          "metadata": {
+            "amount": 42,
+            "apiKey": "[redacted]",
+            "currency": "USD"
+          },
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": "req-1001",
+          "sessionId": null,
+          "source": "billing",
+          "targets": [
+            {
+              "displayName": "Invoice 1001",
+              "id": "inv-1001",
+              "type": "invoice"
+            }
+          ],
+          "userAgent": "BillingWorker/1.0",
+          "userId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 9. operator: by action
+> GET /sqlos/admin/audit/api/events?action=report.exported
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "action": "report.exported",
+          "actor": {
+            "displayName": null,
+            "id": "{usr#1}",
+            "type": "user"
+          },
+          "applicationId": null,
+          "applicationKey": null,
+          "context": null,
+          "correlationId": null,
+          "eventType": "report.exported",
+          "id": "{evt#3}",
+          "ingestedAt": "{datetime:unspecified}",
+          "ipAddress": null,
+          "metadata": {
+            "format": "csv",
+            "userPassword": "[redacted]"
+          },
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": null,
+          "requestId": null,
+          "sessionId": null,
+          "source": "application",
+          "targets": [
+            {
+              "displayName": null,
+              "id": "rpt-7",
+              "type": "report"
+            }
+          ],
+          "userAgent": null,
+          "userId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 10. operator: by actor type
+> GET /sqlos/admin/audit/api/events?actorType=service
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "action": "invoice.refunded",
+          "actor": {
+            "displayName": null,
+            "id": "billing-worker",
+            "type": "service"
+          },
+          "applicationId": null,
+          "applicationKey": null,
+          "context": null,
+          "correlationId": null,
+          "eventType": "invoice.refunded",
+          "id": "{evt#2}",
+          "ingestedAt": "{datetime:unspecified}",
+          "ipAddress": null,
+          "metadata": {
+            "result": "partial"
+          },
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "sessionId": null,
+          "source": "billing",
+          "targets": [
+            {
+              "displayName": null,
+              "id": "inv-1001",
+              "type": "invoice"
+            }
+          ],
+          "userAgent": null,
+          "userId": null
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 11. operator: by actor and source
+> GET /sqlos/admin/audit/api/events?actorId={usr#1}&source=billing
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "action": "invoice.paid",
+          "actor": {
+            "displayName": "Alice",
+            "id": "{usr#1}",
+            "type": "user"
+          },
+          "applicationId": "{cli#1}",
+          "applicationKey": "behavior-lock-app",
+          "context": {
+            "correlationId": "corr-1001",
+            "ipAddress": "198.51.100.7",
+            "requestId": "req-1001",
+            "sessionId": null,
+            "userAgent": "BillingWorker/1.0"
+          },
+          "correlationId": "corr-1001",
+          "eventType": "invoice.paid",
+          "id": "{evt#1}",
+          "ingestedAt": "{datetime:unspecified}",
+          "ipAddress": "198.51.100.7",
+          "metadata": {
+            "amount": 42,
+            "apiKey": "[redacted]",
+            "currency": "USD"
+          },
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": "req-1001",
+          "sessionId": null,
+          "source": "billing",
+          "targets": [
+            {
+              "displayName": "Invoice 1001",
+              "id": "inv-1001",
+              "type": "invoice"
+            }
+          ],
+          "userAgent": "BillingWorker/1.0",
+          "userId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 12. operator: by target type
+> GET /sqlos/admin/audit/api/events?targetType=report
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "action": "report.exported",
+          "actor": {
+            "displayName": null,
+            "id": "{usr#1}",
+            "type": "user"
+          },
+          "applicationId": null,
+          "applicationKey": null,
+          "context": null,
+          "correlationId": null,
+          "eventType": "report.exported",
+          "id": "{evt#3}",
+          "ingestedAt": "{datetime:unspecified}",
+          "ipAddress": null,
+          "metadata": {
+            "format": "csv",
+            "userPassword": "[redacted]"
+          },
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": null,
+          "requestId": null,
+          "sessionId": null,
+          "source": "application",
+          "targets": [
+            {
+              "displayName": null,
+              "id": "rpt-7",
+              "type": "report"
+            }
+          ],
+          "userAgent": null,
+          "userId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 13. operator: by target ID and actor type
+> GET /sqlos/admin/audit/api/events?targetId=inv-1001&actorType=user
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "action": "invoice.paid",
+          "actor": {
+            "displayName": "Alice",
+            "id": "{usr#1}",
+            "type": "user"
+          },
+          "applicationId": "{cli#1}",
+          "applicationKey": "behavior-lock-app",
+          "context": {
+            "correlationId": "corr-1001",
+            "ipAddress": "198.51.100.7",
+            "requestId": "req-1001",
+            "sessionId": null,
+            "userAgent": "BillingWorker/1.0"
+          },
+          "correlationId": "corr-1001",
+          "eventType": "invoice.paid",
+          "id": "{evt#1}",
+          "ingestedAt": "{datetime:unspecified}",
+          "ipAddress": "198.51.100.7",
+          "metadata": {
+            "amount": 42,
+            "apiKey": "[redacted]",
+            "currency": "USD"
+          },
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": "req-1001",
+          "sessionId": null,
+          "source": "billing",
+          "targets": [
+            {
+              "displayName": "Invoice 1001",
+              "id": "inv-1001",
+              "type": "invoice"
+            }
+          ],
+          "userAgent": "BillingWorker/1.0",
+          "userId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 14. operator: by a value in the metadata
+> GET /sqlos/admin/audit/api/events?result=partial
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "action": "invoice.refunded",
+          "actor": {
+            "displayName": null,
+            "id": "billing-worker",
+            "type": "service"
+          },
+          "applicationId": null,
+          "applicationKey": null,
+          "context": null,
+          "correlationId": null,
+          "eventType": "invoice.refunded",
+          "id": "{evt#2}",
+          "ingestedAt": "{datetime:unspecified}",
+          "ipAddress": null,
+          "metadata": {
+            "result": "partial"
+          },
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "sessionId": null,
+          "source": "billing",
+          "targets": [
+            {
+              "displayName": null,
+              "id": "inv-1001",
+              "type": "invoice"
+            }
+          ],
+          "userAgent": null,
+          "userId": null
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 15. operator: by free-text search
+> GET /sqlos/admin/audit/api/events?search=rpt-7
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "action": "report.exported",
+          "actor": {
+            "displayName": null,
+            "id": "{usr#1}",
+            "type": "user"
+          },
+          "applicationId": null,
+          "applicationKey": null,
+          "context": null,
+          "correlationId": null,
+          "eventType": "report.exported",
+          "id": "{evt#3}",
+          "ingestedAt": "{datetime:unspecified}",
+          "ipAddress": null,
+          "metadata": {
+            "format": "csv",
+            "userPassword": "[redacted]"
+          },
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": null,
+          "requestId": null,
+          "sessionId": null,
+          "source": "application",
+          "targets": [
+            {
+              "displayName": null,
+              "id": "rpt-7",
+              "type": "report"
+            }
+          ],
+          "userAgent": null,
+          "userId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 16. operator: by application, matching the application key
+> GET /sqlos/admin/audit/api/events?application=behavior-lock-app
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "action": "invoice.paid",
+          "actor": {
+            "displayName": "Alice",
+            "id": "{usr#1}",
+            "type": "user"
+          },
+          "applicationId": "{cli#1}",
+          "applicationKey": "behavior-lock-app",
+          "context": {
+            "correlationId": "corr-1001",
+            "ipAddress": "198.51.100.7",
+            "requestId": "req-1001",
+            "sessionId": null,
+            "userAgent": "BillingWorker/1.0"
+          },
+          "correlationId": "corr-1001",
+          "eventType": "invoice.paid",
+          "id": "{evt#1}",
+          "ingestedAt": "{datetime:unspecified}",
+          "ipAddress": "198.51.100.7",
+          "metadata": {
+            "amount": 42,
+            "apiKey": "[redacted]",
+            "currency": "USD"
+          },
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": "req-1001",
+          "sessionId": null,
+          "source": "billing",
+          "targets": [
+            {
+              "displayName": "Invoice 1001",
+              "id": "inv-1001",
+              "type": "invoice"
+            }
+          ],
+          "userAgent": "BillingWorker/1.0",
+          "userId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 17. operator: by occurrence window
+> GET /sqlos/admin/audit/api/events?source=billing&occurredAtFrom={datetime:utc-z}&occurredAtTo={datetime:utc-z}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "action": "invoice.refunded",
+          "actor": {
+            "displayName": null,
+            "id": "billing-worker",
+            "type": "service"
+          },
+          "applicationId": null,
+          "applicationKey": null,
+          "context": null,
+          "correlationId": null,
+          "eventType": "invoice.refunded",
+          "id": "{evt#2}",
+          "ingestedAt": "{datetime:unspecified}",
+          "ipAddress": null,
+          "metadata": {
+            "result": "partial"
+          },
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "sessionId": null,
+          "source": "billing",
+          "targets": [
+            {
+              "displayName": null,
+              "id": "inv-1001",
+              "type": "invoice"
+            }
+          ],
+          "userAgent": null,
+          "userId": null
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 18. operator: the from and to aliases
+> GET /sqlos/admin/audit/api/events?source=application&from={datetime:utc-z}&to={datetime:utc-z}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "action": "workspace.deleted",
+          "actor": {
+            "displayName": null,
+            "id": null,
+            "type": "admin"
+          },
+          "applicationId": null,
+          "applicationKey": null,
+          "context": null,
+          "correlationId": null,
+          "eventType": "workspace.deleted",
+          "id": "{evt#4}",
+          "ingestedAt": "{datetime:unspecified}",
+          "ipAddress": null,
+          "metadata": null,
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#2}",
+          "requestId": null,
+          "sessionId": null,
+          "source": "application",
+          "targets": [],
+          "userAgent": null,
+          "userId": null
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 19. operator: the dashboard's audit page is the dashboard shell
+> GET /sqlos/admin/audit/events
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#1}'; style-src 'self' 'nonce-{csp-nonce#1}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>SqlOS Dashboard</title>
+        <link rel="stylesheet" href="/sqlos/style.css" />
+      </head>
+      <body>
+        <script nonce="{csp-nonce#1}">{script-sha256:e2e7315636187e83}</script>
+        <div class="layout">
+          <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+              <div class="sidebar-logo">So</div>
+              <span class="sidebar-title">SqlOS</span>
+              <button class="sidebar-close" id="sidebar-close">×</button>
+            </div>
+            <nav>
+              <div class="nav-group">
+                <div class="nav-label">Dashboard</div>
+                <a href="#" data-route="home" class="active">Home</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Governance</div>
+                <a href="#" data-route="audit-logs">Audit Logs</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Auth Server</div>
+                <a href="#" data-route="auth-overview">Overview</a>
+                <a href="#" data-route="auth-organizations">Organizations</a>
+                <a href="#" data-route="auth-users">Users</a>
+                <a href="#" data-route="auth-memberships">Memberships</a>
+                <a href="#" data-route="auth-clients">Applications</a>
+                <a href="#" data-route="auth-machine-clients">Machine Clients</a>
+                <a href="#" data-route="auth-oidc">OIDC</a>
+                <a href="#" data-route="auth-scopes">Scope Display Names</a>
+                <a href="#" data-route="auth-security">Security</a>
+                <a href="#" data-route="auth-mfa">MFA</a>
+                <a href="#" data-route="auth-authpage">Auth Page</a>
+                <a href="#" data-route="auth-sessions">Sessions</a>
+                <a href="#" data-route="auth-audit">Audit Events</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Fine-Grained Auth</div>
+                <a href="#" data-route="fga-resources">Resources</a>
+                <a href="#" data-route="fga-grants">Grants</a>
+                <a href="#" data-route="fga-roles">Roles</a>
+                <a href="#" data-route="fga-permissions">Permissions</a>
+                <a href="#" data-route="fga-users">Users</a>
+                <a href="#" data-route="fga-agents">Agents</a>
+                <a href="#" data-route="fga-service-accounts">Service Accounts</a>
+                <a href="#" data-route="fga-user-groups">User Groups</a>
+                <a href="#" data-route="fga-access-tester">Access Tester</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Communications</div>
+                <a href="#" data-route="email-templates">Templates</a>
+                <a href="#" data-route="email-messages">Messages</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Integrations</div>
+                <a href="#" data-route="calendar-connections">Calendar</a>
+              </div>
+            </nav>
+            <div class="sidebar-footer">
+              <button class="sidebar-action" id="dashboard-logout" type="button">Log out</button>
+            </div>
+          </aside>
+          <div class="main-wrapper">
+            <div class="topbar">
+              <button class="hamburger" id="hamburger">☰</button>
+              <span class="topbar-title" id="topbar-title">SqlOS Dashboard</span>
+            </div>
+            <main>
+              <header class="page-header">
+                <div>
+                  <div class="page-eyebrow" id="page-eyebrow">Dashboard</div>
+                  <h1 id="page-title">SqlOS Dashboard</h1>
+                  <p id="page-description">Authentication, organizations, sessions, and authorization in one embedded control plane.</p>
+                </div>
+              </header>
+              <div id="content" class="content-area"></div>
+            </main>
+          </div>
+        </div>
+        <div class="modal-overlay" id="dashboard-modal" hidden="">
+          <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dashboard-modal-title">
+            <div class="modal-header">
+              <h3 id="dashboard-modal-title"></h3>
+              <button type="button" class="modal-close" id="dashboard-modal-close" aria-label="Close">×</button>
+            </div>
+            <div class="modal-body" id="dashboard-modal-body"></div>
+          </div>
+        </div>
+        <script nonce="{csp-nonce#1}" src="/sqlos/admin/fga/app.js"></script>
+        <script nonce="{csp-nonce#1}" src="/sqlos/app.js"></script>
+      </body>
+    </html>
+
+## 20. operator: which is not found without operator credentials
+> GET /sqlos/admin/audit/events
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY

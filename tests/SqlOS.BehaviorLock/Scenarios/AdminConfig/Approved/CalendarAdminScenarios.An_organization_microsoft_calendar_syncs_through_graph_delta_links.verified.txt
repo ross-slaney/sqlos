@@ -1,0 +1,261 @@
+# SqlOS behavior lock transcript
+scenario: CalendarAdminScenarios.An_organization_microsoft_calendar_syncs_through_graph_delta_links
+profile: modules
+
+## 1. host: the host starts a two-way Microsoft calendar connection owned by Acme
+> POST /__probe/calendar/connect
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "mode": "TwoWay",
+>     "oidcConnectionId": "{oidc#1}",
+>     "organizationId": "{org#1}",
+>     "returnUri": "https://sqlos.example.test/calendar/connected"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "authorizationUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=microsoft-client-id&redirect_uri=https%3A%2F%2Fsqlos.example.test%2Fsqlos%2Fauth%2Fcalendar%2Fcallback&response_type=code&scope=openid%20email%20offline_access%20Calendars.ReadWrite&state={state#1}&code_challenge={pkce-challenge#1}&code_challenge_method=S256",
+      "mode": "TwoWay",
+      "oidcConnectionId": "{oidc#1}",
+      "providerType": "Microsoft"
+    }
+  ~ http SqlOSCalendarService: GET https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration -> 200
+
+## 2. browser: Microsoft returns to the SqlOS callback
+> GET /sqlos/auth/calendar/callback?state={state#1}&code=success%3Acalendar@acme.example.test
+< 302 Found
+< Location: https://sqlos.example.test/calendar/connected?calendarConnectionId={cal#1}
+  ~ http SqlOSMicrosoftGraphCalendarAdapter: POST https://login.microsoftonline.com/common/oauth2/v2.0/token -> 200
+      grant_type=authorization_code
+      client_id=microsoft-client-id
+      client_secret=microsoft-client-secret
+      code=success:calendar@acme.example.test
+      redirect_uri=https://sqlos.example.test/sqlos/auth/calendar/callback
+      code_verifier={pkce-verifier#1}
+
+## 3. operator: the first sync enrolls the default calendar and reads a Graph delta window
+> POST /sqlos/admin/calendar/api/connections/{cal#1}/sync
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "calendarConnectionId": "{cal#1}",
+      "calendarsSynced": 1,
+      "errors": [],
+      "eventsRemoved": 0,
+      "eventsUpserted": 2
+    }
+  ~ http SqlOSMicrosoftGraphCalendarAdapter: GET https://graph.microsoft.com/v1.0/me/calendars -> 200
+  ~ http SqlOSMicrosoftGraphCalendarAdapter: GET https://graph.microsoft.com/v1.0/me/calendars/graph-default/calendarView/delta?startDateTime={datetime:sync-window-start}&endDateTime={datetime:sync-window-end} -> 200
+
+## 4. operator: the next sync follows the stored delta link: one event removed, one moved
+> POST /sqlos/admin/calendar/api/connections/{cal#1}/sync
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "calendarConnectionId": "{cal#1}",
+      "calendarsSynced": 1,
+      "errors": [],
+      "eventsRemoved": 1,
+      "eventsUpserted": 1
+    }
+  ~ http SqlOSMicrosoftGraphCalendarAdapter: GET https://graph.microsoft.com/v1.0/me/calendars/graph-default/calendarView/delta?$deltatoken=ms-delta-1 -> 200
+
+## 5. operator: the organization's connection and its sync health
+> GET /sqlos/admin/calendar/api/connections/{cal#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "calendars": [
+        {
+          "displayName": "Calendar",
+          "eventCount": 1,
+          "hasSyncCursor": true,
+          "isSyncEnabled": true,
+          "lastSyncCompletedAt": "{datetime:unspecified}",
+          "lastSyncError": null,
+          "lastSyncStartedAt": "{datetime:unspecified}",
+          "lastSyncStatus": "ok",
+          "providerCalendarId": "graph-default"
+        }
+      ],
+      "connection": {
+        "accessTokenExpiresAt": "{datetime:unspecified}",
+        "createdAt": "{datetime:unspecified}",
+        "displayName": "Microsoft Calendar",
+        "hasRefreshToken": true,
+        "id": "{cal#1}",
+        "lastError": null,
+        "lastErrorAt": null,
+        "lastSyncAt": "{datetime:unspecified}",
+        "mode": "TwoWay",
+        "organizationId": "{org#1}",
+        "providerAccountEmail": "calendar@acme.example.test",
+        "providerType": "Microsoft",
+        "revokedAt": null,
+        "scopes": [
+          "openid",
+          "email",
+          "Calendars.Read",
+          "offline_access"
+        ],
+        "status": "Active",
+        "userId": null
+      },
+      "eventCount": 1
+    }
+
+## audit: the organization's calendar lifecycle
+  - {
+      "action": "calendar.connect.start",
+      "actor": {
+        "displayName": null,
+        "id": "{oidc#1}",
+        "type": "oidc_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "calendar.connect.start",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "mode": "TwoWay",
+        "provider": "Microsoft",
+        "scopes": [
+          "openid",
+          "email",
+          "offline_access",
+          "Calendars.ReadWrite"
+        ]
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "calendar.connection.created",
+      "actor": {
+        "displayName": null,
+        "id": "{cal#1}",
+        "type": "calendar_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "calendar.connection.created",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "mode": "TwoWay",
+        "provider": "Microsoft",
+        "providerAccountEmail": "calendar@acme.example.test"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "calendar.connection.synced",
+      "actor": {
+        "displayName": null,
+        "id": "{cal#1}",
+        "type": "calendar_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "calendar.connection.synced",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "calendarsSynced": 1,
+        "errors": [],
+        "eventsRemoved": 0,
+        "eventsUpserted": 2
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "calendar.connection.synced",
+      "actor": {
+        "displayName": null,
+        "id": "{cal#1}",
+        "type": "calendar_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "calendar.connection.synced",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "calendarsSynced": 1,
+        "errors": [],
+        "eventsRemoved": 1,
+        "eventsUpserted": 1
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

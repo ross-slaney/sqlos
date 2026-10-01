@@ -1,0 +1,52 @@
+# SqlOS behavior lock transcript
+scenario: AdminAccessScenarios.Production_hosts_without_operator_access_hide_the_configuration_apis
+profile: dashboard-off
+
+## 1. client: the auth admin API is not found
+> GET /sqlos/admin/auth/api/settings/security
+< 404 Not Found
+
+## 2. client: nor can it be written
+> PUT /sqlos/admin/auth/api/settings/security
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshTokenGraceWindowSeconds": 0,
+>     "refreshTokenLifetimeMinutes": 1,
+>     "sessionAbsoluteLifetimeMinutes": 1,
+>     "sessionIdleTimeoutMinutes": 1,
+>     "signingKeyGraceWindowDays": 1,
+>     "signingKeyRetiredCleanupDays": 1,
+>     "signingKeyRotationIntervalDays": 2
+>   }
+< 404 Not Found
+
+## 3. client: the audit API is not found
+> GET /sqlos/admin/audit/api/events
+< 404 Not Found
+
+## 4. client: the email API is not found
+> GET /sqlos/admin/email/api/templates
+< 404 Not Found
+
+## 5. client: nor can a template be created
+> POST /sqlos/admin/email/api/templates
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "displayName": "Hidden",
+>     "htmlBodyTemplate": "<p>Hidden</p>",
+>     "key": "hidden",
+>     "subjectTemplate": "Hidden",
+>     "textBodyTemplate": "Hidden"
+>   }
+< 404 Not Found
+
+## 6. client: the calendar API is not found
+> GET /sqlos/admin/calendar/api/summary
+< 404 Not Found
+
+## 7. client: and neither are the dashboard pages
+> GET /sqlos/admin/calendar/connections
+< 404 Not Found
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY

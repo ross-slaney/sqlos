@@ -1,0 +1,42 @@
+# SqlOS behavior lock transcript
+scenario: LegacyWiringScenarios.A_manual_MapAuthServer_call_withdraws_the_module_admin_apis_CurrentBehavior_UnfiledDefect
+profile: legacy-host
+
+## 1. operator: the auth admin API that MapAuthServer maps answers
+> GET /sqlos/admin/auth/api/stats
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "auditEvents": 7,
+      "clients": 1,
+      "oidcConnections": 0,
+      "organizations": 0,
+      "sessions": 0,
+      "ssoConnections": 0,
+      "users": 0
+    }
+
+## 2. operator: the audit-log admin API is gone
+> GET /sqlos/admin/audit/api/events
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 404 Not Found
+
+## 3. operator: and so is the audit export
+> GET /sqlos/admin/audit/api/events/export.csv
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 404 Not Found
+
+## 4. operator: the email template admin API is gone
+> GET /sqlos/admin/email/api/templates
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 404 Not Found
+
+## 5. operator: the calendar admin API is gone
+> GET /sqlos/admin/calendar/api/summary
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 404 Not Found
+
+## 6. browser: the calendar connect callback is gone
+> GET /sqlos/auth/calendar/callback?state=unknown
+< 404 Not Found

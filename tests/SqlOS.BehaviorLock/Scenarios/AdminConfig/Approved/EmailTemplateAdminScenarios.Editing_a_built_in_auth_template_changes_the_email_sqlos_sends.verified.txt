@@ -1,0 +1,145 @@
+# SqlOS behavior lock transcript
+scenario: EmailTemplateAdminScenarios.Editing_a_built_in_auth_template_changes_the_email_sqlos_sends
+profile: modules
+
+## 1. operator: the built-in password-reset template
+> GET /sqlos/admin/email/api/templates/auth.password-reset
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "displayName": "Password reset",
+      "htmlBodyTemplate": "<!DOCTYPE html>\n<html lang=\"en\">\n<body style=\"margin:0;padding:24px;background:{backgroundColor};font-family:Segoe UI,Arial,sans-serif;color:{accentColor};\">\n  <div style=\"max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:20px;padding:32px;\">\n    <img src=\"{logoBase64}\" alt=\"{applicationName}\" style=\"max-height:42px;max-width:180px;display:{logoImageDisplay};margin:0 0 16px;\" />\n    <p style=\"display:{logoTextDisplay};margin:0 0 12px;font-size:14px;color:#475569;font-weight:600;\">{applicationName}</p>\n    <h1 style=\"margin:0 0 12px;font-size:28px;line-height:1.1;color:{accentColor};\">Reset your password</h1>\n    <p style=\"margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;\">Use this link to reset the password for {maskedEmail}. It expires in {expiresInMinutes} minute(s).</p>\n    <p style=\"margin:0 0 20px;\"><a href=\"{resetUrl}\" style=\"display:inline-block;background:{primaryColor};color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;\">Reset password</a></p>\n    <p style=\"margin:0 0 12px;font-size:13px;line-height:1.6;color:#64748b;\">If the button does not work, open this link: {resetUrl}</p>\n    <p style=\"margin:0;font-size:13px;line-height:1.6;color:#64748b;\">If you did not request a password reset, you can ignore this email.</p>\n  </div>\n</body>\n</html>",
+      "id": "{emt#1}",
+      "isActive": true,
+      "key": "auth.password-reset",
+      "subjectTemplate": "Reset your {applicationName} password",
+      "textBodyTemplate": "Reset your {applicationName} password for {maskedEmail}: {resetUrl}. This link expires in {expiresInMinutes} minute(s).",
+      "updatedAt": "{datetime:unspecified}",
+      "variables": {
+        "accentColor": "#0f172a",
+        "applicationName": "SqlOS",
+        "backgroundColor": "#f8fafc",
+        "expiresInMinutes": "60",
+        "logoBase64": "",
+        "logoImageDisplay": "none",
+        "logoTextDisplay": "block",
+        "maskedEmail": "us***@example.com",
+        "primaryColor": "#2563eb",
+        "resetUrl": "https://app.example.test/sqlos/auth/password/reset?token=sample"
+      },
+      "version": 1
+    }
+
+## 2. operator: an operator rewrites it
+> PUT /sqlos/admin/email/api/templates/auth.password-reset
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Password reset",
+>     "htmlBodyTemplate": "<p>Reset {maskedEmail}: <a href=\"{resetUrl}\">{resetUrl}</a></p>",
+>     "key": "auth.password-reset",
+>     "subjectTemplate": "{applicationName}: reset link inside",
+>     "textBodyTemplate": "Reset {maskedEmail}: {resetUrl}",
+>     "variables": {
+>       "accentColor": "#0f172a",
+>       "applicationName": "SqlOS",
+>       "backgroundColor": "#f8fafc",
+>       "expiresInMinutes": "60",
+>       "logoBase64": "",
+>       "logoImageDisplay": "none",
+>       "logoTextDisplay": "block",
+>       "maskedEmail": "us***@example.com",
+>       "primaryColor": "#2563eb",
+>       "resetUrl": "https://app.example.test/sqlos/auth/password/reset?token=sample"
+>     }
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "displayName": "Password reset",
+      "htmlBodyTemplate": "<p>Reset {maskedEmail}: <a href=\"{resetUrl}\">{resetUrl}</a></p>",
+      "id": "{emt#1}",
+      "isActive": true,
+      "key": "auth.password-reset",
+      "subjectTemplate": "{applicationName}: reset link inside",
+      "textBodyTemplate": "Reset {maskedEmail}: {resetUrl}",
+      "updatedAt": "{datetime:utc-z}",
+      "variables": {
+        "accentColor": "#0f172a",
+        "applicationName": "SqlOS",
+        "backgroundColor": "#f8fafc",
+        "expiresInMinutes": "60",
+        "logoBase64": "",
+        "logoImageDisplay": "none",
+        "logoTextDisplay": "block",
+        "maskedEmail": "us***@example.com",
+        "primaryColor": "#2563eb",
+        "resetUrl": "https://app.example.test/sqlos/auth/password/reset?token=sample"
+      },
+      "version": 2
+    }
+
+## 3. client: the next password-reset email uses the edited template
+> POST /sqlos/auth/password/forgot
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "email": "{email:alice}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "email": "{email:alice}",
+      "expiresAt": "{datetime:utc-z}",
+      "maskedEmail": "al***@example.test",
+      "message": "If an account can be reset, you'll receive a password reset email shortly.",
+      "nextAllowedSendAt": "{datetime:utc-z}"
+    }
+  ~ email (transactional) to {email:alice}
+      subject: Behavior Lock: reset link inside
+      text:
+        Reset al***@example.test: https://sqlos.example.test/sqlos/auth/password/reset?token={link-token#1}
+      html:
+        <html>
+          <head></head>
+          <body>
+            <p>
+              Reset al***@example.test:
+              <a href="https://sqlos.example.test/sqlos/auth/password/reset?token={link-token#1}">
+                https://sqlos.example.test/sqlos/auth/password/reset?token={link-token#1}
+              </a>
+            </p>
+          </body>
+        </html>
+
+## 4. operator: the delivery log does not store rendered content of sensitive built-in templates
+> GET /sqlos/admin/email/api/messages?templateKey=auth.password-reset
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "failedAt": null,
+          "id": "{edl#1}",
+          "idempotencyKey": "auth-password-reset:{usr#1}:{hex#1}",
+          "providerMessageId": "behavior-lock-email-1",
+          "renderedHtmlPreview": null,
+          "renderedSubject": "Behavior Lock: reset link inside",
+          "renderedTextPreview": "[suppressed for sensitive built-in template]",
+          "sanitizedError": null,
+          "sentAt": "{datetime:unspecified}",
+          "status": "queued",
+          "templateKey": "auth.password-reset",
+          "templateVersion": 2,
+          "to": "{email:alice}",
+          "updatedAt": "{datetime:unspecified}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
