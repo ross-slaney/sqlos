@@ -1,3 +1,4 @@
+using System.Transactions;
 using FluentAssertions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
@@ -210,6 +211,91 @@ public sealed class DomainEventPipelineIntegrationTests
         }
 
         observations.Should().EndWith($"{autoCommittedId}: account committed, 1 audit row committed");
+    }
+
+    [TestMethod]
+    public async Task A_transaction_that_ends_without_committing_never_hands_its_events_to_the_next_one()
+    {
+        var observations = new List<string>();
+        await using var services = CreateHostServices(
+            ProbeModel.Projection(),
+            collection => collection
+                .AddSingleton(observations)
+                .AddScoped<ISqlOSPostCommitHandler<ProbeDeposited>, CommittedChangeObserver>());
+        var abandonedId = NewId();
+        var committedId = NewId();
+        await using var scope = services.CreateAsyncScope();
+        var context = scope.ServiceProvider.GetRequiredService<ProbeHostDbContext>();
+
+        // One open connection for both transactions: Npgsql then hands both the same pooled
+        // DbTransaction object, which is what a pooled connection does across requests.
+        await context.Database.OpenConnectionAsync();
+        await using (await context.Database.BeginTransactionAsync())
+        {
+            var abandoned = new ProbeAccount(abandonedId);
+            abandoned.Deposit(1);
+            context.Add(abandoned);
+            await context.SaveChangesAsync();
+
+            // Disposed without a commit or a rollback, which EF reports to no interceptor.
+        }
+
+        context.ChangeTracker.Clear();
+        await using (var transaction = await context.Database.BeginTransactionAsync())
+        {
+            var committed = new ProbeAccount(committedId);
+            committed.Deposit(2);
+            context.Add(committed);
+            await context.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+
+        await context.Database.CloseConnectionAsync();
+
+        observations.Should().Equal($"{committedId}: account committed, 1 audit row committed");
+        (await AccountExistsAsync(abandonedId)).Should().BeFalse();
+        (await ReadRowsAsync(abandonedId)).Should().BeEmpty();
+    }
+
+    [TestMethod]
+    public async Task Post_commit_handlers_wait_for_an_ambient_transaction_and_skip_one_that_aborts()
+    {
+        var observations = new List<string>();
+        await using var services = CreateHostServices(
+            ProbeModel.Projection(),
+            collection => collection
+                .AddSingleton(observations)
+                .AddScoped<ISqlOSPostCommitHandler<ProbeDeposited>, CommittedChangeObserver>());
+        var committedId = NewId();
+        using (var ambient = new TransactionScope(TransactionScopeAsyncFlowOption.Enabled))
+        {
+            await using var scope = services.CreateAsyncScope();
+            var context = scope.ServiceProvider.GetRequiredService<ProbeHostDbContext>();
+            var account = new ProbeAccount(committedId);
+            account.Deposit(5);
+            context.Add(account);
+            await context.SaveChangesAsync();
+
+            observations.Should().BeEmpty("the ambient transaction has not committed");
+            ambient.Complete();
+        }
+
+        observations.Should().Equal($"{committedId}: account committed, 1 audit row committed");
+
+        var abortedId = NewId();
+        using (new TransactionScope(TransactionScopeAsyncFlowOption.Enabled))
+        {
+            await using var scope = services.CreateAsyncScope();
+            var context = scope.ServiceProvider.GetRequiredService<ProbeHostDbContext>();
+            var account = new ProbeAccount(abortedId);
+            account.Deposit(6);
+            context.Add(account);
+            await context.SaveChangesAsync();
+        }
+
+        observations.Should().HaveCount(1, "an aborted change never reaches its handlers");
+        (await AccountExistsAsync(abortedId)).Should().BeFalse();
+        (await ReadRowsAsync(abortedId)).Should().BeEmpty("the audit row rolled back with the change");
     }
 
     [TestMethod]

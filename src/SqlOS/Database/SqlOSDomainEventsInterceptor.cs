@@ -1,6 +1,6 @@
-using System.Collections.Concurrent;
 using System.Data.Common;
 using System.Runtime.CompilerServices;
+using System.Transactions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -30,15 +30,21 @@ namespace SqlOS.Database;
 /// them once and an abandoned unit of work writes nothing.
 /// </para>
 /// <para>
-/// <b>After the save</b>, the events go to every <see cref="ISqlOSPostCommitHandler{TEvent}"/>: at
-/// once when the save committed its own transaction, or when the caller's transaction commits. A
-/// rolled-back or failed transaction drops them. Handlers run in a scope of their own, with the
-/// saving scope's request context, so they never re-enter the context that is completing its save
-/// (or whose committed transaction EF still reports as current while it commits).
+/// <b>After the save</b>, the events go to every <see cref="ISqlOSPostCommitHandler{TEvent}"/>
+/// (<see cref="SqlOSPostCommitDispatch"/>): at once when the save committed its own transaction,
+/// when the EF transaction the save ran in commits, or when the ambient
+/// <see cref="System.Transactions.TransactionScope"/> it enlisted in commits. A transaction that
+/// rolls back, or ends without committing, takes them with it. A commit that fails keeps them, so
+/// a retried commit that succeeds still runs them. Two things stay invisible: a transaction
+/// committed straight through ADO.NET rather than through EF, and a rollback to a savepoint, which
+/// does not withdraw the events of the saves it undoes.
 /// </para>
 /// <para>
 /// One shared instance serves every context: a save in progress is tracked by its context, and
-/// events awaiting a commit by their transaction. <c>AddSqlOS</c> attaches it to the host's context
+/// events awaiting a commit by EF's transaction object, which is new for every transaction a
+/// context begins or uses. Never by the ADO.NET <see cref="DbTransaction"/>: Npgsql reuses one for
+/// every transaction on a pooled connection, so a transaction disposed without committing would
+/// hand its events to the next one. <c>AddSqlOS</c> attaches it to the host's context
 /// through <c>ConfigureDbContext</c> and <see cref="SqlOSDbContext{TContext}"/> attaches it in its
 /// constructor; both check first, so a context never runs it twice. The clock, the projection, the
 /// request context and the handlers come from the services of the scope that created the context.
@@ -55,10 +61,8 @@ internal sealed class SqlOSDomainEventsInterceptor : ISaveChangesInterceptor, ID
     /// </summary>
     internal const int MaxDrainRounds = 8;
 
-    private static readonly ConcurrentDictionary<Type, PostCommitDispatcher> Dispatchers = new();
-
     private readonly ConditionalWeakTable<DbContext, PendingSave> _saving = new();
-    private readonly ConditionalWeakTable<DbTransaction, List<PendingDispatch>> _awaitingCommit = new();
+    private readonly ConditionalWeakTable<IDbContextTransaction, List<SqlOSPostCommitDispatch>> _awaitingCommit = new();
 
     private SqlOSDomainEventsInterceptor()
     {
@@ -103,7 +107,7 @@ internal sealed class SqlOSDomainEventsInterceptor : ISaveChangesInterceptor, ID
 
     public int SavedChanges(SaveChangesCompletedEventData eventData, int result)
     {
-        CompleteAsync(eventData.Context, CancellationToken.None).GetAwaiter().GetResult();
+        Complete(eventData.Context)?.RunAsync().GetAwaiter().GetResult();
         return result;
     }
 
@@ -112,7 +116,11 @@ internal sealed class SqlOSDomainEventsInterceptor : ISaveChangesInterceptor, ID
         int result,
         CancellationToken cancellationToken = default)
     {
-        await CompleteAsync(eventData.Context, cancellationToken);
+        if (Complete(eventData.Context) is { } dispatch)
+        {
+            await dispatch.RunAsync();
+        }
+
         return result;
     }
 
@@ -133,35 +141,33 @@ internal sealed class SqlOSDomainEventsInterceptor : ISaveChangesInterceptor, ID
     }
 
     public void TransactionCommitted(DbTransaction transaction, TransactionEndEventData eventData)
-        => DispatchCommittedAsync(transaction, eventData.Context, CancellationToken.None).GetAwaiter().GetResult();
+    {
+        foreach (var dispatch in TakeAwaitingCommit(eventData))
+        {
+            dispatch.RunAsync().GetAwaiter().GetResult();
+        }
+    }
 
-    public Task TransactionCommittedAsync(
+    public async Task TransactionCommittedAsync(
         DbTransaction transaction,
         TransactionEndEventData eventData,
         CancellationToken cancellationToken = default)
-        => DispatchCommittedAsync(transaction, eventData.Context, cancellationToken);
+    {
+        foreach (var dispatch in TakeAwaitingCommit(eventData))
+        {
+            await dispatch.RunAsync();
+        }
+    }
 
     public void TransactionRolledBack(DbTransaction transaction, TransactionEndEventData eventData)
-        => _awaitingCommit.Remove(transaction);
+        => _ = TakeAwaitingCommit(eventData);
 
     public Task TransactionRolledBackAsync(
         DbTransaction transaction,
         TransactionEndEventData eventData,
         CancellationToken cancellationToken = default)
     {
-        _awaitingCommit.Remove(transaction);
-        return Task.CompletedTask;
-    }
-
-    public void TransactionFailed(DbTransaction transaction, TransactionErrorEventData eventData)
-        => _awaitingCommit.Remove(transaction);
-
-    public Task TransactionFailedAsync(
-        DbTransaction transaction,
-        TransactionErrorEventData eventData,
-        CancellationToken cancellationToken = default)
-    {
-        _awaitingCommit.Remove(transaction);
+        _ = TakeAwaitingCommit(eventData);
         return Task.CompletedTask;
     }
 
@@ -209,7 +215,7 @@ internal sealed class SqlOSDomainEventsInterceptor : ISaveChangesInterceptor, ID
                         save.Rows.Add(row);
                     }
 
-                    save.Events.Add(item.Raised);
+                    save.Events.Add(item.Raised.Event);
                 }
 
                 drained = Drain(context);
@@ -224,22 +230,38 @@ internal sealed class SqlOSDomainEventsInterceptor : ISaveChangesInterceptor, ID
         _saving.AddOrUpdate(context, save);
     }
 
-    private async Task CompleteAsync(DbContext? context, CancellationToken cancellationToken)
+    /// <summary>
+    /// Ends the save of <paramref name="context"/>: returns its post-commit dispatch when it can run
+    /// now, or <see langword="null"/> when it has none or waits for a transaction to commit.
+    /// </summary>
+    private SqlOSPostCommitDispatch? Complete(DbContext? context)
     {
         if (context is null || !_saving.TryGetValue(context, out var save))
         {
-            return;
+            return null;
         }
 
         _saving.Remove(context);
-        var dispatch = new PendingDispatch(save.Events, save.Request);
-        if (CurrentTransaction(context) is { } transaction)
+        var dispatch = SqlOSPostCommitDispatch.For(ApplicationServices(context), save.Events, save.Request);
+        if (dispatch is null || !context.Database.IsRelational())
         {
-            _awaitingCommit.GetValue(transaction, static _ => []).Add(dispatch);
-            return;
+            return dispatch;
         }
 
-        await DispatchAsync(context, [dispatch], cancellationToken);
+        if (context.Database.CurrentTransaction is { } transaction)
+        {
+            _awaitingCommit.GetValue(transaction, static _ => []).Add(dispatch);
+            return null;
+        }
+
+        // Inside an ambient transaction EF begins none of its own: the save commits with it.
+        if ((context.Database.GetEnlistedTransaction() ?? Transaction.Current) is { } ambient)
+        {
+            RunWhenCommitted(ambient, dispatch);
+            return null;
+        }
+
+        return dispatch;
     }
 
     private void Abandon(DbContext? context)
@@ -253,19 +275,33 @@ internal sealed class SqlOSDomainEventsInterceptor : ISaveChangesInterceptor, ID
         Restore(context, save);
     }
 
-    private async Task DispatchCommittedAsync(DbTransaction transaction, DbContext? context, CancellationToken cancellationToken)
+    /// <summary>Removes and returns the dispatches waiting for the transaction that is ending.</summary>
+    private IReadOnlyList<SqlOSPostCommitDispatch> TakeAwaitingCommit(TransactionEndEventData eventData)
     {
-        if (!_awaitingCommit.TryGetValue(transaction, out var dispatches))
+        // EF still reports the ending transaction as current while it notifies interceptors.
+        if (eventData.Context?.Database.CurrentTransaction is not { } transaction
+            || transaction.TransactionId != eventData.TransactionId
+            || !_awaitingCommit.TryGetValue(transaction, out var dispatches))
         {
-            return;
+            return [];
         }
 
         _awaitingCommit.Remove(transaction);
-        if (context is not null)
-        {
-            await DispatchAsync(context, dispatches, cancellationToken);
-        }
+        return dispatches;
     }
+
+    private static void RunWhenCommitted(Transaction ambient, SqlOSPostCommitDispatch dispatch)
+        => ambient.TransactionCompleted += (_, completed) =>
+        {
+            if (completed.Transaction?.TransactionInformation.Status != TransactionStatus.Committed)
+            {
+                return;
+            }
+
+            // The handlers run outside the finished transaction, as after any other commit.
+            using var outside = new TransactionScope(TransactionScopeOption.Suppress, TransactionScopeAsyncFlowOption.Enabled);
+            dispatch.RunAsync().GetAwaiter().GetResult();
+        };
 
     private static List<DrainedEvent> Drain(DbContext context)
     {
@@ -330,38 +366,6 @@ internal sealed class SqlOSDomainEventsInterceptor : ISaveChangesInterceptor, ID
         }
     }
 
-    private static async Task DispatchAsync(DbContext context, IReadOnlyList<PendingDispatch> dispatches, CancellationToken cancellationToken)
-    {
-        if (ApplicationServices(context) is not { } services
-            || services.GetService<IServiceScopeFactory>() is not { } scopes
-            || !HasHandlers(services, dispatches))
-        {
-            return;
-        }
-
-        foreach (var dispatch in dispatches)
-        {
-            await using var scope = scopes.CreateAsyncScope();
-            if (scope.ServiceProvider.GetService<SqlOSRequestContextAccessor>() is { } requestContext)
-            {
-                requestContext.Current = dispatch.Request;
-            }
-
-            foreach (var raised in dispatch.Events)
-            {
-                var dispatcher = Dispatchers.GetOrAdd(raised.Event.GetType(), PostCommitDispatcher.Create);
-                await dispatcher.DispatchAsync(scope.ServiceProvider, raised.Event, cancellationToken);
-            }
-        }
-    }
-
-    private static bool HasHandlers(IServiceProvider services, IReadOnlyList<PendingDispatch> dispatches)
-    {
-        var registrations = services.GetService<IServiceProviderIsService>();
-        return dispatches.Any(dispatch => dispatch.Events.Any(raised =>
-            registrations?.IsService(typeof(ISqlOSPostCommitHandler<>).MakeGenericType(raised.Event.GetType())) ?? true));
-    }
-
     private static IServiceProvider? ApplicationServices(DbContext context)
         => context.GetService<IDbContextOptions>().FindExtension<CoreOptionsExtension>()?.ApplicationServiceProvider;
 
@@ -378,14 +382,7 @@ internal sealed class SqlOSDomainEventsInterceptor : ISaveChangesInterceptor, ID
         }
     }
 
-    private static DbTransaction? CurrentTransaction(DbContext context)
-        => context.Database.CurrentTransaction is { } transaction && context.Database.IsRelational()
-            ? transaction.GetDbTransaction()
-            : null;
-
     private readonly record struct DrainedEvent(DomainEventBuffer Source, RaisedDomainEvent Raised);
-
-    private sealed record PendingDispatch(IReadOnlyList<RaisedDomainEvent> Events, SqlOSRequestContext Request);
 
     private sealed class PendingSave(List<DrainedEvent> drained, SqlOSRequestContext request)
     {
@@ -395,28 +392,8 @@ internal sealed class SqlOSDomainEventsInterceptor : ISaveChangesInterceptor, ID
         public SqlOSRequestContext Request { get; } = request;
 
         /// <summary>Every event of the save, in raise order, for the post-commit handlers.</summary>
-        public List<RaisedDomainEvent> Events { get; } = [];
+        public List<ISqlOSDomainEvent> Events { get; } = [];
 
         public List<SqlOSAuditEvent> Rows { get; } = [];
-    }
-
-    private abstract class PostCommitDispatcher
-    {
-        public static PostCommitDispatcher Create(Type eventType)
-            => (PostCommitDispatcher)Activator.CreateInstance(typeof(PostCommitDispatcher<>).MakeGenericType(eventType))!;
-
-        public abstract Task DispatchAsync(IServiceProvider services, ISqlOSDomainEvent domainEvent, CancellationToken cancellationToken);
-    }
-
-    private sealed class PostCommitDispatcher<TEvent> : PostCommitDispatcher
-        where TEvent : ISqlOSDomainEvent
-    {
-        public override async Task DispatchAsync(IServiceProvider services, ISqlOSDomainEvent domainEvent, CancellationToken cancellationToken)
-        {
-            foreach (var handler in services.GetServices<ISqlOSPostCommitHandler<TEvent>>())
-            {
-                await handler.HandleAsync((TEvent)domainEvent, cancellationToken);
-            }
-        }
     }
 }

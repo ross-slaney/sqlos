@@ -43,6 +43,19 @@ public sealed class PipelineRegistrationTests
     }
 
     [TestMethod]
+    public void AddSqlOS_registers_one_clock_alongside_the_one_aspnet_core_authentication_registers()
+    {
+        var services = new ServiceCollection();
+
+        services.AddSqlOS<TestSqlOSInMemoryDbContext>(options => options.AuthServer.Issuer = "https://tests.example/sqlos/auth");
+
+        // AddAuthentication, which AddSqlOS has always called, registers TimeProvider.System too,
+        // so 7.x hosts could already resolve it; both use TryAdd and the host keeps one clock.
+        services.Where(descriptor => descriptor.ServiceType == typeof(TimeProvider)).Should().ContainSingle()
+            .Which.ImplementationInstance.Should().BeSameAs(TimeProvider.System);
+    }
+
+    [TestMethod]
     public void A_host_clock_registered_before_AddSqlOS_wins()
     {
         var hostClock = new FixedClock();

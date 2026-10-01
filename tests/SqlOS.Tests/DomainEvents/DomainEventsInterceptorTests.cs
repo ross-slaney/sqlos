@@ -3,6 +3,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuditLogs;
 using SqlOS.AuthServer.Interfaces;
@@ -223,16 +224,181 @@ public sealed class DomainEventsInterceptorTests
     }
 
     [TestMethod]
-    public async Task A_handler_that_throws_surfaces_after_the_data_is_committed()
+    public async Task A_handler_that_throws_is_logged_and_the_other_handlers_still_run()
+    {
+        await using var pipeline = new Pipeline(configure: services => services
+            .AddScoped<ISqlOSPostCommitHandler<DepositRejected>, ThrowingHandler>()
+            .AddScoped<ISqlOSPostCommitHandler<DepositRejected>, RejectionHandler>());
+        await using var scope = pipeline.CreateScope();
+        var account = new LedgerAccount("acc_throw");
+        scope.Context.Add(account);
+        scope.Recorder.Record(new DepositRejected("acc_throw", "limit"));
+        account.Deposit(5);
+
+        await scope.Context.SaveChangesAsync();
+
+        (await pipeline.ReadRowsAsync()).Should().HaveCount(2, "the change committed before any handler ran");
+        pipeline.Log.Entries.Should().Equal(
+            new HandlerEntry("rejected acc_throw:limit", InTransaction: false),
+            new HandlerEntry("deposited acc_throw:5", InTransaction: false));
+        var failure = pipeline.Logged.Should().ContainSingle().Subject;
+        failure.Level.Should().Be(LogLevel.Error);
+        failure.Exception.Should().BeOfType<InvalidOperationException>().Which.Message.Should().Be("handler failed");
+        failure.Message.Should().Be(
+            $"Post-commit handler {typeof(ThrowingHandler).FullName} failed for domain event {typeof(DepositRejected).FullName}. The change it reacts to is committed.");
+    }
+
+    [TestMethod]
+    public async Task A_handler_that_throws_at_commit_leaves_the_commit_complete_and_the_context_usable()
     {
         await using var pipeline = new Pipeline(configure: services => services.AddScoped<ISqlOSPostCommitHandler<DepositRejected>, ThrowingHandler>());
         await using var scope = pipeline.CreateScope();
-        scope.Recorder.Record(new DepositRejected("acc", "limit"));
+        var context = scope.Context;
 
-        await FluentActions.Invoking(() => scope.Context.SaveChangesAsync())
-            .Should().ThrowAsync<InvalidOperationException>().WithMessage("handler failed");
+        await using (var transaction = await context.Database.BeginTransactionAsync())
+        {
+            scope.Recorder.Record(new DepositRejected("acc", "limit"));
+            await context.SaveChangesAsync();
 
-        (await pipeline.ReadRowsAsync()).Should().ContainSingle("the failure happened after the commit");
+            await transaction.CommitAsync();
+
+            context.Database.CurrentTransaction.Should().BeNull("EF finished the commit");
+        }
+
+        (await pipeline.ReadRowsAsync()).Should().ContainSingle();
+        pipeline.Logged.Should().ContainSingle();
+        await using var next = await context.Database.BeginTransactionAsync();
+    }
+
+    [TestMethod]
+    public async Task A_synchronous_save_writes_its_rows_and_runs_handlers_after_it_commits()
+    {
+        await using var pipeline = new Pipeline();
+        await using var scope = pipeline.CreateScope();
+        var account = new LedgerAccount("acc_sync");
+        account.Deposit(4);
+        scope.Context.Add(account);
+
+        scope.Context.SaveChanges();
+
+        (await pipeline.ReadRowsAsync()).Select(row => row.MetadataJson).Should().Equal("{\"accountId\":\"acc_sync\",\"amount\":4}");
+        pipeline.Log.Entries.Should().Equal(new HandlerEntry("deposited acc_sync:4", InTransaction: false));
+        account.PendingEvents.Should().BeEmpty();
+    }
+
+    [TestMethod]
+    public async Task A_failed_synchronous_save_leaves_the_unit_of_work_as_it_was()
+    {
+        await using var pipeline = new Pipeline();
+        await using (var seed = pipeline.CreateScope())
+        {
+            seed.Context.Add(new LedgerAccount("taken"));
+            await seed.Context.SaveChangesAsync();
+        }
+
+        await using var scope = pipeline.CreateScope();
+        var account = new LedgerAccount("acc_sync_fail");
+        account.Deposit(10);
+        scope.Context.AddRange(account, new LedgerAccount("taken"));
+
+        scope.Context.Invoking(context => context.SaveChanges()).Should().Throw<DbUpdateException>();
+
+        (await pipeline.ReadRowsAsync()).Should().BeEmpty();
+        scope.Context.ChangeTracker.Entries<SqlOSAuditEvent>().Should().BeEmpty();
+        account.PendingEvents.Should().Equal(new Deposited("acc_sync_fail", 10));
+        pipeline.Log.Entries.Should().BeEmpty();
+    }
+
+    [TestMethod]
+    public async Task A_synchronous_transaction_runs_handlers_on_commit_and_none_on_rollback()
+    {
+        await using var pipeline = new Pipeline();
+        await using var scope = pipeline.CreateScope();
+        var context = scope.Context;
+
+        using (var transaction = context.Database.BeginTransaction())
+        {
+            var discarded = new LedgerAccount("acc_discarded");
+            discarded.Deposit(1);
+            context.Add(discarded);
+            context.SaveChanges();
+            transaction.Rollback();
+        }
+
+        context.ChangeTracker.Clear();
+        using (var transaction = context.Database.BeginTransaction())
+        {
+            var kept = new LedgerAccount("acc_kept");
+            kept.Deposit(2);
+            context.Add(kept);
+            context.SaveChanges();
+            pipeline.Log.Entries.Should().BeEmpty("the transaction has not committed");
+            transaction.Commit();
+        }
+
+        pipeline.Log.Entries.Should().Equal(new HandlerEntry("deposited acc_kept:2", InTransaction: false));
+        (await pipeline.ReadRowsAsync()).Select(row => row.MetadataJson).Should().Equal("{\"accountId\":\"acc_kept\",\"amount\":2}");
+    }
+
+    [TestMethod]
+    public async Task A_transaction_that_ends_without_committing_hands_nothing_to_the_next_one()
+    {
+        await using var pipeline = new Pipeline();
+        await using var scope = pipeline.CreateScope();
+        var context = scope.Context;
+
+        await using (await context.Database.BeginTransactionAsync())
+        {
+            var abandoned = new LedgerAccount("acc_abandoned");
+            abandoned.Deposit(1);
+            context.Add(abandoned);
+            await context.SaveChangesAsync();
+
+            // Disposed without a commit or a rollback, which EF reports to no interceptor.
+        }
+
+        context.ChangeTracker.Clear();
+        await using (var transaction = await context.Database.BeginTransactionAsync())
+        {
+            var next = new LedgerAccount("acc_next");
+            next.Deposit(2);
+            context.Add(next);
+            await context.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+
+        pipeline.Log.Entries.Should().Equal(new HandlerEntry("deposited acc_next:2", InTransaction: false));
+        (await pipeline.ReadRowsAsync()).Select(row => row.MetadataJson).Should().Equal("{\"accountId\":\"acc_next\",\"amount\":2}");
+    }
+
+    [TestMethod]
+    public async Task A_commit_that_fails_keeps_its_events_for_a_commit_that_succeeds()
+    {
+        await using var pipeline = new Pipeline();
+        await using var scope = pipeline.CreateScope();
+        var context = scope.Context;
+
+        // SQLite checks a deferred foreign key at COMMIT, and keeps the transaction open when it fails.
+        await context.Database.ExecuteSqlRawAsync("""
+            PRAGMA foreign_keys = ON;
+            CREATE TABLE Parents (Id INTEGER PRIMARY KEY);
+            CREATE TABLE Children (Id INTEGER PRIMARY KEY, ParentId INTEGER REFERENCES Parents (Id) DEFERRABLE INITIALLY DEFERRED);
+            """);
+        await using var transaction = await context.Database.BeginTransactionAsync();
+        var account = new LedgerAccount("acc_retry");
+        account.Deposit(3);
+        context.Add(account);
+        await context.SaveChangesAsync();
+        await context.Database.ExecuteSqlRawAsync("INSERT INTO Children (Id, ParentId) VALUES (1, 404);");
+
+        await FluentActions.Invoking(() => transaction.CommitAsync()).Should().ThrowAsync<SqliteException>();
+        pipeline.Log.Entries.Should().BeEmpty("nothing has committed");
+
+        await context.Database.ExecuteSqlRawAsync("DELETE FROM Children;");
+        await transaction.CommitAsync();
+
+        pipeline.Log.Entries.Should().Equal(new HandlerEntry("deposited acc_retry:3", InTransaction: false));
+        (await pipeline.ReadRowsAsync()).Should().ContainSingle();
     }
 
     [TestMethod]
@@ -422,6 +588,31 @@ public sealed class DomainEventsInterceptorTests
             => throw new InvalidOperationException("handler failed");
     }
 
+    private sealed class RejectionHandler(HandlerLog log, PipelineDbContext context) : ISqlOSPostCommitHandler<DepositRejected>
+    {
+        public Task HandleAsync(DepositRejected domainEvent, CancellationToken cancellationToken)
+        {
+            log.Add($"rejected {domainEvent.AccountId}:{domainEvent.Reason}", context);
+            return Task.CompletedTask;
+        }
+    }
+
+    internal sealed record LoggedEntry(LogLevel Level, string Message, Exception? Exception);
+
+    private sealed class CapturingLogger : ILogger<SqlOSPostCommitDispatch>
+    {
+        public List<LoggedEntry> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull
+            => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            => Entries.Add(new LoggedEntry(logLevel, formatter(state, exception), exception));
+    }
+
     private sealed class FixedTime(DateTimeOffset now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => now;
@@ -447,6 +638,8 @@ public sealed class DomainEventsInterceptorTests
             services.AddScoped<IAuditRecorder, SqlOSAuditRecorder>();
             services.AddSingleton<HandlerLog>();
             services.AddSingleton<List<CapturedScope>>();
+            services.AddSingleton<CapturingLogger>();
+            services.AddSingleton<ILogger<SqlOSPostCommitDispatch>>(provider => provider.GetRequiredService<CapturingLogger>());
             services.AddScoped<ISqlOSPostCommitHandler<Deposited>, DepositedHandler>();
             services.AddScoped<ISqlOSPostCommitHandler<Silent>, SilentHandler>();
             configure?.Invoke(services);
@@ -459,6 +652,8 @@ public sealed class DomainEventsInterceptorTests
         public HandlerLog Log => _services.GetRequiredService<HandlerLog>();
 
         public IReadOnlyList<CapturedScope> Captured => _services.GetRequiredService<List<CapturedScope>>();
+
+        public IReadOnlyList<LoggedEntry> Logged => _services.GetRequiredService<CapturingLogger>().Entries;
 
         public Scope CreateScope() => new(_services.CreateAsyncScope());
 
