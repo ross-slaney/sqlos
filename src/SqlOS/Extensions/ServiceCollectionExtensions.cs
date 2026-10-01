@@ -132,6 +132,13 @@ public static class ServiceCollectionExtensions
         services.AddScoped<SqlOSMfaAttemptAdmissionService>();
         services.AddScoped(sp => new SqlOSDeliveryAdmissionService(
             sp.GetRequiredService<SqlOSDistributedRateLimitStore>()));
+        // The one admission gate processes pass before a delivery, an MFA comparison or a
+        // password comparison (#424).
+        services.AddScoped<IAdmissionGate>(sp => new SqlOSAdmissionGate(
+            sp.GetRequiredService<SqlOSDeliveryAdmissionService>(),
+            sp.GetRequiredService<SqlOSMfaAttemptAdmissionService>(),
+            sp.GetRequiredService<SqlOSPasswordLoginAbuseService>(),
+            sp.GetRequiredService<IOptions<SqlOSAuthServerOptions>>()));
         services.AddScoped<SqlOSInvitationService>();
         services.AddScoped<SqlOSDeviceAuthorizationService>();
         services.AddScoped<SqlOSClientAuthenticationService>();

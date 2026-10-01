@@ -210,10 +210,14 @@ public sealed class HostedMagicLinkScenarios
 
     [Scenario]
     [Covers("POST /sqlos/auth/login/magic-link/start")]
-    public async Task Concurrent_link_requests_exceed_the_per_address_limit_CurrentBehavior_KnownDefect_424()
+    public async Task Concurrent_link_requests_never_exceed_the_per_address_limit()
     {
-        // #424: start loads the recent links, counts them in memory, then inserts its own, with no
-        // lock between. Seven requests that all count before any inserts are all admitted.
+        // #424, fixed: start admits the send with one atomic reservation of the address's, the IP
+        // address's and the client's buckets before it writes anything. Of seven requests sent
+        // together, five are admitted and reach their insert (the barrier holds them there) and
+        // two are refused before writing, so five links go out, the limit. 7.2.1 loaded the recent
+        // links, counted them in memory, then inserted its own, with no lock between: all seven
+        // counted before any inserted, and seven links went out.
         var barrier = new HostedRaceBarrier("/sqlos/auth/login/magic-link/start", "INSERT INTO", "SqlOSTemporaryTokens", participants: 7);
         await using var t = await Transcript.StartAsync(HostProfiles.Hosted, barrier.Install);
         var alice = await HostedFlows.CreateVerifiedEmailUserAsync(t, "alice");
@@ -228,10 +232,12 @@ public sealed class HostedMagicLinkScenarios
         await t.SkipAuditAsync();
         var emailsBefore = t.Emails.Count;
         barrier.Arm();
-        var (shown, others) = await HostedRaceBarrier.PostTogetherAsync(t, forms);
-        t.Observe(shown, "seven link requests at once for one address, one per tab (one shown)");
+        var (shown, others) = await barrier.PostTogetherAsync(t, forms);
+        t.Observe(shown, "seven link requests at once for one address, one per tab (one shown, admitted)");
         t.Note($"The other six tabs were answered {string.Join(", ", others)}.");
-        t.Note($"{barrier.Held} start requests were held at their insert until all had counted the recent links.");
+        t.Note(
+            $"{barrier.Held} start requests were admitted and held at their insert; the others were refused before writing anything.",
+            baselineText: $"{barrier.Held} start requests were held at their insert until all had counted the recent links.");
         t.Note($"{t.Emails.Count - emailsBefore} sign-in links were emailed to the address; the limit is 5 per hour.");
         // The audit readback is left out on purpose: the fake sender numbers deliveries in the
         // order the concurrent requests reach it, so email.send.queued rows would not render

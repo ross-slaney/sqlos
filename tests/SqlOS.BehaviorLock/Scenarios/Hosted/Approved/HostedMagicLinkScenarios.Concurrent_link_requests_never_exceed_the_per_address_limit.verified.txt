@@ -1,8 +1,8 @@
 # SqlOS behavior lock transcript
-scenario: HostedMagicLinkScenarios.Concurrent_link_requests_exceed_the_per_address_limit_CurrentBehavior_KnownDefect_424
+scenario: HostedMagicLinkScenarios.Concurrent_link_requests_never_exceed_the_per_address_limit
 profile: hosted
 
-## 1. browser: seven link requests at once for one address, one per tab (one shown)
+## 1. browser: seven link requests at once for one address, one per tab (one shown, admitted)
 > POST /sqlos/auth/login/magic-link/start
 > Content-Type: application/x-www-form-urlencoded
 > Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
@@ -89,8 +89,8 @@ profile: hosted
           </body>
         </html>
 
-# The other six tabs were answered 200, 200, 200, 200, 200, 200.
+# The other six tabs were answered 200, 200, 200, 200, 400, 400.
 
-# 7 start requests were held at their insert until all had counted the recent links.
+# 5 start requests were admitted and held at their insert; the others were refused before writing anything.
 
-# 7 sign-in links were emailed to the address; the limit is 5 per hour.
+# 5 sign-in links were emailed to the address; the limit is 5 per hour.

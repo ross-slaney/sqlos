@@ -12,11 +12,12 @@ namespace SqlOS.BehaviorLock.Scenarios.Hosted;
 /// <summary>
 /// Makes a check-then-write race deterministic, so a scenario can lock how SqlOS behaves under it.
 /// Once armed, every request to <c>path</c> is held at its first <c>statement</c> against
-/// <c>table</c> until <c>participants</c> requests are waiting there (or ten seconds pass): each of
-/// them has made its decision on the same data before any of them writes. That is exactly the
-/// interleaving #424 describes for email-code attempts and send limits; without the barrier the
-/// outcome would depend on thread timing. A fixed implementation that reserves before it reads
-/// simply meets the barrier at its reservation instead, and the transcript shows the fixed result.
+/// <c>table</c> until each of <c>participants</c> requests is either waiting there or finished
+/// without reaching it (or ten seconds pass): each of them has made its decision on the same data
+/// before any of them writes. That is exactly the interleaving #424 describes for email-code
+/// attempts and send limits; without the barrier the outcome would depend on thread timing. A fixed
+/// implementation that reserves before it reads simply meets the barrier at its reservation
+/// instead, or refuses a request before its write, and the transcript shows the fixed result.
 /// </summary>
 internal sealed class HostedRaceBarrier : DbCommandInterceptor
 {
@@ -27,8 +28,10 @@ internal sealed class HostedRaceBarrier : DbCommandInterceptor
     private readonly Regex _statement;
     private readonly int _participants;
     private readonly TaskCompletionSource _released = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _firstArrival = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private IHttpContextAccessor? _httpContextAccessor;
     private int _arrived;
+    private int _finished;
     private volatile bool _armed;
 
     /// <param name="path">The request path whose requests are held, for example <c>/sqlos/auth/login/email-otp/verify</c>.</param>
@@ -53,21 +56,25 @@ internal sealed class HostedRaceBarrier : DbCommandInterceptor
     }
 
     /// <summary>
-    /// Posts <paramref name="forms"/> all at once from the transcript's browser: the first through
+    /// Posts <paramref name="forms"/> together from the transcript's browser: the first through
     /// the browser itself (so the scenario can observe it), the rest from other tabs of the same
     /// browser (<see cref="HttpActor.Tab"/>: the same cookies and origin), whose exchanges are
-    /// discarded and whose status codes are returned. Every tab copies the cookies before any
-    /// request runs, because the shown request may update the browser's own.
+    /// discarded and whose status codes are returned in ascending order. Every tab copies the
+    /// cookies before any request runs, because the shown request may update the browser's own.
+    /// The shown request starts first and reaches the barrier (or finishes) before the others
+    /// start, so when a limit admits only some of them, the shown one is admitted and which of the
+    /// others are refused does not depend on thread timing.
     /// </summary>
-    public static async Task<(HttpExchange Shown, IReadOnlyList<int> OtherStatuses)> PostTogetherAsync(
+    public async Task<(HttpExchange Shown, IReadOnlyList<int> OtherStatuses)> PostTogetherAsync(
         Transcript t,
         IReadOnlyList<HtmlForm> forms)
     {
         var tabs = forms.Skip(1).Select((_, index) => t.Browser.Tab($"tab-{index + 2}")).ToList();
-        var others = forms.Skip(1).Select((form, index) => tabs[index].SubmitAsync(form)).ToList();
-        var shown = t.SubmitAsync(forms[0]);
+        var shown = FinishAsync(t.SubmitAsync(forms[0]));
+        await Task.WhenAny(_firstArrival.Task, shown);
+        var others = forms.Skip(1).Select((form, index) => FinishAsync(tabs[index].SubmitAsync(form))).ToList();
         await Task.WhenAll(others.Append(shown));
-        return (await shown, others.Select(other => t.Discard(other.Result).StatusCode).ToList());
+        return (await shown, others.Select(other => t.Discard(other.Result).StatusCode).Order().ToList());
     }
 
     /// <summary>Adds the barrier to the host's SqlOS <see cref="DbContext"/> (a scenario option).</summary>
@@ -127,11 +134,32 @@ internal sealed class HostedRaceBarrier : DbCommandInterceptor
             return;
         }
 
-        if (Interlocked.Increment(ref _arrived) >= _participants)
+        Interlocked.Increment(ref _arrived);
+        _firstArrival.TrySetResult();
+        ReleaseOnceEveryoneIsAccountedFor();
+        await Task.WhenAny(_released.Task, Task.Delay(MaximumWait, cancellationToken));
+    }
+
+    // A request that finishes while the barrier is closed never reached it (a request that did is
+    // held until it opens), so it no longer needs to be waited for.
+    private async Task<HttpExchange> FinishAsync(Task<HttpExchange> request)
+    {
+        try
+        {
+            return await request;
+        }
+        finally
+        {
+            Interlocked.Increment(ref _finished);
+            ReleaseOnceEveryoneIsAccountedFor();
+        }
+    }
+
+    private void ReleaseOnceEveryoneIsAccountedFor()
+    {
+        if (Volatile.Read(ref _arrived) + Volatile.Read(ref _finished) >= _participants)
         {
             _released.TrySetResult();
         }
-
-        await Task.WhenAny(_released.Task, Task.Delay(MaximumWait, cancellationToken));
     }
 }

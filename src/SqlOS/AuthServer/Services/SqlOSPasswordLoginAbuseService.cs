@@ -41,20 +41,27 @@ public sealed class SqlOSPasswordLoginAbuseService
         string? authorizationRequestId = null,
         string? surface = null,
         string? userId = null)
-    {
-        var userAgent = httpContext?.Request.Headers.UserAgent.ToString();
-        return new SqlOSPasswordLoginAttempt(
+        => CreateAttempt(normalizedEmail, AdmissionOrigin.Of(httpContext), clientKey, authorizationRequestId, surface, userId);
+
+    /// <summary>Describes a password comparison for a request from <paramref name="origin"/>.</summary>
+    internal SqlOSPasswordLoginAttempt CreateAttempt(
+        string normalizedEmail,
+        AdmissionOrigin origin,
+        string? clientKey,
+        string? authorizationRequestId,
+        string? surface,
+        string? userId)
+        => new(
             normalizedEmail,
             userId,
             NormalizeClientKey(clientKey),
             authorizationRequestId,
             string.IsNullOrWhiteSpace(surface) ? "unknown" : surface.Trim(),
-            NormalizeIpAddress(httpContext),
-            HashUserAgent(userAgent))
+            origin.IpAddress,
+            HashUserAgent(origin.UserAgent))
         {
             ReservationId = _cryptoService.GenerateId("pla")
         };
-    }
 
     /// <summary>
     /// Atomically reserves capacity in every applicable bucket before a password hash comparison.
@@ -598,9 +605,6 @@ public sealed class SqlOSPasswordLoginAbuseService
                 details = data
             },
             cancellationToken: cancellationToken);
-
-    private static string? NormalizeIpAddress(HttpContext? httpContext)
-        => httpContext?.Connection.RemoteIpAddress?.ToString();
 
     private static string? NormalizeClientKey(string? clientKey)
         => string.IsNullOrWhiteSpace(clientKey) ? null : clientKey.Trim();

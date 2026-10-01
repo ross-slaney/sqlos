@@ -213,6 +213,49 @@ public class DistributedRateLimitIntegrationTests
         await cleanup.DeleteAsync(ip.Scope, ip.Key);
     }
 
+    [TestMethod]
+    public async Task ReleaseMany_GivesBackOneReservationPerBucketWithinItsWindow()
+    {
+        var connectionString = GetConnectionString();
+        var authOptions = Options.Create(new SqlOSAuthServerOptions());
+        await using var context = CreateContext(connectionString);
+        var store = new SqlOSDistributedRateLimitStore(context, authOptions);
+        var email = new SqlOSRateLimitBucketRequest("email-otp-email", $"email-{Guid.NewGuid():N}", 2, TimeSpan.FromHours(1), TimeSpan.FromHours(1));
+        var ip = new SqlOSRateLimitBucketRequest("email-otp-ip", $"ip-{Guid.NewGuid():N}", 5, TimeSpan.FromHours(1), TimeSpan.FromHours(1));
+        // A time with sub-millisecond digits: SQL Server stores the window start rounded.
+        var now = new DateTimeOffset(2026, 9, 30, 12, 0, 0, 317, TimeSpan.Zero).AddTicks(9360);
+
+        try
+        {
+            (await store.ReserveManyAsync([email, ip], now)).Admitted.Should().BeTrue();
+            var second = await store.ReserveManyAsync([email, ip], now.AddSeconds(1));
+            second.Admitted.Should().BeTrue();
+            (await store.ReserveManyAsync([email, ip], now.AddSeconds(2))).Admitted.Should().BeFalse("the email bucket reached its limit");
+
+            await store.ReleaseManyAsync(
+                [
+                    new SqlOSRateLimitReservationRelease(email.Scope, email.Key, email.LockThreshold, second.Buckets[0]!.WindowStartedAt!.Value),
+                    new SqlOSRateLimitReservationRelease(ip.Scope, ip.Key, ip.LockThreshold, second.Buckets[1]!.WindowStartedAt!.Value)
+                ],
+                now.AddSeconds(3));
+
+            var afterRelease = await store.ReserveManyAsync([email, ip], now.AddSeconds(4));
+            afterRelease.Admitted.Should().BeTrue("the released reservation unlocked the email bucket");
+            afterRelease.Buckets[0]!.Count.Should().Be(2);
+            afterRelease.Buckets[1]!.Count.Should().Be(2, "each bucket gave back exactly one reservation");
+
+            await store.ReleaseManyAsync(
+                [new SqlOSRateLimitReservationRelease(email.Scope, email.Key, email.LockThreshold, now.AddHours(-2))],
+                now.AddSeconds(5));
+            (await store.ReserveManyAsync([email, ip], now.AddSeconds(6))).Admitted.Should().BeFalse("a release for another window gives nothing back");
+        }
+        finally
+        {
+            await store.DeleteAsync(email.Scope, email.Key);
+            await store.DeleteAsync(ip.Scope, ip.Key);
+        }
+    }
+
     private static string GetConnectionString()
         => AspireFixture.SharedContext?.Database.GetConnectionString()
            ?? throw new InvalidOperationException("The integration database has no connection string.");

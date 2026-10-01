@@ -341,7 +341,7 @@ public sealed class HostedEmailOtpScenarios
         var wrong = verify.With("code", HostedFlows.WrongCode(t, code));
 
         barrier.Arm();
-        var (shown, others) = await HostedRaceBarrier.PostTogetherAsync(t, Enumerable.Repeat(wrong, 10).ToList());
+        var (shown, others) = await barrier.PostTogetherAsync(t, Enumerable.Repeat(wrong, 10).ToList());
         t.Observe(shown, "ten wrong codes at once from ten tabs: each is answered 'invalid or expired' (one shown)");
         t.Note($"The other nine tabs were answered {string.Join(", ", others)}.");
         t.Note(
@@ -362,11 +362,15 @@ public sealed class HostedEmailOtpScenarios
 
     [Scenario]
     [Covers("POST /sqlos/auth/login/email-otp/start")]
-    public async Task Concurrent_code_requests_exceed_the_per_address_limit_CurrentBehavior_KnownDefect_424()
+    public async Task Concurrent_code_requests_never_exceed_the_per_address_limit()
     {
-        // #424: start counts the address's recent challenges, then inserts its own, with no lock
-        // between. Seven requests that all count before any inserts are all admitted, so seven
-        // codes go out although the limit is five per hour.
+        // #424, fixed: start admits the send with one atomic reservation of the address's, the IP
+        // address's and the client's buckets before it writes anything. The code that verified the
+        // address in setup is the first of the hour, so of seven requests sent together four are
+        // admitted and reach their insert (the barrier holds them there) and three are refused
+        // before writing: five codes in the hour, the limit. 7.2.1 counted the address's recent
+        // challenges, then inserted its own, with no lock between: all seven counted before any
+        // inserted, and seven more codes went out.
         var barrier = new HostedRaceBarrier("/sqlos/auth/login/email-otp/start", "INSERT INTO", "SqlOSEmailOtpChallenges", participants: 7);
         await using var t = await Transcript.StartAsync(HostProfiles.Hosted, barrier.Install);
         var alice = await HostedFlows.CreateVerifiedEmailUserAsync(t, "alice");
@@ -382,11 +386,15 @@ public sealed class HostedEmailOtpScenarios
         await t.SkipAuditAsync();
         var emailsBefore = t.Emails.Count;
         barrier.Arm();
-        var (shown, others) = await HostedRaceBarrier.PostTogetherAsync(t, forms);
-        t.Observe(shown, "seven code requests at once for one address, one per tab (one shown)");
+        var (shown, others) = await barrier.PostTogetherAsync(t, forms);
+        t.Observe(shown, "seven code requests at once for one address, one per tab (one shown, admitted)");
         t.Note($"The other six tabs were answered {string.Join(", ", others)}.");
-        t.Note($"{barrier.Held} start requests were held at their insert until all had counted the recent challenges.");
-        t.Note($"{t.Emails.Count - emailsBefore} sign-in codes were emailed to the address; the limit is 5 per hour.");
+        t.Note(
+            $"{barrier.Held} start requests were admitted and held at their insert; the others were refused before writing anything.",
+            baselineText: $"{barrier.Held} start requests were held at their insert until all had counted the recent challenges.");
+        t.Note(
+            $"{t.Emails.Count - emailsBefore} sign-in codes were emailed to the address; with the code that verified it, that is the limit of 5 per hour.",
+            baselineText: $"{t.Emails.Count - emailsBefore} sign-in codes were emailed to the address; the limit is 5 per hour.");
         // The audit readback is left out on purpose: the fake sender numbers deliveries in the
         // order the concurrent requests reach it, so email.send.queued rows would not render
         // deterministically. The answers and the count above are the evidence.

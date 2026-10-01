@@ -29,6 +29,7 @@ public sealed class SqlOSMagicLinkService
     private readonly ISqlOSAuthEmailSender _emailSender;
     private readonly ISqlOSTransactionalEmailService? _transactionalEmailService;
     private readonly IAuditRecorder _auditRecorder;
+    private readonly IAdmissionGate _admission;
     private readonly SqlOSAuthServerOptions _authOptions;
     private readonly SqlOSMagicLinkOptions _options;
 
@@ -48,6 +49,7 @@ public sealed class SqlOSMagicLinkService
         _emailSender = emailSender;
         _transactionalEmailService = transactionalEmailService;
         _auditRecorder = new SqlOSAuditRecorder(context);
+        _admission = SqlOSAdmissionGate.Create(context, adminService, cryptoService, options);
         _authOptions = options.Value;
         _options = options.Value.MagicLink;
     }
@@ -209,33 +211,28 @@ public sealed class SqlOSMagicLinkService
 
         trimmedEmail = typedAddress;
         var now = DateTime.UtcNow;
-        var ipAddress = httpContext?.Connection.RemoteIpAddress?.ToString();
+        var origin = AdmissionOrigin.Of(httpContext);
+        var ipAddress = origin.IpAddress;
         var maskedEmail = Masked.Email(trimmedEmail);
 
-        var recentTokens = await _context.Set<SqlOSTemporaryToken>()
-            .Where(SqlOSTemporaryToken.OfKind(SqlOSTemporaryTokenKinds.MagicLink))
-            .Where(x => x.CreatedAt >= now.Subtract(_options.RateLimitWindow))
-            .ToListAsync(cancellationToken);
-        var recent = recentTokens
-            .Select(token => new RecentMagicLinkToken(token, token.ReadPayload(SqlOSTemporaryTokenKinds.MagicLink)))
-            .Where(x => x.Payload != null)
-            .ToArray();
-
-        var exceededLimit = recent.Count(x => string.Equals(x.Payload!.NormalizedEmail, normalizedEmail, StringComparison.Ordinal)) >= _options.MaxLinksPerEmailPerWindow
-            ? "email"
-            : !string.IsNullOrWhiteSpace(ipAddress)
-                && recent.Count(x => string.Equals(x.Payload!.IpAddress, ipAddress, StringComparison.Ordinal)) >= _options.MaxLinksPerIpPerWindow
-                ? "ip"
-                : !string.IsNullOrWhiteSpace(clientApplicationId)
-                    && recent.Count(x => string.Equals(x.Token.ClientApplicationId, clientApplicationId, StringComparison.Ordinal)) >= _options.MaxLinksPerClientPerWindow
-                    ? "client"
-                    : null;
-        if (exceededLimit != null)
+        // The send is admitted atomically before anything is written, so requests sent together
+        // can never exceed a limit between them (#424).
+        var admission = await _admission.AdmitSignInLinkAsync(EmailAddress.Parse(typedAddress), origin, clientApplicationId, now, cancellationToken);
+        if (!admission.Admitted)
         {
-            _auditRecorder.Record(new MagicLinkSendRateLimited(maskedEmail, ipAddress, exceededLimit, clientApplicationId, requestedOrganizationId));
+            _auditRecorder.Record(new MagicLinkSendRateLimited(maskedEmail, ipAddress, admission.RefusedLimit!, clientApplicationId, requestedOrganizationId));
             await _context.SaveChangesAsync(cancellationToken);
             throw new InvalidOperationException("Too many sign-in link requests. Try again later.");
         }
+
+        // Only this client's recent links can be in the same sign-in context.
+        var recent = (await _context.Set<SqlOSTemporaryToken>()
+                .Where(SqlOSTemporaryToken.OfKind(SqlOSTemporaryTokenKinds.MagicLink))
+                .Where(x => x.ClientApplicationId == clientApplicationId && x.CreatedAt >= now.Subtract(_options.RateLimitWindow))
+                .ToListAsync(cancellationToken))
+            .Select(token => new RecentMagicLinkToken(token, token.ReadPayload(SqlOSTemporaryTokenKinds.MagicLink)))
+            .Where(x => x.Payload != null)
+            .ToArray();
 
         var latestContextToken = recent
             .Where(x => x.Token.ConsumedAt == null
@@ -248,6 +245,8 @@ public sealed class SqlOSMagicLinkService
             .FirstOrDefault();
         if (latestContextToken != null && latestContextToken.Token.CreatedAt > now.Subtract(_options.ResendCooldown))
         {
+            // A resend the cooldown refuses sends nothing, so it does not count against a limit.
+            await _admission.WithdrawAsync(admission, now, cancellationToken);
             throw new InvalidOperationException($"Wait {(int)Math.Ceiling(_options.ResendCooldown.TotalSeconds)} seconds before requesting another sign-in link.");
         }
 

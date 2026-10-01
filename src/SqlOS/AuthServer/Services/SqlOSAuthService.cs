@@ -39,9 +39,7 @@ public sealed class SqlOSAuthService
     private readonly SqlOSMfaPolicyService _mfaPolicyService;
     private readonly SqlOSTotpMfaService? _totpMfaService;
     private readonly SqlOSInvitationService? _invitationService;
-    private readonly SqlOSPasswordLoginAbuseService _passwordLoginAbuseService;
-    private readonly SqlOSMfaAttemptAdmissionService _mfaAttemptAdmissionService;
-    private readonly SqlOSDeliveryAdmissionService _deliveryAdmission;
+    private readonly IAdmissionGate _admission;
     private readonly ISqlOSTransactionalEmailService? _transactionalEmailService;
     private readonly ISqlOSAuthEmailSender? _authEmailSender;
 
@@ -73,11 +71,14 @@ public sealed class SqlOSAuthService
         _magicLinkService = magicLinkService;
         _phoneOtpService = phoneOtpService;
         _invitationService = invitationService;
-        _passwordLoginAbuseService = passwordLoginAbuseService
-            ?? new SqlOSPasswordLoginAbuseService(context, adminService, cryptoService, options);
-        _mfaAttemptAdmissionService = mfaAttemptAdmissionService
-            ?? new SqlOSMfaAttemptAdmissionService(context, cryptoService, options);
-        _deliveryAdmission = deliveryAdmissionService ?? new SqlOSDeliveryAdmissionService();
+        _admission = SqlOSAdmissionGate.Create(
+            context,
+            adminService,
+            cryptoService,
+            options,
+            deliveryAdmissionService ?? new SqlOSDeliveryAdmissionService(),
+            mfaAttemptAdmissionService,
+            passwordLoginAbuseService);
         _transactionalEmailService = transactionalEmailService;
         _authEmailSender = authEmailSender;
         _mfaPolicyService = mfaPolicyService ?? new SqlOSMfaPolicyService(context, settingsService, options);
@@ -165,9 +166,9 @@ public sealed class SqlOSAuthService
         // Refuse a third-party client before the password is checked: its UI must not collect credentials.
         await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(_adminService, client, httpContext, userId: null, cancellationToken);
         var normalizedEmail = SqlOSAdminService.NormalizeEmail(request.Email);
-        var attempt = _passwordLoginAbuseService.CreateAttempt(
+        var attempt = _admission.BeginPasswordAttempt(
             normalizedEmail,
-            httpContext,
+            AdmissionOrigin.Of(httpContext),
             clientKey: request.ClientId,
             surface: "api");
 
@@ -186,7 +187,7 @@ public sealed class SqlOSAuthService
             : await _context.Set<SqlOSCredential>()
                 .AsNoTracking()
                 .FirstOrDefaultAsync(x => x.UserId == email.UserId && x.Type == "password" && x.RevokedAt == null, cancellationToken);
-        await _passwordLoginAbuseService.ReserveAsync(attempt, cancellationToken);
+        await _admission.AdmitPasswordAttemptAsync(attempt, cancellationToken);
         var passwordMatches = _cryptoService.VerifyPassword(
             credential?.SecretHash ?? SqlOSClientAuthenticationService.DummyCredentialHash,
             request.Password);
@@ -197,12 +198,12 @@ public sealed class SqlOSAuthService
                 : credential == null
                     ? "missing_password_credential"
                     : "invalid_password";
-            await _passwordLoginAbuseService.RecordFailureAsync(attempt, failureReason, cancellationToken);
+            await _admission.RecordPasswordAttemptFailedAsync(attempt, failureReason, cancellationToken);
             throw new InvalidOperationException(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
         }
 
         var user = await _context.Set<SqlOSUser>().AsNoTracking().FirstAsync(x => x.Id == email!.UserId, cancellationToken);
-        await _passwordLoginAbuseService.RecordSuccessAsync(attempt, cancellationToken);
+        await _admission.RecordPasswordAttemptSucceededAsync(attempt, cancellationToken);
         var storedCredential = await _context.Set<SqlOSCredential>().FirstAsync(x => x.Id == credential.Id, cancellationToken);
         storedCredential.LastUsedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync(cancellationToken);
@@ -1247,12 +1248,11 @@ public sealed class SqlOSAuthService
             .Include(x => x.User)
             .FindByEmailAsync(trimmedEmail, cancellationToken);
 
-        var rateLimit = await _deliveryAdmission.ReservePasswordResetAsync(
+        var rateLimit = await _admission.AdmitPasswordResetEmailAsync(
             normalizedEmail,
             email?.UserId,
-            ipAddress,
+            AdmissionOrigin.Of(httpContext),
             clientKey,
-            _passwordResetOptions,
             now,
             cancellationToken);
 
@@ -1268,7 +1268,7 @@ public sealed class SqlOSAuthService
                 ipAddress,
                 new
                 {
-                    scope = rateLimit.RejectedScope,
+                    scope = rateLimit.RefusedLimit,
                     retryAfter,
                     clientKey
                 },
@@ -2077,20 +2077,20 @@ public sealed class SqlOSAuthService
 
         var payload = token.ReadPayload(SqlOSTemporaryTokenKinds.MfaChallenge)
             ?? throw new InvalidOperationException("MFA challenge payload is invalid.");
-        var reservationId = await _mfaAttemptAdmissionService.ReserveAsync(
+        var reservationId = await _admission.AdmitMfaAttemptAsync(
             token,
-            httpContext,
+            AdmissionOrigin.Of(httpContext),
             payload.AuthorizationRequestId,
             cancellationToken);
         try
         {
             var factorMethod = await RequireTotpMfaService().VerifySecondFactorCodeAsync(token.UserId, code, cancellationToken);
-            await _mfaAttemptAdmissionService.RecordSuccessAsync(reservationId, CancellationToken.None);
+            await _admission.RecordMfaAttemptSucceededAsync(reservationId, CancellationToken.None);
             return factorMethod;
         }
         catch (InvalidOperationException)
         {
-            await _mfaAttemptAdmissionService.RecordFailureAsync(reservationId, CancellationToken.None);
+            await _admission.RecordMfaAttemptFailedAsync(reservationId, CancellationToken.None);
             var attemptCount = await RecordMfaChallengeFailureAsync(token, cancellationToken);
             await TryRecordMfaChallengeAuditAsync(
                 MfaChallengeFailedAuditEvent,
@@ -2119,7 +2119,7 @@ public sealed class SqlOSAuthService
         CancellationToken cancellationToken = default,
         bool credentialSignIn = false)
     {
-        if (await _mfaAttemptAdmissionService.IsUserCapacityExhaustedAsync(user.Id, cancellationToken))
+        if (await _admission.IsMfaBudgetExhaustedAsync(user.Id, cancellationToken))
         {
             await TryRecordMfaChallengeAuditAsync(
                 "user.mfa.challenge_issue_rejected",

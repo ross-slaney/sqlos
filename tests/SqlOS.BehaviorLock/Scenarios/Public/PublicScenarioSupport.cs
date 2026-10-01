@@ -37,17 +37,19 @@ internal static class PublicHost
 
 /// <summary>
 /// A rendezvous for SQL commands issued by parallel requests. While armed, every command whose
-/// text contains all of <see cref="Markers"/> waits until <see cref="Participants"/> such commands
-/// have arrived (or <see cref="Timeout"/> passes), then all of them run. It makes a race in
-/// SqlOS deterministic: each parallel request has finished its reads before any of them writes,
-/// which is the interleaving a real attacker gets by sending the requests together. Commands that
-/// arrive after the barrier opened, or while it is disarmed, run immediately.
+/// text contains all of <see cref="Markers"/> waits until <see cref="Participants"/> requests are
+/// accounted for, each either waiting at such a command or finished without one (see
+/// <see cref="Depart"/>), or until <see cref="Timeout"/> passes; then all of them run. It makes a
+/// race in SqlOS deterministic: each parallel request has finished its reads before any of them
+/// writes, which is the interleaving a real attacker gets by sending the requests together.
+/// Commands that arrive after the barrier opened, or while it is disarmed, run immediately.
 /// </summary>
 internal sealed class SqlCommandBarrier : DbCommandInterceptor
 {
     private readonly object _gate = new();
     private TaskCompletionSource? _opened;
     private int _arrived;
+    private int _departed;
 
     public SqlCommandBarrier(int participants, params string[] markers)
     {
@@ -66,7 +68,29 @@ internal sealed class SqlCommandBarrier : DbCommandInterceptor
         lock (_gate)
         {
             _arrived = 0;
+            _departed = 0;
             _opened = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+    }
+
+    /// <summary>
+    /// Records that a participating request finished. While the barrier is closed, a finished
+    /// request never reached it (a request that did waits until it opens), for example one a fixed
+    /// SqlOS refused before its write, so the barrier stops waiting for it.
+    /// </summary>
+    public void Depart()
+    {
+        lock (_gate)
+        {
+            if (_opened == null || _opened.Task.IsCompleted)
+            {
+                return;
+            }
+
+            if (_arrived + ++_departed >= Participants)
+            {
+                _opened.TrySetResult();
+            }
         }
     }
 
@@ -122,7 +146,7 @@ internal sealed class SqlCommandBarrier : DbCommandInterceptor
             }
 
             opened = _opened.Task;
-            if (++_arrived >= Participants)
+            if (++_arrived + _departed >= Participants)
             {
                 _opened.TrySetResult();
             }

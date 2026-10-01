@@ -24,7 +24,7 @@ public sealed class SqlOSAuthorizationServerService
     private readonly SqlOSIssuerSessionService _issuerSessionService;
     private readonly SqlOSAuthServerOptions _options;
     private readonly SqlOSInvitationService? _invitationService;
-    private readonly SqlOSPasswordLoginAbuseService _passwordLoginAbuseService;
+    private readonly IAdmissionGate _admission;
     private readonly SqlOSMfaPolicyService _mfaPolicyService;
     private readonly SqlOSTotpMfaService? _totpMfaService;
     private readonly SqlOSConsentService _consentService;
@@ -51,8 +51,12 @@ public sealed class SqlOSAuthorizationServerService
         _issuerSessionService = issuerSessionService;
         _options = options.Value;
         _invitationService = invitationService;
-        _passwordLoginAbuseService = passwordLoginAbuseService
-            ?? new SqlOSPasswordLoginAbuseService(context, adminService, cryptoService, options);
+        _admission = SqlOSAdmissionGate.Create(
+            context,
+            adminService,
+            cryptoService,
+            options,
+            passwordAttempts: passwordLoginAbuseService);
         _mfaPolicyService = mfaPolicyService ?? new SqlOSMfaPolicyService(context, settingsService, options);
         _totpMfaService = totpMfaService;
         _consentService = consentService ?? new SqlOSConsentService(context, cryptoService);
@@ -619,9 +623,9 @@ public sealed class SqlOSAuthorizationServerService
         }
 
         var normalizedEmail = SqlOSAdminService.NormalizeEmail(email);
-        var attempt = _passwordLoginAbuseService.CreateAttempt(
+        var attempt = _admission.BeginPasswordAttempt(
             normalizedEmail,
-            httpContext,
+            AdmissionOrigin.Of(httpContext),
             clientKey,
             authorizationRequestId,
             surface ?? "authorization");
@@ -644,7 +648,7 @@ public sealed class SqlOSAuthorizationServerService
             : await _context.Set<SqlOSCredential>()
                 .AsNoTracking()
                 .FirstOrDefaultAsync(x => x.UserId == emailRecord.UserId && x.Type == "password" && x.RevokedAt == null, cancellationToken);
-        await _passwordLoginAbuseService.ReserveAsync(attempt, cancellationToken);
+        await _admission.AdmitPasswordAttemptAsync(attempt, cancellationToken);
         var passwordMatches = _cryptoService.VerifyPassword(
             credential?.SecretHash ?? SqlOSClientAuthenticationService.DummyCredentialHash,
             password);
@@ -655,7 +659,7 @@ public sealed class SqlOSAuthorizationServerService
                 : credential == null
                     ? "missing_password_credential"
                     : "invalid_password";
-            await _passwordLoginAbuseService.RecordFailureAsync(attempt, failureReason, cancellationToken);
+            await _admission.RecordPasswordAttemptFailedAsync(attempt, failureReason, cancellationToken);
             throw new InvalidOperationException(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
         }
 
@@ -664,11 +668,11 @@ public sealed class SqlOSAuthorizationServerService
             .FirstOrDefaultAsync(x => x.Id == emailRecord!.UserId, cancellationToken);
         if (user == null || !user.IsActive)
         {
-            await _passwordLoginAbuseService.RecordFailureAsync(attempt, "inactive_user", cancellationToken);
+            await _admission.RecordPasswordAttemptFailedAsync(attempt, "inactive_user", cancellationToken);
             throw new InvalidOperationException(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
         }
 
-        await _passwordLoginAbuseService.RecordSuccessAsync(attempt, cancellationToken);
+        await _admission.RecordPasswordAttemptSucceededAsync(attempt, cancellationToken);
         var storedCredential = await _context.Set<SqlOSCredential>().FirstAsync(x => x.Id == credential.Id, cancellationToken);
         storedCredential.LastUsedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync(cancellationToken);

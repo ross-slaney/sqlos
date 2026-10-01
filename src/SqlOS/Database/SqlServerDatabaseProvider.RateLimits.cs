@@ -400,6 +400,9 @@ internal sealed partial class SqlServerDatabaseProvider
             CLOSE lock_cursor;
             DEALLOCATE lock_cursor;
             """);
+        // A window start travels as a DATETIME parameter, as it was written. Comparing DATETIME with
+        // a DATETIME2 column uses the exact DATETIME value, which never equals the rounded value the
+        // write stored, so the parameter is converted the way the write converted it.
         for (var index = 0; index < count; index++)
         {
             sql.AppendLine($"""
@@ -408,10 +411,10 @@ internal sealed partial class SqlServerDatabaseProvider
                     [LockedUntil] = CASE WHEN [Count] - 1 < @threshold{index} THEN NULL ELSE [LockedUntil] END,
                     [UpdatedAt] = @now
                 WHERE [Scope] = @scope{index} AND [BucketKey] = @key{index}
-                  AND [WindowStartedAt] = @windowStartedAt{index};
+                  AND [WindowStartedAt] = CAST(@windowStartedAt{index} AS DATETIME2);
                 DELETE FROM {table}
                 WHERE [Scope] = @scope{index} AND [BucketKey] = @key{index}
-                  AND [WindowStartedAt] = @windowStartedAt{index}
+                  AND [WindowStartedAt] = CAST(@windowStartedAt{index} AS DATETIME2)
                   AND [Count] = 0;
                 """);
         }

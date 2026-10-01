@@ -28,6 +28,7 @@ public sealed class SqlOSEmailOtpService
     private readonly ISqlOSTransactionalEmailService? _transactionalEmailService;
     private readonly IAuditRecorder _auditRecorder;
     private readonly SqlOSEmailOtpAttemptLedger _attempts;
+    private readonly IAdmissionGate _admission;
     private readonly SqlOSEmailOtpOptions _options;
 
     public SqlOSEmailOtpService(
@@ -47,6 +48,7 @@ public sealed class SqlOSEmailOtpService
         _transactionalEmailService = transactionalEmailService;
         _auditRecorder = new SqlOSAuditRecorder(context);
         _attempts = new SqlOSEmailOtpAttemptLedger(context);
+        _admission = SqlOSAdmissionGate.Create(context, adminService, cryptoService, options);
         _options = options.Value.EmailOtp;
     }
 
@@ -450,41 +452,39 @@ public sealed class SqlOSEmailOtpService
             httpContext?.Request.Headers.UserAgent.ToString());
         var now = DateTime.UtcNow;
 
-        var recentChallenges = (await _context.Set<SqlOSEmailOtpChallenge>()
-                .Where(x => x.NormalizedEmail == normalizedEmail && x.CreatedAt >= now.AddHours(-1))
-                .OrderByDescending(x => x.CreatedAt)
-                .ToListAsync(cancellationToken))
-            .Where(x => string.Equals(x.NormalizedEmail, normalizedEmail, StringComparison.Ordinal))
-            .ToList();
-
-        var exceededLimit = recentChallenges.Count >= _options.MaxChallengesPerHour
-            ? "email"
-            : !string.IsNullOrWhiteSpace(request.IpAddress)
-                && await _context.Set<SqlOSEmailOtpChallenge>()
-                    .CountAsync(x => x.IpAddress == request.IpAddress && x.CreatedAt >= now.AddHours(-1), cancellationToken) >= _options.MaxChallengesPerIpPerHour
-                ? "ip"
-                : !string.IsNullOrWhiteSpace(context.ClientApplicationId)
-                    && await _context.Set<SqlOSEmailOtpChallenge>()
-                        .CountAsync(x => x.ClientApplicationId == context.ClientApplicationId && x.CreatedAt >= now.AddHours(-1), cancellationToken) >= _options.MaxChallengesPerClientPerHour
-                    ? "client"
-                    : null;
-        if (exceededLimit != null)
+        // The send is admitted atomically before anything is written, so requests sent together
+        // can never exceed a limit between them (#424).
+        var admission = await _admission.AdmitEmailCodeAsync(
+            requestedAddress,
+            new AdmissionOrigin(request.IpAddress, request.UserAgent),
+            context.ClientApplicationId,
+            now,
+            cancellationToken);
+        if (!admission.Admitted)
         {
             _auditRecorder.Record(new EmailOtpSendRateLimited(
                 purpose,
                 Masked.Email(requestedAddress.Address),
                 request.IpAddress,
-                exceededLimit,
+                admission.RefusedLimit!,
                 context.ClientApplicationId,
                 context.RequestedOrganizationId));
             await _context.SaveChangesAsync(cancellationToken);
             throw new InvalidOperationException("Too many sign-in code requests. Try again later.");
         }
 
+        var recentChallenges = (await _context.Set<SqlOSEmailOtpChallenge>()
+                .Where(x => x.NormalizedEmail == normalizedEmail && x.CreatedAt >= now.AddHours(-1))
+                .OrderByDescending(x => x.CreatedAt)
+                .ToListAsync(cancellationToken))
+            .Where(x => string.Equals(x.NormalizedEmail, normalizedEmail, StringComparison.Ordinal))
+            .ToList();
         var latestContextChallenge = recentChallenges
             .FirstOrDefault(x => x.WasStartedIn(context) && !x.IsInvalidated);
         if (latestContextChallenge != null && latestContextChallenge.WasSentWithin(_options.ResendCooldown, now))
         {
+            // A resend the cooldown refuses sends nothing, so it does not count against a limit.
+            await _admission.WithdrawAsync(admission, now, cancellationToken);
             throw new InvalidOperationException($"Wait {(int)Math.Ceiling(_options.ResendCooldown.TotalSeconds)} seconds before requesting another code.");
         }
 

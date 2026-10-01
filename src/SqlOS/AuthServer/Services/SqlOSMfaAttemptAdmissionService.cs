@@ -34,15 +34,26 @@ public sealed class SqlOSMfaAttemptAdmissionService
     /// Reserves comparison capacity in every applicable MFA bucket before TOTP or recovery-code
     /// verification. The SQL transaction completes before the factor is compared.
     /// </summary>
-    public async Task<string> ReserveAsync(
+    public Task<string> ReserveAsync(
         SqlOSTemporaryToken challenge,
         HttpContext? httpContext,
         string? authorizationRequestId = null,
         CancellationToken cancellationToken = default)
+        => ReserveAsync(challenge, AdmissionOrigin.Of(httpContext), authorizationRequestId, cancellationToken);
+
+    /// <summary>
+    /// Reserves comparison capacity for a request from <paramref name="origin"/>; see the public
+    /// overload.
+    /// </summary>
+    internal async Task<string> ReserveAsync(
+        SqlOSTemporaryToken challenge,
+        AdmissionOrigin origin,
+        string? authorizationRequestId,
+        CancellationToken cancellationToken)
     {
         var reservationId = _cryptoService.GenerateId("mfa");
         var admitted = await ExecuteAtomicAsync(
-            () => ReserveCoreAsync(reservationId, challenge, httpContext, authorizationRequestId, cancellationToken),
+            () => ReserveCoreAsync(reservationId, challenge, origin, authorizationRequestId, cancellationToken),
             cancellationToken);
         if (admitted)
         {
@@ -80,12 +91,12 @@ public sealed class SqlOSMfaAttemptAdmissionService
     private async Task<bool> ReserveCoreAsync(
         string reservationId,
         SqlOSTemporaryToken challenge,
-        HttpContext? httpContext,
+        AdmissionOrigin origin,
         string? authorizationRequestId,
         CancellationToken cancellationToken)
     {
         var now = DateTime.UtcNow;
-        var identities = GetBucketIdentities(challenge, httpContext, authorizationRequestId).ToArray();
+        var identities = GetBucketIdentities(challenge, origin, authorizationRequestId).ToArray();
         var existing = new List<(MfaBucketIdentity Identity, SqlOSMfaAttemptBucket Bucket)>();
         var missing = new List<MfaBucketIdentity>();
         foreach (var identity in identities)
@@ -323,7 +334,7 @@ public sealed class SqlOSMfaAttemptAdmissionService
 
     private IEnumerable<MfaBucketIdentity> GetBucketIdentities(
         SqlOSTemporaryToken challenge,
-        HttpContext? httpContext,
+        AdmissionOrigin origin,
         string? authorizationRequestId)
     {
         yield return new MfaBucketIdentity("challenge", challenge.Id, _options.MaxFailedAttemptsPerChallenge);
@@ -340,13 +351,13 @@ public sealed class SqlOSMfaAttemptAdmissionService
                 _options.MaxFailedAttemptsPerClient);
         }
 
-        var ipAddress = httpContext?.Connection.RemoteIpAddress?.ToString();
+        var ipAddress = origin.IpAddress;
         if (!string.IsNullOrWhiteSpace(ipAddress))
         {
             yield return new MfaBucketIdentity("ip", ipAddress, _options.MaxFailedAttemptsPerIp);
         }
 
-        var userAgent = httpContext?.Request.Headers.UserAgent.ToString();
+        var userAgent = origin.UserAgent;
         if (!string.IsNullOrWhiteSpace(userAgent) && !string.IsNullOrWhiteSpace(challenge.UserId))
         {
             var separator = SqlOSDatabase.CompositeKeySeparator(_context.Database.ProviderName);

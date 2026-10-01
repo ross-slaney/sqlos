@@ -22,7 +22,7 @@ public sealed class SqlOSPhoneOtpService
     private readonly SqlOSCryptoService _cryptoService;
     private readonly SqlOSSettingsService _settingsService;
     private readonly ISqlOSOtpDeliveryChannel _deliveryChannel;
-    private readonly SqlOSDeliveryAdmissionService _deliveryAdmission;
+    private readonly IAdmissionGate _admission;
     private readonly IAuditRecorder _auditRecorder;
     private readonly SqlOSPhoneOtpOptions _options;
 
@@ -40,7 +40,12 @@ public sealed class SqlOSPhoneOtpService
         _cryptoService = cryptoService;
         _settingsService = settingsService;
         _deliveryChannel = deliveryChannel;
-        _deliveryAdmission = deliveryAdmissionService ?? new SqlOSDeliveryAdmissionService();
+        _admission = SqlOSAdmissionGate.Create(
+            context,
+            adminService,
+            cryptoService,
+            options,
+            deliveryAdmissionService ?? new SqlOSDeliveryAdmissionService());
         _auditRecorder = new SqlOSAuditRecorder(context);
         _options = options.Value.PhoneOtp;
     }
@@ -531,12 +536,11 @@ public sealed class SqlOSPhoneOtpService
 
         var effectiveUserId = userId ?? phoneRecord?.UserId;
         var effectiveUserPhoneNumberId = userPhoneNumberId ?? phoneRecord?.Id;
-        var admission = await _deliveryAdmission.ReservePhoneOtpAsync(
+        var admission = await _admission.AdmitPhoneCodeAsync(
             phoneHash,
             effectiveUserId,
-            ipAddress,
+            AdmissionOrigin.Of(httpContext),
             clientApplicationId,
-            _options,
             now,
             cancellationToken);
         if (!admission.Admitted)
@@ -545,7 +549,7 @@ public sealed class SqlOSPhoneOtpService
                 purpose,
                 maskedPhone,
                 ipAddress,
-                admission.RejectedScope ?? "phone",
+                admission.RefusedLimit ?? "phone",
                 clientApplicationId,
                 requestedOrganizationId));
             await _context.SaveChangesAsync(cancellationToken);

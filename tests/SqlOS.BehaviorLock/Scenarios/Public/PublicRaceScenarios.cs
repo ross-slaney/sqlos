@@ -48,7 +48,7 @@ public sealed class PublicRaceScenarios
             t,
             barrier,
             guess => t.Api.PostJsonAsync("/sqlos/auth/email-otp/verify", new { challengeToken, code = PublicSetup.WrongCode(code, guess) }),
-            guess => $"parallel wrong guess {guess}",
+            (guess, _) => $"parallel wrong guess {guess}",
             "five guesses spent the five attempts, the last closing the challenge (max_attempts); the sixth found none left");
 
         t.Observe(
@@ -61,8 +61,11 @@ public sealed class PublicRaceScenarios
 
     [Scenario]
     [Covers("POST /sqlos/auth/email-otp/start")]
-    public async Task Parallel_code_requests_exceed_the_hourly_limit_CurrentBehavior_KnownDefect_424()
+    public async Task Parallel_code_requests_never_exceed_the_hourly_limit()
     {
+        // #424, fixed: each request reserves the address's, the IP address's and the client's
+        // buckets in one atomic step before it writes, so five of the six are admitted and the
+        // sixth is refused. 7.2.1 counted the recent challenges, then inserted, and admitted all six.
         var barrier = new SqlCommandBarrier(Parallel, "INSERT", "SqlOSEmailOtpChallenges");
         await using var t = await PublicHost.StartAsync(HostProfiles.Hosted, options => options.ConfigureServices = PublicHost.Interleave(barrier));
         var alice = await t.Setup.CreateUserAsync("alice");
@@ -71,12 +74,14 @@ public sealed class PublicRaceScenarios
             t,
             barrier,
             _ => t.Api.PostJsonAsync("/sqlos/auth/email-otp/start", new { email = alice.Email, clientId = Client }),
-            request => $"parallel request {request}: admitted, and a code is sent",
-            "six challenges started and six emails queued");
+            (request, exchange) => exchange.StatusCode == 200
+                ? $"parallel request {request}: admitted, and a code is sent"
+                : $"parallel request {request}: refused, the address's hourly limit is reached",
+            "five challenges started and five emails queued; one request refused");
 
         t.Observe(
             await t.Api.PostJsonAsync("/sqlos/auth/email-otp/start", new { email = alice.Email, clientId = Client }),
-            "six codes went out against a limit of five an hour; only now is the limit enforced");
+            "a seventh request is refused as well");
 
         await t.ObserveAuditAsync("the rejection");
         await t.ApproveAsync();
@@ -84,8 +89,11 @@ public sealed class PublicRaceScenarios
 
     [Scenario]
     [Covers("POST /sqlos/auth/magic-link/start")]
-    public async Task Parallel_link_requests_exceed_the_hourly_limit_CurrentBehavior_KnownDefect_424()
+    public async Task Parallel_link_requests_never_exceed_the_hourly_limit()
     {
+        // #424, fixed: each request reserves the address's, the IP address's and the client's
+        // buckets in one atomic step before it writes, so five of the six are admitted and the
+        // sixth is refused. 7.2.1 counted the recent links, then inserted, and admitted all six.
         var barrier = new SqlCommandBarrier(Parallel, "INSERT", "SqlOSTemporaryTokens");
         await using var t = await PublicHost.StartAsync(HostProfiles.Hosted, options => options.ConfigureServices = PublicHost.Interleave(barrier));
         var alice = await t.Setup.CreateUserAsync("alice");
@@ -94,12 +102,14 @@ public sealed class PublicRaceScenarios
             t,
             barrier,
             _ => t.Api.PostJsonAsync("/sqlos/auth/magic-link/start", new { email = alice.Email, clientId = Client }),
-            request => $"parallel request {request}: admitted, and a link is sent",
-            "six links requested and six emails queued");
+            (request, exchange) => exchange.StatusCode == 200
+                ? $"parallel request {request}: admitted, and a link is sent"
+                : $"parallel request {request}: refused, the address's hourly limit is reached",
+            "five links requested and five emails queued; one request refused");
 
         t.Observe(
             await t.Api.PostJsonAsync("/sqlos/auth/magic-link/start", new { email = alice.Email, clientId = Client }),
-            "six links went out against a limit of five an hour; only now is the limit enforced");
+            "a seventh request is refused as well");
 
         await t.ObserveAuditAsync("the rejection");
         await t.ApproveAsync();
@@ -107,22 +117,37 @@ public sealed class PublicRaceScenarios
 
     /// <summary>
     /// Sends <see cref="Parallel"/> requests together through the armed barrier, observes them in
-    /// the order they were listed, and records the audit events they wrote in content order: the
-    /// requests write them in whatever order their threads run.
+    /// the order they were listed, the answered ones before the refused ones (a stable sort by
+    /// status: when a limit admits only some of the requests, which ones it refuses depends on
+    /// thread timing), and records the audit events they wrote in content order: the requests write
+    /// them in whatever order their threads run.
     /// </summary>
     private static async Task SendInParallelAsync(
         Transcript t,
         SqlCommandBarrier barrier,
         Func<int, Task<HttpExchange>> request,
-        Func<string, string> caption,
+        Func<string, HttpExchange, string> caption,
         string auditCaption)
     {
         barrier.Arm();
-        var exchanges = await Task.WhenAll(Enumerable.Range(1, Parallel).Select(request));
-        barrier.Disarm();
-        for (var index = 0; index < exchanges.Length; index++)
+        var exchanges = await Task.WhenAll(Enumerable.Range(1, Parallel).Select(async index =>
         {
-            t.Observe(exchanges[index], caption($"{(index + 1).ToString(CultureInfo.InvariantCulture)} of {Parallel.ToString(CultureInfo.InvariantCulture)}"));
+            try
+            {
+                return await request(index);
+            }
+            finally
+            {
+                barrier.Depart();
+            }
+        }));
+        barrier.Disarm();
+        var observed = exchanges.OrderBy(exchange => exchange.StatusCode).ToList();
+        for (var index = 0; index < observed.Count; index++)
+        {
+            t.Observe(
+                observed[index],
+                caption($"{(index + 1).ToString(CultureInfo.InvariantCulture)} of {Parallel.ToString(CultureInfo.InvariantCulture)}", observed[index]));
         }
 
         await t.ObserveAuditAsync(auditCaption, AuditOrder.Content);
