@@ -421,6 +421,28 @@ Each layer keeps every gate green, and every external difference is ledgered.
 | 4 | #438 | `Organization`, domain claims, `Membership`, `Invitation`, `SsoConnection`, `OidcConnection`, `ScimConnection` and its links, portal sessions, and the FGA write model with `GrantAuthority`. |
 | 5 | #439 | Configuration, email, calendar, audit logs and dashboard sessions; audit completeness (#415); the public API finalization; allowlists to zero; removing legacy code; the security re-audit; docs, the upgrade guide, the architecture guide and the release article. |
 
+### Layer 2 delivered
+
+Every identity flow is one internal process in `SqlOS.AuthServer.Processes.Identity`, called by the hosted, headless and public-API adapters and by the public facades, which keep their 7.x signatures and delegate: sign-up with a password, an email code, a phone code or an invitation; sign-in with a password, an email code, a sign-in link or a phone code; the password reset request, the operator's reset email and the reset; email verification; TOTP enrollment; the MFA challenge with an authenticator or a recovery code; and an operator creating, deactivating and reactivating an account. Each sign-in ends in `LoginEvidence`, which the hub adapter completes until layer 3 replaces it. The behavior lock differs from 7.2.1 only by BL-0001 to BL-0008.
+
+`scripts/domain-metrics.sh` on 7.2.1 (`25fb3f0`) and at the end of layer 2, with layer 2's counting rule for duplicated flows ([baseline](8.0-baseline-metrics.md#counting-rule-changes)):
+
+| Metric | 7.2.1 | Layer 2 |
+|---|---|---|
+| Public settable entity properties | 930 | 779 |
+| `IsVerified`, `ConsumedAt`, `RevokedAt`, `IsActive` write sites | 8, 25, 52, 31 | 0, 6, 45, 29 |
+| `SqlOSAuthorizationRequest` assignments | 43 | 32 |
+| Audit write sites | 227 | 176 |
+| `DateTime.UtcNow` uses | 389 | 307 |
+| Methods over 100 lines | 84 | 73 |
+| `SaveChangesAsync` call sites | 249 | 276 |
+| Services implementing sign-up, MFA verification, email-code verification, sign-in-link completion, organization selection | 3, 3, 2, 2, 3 | 0, 0, 0, 0, 3 |
+
+- **Entities.** Identity, challenge and token entities have no public setters, and `IsVerified` is written only through `Verification`.
+- **Time.** No `DateTime.UtcNow` in domain or process code (rule 6 allows only the audit and FGA constructors that layers 4 and 5 move) or in the identity services, which read the host's `TimeProvider`. The 307 uses left belong to layers 3 to 5.
+- **One implementation per flow.** A flow's process is its implementation; facades and adapters only forward to it. Organization selection is the hub's step (Amendment 4), which layer 3 models.
+- **Saves.** Only processes save for the identity flows. A process saves each change 7.2.1 committed on its own (Amendment 4), so call sites grew where 7.2.1's audit helpers saved out of sight, at the same runtime boundaries. Saves outside processes (`save-call-sites.txt`) fell from 218 to 184. Account settings outside the credential flows (adding a phone number, revoking an authenticator) keep their service implementations on that allowlist.
+
 ## 14. Decisions and rejected alternatives
 
 | Decision | Rejected alternative | Why |
@@ -481,3 +503,14 @@ Each layer keeps every gate green, and every external difference is ledgered.
 | Refusals (§8) | A refusal an identity process decides is `Refused(IdentityRefusal)`: a stable code and the exact 7.x message. Adapters turn it into the 7.x exception inside the catch that maps errors today (`SqlOSPublicAuthErrorMapper`), and the public facades throw it, so statuses, bodies and the public routes' 500s (#456) are unchanged. Collaborators other layers own (the hub, invitations) still throw until their layers return outcomes. | Expected branches are data; the error surface stays byte-identical. |
 | Saves (§3.7, §5) | A process saves each change 7.2.1 committed on its own: an admission or rate-limit record before delivery, a challenge before its code is sent and again when delivery fails, a spent attempt before the comparison (Amendment 2), a spent sign-up token before its audit row. Writes 7.2.1 committed together are saved together, and the hub adapter's completions still save for themselves. No endpoint or facade saves for these sign-in and sign-up flows any more: home-realm discovery that binds a request is the `RouteToHomeRealm` process. | Merging them would retime or reorder 7.2.1's audit rows, each of which takes its save's clock, or roll a failure's record back with the failure. |
 | Sign-ups (§3.7, §5) | Every sign-up runs in one `SignupUnitOfWork`: 7.2.1's database transaction, committed only on `SignedUp` (the public API's password sign-up under the execution strategy, as in 7.2.1), or, on a store without transactions, deleting the account and the organization it created. The account is saved inside it before the hub completes the first login. What the surfaces still do differently in 7.2.1 is one table, `SignupConventions`: which surfaces audit `user.signup*`, whether the record precedes the completion, which call the host hook, the hosted request's organization, and whether a passwordless invitation sign-up needs email codes. The `user.signup*` rows are projected from `UserSignedUp`, raised by `SqlOSUser.RecordSignUp`. | Three sign-up implementations become one per method, and every surface difference is visible in one place until #415 (layer 5) removes the audit difference. |
+
+### Amendment 5: after the recovery and MFA processes slice (layer 2, T2-D2)
+
+| Topic | Amendment | Why |
+|---|---|---|
+| MFA (§3.5, §13) | An answered MFA challenge is a login. `VerifyMfaChallenge` checks the authenticator or recovery code after the challenge's admission and produces evidence with the first factor's method and its own; then it continues the login where the hub paused it, through one of two destinations: `AuthorizationRequestAfterMfa` (the code, in the challenge's organization; a credential sign-in keeps #443) or `DirectLoginAfterMfa` (a first-party client's session and tokens, for the challenge's resource). The hub adapter completes both and audits `user.login.mfa`. A wrong factor is counted on the challenge, which locks at its limit, before the refusal returns. Issuing a challenge stays the hub's (Amendment 4). | Three MFA implementations become one; what the login does next is the hub's. |
+| Channels (§2, §3.7) | Sending a link and checking an authenticator are channels a process calls, not processes: `SqlOSPasswordResetDelivery` (the host's message or the template, the trusted URL template and the idempotency key), `SqlOSEmailVerificationDelivery`, and `SqlOSTotpMfaService` for secrets, code matching at the instant the process read and recovery codes. A channel neither saves nor audits: the process records the outcome on the link (`TemporaryTokenOutcome`) or through `IAuditRecorder`, and saves. | The delivery and matching rules move unchanged, and the save and audit order stays the process's (Amendment 4). |
+| Recovery (§5) | A reset link retires the account's open links and is saved before it is sent, and the send is recorded after it. A link that cannot be sent is withdrawn with the other open links and its failure audited, without the request's cancellation. A reset asks the password policy, then spends its link, then sets the password and revokes the sessions, and records the completion in its own save. | 7.2.1's commits in 7.2.1's order; a caller that disconnects cannot strand a live link. |
+| Transactions (§5) | Confirming an authenticator enrolled for an MFA challenge and completing that challenge's login commit together in one database transaction (`IdentityTransactions`), or not at all; parallel confirmations complete one login (on SQL Server the others end as deadlock victims, as in 7.2.1). | 7.2.1's transaction, as an outcome instead of an exception. |
+| Operators | `SqlOSAdminService.CreateUserAsync` and the admin API run `CreateUser`; an operator never proves a mailbox, so the address stays unverified until a later proof claims it. The admin API's reset email and the facade's run `SendPasswordResetEmail`. | One path per operator action, whichever control plane calls it. |
+| Metrics (§11) | `duplicated_flow_*` counts implementations: a method that hands its flow to a process is an entry point, not a copy ([counting rule changes](8.0-baseline-metrics.md#counting-rule-changes)). | Facades keep their 7.x signatures (§3.8), so counting entry points would never fall. |
