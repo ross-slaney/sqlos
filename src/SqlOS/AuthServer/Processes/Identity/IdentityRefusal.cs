@@ -24,6 +24,7 @@ internal sealed record IdentityRefusal(string Code, string Message)
 /// <summary>The refusals the identity processes decide, with their 7.x public messages.</summary>
 internal static class IdentityRefusals
 {
+    public static readonly IdentityRefusal EmailRequired = new("email_required", "Email address is required.");
     public static readonly IdentityRefusal PasswordLoginDisabled = new("password_login_disabled", "Local password authentication is disabled.");
     public static readonly IdentityRefusal PasswordSignupDisabled = new("password_signup_disabled", "Password signup is disabled.");
     public static readonly IdentityRefusal EmailNotVerified = new("email_not_verified", "Email must be verified before password login.");

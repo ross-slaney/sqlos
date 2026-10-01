@@ -117,7 +117,7 @@ public static partial class EndpointRouteBuilderExtensions
         hostedForms.MapPost("/password/forgot/submit", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
-            SqlOSAuthService authService,
+            SqlOSIdentityProcesses processes,
             CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
@@ -127,12 +127,17 @@ public static partial class EndpointRouteBuilderExtensions
 
             try
             {
-                await authService.RequestPasswordResetEmailAsync(
-                    new SqlOSForgotPasswordRequest(
+                // The link is bound to the authorization request's client.
+                var outcome = await processes.RequestPasswordReset().ExecuteAsync(
+                    new RequestPasswordResetCommand(
                         email,
-                        authorizationRequest?.ClientApplication?.ClientId),
-                    context,
+                        authorizationRequest?.ClientApplication?.ClientId,
+                        SqlOSHttpRequestContext.From(context, SqlOSRequestSurface.Hosted)),
                     cancellationToken);
+                if (outcome is PasswordResetRequestOutcome.Refused refused)
+                {
+                    throw refused.Refusal.ToException();
+                }
 
                 return Html(await BuildAuthPageViewModelAsync(
                     "forgot-password-sent",

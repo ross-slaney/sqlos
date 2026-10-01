@@ -21,7 +21,6 @@ SqlOS.AuthServer.Services.SqlOSAdminService::CreateScimGroupMappingAsync
 SqlOS.AuthServer.Services.SqlOSAdminService::CreateScopeDisplayNameAsync
 SqlOS.AuthServer.Services.SqlOSAdminService::CreateSsoConnectionAsync
 SqlOS.AuthServer.Services.SqlOSAdminService::CreateSsoConnectionDraftAsync
-SqlOS.AuthServer.Services.SqlOSAdminService::CreateUserAsync
 SqlOS.AuthServer.Services.SqlOSAdminService::DeleteScopeDisplayNameAsync
 SqlOS.AuthServer.Services.SqlOSAdminService::DisableClientAsync
 SqlOS.AuthServer.Services.SqlOSAdminService::EmergencyDisableClientAsync
@@ -51,16 +50,12 @@ SqlOS.AuthServer.Services.SqlOSAdminService::UpsertSeededSamlConnectionsCoreAsyn
 SqlOS.AuthServer.Services.SqlOSAdminService::UpsertSeededScimConnectionsCoreAsync
 SqlOS.AuthServer.Services.SqlOSAdminService::UpsertSeededScopeDisplayNamesCoreAsync
 SqlOS.AuthServer.Services.SqlOSAuthService::CreateSessionAndTokensAsync
-SqlOS.AuthServer.Services.SqlOSAuthService::InvalidateActivePasswordResetTokensAsync
 SqlOS.AuthServer.Services.SqlOSAuthService::LogoutAllAsync
 SqlOS.AuthServer.Services.SqlOSAuthService::RecordMfaChallengeFailureAsync
 SqlOS.AuthServer.Services.SqlOSAuthService::RefreshWithSessionScopeAsync
-SqlOS.AuthServer.Services.SqlOSAuthService::RequestEmailVerificationAsync
 SqlOS.AuthServer.Services.SqlOSAuthService::RequireActiveLifecycleAsync
-SqlOS.AuthServer.Services.SqlOSAuthService::ResetPasswordAsync
 SqlOS.AuthServer.Services.SqlOSAuthService::RevokeRefreshTokenFamilyAsync
 SqlOS.AuthServer.Services.SqlOSAuthService::RevokeSessionAsync
-SqlOS.AuthServer.Services.SqlOSAuthService::VerifyEmailAsync
 SqlOS.AuthServer.Services.SqlOSAuthorizationServerService::BuildAuthorizationErrorRedirectAsync
 SqlOS.AuthServer.Services.SqlOSAuthorizationServerService::ConsumeIssuedAuthorizationCodeAsync
 SqlOS.AuthServer.Services.SqlOSAuthorizationServerService::CreateAuthorizationRequestAsync

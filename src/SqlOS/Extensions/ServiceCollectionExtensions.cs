@@ -160,6 +160,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped(sp =>
         {
             var authorizationServer = sp.GetRequiredService<SqlOSAuthorizationServerService>();
+            var auth = sp.GetRequiredService<SqlOSAuthService>();
             return new SqlOSIdentityProcesses(
                 sp.GetRequiredService<ISqlOSAuthServerDbContext>(),
                 sp.GetRequiredService<SqlOSAdminService>(),
@@ -168,8 +169,11 @@ public static class ServiceCollectionExtensions
                 sp.GetRequiredService<IOptions<SqlOSAuthServerOptions>>().Value)
             {
                 PasswordAdmission = authorizationServer.PasswordAdmission,
+                PasswordResetAdmission = auth.Admission,
+                PasswordResetEmails = auth.PasswordResetEmails,
+                VerificationEmails = auth.VerificationEmails,
                 AuthorizationServer = authorizationServer,
-                Auth = sp.GetRequiredService<SqlOSAuthService>(),
+                Auth = auth,
                 IssuerSessions = sp.GetRequiredService<SqlOSIssuerSessionService>(),
                 Invitations = sp.GetRequiredService<SqlOSInvitationService>(),
                 HomeRealms = sp.GetRequiredService<SqlOSHomeRealmDiscoveryService>(),

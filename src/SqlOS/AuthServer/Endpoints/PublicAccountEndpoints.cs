@@ -16,6 +16,7 @@ using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Errors;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.AuthServer.Processes.Identity;
 using SqlOS.AuthServer.Services;
 using SqlOS.AuthServer.Security;
 using SqlOS.Configuration;
@@ -203,7 +204,7 @@ public static partial class EndpointRouteBuilderExtensions
                 error: null,
                 success: false)));
 
-        hostedForms.MapPost("/password/reset/submit", async (HttpContext context, SqlOSAuthService authService, CancellationToken cancellationToken) =>
+        hostedForms.MapPost("/password/reset/submit", async (HttpContext context, SqlOSIdentityProcesses processes, CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
             var token = form["token"].ToString();
@@ -217,7 +218,12 @@ public static partial class EndpointRouteBuilderExtensions
                     throw new InvalidOperationException("Passwords do not match.");
                 }
 
-                await authService.ResetPasswordAsync(new SqlOSResetPasswordRequest(token, newPassword), cancellationToken);
+                var outcome = await processes.ResetPassword().ExecuteAsync(new ResetPasswordCommand(token, newPassword), cancellationToken);
+                if (outcome is PasswordResetOutcome.Refused refused)
+                {
+                    throw refused.Refusal.ToException();
+                }
+
                 return HostedHtml(BuildPasswordResetPage(token: null, error: null, success: true));
             }
             catch (InvalidOperationException ex)
@@ -240,7 +246,7 @@ public static partial class EndpointRouteBuilderExtensions
         auth.MapPost("/email/verification-email", async (SqlOSCreateVerificationTokenRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
             Results.Ok(await authService.RequestEmailVerificationAsync(request, httpContext, cancellationToken)));
 
-        auth.MapGet("/email/verify", async (HttpContext context, SqlOSAuthService authService, CancellationToken cancellationToken) =>
+        auth.MapGet("/email/verify", async (HttpContext context, SqlOSIdentityProcesses processes, CancellationToken cancellationToken) =>
         {
             context.Response.Headers.CacheControl = "no-store";
             context.Response.Headers.Pragma = "no-cache";
@@ -248,9 +254,14 @@ public static partial class EndpointRouteBuilderExtensions
             context.Response.Headers["X-Content-Type-Options"] = "nosniff";
             try
             {
-                await authService.VerifyEmailAsync(
-                    new SqlOSVerifyEmailRequest(context.Request.Query["token"].ToString()),
+                var outcome = await processes.VerifyEmail().ExecuteAsync(
+                    new VerifyEmailCommand(context.Request.Query["token"].ToString()),
                     cancellationToken);
+                if (outcome is EmailVerificationOutcome.Refused refused)
+                {
+                    throw refused.Refusal.ToException();
+                }
+
                 return HostedHtml(BuildEmailVerificationPage(error: null));
             }
             catch (InvalidOperationException ex)

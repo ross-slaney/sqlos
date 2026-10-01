@@ -244,7 +244,8 @@ public sealed class SqlOSDiscoveryAndSettingsTests
         string email)
     {
         // A sign-up whose code proved the address registers it verified.
-        return await admin.CreateUserAsync(
+        return await TestAccounts.RegisterAsync(
+            context,
             new SqlOSCreateUserRequest(displayName, email, "P@ssword123!"),
             new OwnershipProof(EmailAddress.Parse(email), OwnershipProofMethod.EmailOtp));
     }

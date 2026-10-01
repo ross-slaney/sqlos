@@ -232,7 +232,8 @@ internal sealed class EmailOwnershipServer : IAsyncDisposable
     {
         await using var scope = CreateScope();
         // A sign-up whose code proved the address registers it verified.
-        return await scope.Admin.CreateUserAsync(
+        return await TestAccounts.RegisterAsync(
+            scope.Context,
             new SqlOSCreateUserRequest(displayName, email, password),
             verified ? new OwnershipProof(EmailAddress.Parse(email), OwnershipProofMethod.EmailOtp) : null);
     }

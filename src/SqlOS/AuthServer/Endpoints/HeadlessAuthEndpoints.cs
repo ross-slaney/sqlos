@@ -16,10 +16,13 @@ using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Errors;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.AuthServer.Processes.Identity;
 using SqlOS.AuthServer.Services;
 using SqlOS.AuthServer.Security;
 using SqlOS.Configuration;
 using SqlOS.Dashboard;
+using SqlOS.Domain;
+using SqlOS.Hosting;
 
 namespace SqlOS.AuthServer.Extensions;
 
@@ -317,7 +320,7 @@ public static partial class EndpointRouteBuilderExtensions
             HttpContext context,
             SqlOSHeadlessAuthService headlessAuthService,
             SqlOSAuthorizationServerService authorizationServerService,
-            SqlOSAuthService authService,
+            SqlOSIdentityProcesses processes,
             CancellationToken cancellationToken) =>
         {
             if (!headlessAuthService.IsApiEnabled)
@@ -327,15 +330,22 @@ public static partial class EndpointRouteBuilderExtensions
 
             try
             {
+                // The link is bound to the authorization request's client, when the UI names one.
                 var authorizationRequest = string.IsNullOrWhiteSpace(request.RequestId)
                     ? null
                     : await authorizationServerService.TryGetActiveAuthorizationRequestAsync(request.RequestId, cancellationToken);
-                return Results.Ok(await authService.RequestPasswordResetEmailAsync(
-                    new SqlOSForgotPasswordRequest(
+                var outcome = await processes.RequestPasswordReset().ExecuteAsync(
+                    new RequestPasswordResetCommand(
                         request.Email,
-                        authorizationRequest?.ClientApplication?.ClientId),
-                    context,
-                    cancellationToken));
+                        authorizationRequest?.ClientApplication?.ClientId,
+                        SqlOSHttpRequestContext.From(context, SqlOSRequestSurface.Headless)),
+                    cancellationToken);
+                return outcome switch
+                {
+                    PasswordResetRequestOutcome.Answered answered => Results.Ok(answered.Result),
+                    PasswordResetRequestOutcome.Refused refused => throw refused.Refusal.ToException(),
+                    _ => throw new InvalidOperationException($"Unknown password-reset request outcome '{outcome.GetType().Name}'.")
+                };
             }
             catch (InvalidOperationException ex)
             {
@@ -347,7 +357,7 @@ public static partial class EndpointRouteBuilderExtensions
             SqlOSResetPasswordRequest request,
             HttpContext context,
             SqlOSHeadlessAuthService headlessAuthService,
-            SqlOSAuthService authService,
+            SqlOSIdentityProcesses processes,
             CancellationToken cancellationToken) =>
         {
             if (!headlessAuthService.IsApiEnabled)
@@ -357,8 +367,15 @@ public static partial class EndpointRouteBuilderExtensions
 
             try
             {
-                await authService.ResetPasswordAsync(request, cancellationToken);
-                return Results.NoContent();
+                var outcome = await processes.ResetPassword().ExecuteAsync(
+                    new ResetPasswordCommand(request.Token, request.NewPassword),
+                    cancellationToken);
+                return outcome switch
+                {
+                    PasswordResetOutcome.Reset => Results.NoContent(),
+                    PasswordResetOutcome.Refused refused => throw refused.Refusal.ToException(),
+                    _ => throw new InvalidOperationException($"Unknown password-reset outcome '{outcome.GetType().Name}'.")
+                };
             }
             catch (InvalidOperationException ex)
             {

@@ -16,10 +16,13 @@ using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Errors;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.AuthServer.Processes.Identity;
 using SqlOS.AuthServer.Services;
 using SqlOS.AuthServer.Security;
 using SqlOS.Configuration;
 using SqlOS.Dashboard;
+using SqlOS.Domain;
+using SqlOS.Hosting;
 using SqlOS.Pagination;
 
 namespace SqlOS.AuthServer.Extensions;
@@ -126,7 +129,7 @@ public static partial class EndpointRouteBuilderExtensions
             }
         });
 
-        api.MapPost("/users/{userId}/password-reset-email", async (HttpContext context, string userId, SqlOSSendUserPasswordResetEmailRequest request, SqlOSAuthService authService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        api.MapPost("/users/{userId}/password-reset-email", async (HttpContext context, string userId, SqlOSSendUserPasswordResetEmailRequest request, SqlOSIdentityProcesses processes, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
             if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
             {
@@ -135,7 +138,19 @@ public static partial class EndpointRouteBuilderExtensions
 
             try
             {
-                return Results.Ok(await authService.SendPasswordResetEmailForUserAsync(userId, request, context, cancellationToken));
+                var outcome = await processes.SendPasswordResetEmail().ExecuteAsync(
+                    new SendPasswordResetEmailCommand(
+                        new PasswordResetRecipient.User(userId),
+                        request.ResetUrlTemplate,
+                        ClientId: null,
+                        SqlOSHttpRequestContext.From(context, SqlOSRequestSurface.Admin)),
+                    cancellationToken);
+                return outcome switch
+                {
+                    PasswordResetEmailOutcome.Sent sent => Results.Ok(sent.Result),
+                    PasswordResetEmailOutcome.Refused refused => throw refused.Refusal.ToException(),
+                    _ => throw new InvalidOperationException($"Unknown password-reset email outcome '{outcome.GetType().Name}'.")
+                };
             }
             catch (InvalidOperationException ex)
             {
@@ -143,14 +158,17 @@ public static partial class EndpointRouteBuilderExtensions
             }
         });
 
-        api.MapPost("/users", async (HttpContext context, SqlOSCreateUserRequest request, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        api.MapPost("/users", async (HttpContext context, SqlOSCreateUserRequest request, SqlOSIdentityProcesses processes, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
             if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
             {
                 return Results.NotFound();
             }
 
-            var user = await adminService.CreateUserAsync(request, cancellationToken);
+            // A taken or invalid address escapes as a server error, as in 7.x.
+            var user = await processes.CreateUser().ExecuteAsync(
+                new CreateUserCommand(request.DisplayName, request.Email, request.Password),
+                cancellationToken);
             return Results.Ok(new
             {
                 user.Id,

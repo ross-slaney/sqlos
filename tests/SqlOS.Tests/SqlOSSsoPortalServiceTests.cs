@@ -958,7 +958,8 @@ public sealed class SqlOSSsoPortalServiceTests
     private static async Task<SqlOSUser> CreateVerifiedUserAsync(PortalHarness harness, string displayName, string email)
     {
         // A sign-up whose code proved the address registers it verified.
-        return await harness.Admin.CreateUserAsync(
+        return await TestAccounts.RegisterAsync(
+            harness.Context,
             new SqlOSCreateUserRequest(displayName, email, "P@ssword123!"),
             new OwnershipProof(EmailAddress.Parse(email), OwnershipProofMethod.EmailOtp));
     }

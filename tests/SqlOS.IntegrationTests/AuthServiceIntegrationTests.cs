@@ -335,10 +335,12 @@ public sealed class AuthServiceIntegrationTests
             });
 
             // Sign-ups whose codes proved the addresses register them verified.
-            var switchedUser = await issuance.Admin.CreateUserAsync(
+            var switchedUser = await TestAccounts.RegisterAsync(
+                issuance.Context,
                 new SqlOSCreateUserRequest("SQL Switched User", $"switched@{suffix}.sql-switch.test", "P@ssword123!"),
                 new OwnershipProof(EmailAddress.Parse($"switched@{suffix}.sql-switch.test"), OwnershipProofMethod.EmailOtp));
-            var unrelatedUser = await issuance.Admin.CreateUserAsync(
+            var unrelatedUser = await TestAccounts.RegisterAsync(
+                issuance.Context,
                 new SqlOSCreateUserRequest("SQL Unrelated User", $"unrelated@{suffix}.sql-switch.test", "P@ssword123!"),
                 new OwnershipProof(EmailAddress.Parse($"unrelated@{suffix}.sql-switch.test"), OwnershipProofMethod.EmailOtp));
 

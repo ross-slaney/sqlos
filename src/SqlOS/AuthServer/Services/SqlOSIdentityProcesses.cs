@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using SqlOS.AuditLogs;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Processes.Identity;
@@ -50,6 +51,15 @@ internal sealed class SqlOSIdentityProcesses
 
     /// <summary>The admission gate password sign-ins pass (the password-login buckets).</summary>
     public IAdmissionGate? PasswordAdmission { get; init; }
+
+    /// <summary>The admission gate password-reset emails pass (the delivery buckets).</summary>
+    public IAdmissionGate? PasswordResetAdmission { get; init; }
+
+    /// <summary>The password-reset email channel: the reset options and the delivery.</summary>
+    public SqlOSPasswordResetDelivery? PasswordResetEmails { get; init; }
+
+    /// <summary>The email-verification channel.</summary>
+    public SqlOSEmailVerificationDelivery? VerificationEmails { get; init; }
 
     public SqlOSAuthorizationServerService? AuthorizationServer { get; init; }
 
@@ -133,11 +143,55 @@ internal sealed class SqlOSIdentityProcesses
         return new(_context, _settingsService, _adminService, Invitations, hub, hub, _cryptoService.Clock);
     }
 
+    public RequestPasswordReset RequestPasswordReset()
+        => new(
+            _context,
+            _settingsService,
+            PasswordResetAdmission ?? throw new InvalidOperationException("The password-reset admission gate is not configured."),
+            PasswordResetLinks(),
+            RequirePasswordResetEmails(),
+            AuditRecorder(),
+            _cryptoService.Clock);
+
+    public SendPasswordResetEmail SendPasswordResetEmail()
+        => new(_context, _settingsService, PasswordResetLinks(), _cryptoService.Clock);
+
+    public IssuePasswordResetToken IssuePasswordResetToken()
+        => new(_context, _settingsService, PasswordResetLinks(), _cryptoService.Clock);
+
+    public ResetPassword ResetPassword()
+        => new(_context, _settingsService, AuditRecorder(), _cryptoService.Clock);
+
+    public RequestEmailVerification RequestEmailVerification()
+        => new(
+            _context,
+            VerificationEmails ?? throw new InvalidOperationException("The email-verification delivery is not configured."),
+            AuditRecorder(),
+            _cryptoService.Clock);
+
+    public IssueEmailVerificationToken IssueEmailVerificationToken()
+        => new(_context, _cryptoService.Clock);
+
+    public VerifyEmail VerifyEmail()
+        => new(_context, _cryptoService.Clock);
+
+    public CreateUser CreateUser()
+        => new(_context, _cryptoService.Clock);
+
     public RouteToHomeRealm RouteToHomeRealm()
         => new(
             _context,
             HomeRealms ?? throw new InvalidOperationException("Home-realm discovery is not configured."),
             Saml ?? throw new InvalidOperationException("SAML is not configured."));
+
+    private PasswordResetLinks PasswordResetLinks()
+        => new(_context, RequirePasswordResetEmails(), AuditRecorder());
+
+    private SqlOSPasswordResetDelivery RequirePasswordResetEmails()
+        => PasswordResetEmails ?? throw new InvalidOperationException("The password-reset delivery is not configured.");
+
+    /// <summary>Records the failures and outcomes a process audits without a state change, in its unit of work.</summary>
+    private IAuditRecorder AuditRecorder() => new SqlOSAuditRecorder(_context);
 
     private SqlOSPhoneOtpService RequirePhoneCodes()
         => PhoneCodes ?? throw new InvalidOperationException("Phone OTP service is not registered.");

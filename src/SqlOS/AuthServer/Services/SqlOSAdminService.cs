@@ -536,59 +536,14 @@ public sealed partial class SqlOSAdminService
         throw new InvalidOperationException("Custom seeded OIDC connections require a stable key. Use SeedOidcConnection(key, configure).");
     }
 
-    public Task<SqlOSUser> CreateUserAsync(SqlOSCreateUserRequest request, CancellationToken cancellationToken = default)
-        => CreateUserAsync(request, emailProof: null, cancellationToken);
-
     /// <summary>
-    /// Registers an account. Its address is verified only when <paramref name="emailProof"/> proves
-    /// it (an email-code or invitation sign-up); a password, when the request has one, is set under
-    /// the password policy. A request without a password registers an account without one, as an
-    /// operator may.
+    /// Creates an account (<see cref="CreateUser"/>): its address unverified, and a password, when the
+    /// request has one, set under the password policy. An address an account already owns fails.
     /// </summary>
-    internal async Task<SqlOSUser> CreateUserAsync(
-        SqlOSCreateUserRequest request,
-        OwnershipProof? emailProof,
-        CancellationToken cancellationToken = default)
-    {
-        if (!EmailAddress.TryParse(request.Email, out var address))
-        {
-            throw new InvalidOperationException(SqlOSEmailAddress.InvalidEmailMessage);
-        }
-
-        var existingEmail = await _context.Set<SqlOSUserEmail>()
-            .FindByEmailAddressAsync(address, request.Email, cancellationToken);
-        if (existingEmail != null)
-        {
-            throw new InvalidOperationException($"Email '{request.Email}' already exists.");
-        }
-
-        if (emailProof is not null && !emailProof.Address.Equals(address))
-        {
-            throw SqlOSDomainException.Of(SqlOSDomainError.OwnershipProofMismatch);
-        }
-
-        var now = DateTime.UtcNow;
-        var user = emailProof is null
-            ? SqlOSUser.Register(request.DisplayName, address, now)
-            : SqlOSUser.Register(request.DisplayName, emailProof, now);
-        if (!string.IsNullOrWhiteSpace(request.Password))
-        {
-            user.SetPassword(request.Password, PasswordPolicy.Default, now);
-        }
-
-        _context.Set<SqlOSUser>().Add(user);
-
-        try
-        {
-            await _context.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateException ex) when (SqlOSSignupOrchestration.IsUniqueConstraintViolation(ex))
-        {
-            throw new InvalidOperationException($"Email '{request.Email}' already exists.", ex);
-        }
-
-        return user;
-    }
+    public Task<SqlOSUser> CreateUserAsync(SqlOSCreateUserRequest request, CancellationToken cancellationToken = default)
+        => new CreateUser(_context, _cryptoService.Clock).ExecuteAsync(
+            new CreateUserCommand(request.DisplayName, request.Email, request.Password),
+            cancellationToken);
 
     /// <summary>
     /// Deactivates the user: SqlOS refuses the account's sign-ins, and its sessions and tokens at

@@ -172,7 +172,8 @@ public sealed class SqlOSScimEmailOwnershipTests
     {
         await using var context = CreateContext();
         var harness = await CreateHarnessAsync(context);
-        var existing = await harness.Admin.CreateUserAsync(
+        var existing = await TestAccounts.RegisterAsync(
+            context,
             new SqlOSCreateUserRequest("Contractor", "contractor@freelance.test", null),
             new OwnershipProof(EmailAddress.Parse("contractor@freelance.test"), OwnershipProofMethod.EmailOtp));
         await harness.Admin.DeactivateUserAsync(existing.Id);

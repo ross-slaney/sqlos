@@ -15,8 +15,9 @@ SqlOS.Domain.LoginEvidence <- SqlOS.AuthServer.Processes.Identity.VerifyEmailOtp
 SqlOS.Domain.LoginEvidence <- SqlOS.AuthServer.Processes.Identity.VerifyPhoneOtpSignIn
 SqlOS.Domain.OwnershipProof <- SqlOS.AuthServer.Models.SqlOSEmailOtpChallenge
 SqlOS.Domain.OwnershipProof <- SqlOS.AuthServer.Processes.Identity.CompleteMagicLinkSignIn
+SqlOS.Domain.OwnershipProof <- SqlOS.AuthServer.Processes.Identity.ResetPassword
 SqlOS.Domain.OwnershipProof <- SqlOS.AuthServer.Processes.Identity.SignUpWithInvitation
-SqlOS.Domain.OwnershipProof <- SqlOS.AuthServer.Services.SqlOSAuthService
+SqlOS.Domain.OwnershipProof <- SqlOS.AuthServer.Processes.Identity.VerifyEmail
 SqlOS.Domain.OwnershipProof <- SqlOS.AuthServer.Services.SqlOSAuthorizationServerService
 SqlOS.Domain.OwnershipProof <- SqlOS.AuthServer.Services.SqlOSInvitationService
 SqlOS.Domain.OwnershipProof <- SqlOS.AuthServer.Services.SqlOSOidcAuthService
