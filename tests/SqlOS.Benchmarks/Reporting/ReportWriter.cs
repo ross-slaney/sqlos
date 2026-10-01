@@ -1,0 +1,282 @@
+using System.Globalization;
+using System.Text;
+using System.Text.Json;
+using SqlOS.Benchmarks.Data;
+using SqlOS.Benchmarks.Scenarios;
+
+namespace SqlOS.Benchmarks.Reporting;
+
+internal static class ReportWriter
+{
+    private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
+
+    public static async Task<string> WriteAsync(BenchmarkReport report, string directory, string? summaryPath, CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(directory);
+        await File.WriteAllTextAsync(Path.Combine(directory, "results.json"), JsonSerializer.Serialize(report, Json), cancellationToken);
+
+        var markdown = Markdown(report);
+        await File.WriteAllTextAsync(Path.Combine(directory, "summary.md"), markdown, cancellationToken);
+        if (summaryPath is not null)
+        {
+            await File.AppendAllTextAsync(summaryPath, markdown + Environment.NewLine, cancellationToken);
+        }
+
+        return markdown;
+    }
+
+    public static string Markdown(BenchmarkReport report)
+    {
+        var text = new StringBuilder();
+        var steps = report.Steps;
+        var smallest = steps[0];
+        var largest = steps[^1];
+
+        text.AppendLine(CultureInfo.InvariantCulture, $"### SHRBAC benchmarks · {report.Engine}");
+        text.AppendLine();
+        text.AppendLine(report.Dataset.Description);
+        text.AppendLine();
+
+        // The three ways side by side: one row per page, three columns per scale.
+        var pages = largest.Scenarios.Where(s => s.Kind == "List").ToList();
+        if (pages.Count > 0)
+        {
+            text.AppendLine("**Pages: previous function · lineage · scope columns** (median ms)");
+            text.AppendLine();
+            text.Append("| Page | σ |");
+            foreach (var step in steps)
+            {
+                text.Append(CultureInfo.InvariantCulture, $" {RetailTree.Count(step.Products)} |");
+            }
+
+            text.AppendLine();
+            text.Append("|---|---:|");
+            text.Append(string.Concat(Enumerable.Repeat("---|", steps.Count)));
+            text.AppendLine();
+            foreach (var page in pages)
+            {
+                text.Append(CultureInfo.InvariantCulture, $"| {page.Title} | {Selectivity(page.Selectivity)} |");
+                foreach (var step in steps)
+                {
+                    var previous = step.Scenarios.FirstOrDefault(s => s.Id == "reference." + page.Id);
+                    var lineage = step.Scenarios.FirstOrDefault(s => s.Id == page.Id);
+                    var scoped = step.Scenarios.FirstOrDefault(s => s.Id == "scoped." + page.Id);
+                    text.Append(CultureInfo.InvariantCulture, $" {Cell(previous)} · {Cell(lineage)} · {Cell(scoped)} |");
+                }
+
+                text.AppendLine();
+            }
+
+            text.AppendLine();
+        }
+
+        text.AppendLine("**Every scenario**");
+        text.AppendLine();
+        text.Append("| Scenario | σ |");
+        foreach (var step in steps)
+        {
+            text.Append(CultureInfo.InvariantCulture, $" {RetailTree.Count(step.Products)} |");
+        }
+
+        if (steps.Count > 1)
+        {
+            text.Append(CultureInfo.InvariantCulture, $" {RetailTree.Count(largest.Products)} ÷ {RetailTree.Count(smallest.Products)} |");
+        }
+
+        var showsPlanning = largest.Scenarios.Any(s => s.ServerPlanningMs is not null);
+        text.Append(CultureInfo.InvariantCulture, $" product rows read @ {RetailTree.Count(largest.Products)} | server µs per row |");
+        text.AppendLine(showsPlanning ? " server planning ms |" : "");
+        text.Append("|---|---:|");
+        text.Append(string.Concat(Enumerable.Repeat("---:|", steps.Count + (steps.Count > 1 ? 1 : 0) + 2 + (showsPlanning ? 1 : 0))));
+        text.AppendLine();
+
+        foreach (var scenario in largest.Scenarios)
+        {
+            text.Append(CultureInfo.InvariantCulture, $"| {scenario.Title} | {(IsPage(scenario.Kind) ? Selectivity(scenario.Selectivity) : "–")} |");
+            foreach (var step in steps)
+            {
+                var match = step.Scenarios.FirstOrDefault(s => s.Id == scenario.Id);
+                text.Append(CultureInfo.InvariantCulture, $" {Cell(match)} |");
+            }
+
+            if (steps.Count > 1)
+            {
+                var baseline = smallest.Scenarios.FirstOrDefault(s => s.Id == scenario.Id);
+                text.Append(baseline is null
+                    ? " – |"
+                    : string.Create(CultureInfo.InvariantCulture, $" ×{scenario.MedianMs / baseline.MedianMs:F2} |"));
+            }
+
+            text.Append(CultureInfo.InvariantCulture, $" {(scenario.RowsExamined is { } rows ? rows.ToString("N0", CultureInfo.InvariantCulture) : "–")} |");
+            text.Append(CultureInfo.InvariantCulture, $" {(scenario.MicrosecondsPerRowExamined is { } us ? us.ToString("F1", CultureInfo.InvariantCulture) : "–")} |");
+            text.AppendLine(showsPlanning
+                ? $" {(scenario.ServerPlanningMs is { } planning ? planning.ToString("F2", CultureInfo.InvariantCulture) : "–")} |"
+                : "");
+        }
+
+        text.AppendLine();
+        text.AppendLine("Median milliseconds per query as the application sees it, warm cache; every answer is checked against ground truth. Product rows read and server times come from the actual plan.");
+        if (steps.SelectMany(s => s.Scenarios).Any(s => !s.FullPage))
+        {
+            text.AppendLine("† Fewer authorized rows than the page asks for exist at this scale, so the engine read to the end of the table; excluded from the scale gate.");
+        }
+
+        AppendTwins(text, largest, "ListReference", "**Previous function** (regression check, same data, same job)",
+            (current, twin) => string.Create(CultureInfo.InvariantCulture, $"{current.Title}: {WithUnit(current.MedianMs)} now vs {WithUnit(twin.MedianMs)} before (×{current.MedianMs / twin.MedianMs:F2})"));
+        AppendTwins(text, largest, "PointFunctionReference", null,
+            (current, twin) => string.Create(CultureInfo.InvariantCulture, $"{current.Title}: {WithUnit(current.MedianMs)} now vs {WithUnit(twin.MedianMs)} before (×{current.MedianMs / twin.MedianMs:F2})"));
+        AppendTwins(text, largest, "ListScoped", "**Scope columns** (the same page read from the row instead of the resources table)",
+            (current, twin) => string.Create(CultureInfo.InvariantCulture,
+                $"{current.Title}: {WithUnit(current.MedianMs)} → {WithUnit(twin.MedianMs)} (×{twin.MedianMs / current.MedianMs:F3}{(twin.RowsExamined is { } rows ? $", {rows:N0} product rows read" : "")})"));
+
+        if (smallest.Density.Count > 0)
+        {
+            text.AppendLine();
+            text.Append(CultureInfo.InvariantCulture,
+                $"**Grant density** · at {RetailTree.Count(smallest.Products)}, with {BenchmarkModel.RootCrowdGrants} other people's grants added to the root:");
+            foreach (var dense in smallest.Density)
+            {
+                var plain = smallest.Scenarios.First(s => "density." + s.Id == dense.Id);
+                text.Append(CultureInfo.InvariantCulture,
+                    $" {plain.Title}: {WithUnit(plain.MedianMs)} → {WithUnit(dense.MedianMs)} (×{dense.MedianMs / plain.MedianMs:F1});");
+            }
+
+            text.Length -= 1;
+            text.AppendLine(". The model's per-row bound depends only on the caller's own grants, so ×1 is the target. Reported, not gated.");
+        }
+
+        var maintained = steps.FirstOrDefault(s => s.Maintenance.Count > 0);
+        if (maintained is not null)
+        {
+            text.AppendLine();
+            text.Append(CultureInfo.InvariantCulture, $"**Lineage maintenance** · at {RetailTree.Count(maintained.Products)}:");
+            foreach (var result in maintained.Maintenance)
+            {
+                var cost = result.Id.StartsWith("insert.single", StringComparison.Ordinal)
+                    ? string.Create(CultureInfo.InvariantCulture, $"{result.MillisecondsPerRow:F2} ms each over {result.Rows:N0}")
+                    : WithUnit(result.Milliseconds);
+                var lineage = result.Id.StartsWith("delete", StringComparison.Ordinal)
+                    ? string.Create(CultureInfo.InvariantCulture, $"{result.Rows:N0} rows removed")
+                    : string.Create(CultureInfo.InvariantCulture, $"{result.LineageRows:N0} lineages computed");
+                text.Append(CultureInfo.InvariantCulture, $" {result.Title}: {cost}, {lineage};");
+            }
+
+            text.Length -= 1;
+            text.Append('.');
+            if (maintained.LineageCheck is { } check)
+            {
+                text.Append(CultureInfo.InvariantCulture,
+                    $" Rebuilt from scratch by SqlOS in {Seconds(check.RebuildSeconds)}: {(check.Agrees ? "identical to the loaded lineage and scope columns and to those after the maintenance pass (counts and hashes)" : $"DIFFERENT (loaded {check.Loaded}, after maintenance {check.Restored}, rebuilt {check.Rebuilt})")}.");
+            }
+
+            text.AppendLine();
+        }
+
+        text.AppendLine();
+
+        text.Append("**Dataset load** ·");
+        foreach (var step in steps)
+        {
+            text.Append(CultureInfo.InvariantCulture,
+                $" {RetailTree.Count(step.Products)} products / {step.Resources:N0} resources: {Seconds(step.LoadRowsSeconds)} rows + {Seconds(step.LoadIndexesSeconds)} indexes + {Seconds(step.LoadMaintenanceSeconds)} statistics, {step.DatabaseBytes / 1e9:F1} GB ·");
+        }
+
+        text.Length -= 2;
+        text.AppendLine();
+        text.AppendLine();
+
+        var gates = report.Gates.GroupBy(g => g.Gate).ToList();
+        text.Append("**Gates** ·");
+        foreach (var gate in gates)
+        {
+            var passed = gate.Count(g => g.Passed);
+            text.Append(CultureInfo.InvariantCulture, $" {(passed == gate.Count() ? "✅" : "❌")} {gate.Key} {passed}/{gate.Count()} ·");
+        }
+
+        text.Length -= 2;
+        text.AppendLine();
+
+        var failures = report.Gates.Where(g => !g.Passed).ToList();
+        if (failures.Count > 0)
+        {
+            text.AppendLine();
+            text.AppendLine("| Failed gate | Subject | Detail |");
+            text.AppendLine("|---|---|---|");
+            foreach (var failure in failures)
+            {
+                text.AppendLine(CultureInfo.InvariantCulture, $"| {failure.Gate} | {failure.Subject} | {failure.Detail} |");
+            }
+        }
+
+        text.AppendLine();
+        var environment = report.Environment;
+        text.AppendLine(CultureInfo.InvariantCulture,
+            $"<sub>{environment.Cpu} × {environment.ProcessorCount} · {environment.MemoryBytes / 1e9:F0} GB · {environment.OperatingSystem} · {report.Server} · {(environment.Commit is { Length: >= 7 } c ? c[..7] : "local")} · {TimeSpan.FromSeconds(report.DurationSeconds):h\\:mm\\:ss}</sub>");
+        return text.ToString();
+    }
+
+    private static string Cell(ScenarioResult? result)
+    {
+        if (result is null)
+        {
+            return "–";
+        }
+
+        var mark = !result.Correct ? " ❌" : !result.FullPage ? "†" : "";
+        return Milliseconds(result.MedianMs) + mark;
+    }
+
+    /// <summary>One paragraph pairing each twin of <paramref name="kind"/> at the largest scale with its lineage scenario.</summary>
+    private static void AppendTwins(StringBuilder text, ScaleStep step, string kind, string? heading, Func<ScenarioResult, ScenarioResult, string> describe)
+    {
+        var pairs = step.Scenarios
+            .Where(s => s.Kind == kind && s.Baseline is not null)
+            .Select(twin => (Current: step.Scenarios.FirstOrDefault(s => s.Id == twin.Baseline), Twin: twin))
+            .Where(p => p.Current is not null)
+            .ToList();
+        if (pairs.Count == 0)
+        {
+            return;
+        }
+
+        if (heading is not null)
+        {
+            text.AppendLine();
+            text.Append(heading);
+            text.Append(CultureInfo.InvariantCulture, $" · at {RetailTree.Count(step.Products)}:");
+        }
+
+        foreach (var (current, twin) in pairs)
+        {
+            text.Append(' ');
+            text.Append(describe(current!, twin));
+            text.Append(';');
+        }
+
+        text.Length -= 1;
+        text.AppendLine(".");
+    }
+
+    private static bool IsPage(string kind) => kind is "List" or "ListReference" or "ListScoped";
+
+    private static string Selectivity(double value)
+        => value >= 0.9999 ? "1"
+            : value >= 0.01 ? (value * 100).ToString("0.#", CultureInfo.InvariantCulture) + "%"
+            : (value * 100).ToString("0.####", CultureInfo.InvariantCulture) + "%";
+
+    private static string Milliseconds(double value)
+        => value switch
+        {
+            >= 10_000 => (value / 1000).ToString("F1", CultureInfo.InvariantCulture) + " s",
+            >= 100 => value.ToString("F0", CultureInfo.InvariantCulture),
+            _ => value.ToString("F2", CultureInfo.InvariantCulture),
+        };
+
+    private static string WithUnit(double milliseconds)
+        => milliseconds >= 10_000 ? Milliseconds(milliseconds) : Milliseconds(milliseconds) + " ms";
+
+    private static string Seconds(double seconds)
+        => seconds >= 60
+            ? $"{(int)(seconds / 60)}m{(int)(seconds % 60):D2}s"
+            : seconds.ToString("F1", CultureInfo.InvariantCulture) + "s";
+}
