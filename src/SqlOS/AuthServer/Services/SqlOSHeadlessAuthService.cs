@@ -8,6 +8,9 @@ using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Errors;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.AuthServer.Processes.Identity;
+using SqlOS.Domain;
+using SqlOS.Hosting;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -62,6 +65,26 @@ public sealed class SqlOSHeadlessAuthService
         _issuerSessionService = issuerSessionService;
         _options = options.Value;
     }
+
+    /// <summary>The identity processes the headless API runs, shared with the hosted and public surfaces.</summary>
+    private SqlOSIdentityProcesses Processes => new(
+        _context,
+        _adminService,
+        _authorizationServerService.Crypto,
+        _settingsService,
+        _options)
+    {
+        PasswordAdmission = _authorizationServerService.PasswordAdmission,
+        AuthorizationServer = _authorizationServerService,
+        Auth = _authService,
+        IssuerSessions = _issuerSessionService,
+        Invitations = _invitationService,
+        HomeRealms = _discoveryService,
+        Saml = _samlService,
+        EmailCodes = _emailOtpService,
+        SignInLinks = _magicLinkService,
+        PhoneCodes = _phoneOtpService
+    };
 
     public bool IsApiEnabled => _options.Headless.EnableApi;
     public bool IsBrowserUiEnabled => _options.Headless.BuildUiUrl != null;
@@ -490,16 +513,10 @@ public sealed class SqlOSHeadlessAuthService
         var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
         await BindInvitationIfPresentAsync(authorizationRequest, request.InvitationToken, cancellationToken);
         var email = await ResolveEffectiveEmailAsync(authorizationRequest, request.Email, cancellationToken);
-        var discovery = await _discoveryService.DiscoverAsync(new SqlOSHomeRealmDiscoveryRequest(email), cancellationToken);
-
-        authorizationRequest.LoginHintEmail = email;
-        SqlOSHomeRealmDiscoveryService.BindToAuthorizationRequest(authorizationRequest, discovery);
-        await _context.SaveChangesAsync(cancellationToken);
-
-        if (string.Equals(discovery.Mode, "sso", StringComparison.Ordinal)
-            && !string.IsNullOrWhiteSpace(discovery.ConnectionId))
+        var ssoRedirect = await RedirectToSsoIfRequiredAsync(authorizationRequest, email, cancellationToken);
+        if (ssoRedirect != null)
         {
-            return Redirect(await _samlService.BuildIdentityProviderRedirectForAuthorizationRequestAsync(authorizationRequest.Id, cancellationToken));
+            return ssoRedirect;
         }
 
         var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
@@ -534,21 +551,21 @@ public sealed class SqlOSHeadlessAuthService
 
         try
         {
-            var authentication = await _authorizationServerService.AuthenticatePasswordAsync(
-                email,
-                request.Password,
-                cancellationToken,
-                allowUnverifiedEmailForInvitation: !string.IsNullOrWhiteSpace(authorizationRequest.InvitationId),
-                httpContext: httpContext,
-                clientKey: authorizationRequest.ClientApplication?.ClientId ?? authorizationRequest.ClientApplicationId,
-                authorizationRequestId: authorizationRequest.Id,
-                surface: "headless");
-            var completion = await _authorizationServerService.CompleteCredentialSignInAsync(
-                authorizationRequest,
-                authentication.User,
-                authentication.AuthenticationMethod,
-                httpContext,
+            var outcome = await Processes.SignInWithPassword(httpContext).ExecuteAsync(
+                new SignInWithPasswordCommand(
+                    email,
+                    request.Password,
+                    new LoginTarget.AuthorizationRequest(authorizationRequest),
+                    CarriesInvitation: !string.IsNullOrWhiteSpace(authorizationRequest.InvitationId),
+                    PasswordAttemptContext.ForAuthorizationRequest(authorizationRequest, "headless"),
+                    SqlOSHttpRequestContext.From(httpContext, SqlOSRequestSurface.Headless)),
                 cancellationToken);
+            var completion = outcome switch
+            {
+                SignInOutcome.SignedIn { Completion: LoginCompletion.AuthorizationRequestContinued continued } => continued.Result,
+                SignInOutcome.Refused refused => throw refused.Refusal.ToException(),
+                _ => throw new InvalidOperationException($"Unknown sign-in outcome '{outcome.GetType().Name}'.")
+            };
 
             return await BuildCompletionActionResultAsync(
                 authorizationRequest,
@@ -589,49 +606,41 @@ public sealed class SqlOSHeadlessAuthService
 
         var boundInvitation = await GetBoundInvitationOrNullAsync(authorizationRequest, cancellationToken);
 
-        if (boundInvitation != null)
-        {
-            var invitedAccountIsActive = await GetAccountActiveStateForEmailAsync(email, cancellationToken);
-            if (invitedAccountIsActive == null)
-            {
-                return View(await BuildViewModelAsync(
-                    authorizationRequest,
-                    "signup",
-                    "Create an account to accept this invitation.",
-                    pendingToken: null,
-                    email: email,
-                    displayName: null,
-                    fieldErrors: null,
-                    organizationSelection: null,
-                    info: null,
-                    challengeToken: null,
-                    cancellationToken: cancellationToken));
-            }
-
-            if (invitedAccountIsActive == false)
-            {
-                return View(await BuildViewModelAsync(
-                    authorizationRequest,
-                    "login",
-                    "This invited account is inactive. Contact the workspace admin.",
-                    pendingToken: null,
-                    email: email,
-                    displayName: null,
-                    fieldErrors: null,
-                    organizationSelection: null,
-                    info: null,
-                    challengeToken: null,
-                    cancellationToken: cancellationToken));
-            }
-        }
-
         try
         {
-            var challenge = await _emailOtpService.StartForAuthorizationRequestAsync(
-                authorizationRequest,
-                email,
-                httpContext,
+            var outcome = await Processes.StartEmailOtpSignIn().ExecuteAsync(
+                new StartEmailOtpSignInCommand(
+                    email,
+                    new LoginTarget.AuthorizationRequest(authorizationRequest),
+                    SqlOSHttpRequestContext.From(httpContext, SqlOSRequestSurface.Headless),
+                    RequiresInvitedAccount: boundInvitation != null),
                 cancellationToken);
+            var challenge = outcome switch
+            {
+                EmailCodeStartOutcome.Sent sent => sent.Result,
+                EmailCodeStartOutcome.Refused { Refusal: var refusal } when refusal == IdentityRefusals.InvitedAccountMissing => null,
+                EmailCodeStartOutcome.Refused { Refusal: var refusal } when refusal == IdentityRefusals.InvitedAccountInactive => null,
+                EmailCodeStartOutcome.Refused refused => throw refused.Refusal.ToException(),
+                _ => throw new InvalidOperationException($"Unknown email-code start outcome '{outcome.GetType().Name}'.")
+            };
+            if (challenge == null)
+            {
+                // An invitation is accepted by its account: an unknown address signs up instead,
+                // and an inactive one is refused.
+                var missing = ((EmailCodeStartOutcome.Refused)outcome).Refusal == IdentityRefusals.InvitedAccountMissing;
+                return View(await BuildViewModelAsync(
+                    authorizationRequest,
+                    missing ? "signup" : "login",
+                    ((EmailCodeStartOutcome.Refused)outcome).Refusal.Message,
+                    pendingToken: null,
+                    email: email,
+                    displayName: null,
+                    fieldErrors: null,
+                    organizationSelection: null,
+                    info: null,
+                    challengeToken: null,
+                    cancellationToken: cancellationToken));
+            }
 
             return View(await BuildViewModelAsync(
                 authorizationRequest,
@@ -679,14 +688,21 @@ public sealed class SqlOSHeadlessAuthService
 
         try
         {
-            var signup = await _emailOtpService.StartSignupForAuthorizationRequestAsync(
-                authorizationRequest,
-                request.DisplayName,
-                email,
-                string.IsNullOrWhiteSpace(authorizationRequest.InvitationId) ? request.OrganizationName : null,
-                request.CustomFields,
-                httpContext,
+            var outcome = await Processes.StartEmailOtpSignUp().ExecuteAsync(
+                new StartEmailOtpSignUpCommand(
+                    request.DisplayName,
+                    email,
+                    string.IsNullOrWhiteSpace(authorizationRequest.InvitationId) ? request.OrganizationName : null,
+                    request.CustomFields,
+                    new LoginTarget.AuthorizationRequest(authorizationRequest),
+                    SqlOSHttpRequestContext.From(httpContext, SqlOSRequestSurface.Headless)),
                 cancellationToken);
+            var signup = outcome switch
+            {
+                EmailCodeSignUpStartOutcome.Sent sent => sent.Result,
+                EmailCodeSignUpStartOutcome.Refused refused => throw refused.Refusal.ToException(),
+                _ => throw new InvalidOperationException($"Unknown email-code sign-up start outcome '{outcome.GetType().Name}'.")
+            };
 
             return View(await BuildViewModelAsync(
                 authorizationRequest,
@@ -733,11 +749,18 @@ public sealed class SqlOSHeadlessAuthService
 
         try
         {
-            var start = await RequireMagicLinkService().StartForAuthorizationRequestAsync(
-                authorizationRequest,
-                email,
-                httpContext,
+            var outcome = await Processes.StartMagicLinkSignIn(httpContext).ExecuteAsync(
+                new StartMagicLinkSignInCommand(
+                    email,
+                    new LoginTarget.AuthorizationRequest(authorizationRequest),
+                    SqlOSHttpRequestContext.From(httpContext, SqlOSRequestSurface.Headless)),
                 cancellationToken);
+            var start = outcome switch
+            {
+                SignInLinkStartOutcome.Sent sent => sent.Result,
+                SignInLinkStartOutcome.Refused refused => throw refused.Refusal.ToException(),
+                _ => throw new InvalidOperationException($"Unknown sign-in link start outcome '{outcome.GetType().Name}'.")
+            };
 
             return View(await BuildViewModelAsync(
                 authorizationRequest,
@@ -777,28 +800,21 @@ public sealed class SqlOSHeadlessAuthService
 
         try
         {
-            var verification = await _emailOtpService.VerifyAsync(
-                new SqlOSEmailOtpVerifyRequest(request.ChallengeToken, request.Code),
-                authorizationRequest.Id,
-                requireAuthorizationRequestMatch: true,
+            var target = new LoginTarget.AuthorizationRequest(authorizationRequest);
+            var outcome = await Processes.VerifyEmailOtpSignIn(httpContext).ExecuteAsync(
+                new VerifyEmailOtpSignInCommand(request.ChallengeToken, request.Code, target, ChallengeBinding.For(target)),
                 cancellationToken);
-
-            if (!string.Equals(verification.Challenge.AuthorizationRequestId, authorizationRequest.Id, StringComparison.Ordinal))
+            var signedIn = outcome switch
             {
-                throw new InvalidOperationException("The sign-in code is invalid or expired.");
-            }
-
-            var completion = await _authorizationServerService.CompleteCredentialSignInAsync(
-                authorizationRequest,
-                verification.User,
-                verification.AuthenticationMethod,
-                httpContext,
-                cancellationToken);
+                EmailCodeSignInOutcome.SignedIn success => success,
+                EmailCodeSignInOutcome.Refused refused => throw refused.Refusal.ToException(),
+                _ => throw new InvalidOperationException($"Unknown email-code sign-in outcome '{outcome.GetType().Name}'.")
+            };
 
             return await BuildCompletionActionResultAsync(
                 authorizationRequest,
-                completion,
-                verification.Challenge.Email,
+                ((LoginCompletion.AuthorizationRequestContinued)signedIn.Completion).Result,
+                signedIn.Challenge.Email,
                 cancellationToken);
         }
         catch (InvalidOperationException ex)
@@ -823,35 +839,22 @@ public sealed class SqlOSHeadlessAuthService
         SqlOSHeadlessMagicLinkCompleteRequest request,
         CancellationToken cancellationToken = default)
     {
-        var verification = await RequireMagicLinkService().CompleteAsync(
-            new SqlOSMagicLinkCompleteRequest(request.Token),
-            request.RequestId,
-            requireAuthorizationRequestMatch: !string.IsNullOrWhiteSpace(request.RequestId),
+        var outcome = await Processes.CompleteMagicLinkSignIn(httpContext).ExecuteAsync(
+            new CompleteMagicLinkSignInCommand(
+                request.Token,
+                new SignInLinkTarget.Headless(request.RequestId, request.InvitationToken)),
             cancellationToken);
-        var authorizationRequestId = verification.Payload.AuthorizationRequestId ?? request.RequestId;
-        if (string.IsNullOrWhiteSpace(authorizationRequestId))
+        var signedIn = outcome switch
         {
-            throw new InvalidOperationException("The sign-in link is invalid or expired.");
-        }
-
-        var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(authorizationRequestId, cancellationToken);
-        await BindInvitationIfPresentAsync(authorizationRequest, request.InvitationToken, cancellationToken);
-        if (!string.Equals(verification.Payload.AuthorizationRequestId, authorizationRequest.Id, StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException("The sign-in link is invalid or expired.");
-        }
-
-        var completion = await _authorizationServerService.CompleteCredentialSignInAsync(
-            authorizationRequest,
-            verification.User,
-            verification.AuthenticationMethod,
-            httpContext,
-            cancellationToken);
+            SignInLinkOutcome.SignedIn success => success,
+            SignInLinkOutcome.Refused refused => throw refused.Refusal.ToException(),
+            _ => throw new InvalidOperationException($"Unknown sign-in link outcome '{outcome.GetType().Name}'.")
+        };
 
         return await BuildCompletionActionResultAsync(
-            authorizationRequest,
-            completion,
-            verification.Payload.Email,
+            ((LoginDestination.AuthorizationRequest)signedIn.Destination).Request,
+            ((LoginCompletion.AuthorizationRequestContinued)signedIn.Completion).Result,
+            signedIn.Email,
             cancellationToken);
     }
 
@@ -863,94 +866,27 @@ public sealed class SqlOSHeadlessAuthService
         var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
         await BindInvitationIfPresentAsync(authorizationRequest, request.InvitationToken, cancellationToken);
         var boundInvitation = await GetBoundInvitationOrNullAsync(authorizationRequest, cancellationToken);
-        IDbContextTransaction? transaction = null;
-        SqlOSPasswordAuthenticationResult? signup = null;
-        SqlOSEmailOtpSignupVerificationResult? verification = null;
 
         try
         {
-            if (SupportsDatabaseTransactions())
-            {
-                transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
-            }
-
-            verification = await _emailOtpService.VerifySignupAsync(
-                new SqlOSEmailOtpSignupVerifyRequest(request.SignupToken, request.ChallengeToken, request.Code),
-                authorizationRequest.Id,
-                requireAuthorizationRequestMatch: true,
+            var outcome = await Processes.CompleteEmailOtpSignUp(httpContext).ExecuteAsync(
+                new CompleteEmailOtpSignUpCommand(
+                    request.SignupToken,
+                    request.ChallengeToken,
+                    request.Code,
+                    boundInvitation,
+                    new LoginTarget.AuthorizationRequest(authorizationRequest),
+                    SqlOSHttpRequestContext.From(httpContext, SqlOSRequestSurface.Headless)),
                 cancellationToken);
-
-            signup = await _authorizationServerService.SignUpWithEmailOtpAsync(
-                verification.DisplayName,
-                verification.Email,
-                boundInvitation == null ? verification.OrganizationName : null,
-                boundInvitation == null ? authorizationRequest.OrganizationId ?? verification.OrganizationId : null,
-                cancellationToken);
-
-            var selectedOrganizationId = boundInvitation?.OrganizationId
-                ?? signup.Organizations.FirstOrDefault()?.Id;
-            SqlOSOrganization? organization = null;
-            if (!string.IsNullOrWhiteSpace(selectedOrganizationId))
-            {
-                organization = await _context.Set<SqlOSOrganization>()
-                    .FirstOrDefaultAsync(x => x.Id == selectedOrganizationId, cancellationToken);
-            }
-
-            if (_options.Headless.OnHeadlessSignupAsync != null)
-            {
-                await _options.Headless.OnHeadlessSignupAsync(
-                    new SqlOSHeadlessSignupHookContext(
-                        httpContext,
-                        authorizationRequest,
-                        signup.User,
-                        organization,
-                        verification.CustomFields ?? boundInvitation?.CustomFields ?? new JsonObject()),
-                    cancellationToken);
-            }
-
-            var completion = await _authorizationServerService.CompleteCredentialSignInAsync(
-                authorizationRequest,
-                signup.User,
-                signup.AuthenticationMethod,
-                httpContext,
-                cancellationToken);
-
-            await _emailOtpService.ConsumeSignupTokenAsync(verification.SignupToken, cancellationToken);
-            await _adminService.RecordAuditAsync(
-                "user.signup.email_otp",
-                "user",
-                signup.User.Id,
-                userId: signup.User.Id,
-                organizationId: selectedOrganizationId,
-                ipAddress: httpContext.Connection.RemoteIpAddress?.ToString(),
-                cancellationToken: cancellationToken);
-
-            if (transaction != null)
-            {
-                await transaction.CommitAsync(cancellationToken);
-            }
-
+            var signedUp = SignedUp(outcome);
             return await BuildCompletionActionResultAsync(
                 authorizationRequest,
-                completion,
-                verification.Email,
+                ((LoginCompletion.AuthorizationRequestContinued)signedUp.Completion).Result,
+                signedUp.Email,
                 cancellationToken);
         }
         catch (SqlOSHeadlessValidationException ex)
         {
-            if (transaction != null)
-            {
-                await transaction.RollbackAsync(cancellationToken);
-            }
-            else
-            {
-                await CleanupNonTransactionalSignupArtifactsAsync(
-                    signup,
-                    boundInvitation?.OrganizationId ?? authorizationRequest.OrganizationId ?? verification?.OrganizationId,
-                    boundInvitation == null ? verification?.OrganizationName : null,
-                    cancellationToken);
-            }
-
             return View(await BuildViewModelAsync(
                 authorizationRequest,
                 "email-otp-signup-verify",
@@ -966,19 +902,6 @@ public sealed class SqlOSHeadlessAuthService
         }
         catch (InvalidOperationException ex)
         {
-            if (transaction != null)
-            {
-                await transaction.RollbackAsync(cancellationToken);
-            }
-            else
-            {
-                await CleanupNonTransactionalSignupArtifactsAsync(
-                    signup,
-                    boundInvitation?.OrganizationId ?? authorizationRequest.OrganizationId ?? verification?.OrganizationId,
-                    boundInvitation == null ? verification?.OrganizationName : null,
-                    cancellationToken);
-            }
-
             return View(await BuildViewModelAsync(
                 authorizationRequest,
                 "email-otp-signup-verify",
@@ -1003,11 +926,18 @@ public sealed class SqlOSHeadlessAuthService
 
         try
         {
-            var challenge = await RequirePhoneOtpService().StartForAuthorizationRequestAsync(
-                authorizationRequest,
-                request.PhoneNumber,
-                httpContext,
+            var outcome = await Processes.StartPhoneOtpSignIn().ExecuteAsync(
+                new StartPhoneOtpSignInCommand(
+                    request.PhoneNumber,
+                    new LoginTarget.AuthorizationRequest(authorizationRequest),
+                    SqlOSHttpRequestContext.From(httpContext, SqlOSRequestSurface.Headless)),
                 cancellationToken);
+            var challenge = outcome switch
+            {
+                PhoneCodeStartOutcome.Sent sent => sent.Result,
+                PhoneCodeStartOutcome.Refused refused => throw refused.Refusal.ToException(),
+                _ => throw new InvalidOperationException($"Unknown phone-code start outcome '{outcome.GetType().Name}'.")
+            };
 
             return View(await BuildViewModelAsync(
                 authorizationRequest,
@@ -1048,22 +978,20 @@ public sealed class SqlOSHeadlessAuthService
 
         try
         {
-            var verification = await RequirePhoneOtpService().VerifyAsync(
-                new SqlOSPhoneOtpVerifyRequest(request.ChallengeToken, request.Code),
-                authorizationRequest.Id,
-                requireAuthorizationRequestMatch: true,
+            var target = new LoginTarget.AuthorizationRequest(authorizationRequest);
+            var outcome = await Processes.VerifyPhoneOtpSignIn(httpContext).ExecuteAsync(
+                new VerifyPhoneOtpSignInCommand(request.ChallengeToken, request.Code, target, ChallengeBinding.For(target)),
                 cancellationToken);
-
-            var completion = await _authorizationServerService.CompleteCredentialSignInAsync(
-                authorizationRequest,
-                verification.User,
-                verification.AuthenticationMethod,
-                httpContext,
-                cancellationToken);
+            var signedIn = outcome switch
+            {
+                PhoneCodeSignInOutcome.SignedIn success => success,
+                PhoneCodeSignInOutcome.Refused refused => throw refused.Refusal.ToException(),
+                _ => throw new InvalidOperationException($"Unknown phone-code sign-in outcome '{outcome.GetType().Name}'.")
+            };
 
             return await BuildCompletionActionResultAsync(
                 authorizationRequest,
-                completion,
+                ((LoginCompletion.AuthorizationRequestContinued)signedIn.Completion).Result,
                 email: null,
                 cancellationToken);
         }
@@ -1093,19 +1021,22 @@ public sealed class SqlOSHeadlessAuthService
 
         try
         {
-            if (await GetBoundInvitationOrNullAsync(authorizationRequest, cancellationToken) != null)
-            {
-                throw new InvalidOperationException("Phone signup is not available for email invitations.");
-            }
-
-            var signup = await RequirePhoneOtpService().StartSignupForAuthorizationRequestAsync(
-                authorizationRequest,
-                request.DisplayName,
-                request.PhoneNumber,
-                request.OrganizationName,
-                request.CustomFields,
-                httpContext,
+            var outcome = await Processes.StartPhoneOtpSignUp().ExecuteAsync(
+                new StartPhoneOtpSignUpCommand(
+                    request.DisplayName,
+                    request.PhoneNumber,
+                    request.OrganizationName,
+                    request.CustomFields,
+                    new LoginTarget.AuthorizationRequest(authorizationRequest),
+                    CarriesInvitation: await GetBoundInvitationOrNullAsync(authorizationRequest, cancellationToken) != null,
+                    SqlOSHttpRequestContext.From(httpContext, SqlOSRequestSurface.Headless)),
                 cancellationToken);
+            var signup = outcome switch
+            {
+                PhoneCodeSignUpStartOutcome.Sent sent => sent.Result,
+                PhoneCodeSignUpStartOutcome.Refused refused => throw refused.Refusal.ToException(),
+                _ => throw new InvalidOperationException($"Unknown phone-code sign-up start outcome '{outcome.GetType().Name}'.")
+            };
 
             return View(await BuildViewModelAsync(
                 authorizationRequest,
@@ -1145,98 +1076,28 @@ public sealed class SqlOSHeadlessAuthService
     {
         var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
         await BindInvitationIfPresentAsync(authorizationRequest, request.InvitationToken, cancellationToken);
-        IDbContextTransaction? transaction = null;
-        SqlOSPasswordAuthenticationResult? signup = null;
-        SqlOSPhoneOtpSignupVerificationResult? verification = null;
+        var process = Processes.CompletePhoneOtpSignUp(httpContext);
 
         try
         {
-            if (SupportsDatabaseTransactions())
-            {
-                transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
-            }
-
-            if (await GetBoundInvitationOrNullAsync(authorizationRequest, cancellationToken) != null)
-            {
-                throw new InvalidOperationException("Phone signup is not available for email invitations.");
-            }
-
-            verification = await RequirePhoneOtpService().VerifySignupAsync(
-                new SqlOSPhoneOtpSignupVerifyRequest(request.SignupToken, request.ChallengeToken, request.Code),
-                authorizationRequest.Id,
-                requireAuthorizationRequestMatch: true,
+            var outcome = await process.ExecuteAsync(
+                new CompletePhoneOtpSignUpCommand(
+                    request.SignupToken,
+                    request.ChallengeToken,
+                    request.Code,
+                    CarriesInvitation: await GetBoundInvitationOrNullAsync(authorizationRequest, cancellationToken) != null,
+                    new LoginTarget.AuthorizationRequest(authorizationRequest),
+                    SqlOSHttpRequestContext.From(httpContext, SqlOSRequestSurface.Headless)),
                 cancellationToken);
-
-            signup = await _authorizationServerService.SignUpWithPhoneOtpAsync(
-                verification.DisplayName,
-                verification.PhoneNumber,
-                verification.OrganizationName,
-                authorizationRequest.OrganizationId ?? verification.OrganizationId,
-                cancellationToken);
-
-            var selectedOrganizationId = signup.Organizations.FirstOrDefault()?.Id;
-            SqlOSOrganization? organization = null;
-            if (!string.IsNullOrWhiteSpace(selectedOrganizationId))
-            {
-                organization = await _context.Set<SqlOSOrganization>()
-                    .FirstOrDefaultAsync(x => x.Id == selectedOrganizationId, cancellationToken);
-            }
-
-            if (_options.Headless.OnHeadlessSignupAsync != null)
-            {
-                await _options.Headless.OnHeadlessSignupAsync(
-                    new SqlOSHeadlessSignupHookContext(
-                        httpContext,
-                        authorizationRequest,
-                        signup.User,
-                        organization,
-                        verification.CustomFields ?? new JsonObject()),
-                    cancellationToken);
-            }
-
-            var completion = await _authorizationServerService.CompleteCredentialSignInAsync(
-                authorizationRequest,
-                signup.User,
-                signup.AuthenticationMethod,
-                httpContext,
-                cancellationToken);
-
-            await RequirePhoneOtpService().ConsumeSignupTokenAsync(verification.SignupToken, cancellationToken);
-            await _adminService.RecordAuditAsync(
-                "user.signup.phone_otp",
-                "user",
-                signup.User.Id,
-                userId: signup.User.Id,
-                organizationId: selectedOrganizationId,
-                ipAddress: httpContext.Connection.RemoteIpAddress?.ToString(),
-                cancellationToken: cancellationToken);
-
-            if (transaction != null)
-            {
-                await transaction.CommitAsync(cancellationToken);
-            }
-
+            var signedUp = SignedUp(outcome);
             return await BuildCompletionActionResultAsync(
                 authorizationRequest,
-                completion,
+                ((LoginCompletion.AuthorizationRequestContinued)signedUp.Completion).Result,
                 email: null,
                 cancellationToken);
         }
         catch (InvalidOperationException ex)
         {
-            if (transaction != null)
-            {
-                await transaction.RollbackAsync(cancellationToken);
-            }
-            else
-            {
-                await CleanupNonTransactionalSignupArtifactsAsync(
-                    signup,
-                    authorizationRequest.OrganizationId ?? verification?.OrganizationId,
-                    verification?.OrganizationName,
-                    cancellationToken);
-            }
-
             return View(await BuildViewModelAsync(
                 authorizationRequest,
                 "phone-otp-signup-verify",
@@ -1248,7 +1109,7 @@ public sealed class SqlOSHeadlessAuthService
                 organizationSelection: null,
                 challengeToken: request.ChallengeToken,
                 signupToken: request.SignupToken,
-                phoneNumber: verification?.PhoneNumber,
+                phoneNumber: process.VerifiedPhoneNumber,
                 cancellationToken: cancellationToken));
         }
     }
@@ -1265,13 +1126,10 @@ public sealed class SqlOSHeadlessAuthService
         var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
         if (!credentialSettings.EmailOtpEnabled)
         {
-            throw new InvalidOperationException("Invitation signup without a password requires Email OTP to be enabled.");
+            throw IdentityRefusals.InvitationSignupNeedsEmailCodes.ToException();
         }
 
         var email = boundInvitation.Email;
-
-        IDbContextTransaction? transaction = null;
-        SqlOSPasswordAuthenticationResult? signup = null;
 
         try
         {
@@ -1282,77 +1140,23 @@ public sealed class SqlOSHeadlessAuthService
                 return ssoRedirect;
             }
 
-            if (SupportsDatabaseTransactions())
-            {
-                transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
-            }
-
-            signup = await _authorizationServerService.SignUpWithInvitationAsync(
-                request.DisplayName,
-                email,
+            var outcome = await Processes.SignUpWithInvitation(httpContext).ExecuteAsync(
+                new SignUpWithInvitationCommand(
+                    request.DisplayName,
+                    InvitationToken: null,
+                    boundInvitation,
+                    request.CustomFields,
+                    new LoginTarget.AuthorizationRequest(authorizationRequest),
+                    SqlOSHttpRequestContext.From(httpContext, SqlOSRequestSurface.Headless)),
                 cancellationToken);
-
-            SqlOSOrganization? organization = null;
-            if (!string.IsNullOrWhiteSpace(boundInvitation.OrganizationId))
-            {
-                organization = await _context.Set<SqlOSOrganization>()
-                    .FirstOrDefaultAsync(x => x.Id == boundInvitation.OrganizationId, cancellationToken);
-            }
-
-            if (_options.Headless.OnHeadlessSignupAsync != null)
-            {
-                await _options.Headless.OnHeadlessSignupAsync(
-                    new SqlOSHeadlessSignupHookContext(
-                        httpContext,
-                        authorizationRequest,
-                        signup.User,
-                        organization,
-                        request.CustomFields ?? boundInvitation.CustomFields ?? new JsonObject()),
-                    cancellationToken);
-            }
-
-            var completion = await _authorizationServerService.CompleteCredentialSignInAsync(
-                authorizationRequest,
-                signup.User,
-                signup.AuthenticationMethod,
-                httpContext,
-                cancellationToken);
-
-            await _adminService.RecordAuditAsync(
-                "user.signup.invitation",
-                "user",
-                signup.User.Id,
-                userId: signup.User.Id,
-                organizationId: boundInvitation.OrganizationId,
-                ipAddress: httpContext.Connection.RemoteIpAddress?.ToString(),
-                cancellationToken: cancellationToken);
-
-            if (transaction != null)
-            {
-                await transaction.CommitAsync(cancellationToken);
-            }
-
             return await BuildCompletionActionResultAsync(
                 authorizationRequest,
-                completion,
+                ((LoginCompletion.AuthorizationRequestContinued)SignedUp(outcome).Completion).Result,
                 email,
                 cancellationToken);
         }
         catch (SqlOSHeadlessValidationException ex)
         {
-            if (transaction != null)
-            {
-                await transaction.RollbackAsync(cancellationToken);
-            }
-            else
-            {
-                await CleanupNonTransactionalSignupArtifactsAsync(
-                    signup,
-                    boundInvitation.OrganizationId,
-                    organizationName: null,
-                    cancellationToken: cancellationToken);
-            }
-
             return View(await BuildViewModelAsync(
                 authorizationRequest,
                 "signup",
@@ -1366,19 +1170,6 @@ public sealed class SqlOSHeadlessAuthService
         }
         catch (InvalidOperationException ex)
         {
-            if (transaction != null)
-            {
-                await transaction.RollbackAsync(cancellationToken);
-            }
-            else
-            {
-                await CleanupNonTransactionalSignupArtifactsAsync(
-                    signup,
-                    boundInvitation.OrganizationId,
-                    organizationName: null,
-                    cancellationToken: cancellationToken);
-            }
-
             return View(await BuildViewModelAsync(
                 authorizationRequest,
                 "signup",
@@ -1403,9 +1194,6 @@ public sealed class SqlOSHeadlessAuthService
         SqlOSSignupOrchestration.RejectInvitationEmailMismatch(boundInvitation?.Email, request.Email);
         var email = await ResolveEffectiveEmailAsync(authorizationRequest, request.Email, cancellationToken);
 
-        IDbContextTransaction? transaction = null;
-        SqlOSPasswordAuthenticationResult? signup = null;
-
         try
         {
             await _authorizationServerService.EnsureSignupAuthorizationContextAsync(authorizationRequest, cancellationToken);
@@ -1415,72 +1203,26 @@ public sealed class SqlOSHeadlessAuthService
                 return ssoRedirect;
             }
 
-            if (SupportsDatabaseTransactions())
-            {
-                transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
-            }
-
-            signup = await _authorizationServerService.SignUpAsync(
-                request.DisplayName,
-                email,
-                request.Password,
-                boundInvitation == null ? request.OrganizationName : null,
-                boundInvitation == null ? authorizationRequest.OrganizationId : null,
+            var outcome = await Processes.SignUpWithPassword(httpContext).ExecuteAsync(
+                new SignUpWithPasswordCommand(
+                    request.DisplayName,
+                    email,
+                    request.Password,
+                    boundInvitation == null ? request.OrganizationName : null,
+                    boundInvitation == null ? authorizationRequest.OrganizationId : null,
+                    boundInvitation,
+                    request.CustomFields,
+                    new LoginTarget.AuthorizationRequest(authorizationRequest),
+                    SqlOSHttpRequestContext.From(httpContext, SqlOSRequestSurface.Headless)),
                 cancellationToken);
-
-            var selectedOrganizationId = boundInvitation?.OrganizationId
-                ?? signup.Organizations.FirstOrDefault()?.Id;
-            SqlOSOrganization? organization = null;
-            if (!string.IsNullOrWhiteSpace(selectedOrganizationId))
-            {
-                organization = await _context.Set<SqlOSOrganization>()
-                    .FirstOrDefaultAsync(x => x.Id == selectedOrganizationId, cancellationToken);
-            }
-
-            if (_options.Headless.OnHeadlessSignupAsync != null)
-            {
-                await _options.Headless.OnHeadlessSignupAsync(
-                    new SqlOSHeadlessSignupHookContext(
-                        httpContext,
-                        authorizationRequest,
-                        signup.User,
-                        organization,
-                        request.CustomFields ?? new JsonObject()),
-                    cancellationToken);
-            }
-
-            var completion = await _authorizationServerService.CompleteCredentialSignInAsync(
-                authorizationRequest,
-                signup.User,
-                signup.AuthenticationMethod,
-                httpContext,
-                cancellationToken);
-
-            if (transaction != null)
-            {
-                await transaction.CommitAsync(cancellationToken);
-            }
-
             return await BuildCompletionActionResultAsync(
                 authorizationRequest,
-                completion,
+                ((LoginCompletion.AuthorizationRequestContinued)SignedUp(outcome).Completion).Result,
                 email,
                 cancellationToken);
         }
         catch (SqlOSHeadlessValidationException ex)
         {
-            if (transaction != null)
-            {
-                await transaction.RollbackAsync(cancellationToken);
-            }
-            else
-            {
-                await CleanupNonTransactionalSignupArtifactsAsync(
-                    signup,
-                    boundInvitation?.OrganizationId ?? authorizationRequest.OrganizationId,
-                    boundInvitation == null ? request.OrganizationName : null,
-                    cancellationToken);
-            }
             return View(await BuildViewModelAsync(
                 authorizationRequest,
                 "signup",
@@ -1494,18 +1236,6 @@ public sealed class SqlOSHeadlessAuthService
         }
         catch (InvalidOperationException ex)
         {
-            if (transaction != null)
-            {
-                await transaction.RollbackAsync(cancellationToken);
-            }
-            else
-            {
-                await CleanupNonTransactionalSignupArtifactsAsync(
-                    signup,
-                    boundInvitation?.OrganizationId ?? authorizationRequest.OrganizationId,
-                    boundInvitation == null ? request.OrganizationName : null,
-                    cancellationToken);
-            }
             return View(await BuildViewModelAsync(
                 authorizationRequest,
                 "signup",
@@ -1518,6 +1248,14 @@ public sealed class SqlOSHeadlessAuthService
                 cancellationToken: cancellationToken));
         }
     }
+
+    /// <summary>The sign-up's success, or its refusal as the 7.x exception the surface maps.</summary>
+    private static SignUpOutcome.SignedUp SignedUp(SignUpOutcome outcome) => outcome switch
+    {
+        SignUpOutcome.SignedUp signedUp => signedUp,
+        SignUpOutcome.Refused refused => throw refused.Refusal.ToException(),
+        _ => throw new InvalidOperationException($"Unknown sign-up outcome '{outcome.GetType().Name}'.")
+    };
 
     public async Task<SqlOSHeadlessActionResult> SelectOrganizationAsync(
         HttpContext httpContext,
@@ -1970,9 +1708,6 @@ public sealed class SqlOSHeadlessAuthService
         return "login";
     }
 
-    private bool SupportsDatabaseTransactions()
-        => !string.Equals(_context.Database.ProviderName, "Microsoft.EntityFrameworkCore.InMemory", StringComparison.Ordinal);
-
     private SqlOSPhoneOtpService RequirePhoneOtpService()
         => _phoneOtpService ?? throw new InvalidOperationException("Phone OTP service is not registered.");
 
@@ -2001,38 +1736,18 @@ public sealed class SqlOSHeadlessAuthService
         return invitation?.Email ?? requestedEmail;
     }
 
+    /// <summary>
+    /// Home-realm discovery for the request (<see cref="RouteToHomeRealm"/>): the redirect to the
+    /// organization's identity provider, or null when the person signs in here.
+    /// </summary>
     private async Task<SqlOSHeadlessActionResult?> RedirectToSsoIfRequiredAsync(
         SqlOSAuthorizationRequest authorizationRequest,
         string email,
         CancellationToken cancellationToken)
-    {
-        var discovery = await _discoveryService.DiscoverAsync(new SqlOSHomeRealmDiscoveryRequest(email), cancellationToken);
-        authorizationRequest.LoginHintEmail = email;
-        SqlOSHomeRealmDiscoveryService.BindToAuthorizationRequest(authorizationRequest, discovery);
-        await _context.SaveChangesAsync(cancellationToken);
-
-        if (string.Equals(discovery.Mode, "sso", StringComparison.Ordinal)
-            && !string.IsNullOrWhiteSpace(discovery.ConnectionId))
-        {
-            return Redirect(await _samlService.BuildIdentityProviderRedirectForAuthorizationRequestAsync(authorizationRequest.Id, cancellationToken));
-        }
-
-        return null;
-    }
-
-    private async Task<bool?> GetAccountActiveStateForEmailAsync(
-        string email,
-        CancellationToken cancellationToken)
-    {
-        var emailRecord = await _context.Set<SqlOSUserEmail>()
-            .Include(x => x.User)
-            .AsNoTracking()
-            .FindByEmailAsync(email, cancellationToken);
-
-        return emailRecord == null
-            ? null
-            : emailRecord.User?.IsActive == true;
-    }
+        => await Processes.RouteToHomeRealm().ExecuteAsync(new RouteToHomeRealmCommand(authorizationRequest, email), cancellationToken)
+            is HomeRealmRoute.IdentityProvider identityProvider
+            ? Redirect(identityProvider.RedirectUrl)
+            : null;
 
     private async Task<SqlOSEmailInvitationResult?> GetBoundInvitationOrNullAsync(
         SqlOSAuthorizationRequest authorizationRequest,
@@ -2126,54 +1841,5 @@ public sealed class SqlOSHeadlessAuthService
         }
 
         return userCode;
-    }
-
-    private async Task CleanupNonTransactionalSignupArtifactsAsync(
-        SqlOSPasswordAuthenticationResult? signup,
-        string? existingOrganizationId,
-        string? organizationName,
-        CancellationToken cancellationToken)
-    {
-        if (signup == null)
-        {
-            return;
-        }
-
-        if (!string.IsNullOrWhiteSpace(organizationName) && string.IsNullOrWhiteSpace(existingOrganizationId))
-        {
-            var organizationIds = signup.Organizations
-                .Select(static x => x.Id)
-                .Distinct(StringComparer.Ordinal)
-                .ToArray();
-
-            if (organizationIds.Length > 0)
-            {
-                var organizations = await _context.Set<SqlOSOrganization>()
-                    .Where(x => organizationIds.Contains(x.Id))
-                    .ToListAsync(cancellationToken);
-
-                if (organizations.Count > 0)
-                {
-                    _context.Set<SqlOSOrganization>().RemoveRange(organizations);
-                }
-            }
-        }
-
-        var user = await _context.Set<SqlOSUser>()
-            .FirstOrDefaultAsync(x => x.Id == signup.User.Id, cancellationToken);
-        if (user != null)
-        {
-            var phoneNumbers = await _context.Set<SqlOSUserPhoneNumber>()
-                .Where(x => x.UserId == user.Id)
-                .ToListAsync(cancellationToken);
-            if (phoneNumbers.Count > 0)
-            {
-                _context.Set<SqlOSUserPhoneNumber>().RemoveRange(phoneNumbers);
-            }
-
-            _context.Set<SqlOSUser>().Remove(user);
-        }
-
-        await _context.SaveChangesAsync(cancellationToken);
     }
 }
