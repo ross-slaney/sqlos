@@ -119,7 +119,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
             var column = QuoteIdentifier(SqlOSFgaLineage.AncestorColumn(level));
             var index = QuoteIdentifier(SqlOSFgaLineage.AncestorIndexName(options.TableNames.Resources, level));
             sql.AppendLine(CultureInfo.InvariantCulture, $"ALTER TABLE {resources} ADD COLUMN IF NOT EXISTS {column} bigint NULL;");
-            sql.AppendLine(CultureInfo.InvariantCulture, $"CREATE INDEX IF NOT EXISTS {index} ON {resources} ({column}) INCLUDE (\"Id\", \"{SqlOSFgaLineage.ReachColumn}\") WHERE {column} IS NOT NULL;");
+            sql.AppendLine(CultureInfo.InvariantCulture, $"CREATE INDEX IF NOT EXISTS {index} ON {resources} ({column}) INCLUDE (\"{SqlOSFgaLineage.ReachColumn}\") WHERE {column} IS NOT NULL;");
         }
 
         return [sql.ToString()];

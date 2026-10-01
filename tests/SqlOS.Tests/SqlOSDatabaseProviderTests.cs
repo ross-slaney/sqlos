@@ -97,7 +97,7 @@ public class SqlOSDatabaseProviderTests
 
         var columns = PostgreSqlDatabaseProvider.Instance.BuildEnsureLineageColumnsSql(options).Single();
         columns.Should().Contain("ALTER TABLE \"ten\"\"ant\".\"res\"\"ources\" ADD COLUMN IF NOT EXISTS \"Ancestor4\" bigint NULL;");
-        columns.Should().Contain("CREATE INDEX IF NOT EXISTS \"IX_res\"\"ources_Ancestor4\" ON \"ten\"\"ant\".\"res\"\"ources\" (\"Ancestor4\") INCLUDE (\"Id\", \"Reach\") WHERE \"Ancestor4\" IS NOT NULL;");
+        columns.Should().Contain("CREATE INDEX IF NOT EXISTS \"IX_res\"\"ources_Ancestor4\" ON \"ten\"\"ant\".\"res\"\"ources\" (\"Ancestor4\") INCLUDE (\"Reach\") WHERE \"Ancestor4\" IS NOT NULL;");
         columns.Should().NotContain("Ancestor5");
 
         var batches = PostgreSqlDatabaseProvider.Instance.BuildLineageMaintenanceSql(options, [scope]);
