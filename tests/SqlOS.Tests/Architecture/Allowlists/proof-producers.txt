@@ -19,7 +19,6 @@ SqlOS.Domain.OwnershipProof <- SqlOS.AuthServer.Processes.Identity.SignUpWithInv
 SqlOS.Domain.OwnershipProof <- SqlOS.AuthServer.Services.SqlOSAuthService
 SqlOS.Domain.OwnershipProof <- SqlOS.AuthServer.Services.SqlOSAuthorizationServerService
 SqlOS.Domain.OwnershipProof <- SqlOS.AuthServer.Services.SqlOSInvitationService
-SqlOS.Domain.OwnershipProof <- SqlOS.AuthServer.Services.SqlOSMagicLinkService
 SqlOS.Domain.OwnershipProof <- SqlOS.AuthServer.Services.SqlOSOidcAuthService
 SqlOS.Domain.OwnershipProof <- SqlOS.AuthServer.Services.SqlOSSamlService
 SqlOS.Domain.OwnershipProof <- SqlOS.AuthServer.Services.SqlOSScimService

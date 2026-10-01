@@ -16,6 +16,7 @@ using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Errors;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.AuthServer.Processes.Identity;
 using SqlOS.AuthServer.Services;
 using SqlOS.AuthServer.Security;
 using SqlOS.Configuration;
@@ -414,9 +415,6 @@ public static partial class EndpointRouteBuilderExtensions
         return "login";
     }
 
-    private static bool SupportsDatabaseTransactions(ISqlOSAuthServerDbContext context)
-        => !string.Equals(context.Database.ProviderName, "Microsoft.EntityFrameworkCore.InMemory", StringComparison.Ordinal);
-
     private static string? ReadInvitationToken(HttpContext context, IFormCollection? form = null)
     {
         var formValue = form?["invitationToken"].ToString();
@@ -584,12 +582,15 @@ public static partial class EndpointRouteBuilderExtensions
             : await invitationService.ResolveEmailInvitationAsync(invitationToken, context, cancellationToken);
     }
 
-    private static async Task<IResult?> RedirectToSsoIfRequiredAsync(
+    /// <summary>
+    /// The redirect to the organization's identity provider when home-realm discovery for an
+    /// authorization request routes <paramref name="email"/> there; null when the person signs in
+    /// here, or when there is no authorization request to route.
+    /// </summary>
+    private static async Task<IResult?> RouteToIdentityProviderAsync(
+        SqlOSIdentityProcesses processes,
         SqlOSAuthorizationRequest? authorizationRequest,
         string email,
-        SqlOSHomeRealmDiscoveryService discoveryService,
-        SqlOSSamlService samlService,
-        ISqlOSAuthServerDbContext dbContext,
         CancellationToken cancellationToken)
     {
         if (authorizationRequest == null)
@@ -597,14 +598,9 @@ public static partial class EndpointRouteBuilderExtensions
             return null;
         }
 
-        var discovery = await discoveryService.DiscoverAsync(new SqlOSHomeRealmDiscoveryRequest(email), cancellationToken);
-        authorizationRequest.LoginHintEmail = email;
-        SqlOSHomeRealmDiscoveryService.BindToAuthorizationRequest(authorizationRequest, discovery);
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        return string.Equals(discovery.Mode, "sso", StringComparison.Ordinal)
-            && !string.IsNullOrWhiteSpace(discovery.ConnectionId)
-            ? Results.Redirect(await samlService.BuildIdentityProviderRedirectForAuthorizationRequestAsync(authorizationRequest.Id, cancellationToken))
+        return await processes.RouteToHomeRealm().ExecuteAsync(new RouteToHomeRealmCommand(authorizationRequest, email), cancellationToken)
+            is HomeRealmRoute.IdentityProvider identityProvider
+            ? Results.Redirect(identityProvider.RedirectUrl)
             : null;
     }
 }

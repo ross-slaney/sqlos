@@ -16,10 +16,13 @@ using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Errors;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.AuthServer.Processes.Identity;
 using SqlOS.AuthServer.Services;
 using SqlOS.AuthServer.Security;
 using SqlOS.Configuration;
 using SqlOS.Dashboard;
+using SqlOS.Domain;
+using SqlOS.Hosting;
 
 namespace SqlOS.AuthServer.Extensions;
 
@@ -78,11 +81,8 @@ public static partial class EndpointRouteBuilderExtensions
         hostedForms.MapPost("/login/email-otp/start", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
-            SqlOSEmailOtpService emailOtpService,
             SqlOSInvitationService invitationService,
-            SqlOSHomeRealmDiscoveryService discoveryService,
-            SqlOSSamlService samlService,
-            ISqlOSAuthServerDbContext dbContext,
+            SqlOSIdentityProcesses processes,
             CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
@@ -97,23 +97,23 @@ public static partial class EndpointRouteBuilderExtensions
                 var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken)
                     ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken);
                 email = invitation?.Email ?? email;
-                var ssoRedirect = await RedirectToSsoIfRequiredAsync(
-                    authorizationRequest,
-                    email,
-                    discoveryService,
-                    samlService,
-                    dbContext,
-                    cancellationToken);
-                if (ssoRedirect != null)
+                if (await RouteToIdentityProviderAsync(processes, authorizationRequest, email, cancellationToken) is { } identityProvider)
                 {
-                    return ssoRedirect;
+                    return identityProvider;
                 }
 
-                var challenge = await emailOtpService.StartForAuthorizationRequestAsync(
-                    authorizationRequest,
-                    email,
-                    context,
+                var outcome = await processes.StartEmailOtpSignIn().ExecuteAsync(
+                    new StartEmailOtpSignInCommand(
+                        email,
+                        LoginTarget.ForBrowser(authorizationRequest, invitationToken),
+                        SqlOSHttpRequestContext.From(context, SqlOSRequestSurface.Hosted)),
                     cancellationToken);
+                var challenge = outcome switch
+                {
+                    EmailCodeStartOutcome.Sent sent => sent.Result,
+                    EmailCodeStartOutcome.Refused refused => throw refused.Refusal.ToException(),
+                    _ => throw new InvalidOperationException($"Unknown email-code start outcome '{outcome.GetType().Name}'.")
+                };
 
                 var page = await BuildAuthPageViewModelAsync(
                     "email-otp-verify",
@@ -155,10 +155,9 @@ public static partial class EndpointRouteBuilderExtensions
         hostedForms.MapPost("/login/email-otp/verify", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
-            SqlOSEmailOtpService emailOtpService,
             SqlOSAuthService authService,
-            SqlOSIssuerSessionService issuerSessionService,
             SqlOSInvitationService invitationService,
+            SqlOSIdentityProcesses processes,
             CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
@@ -175,51 +174,29 @@ public static partial class EndpointRouteBuilderExtensions
                 var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken)
                     ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken);
                 email = invitation?.Email ?? email;
-                var verification = await emailOtpService.VerifyAsync(
-                    new SqlOSEmailOtpVerifyRequest(challengeToken, code),
-                    authorizationRequest?.Id,
-                    requireAuthorizationRequestMatch: true,
+                var target = LoginTarget.ForBrowser(authorizationRequest, invitationToken);
+                var outcome = await processes.VerifyEmailOtpSignIn(context).ExecuteAsync(
+                    new VerifyEmailOtpSignInCommand(challengeToken, code, target, ChallengeBinding.For(target)),
                     cancellationToken);
-
-                if (authorizationRequest == null)
+                var signedIn = outcome switch
                 {
-                    var organizationId = verification.Organizations.FirstOrDefault()?.Id;
-                    if (!string.IsNullOrWhiteSpace(invitationToken))
-                    {
-                        var acceptance = await invitationService.AcceptEmailInvitationAsync(
-                            new SqlOSAcceptEmailInvitationRequest(invitationToken, verification.User.Id) { AuthenticationMethod = verification.AuthenticationMethod },
-                            context,
-                            cancellationToken);
-                        organizationId = acceptance.OrganizationId;
-                    }
-
-                    await issuerSessionService.SignInAsync(
-                        context,
-                        verification.User,
-                        organizationId,
-                        verification.AuthenticationMethod,
-                        cancellationToken);
+                    EmailCodeSignInOutcome.SignedIn success => success,
+                    EmailCodeSignInOutcome.Refused refused => throw refused.Refusal.ToException(),
+                    _ => throw new InvalidOperationException($"Unknown email-code sign-in outcome '{outcome.GetType().Name}'.")
+                };
+                if (signedIn.Completion is LoginCompletion.BrowserSignedIn)
+                {
                     return RedirectAfterStandaloneSignIn(authPrefix, invitation == null ? "signed-in" : "invitation-accepted", deviceUserCode);
                 }
 
-                if (!string.Equals(verification.Challenge.AuthorizationRequestId, authorizationRequest.Id, StringComparison.Ordinal))
-                {
-                    throw new InvalidOperationException("The sign-in code is invalid or expired.");
-                }
-
-                var completion = await authorizationServerService.CompleteCredentialSignInAsync(
-                    authorizationRequest,
-                    verification.User,
-                    verification.AuthenticationMethod,
-                    context,
-                    cancellationToken);
-
+                var completion = ((LoginCompletion.AuthorizationRequestContinued)signedIn.Completion).Result;
+                var challengeEmail = signedIn.Challenge.Email;
                 if (completion.RequiresConsent)
                 {
                     return Html(await BuildAuthPageViewModelAsync(
                         "consent",
                         requestId,
-                        verification.Challenge.Email,
+                        challengeEmail,
                         null,
                         null,
                         null,
@@ -235,7 +212,7 @@ public static partial class EndpointRouteBuilderExtensions
                     var organizationPage = await BuildAuthPageViewModelAsync(
                         "organization",
                         requestId,
-                        verification.Challenge.Email,
+                        challengeEmail,
                         null,
                         null,
                         completion.PendingToken,
@@ -254,7 +231,7 @@ public static partial class EndpointRouteBuilderExtensions
                     return await RenderMfaChallengeAsync(
                         completion,
                         requestId,
-                        verification.Challenge.Email,
+                        challengeEmail,
                         authPrefix,
                         authorizationServerService,
                         authService,

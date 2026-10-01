@@ -16,10 +16,13 @@ using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Errors;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.AuthServer.Processes.Identity;
 using SqlOS.AuthServer.Services;
 using SqlOS.AuthServer.Security;
 using SqlOS.Configuration;
 using SqlOS.Dashboard;
+using SqlOS.Domain;
+using SqlOS.Hosting;
 
 namespace SqlOS.AuthServer.Extensions;
 
@@ -133,12 +136,9 @@ public static partial class EndpointRouteBuilderExtensions
         hostedForms.MapPost("/signup/submit", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
-            SqlOSIssuerSessionService issuerSessionService,
             SqlOSAuthService authService,
             SqlOSInvitationService invitationService,
-            SqlOSHomeRealmDiscoveryService discoveryService,
-            SqlOSSamlService samlService,
-            ISqlOSAuthServerDbContext dbContext,
+            SqlOSIdentityProcesses processes,
             CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
@@ -149,7 +149,6 @@ public static partial class EndpointRouteBuilderExtensions
             var organizationName = form["organizationName"].ToString();
             var invitationToken = ReadInvitationToken(context, form);
             var deviceUserCode = ReadDeviceUserCode(context, form);
-            IDbContextTransaction? transaction = null;
 
             try
             {
@@ -163,68 +162,28 @@ public static partial class EndpointRouteBuilderExtensions
                     await authorizationServerService.EnsureSignupAuthorizationContextAsync(authorizationRequest, cancellationToken);
                 }
 
-                var ssoRedirect = await RedirectToSsoIfRequiredAsync(
-                    authorizationRequest,
-                    email,
-                    discoveryService,
-                    samlService,
-                    dbContext,
+                if (await RouteToIdentityProviderAsync(processes, authorizationRequest, email, cancellationToken) is { } identityProvider)
+                {
+                    return identityProvider;
+                }
+
+                var outcome = await processes.SignUpWithPassword(context).ExecuteAsync(
+                    new SignUpWithPasswordCommand(
+                        displayName,
+                        email,
+                        password,
+                        invitation == null ? organizationName : null,
+                        invitation == null ? authorizationRequest?.OrganizationId : null,
+                        invitation,
+                        CustomFields: null,
+                        LoginTarget.ForBrowser(authorizationRequest, invitationToken),
+                        SqlOSHttpRequestContext.From(context, SqlOSRequestSurface.Hosted)),
                     cancellationToken);
-                if (ssoRedirect != null)
-                {
-                    return ssoRedirect;
-                }
-
-                if (SupportsDatabaseTransactions(dbContext))
-                {
-                    transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
-                }
-
-                var signup = await authorizationServerService.SignUpAsync(
-                    displayName,
-                    email,
-                    password,
-                    invitation == null ? organizationName : null,
-                    invitation == null ? authorizationRequest?.OrganizationId : null,
-                    cancellationToken);
-
-                if (authorizationRequest == null)
-                {
-                    var organizationId = signup.Organizations.FirstOrDefault()?.Id;
-                    if (!string.IsNullOrWhiteSpace(invitationToken))
-                    {
-                        var acceptance = await invitationService.AcceptEmailInvitationInCurrentTransactionAsync(
-                            new SqlOSAcceptEmailInvitationRequest(invitationToken, signup.User.Id) { AuthenticationMethod = signup.AuthenticationMethod },
-                            context,
-                            cancellationToken);
-                        organizationId = acceptance.OrganizationId;
-                    }
-
-                    await issuerSessionService.SignInAsync(context, signup.User, organizationId, signup.AuthenticationMethod, cancellationToken);
-                    if (transaction != null)
-                    {
-                        await transaction.CommitAsync(cancellationToken);
-                    }
-
-                    return RedirectAfterStandaloneSignIn(authPrefix, invitation == null ? "signed-up" : "invitation-accepted", deviceUserCode);
-                }
-
-                authorizationRequest.OrganizationId ??= invitation?.OrganizationId ?? signup.Organizations.FirstOrDefault()?.Id;
-                var completion = await authorizationServerService.CompleteCredentialSignInAsync(
+                return await RenderSignedUpAsync(
+                    outcome,
                     authorizationRequest,
-                    signup.User,
-                    signup.AuthenticationMethod,
-                    context,
-                    cancellationToken);
-                if (transaction != null)
-                {
-                    await transaction.CommitAsync(cancellationToken);
-                }
-
-                return await RenderHostedAuthorizationCompletionAsync(
-                    completion,
-                    authorizationRequest,
-                    signup.User.DefaultEmail,
+                    invitation == null ? "signed-up" : "invitation-accepted",
+                    deviceUserCode,
                     authPrefix,
                     authorizationServerService,
                     authService,
@@ -232,11 +191,6 @@ public static partial class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                if (transaction != null)
-                {
-                    await transaction.RollbackAsync(cancellationToken);
-                }
-
                 var page = await BuildAuthPageViewModelAsync(
                     "signup",
                     requestId,
@@ -257,13 +211,9 @@ public static partial class EndpointRouteBuilderExtensions
         hostedForms.MapPost("/signup/invitation/submit", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
-            SqlOSIssuerSessionService issuerSessionService,
             SqlOSAuthService authService,
             SqlOSInvitationService invitationService,
-            SqlOSSettingsService settingsService,
-            SqlOSHomeRealmDiscoveryService discoveryService,
-            SqlOSSamlService samlService,
-            ISqlOSAuthServerDbContext dbContext,
+            SqlOSIdentityProcesses processes,
             CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
@@ -272,7 +222,6 @@ public static partial class EndpointRouteBuilderExtensions
             var email = form["email"].ToString();
             var invitationToken = ReadInvitationToken(context, form);
             var deviceUserCode = ReadDeviceUserCode(context, form);
-            IDbContextTransaction? transaction = null;
 
             try
             {
@@ -287,66 +236,25 @@ public static partial class EndpointRouteBuilderExtensions
                     await authorizationServerService.EnsureSignupAuthorizationContextAsync(authorizationRequest, cancellationToken);
                 }
 
-                var ssoRedirect = await RedirectToSsoIfRequiredAsync(
-                    authorizationRequest,
-                    email,
-                    discoveryService,
-                    samlService,
-                    dbContext,
+                if (await RouteToIdentityProviderAsync(processes, authorizationRequest, email, cancellationToken) is { } identityProvider)
+                {
+                    return identityProvider;
+                }
+
+                var outcome = await processes.SignUpWithInvitation(context).ExecuteAsync(
+                    new SignUpWithInvitationCommand(
+                        displayName,
+                        invitationToken,
+                        invitation,
+                        CustomFields: null,
+                        LoginTarget.ForBrowser(authorizationRequest, invitationToken),
+                        SqlOSHttpRequestContext.From(context, SqlOSRequestSurface.Hosted)),
                     cancellationToken);
-                if (ssoRedirect != null)
-                {
-                    return ssoRedirect;
-                }
-
-                if (SupportsDatabaseTransactions(dbContext))
-                {
-                    transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
-                }
-
-                var credentialSettings = await settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
-                if (!credentialSettings.EmailOtpEnabled)
-                {
-                    throw new InvalidOperationException("Invitation signup without a password requires Email OTP to be enabled.");
-                }
-
-                var signup = await authorizationServerService.SignUpWithInvitationAsync(
-                    displayName,
-                    email,
-                    cancellationToken);
-
-                if (authorizationRequest == null)
-                {
-                    var acceptance = await invitationService.AcceptEmailInvitationInCurrentTransactionAsync(
-                        new SqlOSAcceptEmailInvitationRequest(invitationToken!, signup.User.Id) { AuthenticationMethod = signup.AuthenticationMethod },
-                        context,
-                        cancellationToken);
-
-                    await issuerSessionService.SignInAsync(context, signup.User, acceptance.OrganizationId, signup.AuthenticationMethod, cancellationToken);
-                    if (transaction != null)
-                    {
-                        await transaction.CommitAsync(cancellationToken);
-                    }
-
-                    return RedirectAfterStandaloneSignIn(authPrefix, "invitation-accepted", deviceUserCode);
-                }
-
-                authorizationRequest.OrganizationId ??= invitation.OrganizationId;
-                var completion = await authorizationServerService.CompleteCredentialSignInAsync(
+                return await RenderSignedUpAsync(
+                    outcome,
                     authorizationRequest,
-                    signup.User,
-                    signup.AuthenticationMethod,
-                    context,
-                    cancellationToken);
-                if (transaction != null)
-                {
-                    await transaction.CommitAsync(cancellationToken);
-                }
-
-                return await RenderHostedAuthorizationCompletionAsync(
-                    completion,
-                    authorizationRequest,
-                    signup.User.DefaultEmail,
+                    "invitation-accepted",
+                    deviceUserCode,
                     authPrefix,
                     authorizationServerService,
                     authService,
@@ -354,11 +262,6 @@ public static partial class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                if (transaction != null)
-                {
-                    await transaction.RollbackAsync(cancellationToken);
-                }
-
                 var page = await BuildAuthPageViewModelAsync(
                     "signup",
                     requestId,
@@ -379,11 +282,8 @@ public static partial class EndpointRouteBuilderExtensions
         hostedForms.MapPost("/signup/email-otp/start", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
-            SqlOSEmailOtpService emailOtpService,
             SqlOSInvitationService invitationService,
-            SqlOSHomeRealmDiscoveryService discoveryService,
-            SqlOSSamlService samlService,
-            ISqlOSAuthServerDbContext dbContext,
+            SqlOSIdentityProcesses processes,
             CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
@@ -405,26 +305,26 @@ public static partial class EndpointRouteBuilderExtensions
                     await authorizationServerService.EnsureSignupAuthorizationContextAsync(authorizationRequest, cancellationToken);
                 }
 
-                var ssoRedirect = await RedirectToSsoIfRequiredAsync(
-                    authorizationRequest,
-                    email,
-                    discoveryService,
-                    samlService,
-                    dbContext,
-                    cancellationToken);
-                if (ssoRedirect != null)
+                if (await RouteToIdentityProviderAsync(processes, authorizationRequest, email, cancellationToken) is { } identityProvider)
                 {
-                    return ssoRedirect;
+                    return identityProvider;
                 }
 
-                var signup = await emailOtpService.StartSignupForAuthorizationRequestAsync(
-                    authorizationRequest,
-                    displayName,
-                    email,
-                    invitation == null ? organizationName : null,
-                    customFields: invitation?.CustomFields,
-                    context,
+                var outcome = await processes.StartEmailOtpSignUp().ExecuteAsync(
+                    new StartEmailOtpSignUpCommand(
+                        displayName,
+                        email,
+                        invitation == null ? organizationName : null,
+                        invitation?.CustomFields,
+                        LoginTarget.ForBrowser(authorizationRequest, invitationToken: null),
+                        SqlOSHttpRequestContext.From(context, SqlOSRequestSurface.Hosted)),
                     cancellationToken);
+                var signup = outcome switch
+                {
+                    EmailCodeSignUpStartOutcome.Sent sent => sent.Result,
+                    EmailCodeSignUpStartOutcome.Refused refused => throw refused.Refusal.ToException(),
+                    _ => throw new InvalidOperationException($"Unknown email-code sign-up start outcome '{outcome.GetType().Name}'.")
+                };
 
                 var page = await BuildAuthPageViewModelAsync(
                     "email-otp-signup-verify",
@@ -467,11 +367,9 @@ public static partial class EndpointRouteBuilderExtensions
         hostedForms.MapPost("/signup/email-otp/verify", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
-            SqlOSIssuerSessionService issuerSessionService,
             SqlOSAuthService authService,
-            SqlOSEmailOtpService emailOtpService,
-            ISqlOSAuthServerDbContext dbContext,
             SqlOSInvitationService invitationService,
+            SqlOSIdentityProcesses processes,
             CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
@@ -482,71 +380,27 @@ public static partial class EndpointRouteBuilderExtensions
             var code = form["code"].ToString();
             var invitationToken = ReadInvitationToken(context, form);
             var deviceUserCode = ReadDeviceUserCode(context, form);
-            IDbContextTransaction? transaction = null;
 
             try
             {
-                if (SupportsDatabaseTransactions(dbContext))
-                {
-                    transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
-                }
-
                 var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
                 var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken)
                     ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken);
                 email = invitation?.Email ?? email;
-                var signupVerification = await emailOtpService.VerifySignupAsync(
-                    new SqlOSEmailOtpSignupVerifyRequest(signupToken, challengeToken, code),
-                    authorizationRequest?.Id,
-                    requireAuthorizationRequestMatch: true,
+                var outcome = await processes.CompleteEmailOtpSignUp(context).ExecuteAsync(
+                    new CompleteEmailOtpSignUpCommand(
+                        signupToken,
+                        challengeToken,
+                        code,
+                        invitation,
+                        LoginTarget.ForBrowser(authorizationRequest, invitationToken),
+                        SqlOSHttpRequestContext.From(context, SqlOSRequestSurface.Hosted)),
                     cancellationToken);
-
-                var signup = await authorizationServerService.SignUpWithEmailOtpAsync(
-                    signupVerification.DisplayName,
-                    signupVerification.Email,
-                    invitation == null ? signupVerification.OrganizationName : null,
-                    invitation == null ? authorizationRequest?.OrganizationId ?? signupVerification.OrganizationId : null,
-                    cancellationToken);
-
-                if (authorizationRequest == null)
-                {
-                    var organizationId = signup.Organizations.FirstOrDefault()?.Id;
-                    if (!string.IsNullOrWhiteSpace(invitationToken))
-                    {
-                        var acceptance = await invitationService.AcceptEmailInvitationInCurrentTransactionAsync(
-                            new SqlOSAcceptEmailInvitationRequest(invitationToken, signup.User.Id) { AuthenticationMethod = signup.AuthenticationMethod },
-                            context,
-                            cancellationToken);
-                        organizationId = acceptance.OrganizationId;
-                    }
-
-                    await issuerSessionService.SignInAsync(context, signup.User, organizationId, signup.AuthenticationMethod, cancellationToken);
-                    await emailOtpService.ConsumeSignupTokenAsync(signupVerification.SignupToken, cancellationToken);
-                    if (transaction != null)
-                    {
-                        await transaction.CommitAsync(cancellationToken);
-                    }
-                    return RedirectAfterStandaloneSignIn(authPrefix, invitation == null ? "signed-up" : "invitation-accepted", deviceUserCode);
-                }
-
-                authorizationRequest.OrganizationId ??= invitation?.OrganizationId ?? signup.Organizations.FirstOrDefault()?.Id;
-                var completion = await authorizationServerService.CompleteCredentialSignInAsync(
+                return await RenderSignedUpAsync(
+                    outcome,
                     authorizationRequest,
-                    signup.User,
-                    signup.AuthenticationMethod,
-                    context,
-                    cancellationToken);
-
-                await emailOtpService.ConsumeSignupTokenAsync(signupVerification.SignupToken, cancellationToken);
-                if (transaction != null)
-                {
-                    await transaction.CommitAsync(cancellationToken);
-                }
-
-                return await RenderHostedAuthorizationCompletionAsync(
-                    completion,
-                    authorizationRequest,
-                    signup.User.DefaultEmail,
+                    invitation == null ? "signed-up" : "invitation-accepted",
+                    deviceUserCode,
                     authPrefix,
                     authorizationServerService,
                     authService,
@@ -554,11 +408,6 @@ public static partial class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                if (transaction != null)
-                {
-                    await transaction.RollbackAsync(cancellationToken);
-                }
-
                 var page = await BuildAuthPageViewModelAsync(
                     "email-otp-signup-verify",
                     requestId,
@@ -581,8 +430,8 @@ public static partial class EndpointRouteBuilderExtensions
         hostedForms.MapPost("/signup/phone-otp/start", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
-            SqlOSPhoneOtpService phoneOtpService,
             SqlOSInvitationService invitationService,
+            SqlOSIdentityProcesses processes,
             CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
@@ -598,19 +447,22 @@ public static partial class EndpointRouteBuilderExtensions
                 var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
                 var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken)
                     ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken);
-                if (invitation != null)
-                {
-                    throw new InvalidOperationException("Phone signup is not available for email invitations.");
-                }
-
-                var signup = await phoneOtpService.StartSignupForAuthorizationRequestAsync(
-                    authorizationRequest,
-                    displayName,
-                    phoneNumber,
-                    organizationName,
-                    customFields: null,
-                    context,
+                var outcome = await processes.StartPhoneOtpSignUp().ExecuteAsync(
+                    new StartPhoneOtpSignUpCommand(
+                        displayName,
+                        phoneNumber,
+                        organizationName,
+                        CustomFields: null,
+                        LoginTarget.ForBrowser(authorizationRequest, invitationToken: null),
+                        CarriesInvitation: invitation != null,
+                        SqlOSHttpRequestContext.From(context, SqlOSRequestSurface.Hosted)),
                     cancellationToken);
+                var signup = outcome switch
+                {
+                    PhoneCodeSignUpStartOutcome.Sent sent => sent.Result,
+                    PhoneCodeSignUpStartOutcome.Refused refused => throw refused.Refusal.ToException(),
+                    _ => throw new InvalidOperationException($"Unknown phone-code sign-up start outcome '{outcome.GetType().Name}'.")
+                };
 
                 var page = await BuildAuthPageViewModelAsync(
                     "phone-otp-signup-verify",
@@ -653,12 +505,9 @@ public static partial class EndpointRouteBuilderExtensions
         hostedForms.MapPost("/signup/phone-otp/verify", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
-            SqlOSIssuerSessionService issuerSessionService,
             SqlOSAuthService authService,
-            SqlOSPhoneOtpService phoneOtpService,
-            ISqlOSAuthServerDbContext dbContext,
             SqlOSInvitationService invitationService,
-            SqlOSAdminService adminService,
+            SqlOSIdentityProcesses processes,
             CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
@@ -669,83 +518,26 @@ public static partial class EndpointRouteBuilderExtensions
             var code = form["code"].ToString();
             var invitationToken = ReadInvitationToken(context, form);
             var deviceUserCode = ReadDeviceUserCode(context, form);
-            IDbContextTransaction? transaction = null;
 
             try
             {
-                if (SupportsDatabaseTransactions(dbContext))
-                {
-                    transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
-                }
-
                 var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
                 var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken)
                     ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken);
-                if (invitation != null)
-                {
-                    throw new InvalidOperationException("Phone signup is not available for email invitations.");
-                }
-
-                var signupVerification = await phoneOtpService.VerifySignupAsync(
-                    new SqlOSPhoneOtpSignupVerifyRequest(signupToken, challengeToken, code),
-                    authorizationRequest?.Id,
-                    requireAuthorizationRequestMatch: true,
+                var outcome = await processes.CompletePhoneOtpSignUp(context).ExecuteAsync(
+                    new CompletePhoneOtpSignUpCommand(
+                        signupToken,
+                        challengeToken,
+                        code,
+                        CarriesInvitation: invitation != null,
+                        LoginTarget.ForBrowser(authorizationRequest, invitationToken: null),
+                        SqlOSHttpRequestContext.From(context, SqlOSRequestSurface.Hosted)),
                     cancellationToken);
-
-                var signup = await authorizationServerService.SignUpWithPhoneOtpAsync(
-                    signupVerification.DisplayName,
-                    signupVerification.PhoneNumber,
-                    signupVerification.OrganizationName,
-                    authorizationRequest?.OrganizationId ?? signupVerification.OrganizationId,
-                    cancellationToken);
-
-                if (authorizationRequest == null)
-                {
-                    var organizationId = signup.Organizations.FirstOrDefault()?.Id;
-                    await issuerSessionService.SignInAsync(context, signup.User, organizationId, signup.AuthenticationMethod, cancellationToken);
-                    await phoneOtpService.ConsumeSignupTokenAsync(signupVerification.SignupToken, cancellationToken);
-                    await adminService.RecordAuditAsync(
-                        "user.signup.phone_otp",
-                        "user",
-                        signup.User.Id,
-                        userId: signup.User.Id,
-                        organizationId: organizationId,
-                        ipAddress: context.Connection.RemoteIpAddress?.ToString(),
-                        cancellationToken: cancellationToken);
-                    if (transaction != null)
-                    {
-                        await transaction.CommitAsync(cancellationToken);
-                    }
-
-                    return RedirectAfterStandaloneSignIn(authPrefix, "signed-up", deviceUserCode);
-                }
-
-                authorizationRequest.OrganizationId ??= signup.Organizations.FirstOrDefault()?.Id;
-                var completion = await authorizationServerService.CompleteCredentialSignInAsync(
+                return await RenderSignedUpAsync(
+                    outcome,
                     authorizationRequest,
-                    signup.User,
-                    signup.AuthenticationMethod,
-                    context,
-                    cancellationToken);
-
-                await phoneOtpService.ConsumeSignupTokenAsync(signupVerification.SignupToken, cancellationToken);
-                await adminService.RecordAuditAsync(
-                    "user.signup.phone_otp",
-                    "user",
-                    signup.User.Id,
-                    userId: signup.User.Id,
-                    organizationId: signup.Organizations.FirstOrDefault()?.Id,
-                    ipAddress: context.Connection.RemoteIpAddress?.ToString(),
-                    cancellationToken: cancellationToken);
-                if (transaction != null)
-                {
-                    await transaction.CommitAsync(cancellationToken);
-                }
-
-                return await RenderHostedAuthorizationCompletionAsync(
-                    completion,
-                    authorizationRequest,
-                    signup.User.DefaultEmail,
+                    "signed-up",
+                    deviceUserCode,
                     authPrefix,
                     authorizationServerService,
                     authService,
@@ -753,11 +545,6 @@ public static partial class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                if (transaction != null)
-                {
-                    await transaction.RollbackAsync(cancellationToken);
-                }
-
                 var page = await BuildAuthPageViewModelAsync(
                     "phone-otp-signup-verify",
                     requestId,
@@ -777,5 +564,41 @@ public static partial class EndpointRouteBuilderExtensions
                 return Html(page, StatusCodes.Status400BadRequest);
             }
         });
+    }
+
+    /// <summary>
+    /// The hosted answer to a completed sign-up: the AuthPage's own sign-in redirects to its status
+    /// page (or the device page), and an authorization request continues to consent, MFA, an
+    /// organization choice, or the client. A refusal is answered as the 7.x exception was.
+    /// </summary>
+    private static async Task<IResult> RenderSignedUpAsync(
+        SignUpOutcome outcome,
+        SqlOSAuthorizationRequest? authorizationRequest,
+        string standaloneStatus,
+        string? deviceUserCode,
+        string authPrefix,
+        SqlOSAuthorizationServerService authorizationServerService,
+        SqlOSAuthService authService,
+        CancellationToken cancellationToken)
+    {
+        var signedUp = outcome switch
+        {
+            SignUpOutcome.SignedUp success => success,
+            SignUpOutcome.Refused refused => throw refused.Refusal.ToException(),
+            _ => throw new InvalidOperationException($"Unknown sign-up outcome '{outcome.GetType().Name}'.")
+        };
+        if (signedUp.Completion is LoginCompletion.BrowserSignedIn)
+        {
+            return RedirectAfterStandaloneSignIn(authPrefix, standaloneStatus, deviceUserCode);
+        }
+
+        return await RenderHostedAuthorizationCompletionAsync(
+            ((LoginCompletion.AuthorizationRequestContinued)signedUp.Completion).Result,
+            authorizationRequest!,
+            signedUp.Evidence.User.DefaultEmail,
+            authPrefix,
+            authorizationServerService,
+            authService,
+            cancellationToken);
     }
 }

@@ -4,12 +4,6 @@
 # These are the violations that existed when the rule was introduced. The list only shrinks: fix a
 # violation, delete its line and lower this file's mark in high-water-marks.txt. Never add a line.
 # Every allowlist is empty by the end of the 8.0.0 refactor (layer 5). Sorted ordinally.
-SqlOS.AuthServer.Extensions.EndpointRouteBuilderExtensions::MapEmailOtpEndpoints
-SqlOS.AuthServer.Extensions.EndpointRouteBuilderExtensions::MapHostedFactorEndpoints
-SqlOS.AuthServer.Extensions.EndpointRouteBuilderExtensions::MapHostedPrimaryEndpoints
-SqlOS.AuthServer.Extensions.EndpointRouteBuilderExtensions::MapHostedSignupEndpoints
-SqlOS.AuthServer.Extensions.EndpointRouteBuilderExtensions::RedirectToSsoIfRequiredAsync
-SqlOS.AuthServer.Extensions.EndpointRouteBuilderExtensions::SupportsDatabaseTransactions
 SqlOS.Fga.Dashboard.SqlOSFgaDashboardMiddleware::GetAgentsAsync
 SqlOS.Fga.Dashboard.SqlOSFgaDashboardMiddleware::GetGrantsAsync
 SqlOS.Fga.Dashboard.SqlOSFgaDashboardMiddleware::GetPermissionsAsync

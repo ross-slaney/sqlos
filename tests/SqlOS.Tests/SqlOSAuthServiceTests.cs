@@ -12,6 +12,7 @@ using System.Text.RegularExpressions;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Models;
+using SqlOS.AuthServer.Processes.Identity;
 using SqlOS.AuthServer.Services;
 using SqlOS.Email.Configuration;
 using SqlOS.Email.Services;
@@ -2334,12 +2335,16 @@ public sealed class SqlOSAuthServiceTests
         await magicLink.StartForAuthorizationRequestAsync(first, user.DefaultEmail!, CreatePasswordHttpContext("203.0.113.240"));
         var rawToken = ExtractMagicLinkToken(emailSender.Messages.Single().TextBody);
 
-        var act = async () => await magicLink.CompleteAsync(
-            new SqlOSMagicLinkCompleteRequest(rawToken),
-            second.Id,
-            requireAuthorizationRequestMatch: true);
-        await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("The sign-in link is invalid or expired.");
+        // The headless surface completes a link only for the authorization request it names.
+        var processes = new SqlOSIdentityProcesses(harness.Context, harness.Admin, harness.Crypto, harness.Settings, harness.Options)
+        {
+            SignInLinks = magicLink
+        };
+        var outcome = await processes.CompleteMagicLinkSignIn(httpContext: null).ExecuteAsync(
+            new CompleteMagicLinkSignInCommand(rawToken, new SignInLinkTarget.Headless(second.Id, InvitationToken: null)),
+            CancellationToken.None);
+        outcome.Should().BeOfType<SignInLinkOutcome.Refused>()
+            .Which.Refusal.Message.Should().Be("The sign-in link is invalid or expired.");
     }
 
     [TestMethod]

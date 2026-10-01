@@ -22,7 +22,6 @@ namespace SqlOS.AuthServer.Services;
 public sealed class SqlOSMagicLinkService
 {
     public const string TokenPurpose = SqlOSTemporaryTokenKinds.Purposes.MagicLink;
-    private const string InvalidLinkMessage = "The sign-in link is invalid or expired.";
 
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSAdminService _adminService;
@@ -98,137 +97,6 @@ public sealed class SqlOSMagicLinkService
                 new LoginTarget.DirectLogin(request.ClientId, request.OrganizationId),
                 SqlOSHttpRequestContext.FromOptional(httpContext, SqlOSRequestSurface.PublicApi)),
             cancellationToken));
-
-    internal async Task<SqlOSMagicLinkVerificationResult> CompleteAsync(
-        SqlOSMagicLinkCompleteRequest request,
-        string? expectedAuthorizationRequestId,
-        bool requireAuthorizationRequestMatch,
-        CancellationToken cancellationToken = default)
-    {
-        await EnsureMagicLinkEnabledAsync(cancellationToken);
-
-        var rawToken = request.Token?.Trim()
-            ?? throw new InvalidOperationException(InvalidLinkMessage);
-        if (string.IsNullOrWhiteSpace(rawToken))
-        {
-            throw new InvalidOperationException(InvalidLinkMessage);
-        }
-
-        var token = await _cryptoService.FindTemporaryTokenAsync(SqlOSTemporaryTokenKinds.MagicLink, rawToken, cancellationToken);
-        if (token == null)
-        {
-            _auditRecorder.Record(new MagicLinkNotFound());
-            await _context.SaveChangesAsync(cancellationToken);
-            throw new InvalidOperationException(InvalidLinkMessage);
-        }
-
-        var payload = token.ReadPayload(SqlOSTemporaryTokenKinds.MagicLink)
-            ?? throw new InvalidOperationException(InvalidLinkMessage);
-
-        ValidateBinding(token, payload, expectedAuthorizationRequestId, requireAuthorizationRequestMatch);
-
-        var consumed = await _cryptoService.ConsumeTemporaryTokenAsync(SqlOSTemporaryTokenKinds.MagicLink, rawToken, cancellationToken);
-        if (consumed == null)
-        {
-            _auditRecorder.Record(new MagicLinkReplayed(
-                payload.MaskedEmail,
-                payload.IpAddress,
-                payload.ClientApplicationId,
-                payload.AuthorizationRequestId));
-            await _context.SaveChangesAsync(cancellationToken);
-            throw new InvalidOperationException(InvalidLinkMessage);
-        }
-
-        if (string.IsNullOrWhiteSpace(consumed.UserId))
-        {
-            throw new InvalidOperationException(InvalidLinkMessage);
-        }
-
-        var user = await _context.FindUserAsync(consumed.UserId, SqlOSUserParts.Emails, cancellationToken);
-        if (user is not { IsActive: true })
-        {
-            throw new InvalidOperationException(InvalidLinkMessage);
-        }
-
-        // The link was delivered to one stored address; it signs in only while that exact
-        // address still belongs to this account.
-        var userEmail = string.IsNullOrWhiteSpace(payload.UserEmailId) ? null : user.FindEmail(payload.UserEmailId);
-        if (userEmail == null || !SqlOSEmailAddress.MatchesStoredEmail(userEmail, payload.NormalizedEmail))
-        {
-            throw new InvalidOperationException(InvalidLinkMessage);
-        }
-
-        // The link proved the mailbox it was delivered to. An unverified address is claimed:
-        // whatever was attached before the owner proved it is evicted in this same save, and the
-        // address becomes the account's default email.
-        var now = DateTime.UtcNow;
-        var ownership = new OwnershipProof(EmailAddress.Parse(payload.Email), OwnershipProofMethod.MagicLink);
-        await ClaimEmailOwnership.StageAsync(
-            _context,
-            user,
-            ownership,
-            PresentedCredentials.None,
-            now,
-            cancellationToken);
-
-        user.MakeDefaultEmail(ownership, now);
-        consumed.Record(new MagicLinkCompleted(
-            consumed.Id,
-            payload.MaskedEmail,
-            payload.IpAddress,
-            user.Id,
-            payload.ClientApplicationId,
-            payload.AuthorizationRequestId,
-            payload.RequestedOrganizationId));
-        await _context.SaveChangesAsync(cancellationToken);
-
-        var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
-
-        return new SqlOSMagicLinkVerificationResult(
-            consumed,
-            payload,
-            user,
-            userEmail,
-            organizations,
-            "magic_link");
-    }
-
-    private void ValidateBinding(
-        SqlOSTemporaryToken token,
-        MagicLinkPayload payload,
-        string? expectedAuthorizationRequestId,
-        bool requireAuthorizationRequestMatch)
-    {
-        if (!string.Equals(token.ClientApplicationId, payload.ClientApplicationId, StringComparison.Ordinal)
-            || !string.Equals(token.OrganizationId, payload.RequestedOrganizationId, StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(InvalidLinkMessage);
-        }
-
-        if (requireAuthorizationRequestMatch)
-        {
-            if (string.IsNullOrWhiteSpace(expectedAuthorizationRequestId))
-            {
-                if (!string.IsNullOrWhiteSpace(payload.AuthorizationRequestId))
-                {
-                    throw new InvalidOperationException(InvalidLinkMessage);
-                }
-            }
-            else if (!string.Equals(payload.AuthorizationRequestId, expectedAuthorizationRequestId, StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException(InvalidLinkMessage);
-            }
-        }
-    }
-
-    private async Task EnsureMagicLinkEnabledAsync(CancellationToken cancellationToken)
-    {
-        var settings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
-        if (!settings.MagicLinkEnabled)
-        {
-            throw new InvalidOperationException("Magic-link sign-in is unavailable.");
-        }
-    }
 
     /// <summary>
     /// Sends a sign-in link to its stored recipient: through the host's message builder when it
@@ -366,14 +234,6 @@ public sealed class SqlOSMagicLinkService
         };
     }
 }
-
-internal sealed record SqlOSMagicLinkVerificationResult(
-    SqlOSTemporaryToken Token,
-    MagicLinkPayload Payload,
-    SqlOSUser User,
-    SqlOSUserEmail UserEmail,
-    IReadOnlyList<SqlOSOrganizationOption> Organizations,
-    string AuthenticationMethod);
 
 /// <summary>
 /// Delivers sign-in links for one request: the host's link builder

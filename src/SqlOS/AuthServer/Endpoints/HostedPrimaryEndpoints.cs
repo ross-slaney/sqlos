@@ -16,10 +16,13 @@ using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Errors;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.AuthServer.Processes.Identity;
 using SqlOS.AuthServer.Services;
 using SqlOS.AuthServer.Security;
 using SqlOS.Configuration;
 using SqlOS.Dashboard;
+using SqlOS.Domain;
+using SqlOS.Hosting;
 
 namespace SqlOS.AuthServer.Extensions;
 
@@ -596,11 +599,9 @@ public static partial class EndpointRouteBuilderExtensions
         hostedForms.MapPost("/login/identify", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
-            SqlOSHomeRealmDiscoveryService discoveryService,
-            SqlOSSamlService samlService,
-            ISqlOSAuthServerDbContext dbContext,
             SqlOSSettingsService settingsService,
             SqlOSInvitationService invitationService,
+            SqlOSIdentityProcesses processes,
             CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
@@ -612,19 +613,9 @@ public static partial class EndpointRouteBuilderExtensions
             var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
             var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken);
             email = invitation?.Email ?? email;
-            var discovery = await discoveryService.DiscoverAsync(new SqlOSHomeRealmDiscoveryRequest(email), cancellationToken);
-            if (authorizationRequest != null)
+            if (await RouteToIdentityProviderAsync(processes, authorizationRequest, email, cancellationToken) is { } identityProvider)
             {
-                authorizationRequest.LoginHintEmail = email;
-                SqlOSHomeRealmDiscoveryService.BindToAuthorizationRequest(authorizationRequest, discovery);
-                await dbContext.SaveChangesAsync(cancellationToken);
-            }
-
-            if (authorizationRequest != null
-                && string.Equals(discovery.Mode, "sso", StringComparison.Ordinal)
-                && !string.IsNullOrWhiteSpace(discovery.ConnectionId))
-            {
-                return Results.Redirect(await samlService.BuildIdentityProviderRedirectForAuthorizationRequestAsync(authorizationRequest.Id, cancellationToken));
+                return identityProvider;
             }
 
             var credentialSettings = await settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
@@ -651,11 +642,8 @@ public static partial class EndpointRouteBuilderExtensions
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSAuthService authService,
-            SqlOSIssuerSessionService issuerSessionService,
             SqlOSInvitationService invitationService,
-            SqlOSHomeRealmDiscoveryService discoveryService,
-            SqlOSSamlService samlService,
-            ISqlOSAuthServerDbContext dbContext,
+            SqlOSIdentityProcesses processes,
             CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
@@ -671,50 +659,35 @@ public static partial class EndpointRouteBuilderExtensions
                 var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken)
                     ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken);
                 email = invitation?.Email ?? email;
-                var ssoRedirect = await RedirectToSsoIfRequiredAsync(
-                    authorizationRequest,
-                    email,
-                    discoveryService,
-                    samlService,
-                    dbContext,
-                    cancellationToken);
-                if (ssoRedirect != null)
+                if (await RouteToIdentityProviderAsync(processes, authorizationRequest, email, cancellationToken) is { } identityProvider)
                 {
-                    return ssoRedirect;
+                    return identityProvider;
                 }
 
-                var authentication = await authorizationServerService.AuthenticatePasswordAsync(
-                    email,
-                    password,
-                    cancellationToken,
-                    allowUnverifiedEmailForInvitation: invitation != null,
-                    httpContext: context,
-                    clientKey: authorizationRequest?.ClientApplication?.ClientId ?? authorizationRequest?.ClientApplicationId,
-                    authorizationRequestId: authorizationRequest?.Id,
-                    surface: authorizationRequest == null ? "hosted_standalone" : "hosted");
-                if (authorizationRequest == null)
+                var outcome = await processes.SignInWithPassword(context).ExecuteAsync(
+                    new SignInWithPasswordCommand(
+                        email,
+                        password,
+                        LoginTarget.ForBrowser(authorizationRequest, invitationToken),
+                        CarriesInvitation: invitation != null,
+                        PasswordAttemptContext.ForAuthorizationRequest(
+                            authorizationRequest,
+                            authorizationRequest == null ? "hosted_standalone" : "hosted"),
+                        SqlOSHttpRequestContext.From(context, SqlOSRequestSurface.Hosted)),
+                    cancellationToken);
+                var completion = outcome switch
                 {
-                    var organizationId = authentication.Organizations.FirstOrDefault()?.Id;
-                    if (!string.IsNullOrWhiteSpace(invitationToken))
-                    {
-                        var acceptance = await invitationService.AcceptEmailInvitationAsync(
-                            new SqlOSAcceptEmailInvitationRequest(invitationToken, authentication.User.Id) { AuthenticationMethod = authentication.AuthenticationMethod },
-                            context,
-                            cancellationToken);
-                        organizationId = acceptance.OrganizationId;
-                    }
-
-                    await issuerSessionService.SignInAsync(context, authentication.User, organizationId, authentication.AuthenticationMethod, cancellationToken);
+                    SignInOutcome.SignedIn signedIn => signedIn.Completion,
+                    SignInOutcome.Refused refused => throw refused.Refusal.ToException(),
+                    _ => throw new InvalidOperationException($"Unknown sign-in outcome '{outcome.GetType().Name}'.")
+                };
+                if (completion is LoginCompletion.BrowserSignedIn)
+                {
                     return RedirectAfterStandaloneSignIn(authPrefix, invitation == null ? "signed-in" : "invitation-accepted", deviceUserCode);
                 }
-                var completion = await authorizationServerService.CompleteCredentialSignInAsync(
-                    authorizationRequest,
-                    authentication.User,
-                    authentication.AuthenticationMethod,
-                    context,
-                    cancellationToken);
 
-                if (completion.RequiresConsent)
+                var result = ((LoginCompletion.AuthorizationRequestContinued)completion).Result;
+                if (result.RequiresConsent)
                 {
                     return Html(await BuildAuthPageViewModelAsync(
                         "consent",
@@ -726,11 +699,11 @@ public static partial class EndpointRouteBuilderExtensions
                         authPrefix,
                         authorizationServerService,
                         cancellationToken,
-                        consentToken: completion.ConsentToken,
-                        consentScopes: completion.ConsentScopes));
+                        consentToken: result.ConsentToken,
+                        consentScopes: result.ConsentScopes));
                 }
 
-                if (completion.RequiresOrganizationSelection)
+                if (result.RequiresOrganizationSelection)
                 {
                     var organizationPage = await BuildAuthPageViewModelAsync(
                         "organization",
@@ -738,21 +711,21 @@ public static partial class EndpointRouteBuilderExtensions
                         email,
                         null,
                         null,
-                        completion.PendingToken,
+                        result.PendingToken,
                         authPrefix,
                         authorizationServerService,
                         cancellationToken,
-                        completion.Organizations,
+                        result.Organizations,
                         invitationToken: invitationToken,
                         invitation: invitation,
                         invitationService: invitationService);
                     return Html(organizationPage);
                 }
 
-                if (completion.RequiresMfa)
+                if (result.RequiresMfa)
                 {
                     return await RenderMfaChallengeAsync(
-                        completion,
+                        result,
                         requestId,
                         email,
                         authPrefix,
@@ -763,7 +736,7 @@ public static partial class EndpointRouteBuilderExtensions
                         invitationService: invitationService);
                 }
 
-                return ClientRedirect(completion.RedirectUrl!);
+                return ClientRedirect(result.RedirectUrl!);
             }
             catch (InvalidOperationException ex)
             {

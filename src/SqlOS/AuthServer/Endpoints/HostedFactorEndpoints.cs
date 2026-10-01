@@ -16,10 +16,13 @@ using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Errors;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.AuthServer.Processes.Identity;
 using SqlOS.AuthServer.Services;
 using SqlOS.AuthServer.Security;
 using SqlOS.Configuration;
 using SqlOS.Dashboard;
+using SqlOS.Domain;
+using SqlOS.Hosting;
 
 namespace SqlOS.AuthServer.Extensions;
 
@@ -78,11 +81,8 @@ public static partial class EndpointRouteBuilderExtensions
         hostedForms.MapPost("/login/magic-link/start", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
-            SqlOSMagicLinkService magicLinkService,
             SqlOSInvitationService invitationService,
-            SqlOSHomeRealmDiscoveryService discoveryService,
-            SqlOSSamlService samlService,
-            ISqlOSAuthServerDbContext dbContext,
+            SqlOSIdentityProcesses processes,
             CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
@@ -97,23 +97,23 @@ public static partial class EndpointRouteBuilderExtensions
                 var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken)
                     ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken);
                 email = invitation?.Email ?? email;
-                var ssoRedirect = await RedirectToSsoIfRequiredAsync(
-                    authorizationRequest,
-                    email,
-                    discoveryService,
-                    samlService,
-                    dbContext,
-                    cancellationToken);
-                if (ssoRedirect != null)
+                if (await RouteToIdentityProviderAsync(processes, authorizationRequest, email, cancellationToken) is { } identityProvider)
                 {
-                    return ssoRedirect;
+                    return identityProvider;
                 }
 
-                var start = await magicLinkService.StartForAuthorizationRequestAsync(
-                    authorizationRequest,
-                    email,
-                    context,
+                var outcome = await processes.StartMagicLinkSignIn(context).ExecuteAsync(
+                    new StartMagicLinkSignInCommand(
+                        email,
+                        LoginTarget.ForBrowser(authorizationRequest, invitationToken),
+                        SqlOSHttpRequestContext.From(context, SqlOSRequestSurface.Hosted)),
                     cancellationToken);
+                var start = outcome switch
+                {
+                    SignInLinkStartOutcome.Sent sent => sent.Result,
+                    SignInLinkStartOutcome.Refused refused => throw refused.Refusal.ToException(),
+                    _ => throw new InvalidOperationException($"Unknown sign-in link start outcome '{outcome.GetType().Name}'.")
+                };
 
                 var page = await BuildAuthPageViewModelAsync(
                     "magic-link-sent",
@@ -193,9 +193,8 @@ public static partial class EndpointRouteBuilderExtensions
         hostedForms.MapPost("/login/magic-link/complete", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
-            SqlOSMagicLinkService magicLinkService,
             SqlOSAuthService authService,
-            SqlOSIssuerSessionService issuerSessionService,
+            SqlOSIdentityProcesses processes,
             CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
@@ -203,46 +202,28 @@ public static partial class EndpointRouteBuilderExtensions
 
             try
             {
-                var verification = await magicLinkService.CompleteAsync(
-                    new SqlOSMagicLinkCompleteRequest(token),
-                    expectedAuthorizationRequestId: null,
-                    requireAuthorizationRequestMatch: false,
+                var outcome = await processes.CompleteMagicLinkSignIn(context).ExecuteAsync(
+                    new CompleteMagicLinkSignInCommand(token, SignInLinkTarget.HostedPage.Instance),
                     cancellationToken);
-
-                if (string.IsNullOrWhiteSpace(verification.Payload.AuthorizationRequestId))
+                var signedIn = outcome switch
                 {
-                    var organizationId = verification.Organizations.FirstOrDefault()?.Id;
-                    await issuerSessionService.SignInAsync(
-                        context,
-                        verification.User,
-                        organizationId,
-                        verification.AuthenticationMethod,
-                        cancellationToken);
+                    SignInLinkOutcome.SignedIn success => success,
+                    SignInLinkOutcome.Refused refused => throw refused.Refusal.ToException(),
+                    _ => throw new InvalidOperationException($"Unknown sign-in link outcome '{outcome.GetType().Name}'.")
+                };
+                if (signedIn.Completion is LoginCompletion.BrowserSignedIn)
+                {
                     return RedirectAfterStandaloneSignIn(authPrefix, "signed-in", deviceUserCode: null);
                 }
 
-                var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(
-                    verification.Payload.AuthorizationRequestId,
-                    cancellationToken)
-                    ?? throw new InvalidOperationException("The sign-in link is invalid or expired.");
-                if (!string.Equals(authorizationRequest.ClientApplicationId, verification.Token.ClientApplicationId, StringComparison.Ordinal))
-                {
-                    throw new InvalidOperationException("The sign-in link is invalid or expired.");
-                }
-
-                var completion = await authorizationServerService.CompleteCredentialSignInAsync(
-                    authorizationRequest,
-                    verification.User,
-                    verification.AuthenticationMethod,
-                    context,
-                    cancellationToken);
-
+                var authorizationRequest = ((LoginDestination.AuthorizationRequest)signedIn.Destination).Request;
+                var completion = ((LoginCompletion.AuthorizationRequestContinued)signedIn.Completion).Result;
                 if (completion.RequiresConsent)
                 {
                     return Html(await BuildAuthPageViewModelAsync(
                         "consent",
                         authorizationRequest.Id,
-                        verification.Payload.Email,
+                        signedIn.Email,
                         null,
                         null,
                         null,
@@ -258,7 +239,7 @@ public static partial class EndpointRouteBuilderExtensions
                     var organizationPage = await BuildAuthPageViewModelAsync(
                         "organization",
                         authorizationRequest.Id,
-                        verification.Payload.Email,
+                        signedIn.Email,
                         null,
                         null,
                         completion.PendingToken,
@@ -274,7 +255,7 @@ public static partial class EndpointRouteBuilderExtensions
                     return await RenderMfaChallengeAsync(
                         completion,
                         authorizationRequest.Id,
-                        verification.Payload.Email,
+                        signedIn.Email,
                         authPrefix,
                         authorizationServerService,
                         authService,
@@ -346,7 +327,7 @@ public static partial class EndpointRouteBuilderExtensions
         hostedForms.MapPost("/login/phone-otp/start", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
-            SqlOSPhoneOtpService phoneOtpService,
+            SqlOSIdentityProcesses processes,
             CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
@@ -357,11 +338,18 @@ public static partial class EndpointRouteBuilderExtensions
             try
             {
                 var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
-                var challenge = await phoneOtpService.StartForAuthorizationRequestAsync(
-                    authorizationRequest,
-                    phoneNumber,
-                    context,
+                var outcome = await processes.StartPhoneOtpSignIn().ExecuteAsync(
+                    new StartPhoneOtpSignInCommand(
+                        phoneNumber,
+                        LoginTarget.ForBrowser(authorizationRequest, invitationToken: null),
+                        SqlOSHttpRequestContext.From(context, SqlOSRequestSurface.Hosted)),
                     cancellationToken);
+                var challenge = outcome switch
+                {
+                    PhoneCodeStartOutcome.Sent sent => sent.Result,
+                    PhoneCodeStartOutcome.Refused refused => throw refused.Refusal.ToException(),
+                    _ => throw new InvalidOperationException($"Unknown phone-code start outcome '{outcome.GetType().Name}'.")
+                };
 
                 var page = await BuildAuthPageViewModelAsync(
                     "phone-otp-verify",
@@ -400,9 +388,8 @@ public static partial class EndpointRouteBuilderExtensions
         hostedForms.MapPost("/login/phone-otp/verify", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
-            SqlOSPhoneOtpService phoneOtpService,
             SqlOSAuthService authService,
-            SqlOSIssuerSessionService issuerSessionService,
+            SqlOSIdentityProcesses processes,
             CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
@@ -415,31 +402,22 @@ public static partial class EndpointRouteBuilderExtensions
             try
             {
                 var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
-                var verification = await phoneOtpService.VerifyAsync(
-                    new SqlOSPhoneOtpVerifyRequest(challengeToken, code),
-                    authorizationRequest?.Id,
-                    requireAuthorizationRequestMatch: true,
+                var target = LoginTarget.ForBrowser(authorizationRequest, invitationToken: null);
+                var outcome = await processes.VerifyPhoneOtpSignIn(context).ExecuteAsync(
+                    new VerifyPhoneOtpSignInCommand(challengeToken, code, target, ChallengeBinding.For(target)),
                     cancellationToken);
-
-                if (authorizationRequest == null)
+                var signedIn = outcome switch
                 {
-                    var organizationId = verification.Organizations.FirstOrDefault()?.Id;
-                    await issuerSessionService.SignInAsync(
-                        context,
-                        verification.User,
-                        organizationId,
-                        verification.AuthenticationMethod,
-                        cancellationToken);
+                    PhoneCodeSignInOutcome.SignedIn success => success,
+                    PhoneCodeSignInOutcome.Refused refused => throw refused.Refusal.ToException(),
+                    _ => throw new InvalidOperationException($"Unknown phone-code sign-in outcome '{outcome.GetType().Name}'.")
+                };
+                if (signedIn.Completion is LoginCompletion.BrowserSignedIn)
+                {
                     return RedirectAfterStandaloneSignIn(authPrefix, "signed-in", deviceUserCode);
                 }
 
-                var completion = await authorizationServerService.CompleteCredentialSignInAsync(
-                    authorizationRequest,
-                    verification.User,
-                    verification.AuthenticationMethod,
-                    context,
-                    cancellationToken);
-
+                var completion = ((LoginCompletion.AuthorizationRequestContinued)signedIn.Completion).Result;
                 if (completion.RequiresConsent)
                 {
                     return Html(await BuildAuthPageViewModelAsync(

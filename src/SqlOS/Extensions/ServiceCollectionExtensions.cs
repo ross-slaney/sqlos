@@ -155,6 +155,30 @@ public static class ServiceCollectionExtensions
         services.AddScoped<SqlOSUserInfoService>();
         services.AddScoped<SqlOSConsentService>();
         services.AddScoped<SqlOSHeadlessAuthService>();
+        // The identity processes the hosted AuthPage runs; the headless and public facades build
+        // the same processes from their own dependencies.
+        services.AddScoped(sp =>
+        {
+            var authorizationServer = sp.GetRequiredService<SqlOSAuthorizationServerService>();
+            return new SqlOSIdentityProcesses(
+                sp.GetRequiredService<ISqlOSAuthServerDbContext>(),
+                sp.GetRequiredService<SqlOSAdminService>(),
+                sp.GetRequiredService<SqlOSCryptoService>(),
+                sp.GetRequiredService<SqlOSSettingsService>(),
+                sp.GetRequiredService<IOptions<SqlOSAuthServerOptions>>().Value)
+            {
+                PasswordAdmission = authorizationServer.PasswordAdmission,
+                AuthorizationServer = authorizationServer,
+                Auth = sp.GetRequiredService<SqlOSAuthService>(),
+                IssuerSessions = sp.GetRequiredService<SqlOSIssuerSessionService>(),
+                Invitations = sp.GetRequiredService<SqlOSInvitationService>(),
+                HomeRealms = sp.GetRequiredService<SqlOSHomeRealmDiscoveryService>(),
+                Saml = sp.GetRequiredService<SqlOSSamlService>(),
+                EmailCodes = sp.GetRequiredService<SqlOSEmailOtpService>(),
+                SignInLinks = sp.GetRequiredService<SqlOSMagicLinkService>(),
+                PhoneCodes = sp.GetRequiredService<SqlOSPhoneOtpService>()
+            };
+        });
         services.AddScoped<SqlOSHomeRealmDiscoveryService>();
         services.AddScoped<SqlOSOidcAuthService>();
         services.AddScoped<SqlOSOidcBrowserAuthService>();

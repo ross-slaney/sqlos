@@ -5,8 +5,6 @@
 # violation, delete its line and lower this file's mark in high-water-marks.txt. Never add a line.
 # Every allowlist is empty by the end of the 8.0.0 refactor (layer 5). Sorted ordinally.
 SqlOS.AuditLogs.SqlOSAuditLogService::RecordAsync
-SqlOS.AuthServer.Extensions.EndpointRouteBuilderExtensions::MapHostedPrimaryEndpoints
-SqlOS.AuthServer.Extensions.EndpointRouteBuilderExtensions::RedirectToSsoIfRequiredAsync
 SqlOS.AuthServer.Services.SqlOSAdminService::AssignApplicationAsync
 SqlOS.AuthServer.Services.SqlOSAdminService::CleanupExpiredEmailOtpChallengesAsync
 SqlOS.AuthServer.Services.SqlOSAdminService::CleanupExpiredPhoneOtpChallengesAsync
@@ -118,7 +116,6 @@ SqlOS.AuthServer.Services.SqlOSMachineClientAdminService::RemoveGrantAsync
 SqlOS.AuthServer.Services.SqlOSMachineClientAdminService::RevokeAsync
 SqlOS.AuthServer.Services.SqlOSMachineClientAdminService::RotateAsync
 SqlOS.AuthServer.Services.SqlOSMachineClientAdminService::UpsertSeededMachineClientsCoreAsync
-SqlOS.AuthServer.Services.SqlOSMagicLinkService::CompleteAsync
 SqlOS.AuthServer.Services.SqlOSMfaAttemptAdmissionService::CleanupExpiredReservationsForBucketsAsync
 SqlOS.AuthServer.Services.SqlOSMfaAttemptAdmissionService::FinalizeAsync
 SqlOS.AuthServer.Services.SqlOSMfaAttemptAdmissionService::IsUserCapacityExhaustedAsync
