@@ -5,6 +5,10 @@
 # is constructed (or copied with `with`) only by the types listed for it here.
 SqlOS.AuthServer.Models.EmailClaimEvictions <- SqlOS.AuthServer.Processes.Identity.ClaimEmailOwnership
 SqlOS.AuthServer.Models.EmailOtpAttemptReservation <- SqlOS.AuthServer.Services.SqlOSEmailOtpAttemptLedger
+SqlOS.Domain.GrantAuthority <- SqlOS.AuthServer.Services.SqlOSMachineClientAdminService
+SqlOS.Domain.GrantAuthority <- SqlOS.AuthServer.Services.SqlOSScimGrantBoundaryPolicy
+SqlOS.Domain.GrantAuthority <- SqlOS.Extensions.SqlOSErgonomicsExtensions
+SqlOS.Domain.GrantAuthority <- SqlOS.Fga.Dashboard.SqlOSFgaDashboardMiddleware
 SqlOS.Domain.LoginEvidence <- SqlOS.AuthServer.Processes.Identity.CompleteEmailOtpSignUp
 SqlOS.Domain.LoginEvidence <- SqlOS.AuthServer.Processes.Identity.CompleteMagicLinkSignIn
 SqlOS.Domain.LoginEvidence <- SqlOS.AuthServer.Processes.Identity.CompletePhoneOtpSignUp

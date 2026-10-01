@@ -1300,11 +1300,7 @@ internal sealed class SqlOSScimService
     {
         if (!await _context.Set<SqlOSFgaSubjectType>().AnyAsync(x => x.Id == id, cancellationToken))
         {
-            _context.Set<SqlOSFgaSubjectType>().Add(new SqlOSFgaSubjectType
-            {
-                Id = id,
-                Name = name
-            });
+            _context.Set<SqlOSFgaSubjectType>().Add(SqlOSFgaSubjectType.Define(id, name));
         }
     }
 

@@ -180,8 +180,8 @@ public sealed class SqlOSErgonomicsExtensionsTests
             .Options;
         using var context = new ManualDepthFgaDbContext(options);
         context.Set<SqlOSFgaResourceType>().AddRange(
-            new SqlOSFgaResourceType { Id = "root", Name = "Root" },
-            new SqlOSFgaResourceType { Id = "workspace", Name = "Workspace" });
+            FgaTestModel.ResourceType("root", "Root"),
+            FgaTestModel.ResourceType("workspace", "Workspace"));
         context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
         {
             Id = "root",
@@ -501,24 +501,19 @@ public sealed class SqlOSErgonomicsExtensionsTests
     private static void SeedFgaCore(TestSqlOSInMemoryDbContext context)
     {
         context.Set<SqlOSFgaSubjectType>().AddRange(
-            new SqlOSFgaSubjectType { Id = "user", Name = "User" },
-            new SqlOSFgaSubjectType { Id = "agent", Name = "Agent" },
-            new SqlOSFgaSubjectType { Id = "service_account", Name = "Service Account" });
+            FgaTestModel.SubjectType("user", "User"),
+            FgaTestModel.SubjectType("agent", "Agent"),
+            FgaTestModel.SubjectType("service_account", "Service Account"));
         context.Set<SqlOSFgaResourceType>().AddRange(
-            new SqlOSFgaResourceType { Id = "root", Name = "Root" },
-            new SqlOSFgaResourceType { Id = "workspace", Name = "Workspace" });
+            FgaTestModel.ResourceType("root", "Root"),
+            FgaTestModel.ResourceType("workspace", "Workspace"));
         context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
         {
             Id = "root",
             Name = "Root",
             ResourceTypeId = "root"
         });
-        context.Set<SqlOSFgaRole>().Add(new SqlOSFgaRole
-        {
-            Id = "role_owner",
-            Key = "owner",
-            Name = "Owner"
-        });
+        context.Set<SqlOSFgaRole>().Add(FgaTestModel.Role("role_owner", key: "owner", name: "Owner"));
     }
 
     private sealed class FakeFgaAuthService(bool allowed) : ISqlOSFgaAuthService

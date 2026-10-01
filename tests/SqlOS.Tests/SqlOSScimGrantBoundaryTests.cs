@@ -755,9 +755,9 @@ public sealed class SqlOSScimGrantBoundaryTests
             new SqlOSOrganization { Id = OrgA, Slug = "acme", Name = "Acme", CreatedAt = now },
             new SqlOSOrganization { Id = OrgB, Slug = "beta", Name = "Beta", CreatedAt = now });
         context.Set<SqlOSFgaResourceType>().AddRange(
-            new SqlOSFgaResourceType { Id = "org", Name = "Organization" },
-            new SqlOSFgaResourceType { Id = "region", Name = "Region" },
-            new SqlOSFgaResourceType { Id = "store", Name = "Store" });
+            FgaTestModel.ResourceType("org", "Organization"),
+            FgaTestModel.ResourceType("region", "Region"),
+            FgaTestModel.ResourceType("store", "Store"));
         AddResource(context, BoundaryA, null, "org", "Acme");
         AddResource(context, StoreA42, BoundaryA, "store", "Acme store 42");
         AddResource(context, LegacyStoreA42, BoundaryA, "store", "Acme legacy store 42");
@@ -767,9 +767,9 @@ public sealed class SqlOSScimGrantBoundaryTests
         AddResource(context, StoreB9001, BoundaryB, "store", "Beta store 9001");
         AddResource(context, LegacyStoreB9001, BoundaryB, "store", "Beta legacy store 9001");
         AddResource(context, AcmeLookingStoreInB, BoundaryB, "store", "Beta store with an Acme-looking ID");
-        context.Set<SqlOSFgaPermission>().Add(new SqlOSFgaPermission { Id = "perm_store_manage", Key = ManageStore, Name = "Manage store", ResourceTypeId = "store" });
-        context.Set<SqlOSFgaRole>().Add(new SqlOSFgaRole { Id = "role_store_manager", Key = StoreManager, Name = "Store manager" });
-        context.Set<SqlOSFgaRolePermission>().Add(new SqlOSFgaRolePermission { RoleId = "role_store_manager", PermissionId = "perm_store_manage" });
+        context.Set<SqlOSFgaPermission>().Add(FgaTestModel.Permission("perm_store_manage", ManageStore, name: "Manage store", resourceTypeId: "store"));
+        context.Set<SqlOSFgaRole>().Add(FgaTestModel.Role("role_store_manager", key: StoreManager, name: "Store manager"));
+        context.Set<SqlOSFgaRolePermission>().Add(new SqlOSFgaRolePermission("role_store_manager", "perm_store_manage"));
         await context.SaveChangesAsync();
 
         var options = Options.Create(optionsValue ?? new SqlOSAuthServerOptions());

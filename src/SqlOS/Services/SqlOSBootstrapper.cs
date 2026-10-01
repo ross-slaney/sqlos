@@ -77,7 +77,7 @@ public sealed class SqlOSBootstrapper
         }
         if (_options.Fga.StartupSeedData != null)
         {
-            await _fgaSeedService.SeedAuthorizationDataAsync(_options.Fga.StartupSeedData, cancellationToken);
+            await _fgaSeedService.SeedStartupDataAsync(_options.Fga.StartupSeedData, cancellationToken);
         }
 
         await _adminService.UpsertSeededClientsAsync(cancellationToken);

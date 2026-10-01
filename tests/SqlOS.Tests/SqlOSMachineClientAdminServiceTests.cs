@@ -299,7 +299,7 @@ public sealed class SqlOSMachineClientAdminServiceTests
     {
         var organization = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Machines", $"machines-{Guid.NewGuid():N}"));
         var resource = new SqlOSFgaResource { Id = $"res_{Guid.NewGuid():N}", Name = "Jobs", ResourceTypeId = "workspace", IsActive = true };
-        var role = new SqlOSFgaRole { Id = $"role_{Guid.NewGuid():N}", Key = "runner", Name = "Runner" };
+        var role = FgaTestModel.Role($"role_{Guid.NewGuid():N}", key: "runner", name: "Runner");
         context.Set<SqlOSFgaResource>().Add(resource);
         context.Set<SqlOSFgaRole>().Add(role);
         await context.SaveChangesAsync();

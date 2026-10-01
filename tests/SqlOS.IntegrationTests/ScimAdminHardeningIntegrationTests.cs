@@ -14,6 +14,7 @@ using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Models;
 using SqlOS.Fga.Services;
 using SqlOS.IntegrationTests.Infrastructure;
+using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.IntegrationTests;
 
@@ -120,11 +121,7 @@ public sealed class ScimAdminHardeningIntegrationTests
             var organization = await setupAdmin.CreateOrganizationAsync(
                 new SqlOSCreateOrganizationRequest("Grant batch organization", "grant-batch"));
             // Mapped grants must stay inside the connection's grant boundary (#421).
-            setupContext.Set<SqlOSFgaResourceType>().Add(new SqlOSFgaResourceType
-            {
-                Id = "batch_resource_type",
-                Name = "Batch resource"
-            });
+            setupContext.Set<SqlOSFgaResourceType>().Add(FgaTestModel.ResourceType("batch_resource_type", "Batch resource"));
             setupContext.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
             {
                 Id = "batch_root",
@@ -161,11 +158,7 @@ public sealed class ScimAdminHardeningIntegrationTests
                     Enabled: true));
 
             var now = DateTime.UtcNow;
-            setupContext.Set<SqlOSFgaSubjectType>().Add(new SqlOSFgaSubjectType
-            {
-                Id = "batch_group_type",
-                Name = "Batch group"
-            });
+            setupContext.Set<SqlOSFgaSubjectType>().Add(FgaTestModel.SubjectType("batch_group_type", "Batch group"));
             setupContext.Set<SqlOSFgaSubject>().Add(new SqlOSFgaSubject
             {
                 Id = "batch_group_subject",
@@ -184,12 +177,7 @@ public sealed class ScimAdminHardeningIntegrationTests
                 CreatedAt = now,
                 UpdatedAt = now
             });
-            setupContext.Set<SqlOSFgaRole>().Add(new SqlOSFgaRole
-            {
-                Id = "batch_role",
-                Key = "batch_role",
-                Name = "Batch role"
-            });
+            setupContext.Set<SqlOSFgaRole>().Add(FgaTestModel.Role("batch_role", key: "batch_role", name: "Batch role"));
             const int grantCount = 129;
             setupContext.Set<SqlOSFgaGrant>().AddRange(Enumerable.Range(0, grantCount).Select(index =>
                 new SqlOSFgaGrant

@@ -8,6 +8,7 @@ using SqlOS.AuthServer.Interfaces;
 using SqlOS.Extensions;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
+using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.Tests;
 
@@ -682,22 +683,17 @@ public sealed class SqlOSResourceEntitySyncTests
 
     private static void SeedFgaCore(DbContext context)
     {
-        context.Set<SqlOSFgaSubjectType>().Add(new SqlOSFgaSubjectType { Id = "user", Name = "User" });
+        context.Set<SqlOSFgaSubjectType>().Add(FgaTestModel.SubjectType("user", "User"));
         context.Set<SqlOSFgaResourceType>().AddRange(
-            new SqlOSFgaResourceType { Id = "root", Name = "Root" },
-            new SqlOSFgaResourceType { Id = "workspace", Name = "Workspace" });
+            FgaTestModel.ResourceType("root", "Root"),
+            FgaTestModel.ResourceType("workspace", "Workspace"));
         context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
         {
             Id = "root",
             Name = "Root",
             ResourceTypeId = "root"
         });
-        context.Set<SqlOSFgaRole>().Add(new SqlOSFgaRole
-        {
-            Id = "role_owner",
-            Key = "owner",
-            Name = "Owner"
-        });
+        context.Set<SqlOSFgaRole>().Add(FgaTestModel.Role("role_owner", key: "owner", name: "Owner"));
     }
 
     private static async Task CreateSqliteFgaTablesAsync(DbContext context)

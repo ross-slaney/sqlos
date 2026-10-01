@@ -1,4 +1,5 @@
 using SqlOS.Fga.Models;
+using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.Tests.Fga;
 
@@ -11,8 +12,8 @@ internal static class ReadPathPinData
     public static async Task SeedAsync(ReadPathPinContext context)
     {
         context.Set<SqlOSFgaSubjectType>().AddRange(
-            new SqlOSFgaSubjectType { Id = "user", Name = "User" },
-            new SqlOSFgaSubjectType { Id = "group", Name = "Group" });
+            FgaTestModel.SubjectType("user", "User"),
+            FgaTestModel.SubjectType("group", "Group"));
         context.Set<SqlOSFgaSubject>().AddRange(
             new SqlOSFgaSubject { Id = "pin-user", SubjectTypeId = "user", DisplayName = "Pin user" },
             new SqlOSFgaSubject { Id = "pin-group-subject", SubjectTypeId = "group", DisplayName = "Pin group" },
@@ -24,7 +25,7 @@ internal static class ReadPathPinData
         context.Set<SqlOSFgaUserGroupMembership>().AddRange(
             new SqlOSFgaUserGroupMembership { SubjectId = "pin-user", UserGroupId = "pin-group" },
             new SqlOSFgaUserGroupMembership { SubjectId = "pin-user", UserGroupId = "pin-inactive-group" });
-        context.Set<SqlOSFgaPermission>().Add(new SqlOSFgaPermission { Id = "perm-pin-read", Key = "pin.read", Name = "Read" });
+        context.Set<SqlOSFgaPermission>().Add(FgaTestModel.Permission("perm-pin-read", "pin.read", name: "Read"));
         await context.SaveChangesAsync();
     }
 }

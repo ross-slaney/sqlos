@@ -1,9 +1,9 @@
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using SqlOS.Domain;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
-using SqlOS.Fga.Models;
+using SqlOS.Fga.Processes;
 
 namespace SqlOS.Fga.Services;
 
@@ -26,163 +26,84 @@ public class SqlOSFgaSeedService
     public async Task SeedCoreAsync(CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Seeding core SqlOSFga data...");
-
-        // Seed subject types
-        await SeedIfNotExistsAsync<SqlOSFgaSubjectType>("user", new SqlOSFgaSubjectType { Id = "user", Name = "User", Description = "A human user" }, cancellationToken);
-        await SeedIfNotExistsAsync<SqlOSFgaSubjectType>("group", new SqlOSFgaSubjectType { Id = "group", Name = "Group", Description = "A user group" }, cancellationToken);
-        await SeedIfNotExistsAsync<SqlOSFgaSubjectType>("service_account", new SqlOSFgaSubjectType { Id = "service_account", Name = "Service Account", Description = "An automated service account" }, cancellationToken);
-        await SeedIfNotExistsAsync<SqlOSFgaSubjectType>("agent", new SqlOSFgaSubjectType { Id = "agent", Name = "Agent", Description = "An automated agent (job, worker, AI)" }, cancellationToken);
-
-        // Seed root resource type
-        await SeedIfNotExistsAsync<SqlOSFgaResourceType>("root", new SqlOSFgaResourceType { Id = "root", Name = "Root", Description = "The root resource type" }, cancellationToken);
-
-        // Seed root resource
-        await SeedIfNotExistsAsync<SqlOSFgaResource>(_options.RootResourceId, new SqlOSFgaResource
-        {
-            Id = _options.RootResourceId,
-            Name = _options.RootResourceName,
-            ResourceTypeId = "root",
-            IsActive = true,
-        }, cancellationToken);
-
-        await _context.SaveChangesAsync(cancellationToken);
+        await new SeedFgaCore(_context, _options).ExecuteAsync(cancellationToken);
         _logger.LogInformation("Core SqlOSFga data seeded.");
     }
 
-    public async Task SeedAuthorizationDataAsync(SqlOSFgaSeedData data, CancellationToken cancellationToken = default)
+    public Task SeedAuthorizationDataAsync(SqlOSFgaSeedData data, CancellationToken cancellationToken = default)
+        => SeedAuthorizationDataAsync(data, FgaActor.Host, cancellationToken);
+
+    /// <summary>Reconciles <c>options.Fga.Seed</c> at startup.</summary>
+    internal Task SeedStartupDataAsync(SqlOSFgaSeedData data, CancellationToken cancellationToken = default)
+        => SeedAuthorizationDataAsync(data, FgaActor.Startup, cancellationToken);
+
+    private async Task SeedAuthorizationDataAsync(SqlOSFgaSeedData data, FgaActor actor, CancellationToken cancellationToken)
     {
         _logger.LogInformation("Seeding authorization data...");
-
-        if (data.ResourceTypes != null)
-        {
-            foreach (var rt in data.ResourceTypes)
-            {
-                var existing = await _context.Set<SqlOSFgaResourceType>().FindAsync(new object[] { rt.Id }, cancellationToken);
-                if (existing == null)
-                {
-                    _context.Set<SqlOSFgaResourceType>().Add(new SqlOSFgaResourceType
-                    {
-                        Id = rt.Id,
-                        Name = rt.Name,
-                        Description = rt.Description
-                    });
-                }
-                else
-                {
-                    existing.Name = rt.Name;
-                    existing.Description = rt.Description;
-                }
-            }
-        }
-
-        if (data.Roles != null)
-        {
-            foreach (var role in data.Roles)
-            {
-                var existing = await _context.Set<SqlOSFgaRole>().FindAsync(new object[] { role.Id }, cancellationToken);
-                if (existing == null)
-                {
-                    _context.Set<SqlOSFgaRole>().Add(new SqlOSFgaRole
-                    {
-                        Id = role.Id,
-                        Key = role.Key,
-                        Name = role.Name,
-                        Description = role.Description,
-                        IsVirtual = role.IsVirtual
-                    });
-                }
-                else
-                {
-                    existing.Key = role.Key;
-                    existing.Name = role.Name;
-                    existing.Description = role.Description;
-                    existing.IsVirtual = role.IsVirtual;
-                }
-            }
-        }
-
-        if (data.Permissions != null)
-        {
-            foreach (var perm in data.Permissions)
-            {
-                var existing = await _context.Set<SqlOSFgaPermission>().FindAsync(new object[] { perm.Id }, cancellationToken);
-                if (existing == null)
-                {
-                    _context.Set<SqlOSFgaPermission>().Add(new SqlOSFgaPermission
-                    {
-                        Id = perm.Id,
-                        Key = perm.Key,
-                        Name = perm.Name,
-                        Description = perm.Description,
-                        ResourceTypeId = perm.ResourceTypeId
-                    });
-                }
-                else
-                {
-                    existing.Key = perm.Key;
-                    existing.Name = perm.Name;
-                    existing.Description = perm.Description;
-                    existing.ResourceTypeId = perm.ResourceTypeId;
-                }
-            }
-        }
-
-        await _context.SaveChangesAsync(cancellationToken);
-
-        if (data.RolePermissions != null)
-        {
-            foreach (var (roleKey, permissionKeys) in data.RolePermissions)
-            {
-                var role = await _context.Set<SqlOSFgaRole>().FirstOrDefaultAsync(r => r.Key == roleKey, cancellationToken);
-                if (role == null)
-                {
-                    _logger.LogWarning("Role with key {RoleKey} not found for role-permission mapping", roleKey);
-                    continue;
-                }
-
-                foreach (var permKey in permissionKeys)
-                {
-                    var perm = await _context.Set<SqlOSFgaPermission>().FirstOrDefaultAsync(p => p.Key == permKey, cancellationToken);
-                    if (perm == null)
-                    {
-                        _logger.LogWarning("Permission with key {PermKey} not found for role {RoleKey}", permKey, roleKey);
-                        continue;
-                    }
-
-                    var exists = await _context.Set<SqlOSFgaRolePermission>()
-                        .AnyAsync(rp => rp.RoleId == role.Id && rp.PermissionId == perm.Id, cancellationToken);
-
-                    if (!exists)
-                    {
-                        _context.Set<SqlOSFgaRolePermission>().Add(new SqlOSFgaRolePermission
-                        {
-                            RoleId = role.Id,
-                            PermissionId = perm.Id,
-                        });
-                    }
-                }
-            }
-
-            await _context.SaveChangesAsync(cancellationToken);
-        }
-
+        await new ReconcileFgaModel(_context, _logger).ExecuteAsync(data, actor, cancellationToken);
         _logger.LogInformation("Authorization data seeded.");
-    }
-
-    private async Task SeedIfNotExistsAsync<T>(string id, T entity, CancellationToken cancellationToken) where T : class
-    {
-        var existing = await _context.Set<T>().FindAsync(new object[] { id }, cancellationToken);
-        if (existing == null)
-        {
-            _context.Set<T>().Add(entity);
-        }
     }
 }
 
+/// <summary>
+/// The authorization model <see cref="SqlOSFgaSeedService.SeedAuthorizationDataAsync"/> reconciles:
+/// resource types, permissions, roles, and each role's permission keys.
+/// </summary>
 public class SqlOSFgaSeedData
 {
-    public List<SqlOSFgaResourceType>? ResourceTypes { get; set; }
-    public List<SqlOSFgaRole>? Roles { get; set; }
-    public List<SqlOSFgaPermission>? Permissions { get; set; }
+    public List<SqlOSFgaResourceTypeSeed>? ResourceTypes { get; set; }
+    public List<SqlOSFgaRoleSeed>? Roles { get; set; }
+    public List<SqlOSFgaPermissionSeed>? Permissions { get; set; }
     public List<(string RoleKey, string[] PermissionKeys)>? RolePermissions { get; set; }
+}
+
+/// <summary>A resource type in <see cref="SqlOSFgaSeedData"/>.</summary>
+public sealed record SqlOSFgaResourceTypeSeed
+{
+    /// <summary>The stable resource type identifier referenced by resources and permissions.</summary>
+    public required string Id { get; init; }
+
+    /// <summary>The display name.</summary>
+    public required string Name { get; init; }
+
+    /// <summary>An optional description.</summary>
+    public string? Description { get; init; }
+}
+
+/// <summary>A role in <see cref="SqlOSFgaSeedData"/>.</summary>
+public sealed record SqlOSFgaRoleSeed
+{
+    /// <summary>The stable role identifier stored on grants.</summary>
+    public required string Id { get; init; }
+
+    /// <summary>The application-facing key that grant helpers and role permissions use.</summary>
+    public required string Key { get; init; }
+
+    /// <summary>The display name.</summary>
+    public required string Name { get; init; }
+
+    /// <summary>An optional description.</summary>
+    public string? Description { get; init; }
+
+    /// <summary>Whether the role is virtual.</summary>
+    public bool IsVirtual { get; init; }
+}
+
+/// <summary>A permission in <see cref="SqlOSFgaSeedData"/>.</summary>
+public sealed record SqlOSFgaPermissionSeed
+{
+    /// <summary>The stable permission identifier.</summary>
+    public required string Id { get; init; }
+
+    /// <summary>The application-facing key that access checks use.</summary>
+    public required string Key { get; init; }
+
+    /// <summary>The display name.</summary>
+    public required string Name { get; init; }
+
+    /// <summary>An optional description.</summary>
+    public string? Description { get; init; }
+
+    /// <summary>The resource type the permission applies to, or null for every resource type.</summary>
+    public string? ResourceTypeId { get; init; }
 }

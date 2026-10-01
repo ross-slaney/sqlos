@@ -678,9 +678,9 @@ public sealed class SqlOSControlPlaneParityTests
     {
         var now = DateTime.UtcNow;
         harness.Context.Set<SqlOS.Fga.Models.SqlOSFgaResourceType>().AddRange(
-            new SqlOS.Fga.Models.SqlOSFgaResourceType { Id = "org", Name = "Organization" },
-            new SqlOS.Fga.Models.SqlOSFgaResourceType { Id = "region", Name = "Region" },
-            new SqlOS.Fga.Models.SqlOSFgaResourceType { Id = "store", Name = "Store" });
+            FgaTestModel.ResourceType("org", "Organization"),
+            FgaTestModel.ResourceType("region", "Region"),
+            FgaTestModel.ResourceType("store", "Store"));
         foreach (var (id, parentId, type) in new (string, string?, string)[]
         {
             (ParityBoundary, null, "org"),
@@ -701,24 +701,9 @@ public sealed class SqlOSControlPlaneParityTests
                 UpdatedAt = now
             });
         }
-        harness.Context.Set<SqlOS.Fga.Models.SqlOSFgaPermission>().Add(new SqlOS.Fga.Models.SqlOSFgaPermission
-        {
-            Id = "perm_store_manage",
-            Key = "STORE_MANAGE",
-            Name = "Manage store",
-            ResourceTypeId = "store"
-        });
-        harness.Context.Set<SqlOS.Fga.Models.SqlOSFgaRole>().Add(new SqlOS.Fga.Models.SqlOSFgaRole
-        {
-            Id = "role_store_manager",
-            Key = "store_manager",
-            Name = "Store manager"
-        });
-        harness.Context.Set<SqlOS.Fga.Models.SqlOSFgaRolePermission>().Add(new SqlOS.Fga.Models.SqlOSFgaRolePermission
-        {
-            RoleId = "role_store_manager",
-            PermissionId = "perm_store_manage"
-        });
+        harness.Context.Set<SqlOS.Fga.Models.SqlOSFgaPermission>().Add(FgaTestModel.Permission("perm_store_manage", "STORE_MANAGE", name: "Manage store", resourceTypeId: "store"));
+        harness.Context.Set<SqlOS.Fga.Models.SqlOSFgaRole>().Add(FgaTestModel.Role("role_store_manager", key: "store_manager", name: "Store manager"));
+        harness.Context.Set<SqlOS.Fga.Models.SqlOSFgaRolePermission>().Add(new SqlOS.Fga.Models.SqlOSFgaRolePermission("role_store_manager", "perm_store_manage"));
         await harness.Context.SaveChangesAsync();
     }
 

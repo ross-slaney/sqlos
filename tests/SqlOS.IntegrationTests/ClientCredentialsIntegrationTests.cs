@@ -15,6 +15,7 @@ using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Models;
 using SqlOS.Fga.Services;
 using SqlOS.IntegrationTests.Infrastructure;
+using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.IntegrationTests;
 
@@ -236,7 +237,7 @@ public sealed class ClientCredentialsIntegrationTests
         var protocol = new SqlOSClientCredentialsService(context, crypto, admin, options);
         var organization = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"Unified {suffix}", $"unified-{suffix}"));
         var resourceTypeId = await context.Set<SqlOSFgaResourceType>().Select(x => x.Id).FirstAsync();
-        var role = new SqlOSFgaRole { Id = $"role_{suffix}", Key = $"runner-{suffix}", Name = "Runner" };
+        var role = FgaTestModel.Role($"role_{suffix}", key: $"runner-{suffix}", name: "Runner");
         var resource = new SqlOSFgaResource { Id = $"res_{suffix}", ResourceTypeId = resourceTypeId, Name = "Jobs", IsActive = true };
         context.Set<SqlOSFgaRole>().Add(role);
         context.Set<SqlOSFgaResource>().Add(resource);

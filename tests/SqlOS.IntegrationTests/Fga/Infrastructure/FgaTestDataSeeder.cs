@@ -1,5 +1,6 @@
 using SqlOS.Fga.Models;
 using SqlOS.IntegrationTests.Infrastructure;
+using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.IntegrationTests.Fga.Infrastructure;
 
@@ -48,23 +49,23 @@ public static class FgaTestDataSeeder
     {
         // Resource types
         context.Set<SqlOSFgaResourceType>().AddRange(
-            new SqlOSFgaResourceType { Id = "agency", Name = "Agency" },
-            new SqlOSFgaResourceType { Id = "team", Name = "Team" },
-            new SqlOSFgaResourceType { Id = "project", Name = "Project" }
+            FgaTestModel.ResourceType("agency", "Agency"),
+            FgaTestModel.ResourceType("team", "Team"),
+            FgaTestModel.ResourceType("project", "Project")
         );
 
         // Permissions
         context.Set<SqlOSFgaPermission>().AddRange(
-            new SqlOSFgaPermission { Id = ViewPermissionId, Key = "TEST_VIEW", Name = "View" },
-            new SqlOSFgaPermission { Id = EditPermissionId, Key = "TEST_EDIT", Name = "Edit" },
-            new SqlOSFgaPermission { Id = AdminPermissionId, Key = "TEST_ADMIN", Name = "Admin" }
+            FgaTestModel.Permission(ViewPermissionId, "TEST_VIEW", name: "View"),
+            FgaTestModel.Permission(EditPermissionId, "TEST_EDIT", name: "Edit"),
+            FgaTestModel.Permission(AdminPermissionId, "TEST_ADMIN", name: "Admin")
         );
 
         // Roles
         context.Set<SqlOSFgaRole>().AddRange(
-            new SqlOSFgaRole { Id = SystemAdminRoleId, Key = "SystemAdmin", Name = "System Admin" },
-            new SqlOSFgaRole { Id = AgencyAdminRoleId, Key = "AgencyAdmin", Name = "Agency Admin" },
-            new SqlOSFgaRole { Id = AgencyMemberRoleId, Key = "AgencyMember", Name = "Agency Member" }
+            FgaTestModel.Role(SystemAdminRoleId, key: "SystemAdmin", name: "System Admin"),
+            FgaTestModel.Role(AgencyAdminRoleId, key: "AgencyAdmin", name: "Agency Admin"),
+            FgaTestModel.Role(AgencyMemberRoleId, key: "AgencyMember", name: "Agency Member")
         );
 
         await context.SaveChangesAsync();
@@ -72,14 +73,14 @@ public static class FgaTestDataSeeder
         // Role-Permission mappings
         context.Set<SqlOSFgaRolePermission>().AddRange(
             // SystemAdmin gets all permissions
-            new SqlOSFgaRolePermission { RoleId = SystemAdminRoleId, PermissionId = ViewPermissionId },
-            new SqlOSFgaRolePermission { RoleId = SystemAdminRoleId, PermissionId = EditPermissionId },
-            new SqlOSFgaRolePermission { RoleId = SystemAdminRoleId, PermissionId = AdminPermissionId },
+            new SqlOSFgaRolePermission(SystemAdminRoleId, ViewPermissionId),
+            new SqlOSFgaRolePermission(SystemAdminRoleId, EditPermissionId),
+            new SqlOSFgaRolePermission(SystemAdminRoleId, AdminPermissionId),
             // AgencyAdmin gets view + edit
-            new SqlOSFgaRolePermission { RoleId = AgencyAdminRoleId, PermissionId = ViewPermissionId },
-            new SqlOSFgaRolePermission { RoleId = AgencyAdminRoleId, PermissionId = EditPermissionId },
+            new SqlOSFgaRolePermission(AgencyAdminRoleId, ViewPermissionId),
+            new SqlOSFgaRolePermission(AgencyAdminRoleId, EditPermissionId),
             // AgencyMember gets view only
-            new SqlOSFgaRolePermission { RoleId = AgencyMemberRoleId, PermissionId = ViewPermissionId }
+            new SqlOSFgaRolePermission(AgencyMemberRoleId, ViewPermissionId)
         );
 
         // Resources (hierarchy: root > agency > team/project, root > other_agency)

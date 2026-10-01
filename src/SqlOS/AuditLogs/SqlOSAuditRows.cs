@@ -50,12 +50,7 @@ internal static class SqlOSAuditRows
         string? sessionId = null,
         string? ipAddress = null,
         object? data = null)
-    {
-        IReadOnlyDictionary<string, object?>? metadata = data == null
-            ? null
-            : JsonSerializer.Deserialize<Dictionary<string, object?>>(JsonSerializer.Serialize(data), JsonOptions);
-
-        return new SqlOSAuditLogRecordRequest(
+        => new(
             Action: eventType,
             OrganizationId: organizationId,
             UserId: userId,
@@ -64,8 +59,16 @@ internal static class SqlOSAuditRows
             Context: new SqlOSAuditContext(
                 IpAddress: ipAddress,
                 SessionId: sessionId),
-            Metadata: metadata);
-    }
+            Metadata: Metadata(data));
+
+    /// <summary>
+    /// <paramref name="data"/> as audit metadata: its member names as declared, its values through
+    /// web JSON.
+    /// </summary>
+    public static IReadOnlyDictionary<string, object?>? Metadata(object? data)
+        => data == null
+            ? null
+            : JsonSerializer.Deserialize<Dictionary<string, object?>>(JsonSerializer.Serialize(data), JsonOptions);
 
     /// <summary>
     /// The row <see cref="SqlOSAuditLogService.RecordAsync"/> writes for <paramref name="request"/>,

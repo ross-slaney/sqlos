@@ -10,6 +10,7 @@ using SqlOS.AuthServer.Services;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
 using SqlOS.IntegrationTests.Infrastructure;
+using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.IntegrationTests;
 
@@ -274,7 +275,7 @@ public sealed partial class ScimProtocolIntegrationTests
         var context = scope.ServiceProvider.GetRequiredService<TestSqlOSDbContext>();
         if (!await context.Set<SqlOSFgaResourceType>().AnyAsync(x => x.Id == "organization"))
         {
-            context.Set<SqlOSFgaResourceType>().Add(new SqlOSFgaResourceType { Id = "organization", Name = "Organization" });
+            context.Set<SqlOSFgaResourceType>().Add(FgaTestModel.ResourceType("organization", "Organization"));
         }
         if (!await context.Set<SqlOSFgaResource>().AnyAsync(x => x.Id == tenantRootId))
         {
@@ -291,23 +292,17 @@ public sealed partial class ScimProtocolIntegrationTests
         await using var scope = server.Services.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<TestSqlOSDbContext>();
         context.Set<SqlOSFgaResourceType>().AddRange(
-            new SqlOSFgaResourceType { Id = "organization", Name = "Organization" },
-            new SqlOSFgaResourceType { Id = "region", Name = "Region" },
-            new SqlOSFgaResourceType { Id = "store", Name = "Store" });
+            FgaTestModel.ResourceType("organization", "Organization"),
+            FgaTestModel.ResourceType("region", "Region"),
+            FgaTestModel.ResourceType("store", "Store"));
         AddResource(context, BoundaryTenantRoot, "root", "organization");
         AddResource(context, BoundaryStore42, BoundaryTenantRoot, "store");
         AddResource(context, OtherTenantRoot, "root", "organization");
         AddResource(context, OtherTenantStore9001, OtherTenantRoot, "store");
-        context.Set<SqlOSFgaPermission>().Add(new SqlOSFgaPermission
-        {
-            Id = "perm_store_manage",
-            Key = "STORE_MANAGE",
-            Name = "Manage store",
-            ResourceTypeId = "store"
-        });
-        context.Set<SqlOSFgaRole>().Add(new SqlOSFgaRole { Id = "role_store_manager", Key = "store_manager", Name = "Store manager" });
+        context.Set<SqlOSFgaPermission>().Add(FgaTestModel.Permission("perm_store_manage", "STORE_MANAGE", name: "Manage store", resourceTypeId: "store"));
+        context.Set<SqlOSFgaRole>().Add(FgaTestModel.Role("role_store_manager", key: "store_manager", name: "Store manager"));
         await context.SaveChangesAsync();
-        context.Set<SqlOSFgaRolePermission>().Add(new SqlOSFgaRolePermission { RoleId = "role_store_manager", PermissionId = "perm_store_manage" });
+        context.Set<SqlOSFgaRolePermission>().Add(new SqlOSFgaRolePermission("role_store_manager", "perm_store_manage"));
         await context.SaveChangesAsync();
     }
 

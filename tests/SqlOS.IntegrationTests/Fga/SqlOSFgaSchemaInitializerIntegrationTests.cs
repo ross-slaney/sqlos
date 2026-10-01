@@ -7,6 +7,7 @@ using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Services;
 using SqlOS.IntegrationTests.Fga.Infrastructure;
 using SqlOS.IntegrationTests.Infrastructure;
+using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.IntegrationTests.Fga;
 
@@ -125,12 +126,8 @@ public class SqlOSFgaSchemaInitializerIntegrationTests : FgaIntegrationTestBase
 
         Assert.IsTrue(await IndexExistsAsync("SqlOSFgaPermissions", "UX_SqlOSFgaPermissions_Key"));
 
-        Context.Set<SqlOS.Fga.Models.SqlOSFgaPermission>().Add(new()
-        {
-            Id = $"perm_duplicate_{Guid.NewGuid():N}",
-            Key = "TEST_VIEW",
-            Name = "Duplicate View"
-        });
+        Context.Set<SqlOS.Fga.Models.SqlOSFgaPermission>().Add(
+            FgaTestModel.Permission($"perm_duplicate_{Guid.NewGuid():N}", "TEST_VIEW", name: "Duplicate View"));
         await Assert.ThrowsExceptionAsync<DbUpdateException>(() => Context.SaveChangesAsync());
         Context.ChangeTracker.Clear();
     }
@@ -165,9 +162,9 @@ public class SqlOSFgaSchemaInitializerIntegrationTests : FgaIntegrationTestBase
 
         try
         {
-            Context.Set<SqlOS.Fga.Models.SqlOSFgaResourceType>().Add(new() { Id = resourceTypeId, Name = "Bound index type" });
-            Context.Set<SqlOS.Fga.Models.SqlOSFgaSubjectType>().Add(new() { Id = subjectTypeId, Name = "Bound index subject" });
-            Context.Set<SqlOS.Fga.Models.SqlOSFgaRole>().Add(new() { Id = roleId, Key = $"bound_{token}", Name = "Bound index role" });
+            Context.Set<SqlOS.Fga.Models.SqlOSFgaResourceType>().Add(FgaTestModel.ResourceType(resourceTypeId, "Bound index type"));
+            Context.Set<SqlOS.Fga.Models.SqlOSFgaSubjectType>().Add(FgaTestModel.SubjectType(subjectTypeId, "Bound index subject"));
+            Context.Set<SqlOS.Fga.Models.SqlOSFgaRole>().Add(FgaTestModel.Role(roleId, $"bound_{token}", "Bound index role"));
             await Context.SaveChangesAsync();
 
             Context.Set<SqlOS.Fga.Models.SqlOSFgaResource>().Add(new()

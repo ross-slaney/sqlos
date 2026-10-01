@@ -190,7 +190,6 @@ SqlOS.Extensions.SqlOSErgonomicsExtensions::CreateResource -> SqlOSFgaResource.I
 SqlOS.Extensions.SqlOSErgonomicsExtensions::ProvisionResourceWithIdAsync -> SqlOSFgaResource.IsActive
 SqlOS.Extensions.SqlOSErgonomicsExtensions::ProvisionServiceAccountSubjectAsync -> SqlOSFgaServiceAccount.ExpiresAt
 SqlOS.Extensions.SqlOSErgonomicsExtensions::ProvisionUserSubjectAsync -> SqlOSFgaUser.IsActive
-SqlOS.Fga.Services.SqlOSFgaSeedService::SeedCoreAsync -> SqlOSFgaResource.IsActive
 SqlOS.Fga.Services.SqlOSFgaSubjectService::CreateServiceAccountAsync -> SqlOSFgaServiceAccount.ExpiresAt
 SqlOS.Fga.Services.SqlOSFgaSubjectService::CreateUserAsync -> SqlOSFgaUser.IsActive
 SqlOS.Fga.SqlOSResourceEntitySynchronizer::ApplyResourceValues -> SqlOSFgaResource.IsActive

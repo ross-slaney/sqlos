@@ -42,6 +42,7 @@ internal sealed class SqlOSAuditProjection
         .AddPasswordResetEvents()
         .AddEmailVerificationEvents()
         .AddMfaEvents()
+        .AddFgaEvents()
         .Build();
 
     /// <summary>The registered event types, audited or not.</summary>

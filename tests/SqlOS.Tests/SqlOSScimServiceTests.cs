@@ -882,22 +882,9 @@ public sealed class SqlOSScimServiceTests
 
     private static async Task SeedFgaRoleAndResourceAsync(TestSqlOSInMemoryDbContext context)
     {
-        context.Set<SqlOSFgaResourceType>().Add(new SqlOSFgaResourceType
-        {
-            Id = "store",
-            Name = "Store"
-        });
-        context.Set<SqlOSFgaResourceType>().Add(new SqlOSFgaResourceType
-        {
-            Id = "organization",
-            Name = "Organization"
-        });
-        context.Set<SqlOSFgaRole>().Add(new SqlOSFgaRole
-        {
-            Id = "role_store_manager",
-            Key = "store_manager",
-            Name = "Store Manager"
-        });
+        context.Set<SqlOSFgaResourceType>().Add(FgaTestModel.ResourceType("store", "Store"));
+        context.Set<SqlOSFgaResourceType>().Add(FgaTestModel.ResourceType("organization", "Organization"));
+        context.Set<SqlOSFgaRole>().Add(FgaTestModel.Role("role_store_manager", key: "store_manager", name: "Store Manager"));
         // The organization's root resource is the SCIM grant boundary for mapped grants.
         context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
         {

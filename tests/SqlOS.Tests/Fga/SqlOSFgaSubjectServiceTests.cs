@@ -8,6 +8,7 @@ using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
 using SqlOS.Fga.Services;
+using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.Tests.Fga;
 
@@ -43,10 +44,10 @@ public class SqlOSFgaSubjectServiceTests
 
         // Seed subject types
         _context.Set<SqlOSFgaSubjectType>().AddRange(
-            new SqlOSFgaSubjectType { Id = "user", Name = "User" },
-            new SqlOSFgaSubjectType { Id = "group", Name = "Group" },
-            new SqlOSFgaSubjectType { Id = "service_account", Name = "Service Account" },
-            new SqlOSFgaSubjectType { Id = "agent", Name = "Agent" }
+            FgaTestModel.SubjectType("user", "User"),
+            FgaTestModel.SubjectType("group", "Group"),
+            FgaTestModel.SubjectType("service_account", "Service Account"),
+            FgaTestModel.SubjectType("agent", "Agent")
         );
         _context.SaveChanges();
 
@@ -83,12 +84,7 @@ public class SqlOSFgaSubjectServiceTests
     [TestMethod]
     public async Task BuildFilterAsync_UsesCapturedParametersInsteadOfLiteralConstants()
     {
-        _context.Set<SqlOSFgaPermission>().Add(new SqlOSFgaPermission
-        {
-            Id = "perm_read",
-            Key = "READ",
-            Name = "Read"
-        });
+        _context.Set<SqlOSFgaPermission>().Add(FgaTestModel.Permission("perm_read", "READ", name: "Read"));
         _context.SaveChanges();
         var authService = new SqlOSFgaAuthService(
             _context,

@@ -108,6 +108,7 @@ public static class SqlOSFgaModelConfiguration
         {
             entity.ToTable(tables.Roles, schema, t => t.ExcludeFromMigrations());
             entity.HasKey(e => e.Id);
+            entity.Navigation(e => e.RolePermissions).UsePropertyAccessMode(PropertyAccessMode.Field);
         });
 
         // Permission

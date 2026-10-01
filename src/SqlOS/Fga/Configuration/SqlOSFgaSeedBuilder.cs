@@ -9,11 +9,11 @@ namespace SqlOS.Fga.Configuration;
 /// </summary>
 public sealed class SqlOSFgaSeedBuilder
 {
-    private readonly Dictionary<string, SqlOSFgaResourceType> _resourceTypes = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, SqlOSFgaPermission> _permissionsById = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, SqlOSFgaPermission> _permissionsByKey = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, SqlOSFgaRole> _rolesById = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, SqlOSFgaRole> _rolesByKey = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, SqlOSFgaResourceTypeSeed> _resourceTypes = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, SqlOSFgaPermissionSeed> _permissionsById = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, SqlOSFgaPermissionSeed> _permissionsByKey = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, SqlOSFgaRoleSeed> _rolesById = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, SqlOSFgaRoleSeed> _rolesByKey = new(StringComparer.Ordinal);
     private readonly Dictionary<string, HashSet<string>> _rolePermissions = new(StringComparer.Ordinal);
 
     /// <summary>Creates an empty FGA startup seed builder.</summary>
@@ -27,7 +27,7 @@ public sealed class SqlOSFgaSeedBuilder
         {
             foreach (var resourceType in existing.ResourceTypes)
             {
-                _resourceTypes[resourceType.Id] = Clone(resourceType);
+                _resourceTypes[resourceType.Id] = resourceType;
             }
         }
 
@@ -35,9 +35,8 @@ public sealed class SqlOSFgaSeedBuilder
         {
             foreach (var permission in existing.Permissions)
             {
-                var clone = Clone(permission);
-                _permissionsById[clone.Id] = clone;
-                _permissionsByKey[clone.Key] = clone;
+                _permissionsById[permission.Id] = permission;
+                _permissionsByKey[permission.Key] = permission;
             }
         }
 
@@ -45,9 +44,8 @@ public sealed class SqlOSFgaSeedBuilder
         {
             foreach (var role in existing.Roles)
             {
-                var clone = Clone(role);
-                _rolesById[clone.Id] = clone;
-                _rolesByKey[clone.Key] = clone;
+                _rolesById[role.Id] = role;
+                _rolesByKey[role.Key] = role;
             }
         }
 
@@ -72,7 +70,7 @@ public sealed class SqlOSFgaSeedBuilder
     public SqlOSFgaSeedBuilder ResourceType(string id, string name, string? description = null)
     {
         var normalizedId = RequireValue(id, nameof(id));
-        _resourceTypes[normalizedId] = new SqlOSFgaResourceType
+        _resourceTypes[normalizedId] = new SqlOSFgaResourceTypeSeed
         {
             Id = normalizedId,
             Name = RequireValue(name, nameof(name)),
@@ -110,7 +108,7 @@ public sealed class SqlOSFgaSeedBuilder
                 $"FGA permission key '{normalizedKey}' is already assigned to permission '{permissionWithSameKey.Id}'. Permission keys must be unique.");
         }
 
-        var permission = new SqlOSFgaPermission
+        var permission = new SqlOSFgaPermissionSeed
         {
             Id = normalizedId,
             Key = normalizedKey,
@@ -150,7 +148,7 @@ public sealed class SqlOSFgaSeedBuilder
             _rolesByKey.Remove(existingRole.Key);
         }
 
-        var role = new SqlOSFgaRole
+        var role = new SqlOSFgaRoleSeed
         {
             Id = normalizedId,
             Key = normalizedKey,
@@ -202,9 +200,9 @@ public sealed class SqlOSFgaSeedBuilder
     internal SqlOSFgaSeedData Build()
         => new()
         {
-            ResourceTypes = _resourceTypes.Values.Select(Clone).ToList(),
-            Permissions = _permissionsById.Values.Select(Clone).ToList(),
-            Roles = _rolesById.Values.Select(Clone).ToList(),
+            ResourceTypes = _resourceTypes.Values.ToList(),
+            Permissions = _permissionsById.Values.ToList(),
+            Roles = _rolesById.Values.ToList(),
             RolePermissions = _rolePermissions
                 .OrderBy(static item => item.Key, StringComparer.Ordinal)
                 .Select(static item => (item.Key, item.Value.OrderBy(static value => value, StringComparer.Ordinal).ToArray()))
@@ -223,34 +221,6 @@ public sealed class SqlOSFgaSeedBuilder
 
     private static string? NormalizeOptional(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-
-    private static SqlOSFgaResourceType Clone(SqlOSFgaResourceType source)
-        => new()
-        {
-            Id = source.Id,
-            Name = source.Name,
-            Description = source.Description
-        };
-
-    private static SqlOSFgaPermission Clone(SqlOSFgaPermission source)
-        => new()
-        {
-            Id = source.Id,
-            Key = source.Key,
-            Name = source.Name,
-            Description = source.Description,
-            ResourceTypeId = source.ResourceTypeId
-        };
-
-    private static SqlOSFgaRole Clone(SqlOSFgaRole source)
-        => new()
-        {
-            Id = source.Id,
-            Key = source.Key,
-            Name = source.Name,
-            Description = source.Description,
-            IsVirtual = source.IsVirtual
-        };
 }
 
 /// <summary>Assigns permissions to a role declared through the fluent FGA startup seed API.</summary>

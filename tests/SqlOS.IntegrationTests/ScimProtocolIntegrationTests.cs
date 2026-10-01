@@ -24,6 +24,7 @@ using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Services;
 using SqlOS.IntegrationTests.Infrastructure;
 using SqlOS.Domain;
+using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.IntegrationTests;
 
@@ -378,8 +379,8 @@ public sealed partial class ScimProtocolIntegrationTests
         await using (var scope = server.Services.CreateAsyncScope())
         {
             var context = scope.ServiceProvider.GetRequiredService<TestSqlOSDbContext>();
-            context.Set<SqlOSFgaResourceType>().Add(new SqlOSFgaResourceType { Id = "store", Name = "Store" });
-            context.Set<SqlOSFgaRole>().Add(new SqlOSFgaRole { Id = "role_manager", Key = "manager", Name = "Manager" });
+            context.Set<SqlOSFgaResourceType>().Add(FgaTestModel.ResourceType("store", "Store"));
+            context.Set<SqlOSFgaRole>().Add(FgaTestModel.Role("role_manager", key: "manager", name: "Manager"));
             context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
             {
                 Id = "store_123",
@@ -424,8 +425,8 @@ public sealed partial class ScimProtocolIntegrationTests
         await using (var setup = server.Services.CreateAsyncScope())
         {
             var context = setup.ServiceProvider.GetRequiredService<TestSqlOSDbContext>();
-            context.Set<SqlOSFgaResourceType>().Add(new SqlOSFgaResourceType { Id = "site", Name = "Site" });
-            context.Set<SqlOSFgaRole>().Add(new SqlOSFgaRole { Id = "role_site_admin", Key = "site_admin", Name = "Site admin" });
+            context.Set<SqlOSFgaResourceType>().Add(FgaTestModel.ResourceType("site", "Site"));
+            context.Set<SqlOSFgaRole>().Add(FgaTestModel.Role("role_site_admin", key: "site_admin", name: "Site admin"));
             context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
             {
                 Id = "site_1",
@@ -470,8 +471,8 @@ public sealed partial class ScimProtocolIntegrationTests
         await using (var setup = server.Services.CreateAsyncScope())
         {
             var context = setup.ServiceProvider.GetRequiredService<TestSqlOSDbContext>();
-            context.Set<SqlOSFgaResourceType>().Add(new SqlOSFgaResourceType { Id = "warehouse", Name = "Warehouse" });
-            context.Set<SqlOSFgaRole>().Add(new SqlOSFgaRole { Id = "role_operator", Key = "operator", Name = "Operator" });
+            context.Set<SqlOSFgaResourceType>().Add(FgaTestModel.ResourceType("warehouse", "Warehouse"));
+            context.Set<SqlOSFgaRole>().Add(FgaTestModel.Role("role_operator", key: "operator", name: "Operator"));
             context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
             {
                 Id = "warehouse_123",

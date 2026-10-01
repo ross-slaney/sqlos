@@ -11,6 +11,7 @@ using SqlOS.AuthServer.Services;
 using SqlOS.Fga.Models;
 using SqlOS.Fga.Services;
 using SqlOS.IntegrationTests.Infrastructure;
+using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.IntegrationTests;
 
@@ -53,7 +54,7 @@ public sealed class UtcTimestampIntegrationTests
                 ExpiresAt = ExpiresAt,
                 ApprovedAt = ExpiresAt.AddMinutes(-5)
             });
-            setup.Set<SqlOSFgaResourceType>().Add(new SqlOSFgaResourceType { Id = "utc_type", Name = "UTC" });
+            setup.Set<SqlOSFgaResourceType>().Add(FgaTestModel.ResourceType("utc_type", "UTC"));
             setup.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
             {
                 Id = "utc_resource",

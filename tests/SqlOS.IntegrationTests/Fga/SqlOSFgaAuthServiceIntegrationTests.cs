@@ -8,6 +8,7 @@ using SqlOS.Fga.Models;
 using SqlOS.IntegrationTests.Fga.Infrastructure;
 using SqlOS.Fga.Services;
 using SqlOS.IntegrationTests.Infrastructure;
+using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.IntegrationTests.Fga;
 
@@ -120,19 +121,9 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
     public async Task TypeScopedPermission_DeniesDifferentTargetType_InPointTraceAndEfFilter()
     {
         var suffix = Guid.NewGuid().ToString("N");
-        var permission = new SqlOSFgaPermission
-        {
-            Id = $"perm_typed_deny_{suffix}",
-            Key = $"TYPED_DENY_{suffix}",
-            Name = "Team-only permission",
-            ResourceTypeId = "team"
-        };
+        var permission = FgaTestModel.Permission($"perm_typed_deny_{suffix}", $"TYPED_DENY_{suffix}", name: "Team-only permission", resourceTypeId: "team");
         Context.Set<SqlOSFgaPermission>().Add(permission);
-        Context.Set<SqlOSFgaRolePermission>().Add(new SqlOSFgaRolePermission
-        {
-            RoleId = FgaTestDataSeeder.SystemAdminRoleId,
-            PermissionId = permission.Id
-        });
+        Context.Set<SqlOSFgaRolePermission>().Add(new SqlOSFgaRolePermission(FgaTestDataSeeder.SystemAdminRoleId, permission.Id));
         await Context.SaveChangesAsync();
 
         var point = await _authService.CheckAccessAsync(
@@ -167,19 +158,9 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
     public async Task TypeScopedPermission_AllowsTargetTypeViaAncestorGrant()
     {
         var suffix = Guid.NewGuid().ToString("N");
-        var permission = new SqlOSFgaPermission
-        {
-            Id = $"perm_typed_allow_{suffix}",
-            Key = $"TYPED_ALLOW_{suffix}",
-            Name = "Project permission",
-            ResourceTypeId = "project"
-        };
+        var permission = FgaTestModel.Permission($"perm_typed_allow_{suffix}", $"TYPED_ALLOW_{suffix}", name: "Project permission", resourceTypeId: "project");
         Context.Set<SqlOSFgaPermission>().Add(permission);
-        Context.Set<SqlOSFgaRolePermission>().Add(new SqlOSFgaRolePermission
-        {
-            RoleId = FgaTestDataSeeder.AgencyAdminRoleId,
-            PermissionId = permission.Id
-        });
+        Context.Set<SqlOSFgaRolePermission>().Add(new SqlOSFgaRolePermission(FgaTestDataSeeder.AgencyAdminRoleId, permission.Id));
         await Context.SaveChangesAsync();
 
         var result = await _authService.CheckAccessAsync(

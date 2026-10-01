@@ -160,8 +160,8 @@ public sealed class SqlOSFgaDashboardSchemaWriteTests
             await using (var scope = provider.CreateAsyncScope())
             {
                 var context = scope.ServiceProvider.GetRequiredService<TestSqlOSInMemoryDbContext>();
-                context.Set<SqlOSFgaSubjectType>().Add(new SqlOSFgaSubjectType { Id = "user", Name = "User" });
-                context.Set<SqlOSFgaResourceType>().Add(new SqlOSFgaResourceType { Id = "root", Name = "Root" });
+                context.Set<SqlOSFgaSubjectType>().Add(FgaTestModel.SubjectType("user", "User"));
+                context.Set<SqlOSFgaResourceType>().Add(FgaTestModel.ResourceType("root", "Root"));
                 context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
                 {
                     Id = "root",
@@ -175,15 +175,11 @@ public sealed class SqlOSFgaDashboardSchemaWriteTests
                     SubjectTypeId = "user",
                     DisplayName = "Ada"
                 });
-                context.Set<SqlOSFgaRole>().Add(new SqlOSFgaRole { Id = "admin", Key = "admin", Name = "Admin" });
+                context.Set<SqlOSFgaRole>().Add(FgaTestModel.Role("admin", key: "admin", name: "Admin"));
                 context.Set<SqlOSFgaPermission>().AddRange(
-                    new SqlOSFgaPermission { Id = "delete_users", Key = "delete_users", Name = "Delete users", ResourceTypeId = "root" },
-                    new SqlOSFgaPermission { Id = "extra", Key = "EXTRA_VIEW", Name = "Extra", ResourceTypeId = "root" });
-                context.Set<SqlOSFgaRolePermission>().Add(new SqlOSFgaRolePermission
-                {
-                    RoleId = "admin",
-                    PermissionId = "delete_users"
-                });
+                    FgaTestModel.Permission("delete_users", "delete_users", name: "Delete users", resourceTypeId: "root"),
+                    FgaTestModel.Permission("extra", "EXTRA_VIEW", name: "Extra", resourceTypeId: "root"));
+                context.Set<SqlOSFgaRolePermission>().Add(new SqlOSFgaRolePermission("admin", "delete_users"));
                 await context.SaveChangesAsync();
             }
 
