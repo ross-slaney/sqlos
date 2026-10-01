@@ -149,7 +149,7 @@ public class SqlOSFgaSubjectService : ISqlOSFgaSubjectService
     private Task<SqlOSFgaSubject> CreateAsync(Func<DateTime, SqlOSFgaSubject> create, CancellationToken cancellationToken)
         => new CreateFgaSubject(_context).ExecuteAsync(create, cancellationToken);
 
-    // The 7.x formats: the prefix, an underscore, then the start of a GUID, 30 characters in all.
+    // The prefix, an underscore, then the start of a GUID, 30 characters in all.
     private static string NewSubjectId() => NewId("subj");
 
     private static string NewId(string prefix) => $"{prefix}_{Guid.NewGuid():N}"[..30];

@@ -197,8 +197,9 @@ public static partial class SqlOSErgonomicsExtensions
     }
 
     /// <summary>
-    /// The place under <paramref name="parentId"/> for <paramref name="resourceId"/>, checked in
-    /// 7.x's order: the parent is not the resource, the type and the parent exist, then the chain.
+    /// The place under <paramref name="parentId"/> for <paramref name="resourceId"/>. The order of
+    /// the checks decides which error a host sees: the parent is not the resource, the type and the
+    /// parent exist, then the chain.
     /// </summary>
     private static async Task<SqlOSFgaAncestry> PlaceAsync(
         ISqlOSFgaDbContext context,

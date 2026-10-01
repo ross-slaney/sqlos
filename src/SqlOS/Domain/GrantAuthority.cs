@@ -70,7 +70,7 @@ internal readonly record struct FgaActor(string Type, string? Id)
     /// <summary>SqlOS reconciling code-owned configuration at startup.</summary>
     public static FgaActor Startup { get; } = new("system", "startup");
 
-    /// <summary>SqlOS upgrading data written by an earlier version.</summary>
+    /// <summary>SqlOS migrating stored data to the current model at startup.</summary>
     public static FgaActor Upgrade { get; } = new("system", "upgrade");
 
     /// <summary>A SCIM directory, through the connection with <paramref name="connectionId"/>.</summary>

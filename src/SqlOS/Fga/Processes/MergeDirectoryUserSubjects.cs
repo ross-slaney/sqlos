@@ -8,7 +8,7 @@ namespace SqlOS.Fga.Processes;
 
 /// <summary>
 /// Gives each SCIM-linked SqlOS user one FGA subject, keyed by the user ID (#448). A subject a SCIM
-/// user link points at under another ID, as 7.x SCIM created them (<c>subj_…</c>), merges into the
+/// user link points at under another ID (SCIM's own <c>subj_…</c> subjects) merges into the
 /// user's subject, which is created from it when missing: its group memberships and grants move,
 /// those the user's subject already holds are dropped, and the links follow.
 /// </summary>

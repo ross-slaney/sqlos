@@ -1231,8 +1231,8 @@ internal sealed class SqlOSScimService
     }
 
     /// <summary>
-    /// The user's one FGA subject, keyed by the SqlOS user ID (#448): a subject an earlier version's
-    /// link points at merges into it, a host-provisioned one is reused, and a missing one is created.
+    /// The user's one FGA subject, keyed by the SqlOS user ID (#448): a subject a link points at
+    /// under another ID merges into it, a host-provisioned one is reused, and a missing one is created.
     /// Only the link that owns the person's lifecycle describes it or changes its active state.
     /// </summary>
     private async Task<string> EnsureFgaUserAsync(

@@ -7,7 +7,7 @@ using SqlOS.Fga.Interfaces;
 
 namespace SqlOS.Fga;
 
-/// <summary>What the FGA write paths share: the host's clock and the 7.x argument rules.</summary>
+/// <summary>What the FGA write paths share: the host's clock and the argument rules.</summary>
 internal static class SqlOSFgaWrites
 {
     /// <summary>The host's <see cref="TimeProvider"/> as the context's services hold it, else the system clock.</summary>

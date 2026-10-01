@@ -48,7 +48,7 @@ internal static class SqlOSResourceEntitySynchronizer
         await ApplyAsync(context, placed, deleted, ancestries, resources, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Validates where each new or changed entity's resource goes, in 7.x's order of checks.</summary>
+    /// <summary>Validates where each new or changed entity's resource goes; the order of the checks decides which error a host sees.</summary>
     private static async Task<Dictionary<string, SqlOSFgaAncestry>> PlaceAsync(
         SqlOSFgaResourceTree tree,
         IReadOnlyList<ResourceEntityChange> placed,
@@ -80,7 +80,7 @@ internal static class SqlOSResourceEntitySynchronizer
         return ancestries;
     }
 
-    /// <summary>The stored resources of changed and deleted entities, refusing what 7.x refused, in its order.</summary>
+    /// <summary>The stored resources of the changed and deleted entities, refusing a new one that exists or a missing one.</summary>
     private static async Task<Dictionary<string, SqlOSFgaResource>> FindStoredAsync(
         SqlOSFgaResourceTree tree,
         IReadOnlyList<ResourceEntityChange> changes,

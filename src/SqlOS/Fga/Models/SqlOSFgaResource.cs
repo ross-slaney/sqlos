@@ -170,7 +170,7 @@ internal sealed class SqlOSFgaAncestry
 
     /// <summary>
     /// Refuses a place for <paramref name="resourceId"/> that would make it its own parent or
-    /// ancestor, or put it deeper than the maximum depth, with the 7.x messages.
+    /// ancestor, or put it deeper than the maximum depth.
     /// </summary>
     public void EnsureCanHold(string resourceId)
     {

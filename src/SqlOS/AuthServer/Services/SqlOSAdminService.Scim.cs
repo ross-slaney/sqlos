@@ -61,7 +61,7 @@ public sealed partial class SqlOSAdminService
         return expired.Count;
     }
 
-    /// <summary>Merges the FGA subjects 7.x SCIM created for SqlOS users into each user's ID subject (#448).</summary>
+    /// <summary>Merges the FGA subjects SCIM links point at under another ID into each user's ID subject (#448).</summary>
     internal Task MergeScimUserSubjectsAsync(CancellationToken cancellationToken = default)
         => new MergeDirectoryUserSubjects((DbContext)_context).ExecuteAtStartupAsync(cancellationToken);
 

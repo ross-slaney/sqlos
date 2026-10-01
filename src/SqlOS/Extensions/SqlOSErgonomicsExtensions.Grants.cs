@@ -208,8 +208,8 @@ public static partial class SqlOSErgonomicsExtensions
     }
 
     /// <summary>
-    /// The grant's deterministic identifier: 7.x's for a grant without a window, the window added
-    /// otherwise, so replays converge on one grant.
+    /// The grant's deterministic identifier, from the subject, resource and role, and the window
+    /// when there is one, so replays converge on one grant.
     /// </summary>
     private static string GrantId(string subjectId, string resourceId, string roleId, TimeWindow window)
     {

@@ -15,7 +15,7 @@ namespace SqlOS.Fga.Processes;
 /// <remarks>
 /// Records are matched by ID (role permissions by role and permission key) and created or
 /// redefined; nothing is deleted. A role permission naming an unknown role or permission is skipped
-/// with a warning, as in 7.x.
+/// with a warning.
 /// </remarks>
 internal sealed class ReconcileFgaModel(ISqlOSFgaDbContext context, ILogger logger)
 {
