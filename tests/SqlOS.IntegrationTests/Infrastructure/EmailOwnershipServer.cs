@@ -20,6 +20,7 @@ using SqlOS.AuthServer.Services;
 using SqlOS.Email.Interfaces;
 using SqlOS.Extensions;
 using SqlOS.Services;
+using SqlOS.Domain;
 
 namespace SqlOS.IntegrationTests.Infrastructure;
 
@@ -230,16 +231,10 @@ internal sealed class EmailOwnershipServer : IAsyncDisposable
     public async Task<SqlOSUser> CreateUserAsync(string email, string? password = Password, bool verified = true, string displayName = "Account Owner")
     {
         await using var scope = CreateScope();
-        var user = await scope.Admin.CreateUserAsync(new SqlOSCreateUserRequest(displayName, email, password));
-        if (verified)
-        {
-            var row = await scope.Context.Set<SqlOSUserEmail>().SingleAsync(x => x.UserId == user.Id);
-            row.IsVerified = true;
-            row.VerifiedAt = DateTime.UtcNow;
-            await scope.Context.SaveChangesAsync();
-        }
-
-        return user;
+        // A sign-up whose code proved the address registers it verified.
+        return await scope.Admin.CreateUserAsync(
+            new SqlOSCreateUserRequest(displayName, email, password),
+            verified ? new OwnershipProof(EmailAddress.Parse(email), OwnershipProofMethod.EmailOtp) : null);
     }
 
     public async Task<SqlOSOrganization> CreateOrganizationAsync(string name, string? primaryDomain = null, params string[] verifiedDomains)

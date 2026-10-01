@@ -27,6 +27,15 @@ public static class SqlOSAuthServerModelConfiguration
             entity.HasKey(x => x.Id);
             entity.Property(x => x.DisplayName).HasMaxLength(200);
             entity.Property(x => x.DefaultEmail).HasMaxLength(320);
+
+            // The aggregate owns these collections: EF Core reads and fills its private lists, and
+            // the public getters are read-only views for host LINQ.
+            entity.Navigation(x => x.Emails).UsePropertyAccessMode(PropertyAccessMode.Field);
+            entity.Navigation(x => x.PhoneNumbers).UsePropertyAccessMode(PropertyAccessMode.Field);
+            entity.Navigation(x => x.Credentials).UsePropertyAccessMode(PropertyAccessMode.Field);
+            entity.Navigation(x => x.Authenticators).UsePropertyAccessMode(PropertyAccessMode.Field);
+            entity.Navigation(x => x.RecoveryCodes).UsePropertyAccessMode(PropertyAccessMode.Field);
+            entity.Navigation(x => x.ExternalIdentities).UsePropertyAccessMode(PropertyAccessMode.Field);
         });
 
         modelBuilder.Entity<SqlOSUserEmail>(entity =>

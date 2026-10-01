@@ -3056,16 +3056,15 @@ namespace SqlOS.AuthServer.Models
     }
     public sealed class SqlOSCredential
     {
-        public SqlOSCredential() { }
-        public System.DateTime CreatedAt { get; set; }
-        public string Id { get; set; }
-        public System.DateTime? LastUsedAt { get; set; }
-        public System.DateTime? RevokedAt { get; set; }
-        public string SecretHash { get; set; }
-        public int SecretVersion { get; set; }
-        public string Type { get; set; }
-        public SqlOS.AuthServer.Models.SqlOSUser? User { get; set; }
-        public string UserId { get; set; }
+        public System.DateTime CreatedAt { get; }
+        public string Id { get; }
+        public System.DateTime? LastUsedAt { get; }
+        public System.DateTime? RevokedAt { get; }
+        public string SecretHash { get; }
+        public int SecretVersion { get; }
+        public string Type { get; }
+        public SqlOS.AuthServer.Models.SqlOSUser? User { get; }
+        public string UserId { get; }
     }
     public sealed class SqlOSDeviceAuthorization
     {
@@ -3126,18 +3125,17 @@ namespace SqlOS.AuthServer.Models
     }
     public sealed class SqlOSExternalIdentity
     {
-        public SqlOSExternalIdentity() { }
-        public System.DateTime CreatedAt { get; set; }
-        public string? Email { get; set; }
-        public string Id { get; set; }
-        public string Issuer { get; set; }
-        public SqlOS.AuthServer.Models.SqlOSOidcConnection? OidcConnection { get; set; }
-        public string? OidcConnectionId { get; set; }
-        public SqlOS.AuthServer.Models.SqlOSSsoConnection? SsoConnection { get; set; }
-        public string? SsoConnectionId { get; set; }
-        public string Subject { get; set; }
-        public SqlOS.AuthServer.Models.SqlOSUser? User { get; set; }
-        public string UserId { get; set; }
+        public System.DateTime CreatedAt { get; }
+        public string? Email { get; }
+        public string Id { get; }
+        public string Issuer { get; }
+        public SqlOS.AuthServer.Models.SqlOSOidcConnection? OidcConnection { get; }
+        public string? OidcConnectionId { get; }
+        public SqlOS.AuthServer.Models.SqlOSSsoConnection? SsoConnection { get; }
+        public string? SsoConnectionId { get; }
+        public string Subject { get; }
+        public SqlOS.AuthServer.Models.SqlOSUser? User { get; }
+        public string UserId { get; }
     }
     public sealed class SqlOSInvitation
     {
@@ -3403,14 +3401,13 @@ namespace SqlOS.AuthServer.Models
     }
     public sealed class SqlOSRecoveryCode
     {
-        public SqlOSRecoveryCode() { }
-        public string CodeHash { get; set; }
-        public System.DateTime? ConsumedAt { get; set; }
-        public System.DateTime CreatedAt { get; set; }
-        public string Id { get; set; }
-        public System.DateTime? RevokedAt { get; set; }
-        public SqlOS.AuthServer.Models.SqlOSUser? User { get; set; }
-        public string UserId { get; set; }
+        public string CodeHash { get; }
+        public System.DateTime? ConsumedAt { get; }
+        public System.DateTime CreatedAt { get; }
+        public string Id { get; }
+        public System.DateTime? RevokedAt { get; }
+        public SqlOS.AuthServer.Models.SqlOSUser? User { get; }
+        public string UserId { get; }
     }
     public sealed class SqlOSRefreshToken
     {
@@ -3689,83 +3686,78 @@ namespace SqlOS.AuthServer.Models
     }
     public sealed class SqlOSUser
     {
-        public SqlOSUser() { }
-        public System.Collections.Generic.ICollection<SqlOS.AuthServer.Models.SqlOSUserAuthenticator> Authenticators { get; set; }
-        public System.DateTime CreatedAt { get; set; }
-        public System.Collections.Generic.ICollection<SqlOS.AuthServer.Models.SqlOSCredential> Credentials { get; set; }
-        public string? DefaultEmail { get; set; }
-        public string DisplayName { get; set; }
-        public System.Collections.Generic.ICollection<SqlOS.AuthServer.Models.SqlOSUserEmail> Emails { get; set; }
-        public System.Collections.Generic.ICollection<SqlOS.AuthServer.Models.SqlOSExternalIdentity> ExternalIdentities { get; set; }
-        public string Id { get; set; }
-        public bool IsActive { get; set; }
-        public System.Collections.Generic.ICollection<SqlOS.AuthServer.Models.SqlOSMembership> Memberships { get; set; }
-        public SqlOS.AuthServer.Models.SqlOSUserMfaPolicyOverride? MfaPolicyOverride { get; set; }
-        public System.Collections.Generic.ICollection<SqlOS.AuthServer.Models.SqlOSUserPhoneNumber> PhoneNumbers { get; set; }
-        public System.Collections.Generic.ICollection<SqlOS.AuthServer.Models.SqlOSRecoveryCode> RecoveryCodes { get; set; }
-        public System.Collections.Generic.ICollection<SqlOS.AuthServer.Models.SqlOSSession> Sessions { get; set; }
-        public System.DateTime UpdatedAt { get; set; }
+        public System.Collections.Generic.ICollection<SqlOS.AuthServer.Models.SqlOSUserAuthenticator> Authenticators { get; }
+        public System.DateTime CreatedAt { get; }
+        public System.Collections.Generic.ICollection<SqlOS.AuthServer.Models.SqlOSCredential> Credentials { get; }
+        public string? DefaultEmail { get; }
+        public string DisplayName { get; }
+        public System.Collections.Generic.ICollection<SqlOS.AuthServer.Models.SqlOSUserEmail> Emails { get; }
+        public System.Collections.Generic.ICollection<SqlOS.AuthServer.Models.SqlOSExternalIdentity> ExternalIdentities { get; }
+        public string Id { get; }
+        public bool IsActive { get; }
+        public System.Collections.Generic.ICollection<SqlOS.AuthServer.Models.SqlOSMembership> Memberships { get; }
+        public SqlOS.AuthServer.Models.SqlOSUserMfaPolicyOverride? MfaPolicyOverride { get; }
+        public System.Collections.Generic.ICollection<SqlOS.AuthServer.Models.SqlOSUserPhoneNumber> PhoneNumbers { get; }
+        public System.Collections.Generic.ICollection<SqlOS.AuthServer.Models.SqlOSRecoveryCode> RecoveryCodes { get; }
+        public System.Collections.Generic.ICollection<SqlOS.AuthServer.Models.SqlOSSession> Sessions { get; }
+        public System.DateTime UpdatedAt { get; }
     }
     public sealed class SqlOSUserAuthenticator
     {
-        public SqlOSUserAuthenticator() { }
-        public string Algorithm { get; set; }
-        public System.DateTime? ConfirmedAt { get; set; }
-        public System.DateTime CreatedAt { get; set; }
-        public int Digits { get; set; }
-        public string DisplayName { get; set; }
-        public string Id { get; set; }
-        public bool IsConfirmed { get; set; }
-        public long? LastAcceptedTimeStep { get; set; }
-        public System.DateTime? LastUsedAt { get; set; }
-        public int PeriodSeconds { get; set; }
-        public string? RevocationReason { get; set; }
-        public System.DateTime? RevokedAt { get; set; }
-        public string SecretProtected { get; set; }
-        public int SecretVersion { get; set; }
-        public string Type { get; set; }
-        public SqlOS.AuthServer.Models.SqlOSUser? User { get; set; }
-        public string UserId { get; set; }
+        public string Algorithm { get; }
+        public System.DateTime? ConfirmedAt { get; }
+        public System.DateTime CreatedAt { get; }
+        public int Digits { get; }
+        public string DisplayName { get; }
+        public string Id { get; }
+        public bool IsConfirmed { get; }
+        public long? LastAcceptedTimeStep { get; }
+        public System.DateTime? LastUsedAt { get; }
+        public int PeriodSeconds { get; }
+        public string? RevocationReason { get; }
+        public System.DateTime? RevokedAt { get; }
+        public string SecretProtected { get; }
+        public int SecretVersion { get; }
+        public string Type { get; }
+        public SqlOS.AuthServer.Models.SqlOSUser? User { get; }
+        public string UserId { get; }
     }
     public sealed class SqlOSUserEmail
     {
-        public SqlOSUserEmail() { }
-        public System.DateTime CreatedAt { get; set; }
-        public string Email { get; set; }
-        public string Id { get; set; }
-        public bool IsPrimary { get; set; }
-        public bool IsVerified { get; set; }
-        public string NormalizedEmail { get; set; }
-        public SqlOS.AuthServer.Models.SqlOSUser? User { get; set; }
-        public string UserId { get; set; }
-        public System.DateTime? VerifiedAt { get; set; }
+        public System.DateTime CreatedAt { get; }
+        public string Email { get; }
+        public string Id { get; }
+        public bool IsPrimary { get; }
+        public bool IsVerified { get; }
+        public string NormalizedEmail { get; }
+        public SqlOS.AuthServer.Models.SqlOSUser? User { get; }
+        public string UserId { get; }
+        public System.DateTime? VerifiedAt { get; }
     }
     public sealed class SqlOSUserMfaPolicyOverride
     {
-        public SqlOSUserMfaPolicyOverride() { }
-        public bool? RequireMfa { get; set; }
-        public System.DateTime UpdatedAt { get; set; }
-        public SqlOS.AuthServer.Models.SqlOSUser? User { get; set; }
-        public string UserId { get; set; }
-        public bool? UserSelfEnrollmentEnabled { get; set; }
+        public bool? RequireMfa { get; }
+        public System.DateTime UpdatedAt { get; }
+        public SqlOS.AuthServer.Models.SqlOSUser? User { get; }
+        public string UserId { get; }
+        public bool? UserSelfEnrollmentEnabled { get; }
     }
     public sealed class SqlOSUserPhoneNumber
     {
-        public SqlOSUserPhoneNumber() { }
-        public System.DateTime CreatedAt { get; set; }
-        public string? DisplayValueEncrypted { get; set; }
-        public string Id { get; set; }
-        public bool IsPrimary { get; set; }
-        public bool IsVerified { get; set; }
-        public System.DateTime? LastUsedAt { get; set; }
-        public string PhoneNumber { get; set; }
-        public string PhoneNumberHash { get; set; }
-        public string? RemovalReason { get; set; }
-        public System.DateTime? RemovedAt { get; set; }
-        public System.DateTime UpdatedAt { get; set; }
-        public SqlOS.AuthServer.Models.SqlOSUser? User { get; set; }
-        public string UserId { get; set; }
-        public System.DateTime? VerifiedAt { get; set; }
+        public System.DateTime CreatedAt { get; }
+        public string? DisplayValueEncrypted { get; }
+        public string Id { get; }
+        public bool IsPrimary { get; }
+        public bool IsVerified { get; }
+        public System.DateTime? LastUsedAt { get; }
+        public string PhoneNumber { get; }
+        public string PhoneNumberHash { get; }
+        public string? RemovalReason { get; }
+        public System.DateTime? RemovedAt { get; }
+        public System.DateTime UpdatedAt { get; }
+        public SqlOS.AuthServer.Models.SqlOSUser? User { get; }
+        public string UserId { get; }
+        public System.DateTime? VerifiedAt { get; }
     }
 }
 namespace SqlOS.AuthServer.Services
@@ -3800,6 +3792,7 @@ namespace SqlOS.AuthServer.Services
         public System.Threading.Tasks.Task<SqlOS.AuthServer.Models.SqlOSSsoConnection> CreateSsoConnectionAsync(SqlOS.AuthServer.Contracts.SqlOSCreateSsoConnectionRequest request, System.Threading.CancellationToken cancellationToken = default) { }
         public System.Threading.Tasks.Task<SqlOS.AuthServer.Models.SqlOSSsoConnection> CreateSsoConnectionDraftAsync(SqlOS.AuthServer.Contracts.SqlOSCreateSsoConnectionDraftRequest request, System.Threading.CancellationToken cancellationToken = default) { }
         public System.Threading.Tasks.Task<SqlOS.AuthServer.Models.SqlOSUser> CreateUserAsync(SqlOS.AuthServer.Contracts.SqlOSCreateUserRequest request, System.Threading.CancellationToken cancellationToken = default) { }
+        public System.Threading.Tasks.Task<SqlOS.AuthServer.Models.SqlOSUser?> DeactivateUserAsync(string userId, System.Threading.CancellationToken cancellationToken = default) { }
         public System.Threading.Tasks.Task DeleteScopeDisplayNameAsync(string id, System.Threading.CancellationToken cancellationToken = default) { }
         public System.Threading.Tasks.Task<SqlOS.AuthServer.Models.SqlOSClientApplication> DisableClientAsync(string clientApplicationId, string? reason = null, System.Threading.CancellationToken cancellationToken = default) { }
         public System.Threading.Tasks.Task<SqlOS.AuthServer.Models.SqlOSClientApplication> EmergencyDisableClientAsync(string clientApplicationId, System.Threading.CancellationToken cancellationToken = default) { }
@@ -3835,6 +3828,7 @@ namespace SqlOS.AuthServer.Services
         public System.Threading.Tasks.Task<object> ListUserMembershipsAsync(string userId, string? cursor = null, int? pageSize = default, int? page = default, System.Threading.CancellationToken cancellationToken = default) { }
         public System.Threading.Tasks.Task<object> ListUserSessionsAsync(string userId, string? cursor = null, int? pageSize = default, int? page = default, System.Threading.CancellationToken cancellationToken = default) { }
         public System.Threading.Tasks.Task<object> ListUsersAsync(string? search = null, string? cursor = null, int? pageSize = default, int? page = default, System.Threading.CancellationToken cancellationToken = default) { }
+        public System.Threading.Tasks.Task<SqlOS.AuthServer.Models.SqlOSUser?> ReactivateUserAsync(string userId, System.Threading.CancellationToken cancellationToken = default) { }
         public System.Threading.Tasks.Task ReconcileDisabledScimManagedGrantsAsync(System.Threading.CancellationToken cancellationToken = default) { }
         public System.Threading.Tasks.Task RecordAuditAsync(string eventType, string actorType, string? actorId, string? userId = null, string? organizationId = null, string? sessionId = null, string? ipAddress = null, object? data = null, System.Threading.CancellationToken cancellationToken = default) { }
         public System.Threading.Tasks.Task<SqlOS.AuthServer.Models.SqlOSClientApplication> RequireClientAsync(string? clientId, string? redirectUri, System.Threading.CancellationToken cancellationToken = default, Microsoft.AspNetCore.Http.HttpContext? httpContext = null) { }

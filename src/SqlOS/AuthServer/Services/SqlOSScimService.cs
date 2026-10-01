@@ -12,6 +12,7 @@ using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 using SqlOS.Database;
+using SqlOS.Domain;
 using SqlOS.Fga;
 using SqlOS.Fga.Models;
 
@@ -53,6 +54,7 @@ internal sealed class SqlOSScimService
     private const string LifecycleReleasedAction = "scim.user.lifecycle_released";
     private const string RejectedAction = "scim.user.rejected";
     private const string UnverifiedEmailMatchReason = "unverified_email_match";
+    private const string DirectoryDeprovisionedReason = "scim_deprovisioned";
     private const int ScimOperationCommitCleanupBatchSize = 256;
     private static readonly TimeSpan ScimOperationCommitRetention = TimeSpan.FromDays(1);
     private static readonly TimeSpan TokenUsageWriteInterval = TimeSpan.FromMinutes(5);
@@ -711,15 +713,12 @@ internal sealed class SqlOSScimService
 
         if (user == null)
         {
-            user = new SqlOSUser
+            user = SqlOSUser.Register(request.DisplayName, now);
+            if (!request.Active)
             {
-                Id = _cryptoService.GenerateId("usr"),
-                DisplayName = request.DisplayName,
-                DefaultEmail = request.PrimaryEmail,
-                IsActive = request.Active,
-                CreatedAt = now,
-                UpdatedAt = now
-            };
+                user.Deactivate(DirectoryDeprovisionedReason, now);
+            }
+
             _context.Set<SqlOSUser>().Add(user);
         }
 
@@ -728,16 +727,22 @@ internal sealed class SqlOSScimService
         // only its own membership, FGA subject, and link profile fields.
         if (ownsUserLifecycle)
         {
-            user.DisplayName = request.DisplayName;
-            user.DefaultEmail = request.PrimaryEmail ?? user.DefaultEmail;
+            user.UpdateProfile(request.DisplayName, request.PrimaryEmail ?? user.DefaultEmail, now);
             if (!string.IsNullOrWhiteSpace(request.PrimaryEmail))
             {
                 await UpsertPrimaryEmailAsync(user, request.PrimaryEmail, now, cancellationToken);
             }
 
             var wasActive = user.IsActive;
-            user.IsActive = request.Active;
-            user.UpdatedAt = now;
+            if (request.Active)
+            {
+                user.Reactivate(now);
+            }
+            else
+            {
+                user.Deactivate(DirectoryDeprovisionedReason, now);
+            }
+
             await RevokeOffboardedUserIntegrationsAsync(user, wasActive, now, cancellationToken);
         }
 
@@ -1051,36 +1056,18 @@ internal sealed class SqlOSScimService
         }
 
         var existing = await _context.Set<SqlOSUserEmail>()
+            .AsNoTracking()
             .FindByNormalizedEmailAsync(normalized, email, cancellationToken);
         if (existing != null && existing.UserId != user.Id)
         {
             throw new SqlOSScimException(StatusCodes.Status409Conflict, $"Email '{email}' already belongs to another user.", "uniqueness");
         }
 
-        if (existing == null)
-        {
-            existing = new SqlOSUserEmail
-            {
-                Id = _cryptoService.GenerateId("eml"),
-                UserId = user.Id,
-                CreatedAt = now
-            };
-            _context.Set<SqlOSUserEmail>().Add(existing);
-        }
-
-        var previousPrimaryEmails = await _context.Set<SqlOSUserEmail>()
-            .Where(x => x.UserId == user.Id && x.IsPrimary)
-            .ToListAsync(cancellationToken);
-        foreach (var previous in previousPrimaryEmails.Where(x => x.Id != existing.Id))
-        {
-            previous.IsPrimary = false;
-        }
-
-        existing.Email = address;
-        existing.NormalizedEmail = normalized;
-        existing.IsPrimary = true;
-        existing.IsVerified = true;
-        existing.VerifiedAt ??= now;
+        // The directory that owns this person sets the primary address, inside a domain its
+        // organization verified (checked before the write) or the address the account already
+        // has verified. A directory never claims an address.
+        await _context.LoadUserPartsAsync(user, SqlOSUserParts.Emails, cancellationToken);
+        user.SetPrimaryEmail(new OwnershipProof(EmailAddress.Parse(address), OwnershipProofMethod.Directory), now);
     }
 
     /// <summary>
@@ -1108,9 +1095,16 @@ internal sealed class SqlOSScimService
 
     private async Task RefreshGlobalUserActivityAsync(SqlOSUser user, string currentOrganizationId, DateTime now, CancellationToken cancellationToken)
     {
-        user.IsActive = await _context.Set<SqlOSMembership>()
-            .AnyAsync(x => x.UserId == user.Id && x.OrganizationId != currentOrganizationId && x.IsActive, cancellationToken);
-        user.UpdatedAt = now;
+        // The person stays active only through an active membership in another organization.
+        if (await _context.Set<SqlOSMembership>()
+                .AnyAsync(x => x.UserId == user.Id && x.OrganizationId != currentOrganizationId && x.IsActive, cancellationToken))
+        {
+            user.Reactivate(now);
+        }
+        else
+        {
+            user.Deactivate(DirectoryDeprovisionedReason, now);
+        }
     }
 
     /// <summary>

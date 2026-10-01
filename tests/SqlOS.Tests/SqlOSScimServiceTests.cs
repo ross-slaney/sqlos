@@ -787,7 +787,7 @@ public sealed class SqlOSScimServiceTests
             Name = "Other",
             CreatedAt = DateTime.UtcNow
         });
-        context.Set<SqlOSUser>().Add(new SqlOSUser
+        context.Set<SqlOSUser>().Add(TestRows.Create<SqlOSUser>(new
         {
             Id = "usr_other",
             DisplayName = "Other User",
@@ -795,7 +795,7 @@ public sealed class SqlOSScimServiceTests
             IsActive = true,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
-        });
+        }));
         context.Set<SqlOSMembership>().Add(new SqlOSMembership
         {
             OrganizationId = "org_other",

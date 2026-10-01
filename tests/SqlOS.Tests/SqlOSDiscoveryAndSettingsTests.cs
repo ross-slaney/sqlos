@@ -8,6 +8,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
+using SqlOS.Domain;
 using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.Tests;
@@ -242,12 +243,10 @@ public sealed class SqlOSDiscoveryAndSettingsTests
         string displayName,
         string email)
     {
-        var user = await admin.CreateUserAsync(new SqlOSCreateUserRequest(displayName, email, "P@ssword123!"));
-        var userEmail = await context.Set<SqlOSUserEmail>().SingleAsync(x => x.UserId == user.Id);
-        userEmail.IsVerified = true;
-        userEmail.VerifiedAt = DateTime.UtcNow;
-        await context.SaveChangesAsync();
-        return user;
+        // A sign-up whose code proved the address registers it verified.
+        return await admin.CreateUserAsync(
+            new SqlOSCreateUserRequest(displayName, email, "P@ssword123!"),
+            new OwnershipProof(EmailAddress.Parse(email), OwnershipProofMethod.EmailOtp));
     }
 
     private static string CreateCertificatePem()

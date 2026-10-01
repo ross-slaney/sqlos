@@ -10,6 +10,8 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.AuthServer.Policies;
+using SqlOS.AuthServer.Processes.Identity;
 using SqlOS.Database;
 using SqlOS.Domain;
 using SqlOS.Fga.Models;
@@ -534,54 +536,47 @@ public sealed partial class SqlOSAdminService
         throw new InvalidOperationException("Custom seeded OIDC connections require a stable key. Use SeedOidcConnection(key, configure).");
     }
 
-    public async Task<SqlOSUser> CreateUserAsync(SqlOSCreateUserRequest request, CancellationToken cancellationToken = default)
+    public Task<SqlOSUser> CreateUserAsync(SqlOSCreateUserRequest request, CancellationToken cancellationToken = default)
+        => CreateUserAsync(request, emailProof: null, cancellationToken);
+
+    /// <summary>
+    /// Registers an account. Its address is verified only when <paramref name="emailProof"/> proves
+    /// it (an email-code or invitation sign-up); a password, when the request has one, is set under
+    /// the password policy. A request without a password registers an account without one, as an
+    /// operator may.
+    /// </summary>
+    internal async Task<SqlOSUser> CreateUserAsync(
+        SqlOSCreateUserRequest request,
+        OwnershipProof? emailProof,
+        CancellationToken cancellationToken = default)
     {
-        if (!SqlOSEmailAddress.TryCanonicalize(request.Email, out var address, out var normalizedEmail))
+        if (!EmailAddress.TryParse(request.Email, out var address))
         {
             throw new InvalidOperationException(SqlOSEmailAddress.InvalidEmailMessage);
         }
 
         var existingEmail = await _context.Set<SqlOSUserEmail>()
-            .FindByNormalizedEmailAsync(normalizedEmail, request.Email, cancellationToken);
+            .FindByEmailAddressAsync(address, request.Email, cancellationToken);
         if (existingEmail != null)
         {
             throw new InvalidOperationException($"Email '{request.Email}' already exists.");
         }
 
-        var user = new SqlOSUser
+        if (emailProof is not null && !emailProof.Address.Equals(address))
         {
-            Id = _cryptoService.GenerateId("usr"),
-            DisplayName = request.DisplayName,
-            DefaultEmail = address,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
+            throw SqlOSDomainException.Of(SqlOSDomainError.OwnershipProofMismatch);
+        }
 
-        var email = new SqlOSUserEmail
-        {
-            Id = _cryptoService.GenerateId("eml"),
-            UserId = user.Id,
-            Email = address,
-            NormalizedEmail = normalizedEmail,
-            IsPrimary = true,
-            IsVerified = false,
-            CreatedAt = DateTime.UtcNow
-        };
-
-        _context.Set<SqlOSUser>().Add(user);
-        _context.Set<SqlOSUserEmail>().Add(email);
-
+        var now = DateTime.UtcNow;
+        var user = emailProof is null
+            ? SqlOSUser.Register(request.DisplayName, address, now)
+            : SqlOSUser.Register(request.DisplayName, emailProof, now);
         if (!string.IsNullOrWhiteSpace(request.Password))
         {
-            _context.Set<SqlOSCredential>().Add(new SqlOSCredential
-            {
-                Id = _cryptoService.GenerateId("cred"),
-                UserId = user.Id,
-                SecretHash = _cryptoService.HashPassword(request.Password),
-                Type = "password",
-                CreatedAt = DateTime.UtcNow
-            });
+            user.SetPassword(request.Password, PasswordPolicy.Default, now);
         }
+
+        _context.Set<SqlOSUser>().Add(user);
 
         try
         {
@@ -594,6 +589,19 @@ public sealed partial class SqlOSAdminService
 
         return user;
     }
+
+    /// <summary>
+    /// Deactivates the user: SqlOS refuses the account's sign-ins, and its sessions and tokens at
+    /// their next use, as it does for every inactive account. A deactivated user stays inactive.
+    /// </summary>
+    /// <returns>The user, or <see langword="null"/> when no user has <paramref name="userId"/>.</returns>
+    public Task<SqlOSUser?> DeactivateUserAsync(string userId, CancellationToken cancellationToken = default)
+        => new DeactivateUser(_context, _cryptoService.Clock).ExecuteAsync(new DeactivateUserCommand(userId), cancellationToken);
+
+    /// <summary>Reactivates the user. An active user stays active.</summary>
+    /// <returns>The user, or <see langword="null"/> when no user has <paramref name="userId"/>.</returns>
+    public Task<SqlOSUser?> ReactivateUserAsync(string userId, CancellationToken cancellationToken = default)
+        => new ReactivateUser(_context, _cryptoService.Clock).ExecuteAsync(new ReactivateUserCommand(userId), cancellationToken);
 
     public async Task<SqlOSOrganization> CreateOrganizationAsync(SqlOSCreateOrganizationRequest request, CancellationToken cancellationToken = default)
     {

@@ -107,23 +107,24 @@ public sealed class EmailClaimIntegrationTests
         await using (var seed = _server.CreateScope())
         {
             var now = DateTime.UtcNow;
-            seed.Context.Set<SqlOSUserAuthenticator>().Add(new SqlOSUserAuthenticator
+            // The squatter's factors, as the rows its own enrollment would have stored.
+            seed.Context.Set<SqlOSUserAuthenticator>().Add(TestRows.Create<SqlOSUserAuthenticator>(new
             {
                 Id = $"auth_{Guid.NewGuid():N}"[..28],
                 UserId = squat.UserId,
                 SecretProtected = "protected-secret",
                 IsConfirmed = true,
                 CreatedAt = now,
-                ConfirmedAt = now
-            });
-            seed.Context.Set<SqlOSRecoveryCode>().Add(new SqlOSRecoveryCode
+                ConfirmedAt = (DateTime?)now
+            }));
+            seed.Context.Set<SqlOSRecoveryCode>().Add(TestRows.Create<SqlOSRecoveryCode>(new
             {
                 Id = $"rc_{Guid.NewGuid():N}"[..28],
                 UserId = squat.UserId,
                 CodeHash = Guid.NewGuid().ToString("N"),
                 CreatedAt = now
-            });
-            seed.Context.Set<SqlOSUserPhoneNumber>().Add(new SqlOSUserPhoneNumber
+            }));
+            seed.Context.Set<SqlOSUserPhoneNumber>().Add(TestRows.Create<SqlOSUserPhoneNumber>(new
             {
                 Id = $"phn_{Guid.NewGuid():N}"[..28],
                 UserId = squat.UserId,
@@ -131,10 +132,10 @@ public sealed class EmailClaimIntegrationTests
                 PhoneNumberHash = Guid.NewGuid().ToString("N"),
                 IsPrimary = true,
                 IsVerified = true,
-                VerifiedAt = now,
+                VerifiedAt = (DateTime?)now,
                 CreatedAt = now,
                 UpdatedAt = now
-            });
+            }));
             await seed.Context.SaveChangesAsync();
         }
 

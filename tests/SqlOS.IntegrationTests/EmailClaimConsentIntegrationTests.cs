@@ -13,6 +13,7 @@ using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
 using SqlOS.Email.Interfaces;
 using SqlOS.IntegrationTests.Infrastructure;
+using SqlOS.AuthServer.Processes.Identity;
 
 namespace SqlOS.IntegrationTests;
 
@@ -101,10 +102,10 @@ public sealed class EmailClaimConsentIntegrationTests
 
         var grant = await QueryAsync(fixture, db => db.Set<SqlOSConsentGrant>().AsNoTracking().SingleAsync(x => x.Id == grantId));
         grant.RevokedAt.Should().NotBeNull();
-        grant.RevocationReason.Should().Be(SqlOSEmailOwnershipClaim.RevocationReason);
+        grant.RevocationReason.Should().Be(ClaimEmailOwnership.RevocationReason);
         var claim = await QueryAsync(fixture, db => db.Set<SqlOSAuditEvent>()
             .AsNoTracking()
-            .SingleAsync(x => x.UserId == fixture.UserId && x.EventType == SqlOSEmailOwnershipClaim.AuditEventType));
+            .SingleAsync(x => x.UserId == fixture.UserId && x.EventType == ClaimEmailOwnership.AuditEventType));
         claim.DataJson.Should().Contain(grantId);
     }
 

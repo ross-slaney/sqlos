@@ -38,6 +38,7 @@ internal sealed class SqlOSAuditProjection
         .AddEmailOtpEvents()
         .AddPhoneOtpEvents()
         .AddMagicLinkEvents()
+        .AddUserEvents()
         .Build();
 
     /// <summary>The registered event types, audited or not.</summary>

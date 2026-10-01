@@ -673,8 +673,8 @@ public sealed class SqlOSAuthorizationServerService
         }
 
         await _admission.RecordPasswordAttemptSucceededAsync(attempt, cancellationToken);
-        var storedCredential = await _context.Set<SqlOSCredential>().FirstAsync(x => x.Id == credential.Id, cancellationToken);
-        storedCredential.LastUsedAt = DateTime.UtcNow;
+        var account = await _context.GetUserAsync(user.Id, SqlOSUserParts.Credentials, cancellationToken);
+        account.RecordPasswordSignIn(credential.Id, DateTime.UtcNow);
         await _context.SaveChangesAsync(cancellationToken);
 
         var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
@@ -737,16 +737,11 @@ public sealed class SqlOSAuthorizationServerService
 
         SqlOSSignupJoinPolicy.RejectUnauthorizedOrganizationJoin(organizationId);
 
+        // The caller verified the sign-up code sent to this address, which proves the mailbox.
         var user = await _adminService.CreateUserAsync(
             new SqlOSCreateUserRequest(displayName, email, null),
+            SignupProof(email, OwnershipProofMethod.EmailOtp),
             cancellationToken);
-
-        var emailRecord = await _context.Set<SqlOSUserEmail>()
-            .FirstAsync(x => x.UserId == user.Id && x.IsPrimary, cancellationToken);
-        emailRecord.IsVerified = true;
-        emailRecord.VerifiedAt = DateTime.UtcNow;
-        user.DefaultEmail = emailRecord.Email;
-        user.UpdatedAt = DateTime.UtcNow;
 
         if (!string.IsNullOrWhiteSpace(organizationName))
         {
@@ -788,27 +783,9 @@ public sealed class SqlOSAuthorizationServerService
         }
 
         var now = DateTime.UtcNow;
-        var user = new SqlOSUser
-        {
-            Id = _cryptoService.GenerateId("usr"),
-            DisplayName = displayName,
-            CreatedAt = now,
-            UpdatedAt = now
-        };
+        var user = SqlOSUser.Register(displayName, now);
+        user.AddVerifiedPhone(phoneNumber, _cryptoService.ProtectSecret(phoneNumber), now);
         _context.Set<SqlOSUser>().Add(user);
-        _context.Set<SqlOSUserPhoneNumber>().Add(new SqlOSUserPhoneNumber
-        {
-            Id = _cryptoService.GenerateId("phn"),
-            UserId = user.Id,
-            PhoneNumber = phoneNumber,
-            PhoneNumberHash = phoneHash,
-            DisplayValueEncrypted = _cryptoService.ProtectSecret(phoneNumber),
-            IsPrimary = true,
-            IsVerified = true,
-            VerifiedAt = now,
-            CreatedAt = now,
-            UpdatedAt = now
-        });
 
         if (!string.IsNullOrWhiteSpace(organizationName))
         {
@@ -829,24 +806,24 @@ public sealed class SqlOSAuthorizationServerService
         string email,
         CancellationToken cancellationToken = default)
     {
+        // The invitation was mailed to this address and its token is presented now, which proves the mailbox.
         var user = await _adminService.CreateUserAsync(
             new SqlOSCreateUserRequest(displayName, email, null),
+            SignupProof(email, OwnershipProofMethod.Invitation),
             cancellationToken);
-
-        var emailRecord = await _context.Set<SqlOSUserEmail>()
-            .FirstAsync(x => x.UserId == user.Id && x.IsPrimary, cancellationToken);
-        emailRecord.IsVerified = true;
-        emailRecord.VerifiedAt = DateTime.UtcNow;
-        user.DefaultEmail = emailRecord.Email;
-        user.UpdatedAt = DateTime.UtcNow;
-
-        await _context.SaveChangesAsync(cancellationToken);
 
         return new SqlOSPasswordAuthenticationResult(
             user,
             Array.Empty<SqlOSOrganizationOption>(),
             "invitation");
     }
+
+    /// <summary>
+    /// The proof a sign-up's verified code or presented invitation gives for the address it signs
+    /// up. An address that is not valid has none, and registration refuses it as 7.x did.
+    /// </summary>
+    private static OwnershipProof? SignupProof(string email, OwnershipProofMethod method)
+        => EmailAddress.TryParse(email, out var address) ? new OwnershipProof(address, method) : null;
 
     public Task<string> CreatePendingOrganizationSelectionAsync(
         SqlOSUser user,

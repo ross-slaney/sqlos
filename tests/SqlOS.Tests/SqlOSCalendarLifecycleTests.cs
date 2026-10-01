@@ -146,9 +146,8 @@ public sealed class SqlOSCalendarLifecycleTests
         var first = await ConnectAsync(services, oidc.Id, SqlOSCalendarIntegrationMode.ConnectionOnly, userId: user.Id);
         var second = await ConnectAsync(services, oidc.Id, SqlOSCalendarIntegrationMode.ReadPull, userId: user.Id);
 
-        // No admin API deactivates a user; operators flip IsActive through the shared DbContext.
-        context.Set<SqlOSUser>().Single(x => x.Id == user.Id).IsActive = false;
-        await context.SaveChangesAsync();
+        // No admin API deactivates a user; host code deactivates it through the admin service.
+        await services.Admin.DeactivateUserAsync(user.Id);
 
         var act = () => services.Calendar.GetAccessTokenAsync(first, forUserId: user.Id);
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*disconnected*");
@@ -274,8 +273,7 @@ public sealed class SqlOSCalendarLifecycleTests
         var connection = context.Set<SqlOSCalendarConnection>().Single();
         connection.AccessTokenExpiresAt = DateTime.UtcNow.AddMinutes(-1);
         connection.RefreshTokenEncrypted = services.Crypto.ProtectSecret("revoked-by-provider");
-        context.Set<SqlOSUser>().Single(x => x.Id == user.Id).IsActive = false;
-        await context.SaveChangesAsync();
+        await services.Admin.DeactivateUserAsync(user.Id);
 
         var act = () => services.Calendar.GetAccessTokenAsync(connectionId, forUserId: user.Id);
 
@@ -319,7 +317,7 @@ public sealed class SqlOSCalendarLifecycleTests
         var user = await services.Admin.CreateUserAsync(new SqlOSCreateUserRequest("Cal User", "cal@example.com", null));
         var organization = await services.Admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Acme", "acme"));
         var oidc = await CreateGoogleConnectionAsync(services.Admin);
-        context.Set<SqlOSUser>().Single(x => x.Id == user.Id).IsActive = false;
+        await services.Admin.DeactivateUserAsync(user.Id);
         context.Set<SqlOSOrganization>().Single(x => x.Id == organization.Id).IsActive = false;
         await context.SaveChangesAsync();
 

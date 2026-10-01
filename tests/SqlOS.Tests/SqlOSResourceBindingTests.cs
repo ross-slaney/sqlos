@@ -456,7 +456,7 @@ public sealed class SqlOSResourceBindingTests
 
     private static async Task<SqlOSUser> SeedUserAsync(TestSqlOSInMemoryDbContext context)
     {
-        var user = new SqlOSUser
+        var user = TestRows.Create<SqlOSUser>(new
         {
             Id = "usr_test",
             DisplayName = "Alice",
@@ -464,7 +464,7 @@ public sealed class SqlOSResourceBindingTests
             IsActive = true,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
-        };
+        });
         context.Set<SqlOSUser>().Add(user);
         await context.SaveChangesAsync();
         return user;

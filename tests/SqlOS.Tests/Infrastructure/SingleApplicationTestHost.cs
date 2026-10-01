@@ -74,14 +74,14 @@ internal sealed class SingleApplicationTestHost : IAsyncDisposable
         var context = scopeServices.ServiceProvider.GetRequiredService<TestSqlOSInMemoryDbContext>();
         var crypto = scopeServices.ServiceProvider.GetRequiredService<SqlOSCryptoService>();
 
-        var user = new SqlOSUser
+        var user = TestRows.Create<SqlOSUser>(new
         {
             Id = $"usr_{Guid.NewGuid():N}"[..28],
             DisplayName = "Surface User",
             DefaultEmail = $"surface-{Guid.NewGuid():N}@example.test",
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
-        };
+        });
         var client = new SqlOSClientApplication
         {
             Id = $"cli_{Guid.NewGuid():N}"[..28],

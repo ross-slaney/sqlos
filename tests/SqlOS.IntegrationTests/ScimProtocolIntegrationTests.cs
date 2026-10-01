@@ -23,6 +23,7 @@ using SqlOS.Fga.Models;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Services;
 using SqlOS.IntegrationTests.Infrastructure;
+using SqlOS.Domain;
 
 namespace SqlOS.IntegrationTests;
 
@@ -107,9 +108,8 @@ public sealed partial class ScimProtocolIntegrationTests
                 "Security Suspended User",
                 "standalone.suspended@example.test",
                 Password: null));
-            suspended.IsActive = false;
+            await admin.DeactivateUserAsync(suspended.Id);
             suspendedUserId = suspended.Id;
-            await context.SaveChangesAsync();
             // Directory linking needs a proven mailbox; an unverified address is never linked.
             await MarkEmailsVerifiedAsync(context, activeUserId, suspendedUserId);
         }
@@ -735,10 +735,14 @@ public sealed partial class ScimProtocolIntegrationTests
 
     private static async Task MarkEmailsVerifiedAsync(TestSqlOSDbContext context, params string[] userIds)
     {
-        foreach (var email in await context.Set<SqlOSUserEmail>().Where(x => userIds.Contains(x.UserId)).ToListAsync())
+        // Each owner confirmed the address with the email-verification link.
+        foreach (var userId in userIds)
         {
-            email.IsVerified = true;
-            email.VerifiedAt = DateTime.UtcNow;
+            var user = await context.GetUserAsync(userId, SqlOSUserParts.Emails);
+            foreach (var email in user.Emails.ToList())
+            {
+                user.VerifyEmail(new OwnershipProof(EmailAddress.Parse(email.Email), OwnershipProofMethod.EmailVerification), DateTime.UtcNow);
+            }
         }
 
         await context.SaveChangesAsync();

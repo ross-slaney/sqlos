@@ -806,14 +806,14 @@ public sealed class SqlOSCryptoServiceTests
     private static async Task<(SqlOSUser User, SqlOSSession Session, SqlOSClientApplication Client)> SeedTokenContextAsync(
         TestSqlOSInMemoryDbContext context)
     {
-        var user = new SqlOSUser
+        var user = TestRows.Create<SqlOSUser>(new
         {
             Id = $"usr_{Guid.NewGuid():N}"[..28],
             DisplayName = "Test User",
             DefaultEmail = "test@example.com",
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
-        };
+        });
         var client = new SqlOSClientApplication
         {
             Id = $"cli_{Guid.NewGuid():N}"[..28],

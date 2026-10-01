@@ -149,43 +149,14 @@ public sealed class SqlOSTotpMfaService
     {
 
         var now = DateTime.UtcNow;
-        var stale = await _context.Set<SqlOSUserAuthenticator>()
-            .Where(x =>
-                x.UserId == userId
-                && x.Type == SqlOSMfaFactorTypes.Totp
-                && !x.IsConfirmed
-                && x.RevokedAt == null)
-            .ToListAsync(cancellationToken);
-        foreach (var authenticator in stale)
-        {
-            authenticator.RevokedAt = now;
-            authenticator.RevocationReason = "replaced_unconfirmed";
-        }
-
+        var user = await _context.GetUserAsync(userId, SqlOSUserParts.Authenticators, cancellationToken);
         var secret = EncodeBase32(RandomNumberGenerator.GetBytes(_options.Mfa.Totp.SecretBytes));
-        var authenticatorId = _cryptoService.GenerateId("mfa");
-        var authenticatorName = string.IsNullOrWhiteSpace(displayName)
-            ? "Authenticator app"
-            : displayName.Trim();
-        var authenticatorRow = new SqlOSUserAuthenticator
-        {
-            Id = authenticatorId,
-            UserId = userId,
-            Type = SqlOSMfaFactorTypes.Totp,
-            DisplayName = authenticatorName,
-            SecretProtected = _cryptoService.ProtectSecret(secret),
-            SecretVersion = 1,
-            Algorithm = _options.Mfa.Totp.Algorithm,
-            Digits = _options.Mfa.Totp.Digits,
-            PeriodSeconds = _options.Mfa.Totp.PeriodSeconds,
-            IsConfirmed = false,
-            CreatedAt = now
-        };
-        _context.Set<SqlOSUserAuthenticator>().Add(authenticatorRow);
-
-        var user = await _context.Set<SqlOSUser>()
-            .AsNoTracking()
-            .FirstAsync(x => x.Id == userId, cancellationToken);
+        var authenticator = user.EnrollTotp(
+            _cryptoService.ProtectSecret(secret),
+            displayName,
+            new TotpParameters(_options.Mfa.Totp.Algorithm, _options.Mfa.Totp.Digits, _options.Mfa.Totp.PeriodSeconds),
+            now);
+        var authenticatorId = authenticator.Id;
         var token = (await _cryptoService.CreateTemporaryTokenAsync(
             SqlOSTemporaryTokenKinds.TotpEnrollment,
             new TotpEnrollmentPayload(authenticatorId, challengeBinding),
@@ -308,14 +279,14 @@ public sealed class SqlOSTotpMfaService
             throw new InvalidOperationException("Authenticator enrollment is invalid.");
         }
 
-        var authenticator = await _context.Set<SqlOSUserAuthenticator>()
-            .FirstOrDefaultAsync(x =>
-                x.Id == payload.AuthenticatorId
-                && x.UserId == temporaryToken.UserId
-                && x.Type == SqlOSMfaFactorTypes.Totp
-                && x.RevokedAt == null,
+        var user = await _context.FindUserAsync(
+                temporaryToken.UserId,
+                SqlOSUserParts.Authenticators | SqlOSUserParts.RecoveryCodes | SqlOSUserParts.MfaPolicyOverride,
                 cancellationToken)
             ?? throw new InvalidOperationException("Authenticator enrollment is invalid.");
+        var authenticator = user.FindAuthenticator(payload.AuthenticatorId) is { IsTotp: true } found
+            ? found
+            : throw new InvalidOperationException("Authenticator enrollment is invalid.");
 
         if (authenticator.IsConfirmed)
         {
@@ -328,18 +299,13 @@ public sealed class SqlOSTotpMfaService
             throw new InvalidOperationException("Authenticator code is invalid.");
         }
 
-        authenticator.IsConfirmed = true;
-        authenticator.ConfirmedAt = DateTime.UtcNow;
-        authenticator.LastUsedAt = DateTime.UtcNow;
-        authenticator.LastAcceptedTimeStep = matchedStep;
-        temporaryToken.Consume(SqlOSTemporaryTokenKinds.TotpEnrollment, DateTime.UtcNow);
-        challengeToken?.Consume(SqlOSTemporaryTokenKinds.MfaChallenge, DateTime.UtcNow);
+        // Confirming opts the account into MFA unless it already chose.
+        var now = DateTime.UtcNow;
+        user.ConfirmTotp(authenticator.Id, matchedStep, now);
+        temporaryToken.Consume(SqlOSTemporaryTokenKinds.TotpEnrollment, now);
+        challengeToken?.Consume(SqlOSTemporaryTokenKinds.MfaChallenge, now);
 
-        var recoveryCodes = await ReplaceRecoveryCodesAsync(
-            temporaryToken.UserId,
-            temporaryToken.OrganizationId,
-            cancellationToken);
-        await EnsureUserOptInPolicyAsync(temporaryToken.UserId, cancellationToken);
+        var recoveryCodes = await ReplaceRecoveryCodesAsync(user, temporaryToken.OrganizationId, now, cancellationToken);
         try
         {
             await _context.SaveChangesAsync(cancellationToken);
@@ -385,11 +351,13 @@ public sealed class SqlOSTotpMfaService
         string reason = "user_removed",
         CancellationToken cancellationToken = default)
     {
-        var authenticator = await _context.Set<SqlOSUserAuthenticator>()
-            .FirstOrDefaultAsync(x => x.Id == authenticatorId && x.UserId == userId && x.RevokedAt == null, cancellationToken)
-            ?? throw new InvalidOperationException("Authenticator was not found.");
-        authenticator.RevokedAt = DateTime.UtcNow;
-        authenticator.RevocationReason = reason;
+        var user = await _context.FindUserAsync(userId, SqlOSUserParts.Authenticators, cancellationToken);
+        if (user?.FindAuthenticator(authenticatorId) == null)
+        {
+            throw new InvalidOperationException("Authenticator was not found.");
+        }
+
+        user.RevokeAuthenticator(authenticatorId, reason, DateTime.UtcNow);
         await _context.SaveChangesAsync(cancellationToken);
     }
 
@@ -402,16 +370,13 @@ public sealed class SqlOSTotpMfaService
         string code,
         CancellationToken cancellationToken)
     {
-        var authenticators = await _context.Set<SqlOSUserAuthenticator>()
-            .Where(x =>
-                x.UserId == userId
-                && x.Type == SqlOSMfaFactorTypes.Totp
-                && x.IsConfirmed
-                && x.RevokedAt == null)
-            .OrderByDescending(x => x.CreatedAt)
-            .ToListAsync(cancellationToken);
+        var user = await _context.FindUserAsync(userId, SqlOSUserParts.Authenticators, cancellationToken);
+        if (user == null)
+        {
+            return false;
+        }
 
-        foreach (var authenticator in authenticators)
+        foreach (var authenticator in user.ConfirmedTotpAuthenticators)
         {
             var secret = _cryptoService.UnprotectSecret(authenticator.SecretProtected);
             if (!TryValidateTotp(secret, code, authenticator.PeriodSeconds, authenticator.Digits, out var matchedStep))
@@ -419,13 +384,12 @@ public sealed class SqlOSTotpMfaService
                 continue;
             }
 
-            if (authenticator.LastAcceptedTimeStep.HasValue && matchedStep <= authenticator.LastAcceptedTimeStep.Value)
+            // A code for a time step already accepted is a replay.
+            if (!user.AcceptTotpCode(authenticator.Id, matchedStep, DateTime.UtcNow))
             {
                 continue;
             }
 
-            authenticator.LastAcceptedTimeStep = matchedStep;
-            authenticator.LastUsedAt = DateTime.UtcNow;
             try
             {
                 await _context.SaveChangesAsync(cancellationToken);
@@ -451,20 +415,12 @@ public sealed class SqlOSTotpMfaService
             return false;
         }
 
-        var hash = _cryptoService.HashToken(normalized);
-        var recoveryCode = await _context.Set<SqlOSRecoveryCode>()
-            .FirstOrDefaultAsync(x =>
-                x.UserId == userId
-                && x.CodeHash == hash
-                && x.ConsumedAt == null
-                && x.RevokedAt == null,
-                cancellationToken);
-        if (recoveryCode == null)
+        var user = await _context.FindUserAsync(userId, SqlOSUserParts.RecoveryCodes, cancellationToken);
+        if (user == null || !user.UseRecoveryCode(normalized, DateTime.UtcNow))
         {
             return false;
         }
 
-        recoveryCode.ConsumedAt = DateTime.UtcNow;
         try
         {
             await _context.SaveChangesAsync(cancellationToken);
@@ -477,62 +433,23 @@ public sealed class SqlOSTotpMfaService
     }
 
     private async Task<string[]> ReplaceRecoveryCodesAsync(
-        string userId,
+        SqlOSUser user,
         string? organizationId,
+        DateTime now,
         CancellationToken cancellationToken)
     {
-        var evaluation = await _policyService.EvaluateAsync(userId, organizationId, authenticationMethod: null, cancellationToken);
+        var evaluation = await _policyService.EvaluateAsync(user.Id, organizationId, authenticationMethod: null, cancellationToken);
         if (!evaluation.RecoveryCodesEnabled || !evaluation.AvailableFactors.Contains(SqlOSMfaFactorTypes.RecoveryCode, StringComparer.OrdinalIgnoreCase))
         {
             return [];
-        }
-
-        var existing = await _context.Set<SqlOSRecoveryCode>()
-            .Where(x => x.UserId == userId && x.ConsumedAt == null && x.RevokedAt == null)
-            .ToListAsync(cancellationToken);
-        foreach (var recoveryCode in existing)
-        {
-            recoveryCode.RevokedAt = DateTime.UtcNow;
         }
 
         var rawCodes = Enumerable.Range(0, _options.Mfa.Totp.RecoveryCodeCount)
             .Select(_ => FormatRecoveryCode(EncodeBase32(RandomNumberGenerator.GetBytes(8))[..10]))
             .Distinct(StringComparer.Ordinal)
             .ToArray();
-        foreach (var rawCode in rawCodes)
-        {
-            _context.Set<SqlOSRecoveryCode>().Add(new SqlOSRecoveryCode
-            {
-                Id = _cryptoService.GenerateId("mrc"),
-                UserId = userId,
-                CodeHash = _cryptoService.HashToken(NormalizeRecoveryCode(rawCode)),
-                CreatedAt = DateTime.UtcNow
-            });
-        }
-
+        user.IssueRecoveryCodes(rawCodes.Select(NormalizeRecoveryCode).ToArray(), now);
         return rawCodes;
-    }
-
-    private async Task EnsureUserOptInPolicyAsync(string userId, CancellationToken cancellationToken)
-    {
-        var userOverride = await _context.Set<SqlOSUserMfaPolicyOverride>()
-            .FirstOrDefaultAsync(x => x.UserId == userId, cancellationToken);
-        if (userOverride == null)
-        {
-            _context.Set<SqlOSUserMfaPolicyOverride>().Add(new SqlOSUserMfaPolicyOverride
-            {
-                UserId = userId,
-                RequireMfa = true,
-                UpdatedAt = DateTime.UtcNow
-            });
-            return;
-        }
-
-        if (userOverride.RequireMfa == null)
-        {
-            userOverride.RequireMfa = true;
-            userOverride.UpdatedAt = DateTime.UtcNow;
-        }
     }
 
     private string BuildProvisioningUri(SqlOSUser user, string secret)

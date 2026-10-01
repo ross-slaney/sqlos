@@ -8,6 +8,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.AuthServer.Processes.Identity;
 using SqlOS.Domain;
 using SqlOS.Domain.Events;
 using SqlOS.Email.Contracts;
@@ -142,33 +143,34 @@ public sealed class SqlOSMagicLinkService
             throw new InvalidOperationException(InvalidLinkMessage);
         }
 
-        var user = await _context.Set<SqlOSUser>()
-            .FirstOrDefaultAsync(x => x.Id == consumed.UserId && x.IsActive, cancellationToken)
-            ?? throw new InvalidOperationException(InvalidLinkMessage);
+        var user = await _context.FindUserAsync(consumed.UserId, SqlOSUserParts.Emails, cancellationToken);
+        if (user is not { IsActive: true })
+        {
+            throw new InvalidOperationException(InvalidLinkMessage);
+        }
 
         // The link was delivered to one stored address; it signs in only while that exact
         // address still belongs to this account.
-        var userEmail = string.IsNullOrWhiteSpace(payload.UserEmailId)
-            ? null
-            : await _context.Set<SqlOSUserEmail>()
-                .FirstOrDefaultAsync(x => x.Id == payload.UserEmailId && x.UserId == user.Id, cancellationToken);
+        var userEmail = string.IsNullOrWhiteSpace(payload.UserEmailId) ? null : user.FindEmail(payload.UserEmailId);
         if (userEmail == null || !SqlOSEmailAddress.MatchesStoredEmail(userEmail, payload.NormalizedEmail))
         {
             throw new InvalidOperationException(InvalidLinkMessage);
         }
 
         // The link proved the mailbox it was delivered to. An unverified address is claimed:
-        // whatever was attached before the owner proved it is evicted in this same save.
-        await SqlOSEmailOwnershipClaim.ClaimAsync(
+        // whatever was attached before the owner proved it is evicted in this same save, and the
+        // address becomes the account's default email.
+        var now = DateTime.UtcNow;
+        var ownership = new OwnershipProof(EmailAddress.Parse(payload.Email), OwnershipProofMethod.MagicLink);
+        await ClaimEmailOwnership.StageAsync(
             _context,
-            userEmail,
-            new OwnershipProof(EmailAddress.Parse(payload.Email), OwnershipProofMethod.MagicLink),
-            SqlOSEmailClaimPresentation.None,
-            DateTime.UtcNow,
+            user,
+            ownership,
+            PresentedCredentials.None,
+            now,
             cancellationToken);
 
-        user.UpdatedAt = DateTime.UtcNow;
-        user.DefaultEmail = userEmail.Email;
+        user.MakeDefaultEmail(ownership, now);
         consumed.Record(new MagicLinkCompleted(
             consumed.Id,
             payload.MaskedEmail,

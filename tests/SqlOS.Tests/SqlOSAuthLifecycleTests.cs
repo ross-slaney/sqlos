@@ -447,8 +447,7 @@ public sealed class SqlOSAuthLifecycleTests
     {
         await using var harness = await LifecycleHarness.CreateAsync();
         var subject = await harness.CreateOrganizationSubjectAsync("inactive-password");
-        subject.User.IsActive = false;
-        await harness.Context.SaveChangesAsync();
+        await harness.Admin.DeactivateUserAsync(subject.User.Id);
 
         var action = async () => await harness.Authorization.AuthenticatePasswordAsync(
             subject.User.DefaultEmail!,

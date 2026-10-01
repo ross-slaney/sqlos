@@ -1376,7 +1376,7 @@ public sealed class SqlOSScimProviderCompatibilityTests
             await using var scope = Services.CreateAsyncScope();
             var context = scope.ServiceProvider.GetRequiredService<TestSqlOSInMemoryDbContext>();
             var now = DateTime.UtcNow;
-            context.Set<SqlOSUser>().Add(new SqlOSUser
+            context.Set<SqlOSUser>().Add(TestRows.Create<SqlOSUser>(new
             {
                 Id = userId,
                 DisplayName = "Unmanaged same-organization user",
@@ -1384,7 +1384,7 @@ public sealed class SqlOSScimProviderCompatibilityTests
                 IsActive = true,
                 CreatedAt = now,
                 UpdatedAt = now
-            });
+            }));
             context.Set<SqlOSMembership>().Add(new SqlOSMembership
             {
                 OrganizationId = "org_scim_http",

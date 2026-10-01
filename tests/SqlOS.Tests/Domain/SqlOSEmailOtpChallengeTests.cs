@@ -3,6 +3,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Models;
 using SqlOS.Domain;
 using SqlOS.Domain.Events;
+using SqlOS.Tests.Infrastructure;
 using static SqlOS.Tests.Domain.DomainTime;
 
 namespace SqlOS.Tests.Domain;
@@ -309,14 +310,15 @@ public sealed class SqlOSEmailOtpChallengeTests
     private static IssuedEmailOtpChallenge IssueWithSecrets()
         => SqlOSEmailOtpChallenge.Issue(Request("alice@example.test"), null, Settings, Now);
 
+    // A stored account address exactly as written (a row may predate trimming).
     private static SqlOSUserEmail AccountEmail(string userId, string address)
-        => new()
+        => TestRows.Create<SqlOSUserEmail>(new
         {
             Id = $"eml_{Guid.NewGuid():N}"[..28],
             UserId = userId,
             Email = address,
             NormalizedEmail = EmailAddress.Parse(address).Canonical
-        };
+        });
 
     private static void Load(SqlOSEmailOtpChallenge challenge, SqlOSUserEmail accountEmail)
         => typeof(SqlOSEmailOtpChallenge).GetProperty(nameof(SqlOSEmailOtpChallenge.UserEmail))!.SetValue(challenge, accountEmail);

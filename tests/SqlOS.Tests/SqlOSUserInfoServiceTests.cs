@@ -186,7 +186,7 @@ public sealed class SqlOSUserInfoServiceTests
 
     private static async Task<SqlOSUser> SeedUserAsync(TestSqlOSInMemoryDbContext context)
     {
-        var user = new SqlOSUser
+        var user = TestRows.Create<SqlOSUser>(new
         {
             Id = "usr_userinfo",
             DisplayName = "Alice Example",
@@ -194,9 +194,9 @@ public sealed class SqlOSUserInfoServiceTests
             IsActive = true,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
-        };
+        });
         context.Set<SqlOSUser>().Add(user);
-        context.Set<SqlOSUserEmail>().Add(new SqlOSUserEmail
+        context.Set<SqlOSUserEmail>().Add(TestRows.Create<SqlOSUserEmail>(new
         {
             Id = "eml_userinfo",
             UserId = user.Id,
@@ -205,7 +205,7 @@ public sealed class SqlOSUserInfoServiceTests
             IsPrimary = true,
             IsVerified = true,
             CreatedAt = DateTime.UtcNow
-        });
+        }));
         await context.SaveChangesAsync();
         return user;
     }

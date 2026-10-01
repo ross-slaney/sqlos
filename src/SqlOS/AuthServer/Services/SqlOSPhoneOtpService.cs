@@ -280,13 +280,12 @@ public sealed class SqlOSPhoneOtpService
             throw new InvalidOperationException(PublicInvalidMessage);
         }
 
-        if (challenge.UserPhoneNumber != null)
+        if (challenge.UserPhoneNumberId != null)
         {
-            challenge.UserPhoneNumber.LastUsedAt = DateTime.UtcNow;
-            challenge.UserPhoneNumber.UpdatedAt = DateTime.UtcNow;
+            await _context.LoadUserPartsAsync(challenge.User, SqlOSUserParts.PhoneNumbers, cancellationToken);
         }
 
-        challenge.User.UpdatedAt = DateTime.UtcNow;
+        challenge.User.RecordPhoneSignIn(challenge.UserPhoneNumberId, DateTime.UtcNow);
         await _context.SaveChangesAsync(cancellationToken);
 
         var organizations = await _adminService.GetUserOrganizationsAsync(challenge.User.Id, cancellationToken);
@@ -387,44 +386,20 @@ public sealed class SqlOSPhoneOtpService
         SqlOSPhoneOtpChallenge? enrollment,
         CancellationToken cancellationToken)
     {
+        // A number belongs to one account at a time (the unique index on active numbers is the
+        // guarantee; this check gives the 7.x refusal).
         var phoneHash = _cryptoService.HashToken(e164PhoneNumber);
-        var existing = await _context.Set<SqlOSUserPhoneNumber>()
+        var holder = await _context.Set<SqlOSUserPhoneNumber>()
+            .AsNoTracking()
             .FirstOrDefaultAsync(x => x.PhoneNumberHash == phoneHash && x.RemovedAt == null, cancellationToken);
-        if (existing != null && !string.Equals(existing.UserId, user.Id, StringComparison.Ordinal))
+        if (holder != null && !string.Equals(holder.UserId, user.Id, StringComparison.Ordinal))
         {
             throw new InvalidOperationException("An account already exists for this phone number.");
         }
 
-        var now = DateTime.UtcNow;
-        if (existing != null)
-        {
-            existing.IsVerified = true;
-            existing.VerifiedAt ??= now;
-            existing.PhoneNumber = e164PhoneNumber;
-            existing.DisplayValueEncrypted = _cryptoService.ProtectSecret(e164PhoneNumber);
-            existing.UpdatedAt = now;
-            enrollment?.RecordEnrollment(user.Id, existing.Id);
-            await _context.SaveChangesAsync(cancellationToken);
-            return existing;
-        }
-
-        var hasActivePhone = await _context.Set<SqlOSUserPhoneNumber>()
-            .AnyAsync(x => x.UserId == user.Id && x.RemovedAt == null, cancellationToken);
-        var record = new SqlOSUserPhoneNumber
-        {
-            Id = _cryptoService.GenerateId("phn"),
-            UserId = user.Id,
-            PhoneNumber = e164PhoneNumber,
-            PhoneNumberHash = phoneHash,
-            DisplayValueEncrypted = _cryptoService.ProtectSecret(e164PhoneNumber),
-            IsPrimary = !hasActivePhone,
-            IsVerified = true,
-            VerifiedAt = now,
-            CreatedAt = now,
-            UpdatedAt = now
-        };
-        _context.Set<SqlOSUserPhoneNumber>().Add(record);
-        enrollment?.RecordEnrollment(user.Id, record.Id);
+        var account = await _context.GetUserAsync(user.Id, SqlOSUserParts.PhoneNumbers, cancellationToken);
+        var record = account.AddVerifiedPhone(e164PhoneNumber, _cryptoService.ProtectSecret(e164PhoneNumber), DateTime.UtcNow);
+        enrollment?.RecordEnrollment(account.Id, record.Id);
         await _context.SaveChangesAsync(cancellationToken);
         return record;
     }

@@ -8,6 +8,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
+using SqlOS.Domain;
 using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.Tests;
@@ -68,7 +69,7 @@ public sealed class SqlOSScimEmailOwnershipTests
         var harness = await CreateHarnessAsync(context);
         var userId = await CreateOwnedUserAsync(harness, "grace");
         context.Set<SqlOSSsoConnection>().Add(new SqlOSSsoConnection { Id = "sso_same_org", OrganizationId = OrganizationId, DisplayName = "Same org", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
-        context.Set<SqlOSExternalIdentity>().Add(new SqlOSExternalIdentity { Id = "ext_same_org", UserId = userId, SsoConnectionId = "sso_same_org", Issuer = "urn:idp", Subject = "grace", CreatedAt = DateTime.UtcNow });
+        context.Set<SqlOSExternalIdentity>().Add(TestRows.Create<SqlOSExternalIdentity>(new { Id = "ext_same_org", UserId = userId, SsoConnectionId = "sso_same_org", Issuer = "urn:idp", Subject = "grace", CreatedAt = DateTime.UtcNow }));
         await context.SaveChangesAsync();
 
         await harness.Scim.PatchUserAsync(harness.Connection, userId, Patch(new JsonObject { ["displayName"] = "Grace Hopper" }));
@@ -171,11 +172,10 @@ public sealed class SqlOSScimEmailOwnershipTests
     {
         await using var context = CreateContext();
         var harness = await CreateHarnessAsync(context);
-        var existing = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest("Contractor", "contractor@freelance.test", null));
-        var email = await context.Set<SqlOSUserEmail>().SingleAsync(x => x.UserId == existing.Id);
-        email.IsVerified = true;
-        existing.IsActive = false;
-        await context.SaveChangesAsync();
+        var existing = await harness.Admin.CreateUserAsync(
+            new SqlOSCreateUserRequest("Contractor", "contractor@freelance.test", null),
+            new OwnershipProof(EmailAddress.Parse("contractor@freelance.test"), OwnershipProofMethod.EmailOtp));
+        await harness.Admin.DeactivateUserAsync(existing.Id);
 
         var created = await harness.Scim.CreateUserAsync(harness.Connection, User("contractor-1", "contractor@freelance.test", active: true));
         await harness.Scim.PatchUserAsync(harness.Connection, created["id"]!.GetValue<string>(), Patch(new JsonObject { ["displayName"] = "Renamed" }));
@@ -223,21 +223,21 @@ public sealed class SqlOSScimEmailOwnershipTests
                 context.Set<SqlOSMembership>().Add(new SqlOSMembership { OrganizationId = "org_other", UserId = userId, IsActive = true, CreatedAt = now });
                 break;
             case "password":
-                context.Set<SqlOSCredential>().Add(new SqlOSCredential { Id = $"cred_{userId}", UserId = userId, SecretHash = "hash", CreatedAt = now });
+                context.Set<SqlOSCredential>().Add(TestRows.Create<SqlOSCredential>(new { Id = $"cred_{userId}", UserId = userId, SecretHash = "hash", CreatedAt = now }));
                 break;
             case "mfa_factor":
-                context.Set<SqlOSUserAuthenticator>().Add(new SqlOSUserAuthenticator { Id = $"auth_{userId}", UserId = userId, SecretProtected = "secret", IsConfirmed = true, CreatedAt = now });
+                context.Set<SqlOSUserAuthenticator>().Add(TestRows.Create<SqlOSUserAuthenticator>(new { Id = $"auth_{userId}", UserId = userId, SecretProtected = "secret", IsConfirmed = true, CreatedAt = now }));
                 break;
             case "phone_number":
-                context.Set<SqlOSUserPhoneNumber>().Add(new SqlOSUserPhoneNumber { Id = $"phn_{userId}", UserId = userId, PhoneNumber = "+15555550100", PhoneNumberHash = "hash", IsVerified = true, CreatedAt = now, UpdatedAt = now });
+                context.Set<SqlOSUserPhoneNumber>().Add(TestRows.Create<SqlOSUserPhoneNumber>(new { Id = $"phn_{userId}", UserId = userId, PhoneNumber = "+15555550100", PhoneNumberHash = "hash", IsVerified = true, CreatedAt = now, UpdatedAt = now }));
                 break;
             case "oidc_identity":
-                context.Set<SqlOSExternalIdentity>().Add(new SqlOSExternalIdentity { Id = $"ext_{userId}", UserId = userId, OidcConnectionId = "oidc_google", Issuer = "https://accounts.google.com", Subject = userId, CreatedAt = now });
+                context.Set<SqlOSExternalIdentity>().Add(TestRows.Create<SqlOSExternalIdentity>(new { Id = $"ext_{userId}", UserId = userId, OidcConnectionId = "oidc_google", Issuer = "https://accounts.google.com", Subject = userId, CreatedAt = now }));
                 break;
             case "saml_identity":
                 context.Set<SqlOSOrganization>().Add(new SqlOSOrganization { Id = "org_saml_other", Slug = "saml-other", Name = "SAML Other", CreatedAt = now });
                 context.Set<SqlOSSsoConnection>().Add(new SqlOSSsoConnection { Id = "sso_other_org", OrganizationId = "org_saml_other", DisplayName = "Other", CreatedAt = now, UpdatedAt = now });
-                context.Set<SqlOSExternalIdentity>().Add(new SqlOSExternalIdentity { Id = $"ext_{userId}", UserId = userId, SsoConnectionId = "sso_other_org", Issuer = "urn:other", Subject = userId, CreatedAt = now });
+                context.Set<SqlOSExternalIdentity>().Add(TestRows.Create<SqlOSExternalIdentity>(new { Id = $"ext_{userId}", UserId = userId, SsoConnectionId = "sso_other_org", Issuer = "urn:other", Subject = userId, CreatedAt = now }));
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(anchor), anchor, null);

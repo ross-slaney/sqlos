@@ -2,6 +2,7 @@ using FluentAssertions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
+using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.Tests;
 
@@ -133,13 +134,13 @@ public sealed class SqlOSEmailAddressTests
     public void StoredRows_MatchOnlyWhenTheirAddressIsTheSameMailbox()
     {
         SqlOSEmailAddress.TryNormalize("ü@münchen.de", out var key).Should().BeTrue();
-        var legacyKeyedRow = new SqlOSUserEmail { Email = "ü@münchen.de", NormalizedEmail = "Ü@MÜNCHEN.DE" };
-        var victimRow = new SqlOSUserEmail { Email = "bob@business.com", NormalizedEmail = "BOB@BUSINESS.COM" };
+        var legacyKeyedRow = TestRows.Create<SqlOSUserEmail>(new { Email = "ü@münchen.de", NormalizedEmail = "Ü@MÜNCHEN.DE" });
+        var victimRow = TestRows.Create<SqlOSUserEmail>(new { Email = "bob@business.com", NormalizedEmail = "BOB@BUSINESS.COM" });
         SqlOSEmailAddress.TryNormalize("bob@busineß.com", out var lookAlikeKey).Should().BeTrue();
 
         SqlOSEmailAddress.MatchesStoredEmail(legacyKeyedRow, key).Should().BeTrue();
         SqlOSEmailAddress.MatchesStoredEmail(victimRow, lookAlikeKey).Should().BeFalse();
-        SqlOSEmailAddress.MatchesStoredEmail(new SqlOSUserEmail { Email = "bob", NormalizedEmail = "BOB" }, "BOB").Should().BeFalse();
+        SqlOSEmailAddress.MatchesStoredEmail(TestRows.Create<SqlOSUserEmail>(new { Email = "bob", NormalizedEmail = "BOB" }), "BOB").Should().BeFalse();
     }
 
     [TestMethod]

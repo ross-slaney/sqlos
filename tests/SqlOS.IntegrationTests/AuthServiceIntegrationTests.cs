@@ -13,6 +13,7 @@ using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
 using SqlOS.IntegrationTests.Infrastructure;
+using SqlOS.Domain;
 
 namespace SqlOS.IntegrationTests;
 
@@ -333,22 +334,13 @@ public sealed class AuthServiceIntegrationTests
                 VerifiedAt = DateTime.UtcNow
             });
 
-            var switchedUser = await issuance.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
-                "SQL Switched User",
-                $"switched@{suffix}.sql-switch.test",
-                "P@ssword123!"));
-            var unrelatedUser = await issuance.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
-                "SQL Unrelated User",
-                $"unrelated@{suffix}.sql-switch.test",
-                "P@ssword123!"));
-            var verifiedEmails = await issuance.Context.Set<SqlOSUserEmail>()
-                .Where(x => x.UserId == switchedUser.Id || x.UserId == unrelatedUser.Id)
-                .ToListAsync();
-            foreach (var email in verifiedEmails)
-            {
-                email.IsVerified = true;
-                email.VerifiedAt = DateTime.UtcNow;
-            }
+            // Sign-ups whose codes proved the addresses register them verified.
+            var switchedUser = await issuance.Admin.CreateUserAsync(
+                new SqlOSCreateUserRequest("SQL Switched User", $"switched@{suffix}.sql-switch.test", "P@ssword123!"),
+                new OwnershipProof(EmailAddress.Parse($"switched@{suffix}.sql-switch.test"), OwnershipProofMethod.EmailOtp));
+            var unrelatedUser = await issuance.Admin.CreateUserAsync(
+                new SqlOSCreateUserRequest("SQL Unrelated User", $"unrelated@{suffix}.sql-switch.test", "P@ssword123!"),
+                new OwnershipProof(EmailAddress.Parse($"unrelated@{suffix}.sql-switch.test"), OwnershipProofMethod.EmailOtp));
 
             await issuance.Admin.CreateMembershipAsync(
                 sourceOrganization.Id,

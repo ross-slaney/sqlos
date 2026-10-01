@@ -13,6 +13,7 @@ using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
+using SqlOS.Domain;
 using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.Tests;
@@ -956,12 +957,10 @@ public sealed class SqlOSSsoPortalServiceTests
 
     private static async Task<SqlOSUser> CreateVerifiedUserAsync(PortalHarness harness, string displayName, string email)
     {
-        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(displayName, email, "P@ssword123!"));
-        var userEmail = await harness.Context.Set<SqlOSUserEmail>().SingleAsync(x => x.UserId == user.Id);
-        userEmail.IsVerified = true;
-        userEmail.VerifiedAt = DateTime.UtcNow;
-        await harness.Context.SaveChangesAsync();
-        return user;
+        // A sign-up whose code proved the address registers it verified.
+        return await harness.Admin.CreateUserAsync(
+            new SqlOSCreateUserRequest(displayName, email, "P@ssword123!"),
+            new OwnershipProof(EmailAddress.Parse(email), OwnershipProofMethod.EmailOtp));
     }
 
     private static void AddSession(PortalHarness harness, string sessionId, string userId, string organizationId)

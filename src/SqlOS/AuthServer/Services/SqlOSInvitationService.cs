@@ -9,6 +9,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.AuthServer.Processes.Identity;
 using SqlOS.Domain;
 using SqlOS.Email.Contracts;
 using SqlOS.Email.Interfaces;
@@ -260,7 +261,7 @@ public sealed class SqlOSInvitationService
                 request.UserId,
                 saveChanges: true,
                 httpContext,
-                SqlOSEmailClaimPresentation.FromAuthenticationMethod(request.AuthenticationMethod),
+                PresentedCredentials.FromAuthenticationMethod(request.AuthenticationMethod),
                 cancellationToken);
 
             if (transaction != null)
@@ -292,7 +293,7 @@ public sealed class SqlOSInvitationService
             request.UserId,
             saveChanges: false,
             httpContext,
-            SqlOSEmailClaimPresentation.FromAuthenticationMethod(request.AuthenticationMethod),
+            PresentedCredentials.FromAuthenticationMethod(request.AuthenticationMethod),
             cancellationToken);
     }
 
@@ -364,7 +365,7 @@ public sealed class SqlOSInvitationService
             userId,
             saveChanges,
             httpContext,
-            SqlOSEmailClaimPresentation.FromAuthenticationMethod(authenticationMethod),
+            PresentedCredentials.FromAuthenticationMethod(authenticationMethod),
             cancellationToken);
     }
 
@@ -373,14 +374,12 @@ public sealed class SqlOSInvitationService
         string userId,
         bool saveChanges,
         HttpContext? httpContext,
-        SqlOSEmailClaimPresentation presented,
+        PresentedCredentials presented,
         CancellationToken cancellationToken)
     {
         EnsureInvitationPending(invitation);
         var now = DateTime.UtcNow;
-        var user = await _context.Set<SqlOSUser>()
-            .Include(x => x.Emails)
-            .FirstOrDefaultAsync(x => x.Id == userId, cancellationToken)
+        var user = await _context.FindUserAsync(userId, SqlOSUserParts.Emails, cancellationToken)
             ?? throw new InvalidOperationException("User not found.");
         if (!user.IsActive)
         {
@@ -399,15 +398,15 @@ public sealed class SqlOSInvitationService
             // The invitation token was delivered to this address, so accepting it proves the
             // mailbox and claims the unverified address: everything attached before the owner
             // proved it is evicted, except the credential used to sign in to this same flow.
-            await SqlOSEmailOwnershipClaim.ClaimAsync(
+            var ownership = new OwnershipProof(EmailAddress.Parse(email.Email), OwnershipProofMethod.Invitation);
+            await ClaimEmailOwnership.StageAsync(
                 _context,
-                email,
-                new OwnershipProof(EmailAddress.Parse(email.Email), OwnershipProofMethod.Invitation),
+                user,
+                ownership,
                 presented,
                 now,
                 cancellationToken);
-            user.DefaultEmail = email.Email;
-            user.UpdatedAt = now;
+            user.MakeDefaultEmail(ownership, now);
             emailVerified = true;
         }
 

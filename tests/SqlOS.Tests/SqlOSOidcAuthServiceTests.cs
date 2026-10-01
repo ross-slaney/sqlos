@@ -217,9 +217,7 @@ public sealed class SqlOSOidcAuthServiceTests
             "nonce-inactive",
             null);
         var first = await oidc.CompleteAuthorizationAsync(request);
-        var user = await context.Set<SqlOSUser>().SingleAsync(x => x.Id == first.UserId);
-        user.IsActive = false;
-        await context.SaveChangesAsync();
+        var user = (await admin.DeactivateUserAsync(first.UserId))!;
 
         var action = async () => await oidc.CompleteAuthorizationAsync(request);
 
@@ -247,8 +245,7 @@ public sealed class SqlOSOidcAuthServiceTests
             "Inactive Existing",
             "inactive-link@example.com",
             null));
-        user.IsActive = false;
-        await context.SaveChangesAsync();
+        await admin.DeactivateUserAsync(user.Id);
         var connection = await admin.CreateOidcConnectionAsync(new SqlOSCreateOidcConnectionRequest(
             SqlOSOidcProviderType.Google,
             "Google",

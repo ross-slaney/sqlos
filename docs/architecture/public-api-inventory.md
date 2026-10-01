@@ -430,9 +430,9 @@ A `*Service` class is a class, not an interface or record, whose name ends in `S
 | `SqlOSSsoConnection` | sealed class | Host API | `web/content/docs/reference/authserver-api.mdx` (2) |
 | `SqlOSSsoPortalSession` | sealed class | Incidental | none |
 | `SqlOSTemporaryToken` | sealed class | Host API | `examples/SqlOS.Example.IntegrationTests/SqlOSExampleApiIntegrationTests.cs` (3) |
-| `SqlOSUser` | sealed class | Host API | `examples/SqlOS.Example.Api/Endpoints/ExampleAuthEndpoints.cs` (3), `examples/SqlOS.Example.Api/Endpoints/ExampleDemoEndpoints.cs` (3), `examples/SqlOS.Example.Api/Services/ExampleFgaService.cs` (2), `web/content/docs/guides/authserver-to-fga.mdx` (1), `web/content/docs/guides/scim-directory-sync.mdx` (1), +1 more |
+| `SqlOSUser` | sealed class | Host API | `examples/SqlOS.Example.Api/Endpoints/ExampleAuthEndpoints.cs` (3), `examples/SqlOS.Example.Api/Endpoints/ExampleDemoEndpoints.cs` (3), `examples/SqlOS.Example.Api/Services/ExampleFgaService.cs` (2), `web/content/docs/authserver/users-and-credentials.mdx` (1), `web/content/docs/guides/authserver-to-fga.mdx` (1), +2 more |
 | `SqlOSUserAuthenticator` | sealed class | Incidental | none |
-| `SqlOSUserEmail` | sealed class | Host API | `examples/SqlOS.Example.Api/Endpoints/ExampleDemoEndpoints.cs` (2), `examples/SqlOS.Example.IntegrationTests/SqlOSExampleApiIntegrationTests.cs` (4), `examples/SqlOS.SignInWithX.AppX/Program.cs` (1), `web/content/docs/guides/scim-directory-sync.mdx` (1) |
+| `SqlOSUserEmail` | sealed class | Host API | `examples/SqlOS.Example.Api/Endpoints/ExampleDemoEndpoints.cs` (2), `examples/SqlOS.Example.IntegrationTests/SqlOSExampleApiIntegrationTests.cs` (4), `examples/SqlOS.SignInWithX.AppX/Program.cs` (1), `web/content/docs/authserver/users-and-credentials.mdx` (1), `web/content/docs/guides/scim-directory-sync.mdx` (1) |
 | `SqlOSUserMfaPolicyOverride` | sealed class | Incidental | none |
 | `SqlOSUserPhoneNumber` | sealed class | Incidental | none |
 

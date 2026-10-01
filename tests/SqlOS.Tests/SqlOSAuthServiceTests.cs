@@ -1585,8 +1585,7 @@ public sealed class SqlOSAuthServiceTests
             "Inactive Reset",
             "inactive-reset@example.com",
             "OldPassword123!"));
-        user.IsActive = false;
-        await harness.Context.SaveChangesAsync();
+        await harness.Admin.DeactivateUserAsync(user.Id);
 
         await harness.Auth.RequestPasswordResetEmailAsync(
             new SqlOSForgotPasswordRequest(user.DefaultEmail!),

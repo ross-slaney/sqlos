@@ -192,7 +192,7 @@ public sealed class SqlOSIdTokenIssuanceTests
 
     private static async Task<SqlOSUser> SeedUserAsync(TestSqlOSInMemoryDbContext context, bool emailVerified)
     {
-        var user = new SqlOSUser
+        var user = TestRows.Create<SqlOSUser>(new
         {
             Id = "usr_idt",
             DisplayName = "Alice Example",
@@ -200,9 +200,9 @@ public sealed class SqlOSIdTokenIssuanceTests
             IsActive = true,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
-        };
+        });
         context.Set<SqlOSUser>().Add(user);
-        context.Set<SqlOSUserEmail>().Add(new SqlOSUserEmail
+        context.Set<SqlOSUserEmail>().Add(TestRows.Create<SqlOSUserEmail>(new
         {
             Id = "eml_idt",
             UserId = user.Id,
@@ -211,7 +211,7 @@ public sealed class SqlOSIdTokenIssuanceTests
             IsPrimary = true,
             IsVerified = emailVerified,
             CreatedAt = DateTime.UtcNow
-        });
+        }));
         await context.SaveChangesAsync();
         return user;
     }

@@ -10,6 +10,7 @@ using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Policies;
+using SqlOS.AuthServer.Processes.Identity;
 using SqlOS.Domain;
 using SqlOS.Domain.Events;
 using SqlOS.Email.Contracts;
@@ -205,8 +206,8 @@ public sealed class SqlOSAuthService
 
         var user = await _context.Set<SqlOSUser>().AsNoTracking().FirstAsync(x => x.Id == email!.UserId, cancellationToken);
         await _admission.RecordPasswordAttemptSucceededAsync(attempt, cancellationToken);
-        var storedCredential = await _context.Set<SqlOSCredential>().FirstAsync(x => x.Id == credential.Id, cancellationToken);
-        storedCredential.LastUsedAt = DateTime.UtcNow;
+        var account = await _context.GetUserAsync(user.Id, SqlOSUserParts.Credentials, cancellationToken);
+        account.RecordPasswordSignIn(credential.Id, DateTime.UtcNow);
         await _context.SaveChangesAsync(cancellationToken);
         return await FinalizeClientLoginAsync(user, client, request.OrganizationId, "password", httpContext, cancellationToken);
     }
@@ -1543,8 +1544,7 @@ public sealed class SqlOSAuthService
             throw new InvalidOperationException("Password reset token is invalid or expired.");
         }
 
-        var user = await _context.Set<SqlOSUser>()
-            .FirstOrDefaultAsync(x => x.Id == token.UserId, cancellationToken);
+        var user = await _context.FindUserAsync(token.UserId, SqlOSUserParts.Emails | SqlOSUserParts.Credentials, cancellationToken);
         if (user == null || !user.IsActive)
         {
             await RecordPasswordResetAuditAsync(
@@ -1559,8 +1559,7 @@ public sealed class SqlOSAuthService
             throw new InvalidOperationException("Password reset token is invalid or expired.");
         }
 
-        var credential = await _context.Set<SqlOSCredential>()
-            .FirstOrDefaultAsync(x => x.UserId == token.UserId && x.Type == "password" && x.RevokedAt == null, cancellationToken);
+        var credential = user.Password;
 
         if (credential == null)
         {
@@ -1577,29 +1576,25 @@ public sealed class SqlOSAuthService
         }
 
         var now = DateTime.UtcNow;
-        var claim = SqlOSEmailClaimOutcome.NotClaimed;
+        var claim = EmailClaimOutcome.NotClaimed;
         var payload = token.ReadPayload(SqlOSTemporaryTokenKinds.PasswordReset);
-        var resetEmail = payload == null
-            ? null
-            : await _context.Set<SqlOSUserEmail>()
-                .FirstOrDefaultAsync(x => x.Id == payload.EmailId && x.UserId == user.Id, cancellationToken);
+        var resetEmail = user.FindEmail(payload?.EmailId);
         if (resetEmail != null && SqlOSEmailAddress.MatchesStoredEmail(resetEmail, payload!.NormalizedEmail))
         {
             // The reset link went to this address, so completing it proves the mailbox. An
             // unverified address is claimed: everything attached before the owner proved it is
             // evicted except the password being reset now.
-            claim = await SqlOSEmailOwnershipClaim.ClaimAsync(
+            claim = await ClaimEmailOwnership.StageAsync(
                 _context,
-                resetEmail,
+                user,
                 new OwnershipProof(EmailAddress.Parse(resetEmail.Email), OwnershipProofMethod.PasswordReset),
-                new SqlOSEmailClaimPresentation { PasswordCredentialId = credential.Id },
+                PresentedCredentials.PasswordBeingReset(credential.Id),
                 now,
                 cancellationToken,
                 sessionRevocationReason: "password_reset");
         }
 
-        credential.SecretHash = _cryptoService.HashPassword(request.NewPassword);
-        credential.LastUsedAt = null;
+        user.SetPassword(request.NewPassword, PasswordPolicy.Default, now);
         if (!claim.Claimed)
         {
             await SqlOSAuthLifecyclePolicy.RevokeAsync(
@@ -1775,14 +1770,13 @@ public sealed class SqlOSAuthService
         var payload = token.ReadPayload(SqlOSTemporaryTokenKinds.EmailVerification)
             ?? throw new InvalidOperationException("Email verification token payload is invalid.");
 
-        var email = await _context.Set<SqlOSUserEmail>().FirstAsync(x => x.Id == payload.EmailId, cancellationToken);
-        email.IsVerified = true;
-        email.VerifiedAt = DateTime.UtcNow;
-        var user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == email.UserId, cancellationToken);
-        user.DefaultEmail = email.Email;
-        user.UpdatedAt = DateTime.UtcNow;
+        var email = await _context.Set<SqlOSUserEmail>().AsNoTracking().FirstAsync(x => x.Id == payload.EmailId, cancellationToken);
+        var user = await _context.GetUserAsync(email.UserId, SqlOSUserParts.Emails, cancellationToken);
+
+        // The link was mailed to this address and confirms it. It is the account's confirmation
+        // step, not a sign-in, so it verifies without claiming (user.email-verified, in this save).
+        user.VerifyEmail(new OwnershipProof(EmailAddress.Parse(email.Email), OwnershipProofMethod.EmailVerification), DateTime.UtcNow);
         await _context.SaveChangesAsync(cancellationToken);
-        await _adminService.RecordAuditAsync("user.email-verified", "user", email.UserId, userId: email.UserId, cancellationToken: cancellationToken);
     }
 
     public Task<SqlOSValidatedToken?> ValidateAccessTokenAsync(
@@ -2956,16 +2950,11 @@ public sealed class SqlOSAuthService
 
         SqlOSSignupJoinPolicy.RejectUnauthorizedOrganizationJoin(organizationId);
 
+        // The caller verified the sign-up code sent to this address, which proves the mailbox.
         var user = await _adminService.CreateUserAsync(
             new SqlOSCreateUserRequest(displayName, email, null),
+            SignupProof(email, OwnershipProofMethod.EmailOtp),
             cancellationToken);
-
-        var emailRecord = await _context.Set<SqlOSUserEmail>()
-            .FirstAsync(x => x.UserId == user.Id && x.IsPrimary, cancellationToken);
-        emailRecord.IsVerified = true;
-        emailRecord.VerifiedAt = DateTime.UtcNow;
-        user.DefaultEmail = emailRecord.Email;
-        user.UpdatedAt = DateTime.UtcNow;
 
         if (!string.IsNullOrWhiteSpace(organizationName))
         {
@@ -2996,13 +2985,7 @@ public sealed class SqlOSAuthService
 
         SqlOSSignupJoinPolicy.RejectUnauthorizedOrganizationJoin(organizationId);
 
-        var user = new SqlOSUser
-        {
-            Id = _cryptoService.GenerateId("usr"),
-            DisplayName = displayName,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
+        var user = SqlOSUser.Register(displayName, DateTime.UtcNow);
         _context.Set<SqlOSUser>().Add(user);
         await _context.SaveChangesAsync(cancellationToken);
         await RequirePhoneOtpService().AddVerifiedPhoneNumberAsync(user, phoneNumber, cancellationToken);
@@ -3024,24 +3007,24 @@ public sealed class SqlOSAuthService
         string email,
         CancellationToken cancellationToken)
     {
+        // The invitation was mailed to this address and its token is presented now, which proves the mailbox.
         var user = await _adminService.CreateUserAsync(
             new SqlOSCreateUserRequest(displayName, email, null),
+            SignupProof(email, OwnershipProofMethod.Invitation),
             cancellationToken);
-
-        var emailRecord = await _context.Set<SqlOSUserEmail>()
-            .FirstAsync(x => x.UserId == user.Id && x.IsPrimary, cancellationToken);
-        emailRecord.IsVerified = true;
-        emailRecord.VerifiedAt = DateTime.UtcNow;
-        user.DefaultEmail = emailRecord.Email;
-        user.UpdatedAt = DateTime.UtcNow;
-
-        await _context.SaveChangesAsync(cancellationToken);
 
         return new SqlOSPasswordAuthenticationResult(
             user,
             Array.Empty<SqlOSOrganizationOption>(),
             "invitation");
     }
+
+    /// <summary>
+    /// The proof a sign-up's verified code or presented invitation gives for the address it signs
+    /// up. An address that is not valid has none, and registration refuses it as 7.x did.
+    /// </summary>
+    private static OwnershipProof? SignupProof(string email, OwnershipProofMethod method)
+        => EmailAddress.TryParse(email, out var address) ? new OwnershipProof(address, method) : null;
 
     private async Task PersistRolledBackSignupAccessDenialAsync(
         Exception exception,

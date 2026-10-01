@@ -22,4 +22,16 @@ internal static class AuthServerAuditRows
             SqlOSAuditRows.AuthServerRequest(eventType, "system", null, userId: userId, ipAddress: ipAddress, data: data),
             SqlOSIds.New("evt"),
             context.Now);
+
+    /// <summary>A row whose actor is the user it is about (actor <c>user</c>, the user's ID).</summary>
+    public static SqlOSAuditEvent User(
+        string eventType,
+        string userId,
+        SqlOSAuditProjectionContext context,
+        string? ipAddress = null,
+        object? data = null)
+        => SqlOSAuditRows.Create(
+            SqlOSAuditRows.AuthServerRequest(eventType, "user", userId, userId: userId, ipAddress: ipAddress, data: data),
+            SqlOSIds.New("evt"),
+            context.Now);
 }

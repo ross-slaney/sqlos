@@ -25,10 +25,10 @@ public sealed class SessionRevocationIntegrationTests
             {
                 Id = "org-concurrent", Slug = "org-concurrent", Name = "Concurrent org", CreatedAt = now
             });
-            setup.Set<SqlOSUser>().Add(new SqlOSUser
+            setup.Set<SqlOSUser>().Add(TestRows.Create<SqlOSUser>(new
             {
                 Id = "user-concurrent", DisplayName = "Concurrent user", CreatedAt = now, UpdatedAt = now
-            });
+            }));
             setup.Set<SqlOSClientApplication>().Add(new SqlOSClientApplication
             {
                 Id = "client-concurrent", ClientId = "client-concurrent", Name = "Concurrent client",

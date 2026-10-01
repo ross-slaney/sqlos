@@ -249,7 +249,7 @@ public sealed class SqlOSClientLifecycleTests
 
     private static async Task<SqlOSUser> SeedUserAsync(TestSqlOSInMemoryDbContext context)
     {
-        var user = new SqlOSUser
+        var user = TestRows.Create<SqlOSUser>(new
         {
             Id = "usr_stale",
             DisplayName = "Alice",
@@ -257,7 +257,7 @@ public sealed class SqlOSClientLifecycleTests
             IsActive = true,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
-        };
+        });
         context.Set<SqlOSUser>().Add(user);
         await context.SaveChangesAsync();
         return user;

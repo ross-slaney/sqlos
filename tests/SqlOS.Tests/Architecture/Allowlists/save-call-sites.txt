@@ -54,7 +54,6 @@ SqlOS.AuthServer.Services.SqlOSAdminService::UpsertSeededScimConnectionsCoreAsyn
 SqlOS.AuthServer.Services.SqlOSAdminService::UpsertSeededScopeDisplayNamesCoreAsync
 SqlOS.AuthServer.Services.SqlOSAuthService::CleanupNonTransactionalSignupArtifactsAsync
 SqlOS.AuthServer.Services.SqlOSAuthService::CreateEmailOtpSignupUserAsync
-SqlOS.AuthServer.Services.SqlOSAuthService::CreateInvitationSignupUserAsync
 SqlOS.AuthServer.Services.SqlOSAuthService::CreatePhoneOtpSignupUserAsync
 SqlOS.AuthServer.Services.SqlOSAuthService::CreateSessionAndTokensAsync
 SqlOS.AuthServer.Services.SqlOSAuthService::InvalidateActivePasswordResetTokensAsync
@@ -76,7 +75,6 @@ SqlOS.AuthServer.Services.SqlOSAuthorizationServerService::ExchangeAuthorization
 SqlOS.AuthServer.Services.SqlOSAuthorizationServerService::IssueAssuredAuthorizationRedirectAsync
 SqlOS.AuthServer.Services.SqlOSAuthorizationServerService::RequireActiveLifecycleAsync
 SqlOS.AuthServer.Services.SqlOSAuthorizationServerService::SignUpWithEmailOtpAsync
-SqlOS.AuthServer.Services.SqlOSAuthorizationServerService::SignUpWithInvitationAsync
 SqlOS.AuthServer.Services.SqlOSAuthorizationServerService::SignUpWithPhoneOtpAsync
 SqlOS.AuthServer.Services.SqlOSCimdClientService::RecordAuditAsync
 SqlOS.AuthServer.Services.SqlOSCimdClientService::ResolveClientAsync

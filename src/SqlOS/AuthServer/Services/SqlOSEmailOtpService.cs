@@ -7,6 +7,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.AuthServer.Processes.Identity;
 using SqlOS.Domain;
 using SqlOS.Domain.Events;
 using SqlOS.Email.Contracts;
@@ -296,22 +297,20 @@ public sealed class SqlOSEmailOtpService
         {
             // The code proved the mailbox. An unverified address is claimed: whatever was
             // attached before the owner proved it is evicted in this same save.
-            await SqlOSEmailOwnershipClaim.ClaimAsync(
+            await ClaimEmailOwnership.StageAsync(
                 _context,
-                challenge.UserEmail,
+                challenge.User,
                 ownership,
-                SqlOSEmailClaimPresentation.None,
+                PresentedCredentials.None,
                 now,
                 cancellationToken);
         }
 
-        if (challenge.User != null)
+        if (challenge.User != null && challenge.UserEmail != null)
         {
-            challenge.User.UpdatedAt = DateTime.UtcNow;
-            if (!string.IsNullOrWhiteSpace(challenge.UserEmail?.Email))
-            {
-                challenge.User.DefaultEmail = challenge.UserEmail.Email;
-            }
+            // The address the code went to becomes the account's default email.
+            await _context.LoadUserPartsAsync(challenge.User, SqlOSUserParts.Emails, cancellationToken);
+            challenge.User.MakeDefaultEmail(ownership, DateTime.UtcNow);
         }
 
         try

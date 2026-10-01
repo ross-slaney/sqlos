@@ -11,6 +11,7 @@ using Microsoft.IdentityModel.Tokens;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.AuthServer.Processes.Identity;
 using SqlOS.Domain;
 using SqlOS.AuthServer.Security;
 
@@ -732,8 +733,13 @@ public sealed class SqlOSOidcAuthService
             throw new InvalidOperationException("The social login provider did not return a usable email address.");
         }
 
-        SqlOSUser? user = null;
-        var created = false;
+        var now = DateTime.UtcNow;
+        var identity = ExternalIdentityLink.Oidc(
+            connection.Id,
+            connection.ProviderType.ToString(),
+            resolved.Issuer,
+            providerUser.Subject,
+            providerUser.Email);
         var existingEmail = await _context.Set<SqlOSUserEmail>()
             .FindByNormalizedEmailAsync(normalizedEmail, providerUser.Email, cancellationToken);
 
@@ -757,75 +763,39 @@ public sealed class SqlOSOidcAuthService
                 throw new InvalidOperationException(PublicClaimValidationFailure);
             }
 
-            user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == existingEmail.UserId, cancellationToken);
+            var user = await _context.GetUserAsync(existingEmail.UserId, SqlOSUserParts.Emails, cancellationToken);
             await RequireActiveFederatedUserAsync(user, cancellationToken);
 
             // A verified upstream email proves the mailbox. Linking to an address nobody has
             // proven yet goes through the claim, which evicts everything attached before it
             // (a squatter's password or an upstream identity that never verified the address).
-            await SqlOSEmailOwnershipClaim.ClaimAsync(
+            var ownership = new OwnershipProof(EmailAddress.Parse(providerAddress), OwnershipProofMethod.Oidc);
+            await ClaimEmailOwnership.StageAsync(
                 _context,
-                existingEmail,
-                new OwnershipProof(EmailAddress.Parse(providerAddress), OwnershipProofMethod.Oidc),
-                SqlOSEmailClaimPresentation.None,
-                DateTime.UtcNow,
+                user,
+                ownership,
+                PresentedCredentials.None,
+                now,
                 cancellationToken);
-        }
-
-        if (user == null)
-        {
-            user = new SqlOSUser
-            {
-                Id = _cryptoService.GenerateId("usr"),
-                DisplayName = string.IsNullOrWhiteSpace(providerUser.DisplayName) ? providerAddress : providerUser.DisplayName,
-                DefaultEmail = providerAddress,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-
-            _context.Set<SqlOSUser>().Add(user);
-            _context.Set<SqlOSUserEmail>().Add(new SqlOSUserEmail
-            {
-                Id = _cryptoService.GenerateId("eml"),
-                UserId = user.Id,
-                Email = providerAddress,
-                NormalizedEmail = normalizedEmail,
-                IsPrimary = true,
-                IsVerified = providerUser.EmailVerified,
-                VerifiedAt = providerUser.EmailVerified ? DateTime.UtcNow : null,
-                CreatedAt = DateTime.UtcNow
-            });
-
+            await _context.LoadUserPartsAsync(user, SqlOSUserParts.ExternalIdentities, cancellationToken);
+            user.LinkExternalIdentity(identity, ownership, now);
             await _context.SaveChangesAsync(cancellationToken);
-
-            await _adminService.RecordAuditAsync(
-                "user.login.oidc.provisioned",
-                "user",
-                user.Id,
-                userId: user.Id,
-                data: new
-                {
-                    provider = connection.ProviderType.ToString(),
-                    oidcConnectionId = connection.Id
-                },
-                cancellationToken: cancellationToken);
-
-            created = true;
+            return new ProvisionedProviderUser(user, Created: false);
         }
 
-        _context.Set<SqlOSExternalIdentity>().Add(new SqlOSExternalIdentity
-        {
-            Id = _cryptoService.GenerateId("ext"),
-            UserId = user.Id,
-            OidcConnectionId = connection.Id,
-            Issuer = resolved.Issuer,
-            Subject = providerUser.Subject,
-            Email = providerUser.Email,
-            CreatedAt = DateTime.UtcNow
-        });
-
+        // The provider's first sign-in creates the account (user.login.oidc.provisioned, in this
+        // save). Its address is verified only when the provider vouched for it.
+        var displayName = string.IsNullOrWhiteSpace(providerUser.DisplayName) ? providerAddress : providerUser.DisplayName;
+        var provisioned = providerUser.EmailVerified
+            ? SqlOSUser.RegisterFromExternalIdentity(
+                displayName,
+                new OwnershipProof(EmailAddress.Parse(providerAddress), OwnershipProofMethod.Oidc),
+                identity,
+                now)
+            : SqlOSUser.RegisterFromExternalIdentity(displayName, EmailAddress.Parse(providerAddress), identity, now);
+        _context.Set<SqlOSUser>().Add(provisioned);
         await _context.SaveChangesAsync(cancellationToken);
-        return new ProvisionedProviderUser(user, created);
+        return new ProvisionedProviderUser(provisioned, Created: true);
     }
 
     private async Task RequireActiveFederatedUserAsync(

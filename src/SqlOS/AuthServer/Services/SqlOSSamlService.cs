@@ -14,6 +14,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.AuthServer.Processes.Identity;
 using SqlOS.Domain;
 using SqlOS.AuthServer.Security;
 
@@ -947,9 +948,14 @@ public sealed class SqlOSSamlService
             .FindByNormalizedEmailAsync(normalizedEmail, email, cancellationToken);
         SqlOSUser? user = null;
         SqlOSUser? pendingUser = null;
-        SqlOSUserEmail? pendingEmail = null;
         SqlOSMembership? pendingMembership = null;
-        var claim = SqlOSEmailClaimOutcome.NotClaimed;
+        SqlOSExternalIdentity? pendingIdentity = null;
+        var claim = EmailClaimOutcome.NotClaimed;
+        var now = DateTime.UtcNow;
+        var identity = ExternalIdentityLink.Saml(connection.Id, principal.Issuer, principal.Subject, email);
+        // The assertion from an organization that owns the email's domain proves the mailbox; the
+        // domain checks below decide that before the proof is used.
+        var ownership = new OwnershipProof(EmailAddress.Parse(assertedAddress), OwnershipProofMethod.Saml);
 
         if (existingEmail != null)
         {
@@ -959,7 +965,7 @@ public sealed class SqlOSSamlService
                 return null;
             }
 
-            user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == existingEmail.UserId, cancellationToken);
+            user = await _context.GetUserAsync(existingEmail.UserId, SqlOSUserParts.Emails, cancellationToken);
             if (!await IsActiveFederatedUserAsync(user.Id, organizationId, cancellationToken))
             {
                 return null;
@@ -992,20 +998,22 @@ public sealed class SqlOSSamlService
                 return null;
             }
 
-            // The assertion from an organization that owns the email's domain proves the mailbox.
             // Linking to an address nobody has proven yet goes through the claim, which evicts
             // everything attached before it; a verified address is linked as-is.
-            claim = await SqlOSEmailOwnershipClaim.ClaimAsync(
+            claim = await ClaimEmailOwnership.StageAsync(
                 _context,
-                existingEmail,
-                new OwnershipProof(EmailAddress.Parse(assertedAddress), OwnershipProofMethod.Saml),
-                SqlOSEmailClaimPresentation.None,
-                DateTime.UtcNow,
+                user,
+                ownership,
+                PresentedCredentials.None,
+                now,
                 cancellationToken);
             if (membership == null)
             {
                 pendingMembership = await EnsureMembershipAsync(organizationId, user.Id, cancellationToken);
             }
+
+            await _context.LoadUserPartsAsync(user, SqlOSUserParts.ExternalIdentities, cancellationToken);
+            pendingIdentity = user.LinkExternalIdentity(identity, ownership, now);
         }
         else if (connection.AutoProvisionUsers)
         {
@@ -1023,27 +1031,8 @@ public sealed class SqlOSSamlService
                 displayName = assertedAddress;
             }
 
-            pendingUser = new SqlOSUser
-            {
-                Id = _cryptoService.GenerateId("usr"),
-                DisplayName = displayName,
-                DefaultEmail = assertedAddress,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-            pendingEmail = new SqlOSUserEmail
-            {
-                Id = _cryptoService.GenerateId("eml"),
-                UserId = pendingUser.Id,
-                Email = assertedAddress,
-                NormalizedEmail = normalizedEmail,
-                IsPrimary = true,
-                IsVerified = true,
-                VerifiedAt = DateTime.UtcNow,
-                CreatedAt = DateTime.UtcNow
-            };
+            pendingUser = SqlOSUser.RegisterFromExternalIdentity(displayName, ownership, identity, now);
             _context.Set<SqlOSUser>().Add(pendingUser);
-            _context.Set<SqlOSUserEmail>().Add(pendingEmail);
             pendingMembership = await EnsureMembershipAsync(organizationId, pendingUser.Id, cancellationToken);
             user = pendingUser;
         }
@@ -1052,23 +1041,6 @@ public sealed class SqlOSSamlService
             await RecordLinkDeniedAsync(connection.Id, organizationId, "auto_provision_disabled", cancellationToken);
             return null;
         }
-
-        if (user == null)
-        {
-            return null;
-        }
-
-        var pendingIdentity = new SqlOSExternalIdentity
-        {
-            Id = _cryptoService.GenerateId("ext"),
-            UserId = user.Id,
-            SsoConnectionId = connection.Id,
-            Issuer = principal.Issuer,
-            Subject = principal.Subject,
-            Email = email,
-            CreatedAt = DateTime.UtcNow
-        };
-        _context.Set<SqlOSExternalIdentity>().Add(pendingIdentity);
 
         try
         {
@@ -1079,8 +1051,15 @@ public sealed class SqlOSSamlService
         {
             claim.Revert(_context);
             DetachAdded(pendingIdentity);
+            if (pendingUser != null)
+            {
+                foreach (var member in pendingUser.Emails.Cast<object>().Concat(pendingUser.ExternalIdentities))
+                {
+                    DetachAdded(member);
+                }
+            }
+
             DetachAdded(pendingUser);
-            DetachAdded(pendingEmail);
             DetachAdded(pendingMembership);
 
             var recovered = await TryResolveBoundSubjectAsync(

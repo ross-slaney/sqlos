@@ -1,4 +1,5 @@
 using SqlOS.AuthServer.Contracts;
+using SqlOS.Domain;
 
 namespace SqlOS.AuthServer.Models;
 
@@ -17,73 +18,6 @@ public sealed class SqlOSOrganization
     public ICollection<SqlOSOrganizationDomain> Domains { get; set; } = new List<SqlOSOrganizationDomain>();
     public ICollection<SqlOSApplicationAssignment> ApplicationAssignments { get; set; } = new List<SqlOSApplicationAssignment>();
     public SqlOSOrganizationMfaPolicy? MfaPolicy { get; set; }
-}
-
-public sealed class SqlOSUser
-{
-    public string Id { get; set; } = string.Empty;
-    public string DisplayName { get; set; } = string.Empty;
-    public string? DefaultEmail { get; set; }
-    public bool IsActive { get; set; } = true;
-    public DateTime CreatedAt { get; set; }
-    public DateTime UpdatedAt { get; set; }
-
-    public ICollection<SqlOSUserEmail> Emails { get; set; } = new List<SqlOSUserEmail>();
-    public ICollection<SqlOSUserPhoneNumber> PhoneNumbers { get; set; } = new List<SqlOSUserPhoneNumber>();
-    public ICollection<SqlOSCredential> Credentials { get; set; } = new List<SqlOSCredential>();
-    public ICollection<SqlOSMembership> Memberships { get; set; } = new List<SqlOSMembership>();
-    public ICollection<SqlOSExternalIdentity> ExternalIdentities { get; set; } = new List<SqlOSExternalIdentity>();
-    public ICollection<SqlOSSession> Sessions { get; set; } = new List<SqlOSSession>();
-    public ICollection<SqlOSUserAuthenticator> Authenticators { get; set; } = new List<SqlOSUserAuthenticator>();
-    public ICollection<SqlOSRecoveryCode> RecoveryCodes { get; set; } = new List<SqlOSRecoveryCode>();
-    public SqlOSUserMfaPolicyOverride? MfaPolicyOverride { get; set; }
-}
-
-public sealed class SqlOSUserEmail
-{
-    public string Id { get; set; } = string.Empty;
-    public string UserId { get; set; } = string.Empty;
-    public string Email { get; set; } = string.Empty;
-    public string NormalizedEmail { get; set; } = string.Empty;
-    public bool IsPrimary { get; set; }
-    public bool IsVerified { get; set; }
-    public DateTime? VerifiedAt { get; set; }
-    public DateTime CreatedAt { get; set; }
-
-    public SqlOSUser? User { get; set; }
-}
-
-public sealed class SqlOSUserPhoneNumber
-{
-    public string Id { get; set; } = string.Empty;
-    public string UserId { get; set; } = string.Empty;
-    public string PhoneNumber { get; set; } = string.Empty;
-    public string PhoneNumberHash { get; set; } = string.Empty;
-    public string? DisplayValueEncrypted { get; set; }
-    public bool IsPrimary { get; set; }
-    public bool IsVerified { get; set; }
-    public DateTime? VerifiedAt { get; set; }
-    public DateTime CreatedAt { get; set; }
-    public DateTime UpdatedAt { get; set; }
-    public DateTime? LastUsedAt { get; set; }
-    public DateTime? RemovedAt { get; set; }
-    public string? RemovalReason { get; set; }
-
-    public SqlOSUser? User { get; set; }
-}
-
-public sealed class SqlOSCredential
-{
-    public string Id { get; set; } = string.Empty;
-    public string UserId { get; set; } = string.Empty;
-    public string Type { get; set; } = "password";
-    public string SecretHash { get; set; } = string.Empty;
-    public int SecretVersion { get; set; } = 1;
-    public DateTime? LastUsedAt { get; set; }
-    public DateTime CreatedAt { get; set; }
-    public DateTime? RevokedAt { get; set; }
-
-    public SqlOSUser? User { get; set; }
 }
 
 public sealed class SqlOSPasswordLoginBucket
@@ -445,22 +379,6 @@ public sealed class SqlOSOidcConnection
     public ICollection<SqlOSExternalIdentity> ExternalIdentities { get; set; } = new List<SqlOSExternalIdentity>();
 }
 
-public sealed class SqlOSExternalIdentity
-{
-    public string Id { get; set; } = string.Empty;
-    public string UserId { get; set; } = string.Empty;
-    public string? SsoConnectionId { get; set; }
-    public string? OidcConnectionId { get; set; }
-    public string Issuer { get; set; } = string.Empty;
-    public string Subject { get; set; } = string.Empty;
-    public string? Email { get; set; }
-    public DateTime CreatedAt { get; set; }
-
-    public SqlOSUser? User { get; set; }
-    public SqlOSSsoConnection? SsoConnection { get; set; }
-    public SqlOSOidcConnection? OidcConnection { get; set; }
-}
-
 public sealed class SqlOSSession
 {
     public string Id { get; set; } = string.Empty;
@@ -795,50 +713,6 @@ public sealed class SqlOSOrganizationMfaPolicy
     public SqlOSOrganization? Organization { get; set; }
 }
 
-public sealed class SqlOSUserMfaPolicyOverride
-{
-    public string UserId { get; set; } = string.Empty;
-    public bool? RequireMfa { get; set; }
-    public bool? UserSelfEnrollmentEnabled { get; set; }
-    public DateTime UpdatedAt { get; set; }
-
-    public SqlOSUser? User { get; set; }
-}
-
-public sealed class SqlOSUserAuthenticator
-{
-    public string Id { get; set; } = string.Empty;
-    public string UserId { get; set; } = string.Empty;
-    public string Type { get; set; } = "totp";
-    public string DisplayName { get; set; } = "Authenticator app";
-    public string SecretProtected { get; set; } = string.Empty;
-    public int SecretVersion { get; set; } = 1;
-    public string Algorithm { get; set; } = "SHA1";
-    public int Digits { get; set; } = 6;
-    public int PeriodSeconds { get; set; } = 30;
-    public bool IsConfirmed { get; set; }
-    public DateTime CreatedAt { get; set; }
-    public DateTime? ConfirmedAt { get; set; }
-    public DateTime? LastUsedAt { get; set; }
-    public DateTime? RevokedAt { get; set; }
-    public string? RevocationReason { get; set; }
-    public long? LastAcceptedTimeStep { get; set; }
-
-    public SqlOSUser? User { get; set; }
-}
-
-public sealed class SqlOSRecoveryCode
-{
-    public string Id { get; set; } = string.Empty;
-    public string UserId { get; set; } = string.Empty;
-    public string CodeHash { get; set; } = string.Empty;
-    public DateTime CreatedAt { get; set; }
-    public DateTime? ConsumedAt { get; set; }
-    public DateTime? RevokedAt { get; set; }
-
-    public SqlOSUser? User { get; set; }
-}
-
 public sealed class SqlOSAuthPageSettings
 {
     public string Id { get; set; } = "default";
@@ -992,6 +866,24 @@ public sealed class SqlOSConsentGrant
 
     public SqlOSUser? User { get; set; }
     public SqlOSClientApplication? ClientApplication { get; set; }
+
+    internal Revocation Revocation => new(RevokedAt, RevocationReason);
+
+    /// <summary>
+    /// Withdraws the remembered approval for <paramref name="reason"/>: the client must ask again.
+    /// Revoking is idempotent and keeps the first revocation. (The consent aggregate arrives in
+    /// layer 3; a claim of the user's address revokes through this method until then.)
+    /// </summary>
+    internal void Revoke(string reason, DateTime now)
+    {
+        if (Revocation.IsRevoked)
+        {
+            return;
+        }
+
+        (RevokedAt, RevocationReason) = Revocation.Revoke(reason, now);
+        UpdatedAt = now;
+    }
 }
 
 /// <summary>

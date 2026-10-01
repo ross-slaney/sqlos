@@ -18,6 +18,7 @@ using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
 using SqlOS.IntegrationTests.Infrastructure;
+using SqlOS.Domain;
 
 namespace SqlOS.IntegrationTests;
 
@@ -340,7 +341,7 @@ public sealed partial class SamlServiceIntegrationTests
         {
             var offboardedUser = await offboardingContext.Set<SqlOSUser>()
                 .SingleAsync(x => x.Id == user.Id);
-            offboardedUser.IsActive = false;
+            offboardedUser.Deactivate("offboarded", DateTime.UtcNow);
             await offboardingContext.SaveChangesAsync();
         }
 
@@ -1054,22 +1055,11 @@ public sealed partial class SamlServiceIntegrationTests
         var currentEmail = $"current-scim-saml-{Guid.NewGuid():N}@example.com";
         var existingUser = await admin.CreateUserAsync(new SqlOSCreateUserRequest("SCIM Renamed Member", staleEmail, "P@ssword123!"));
         await MarkEmailVerifiedAsync(existingUser.Id);
-        var staleEmailRecord = await AspireFixture.SharedContext.Set<SqlOSUserEmail>()
-            .SingleAsync(x => x.UserId == existingUser.Id);
-        staleEmailRecord.IsPrimary = false;
-        AspireFixture.SharedContext.Set<SqlOSUserEmail>().Add(new SqlOSUserEmail
-        {
-            Id = $"eml_{Guid.NewGuid():N}",
-            UserId = existingUser.Id,
-            Email = currentEmail,
-            NormalizedEmail = SqlOSAdminService.NormalizeEmail(currentEmail),
-            IsPrimary = true,
-            IsVerified = true,
-            VerifiedAt = DateTime.UtcNow,
-            CreatedAt = DateTime.UtcNow
-        });
-        existingUser.DefaultEmail = currentEmail;
-        existingUser.UpdatedAt = DateTime.UtcNow;
+        // The organization's directory renamed the member: a new verified primary address, the
+        // stale one kept but no longer primary.
+        var renamed = await AspireFixture.SharedContext.GetUserAsync(existingUser.Id, SqlOSUserParts.Emails);
+        renamed.SetPrimaryEmail(new OwnershipProof(EmailAddress.Parse(currentEmail), OwnershipProofMethod.Directory), DateTime.UtcNow);
+        renamed.UpdateProfile(renamed.DisplayName, currentEmail, DateTime.UtcNow);
         await AspireFixture.SharedContext.SaveChangesAsync();
 
         var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"SCIM Rename {Guid.NewGuid():N}", null));
@@ -1246,7 +1236,7 @@ public sealed partial class SamlServiceIntegrationTests
         var request = new CertificateRequest("CN=SqlOSScimSubjectConflictIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         using var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
         var connection = await CreateRestrictedSamlConnectionAsync(admin, org.Id, certificate, "scim-subject-conflict");
-        AspireFixture.SharedContext.Set<SqlOSExternalIdentity>().Add(new SqlOSExternalIdentity
+        AspireFixture.SharedContext.Set<SqlOSExternalIdentity>().Add(TestRows.Create<SqlOSExternalIdentity>(new
         {
             Id = $"ext_{Guid.NewGuid():N}",
             UserId = boundUser.Id,
@@ -1255,7 +1245,7 @@ public sealed partial class SamlServiceIntegrationTests
             Subject = scimEmail,
             Email = boundEmail,
             CreatedAt = DateTime.UtcNow
-        });
+        }));
         await AspireFixture.SharedContext.SaveChangesAsync();
 
         var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
@@ -1295,9 +1285,7 @@ public sealed partial class SamlServiceIntegrationTests
             connectionEnabled: deactivatedState != "disabled_connection");
         if (deactivatedState == "inactive_user")
         {
-            existingUser.IsActive = false;
-            existingUser.UpdatedAt = DateTime.UtcNow;
-            await AspireFixture.SharedContext.SaveChangesAsync();
+            await admin.DeactivateUserAsync(existingUser.Id);
         }
 
         var clientPrefix = deactivatedState switch
@@ -1809,9 +1797,10 @@ public sealed partial class SamlServiceIntegrationTests
 
     private static async Task MarkEmailVerifiedAsync(string userId)
     {
-        var email = await AspireFixture.SharedContext.Set<SqlOSUserEmail>().SingleAsync(x => x.UserId == userId);
-        email.IsVerified = true;
-        email.VerifiedAt = DateTime.UtcNow;
+        // The owner confirmed the address with the email-verification link.
+        var user = await AspireFixture.SharedContext.GetUserAsync(userId, SqlOSUserParts.Emails);
+        var email = user.Emails.Single();
+        user.VerifyEmail(new OwnershipProof(EmailAddress.Parse(email.Email), OwnershipProofMethod.EmailVerification), DateTime.UtcNow);
         await AspireFixture.SharedContext.SaveChangesAsync();
     }
 

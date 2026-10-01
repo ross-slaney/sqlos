@@ -12,6 +12,7 @@ using SqlOS.AuthServer.Errors;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
 using SqlOS.IntegrationTests.Infrastructure;
+using SqlOS.Domain;
 
 namespace SqlOS.IntegrationTests;
 
@@ -144,7 +145,7 @@ public sealed partial class SamlServiceIntegrationTests
         using var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
         var connection = await CreateRestrictedSamlConnectionAsync(admin, org.Id, certificate, "bound-subject");
         var subject = $"idp-user-{Guid.NewGuid():N}";
-        AspireFixture.SharedContext.Set<SqlOSExternalIdentity>().Add(new SqlOSExternalIdentity
+        AspireFixture.SharedContext.Set<SqlOSExternalIdentity>().Add(TestRows.Create<SqlOSExternalIdentity>(new
         {
             Id = $"ext_{Guid.NewGuid():N}",
             UserId = user.Id,
@@ -153,7 +154,7 @@ public sealed partial class SamlServiceIntegrationTests
             Subject = subject,
             Email = email,
             CreatedAt = DateTime.UtcNow
-        });
+        }));
         await AspireFixture.SharedContext.SaveChangesAsync();
 
         var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
@@ -874,9 +875,10 @@ public sealed partial class SamlServiceIntegrationTests
 
     private static async Task MarkEmailVerifiedAsync(TestSqlOSDbContext context, string userId)
     {
-        var email = await context.Set<SqlOSUserEmail>().SingleAsync(x => x.UserId == userId);
-        email.IsVerified = true;
-        email.VerifiedAt = DateTime.UtcNow;
+        // The owner confirmed the address with the email-verification link.
+        var user = await context.GetUserAsync(userId, SqlOSUserParts.Emails);
+        var email = user.Emails.Single();
+        user.VerifyEmail(new OwnershipProof(EmailAddress.Parse(email.Email), OwnershipProofMethod.EmailVerification), DateTime.UtcNow);
         await context.SaveChangesAsync();
     }
 

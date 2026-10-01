@@ -67,6 +67,9 @@ public sealed class SqlOSCryptoService
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
+    /// <summary>The clock of the unit of work: the host's <see cref="TimeProvider"/>, which processes read once.</summary>
+    internal TimeProvider Clock => _timeProvider;
+
     public string HashPassword(string password) => HashedSecret.Pbkdf2(password).Hash;
 
     public string ProtectSecret(string secret)

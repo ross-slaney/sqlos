@@ -15,6 +15,7 @@ using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
 using SqlOS.Email.Interfaces;
 using SqlOS.IntegrationTests.Infrastructure;
+using SqlOS.AuthServer.Processes.Identity;
 
 namespace SqlOS.IntegrationTests;
 
@@ -345,14 +346,14 @@ public sealed class IssuerSessionDeadCookieIntegrationTests
         freshFamily.RevokedAt.Should().BeNull();
         var claimedFamily = await FindFamilyAsync(fixture, liveFamily.Id);
         claimedFamily.RevokedAt.Should().NotBeNull();
-        claimedFamily.RevocationReason.Should().Be(SqlOSEmailOwnershipClaim.RevocationReason);
+        claimedFamily.RevocationReason.Should().Be(ClaimEmailOwnership.RevocationReason);
 
         await using var scope = fixture.App.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<TestSqlOSDbContext>();
         (await db.Set<SqlOSUserEmail>().AsNoTracking().SingleAsync(x => x.UserId == fixture.UserId))
             .IsVerified.Should().BeTrue();
         (await db.Set<SqlOSAuditEvent>().CountAsync(x => x.UserId == fixture.UserId
-            && x.EventType == SqlOSEmailOwnershipClaim.AuditEventType)).Should().Be(1);
+            && x.EventType == ClaimEmailOwnership.AuditEventType)).Should().Be(1);
     }
 
     private static Task<HostedAuthorizeTokenFixture> CreateFixtureAsync()

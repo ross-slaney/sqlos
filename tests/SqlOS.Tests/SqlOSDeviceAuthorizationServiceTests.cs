@@ -286,17 +286,17 @@ public sealed class SqlOSDeviceAuthorizationServiceTests
                 Name = "Test Org",
                 CreatedAt = now
             };
-            var user = new SqlOSUser
+            var user = TestRows.Create<SqlOSUser>(new
             {
                 Id = _crypto.GenerateId("usr"),
                 DisplayName = "Ada Lovelace",
                 DefaultEmail = "ada@example.com",
                 CreatedAt = now,
                 UpdatedAt = now
-            };
+            });
             Context.Set<SqlOSOrganization>().Add(organization);
             Context.Set<SqlOSUser>().Add(user);
-            Context.Set<SqlOSUserEmail>().Add(new SqlOSUserEmail
+            Context.Set<SqlOSUserEmail>().Add(TestRows.Create<SqlOSUserEmail>(new
             {
                 Id = _crypto.GenerateId("eml"),
                 UserId = user.Id,
@@ -306,7 +306,7 @@ public sealed class SqlOSDeviceAuthorizationServiceTests
                 IsVerified = true,
                 VerifiedAt = now,
                 CreatedAt = now
-            });
+            }));
             Context.Set<SqlOSMembership>().Add(new SqlOSMembership
             {
                 OrganizationId = organization.Id,
