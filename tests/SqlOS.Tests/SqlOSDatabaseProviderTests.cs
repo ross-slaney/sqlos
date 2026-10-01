@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.Database;
 using SqlOS.Extensions;
+using SqlOS.Fga;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Models;
 
@@ -66,8 +67,65 @@ public class SqlOSDatabaseProviderTests
         sql.Should().Contain("CREATE OR REPLACE FUNCTION");
         sql.Should().Contain("fn_IsResourceAccessible");
         sql.Should().Contain("RETURNS TABLE(\"Id\"");
-        sql.Should().Contain("strpos");
-        sql.Should().Contain("truncated.\"Depth\" = 7");
+        sql.Should().Contain("CROSS JOIN LATERAL (VALUES (0, x.\"Ancestor0\"), (1, x.\"Ancestor1\")");
+        sql.Should().Contain("(7, x.\"Ancestor7\")) AS lv(\"Level\", \"Seq\")");
+        sql.Should().NotContain("Ancestor8");
+        sql.Should().Contain("lv.\"Level\" >= x.\"Reach\"");
+        sql.Should().Contain("g.\"SubjectId\" = ANY (ARRAY(SELECT live.\"SubjectId\" FROM \"dbo\".\"fn_ActiveSubjects\"(p_subject_ids) live))");
+        sql.Should().Contain("permission.\"ResourceTypeId\" IS NULL OR permission.\"ResourceTypeId\" = x.\"ResourceTypeId\"");
+    }
+
+    [TestMethod]
+    public void PostgreSqlAccessRootsSql_ReadsTheGrantsFirst()
+    {
+        var sql = PostgreSqlDatabaseProvider.Instance.BuildAccessRootsFunctionSql(new SqlOSFgaOptions());
+
+        sql.Should().Contain("CREATE OR REPLACE FUNCTION \"dbo\".\"fn_AccessRoots\"");
+        sql.Should().Contain("RETURNS TABLE(\"ResourceSeq\" bigint, \"Depth\" smallint)");
+        sql.Should().Contain("WITH g AS MATERIALIZED");
+        sql.Should().Contain("r.\"IsActive\" = TRUE AND r.\"Depth\" IS NOT NULL");
+        PostgreSqlDatabaseProvider.Instance.BuildAccessRootsQuerySql(new SqlOSFgaOptions())
+            .Should().Be("SELECT a.\"ResourceSeq\", a.\"Depth\" FROM \"dbo\".\"fn_AccessRoots\"({0}, {1}) AS a");
+    }
+
+    [TestMethod]
+    public void PostgreSqlLineageSql_UsesStatementTriggersWithTransitionTables()
+    {
+        var options = new SqlOSFgaOptions { Schema = "ten\"ant", MaxResourceHierarchyDepth = 4 };
+        options.TableNames.Resources = "res\"ources";
+        var scope = new SqlOSFgaScopeTable("app", "Items", "ResourceId", ["Id"]);
+
+        var columns = PostgreSqlDatabaseProvider.Instance.BuildEnsureLineageColumnsSql(options).Single();
+        columns.Should().Contain("ALTER TABLE \"ten\"\"ant\".\"res\"\"ources\" ADD COLUMN IF NOT EXISTS \"Ancestor4\" bigint NULL;");
+        columns.Should().Contain("CREATE INDEX IF NOT EXISTS \"IX_res\"\"ources_Ancestor4\" ON \"ten\"\"ant\".\"res\"\"ources\" (\"Ancestor4\") INCLUDE (\"Id\", \"Reach\") WHERE \"Ancestor4\" IS NOT NULL;");
+        columns.Should().NotContain("Ancestor5");
+
+        var batches = PostgreSqlDatabaseProvider.Instance.BuildLineageMaintenanceSql(options, [scope]);
+        var all = string.Join("\n", batches);
+        all.Should().Contain("CREATE OR REPLACE FUNCTION \"ten\"\"ant\".\"fn_res\"\"ources_LineageRefresh\"(p_ids varchar[], p_reject boolean)");
+        all.Should().Contain("CREATE OR REPLACE FUNCTION \"ten\"\"ant\".\"fn_res\"\"ources_LineageRebuild\"()");
+        all.Should().Contain("CREATE TEMP TABLE \"SqlOSLineageAffected\"");
+        all.Should().Contain("AFTER INSERT ON \"ten\"\"ant\".\"res\"\"ources\"\n    REFERENCING NEW TABLE AS new_rows\n    FOR EACH STATEMENT");
+        all.Should().Contain("AFTER UPDATE ON \"ten\"\"ant\".\"res\"\"ources\"\n    REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows");
+        all.Should().Contain("AFTER DELETE ON \"ten\"\"ant\".\"res\"\"ources\"");
+        all.Should().Contain("WHERE \"Steps\" > 4");
+        all.Should().Contain("p.\"Depth\" = 4");
+        all.Should().Contain("USING ERRCODE = 'SQ012'");
+        all.Should().Contain("\"Ancestor4\" = CASE WHEN nd.\"Depth\" = 4 THEN n.\"Seq\" WHEN nd.\"Depth\" > 4 THEN p.\"Ancestor4\" ELSE NULL END");
+        all.Should().Contain("CREATE OR REPLACE FUNCTION \"ten\"\"ant\".\"fn_SqlOSFgaScope_app_Items_Insert\"()");
+        all.Should().Contain("CREATE OR REPLACE FUNCTION \"ten\"\"ant\".\"fn_SqlOSFgaScope_app_Items_Update\"()");
+        all.Should().Contain("n.\"ResourceId\" IS DISTINCT FROM o.\"ResourceId\"");
+        all.Should().Contain("IF NOT EXISTS (\n        SELECT 1 FROM new_rows n INNER JOIN old_rows o ON o.\"Id\" = n.\"Id\"", "the update function must leave before updating, or its own update fires it forever");
+        all.Should().Contain("AFTER UPDATE ON \"app\".\"Items\"");
+        all.Should().Contain("\"SqlOSFgaAncestor4\" = r.\"Ancestor4\", \"SqlOSFgaReach\" = r.\"Reach\", \"SqlOSFgaTypeSeq\" = rt.\"Seq\"");
+
+        var hash = PostgreSqlDatabaseProvider.Instance.BuildSelectRoutinesHashSql(options, [scope]);
+        hash.Should().Contain("p.proname = 'fn_ActiveSubjects'");
+        hash.Should().Contain("p.proname = 'fn_AccessRoots'");
+        hash.Should().Contain("p.proname = 'fn_res\"ources_LineageRebuild'");
+        hash.Should().Contain("t.tgname = 'TR_res\"ources_Lineage_Update'");
+        hash.Should().Contain("n.nspname = 'app' AND c.relname = 'Items' AND t.tgname = 'TR_Items_SqlOSFgaScope_Insert'");
+        hash.Should().Contain("column_name = 'Ancestor4'");
     }
 
     [TestMethod]

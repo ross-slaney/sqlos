@@ -726,7 +726,8 @@ public sealed class SqlOSResourceEntitySyncTests
             CREATE TABLE SqlOSFgaResourceTypes (
                 Id TEXT NOT NULL PRIMARY KEY,
                 Name TEXT NOT NULL,
-                Description TEXT NULL
+                Description TEXT NULL,
+                Seq INTEGER NULL
             );
             """);
         await context.Database.ExecuteSqlRawAsync("""
@@ -739,6 +740,20 @@ public sealed class SqlOSResourceEntitySyncTests
                 IsActive INTEGER NOT NULL,
                 CreatedAt TEXT NOT NULL,
                 UpdatedAt TEXT NOT NULL,
+                Seq INTEGER NULL,
+                Depth INTEGER NULL,
+                Reach INTEGER NULL,
+                Ancestor0 INTEGER NULL,
+                Ancestor1 INTEGER NULL,
+                Ancestor2 INTEGER NULL,
+                Ancestor3 INTEGER NULL,
+                Ancestor4 INTEGER NULL,
+                Ancestor5 INTEGER NULL,
+                Ancestor6 INTEGER NULL,
+                Ancestor7 INTEGER NULL,
+                Ancestor8 INTEGER NULL,
+                Ancestor9 INTEGER NULL,
+                Ancestor10 INTEGER NULL,
                 FOREIGN KEY (ParentId) REFERENCES SqlOSFgaResources(Id) ON DELETE RESTRICT,
                 FOREIGN KEY (ResourceTypeId) REFERENCES SqlOSFgaResourceTypes(Id) ON DELETE RESTRICT
             );
