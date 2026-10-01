@@ -5,10 +5,12 @@ name: Benchmarks
 #
 # Pull requests grow the catalog 1M -> 10M and skip the sparse row-filter scans (30 s a page on PostgreSQL,
 # 160 s on SQL Server, for the current and the previous function), so both jobs finish inside the PR CI
-# envelope. The full run, 1M -> 10M -> 100M with every scenario, takes about an hour on PostgreSQL and two on
-# SQL Server (loading 200M rows and 450M closure rows through the clustered keys is the bulk of it); it runs
-# on every merge to main, weekly, on demand, and on a pull request labelled `benchmark-100m`. Standard runners
-# are free for public repositories.
+# envelope. The full run, 1M -> 10M -> 50M, runs on every merge to main, weekly, on demand, and on a pull
+# request labelled `benchmark-full`. 50M is the largest scale that fits a standard runner's disk with the
+# resource closure (about 50 GB on PostgreSQL, 37 GB on SQL Server; 100M needs about 100 GB and 75 GB). The
+# full tier skips the previous release's function for the many-grants people's pages: it takes about a
+# minute per page on SQL Server at 10M and grows with the catalog; the PR tier keeps that comparison.
+# Standard runners are free for public repositories.
 
 on:
   push:
@@ -30,7 +32,7 @@ on:
       scales:
         description: "Product counts to grow through, comma-separated"
         required: false
-        default: "1m,10m,100m"
+        default: "1m,10m,50m"
 
 concurrency:
   group: benchmarks-${{ github.event.pull_request.number || github.ref }}
@@ -38,15 +40,15 @@ concurrency:
 
 env:
   DOTNET_VERSION: "9.0.x"
-  FULL_RUN: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'benchmark-100m') }}
+  FULL_RUN: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'benchmark-full') }}
 
 jobs:
   benchmark:
     name: SHRBAC benchmarks (${{ matrix.name }})
     # Adding some other label to a pull request should not re-run the benchmarks.
-    if: github.event.action != 'labeled' || github.event.label.name == 'benchmark-100m'
+    if: github.event.action != 'labeled' || github.event.label.name == 'benchmark-full'
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'benchmark-100m')) && 170 || 45 }}
+    timeout-minutes: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'benchmark-full')) && 170 || 45 }}
     strategy:
       fail-fast: false
       matrix:
@@ -76,8 +78,10 @@ jobs:
         id: tier
         run: |
           if [ "$FULL_RUN" = "true" ]; then
-            echo "scales=${{ inputs.scales || '1m,10m,100m' }}" >> "$GITHUB_OUTPUT"
-            echo "exclude=" >> "$GITHUB_OUTPUT"
+            echo "scales=${{ inputs.scales || '1m,10m,50m' }}" >> "$GITHUB_OUTPUT"
+            echo "exclude=reference.list.grants10k.first-page,reference.list.grants100k.first-page" >> "$GITHUB_OUTPUT"
+            # Preinstalled toolchains the benchmark does not use; about 20 GB of headroom for the database.
+            sudo rm -rf /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift
           else
             echo "scales=1m,10m" >> "$GITHUB_OUTPUT"
             echo "exclude=list.store.first-page,reference.list.store.first-page" >> "$GITHUB_OUTPUT"

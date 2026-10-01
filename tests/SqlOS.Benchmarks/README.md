@@ -1,7 +1,7 @@
 # SqlOS SHRBAC benchmarks
 
 Measures authorization as SqlOS ships it, on SQL Server and PostgreSQL, while the catalog grows from 1M to
-100M products, and fails CI when that behavior regresses.
+50M products in CI (100M locally), and fails CI when that behavior regresses.
 
 It is the maintained successor to the harness behind the paper's Section 7 (kept in `paper/benchmark`),
 which ran a hand-copied version of the schema and function at 1.2M–1.5M resources on SQL Server only.
@@ -102,7 +102,7 @@ Docker is the only requirement; the harness starts the database with Testcontain
 dotnet run --project tests/SqlOS.Benchmarks -c Release -- --provider postgresql
 
 # SQL Server, as CI runs it
-dotnet run --project tests/SqlOS.Benchmarks -c Release -- --provider sqlserver --scales 1m,10m,100m --data-dir /mnt/sqlos-bench
+dotnet run --project tests/SqlOS.Benchmarks -c Release -- --provider sqlserver --scales 1m,10m,50m --data-dir /mnt/sqlos-bench
 
 # An existing server (drops and recreates the SqlOSBenchmarks database on it; PostgreSQL needs a superuser)
 dotnet run --project tests/SqlOS.Benchmarks -c Release -- --provider sqlserver --connection "Server=localhost,1433;User Id=sa;Password=...;TrustServerCertificate=True"
@@ -123,7 +123,11 @@ repositories.
 | Tier | When | Scales | Time per job |
 |---|---|---|---|
 | Pull request | Every pull request that touches `src/SqlOS` | 1M → 10M, without the sparse row-filter scans | under 10 min per engine |
-| Full | Every merge to `main`, weekly, on demand, and on a pull request labelled `benchmark-100m` | 1M → 10M → 100M, every scenario | about an hour (PostgreSQL), two (SQL Server) |
+| Full | Every merge to `main`, weekly, on demand, and on a pull request labelled `benchmark-full` | 1M → 10M → 50M, every scenario except the previous function's many-grants pages | about an hour (PostgreSQL), two (SQL Server) |
+
+The full tier stops at 50M because that is the largest catalog whose database fits a standard runner's disk
+with the resource closure: about 1 GB per million products on PostgreSQL and 0.75 GB on SQL Server. 100M
+runs locally (`--data-dir` on a disk with about 120 GB free; see Results).
 
 Most of the full run is loading: 90M new rows in each of two tables and 400M closure rows, then rebuilding
 indexes. PostgreSQL loads in parallel `COPY` streams. SQL Server takes the table lock that minimal logging
