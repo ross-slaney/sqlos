@@ -424,7 +424,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
                         SELECT "Id", "ResourceTypeId" FROM old_rows
                     ) retyped) INTO v_types;
                 IF v_types THEN
-                    {typeChanges}
+                    {(typeChanges.Length == 0 ? "NULL;" : typeChanges.ToString())}
                 END IF;
                 RETURN NULL;
             END

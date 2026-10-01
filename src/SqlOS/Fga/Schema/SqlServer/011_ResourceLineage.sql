@@ -5,8 +5,8 @@
 -- scope columns.
 --
 -- The lineage of a resource is its ancestor at every level of the tree (Ancestor0 ... AncestorD, one
--- column per level, added by SqlOSFgaFunctionInitializer because the count follows the configured
--- MaxResourceHierarchyDepth), its Depth, and its Reach: the highest level from which access flows down
+-- column per level: the default depth's here, deeper ones added by SqlOSFgaFunctionInitializer when
+-- MaxResourceHierarchyDepth exceeds 10), its Depth, and its Reach: the highest level from which access flows down
 -- to it without crossing an inactive resource. An inactive resource, or one in a cycle or deeper than the
 -- limit, has no Reach and no Depth, which denies it exactly as fn_IsResourceAccessible always has.
 -- Triggers created by SqlOSFgaFunctionInitializer keep the columns exact; it also fills them once after
@@ -108,7 +108,7 @@ BEGIN
 END
 GO
 
--- 3. Depth and Reach. The ancestor columns follow the configured depth and are added by the initializer.
+-- 3. Depth and Reach.
 IF COL_LENGTH('[{Schema}].[{Resources}]', 'Depth') IS NULL
 BEGIN
     ALTER TABLE [{Schema}].[{Resources}] ADD [Depth] SMALLINT NULL;
@@ -121,7 +121,141 @@ BEGIN
 END
 GO
 
--- 4. The hash of the enforcement routines (functions, lineage procedures, triggers) last applied by
+-- 4. The ancestor columns of the default depth (levels 0..10), each with a filtered index. A larger
+--    configured depth adds the columns above level 10 through SqlOSFgaFunctionInitializer.
+IF COL_LENGTH('[{Schema}].[{Resources}]', 'Ancestor0') IS NULL
+BEGIN
+    ALTER TABLE [{Schema}].[{Resources}] ADD [Ancestor0] BIGINT NULL;
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_{Resources}_Ancestor0' AND object_id = OBJECT_ID('[{Schema}].[{Resources}]'))
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_{Resources}_Ancestor0] ON [{Schema}].[{Resources}]([Ancestor0]) INCLUDE ([Reach]) WHERE [Ancestor0] IS NOT NULL;
+END
+GO
+
+IF COL_LENGTH('[{Schema}].[{Resources}]', 'Ancestor1') IS NULL
+BEGIN
+    ALTER TABLE [{Schema}].[{Resources}] ADD [Ancestor1] BIGINT NULL;
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_{Resources}_Ancestor1' AND object_id = OBJECT_ID('[{Schema}].[{Resources}]'))
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_{Resources}_Ancestor1] ON [{Schema}].[{Resources}]([Ancestor1]) INCLUDE ([Reach]) WHERE [Ancestor1] IS NOT NULL;
+END
+GO
+
+IF COL_LENGTH('[{Schema}].[{Resources}]', 'Ancestor2') IS NULL
+BEGIN
+    ALTER TABLE [{Schema}].[{Resources}] ADD [Ancestor2] BIGINT NULL;
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_{Resources}_Ancestor2' AND object_id = OBJECT_ID('[{Schema}].[{Resources}]'))
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_{Resources}_Ancestor2] ON [{Schema}].[{Resources}]([Ancestor2]) INCLUDE ([Reach]) WHERE [Ancestor2] IS NOT NULL;
+END
+GO
+
+IF COL_LENGTH('[{Schema}].[{Resources}]', 'Ancestor3') IS NULL
+BEGIN
+    ALTER TABLE [{Schema}].[{Resources}] ADD [Ancestor3] BIGINT NULL;
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_{Resources}_Ancestor3' AND object_id = OBJECT_ID('[{Schema}].[{Resources}]'))
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_{Resources}_Ancestor3] ON [{Schema}].[{Resources}]([Ancestor3]) INCLUDE ([Reach]) WHERE [Ancestor3] IS NOT NULL;
+END
+GO
+
+IF COL_LENGTH('[{Schema}].[{Resources}]', 'Ancestor4') IS NULL
+BEGIN
+    ALTER TABLE [{Schema}].[{Resources}] ADD [Ancestor4] BIGINT NULL;
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_{Resources}_Ancestor4' AND object_id = OBJECT_ID('[{Schema}].[{Resources}]'))
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_{Resources}_Ancestor4] ON [{Schema}].[{Resources}]([Ancestor4]) INCLUDE ([Reach]) WHERE [Ancestor4] IS NOT NULL;
+END
+GO
+
+IF COL_LENGTH('[{Schema}].[{Resources}]', 'Ancestor5') IS NULL
+BEGIN
+    ALTER TABLE [{Schema}].[{Resources}] ADD [Ancestor5] BIGINT NULL;
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_{Resources}_Ancestor5' AND object_id = OBJECT_ID('[{Schema}].[{Resources}]'))
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_{Resources}_Ancestor5] ON [{Schema}].[{Resources}]([Ancestor5]) INCLUDE ([Reach]) WHERE [Ancestor5] IS NOT NULL;
+END
+GO
+
+IF COL_LENGTH('[{Schema}].[{Resources}]', 'Ancestor6') IS NULL
+BEGIN
+    ALTER TABLE [{Schema}].[{Resources}] ADD [Ancestor6] BIGINT NULL;
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_{Resources}_Ancestor6' AND object_id = OBJECT_ID('[{Schema}].[{Resources}]'))
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_{Resources}_Ancestor6] ON [{Schema}].[{Resources}]([Ancestor6]) INCLUDE ([Reach]) WHERE [Ancestor6] IS NOT NULL;
+END
+GO
+
+IF COL_LENGTH('[{Schema}].[{Resources}]', 'Ancestor7') IS NULL
+BEGIN
+    ALTER TABLE [{Schema}].[{Resources}] ADD [Ancestor7] BIGINT NULL;
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_{Resources}_Ancestor7' AND object_id = OBJECT_ID('[{Schema}].[{Resources}]'))
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_{Resources}_Ancestor7] ON [{Schema}].[{Resources}]([Ancestor7]) INCLUDE ([Reach]) WHERE [Ancestor7] IS NOT NULL;
+END
+GO
+
+IF COL_LENGTH('[{Schema}].[{Resources}]', 'Ancestor8') IS NULL
+BEGIN
+    ALTER TABLE [{Schema}].[{Resources}] ADD [Ancestor8] BIGINT NULL;
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_{Resources}_Ancestor8' AND object_id = OBJECT_ID('[{Schema}].[{Resources}]'))
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_{Resources}_Ancestor8] ON [{Schema}].[{Resources}]([Ancestor8]) INCLUDE ([Reach]) WHERE [Ancestor8] IS NOT NULL;
+END
+GO
+
+IF COL_LENGTH('[{Schema}].[{Resources}]', 'Ancestor9') IS NULL
+BEGIN
+    ALTER TABLE [{Schema}].[{Resources}] ADD [Ancestor9] BIGINT NULL;
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_{Resources}_Ancestor9' AND object_id = OBJECT_ID('[{Schema}].[{Resources}]'))
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_{Resources}_Ancestor9] ON [{Schema}].[{Resources}]([Ancestor9]) INCLUDE ([Reach]) WHERE [Ancestor9] IS NOT NULL;
+END
+GO
+
+IF COL_LENGTH('[{Schema}].[{Resources}]', 'Ancestor10') IS NULL
+BEGIN
+    ALTER TABLE [{Schema}].[{Resources}] ADD [Ancestor10] BIGINT NULL;
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_{Resources}_Ancestor10' AND object_id = OBJECT_ID('[{Schema}].[{Resources}]'))
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_{Resources}_Ancestor10] ON [{Schema}].[{Resources}]([Ancestor10]) INCLUDE ([Reach]) WHERE [Ancestor10] IS NOT NULL;
+END
+GO
+
+-- 5. The hash of the enforcement routines (functions, lineage procedures, triggers) last applied by
 --    SqlOSFgaFunctionInitializer, so unchanged definitions are not re-created on every startup.
 IF COL_LENGTH('[{Schema}].[SqlOSFgaSchema]', 'RoutinesHash') IS NULL
 BEGIN

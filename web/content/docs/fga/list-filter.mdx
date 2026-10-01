@@ -30,7 +30,7 @@ The subject only sees chains they have access to. The filter translates to a SQL
 
 ## How the filter works
 
-Every FGA resource carries its **lineage**: its ancestor at each level of the tree, its depth, and its **reach**, the highest level from which access flows down to it through active resources only. SqlOS keeps these columns exact with triggers on the resource table and fills them once when you upgrade.
+Every FGA resource carries its **lineage**: its ancestor at each level of the tree, its depth, and its **reach**, the highest level from which access flows down to it through active resources only. Schema v11 adds the columns (one ancestor column per level up to the default depth of 10; a larger `MaxResourceHierarchyDepth` adds the rest at startup), SqlOS keeps them exact with triggers on the resource table, and fills them once when you upgrade.
 
 When you build a filter, SqlOS reads the caller's **access roots** once: the resources on which the caller, or one of their active groups, holds a current grant whose role includes the permission. The filter then says, for each row: the row's resource has one of those roots as its ancestor at the root's level, and the row's reach includes that level. It is the same predicate for every caller and every table.
 

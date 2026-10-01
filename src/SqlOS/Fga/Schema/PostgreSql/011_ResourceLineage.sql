@@ -7,8 +7,8 @@
 -- scope columns.
 --
 -- The lineage of a resource is its ancestor at every level of the tree (Ancestor0 ... AncestorD, one
--- column per level, added by SqlOSFgaFunctionInitializer because the count follows the configured
--- MaxResourceHierarchyDepth), its Depth, and its Reach: the highest level from which access flows down
+-- column per level: the default depth's here, deeper ones added by SqlOSFgaFunctionInitializer when
+-- MaxResourceHierarchyDepth exceeds 10), its Depth, and its Reach: the highest level from which access flows down
 -- to it without crossing an inactive resource. An inactive resource, or one in a cycle or deeper than the
 -- limit, has no Reach and no Depth, which denies it exactly as fn_IsResourceAccessible always has.
 -- Triggers created by SqlOSFgaFunctionInitializer keep the columns exact; it also fills them once after
@@ -56,11 +56,36 @@ ALTER TABLE "{Schema}"."{Resources}" ALTER COLUMN "Seq" SET DEFAULT nextval('"{S
 
 CREATE UNIQUE INDEX IF NOT EXISTS "UX_{Resources}_Seq" ON "{Schema}"."{Resources}"("Seq");
 
--- 3. Depth and Reach. The ancestor columns follow the configured depth and are added by the initializer.
+-- 3. Depth and Reach.
 ALTER TABLE "{Schema}"."{Resources}" ADD COLUMN IF NOT EXISTS "Depth" smallint NULL;
 ALTER TABLE "{Schema}"."{Resources}" ADD COLUMN IF NOT EXISTS "Reach" smallint NULL;
 
--- 4. The hash of the enforcement routines (functions, lineage functions, triggers) last applied by
+-- 4. The ancestor columns of the default depth (levels 0..10), each with a filtered index. A larger
+--    configured depth adds the columns above level 10 through SqlOSFgaFunctionInitializer.
+ALTER TABLE "{Schema}"."{Resources}" ADD COLUMN IF NOT EXISTS "Ancestor0" bigint NULL;
+CREATE INDEX IF NOT EXISTS "IX_{Resources}_Ancestor0" ON "{Schema}"."{Resources}" ("Ancestor0") INCLUDE ("Id", "Reach") WHERE "Ancestor0" IS NOT NULL;
+ALTER TABLE "{Schema}"."{Resources}" ADD COLUMN IF NOT EXISTS "Ancestor1" bigint NULL;
+CREATE INDEX IF NOT EXISTS "IX_{Resources}_Ancestor1" ON "{Schema}"."{Resources}" ("Ancestor1") INCLUDE ("Id", "Reach") WHERE "Ancestor1" IS NOT NULL;
+ALTER TABLE "{Schema}"."{Resources}" ADD COLUMN IF NOT EXISTS "Ancestor2" bigint NULL;
+CREATE INDEX IF NOT EXISTS "IX_{Resources}_Ancestor2" ON "{Schema}"."{Resources}" ("Ancestor2") INCLUDE ("Id", "Reach") WHERE "Ancestor2" IS NOT NULL;
+ALTER TABLE "{Schema}"."{Resources}" ADD COLUMN IF NOT EXISTS "Ancestor3" bigint NULL;
+CREATE INDEX IF NOT EXISTS "IX_{Resources}_Ancestor3" ON "{Schema}"."{Resources}" ("Ancestor3") INCLUDE ("Id", "Reach") WHERE "Ancestor3" IS NOT NULL;
+ALTER TABLE "{Schema}"."{Resources}" ADD COLUMN IF NOT EXISTS "Ancestor4" bigint NULL;
+CREATE INDEX IF NOT EXISTS "IX_{Resources}_Ancestor4" ON "{Schema}"."{Resources}" ("Ancestor4") INCLUDE ("Id", "Reach") WHERE "Ancestor4" IS NOT NULL;
+ALTER TABLE "{Schema}"."{Resources}" ADD COLUMN IF NOT EXISTS "Ancestor5" bigint NULL;
+CREATE INDEX IF NOT EXISTS "IX_{Resources}_Ancestor5" ON "{Schema}"."{Resources}" ("Ancestor5") INCLUDE ("Id", "Reach") WHERE "Ancestor5" IS NOT NULL;
+ALTER TABLE "{Schema}"."{Resources}" ADD COLUMN IF NOT EXISTS "Ancestor6" bigint NULL;
+CREATE INDEX IF NOT EXISTS "IX_{Resources}_Ancestor6" ON "{Schema}"."{Resources}" ("Ancestor6") INCLUDE ("Id", "Reach") WHERE "Ancestor6" IS NOT NULL;
+ALTER TABLE "{Schema}"."{Resources}" ADD COLUMN IF NOT EXISTS "Ancestor7" bigint NULL;
+CREATE INDEX IF NOT EXISTS "IX_{Resources}_Ancestor7" ON "{Schema}"."{Resources}" ("Ancestor7") INCLUDE ("Id", "Reach") WHERE "Ancestor7" IS NOT NULL;
+ALTER TABLE "{Schema}"."{Resources}" ADD COLUMN IF NOT EXISTS "Ancestor8" bigint NULL;
+CREATE INDEX IF NOT EXISTS "IX_{Resources}_Ancestor8" ON "{Schema}"."{Resources}" ("Ancestor8") INCLUDE ("Id", "Reach") WHERE "Ancestor8" IS NOT NULL;
+ALTER TABLE "{Schema}"."{Resources}" ADD COLUMN IF NOT EXISTS "Ancestor9" bigint NULL;
+CREATE INDEX IF NOT EXISTS "IX_{Resources}_Ancestor9" ON "{Schema}"."{Resources}" ("Ancestor9") INCLUDE ("Id", "Reach") WHERE "Ancestor9" IS NOT NULL;
+ALTER TABLE "{Schema}"."{Resources}" ADD COLUMN IF NOT EXISTS "Ancestor10" bigint NULL;
+CREATE INDEX IF NOT EXISTS "IX_{Resources}_Ancestor10" ON "{Schema}"."{Resources}" ("Ancestor10") INCLUDE ("Id", "Reach") WHERE "Ancestor10" IS NOT NULL;
+
+-- 5. The hash of the enforcement routines (functions, lineage functions, triggers) last applied by
 --    SqlOSFgaFunctionInitializer, so unchanged definitions are not re-created on every startup.
 ALTER TABLE "{Schema}"."SqlOSFgaSchema" ADD COLUMN IF NOT EXISTS "RoutinesHash" varchar(64) NULL;
 

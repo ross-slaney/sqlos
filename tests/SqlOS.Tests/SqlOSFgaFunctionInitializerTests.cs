@@ -132,6 +132,19 @@ public class SqlOSFgaFunctionInitializerTests
     }
 
     [TestMethod]
+    public void LineageMaintenanceSql_WithoutScopeTables_HasNoEmptyBlocks()
+    {
+        var all = string.Join("\n", SqlServerDatabaseProvider.Instance.BuildLineageMaintenanceSql(new SqlOSFgaOptions(), []));
+
+        System.Text.RegularExpressions.Regex.IsMatch(all, @"BEGIN\s+END").Should().BeFalse("T-SQL rejects an empty block");
+        all.Should().NotContain("IF UPDATE(ResourceTypeId)", "there is nothing to propagate a type change to");
+        all.Should().NotContain("SqlOSFgaScope");
+
+        var pg = string.Join("\n", PostgreSqlDatabaseProvider.Instance.BuildLineageMaintenanceSql(new SqlOSFgaOptions(), []));
+        System.Text.RegularExpressions.Regex.IsMatch(pg, @"IF v_types THEN\s+NULL;\s+END IF;").Should().BeTrue();
+    }
+
+    [TestMethod]
     public void RoutinesHash_ChangesWithAnyDefinitionOrOption()
     {
         var provider = SqlServerDatabaseProvider.Instance;

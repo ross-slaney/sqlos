@@ -3,7 +3,7 @@
 Companion note to *SHRBAC* (COMPSAC 2026). That paper's row filter decides each row by walking up the
 resource tree and probing the grants at every ancestor; Theorem 3 there bounds a page by the rows the engine
 must examine, which for a caller who sees a fraction σ of the table is about k/σ rows for a page of k. This
-note replaces the walk with a precomputed **lineage** on the resources table, proves the filter it supports
+note replaces the walk with a precomputed **lineage** on the resources table (schema v11), proves the filter it supports
 equals Definition 1 of the paper, proves the triggers keep the lineage exact, and gives the cost of a page
 under the two forms the filter takes. The implementation is `SqlOSFgaLineage`, the two database providers'
 `*.Lineage.cs` files, and `SqlOSFgaFilterBuilder`.

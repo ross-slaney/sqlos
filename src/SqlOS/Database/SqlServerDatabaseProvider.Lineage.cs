@@ -390,10 +390,7 @@ internal sealed partial class SqlServerDatabaseProvider
                     EXEC {refresh} @RejectMalformed = 1, @WalkAll = 1;
                 END
                 DROP TABLE #SqlOSLineageChanged;
-                IF UPDATE(ResourceTypeId)
-                BEGIN
-                    {typeChanges}
-                END
+                {(typeChanges.Length == 0 ? "" : $"IF UPDATE(ResourceTypeId)\nBEGIN\n{typeChanges}END")}
             END
             """;
 
