@@ -1,0 +1,238 @@
+# SqlOS behavior lock transcript
+scenario: AuthorizeScenarios.A_disabled_client_is_refused_at_the_authorization_and_token_endpoints
+profile: multi-app
+
+# Alice holds the portal's tokens and a browser session; the operator then emergency-disables the portal (a code-owned client cannot be disabled any other way).
+
+## 1. browser: a new authorization request for the disabled client
+> GET /sqlos/auth/authorize?response_type=code&client_id=atlas-portal&redirect_uri=https%3A%2F%2Fportal.example.test%2Fauth%2Fcallback&scope=openid%20profile%20email%20offline_access&state={state#1}&nonce={nonce#1}&code_challenge={pkce-challenge#1}&code_challenge_method=S256
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}; sqlos_auth_page={cookie#2}
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#1}'; style-src 'self' 'nonce-{csp-nonce#1}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Atlas Identity</title>
+        <style nonce="{csp-nonce#1}">{style-sha256:80d77a550f3a606a}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Atlas Identity</h1>
+                <p class="brand-subtitle">Secure your app-owned AI and MCP experiences with SqlOS.</p>
+              </div>
+              <div class="messages">
+                <div class="callout error">
+                  <span class="callout-icon">!</span>
+                  <span>The authorization request is invalid.</span>
+                </div>
+              </div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <form class="auth-form" method="post" action="/sqlos/auth/login/identify" data-flow-kind="hrd">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#1}" />
+                    <label class="field">
+                      <span>Email</span>
+                      <input name="email" type="email" value="" placeholder="Your email address" autocomplete="email" required="" />
+                    </label>
+                    <button class="primary-action" type="submit" data-loading-label="Checking email">
+                      <span class="button-label">Continue</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                    <div class="flow-status" hidden="">
+                      <span class="loader loader-sm" aria-hidden="true"></span>
+                      <span>Checking your sign-in method...</span>
+                    </div>
+                  </form>
+                  <p class="footer-prompt">
+                    Don't have an account?
+                    <a class="secondary-link" href="/sqlos/auth/signup">Get started</a>
+                  </p>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#1}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+
+## audit
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "Client 'atlas-portal' is inactive.",
+        "error": "invalid_request",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The authorization request is invalid.",
+        "surface": "OAuthAuthorize"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 2. client: its refresh token
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=refresh_token
+>   refresh_token={refresh-token#1}
+>   client_id=atlas-portal
+< 401 Unauthorized
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+< WWW-Authenticate: Basic
+    {
+      "error": "invalid_client",
+      "error_description": "Client authentication failed."
+    }
+
+## audit
+  - {
+      "action": "oauth.client_authentication.failed",
+      "actor": {
+        "displayName": null,
+        "id": "atlas-portal",
+        "type": "oauth_client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.client_authentication.failed",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "clientId": "atlas-portal"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 3. client: the separate resource API still accepts its unexpired access token
+> GET /resource-api/me
+> Authorization: Bearer {access-token#1}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "claims": [
+        {
+          "type": "amr",
+          "value": "password"
+        },
+        {
+          "type": "aud",
+          "value": "https://api.example.test"
+        },
+        {
+          "type": "client_id",
+          "value": "atlas-portal"
+        },
+        {
+          "type": "email",
+          "value": "{email:alice}"
+        },
+        {
+          "type": "exp",
+          "value": "{epoch:claim}"
+        },
+        {
+          "type": "iat",
+          "value": "{epoch:claim}"
+        },
+        {
+          "type": "iss",
+          "value": "https://sqlos.example.test/sqlos/auth"
+        },
+        {
+          "type": "nbf",
+          "value": "{epoch:claim}"
+        },
+        {
+          "type": "scope",
+          "value": "openid profile email offline_access"
+        },
+        {
+          "type": "sid",
+          "value": "{ses#1}"
+        },
+        {
+          "type": "sub",
+          "value": "{usr#1}"
+        }
+      ],
+      "scheme": "ResourceApi"
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "https://api.example.test",
+      "client_id": "atlas-portal",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "scope": "openid profile email offline_access",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s

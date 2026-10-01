@@ -1,0 +1,103 @@
+# SqlOS behavior lock transcript
+scenario: PublicRefreshScenarios.The_public_refresh_api_refuses_a_confidential_clients_token_without_a_challenge
+profile: multi-app
+
+## 1. web-backend: the confidential web client's refresh token: 401 invalid_client, with no WWW-Authenticate
+> POST /sqlos/auth/token/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshToken": "{refresh-token#1}"
+>   }
+< 401 Unauthorized
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_client",
+      "error_description": "Client authentication failed."
+    }
+
+## audit
+  - {
+      "action": "oauth.client_authentication.failed",
+      "actor": {
+        "displayName": null,
+        "id": "atlas-confidential",
+        "type": "oauth_client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": "{ses#1}",
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.client_authentication.failed",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "clientId": "atlas-confidential",
+        "grantType": "refresh_token"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": "{ses#1}",
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 2. web-backend: credentials are not read on this route, so the client cannot authenticate
+> POST /sqlos/auth/token/refresh
+> Authorization: Basic {credentials#1}
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "atlas-confidential",
+>     "refreshToken": "{refresh-token#1}"
+>   }
+< 401 Unauthorized
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_client",
+      "error_description": "Client authentication failed."
+    }
+
+## audit
+  - {
+      "action": "oauth.client_authentication.failed",
+      "actor": {
+        "displayName": null,
+        "id": "atlas-confidential",
+        "type": "oauth_client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": "{ses#1}",
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.client_authentication.failed",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "clientId": "atlas-confidential",
+        "grantType": "refresh_token"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": "{ses#1}",
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

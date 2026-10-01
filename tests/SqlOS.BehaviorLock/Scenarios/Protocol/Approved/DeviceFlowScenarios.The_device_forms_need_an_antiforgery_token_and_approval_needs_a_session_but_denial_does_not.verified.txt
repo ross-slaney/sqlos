@@ -1,0 +1,150 @@
+# SqlOS behavior lock transcript
+scenario: DeviceFlowScenarios.The_device_forms_need_an_antiforgery_token_and_approval_needs_a_session_but_denial_does_not
+profile: multi-app
+
+## 1. stranger: the code entry form without its antiforgery token
+> POST /sqlos/auth/device/verify
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   userCode={user-code#1}
+< 400 Bad Request
+< Content-Type: text/plain
+    The hosted form could not be validated. Reload the page and try again.
+
+## 2. stranger: the code entry form redirects whatever was typed
+> POST /sqlos/auth/device/verify
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   userCode=not a code
+< 302 Found
+< Location: /sqlos/auth/device?user_code=not%20a%20code
+
+## 3. stranger: approving without a session goes back to the device page
+> POST /sqlos/auth/device/approve
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   userCode={user-code#1}
+< 302 Found
+< Location: /sqlos/auth/device?user_code={user-code#1}
+
+## 4. stranger: the approval page without a session goes back to the device page
+> GET /sqlos/auth/device/approve?request={req#1}
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+< 302 Found
+< Location: /sqlos/auth/device?user_code={user-code#1}
+
+# the approval page for an unknown request: SqlOS throws System.InvalidOperationException "Device authorization request is invalid or expired." and writes no response (Kestrel answers 500).
+
+# the approval page without a request: SqlOS throws System.InvalidOperationException "Device authorization request is invalid or expired." and writes no response (Kestrel answers 500).
+
+## 5. stranger: anyone who holds the code can deny it without signing in
+> POST /sqlos/auth/device/deny
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   userCode={user-code#1}
+< 200 OK
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#1}'; style-src 'self' 'nonce-{csp-nonce#1}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Atlas Identity</title>
+        <style nonce="{csp-nonce#1}">{style-sha256:80d77a550f3a606a}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Atlas Identity</h1>
+                <p class="brand-subtitle">Secure your app-owned AI and MCP experiences with SqlOS.</p>
+              </div>
+              <div class="messages">
+                <div class="callout info">
+                  <span class="callout-icon">i</span>
+                  <span>CLI access was denied.</span>
+                </div>
+              </div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <div class="state-card">
+                    <span class="state-icon">OK</span>
+                    <div class="state-copy">
+                      <strong>CLI access approved.</strong>
+                      <p>You can return to your terminal.</p>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#1}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+
+## audit
+  - {
+      "action": "oauth.device.denied",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "anonymous"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.device.denied",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 6. cli: the CLI is told access_denied
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=urn:ietf:params:oauth:grant-type:device_code
+>   device_code={device-code#1}
+>   client_id=atlas-cli
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "error": "access_denied",
+      "error_description": "The user denied this device authorization request."
+    }
+
+# denying an unknown code: SqlOS throws System.InvalidOperationException "Device code is invalid or expired." and writes no response (Kestrel answers 500).

@@ -1,0 +1,69 @@
+# SqlOS behavior lock transcript
+scenario: BrowserSessionScenarios.Post_logout_redirects_follow_local_paths_and_known_origins_only
+profile: hosted
+
+## 1. browser: a local path, with its query and fragment
+> GET /sqlos/auth/logout?returnTo=%2Fdashboard%3Ftab%3D1%23section
+< 302 Found
+< Location: /dashboard?tab=1#section
+< Set-Cookie: sqlos_auth_page=; expires={unix-epoch}; path=/; secure; samesite=lax; httponly
+
+## 2. browser: an absolute URL on the public origin
+> GET /sqlos/auth/logout?returnTo=https%3A%2F%2Fsqlos.example.test%2Fsigned-out
+< 302 Found
+< Location: https://sqlos.example.test/signed-out
+< Set-Cookie: sqlos_auth_page=; expires={unix-epoch}; path=/; secure; samesite=lax; httponly
+
+## 3. browser: post_logout_redirect_uri when returnTo is absent
+> GET /sqlos/auth/logout?post_logout_redirect_uri=https%3A%2F%2Fsqlos.example.test%2Fafter-logout
+< 302 Found
+< Location: https://sqlos.example.test/after-logout
+< Set-Cookie: sqlos_auth_page=; expires={unix-epoch}; path=/; secure; samesite=lax; httponly
+
+## 4. browser: an encoded ampersand in the query of an absolute URL
+> GET /sqlos/auth/logout?returnTo=https%3A%2F%2Fsqlos.example.test%2Fnext%3Fq%3Da%2526b
+< 302 Found
+< Location: https://sqlos.example.test/next?q=a%26b
+< Set-Cookie: sqlos_auth_page=; expires={unix-epoch}; path=/; secure; samesite=lax; httponly
+
+## 5. browser: a foreign origin falls back to the signed-out page
+> GET /sqlos/auth/logout?returnTo=https%3A%2F%2Fattacker.example%2Fphish
+< 302 Found
+< Location: /sqlos/auth/logged-out
+< Set-Cookie: sqlos_auth_page=; expires={unix-epoch}; path=/; secure; samesite=lax; httponly
+
+## 6. browser: a protocol-relative URL
+> GET /sqlos/auth/logout?returnTo=%2F%2Fattacker.example%2Fphish
+< 302 Found
+< Location: /sqlos/auth/logged-out
+< Set-Cookie: sqlos_auth_page=; expires={unix-epoch}; path=/; secure; samesite=lax; httponly
+
+## 7. browser: an encoded protocol-relative path
+> GET /sqlos/auth/logout?returnTo=%2F%252F%252Fattacker.example
+< 302 Found
+< Location: /sqlos/auth/logged-out
+< Set-Cookie: sqlos_auth_page=; expires={unix-epoch}; path=/; secure; samesite=lax; httponly
+
+## 8. browser: a javascript: URL
+> GET /sqlos/auth/logout?returnTo=javascript%3Aalert(1)
+< 302 Found
+< Location: /sqlos/auth/logged-out
+< Set-Cookie: sqlos_auth_page=; expires={unix-epoch}; path=/; secure; samesite=lax; httponly
+
+## 9. browser: a relative path without a leading slash
+> GET /sqlos/auth/logout?returnTo=settings
+< 302 Found
+< Location: /sqlos/auth/logged-out
+< Set-Cookie: sqlos_auth_page=; expires={unix-epoch}; path=/; secure; samesite=lax; httponly
+
+## 10. browser: a rejected returnTo does not fall back to post_logout_redirect_uri
+> GET /sqlos/auth/logout?returnTo=https%3A%2F%2Fattacker.example%2Fphish&post_logout_redirect_uri=%2Fhome
+< 302 Found
+< Location: /sqlos/auth/logged-out
+< Set-Cookie: sqlos_auth_page=; expires={unix-epoch}; path=/; secure; samesite=lax; httponly
+
+## 11. browser: id_token_hint and state are ignored, and state is not echoed
+> GET /sqlos/auth/logout?post_logout_redirect_uri=%2Fhome&id_token_hint=ignored&state=ignored-state
+< 302 Found
+< Location: /home
+< Set-Cookie: sqlos_auth_page=; expires={unix-epoch}; path=/; secure; samesite=lax; httponly

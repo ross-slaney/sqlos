@@ -1,0 +1,25 @@
+# SqlOS behavior lock transcript
+scenario: AuthorizeScenarios.A_user_in_two_organizations_must_choose_one_and_prompt_none_cannot_ask
+profile: hosted
+
+# Alice signed in and chose Acme; her issuer session carries no organization.
+
+## document: a new request asks her to choose again (GET /sqlos/auth/authorize?response_type=code&client_id=behavior-lock-app&redirect_uri=https%3A%2F%2Fsqlos.example.test%2Fauth%2Fcallback&scope=openid%20profile%20email%20offline_access&state={state#1}&nonce={nonce#1}&code_challenge={pkce-challenge#1}&code_challenge_method=S256)
+    200 text/html; charset=utf-8
+    heading: Sign in to Behavior Lock
+    form POST /sqlos/auth/login/select-organization
+      hidden __RequestVerificationToken={csrf#1}
+      hidden requestId={req#1}
+      hidden pendingToken={pending-token#1}
+    organizations (name order):
+      Acme ({slug:acme} · member) submits organizationId={org#1}
+      Globex ({slug:globex} · admin) submits organizationId={org#2}
+
+## 1. browser: prompt=none cannot ask: interaction_required
+> GET /sqlos/auth/authorize?response_type=code&client_id=behavior-lock-app&redirect_uri=https%3A%2F%2Fsqlos.example.test%2Fauth%2Fcallback&scope=openid%20profile%20email%20offline_access&state={state#2}&nonce={nonce#2}&code_challenge={pkce-challenge#2}&code_challenge_method=S256&prompt=none
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}; sqlos_auth_page={cookie#2}
+< 302 Found
+< Location: https://sqlos.example.test/auth/callback?error=interaction_required&state={state#2}&error_description=Additional%20user%20interaction%20is%20required.
+
+## audit
+  (no new events)

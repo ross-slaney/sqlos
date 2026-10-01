@@ -1,0 +1,119 @@
+# SqlOS behavior lock transcript
+scenario: DiscoveryScenarios.A_standalone_identity_server_publishes_its_configured_issuer_and_every_grant
+profile: multi-app
+
+## 1. relying-party: OpenID Provider metadata
+> GET /sqlos/auth/.well-known/openid-configuration
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "authorization_endpoint": "https://sqlos.example.test/sqlos/auth/authorize",
+      "claims_supported": [
+        "sub",
+        "name",
+        "preferred_username",
+        "email",
+        "email_verified",
+        "auth_time",
+        "amr",
+        "org_id"
+      ],
+      "code_challenge_methods_supported": [
+        "S256"
+      ],
+      "device_authorization_endpoint": "https://sqlos.example.test/sqlos/auth/device_authorization",
+      "grant_types_supported": [
+        "authorization_code",
+        "refresh_token",
+        "urn:ietf:params:oauth:grant-type:device_code",
+        "client_credentials"
+      ],
+      "id_token_signing_alg_values_supported": [
+        "RS256"
+      ],
+      "issuer": "https://sqlos.example.test/sqlos/auth",
+      "jwks_uri": "https://sqlos.example.test/sqlos/auth/.well-known/jwks.json",
+      "request_parameter_supported": false,
+      "request_uri_parameter_supported": false,
+      "resource_parameter_supported": true,
+      "response_modes_supported": [
+        "query"
+      ],
+      "response_types_supported": [
+        "code"
+      ],
+      "scopes_supported": [
+        "email",
+        "openid",
+        "profile",
+        "workspace.read"
+      ],
+      "subject_types_supported": [
+        "public"
+      ],
+      "token_endpoint": "https://sqlos.example.test/sqlos/auth/token",
+      "token_endpoint_auth_methods_supported": [
+        "none",
+        "client_secret_basic",
+        "client_secret_post"
+      ],
+      "userinfo_endpoint": "https://sqlos.example.test/sqlos/auth/userinfo"
+    }
+
+## 2. relying-party: OAuth 2.0 authorization server metadata
+> GET /sqlos/auth/.well-known/oauth-authorization-server
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "authorization_endpoint": "https://sqlos.example.test/sqlos/auth/authorize",
+      "claims_supported": [
+        "sub",
+        "name",
+        "preferred_username",
+        "email",
+        "email_verified",
+        "auth_time",
+        "amr",
+        "org_id"
+      ],
+      "code_challenge_methods_supported": [
+        "S256"
+      ],
+      "device_authorization_endpoint": "https://sqlos.example.test/sqlos/auth/device_authorization",
+      "grant_types_supported": [
+        "authorization_code",
+        "refresh_token",
+        "urn:ietf:params:oauth:grant-type:device_code",
+        "client_credentials"
+      ],
+      "id_token_signing_alg_values_supported": [
+        "RS256"
+      ],
+      "issuer": "https://sqlos.example.test/sqlos/auth",
+      "jwks_uri": "https://sqlos.example.test/sqlos/auth/.well-known/jwks.json",
+      "request_parameter_supported": false,
+      "request_uri_parameter_supported": false,
+      "resource_parameter_supported": true,
+      "response_modes_supported": [
+        "query"
+      ],
+      "response_types_supported": [
+        "code"
+      ],
+      "scopes_supported": [
+        "email",
+        "openid",
+        "profile",
+        "workspace.read"
+      ],
+      "subject_types_supported": [
+        "public"
+      ],
+      "token_endpoint": "https://sqlos.example.test/sqlos/auth/token",
+      "token_endpoint_auth_methods_supported": [
+        "none",
+        "client_secret_basic",
+        "client_secret_post"
+      ],
+      "userinfo_endpoint": "https://sqlos.example.test/sqlos/auth/userinfo"
+    }

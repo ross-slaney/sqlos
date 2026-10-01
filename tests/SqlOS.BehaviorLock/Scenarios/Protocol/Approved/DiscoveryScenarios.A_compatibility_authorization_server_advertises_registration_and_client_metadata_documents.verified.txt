@@ -1,0 +1,63 @@
+# SqlOS behavior lock transcript
+scenario: DiscoveryScenarios.A_compatibility_authorization_server_advertises_registration_and_client_metadata_documents
+profile: dcr
+
+## 1. mcp-client: OpenID Provider metadata with DCR and CIMD
+> GET /sqlos/auth/.well-known/openid-configuration
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "authorization_endpoint": "https://sqlos.example.test/sqlos/auth/authorize",
+      "claims_supported": [
+        "sub",
+        "name",
+        "preferred_username",
+        "email",
+        "email_verified",
+        "auth_time",
+        "amr",
+        "org_id"
+      ],
+      "client_id_metadata_document_supported": true,
+      "code_challenge_methods_supported": [
+        "S256"
+      ],
+      "device_authorization_endpoint": "https://sqlos.example.test/sqlos/auth/device_authorization",
+      "grant_types_supported": [
+        "authorization_code",
+        "refresh_token",
+        "urn:ietf:params:oauth:grant-type:device_code"
+      ],
+      "id_token_signing_alg_values_supported": [
+        "RS256"
+      ],
+      "issuer": "https://sqlos.example.test/sqlos/auth",
+      "jwks_uri": "https://sqlos.example.test/sqlos/auth/.well-known/jwks.json",
+      "registration_endpoint": "https://sqlos.example.test/sqlos/auth/register",
+      "request_parameter_supported": false,
+      "request_uri_parameter_supported": false,
+      "resource_parameter_supported": true,
+      "response_modes_supported": [
+        "query"
+      ],
+      "response_types_supported": [
+        "code"
+      ],
+      "scopes_supported": [
+        "email",
+        "openid",
+        "profile"
+      ],
+      "subject_types_supported": [
+        "public"
+      ],
+      "token_endpoint": "https://sqlos.example.test/sqlos/auth/token",
+      "token_endpoint_auth_methods_supported": [
+        "none"
+      ],
+      "userinfo_endpoint": "https://sqlos.example.test/sqlos/auth/userinfo"
+    }
+
+## 2. mcp-client: no protected-resource metadata: this host declares no API or MCP surface
+> GET /.well-known/oauth-protected-resource
+< 404 Not Found
