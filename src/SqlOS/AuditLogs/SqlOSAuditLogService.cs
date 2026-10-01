@@ -18,24 +18,6 @@ public sealed class SqlOSAuditLogService : ISqlOSAuditLogService
     public static readonly TimeSpan MaxExportRange = TimeSpan.FromDays(366);
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-    private static readonly string[] RedactedMetadataKeyParts =
-    [
-        "password",
-        "secret",
-        "token",
-        "authorization",
-        "cookie",
-        "api_key",
-        "apikey",
-        "clientsecret",
-        "client_secret",
-        "private_key",
-        "privatekey",
-        "stacktrace",
-        "stack_trace",
-        "exception"
-    ];
-
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSCryptoService _cryptoService;
 
@@ -54,10 +36,7 @@ public sealed class SqlOSAuditLogService : ISqlOSAuditLogService
         var action = NormalizeRequired(request.Action, nameof(request.Action), 160);
         var source = NormalizeNullable(request.Source, 80) ?? "application";
         var organizationId = NormalizeNullable(request.OrganizationId, 64);
-        var actor = NormalizeActor(request.Actor);
-        var targets = NormalizeTargets(request.Targets);
         var now = DateTime.UtcNow;
-        var occurredAt = request.OccurredAt?.ToUniversalTime() ?? now;
         var (applicationId, applicationKey) = await ResolveApplicationAsync(
             request.ApplicationId,
             request.ApplicationKey,
@@ -89,42 +68,13 @@ public sealed class SqlOSAuditLogService : ISqlOSAuditLogService
             }
         }
 
-        var sanitizedMetadata = SanitizeMetadata(request.Metadata);
-        var metadataJson = sanitizedMetadata == null
-            ? null
-            : JsonSerializer.Serialize(sanitizedMetadata, JsonOptions);
-        var contextJson = request.Context == null
-            ? null
-            : JsonSerializer.Serialize(request.Context, JsonOptions);
-
-        var entity = new SqlOSAuditEvent
-        {
-            Id = _cryptoService.GenerateId("evt"),
-            OrganizationId = organizationId,
-            ApplicationId = applicationId,
-            ApplicationKey = applicationKey,
-            UserId = NormalizeNullable(request.UserId, 64)
-                ?? (string.Equals(actor.Type, "user", StringComparison.OrdinalIgnoreCase) ? actor.Id : null),
-            SessionId = NormalizeNullable(request.Context?.SessionId, 64),
-            EventType = action,
-            Source = source,
-            Action = action,
-            ActorType = actor.Type,
-            ActorId = actor.Id,
-            ActorDisplayName = actor.DisplayName,
-            TargetsJson = JsonSerializer.Serialize(targets, JsonOptions),
-            ContextJson = contextJson,
-            MetadataJson = metadataJson,
-            DataJson = metadataJson,
-            OccurredAt = occurredAt,
-            IngestedAt = now,
-            IpAddress = NormalizeNullable(request.Context?.IpAddress, 128),
-            UserAgent = NormalizeNullable(request.Context?.UserAgent, 512),
-            RequestId = NormalizeNullable(request.Context?.RequestId, 128),
-            CorrelationId = NormalizeNullable(request.Context?.CorrelationId, 128),
-            IdempotencyScopeHash = idempotencyScopeHash
-        };
-
+        var entity = SqlOSAuditRows.Create(
+            request,
+            _cryptoService.GenerateId("evt"),
+            now,
+            applicationId,
+            applicationKey,
+            idempotencyScopeHash);
         _context.Set<SqlOSAuditEvent>().Add(entity);
 
         try
@@ -507,123 +457,11 @@ public sealed class SqlOSAuditLogService : ISqlOSAuditLogService
         }
     }
 
-    private static IReadOnlyDictionary<string, object?>? SanitizeMetadata(
-        IReadOnlyDictionary<string, object?>? metadata)
-    {
-        if (metadata == null)
-        {
-            return null;
-        }
-
-        var element = JsonSerializer.SerializeToElement(metadata, JsonOptions);
-        return SanitizeElement(element, propertyName: null) as Dictionary<string, object?>;
-    }
-
-    private static object? SanitizeElement(JsonElement element, string? propertyName)
-    {
-        if (ShouldRedact(propertyName))
-        {
-            return "[redacted]";
-        }
-
-        return element.ValueKind switch
-        {
-            JsonValueKind.Object => SanitizeObject(element),
-            JsonValueKind.Array => element.EnumerateArray()
-                .Select(item => SanitizeElement(item, propertyName: null))
-                .ToList(),
-            JsonValueKind.String => Truncate(element.GetString(), 2048),
-            JsonValueKind.Number => ReadNumber(element),
-            JsonValueKind.True => true,
-            JsonValueKind.False => false,
-            JsonValueKind.Null => null,
-            _ => null
-        };
-    }
-
-    private static Dictionary<string, object?> SanitizeObject(JsonElement element)
-    {
-        var result = new Dictionary<string, object?>(StringComparer.Ordinal);
-        foreach (var property in element.EnumerateObject())
-        {
-            result[property.Name] = SanitizeElement(property.Value, property.Name);
-        }
-
-        return result;
-    }
-
-    private static object ReadNumber(JsonElement element)
-    {
-        if (element.TryGetInt64(out var int64))
-        {
-            return int64;
-        }
-
-        if (element.TryGetDecimal(out var decimalValue))
-        {
-            return decimalValue;
-        }
-
-        return element.GetDouble();
-    }
-
-    private static bool ShouldRedact(string? propertyName)
-    {
-        if (string.IsNullOrWhiteSpace(propertyName))
-        {
-            return false;
-        }
-
-        var normalized = propertyName.Replace("-", "_", StringComparison.Ordinal).ToLowerInvariant();
-        if (normalized is "access" or "refresh")
-        {
-            return true;
-        }
-
-        return RedactedMetadataKeyParts.Any(normalized.Contains);
-    }
-
-    private static SqlOSAuditActor NormalizeActor(SqlOSAuditActor? actor)
-        => actor == null
-            ? new SqlOSAuditActor("system")
-            : new SqlOSAuditActor(
-                NormalizeNullable(actor.Type, 80) ?? "system",
-                NormalizeNullable(actor.Id, 128),
-                NormalizeNullable(actor.DisplayName, 320));
-
-    private static IReadOnlyList<SqlOSAuditTarget> NormalizeTargets(IReadOnlyList<SqlOSAuditTarget>? targets)
-        => targets?
-            .Where(x => !string.IsNullOrWhiteSpace(x.Type) && !string.IsNullOrWhiteSpace(x.Id))
-            .Select(x => new SqlOSAuditTarget(
-                NormalizeRequired(x.Type, "target.type", 80),
-                NormalizeRequired(x.Id, "target.id", 128),
-                NormalizeNullable(x.DisplayName, 320)))
-            .ToList()
-        ?? [];
-
     private static string NormalizeRequired(string? value, string name, int maxLength)
-        => NormalizeNullable(value, maxLength)
-           ?? throw new ArgumentException($"{name} is required.", name);
+        => SqlOSAuditRows.NormalizeRequired(value, name, maxLength);
 
     private static string? NormalizeNullable(string? value, int maxLength)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-
-        return Truncate(value.Trim(), maxLength);
-    }
-
-    private static string? Truncate(string? value, int maxLength)
-    {
-        if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
-        {
-            return value;
-        }
-
-        return value[..maxLength];
-    }
+        => SqlOSAuditRows.NormalizeNullable(value, maxLength);
 
     internal static string? HashIdempotencyScope(
         string? organizationId,

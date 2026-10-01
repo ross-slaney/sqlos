@@ -14,6 +14,8 @@ using SqlOS.AuthServer.Security;
 using SqlOS.Calendar.Interfaces;
 using SqlOS.Calendar.Services;
 using SqlOS.Dashboard;
+using SqlOS.Database;
+using SqlOS.Domain;
 using SqlOS.Email.Configuration;
 using SqlOS.Email.Interfaces;
 using SqlOS.Email.Services;
@@ -75,6 +77,17 @@ public static class ServiceCollectionExtensions
 
         services.AddScoped<ISqlOSAuthServerDbContext>(sp => sp.GetRequiredService<TContext>());
         services.AddScoped<ISqlOSFgaDbContext>(sp => sp.GetRequiredService<TContext>());
+
+        // Domain events become audit rows in the save that commits them. The interceptor is
+        // attached to the host's context whether the host or SqlOS registered it, and whether
+        // AddDbContext runs before or after this call; SqlOSDbContext also attaches it, and both
+        // paths check first, so a context never runs it twice.
+        services.ConfigureDbContext<TContext>(
+            static (_, dbOptions) => SqlOSDomainEventsInterceptor.AttachTo(dbOptions),
+            ServiceLifetime.Singleton);
+        services.TryAddSingleton(SqlOSAuditProjection.Default);
+        services.TryAddScoped<SqlOSRequestContextAccessor>();
+        services.TryAddScoped<IAuditRecorder, SqlOSAuditRecorder>();
         services.AddScoped<SqlOSDistributedRateLimitStore>();
         services.AddScoped(sp => new SqlOSDashboardLoginThrottlingService(
             sp.GetRequiredService<SqlOSDistributedRateLimitStore>()));

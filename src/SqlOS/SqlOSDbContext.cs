@@ -21,8 +21,12 @@ public abstract class SqlOSDbContext<TContext> : DbContext, ISqlOSAuthServerDbCo
     where TContext : SqlOSDbContext<TContext>
 {
     /// <param name="options">The EF Core options registered for the concrete application context.</param>
+    /// <remarks>
+    /// The context writes the audit rows of its domain events in the save that commits them, even
+    /// when its options were built without dependency injection.
+    /// </remarks>
     protected SqlOSDbContext(DbContextOptions<TContext> options)
-        : base(options)
+        : base(SqlOSDomainEventsInterceptor.AttachTo(options))
     {
         if (SqlOSDatabase.IsPostgreSql(Database.ProviderName))
         {

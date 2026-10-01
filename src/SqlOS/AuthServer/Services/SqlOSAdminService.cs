@@ -2503,24 +2503,9 @@ public sealed partial class SqlOSAdminService
         object? data = null,
         CancellationToken cancellationToken = default)
     {
-        IReadOnlyDictionary<string, object?>? metadata = data == null
-            ? null
-            : JsonSerializer.Deserialize<Dictionary<string, object?>>(
-                JsonSerializer.Serialize(data),
-                new JsonSerializerOptions(JsonSerializerDefaults.Web));
-
         var auditLogs = new SqlOSAuditLogService(_context, _cryptoService);
         await auditLogs.RecordAsync(
-            new SqlOSAuditLogRecordRequest(
-                Action: eventType,
-                OrganizationId: organizationId,
-                UserId: userId,
-                Source: "authserver",
-                Actor: new SqlOSAuditActor(actorType, actorId),
-                Context: new SqlOSAuditContext(
-                    IpAddress: ipAddress,
-                    SessionId: sessionId),
-                Metadata: metadata),
+            SqlOSAuditRows.AuthServerRequest(eventType, actorType, actorId, userId, organizationId, sessionId, ipAddress, data),
             cancellationToken);
     }
 
