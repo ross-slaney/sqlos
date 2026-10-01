@@ -145,20 +145,21 @@ release's function measured beside the current one in the same job. The PostgreS
 | Chain manager, σ = 7.1% | 13.7 → 16.9 · 29.4 → 32.4 · 5.4 → 6.3 | 54.0 → 55.0 · 72.4 → 75.0 · 5.8 → 6.2 |
 | Region manager, σ = 0.97% (1,592 rows examined) | 64 → 72 · 166 → 174 · 5.4 → 5.6 | 298 → 299 · 434 → 441 · 5.9 → 6.3 |
 | Chain manager at D = 10 | 13.2 → 14.2 · 27.9 → 30.7 · 5.5 → 6.4 | 59.4 → 59.0 · 78.7 → 77.8 · 6.0 → 6.6 |
-| Store manager, sparse, σ = 0.0065% | (row filter: 33 s at every scale, full tier) · – · 5.5 → 6.3 | (161 s, full tier) · – · 6.1 → 6.4 |
+| Store manager, sparse, σ = 0.0065% | full tier only · 33 s at every scale (#446) · 5.5 → 6.3 | full tier only · 161 s at every scale (#446) · 6.1 → 6.4 |
 | Store manager, filtered to the store | 6.5 → 7.6 · 8.3 → 9.1 · – | 16.0 → 16.0 · 17.0 → 17.7 · – |
-| `fn_IsResourceAccessible`, one product (depth 4 / 9 / denied) | 2.7 / 2.7 / 2.7 · 7.6 / 7.4 / 7.3 · – | 4.1 / 4.5 / 3.1 · 2.8 / 3.3 / 2.0 · – |
+| `fn_IsResourceAccessible` at 10M, one product (depth 4 / 9 / denied) | 2.8 / 2.8 / 2.7 · 7.6 / 7.4 / 7.3 · – | 4.1 / 4.5 / 3.1 · 2.8 / 3.3 / 2.0 · – |
 | `Allows`, product at depth 9 | 44.9 → 45.8 | 54.8 → 54.2 |
 
 Three things to read off the table:
 
 - **The row filter did not get slower.** On every list page the current function is at or below the previous
-  release's (PostgreSQL ×0.60–0.85 at 10M, SQL Server ×0.68–0.94). Point checks on PostgreSQL went from
-  7.5 ms to 2.7 ms; on SQL Server they cost about 1 ms more (the root set is built once into a spool, which
-  a single-row check does not amortize).
+  release's (at 10M: PostgreSQL ×0.41–0.83, SQL Server ×0.68–0.94). Point checks on PostgreSQL went from
+  about 7.4 ms to 2.8 ms; on SQL Server they cost about 1 ms more (the root set is built once into a spool,
+  which a single-row check does not amortize).
 - **The closure page is flat in both N and σ.** Every principal, both engines, both scales: 5–7 ms and 20
-  closure entries read, including the store manager whose row-filter page takes 33 s and 161 s.
-- **Per-page cost does not grow with N** for either path: the 10M ÷ 1M ratios are ×0.96–1.26, within the
+  closure entries read, including the store manager whose row-filter page took 33 s and 161 s with the
+  previous release's function.
+- **Per-page cost does not grow with N** for either path: the 10M ÷ 1M ratios are ×0.99–1.26, within the
   scale gate.
 
 Hosted runners come from a mixed pool of CPU models, and the engines respond to it differently; identical
@@ -168,12 +169,18 @@ records the CPU model, and every gate compares within one job on one machine.
 ## Findings
 
 - **Sparse access is the real cost of the row filter, as Theorem 3 predicts.** A manager of a median store
-  who lists "every product I can see" examines about 400K rows per page: 33 s on PostgreSQL, 161 s on SQL
-  Server, at every scale. Scoping the query by the store (`WHERE StoreId = …` on a `(StoreId, Id)` index)
-  brings the same person back to 10 ms and 27 ms.
+  who lists "every product I can see" examines about 400K rows per page; with the previous release's
+  function that took 33 s on PostgreSQL and 161 s on SQL Server, at every scale (#446). The current function
+  examines the same rows at a lower per-row cost; the full tier reports it. Scoping the query by the store
+  (`WHERE StoreId = …` on a `(StoreId, Id)` index) brings the same person back to a normal page.
 - **The closure page removes σ from the bound.** The same page through `ListVisibleAsync` reads 20 closure
   entries (one index range for the manager's one grant) and 20 resource rows, at every scale; see
   `paper/closure-list-filtering.md` for the proof and the `improvement` gate for the measurement.
+- **The closure costs storage, PostgreSQL more than SQL Server.** At 10M products it holds 45.5M rows (about
+  4.5 per product: one per ancestor). With the sequence-number indexes and the `Products.ResourceId` index
+  the closure page needs, the database grew from 3.8 GB to 10.1 GB on PostgreSQL and from 4.5 GB to 7.3 GB
+  on SQL Server. The rows are 20 bytes of keys; PostgreSQL adds a 24-byte header to every heap row and
+  keeps the primary key as a separate index, where SQL Server stores the clustered key once.
 - **`fn_AccessRoots` moves the grant conditions out of the per-row walk.** The current row filter examines
   the same rows as the previous release's and evaluates the caller's grants once per query instead of once
   per ancestor per row; the `regression` gate compares the two on every run.
