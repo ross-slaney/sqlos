@@ -20,7 +20,7 @@ public sealed class PublicSessionScenarios
 
     [Scenario]
     [Covers("POST /sqlos/auth/token/refresh")]
-    public async Task A_replay_inside_the_grace_window_returns_the_cached_pair_with_database_timestamps_CurrentBehavior_KnownDefect_325()
+    public async Task A_replay_inside_the_grace_window_returns_the_cached_pair_with_utc_timestamps()
     {
         await using var t = await PublicHost.StartAsync(HostProfiles.Hosted);
         var alice = await t.Setup.CreateUserAsync("alice");
@@ -32,7 +32,7 @@ public sealed class PublicSessionScenarios
             "refresh: a new pair; its expiry times are UTC (Z)");
         t.Observe(
             await t.Api.PostJsonAsync("/sqlos/auth/token/refresh", new { refreshToken = first }),
-            "replay the first refresh token inside the grace window: the cached pair, with expiry times read back from the database without a UTC marker (#325)");
+            "replay the first refresh token inside the grace window: the cached pair, with expiry times read back from the database as UTC (Z) (#325)");
         t.Observe(
             await t.Api.PostJsonAsync("/sqlos/auth/token/refresh", new { refreshToken = rotated.JsonString("refreshToken"), clientId = Client }),
             "the rotated token refreshes, naming its client");

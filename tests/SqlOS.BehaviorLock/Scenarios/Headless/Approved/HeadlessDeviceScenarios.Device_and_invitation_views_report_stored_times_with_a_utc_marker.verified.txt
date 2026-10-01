@@ -1,8 +1,8 @@
 # SqlOS behavior lock transcript
-scenario: HeadlessDeviceScenarios.Device_and_invitation_views_report_stored_times_without_a_utc_marker_CurrentBehavior_KnownDefect_325
+scenario: HeadlessDeviceScenarios.Device_and_invitation_views_report_stored_times_with_a_utc_marker
 profile: headless
 
-# Known defect #325: times read back from the database serialize without Z ({datetime:unspecified}), so browsers read UTC as local time.
+# Issue #325: times read back from the database serialize as UTC with Z ({datetime:utc-z}).
 
 ## 1. browser: the device view's deviceAuthorization.expiresAt
 > POST /sqlos/auth/headless/device/resolve

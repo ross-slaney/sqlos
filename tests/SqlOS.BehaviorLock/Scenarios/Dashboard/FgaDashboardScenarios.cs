@@ -279,17 +279,17 @@ public sealed class FgaDashboardScenarios
     }
 
     /// <summary>
-    /// Known defect #325 (7.2.1): timestamps SqlOS reads back through EF have no UTC marker. A grant
-    /// window sent in UTC with a trailing <c>Z</c> is stored correctly and enforced correctly, but
-    /// the dashboard returns it (and <c>createdAt</c>) without the <c>Z</c>, so browsers read it as
-    /// local time. The fix changes the <c>{datetime:unspecified}</c> placeholders to <c>{datetime:utc-z}</c>.
+    /// A grant window sent in UTC with a trailing <c>Z</c> is stored, enforced, and returned (with
+    /// <c>createdAt</c>) as UTC with the <c>Z</c>. SqlOS 7.2.1 returned it without the <c>Z</c>, so
+    /// browsers read it as local time (#325, fixed by behavior-ledger entry BL-0001; the baseline keeps
+    /// the 7.2.1 transcript).
     /// </summary>
     [Scenario]
     [Covers("POST /sqlos/admin/fga/api/grants")]
     [Covers("GET /sqlos/admin/fga/api/resources/{resourceId}/grants")]
     [Covers("GET /sqlos/admin/fga/api/subjects/{subjectId}/grants")]
     [Covers("POST /__probe/fga/check")]
-    public async Task Grant_windows_round_trip_without_a_utc_marker_CurrentBehavior_KnownDefect_325()
+    public async Task Grant_windows_round_trip_with_a_utc_marker()
     {
         await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback);
         var alice = await t.Setup.CreateUserAsync("alice");
@@ -305,14 +305,14 @@ public sealed class FgaDashboardScenarios
 
         t.Observe(
             await op.PostJsonAsync($"{Api}/grants", new { subjectId = alice.Id, roleId = reader, resourceId = alpha, effectiveFrom = "2000-01-01T00:00:00Z", effectiveTo = "2099-12-31T23:59:59Z" }),
-            "a grant whose UTC window is open now comes back without the UTC marker");
+            "a grant whose UTC window is open now comes back with the UTC marker");
         t.Observe(
             await op.PostJsonAsync($"{Api}/grants", new { subjectId = alice.Id, roleId = reader, resourceId = beta, effectiveFrom = "2099-01-01T00:00:00Z" }),
             "a grant that starts in the future");
         t.Observe(
             await op.PostJsonAsync($"{Api}/grants", new { subjectId = alice.Id, roleId = reader, resourceId = gamma, effectiveTo = "2000-01-01T00:00:00Z" }),
             "a grant that ended in the past");
-        t.Observe(await op.GetAsync($"{Api}/resources/{alpha}/grants"), "the resource's grants carry the window without the marker");
+        t.Observe(await op.GetAsync($"{Api}/resources/{alpha}/grants"), "the resource's grants carry the window with the marker");
         t.Observe(await op.GetAsync($"{Api}/subjects/{alice.Id}/grants"), "so do the subject's grants");
         t.Observe(
             await probe.PostJsonAsync("/__probe/fga/check", new { subjectId = alice.Id, permissionKey = read, resourceId = alpha }),

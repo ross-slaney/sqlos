@@ -263,22 +263,24 @@ public sealed class AdminIdentityUserScenarios
     [Covers("GET /sqlos/admin/auth/api/organizations/{organizationId}")]
     [Covers("POST /sqlos/admin/auth/api/organizations/{organizationId}/memberships")]
     [Covers("GET /sqlos/admin/auth/api/users/{userId}/memberships")]
-    public async Task Admin_reads_return_database_timestamps_without_a_utc_marker_CurrentBehavior_KnownDefect_325()
+    public async Task Admin_reads_return_database_timestamps_with_a_utc_marker()
     {
         await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback);
 
-        t.Note("Known defect #325, recorded as it behaves today: create responses serialize the in-memory UTC value with Z, while every value read back from the database has no zone ({datetime:unspecified}).");
+        t.Note(
+            "Issue #325: create responses and every value read back from the database serialize UTC with Z ({datetime:utc-z}).",
+            baselineText: "Known defect #325, recorded as it behaves today: create responses serialize the in-memory UTC value with Z, while every value read back from the database has no zone ({datetime:unspecified}).");
         var user = t.Observe(
             await t.Operator.PostJsonAsync(AdminIdentity.Api + "/users", new { displayName = "Alice", email = t.Unique.Email("alice") }),
             "the create response carries Z");
-        t.Observe(await t.Operator.GetAsync($"{AdminIdentity.Api}/users/{user.JsonString("id")}"), "the same user read back has no zone");
-        t.Observe(await t.Operator.GetAsync(AdminIdentity.Api + "/users"), "nor does the list");
+        t.Observe(await t.Operator.GetAsync($"{AdminIdentity.Api}/users/{user.JsonString("id")}"), "the same user read back carries Z too");
+        t.Observe(await t.Operator.GetAsync(AdminIdentity.Api + "/users"), "and so does the list");
         var organization = t.Observe(await t.Operator.PostJsonAsync(AdminIdentity.Api + "/organizations", new { name = "Acme" }), "an organization's create response carries Z");
-        t.Observe(await t.Operator.GetAsync($"{AdminIdentity.Api}/organizations/{organization.JsonString("id")}"), "read back, it has no zone");
+        t.Observe(await t.Operator.GetAsync($"{AdminIdentity.Api}/organizations/{organization.JsonString("id")}"), "read back, it carries Z");
         t.Observe(
             await t.Operator.PostJsonAsync($"{AdminIdentity.Api}/organizations/{organization.JsonString("id")}/memberships", new { userId = user.JsonString("id"), role = "member" }),
             "a membership's create response carries Z");
-        t.Observe(await t.Operator.GetAsync($"{AdminIdentity.Api}/users/{user.JsonString("id")}/memberships"), "read back, it has no zone");
+        t.Observe(await t.Operator.GetAsync($"{AdminIdentity.Api}/users/{user.JsonString("id")}/memberships"), "read back, it carries Z");
         await t.ApproveAsync();
     }
 

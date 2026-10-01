@@ -1,5 +1,5 @@
 # SqlOS behavior lock transcript
-scenario: EnterpriseTimestampScenarios.Timestamps_lose_their_utc_marker_once_read_back_CurrentBehavior_KnownDefect_325
+scenario: EnterpriseTimestampScenarios.Timestamps_keep_their_utc_marker_once_read_back
 profile: enterprise-scim-path
 
 ## 1. directory: create Judy: meta.created and meta.lastModified carry Z
@@ -59,7 +59,7 @@ profile: enterprise-scim-path
       "userName": "{email:judy}"
     }
 
-## 2. directory: read her back: the same instants without Z
+## 2. directory: read her back: the same instants with Z
 > GET /scim/v2/Users/{usr:judy}?attributes=meta
 > Authorization: Bearer {scim-token#1}
 < 200 OK
@@ -78,7 +78,7 @@ profile: enterprise-scim-path
       ]
     }
 
-## 3. directory: the list reads them without Z too
+## 3. directory: the list reads them with Z too
 > GET /scim/v2/Users?attributes=meta
 > Authorization: Bearer {scim-token#1}
 < 200 OK
@@ -122,7 +122,7 @@ profile: enterprise-scim-path
       "tokenRotatedAt": "{datetime:utc-z}"
     }
 
-## 5. operator: the connection read back: tokenRotatedAt without Z
+## 5. operator: the connection read back: tokenRotatedAt with Z
 > GET /sqlos/admin/auth/api/scim-connections/{scim#1}
 > X-BehaviorLock-Operator: behavior-lock-operator
 < 200 OK
@@ -186,7 +186,7 @@ profile: enterprise-scim-path
       "status": "pending"
     }
 
-## 7. operator: the link read back: without Z
+## 7. operator: the link read back: with Z
 > GET /sqlos/admin/auth/api/organizations/{org#1}/sso-portal/sessions?pageSize=1
 > X-BehaviorLock-Operator: behavior-lock-operator
 < 200 OK

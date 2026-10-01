@@ -206,7 +206,7 @@ public sealed partial class AuditLogAdminScenarios
     [Scenario]
     [Covers("GET /sqlos/admin/audit/api/events/{id}")]
     [Covers("GET /sqlos/admin/audit/api/events/export.csv")]
-    public async Task Audit_event_times_are_read_back_without_a_utc_marker_CurrentBehavior_KnownDefect_325()
+    public async Task Audit_event_times_are_read_back_with_a_utc_marker()
     {
         await using var t = await AdminConfigHost.StartAsync(HostProfiles.Modules);
         var recorded = t.Observe(
@@ -220,7 +220,7 @@ public sealed partial class AuditLogAdminScenarios
 
         t.Observe(
             await t.Operator.GetAsync($"{EventsRoute}/{recorded.JsonString("eventId")}"),
-            "known defect #325: the API returns occurredAt and ingestedAt without a UTC marker, so browsers read them as local time");
+            "the API returns occurredAt and ingestedAt with a UTC marker, as the host recorded them (#325)");
         var export = t.Observe(
             await t.Operator.GetAsync($"{EventsRoute}/export.csv?source=clock&occurredAtFrom=2025-12-31T00:00:00Z&occurredAtTo=2026-01-02T00:00:00Z"),
             "the CSV export of the same event writes UTC with a Z");

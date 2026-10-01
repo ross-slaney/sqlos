@@ -1,5 +1,5 @@
 # SqlOS behavior lock transcript
-scenario: AuditLogAdminScenarios.Audit_event_times_are_read_back_without_a_utc_marker_CurrentBehavior_KnownDefect_325
+scenario: AuditLogAdminScenarios.Audit_event_times_are_read_back_with_a_utc_marker
 profile: modules
 
 ## 1. host: the host records an event at 10:00 UTC
@@ -17,7 +17,7 @@ profile: modules
       "eventId": "{evt#1}"
     }
 
-## 2. operator: known defect #325: the API returns occurredAt and ingestedAt without a UTC marker, so browsers read them as local time
+## 2. operator: the API returns occurredAt and ingestedAt with a UTC marker, as the host recorded them (#325)
 > GET /sqlos/admin/audit/api/events/{evt#1}
 > X-BehaviorLock-Operator: behavior-lock-operator
 < 200 OK

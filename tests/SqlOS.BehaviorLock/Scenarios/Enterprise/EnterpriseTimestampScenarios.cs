@@ -6,10 +6,11 @@ using SqlOS.BehaviorLock.Infrastructure.Transcripts;
 namespace SqlOS.BehaviorLock.Scenarios.Enterprise;
 
 /// <summary>
-/// Known defect #325 (7.2.1): a timestamp SqlOS just wrote serializes with a trailing <c>Z</c>, but
-/// the same value read back through EF has <c>DateTimeKind.Unspecified</c> and serializes without
-/// one, so SCIM clients and the dashboard read it as local time. Transcripts show the two format
-/// classes as <c>{datetime:utc-z}</c> and <c>{datetime:unspecified}</c>.
+/// A timestamp SqlOS wrote serializes with a trailing <c>Z</c>, and so does the same value read back
+/// through EF (<c>{datetime:utc-z}</c> in transcripts). SqlOS 7.2.1 read it back with
+/// <c>DateTimeKind.Unspecified</c> and serialized it without the <c>Z</c>
+/// (<c>{datetime:unspecified}</c>), so SCIM clients and the dashboard read it as local time (#325,
+/// fixed by behavior-ledger entry BL-0001; the baseline keeps the 7.2.1 transcript).
 /// </summary>
 [TestClass]
 public sealed class EnterpriseTimestampScenarios
@@ -22,7 +23,7 @@ public sealed class EnterpriseTimestampScenarios
     [Covers("GET /sqlos/admin/auth/api/scim-connections/{connectionId}")]
     [Covers("POST /sqlos/admin/auth/api/organizations/{organizationId}/sso-portal/sessions")]
     [Covers("GET /sqlos/admin/auth/api/organizations/{organizationId}/sso-portal/sessions")]
-    public async Task Timestamps_lose_their_utc_marker_once_read_back_CurrentBehavior_KnownDefect_325()
+    public async Task Timestamps_keep_their_utc_marker_once_read_back()
     {
         await using var t = await Transcript.StartAsync(HostProfiles.EnterpriseScimPath);
         var acme = await t.Setup.CreateOrganizationAsync("acme");
@@ -36,21 +37,21 @@ public sealed class EnterpriseTimestampScenarios
             "create Judy: meta.created and meta.lastModified carry Z");
         var id = created.JsonString("id");
         t.Scrub(id, "usr", "judy");
-        t.Observe(await directory.GetAsync($"{Scim.Root}/Users/{id}?attributes=meta", connection.Token), "read her back: the same instants without Z");
-        t.Observe(await directory.GetAsync($"{Scim.Root}/Users?attributes=meta", connection.Token), "the list reads them without Z too");
+        t.Observe(await directory.GetAsync($"{Scim.Root}/Users/{id}?attributes=meta", connection.Token), "read her back: the same instants with Z");
+        t.Observe(await directory.GetAsync($"{Scim.Root}/Users?attributes=meta", connection.Token), "the list reads them with Z too");
 
         var rotated = t.Observe(
             await t.Operator.PostJsonAsync($"/sqlos/admin/auth/api/scim-connections/{connection.Id}/token/rotate", new { }),
             "rotate the token: tokenRotatedAt carries Z");
         t.ScrubScimToken(rotated.JsonString("token"));
-        t.Observe(await t.Operator.GetAsync($"/sqlos/admin/auth/api/scim-connections/{connection.Id}"), "the connection read back: tokenRotatedAt without Z");
+        t.Observe(await t.Operator.GetAsync($"/sqlos/admin/auth/api/scim-connections/{connection.Id}"), "the connection read back: tokenRotatedAt with Z");
 
         t.Observe(
             await t.Operator.PostJsonAsync($"/sqlos/admin/auth/api/organizations/{acme.Id}/sso-portal/sessions", new { }),
             "issue a setup link: createdAt and expiresAt carry Z");
         t.Observe(
             await t.Operator.GetAsync($"/sqlos/admin/auth/api/organizations/{acme.Id}/sso-portal/sessions?pageSize=1"),
-            "the link read back: without Z");
+            "the link read back: with Z");
 
         await t.ApproveAsync();
     }

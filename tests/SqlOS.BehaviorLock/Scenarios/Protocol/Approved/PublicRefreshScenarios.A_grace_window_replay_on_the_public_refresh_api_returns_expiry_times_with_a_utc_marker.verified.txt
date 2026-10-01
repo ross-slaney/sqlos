@@ -1,8 +1,8 @@
 # SqlOS behavior lock transcript
-scenario: PublicSessionScenarios.A_replay_inside_the_grace_window_returns_the_cached_pair_with_database_timestamps_CurrentBehavior_KnownDefect_325
+scenario: PublicRefreshScenarios.A_grace_window_replay_on_the_public_refresh_api_returns_expiry_times_with_a_utc_marker
 profile: hosted
 
-## 1. client: refresh: a new pair; its expiry times are UTC (Z)
+## 1. app-backend: a rotation computes its expiry times in memory: they carry Z
 > POST /sqlos/auth/token/refresh
 > Content-Type: application/json; charset=utf-8
 >   {
@@ -14,7 +14,7 @@ profile: hosted
       "accessToken": "{access-token#1}",
       "accessTokenExpiresAt": "{datetime:utc-z}",
       "clientId": "behavior-lock-app",
-      "idToken": null,
+      "idToken": "{id-token#1}",
       "organizationId": null,
       "refreshToken": "{refresh-token#2}",
       "refreshTokenExpiresAt": "{datetime:utc-z}",
@@ -37,12 +37,33 @@ profile: hosted
       "iat": {epoch},
       "iss": "https://sqlos.example.test/sqlos/auth",
       "nbf": {epoch},
+      "scope": "openid profile email offline_access",
       "sid": "{ses#1}",
       "sub": "{usr#1}"
     }
     lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+  jwt {id-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "JWT"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "at_hash": "{hash:at_hash}",
+      "aud": "behavior-lock-app",
+      "auth_time": {epoch},
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=5m
 
-## 2. client: replay the first refresh token inside the grace window: the cached pair, with expiry times read back from the database without a UTC marker (#325)
+## 2. app-backend: the grace-window replay reads the cached pair back from the database, and the same expiry times keep their UTC marker (#325)
 > POST /sqlos/auth/token/refresh
 > Content-Type: application/json; charset=utf-8
 >   {
@@ -54,32 +75,9 @@ profile: hosted
       "accessToken": "{access-token#1}",
       "accessTokenExpiresAt": "{datetime:utc-z}",
       "clientId": "behavior-lock-app",
-      "idToken": null,
+      "idToken": "{id-token#1}",
       "organizationId": null,
       "refreshToken": "{refresh-token#2}",
       "refreshTokenExpiresAt": "{datetime:utc-z}",
       "sessionId": "{ses#1}"
     }
-
-## 3. client: the rotated token refreshes, naming its client
-> POST /sqlos/auth/token/refresh
-> Content-Type: application/json; charset=utf-8
->   {
->     "clientId": "behavior-lock-app",
->     "refreshToken": "{refresh-token#2}"
->   }
-< 200 OK
-< Content-Type: application/json; charset=utf-8
-    {
-      "accessToken": "{access-token#1}",
-      "accessTokenExpiresAt": "{datetime:utc-z}",
-      "clientId": "behavior-lock-app",
-      "idToken": null,
-      "organizationId": null,
-      "refreshToken": "{refresh-token#3}",
-      "refreshTokenExpiresAt": "{datetime:utc-z}",
-      "sessionId": "{ses#1}"
-    }
-
-## audit: refresh writes no audit events
-  (no new events)

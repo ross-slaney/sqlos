@@ -53,7 +53,7 @@ public sealed class PublicRefreshScenarios
 
     [Scenario]
     [Covers("POST /sqlos/auth/token/refresh")]
-    public async Task A_grace_window_replay_on_the_public_refresh_api_returns_expiry_times_without_a_utc_marker_CurrentBehavior_KnownDefect_325()
+    public async Task A_grace_window_replay_on_the_public_refresh_api_returns_expiry_times_with_a_utc_marker()
     {
         await using var t = await Transcript.StartAsync(HostProfiles.Hosted);
         var alice = await t.Setup.CreateUserAsync("alice");
@@ -65,7 +65,7 @@ public sealed class PublicRefreshScenarios
             "a rotation computes its expiry times in memory: they carry Z");
         t.ObserveTokens(
             await backend.PostJsonAsync("/sqlos/auth/token/refresh", new { refreshToken = session.RefreshToken }),
-            "known defect #325: the grace-window replay reads the cached pair back from the database, and the same expiry times lose their UTC marker");
+            "the grace-window replay reads the cached pair back from the database, and the same expiry times keep their UTC marker (#325)");
 
         await t.ApproveAsync();
     }

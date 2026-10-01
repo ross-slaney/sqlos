@@ -1,8 +1,8 @@
 # SqlOS behavior lock transcript
-scenario: AdminIdentityUserScenarios.Admin_reads_return_database_timestamps_without_a_utc_marker_CurrentBehavior_KnownDefect_325
+scenario: AdminIdentityUserScenarios.Admin_reads_return_database_timestamps_with_a_utc_marker
 profile: dashboard-callback
 
-# Known defect #325, recorded as it behaves today: create responses serialize the in-memory UTC value with Z, while every value read back from the database has no zone ({datetime:unspecified}).
+# Issue #325: create responses and every value read back from the database serialize UTC with Z ({datetime:utc-z}).
 
 ## 1. operator: the create response carries Z
 > POST /sqlos/admin/auth/api/users
@@ -23,7 +23,7 @@ profile: dashboard-callback
       "updatedAt": "{datetime:utc-z}"
     }
 
-## 2. operator: the same user read back has no zone
+## 2. operator: the same user read back carries Z too
 > GET /sqlos/admin/auth/api/users/{usr#1}
 > X-BehaviorLock-Operator: behavior-lock-operator
 < 200 OK
@@ -40,7 +40,7 @@ profile: dashboard-callback
       "updatedAt": "{datetime:utc-z}"
     }
 
-## 3. operator: nor does the list
+## 3. operator: and so does the list
 > GET /sqlos/admin/auth/api/users
 > X-BehaviorLock-Operator: behavior-lock-operator
 < 200 OK
@@ -79,7 +79,7 @@ profile: dashboard-callback
       "slug": "acme"
     }
 
-## 5. operator: read back, it has no zone
+## 5. operator: read back, it carries Z
 > GET /sqlos/admin/auth/api/organizations/{org#1}
 > X-BehaviorLock-Operator: behavior-lock-operator
 < 200 OK
@@ -114,7 +114,7 @@ profile: dashboard-callback
       "userId": "{usr#1}"
     }
 
-## 7. operator: read back, it has no zone
+## 7. operator: read back, it carries Z
 > GET /sqlos/admin/auth/api/users/{usr#1}/memberships
 > X-BehaviorLock-Operator: behavior-lock-operator
 < 200 OK

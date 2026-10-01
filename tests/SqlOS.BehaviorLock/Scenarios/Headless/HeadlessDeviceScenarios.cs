@@ -300,7 +300,7 @@ public sealed class HeadlessDeviceScenarios
     [Scenario]
     [Covers("POST /sqlos/auth/headless/device/resolve")]
     [Covers("POST /sqlos/auth/headless/invitations/resolve")]
-    public async Task Device_and_invitation_views_report_stored_times_without_a_utc_marker_CurrentBehavior_KnownDefect_325()
+    public async Task Device_and_invitation_views_report_stored_times_with_a_utc_marker()
     {
         await using var t = await Transcript.StartAsync(HostProfiles.Headless);
         await CreateCliClientAsync(t);
@@ -308,7 +308,9 @@ public sealed class HeadlessDeviceScenarios
         var invitationToken = await HeadlessInvitationScenarios.InviteAsync(t, acme, t.Unique.Email("erin"));
         var userCode = await StartDeviceAsync(t);
 
-        t.Note("Known defect #325: times read back from the database serialize without Z ({datetime:unspecified}), so browsers read UTC as local time.");
+        t.Note(
+            "Issue #325: times read back from the database serialize as UTC with Z ({datetime:utc-z}).",
+            baselineText: "Known defect #325: times read back from the database serialize without Z ({datetime:unspecified}), so browsers read UTC as local time.");
         t.Observe(
             await t.PostJsonAsync($"{Api}/device/resolve", new { userCode }),
             "the device view's deviceAuthorization.expiresAt");

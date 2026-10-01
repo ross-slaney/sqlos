@@ -1,8 +1,8 @@
 # SqlOS behavior lock transcript
-scenario: FgaDashboardScenarios.Grant_windows_round_trip_without_a_utc_marker_CurrentBehavior_KnownDefect_325
+scenario: FgaDashboardScenarios.Grant_windows_round_trip_with_a_utc_marker
 profile: dashboard-callback
 
-## 1. operator: a grant whose UTC window is open now comes back without the UTC marker
+## 1. operator: a grant whose UTC window is open now comes back with the UTC marker
 > POST /sqlos/admin/fga/api/grants
 > Content-Type: application/json; charset=utf-8
 > X-BehaviorLock-Operator: behavior-lock-operator
@@ -87,7 +87,7 @@ profile: dashboard-callback
       "subjectName": "Alice"
     }
 
-## 4. operator: the resource's grants carry the window without the marker
+## 4. operator: the resource's grants carry the window with the marker
 > GET /sqlos/admin/fga/api/resources/workspace::alpha/grants
 > X-BehaviorLock-Operator: behavior-lock-operator
 < 200 OK
