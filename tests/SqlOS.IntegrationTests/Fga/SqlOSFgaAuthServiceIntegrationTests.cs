@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.Fga.Configuration;
+using SqlOS.Domain;
 using SqlOS.Fga.Models;
 using SqlOS.IntegrationTests.Fga.Infrastructure;
 using SqlOS.Fga.Services;
@@ -192,20 +193,8 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
         var subjectService = CreateSubjectService();
         var user = await subjectService.CreateUserAsync("Resource Lifecycle User", $"resource-lifecycle-{Guid.NewGuid():N}@example.com");
         var suffix = Guid.NewGuid().ToString("N");
-        var parent = new SqlOSFgaResource
-        {
-            Id = $"res_lifecycle_parent_{suffix}",
-            ParentId = "root",
-            Name = "Lifecycle Parent",
-            ResourceTypeId = "agency"
-        };
-        var child = new SqlOSFgaResource
-        {
-            Id = $"res_lifecycle_child_{suffix}",
-            ParentId = parent.Id,
-            Name = "Lifecycle Child",
-            ResourceTypeId = "project"
-        };
+        var parent = FgaTestModel.Resource($"res_lifecycle_parent_{suffix}", "Lifecycle Parent", "agency", parentId: "root");
+        var child = FgaTestModel.Resource($"res_lifecycle_child_{suffix}", "Lifecycle Child", "project", parentId: parent.Id);
         Context.Set<SqlOSFgaResource>().AddRange(parent, child);
         Context.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant
         {
@@ -219,12 +208,12 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
 
         await AssertPointAndFilterAsync(user.SubjectId, child.Id, expected: true);
 
-        parent.IsActive = false;
+        parent.ChangeActivity(false, FgaActor.Host, FgaTestModel.Now);
         await Context.SaveChangesAsync();
         await AssertPointAndFilterAsync(user.SubjectId, child.Id, expected: false);
 
-        parent.IsActive = true;
-        child.IsActive = false;
+        parent.ChangeActivity(true, FgaActor.Host, FgaTestModel.Now);
+        child.ChangeActivity(false, FgaActor.Host, FgaTestModel.Now);
         await Context.SaveChangesAsync();
         await AssertPointAndFilterAsync(user.SubjectId, child.Id, expected: false);
     }
@@ -315,13 +304,7 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
     {
         var suffix = Guid.NewGuid().ToString("N");
         var resourceId = $"res_lifecycle_{suffix}";
-        Context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
-        {
-            Id = resourceId,
-            ParentId = "root",
-            Name = "Lifecycle Protected Resource",
-            ResourceTypeId = "project"
-        });
+        Context.Set<SqlOSFgaResource>().Add(FgaTestModel.Resource(resourceId, "Lifecycle Protected Resource", "project", parentId: "root"));
         Context.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant
         {
             Id = $"grant_lifecycle_{suffix}",

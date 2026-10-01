@@ -3,8 +3,8 @@
 # it is shorter (lower the mark so the list cannot grow back). Raising a mark needs a reason in the
 # pull request that a reviewer accepts.
 adapter-database-access.txt 23
-domain-clock-reads.txt 9
+domain-clock-reads.txt 8
 domain-http-dependencies.txt 0
-entity-public-setters.txt 751
-lifecycle-writes.txt 190
+entity-public-setters.txt 739
+lifecycle-writes.txt 186
 save-call-sites.txt 182

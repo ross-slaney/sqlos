@@ -197,13 +197,7 @@ public sealed class SqlOSResourceEntitySyncTests
     {
         using var context = CreateContext();
         SeedFgaCore(context);
-        context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
-        {
-            Id = "workspace_1",
-            Name = "Existing workspace",
-            ResourceTypeId = "workspace",
-            ParentId = "root"
-        });
+        context.Set<SqlOSFgaResource>().Add(FgaTestModel.Resource("workspace_1", "Existing workspace", "workspace", parentId: "root"));
         context.SaveChanges();
         context.Resources.Add(new ResourceBackedEntity
         {
@@ -246,13 +240,7 @@ public sealed class SqlOSResourceEntitySyncTests
         context.Resources.Add(entity);
         context.SaveChanges();
 
-        context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
-        {
-            Id = "workspace_child",
-            ParentId = "workspace_1",
-            Name = "Workspace child",
-            ResourceTypeId = "workspace"
-        });
+        context.Set<SqlOSFgaResource>().Add(FgaTestModel.Resource("workspace_child", "Workspace child", "workspace", parentId: "workspace_1"));
         context.Resources.Remove(entity);
 
         Action act = () => context.SaveChanges();
@@ -460,13 +448,7 @@ public sealed class SqlOSResourceEntitySyncTests
         var entity = new ResourceBackedEntity { Id = "workspace_1", Name = "Workspace 1" };
         context.Resources.Add(entity);
         await context.SaveChangesAsync();
-        context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
-        {
-            Id = "workspace_child",
-            ParentId = "workspace_1",
-            Name = "Workspace child",
-            ResourceTypeId = "workspace"
-        });
+        context.Set<SqlOSFgaResource>().Add(FgaTestModel.Resource("workspace_child", "Workspace child", "workspace", parentId: "workspace_1"));
         await context.SaveChangesAsync();
 
         context.Resources.Remove(entity);
@@ -584,13 +566,7 @@ public sealed class SqlOSResourceEntitySyncTests
     {
         using var context = CreateContext();
         SeedFgaCore(context);
-        context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
-        {
-            Id = "workspace_1",
-            Name = "Existing workspace",
-            ResourceTypeId = "workspace",
-            ParentId = "root"
-        });
+        context.Set<SqlOSFgaResource>().Add(FgaTestModel.Resource("workspace_1", "Existing workspace", "workspace", parentId: "root"));
         await context.SaveChangesAsync();
         context.Resources.Add(new ResourceBackedEntity
         {
@@ -687,12 +663,7 @@ public sealed class SqlOSResourceEntitySyncTests
         context.Set<SqlOSFgaResourceType>().AddRange(
             FgaTestModel.ResourceType("root", "Root"),
             FgaTestModel.ResourceType("workspace", "Workspace"));
-        context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
-        {
-            Id = "root",
-            Name = "Root",
-            ResourceTypeId = "root"
-        });
+        context.Set<SqlOSFgaResource>().Add(FgaTestModel.Resource("root", "Root", "root"));
         context.Set<SqlOSFgaRole>().Add(FgaTestModel.Role("role_owner", key: "owner", name: "Owner"));
     }
 
@@ -762,6 +733,35 @@ public sealed class SqlOSResourceEntitySyncTests
                 FOREIGN KEY (SubjectId) REFERENCES SqlOSFgaSubjects(Id) ON DELETE RESTRICT,
                 FOREIGN KEY (ResourceId) REFERENCES SqlOSFgaResources(Id) ON DELETE RESTRICT,
                 FOREIGN KEY (RoleId) REFERENCES SqlOSFgaRoles(Id) ON DELETE RESTRICT
+            );
+            """);
+        // The FGA write model audits what a save changes (resource deletions here).
+        await context.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE SqlOSAuditEvents (
+                Id TEXT NOT NULL PRIMARY KEY,
+                OrganizationId TEXT NULL,
+                ApplicationId TEXT NULL,
+                ApplicationKey TEXT NULL,
+                UserId TEXT NULL,
+                SessionId TEXT NULL,
+                EventType TEXT NOT NULL,
+                Source TEXT NOT NULL,
+                Action TEXT NOT NULL,
+                ActorType TEXT NOT NULL,
+                ActorId TEXT NULL,
+                ActorDisplayName TEXT NULL,
+                TargetsJson TEXT NOT NULL,
+                ContextJson TEXT NULL,
+                MetadataJson TEXT NULL,
+                OccurredAt TEXT NOT NULL,
+                IngestedAt TEXT NOT NULL,
+                IpAddress TEXT NULL,
+                UserAgent TEXT NULL,
+                RequestId TEXT NULL,
+                CorrelationId TEXT NULL,
+                IdempotencyKeyHash TEXT NULL,
+                IdempotencyScopeHash TEXT NULL,
+                DataJson TEXT NULL
             );
             """);
     }

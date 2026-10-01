@@ -1,545 +1,130 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
+using SqlOS.Domain;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
 
 namespace SqlOS.Fga;
 
+/// <summary>
+/// Keeps the FGA resource of every saved <see cref="ISqlOSResourceEntity"/> in step with it, through
+/// the resource's own methods, before a <c>SqlOSDbContext&lt;TContext&gt;</c> save. Every change is
+/// validated before any is applied.
+/// </summary>
 internal static class SqlOSResourceEntitySynchronizer
 {
     public static void Sync(DbContext context)
-    {
-        var changes = GetResourceEntityChanges(context);
-        if (changes.Count == 0)
-        {
-            return;
-        }
-
-        ValidateUniqueResourceIds(changes);
-        var changesById = changes.ToDictionary(change => change.ResourceId, StringComparer.Ordinal);
-        ValidateResourceChanges(
-            context,
-            changes,
-            changesById,
-            SqlOSFgaHierarchyDepth.Resolve((ISqlOSFgaDbContext)context));
-        ApplyResourceChanges(context, changes);
-    }
+        => SyncAsync(context, CancellationToken.None).GetAwaiter().GetResult();
 
     public static async Task SyncAsync(DbContext context, CancellationToken cancellationToken)
     {
-        var changes = GetResourceEntityChanges(context);
+        var changes = context.ChangeTracker
+            .Entries()
+            .Where(entry => entry.Entity is ISqlOSResourceEntity
+                && entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+            .Select(ResourceEntityChange.From)
+            .ToList();
         if (changes.Count == 0)
         {
             return;
         }
 
-        ValidateUniqueResourceIds(changes);
-        var changesById = changes.ToDictionary(change => change.ResourceId, StringComparer.Ordinal);
-        await ValidateResourceChangesAsync(
-            context,
-            changes,
-            changesById,
-            SqlOSFgaHierarchyDepth.Resolve((ISqlOSFgaDbContext)context),
-            cancellationToken);
-        await ApplyResourceChangesAsync(context, changes, cancellationToken);
-    }
-
-    private static List<ResourceEntityChange> GetResourceEntityChanges(DbContext context)
-        => context.ChangeTracker
-            .Entries()
-            .Where(entry => entry.Entity is ISqlOSResourceEntity
-                && entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
-            .Select(entry => ResourceEntityChange.From(entry, (ISqlOSResourceEntity)entry.Entity))
-            .ToList();
-
-    private static void ValidateUniqueResourceIds(IReadOnlyCollection<ResourceEntityChange> changes)
-    {
-        var duplicate = changes
-            .GroupBy(change => change.ResourceId, StringComparer.Ordinal)
-            .FirstOrDefault(group => group.Count() > 1);
+        var duplicate = changes.GroupBy(change => change.ResourceId, StringComparer.Ordinal).FirstOrDefault(group => group.Count() > 1);
         if (duplicate != null)
         {
             throw new InvalidOperationException($"Multiple tracked SqlOS resource entities use resource id '{duplicate.Key}'. Resource ids must be unique in a save operation.");
         }
-    }
 
-    private static void ValidateResourceChanges(
-        DbContext context,
-        IReadOnlyCollection<ResourceEntityChange> changes,
-        IReadOnlyDictionary<string, ResourceEntityChange> changesById,
-        int maxDepth)
-    {
-        foreach (var change in changes.Where(change => change.State != EntityState.Deleted))
+        var placed = changes.Where(change => change.State != EntityState.Deleted).ToList();
+        var deleted = changes.Where(change => change.State == EntityState.Deleted).ToList();
+        var deleting = deleted.Select(change => change.ResourceId).ToHashSet(StringComparer.Ordinal);
+        var tree = new SqlOSFgaResourceTree(
+            context,
+            placed.ToDictionary(change => change.ResourceId, change => change.ParentResourceId, StringComparer.Ordinal),
+            deleting);
+
+        var ancestries = new Dictionary<string, SqlOSFgaAncestry>(StringComparer.Ordinal);
+        foreach (var change in placed)
         {
-            EnsureResourceParentIsNotSelf(change.ResourceId, change.ParentResourceId);
+            if (string.Equals(change.ResourceId, change.ParentResourceId, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("FGA resource parent cannot be the resource itself.");
+            }
 
-            if (!ResourceTypeExists(context, change.ResourceTypeId))
+            if (!await tree.ResourceTypeExistsAsync(change.ResourceTypeId, cancellationToken).ConfigureAwait(false))
             {
                 throw new InvalidOperationException($"FGA resource type '{change.ResourceTypeId}' was not found. Seed or create the resource type before saving resource-backed entities.");
             }
 
-            if (change.ParentResourceId != null && !ResourceExistsOrIsPending(context, change.ParentResourceId, changesById))
+            if (change.ParentResourceId != null && !await tree.ExistsAsync(change.ParentResourceId, cancellationToken).ConfigureAwait(false))
             {
                 throw new InvalidOperationException($"FGA resource '{change.ParentResourceId}' was not found.");
             }
 
-            EnsureParentChainDoesNotCreateCycle(context, change, changesById, maxDepth);
+            var ancestry = await tree.AncestryAsync(change.ResourceId, change.ParentResourceId, cancellationToken).ConfigureAwait(false);
+            ancestry.EnsureCanHold(change.ResourceId);
+            ancestries[change.ResourceId] = ancestry;
         }
 
-        foreach (var added in changes.Where(change => change.State == EntityState.Added))
+        // 7.x's order: every new entity, then every changed one, then every deleted one.
+        var resources = new Dictionary<string, SqlOSFgaResource>(StringComparer.Ordinal);
+        foreach (var change in changes.OrderBy(change => change.State == EntityState.Added ? 0 : change.State == EntityState.Modified ? 1 : 2))
         {
-            if (ResourceExists(context, added.ResourceId))
+            var resource = await tree.FindAsync(change.ResourceId, cancellationToken).ConfigureAwait(false);
+            switch (change.State)
             {
-                throw new InvalidOperationException($"FGA resource '{added.ResourceId}' already exists for a new resource-backed entity.");
+                case EntityState.Added when resource != null:
+                    throw new InvalidOperationException($"FGA resource '{change.ResourceId}' already exists for a new resource-backed entity.");
+                case EntityState.Modified when resource == null:
+                    throw new InvalidOperationException($"FGA resource '{change.ResourceId}' was not found for a modified resource-backed entity.");
+                case EntityState.Deleted when resource == null:
+                    throw new InvalidOperationException($"FGA resource '{change.ResourceId}' was not found for a deleted resource-backed entity.");
+                case EntityState.Deleted when await tree.HasChildrenAsync(change.ResourceId, deleting, cancellationToken).ConfigureAwait(false):
+                    throw new InvalidOperationException($"FGA resource '{change.ResourceId}' has child resources. Delete or reparent child resources before deleting this resource.");
+            }
+
+            if (resource != null)
+            {
+                resources[change.ResourceId] = resource;
             }
         }
 
-        foreach (var modified in changes.Where(change => change.State == EntityState.Modified))
+        var now = SqlOSFgaWrites.Now(context);
+        foreach (var change in placed)
         {
-            if (FindResource(context, modified.ResourceId) == null)
+            if (change.State == EntityState.Added)
             {
-                throw new InvalidOperationException($"FGA resource '{modified.ResourceId}' was not found for a modified resource-backed entity.");
-            }
-        }
-
-        var deletingResourceIds = changes
-            .Where(change => change.State == EntityState.Deleted)
-            .Select(change => change.ResourceId)
-            .ToHashSet(StringComparer.Ordinal);
-
-        foreach (var deleted in changes.Where(change => change.State == EntityState.Deleted))
-        {
-            if (FindResource(context, deleted.ResourceId) == null)
-            {
-                throw new InvalidOperationException($"FGA resource '{deleted.ResourceId}' was not found for a deleted resource-backed entity.");
+                context.Set<SqlOSFgaResource>().Add(SqlOSFgaResource.Create(
+                    change.ResourceId,
+                    change.ResourceName,
+                    change.ResourceTypeId,
+                    change.ResourceDescription,
+                    ancestries[change.ResourceId],
+                    now,
+                    change.ResourceIsActive));
+                continue;
             }
 
-            EnsureResourceHasNoRemainingChildren(context, deleted.ResourceId, deletingResourceIds);
+            var resource = resources[change.ResourceId];
+            resource.MoveTo(ancestries[change.ResourceId], FgaActor.Host, now);
+            resource.Describe(change.ResourceName, change.ResourceTypeId, change.ResourceDescription, now);
+            resource.ChangeActivity(change.ResourceIsActive, FgaActor.Host, now);
+        }
+
+        foreach (var change in deleted)
+        {
+            var grants = await context.Set<SqlOSFgaGrant>()
+                .Where(grant => grant.ResourceId == change.ResourceId)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+            context.Set<SqlOSFgaGrant>().RemoveRange(grants);
+            var resource = resources[change.ResourceId];
+            resource.Delete(FgaActor.Host);
+            context.Set<SqlOSFgaResource>().Remove(resource);
         }
     }
-
-    private static async Task ValidateResourceChangesAsync(
-        DbContext context,
-        IReadOnlyCollection<ResourceEntityChange> changes,
-        IReadOnlyDictionary<string, ResourceEntityChange> changesById,
-        int maxDepth,
-        CancellationToken cancellationToken)
-    {
-        foreach (var change in changes.Where(change => change.State != EntityState.Deleted))
-        {
-            EnsureResourceParentIsNotSelf(change.ResourceId, change.ParentResourceId);
-
-            if (!await ResourceTypeExistsAsync(context, change.ResourceTypeId, cancellationToken))
-            {
-                throw new InvalidOperationException($"FGA resource type '{change.ResourceTypeId}' was not found. Seed or create the resource type before saving resource-backed entities.");
-            }
-
-            if (change.ParentResourceId != null && !await ResourceExistsOrIsPendingAsync(context, change.ParentResourceId, changesById, cancellationToken))
-            {
-                throw new InvalidOperationException($"FGA resource '{change.ParentResourceId}' was not found.");
-            }
-
-            await EnsureParentChainDoesNotCreateCycleAsync(
-                context,
-                change,
-                changesById,
-                maxDepth,
-                cancellationToken);
-        }
-
-        foreach (var added in changes.Where(change => change.State == EntityState.Added))
-        {
-            if (await ResourceExistsAsync(context, added.ResourceId, cancellationToken))
-            {
-                throw new InvalidOperationException($"FGA resource '{added.ResourceId}' already exists for a new resource-backed entity.");
-            }
-        }
-
-        foreach (var modified in changes.Where(change => change.State == EntityState.Modified))
-        {
-            if (await FindResourceAsync(context, modified.ResourceId, cancellationToken) == null)
-            {
-                throw new InvalidOperationException($"FGA resource '{modified.ResourceId}' was not found for a modified resource-backed entity.");
-            }
-        }
-
-        var deletingResourceIds = changes
-            .Where(change => change.State == EntityState.Deleted)
-            .Select(change => change.ResourceId)
-            .ToHashSet(StringComparer.Ordinal);
-
-        foreach (var deleted in changes.Where(change => change.State == EntityState.Deleted))
-        {
-            if (await FindResourceAsync(context, deleted.ResourceId, cancellationToken) == null)
-            {
-                throw new InvalidOperationException($"FGA resource '{deleted.ResourceId}' was not found for a deleted resource-backed entity.");
-            }
-
-            await EnsureResourceHasNoRemainingChildrenAsync(context, deleted.ResourceId, deletingResourceIds, cancellationToken);
-        }
-    }
-
-    private static void ApplyResourceChanges(DbContext context, IReadOnlyCollection<ResourceEntityChange> changes)
-    {
-        foreach (var added in changes.Where(change => change.State == EntityState.Added))
-        {
-            context.Set<SqlOSFgaResource>().Add(CreateResource(added));
-        }
-
-        foreach (var modified in changes.Where(change => change.State == EntityState.Modified))
-        {
-            var resource = FindResource(context, modified.ResourceId)!;
-            ApplyResourceValues(resource, modified);
-        }
-
-        foreach (var deleted in changes.Where(change => change.State == EntityState.Deleted))
-        {
-            RemoveResourceAndGrants(context, deleted.ResourceId);
-        }
-    }
-
-    private static async Task ApplyResourceChangesAsync(
-        DbContext context,
-        IReadOnlyCollection<ResourceEntityChange> changes,
-        CancellationToken cancellationToken)
-    {
-        foreach (var added in changes.Where(change => change.State == EntityState.Added))
-        {
-            context.Set<SqlOSFgaResource>().Add(CreateResource(added));
-        }
-
-        foreach (var modified in changes.Where(change => change.State == EntityState.Modified))
-        {
-            var resource = await FindResourceAsync(context, modified.ResourceId, cancellationToken);
-            ApplyResourceValues(resource!, modified);
-        }
-
-        foreach (var deleted in changes.Where(change => change.State == EntityState.Deleted))
-        {
-            await RemoveResourceAndGrantsAsync(context, deleted.ResourceId, cancellationToken);
-        }
-    }
-
-    private static SqlOSFgaResource CreateResource(ResourceEntityChange change)
-        => new()
-        {
-            Id = change.ResourceId,
-            ParentId = change.ParentResourceId,
-            Name = change.ResourceName,
-            ResourceTypeId = change.ResourceTypeId,
-            Description = change.ResourceDescription,
-            IsActive = change.ResourceIsActive
-        };
-
-    private static void ApplyResourceValues(SqlOSFgaResource resource, ResourceEntityChange change)
-    {
-        resource.ParentId = change.ParentResourceId;
-        resource.Name = change.ResourceName;
-        resource.ResourceTypeId = change.ResourceTypeId;
-        resource.Description = change.ResourceDescription;
-        resource.IsActive = change.ResourceIsActive;
-        resource.UpdatedAt = DateTime.UtcNow;
-    }
-
-    private static void RemoveResourceAndGrants(DbContext context, string resourceId)
-    {
-        var grants = context.Set<SqlOSFgaGrant>()
-            .Where(grant => grant.ResourceId == resourceId)
-            .ToList();
-        context.Set<SqlOSFgaGrant>().RemoveRange(grants);
-
-        var resource = FindResource(context, resourceId)!;
-        context.Set<SqlOSFgaResource>().Remove(resource);
-    }
-
-    private static async Task RemoveResourceAndGrantsAsync(
-        DbContext context,
-        string resourceId,
-        CancellationToken cancellationToken)
-    {
-        var grants = await context.Set<SqlOSFgaGrant>()
-            .Where(grant => grant.ResourceId == resourceId)
-            .ToListAsync(cancellationToken);
-        context.Set<SqlOSFgaGrant>().RemoveRange(grants);
-
-        var resource = await FindResourceAsync(context, resourceId, cancellationToken);
-        context.Set<SqlOSFgaResource>().Remove(resource!);
-    }
-
-    private static void EnsureParentChainDoesNotCreateCycle(
-        DbContext context,
-        ResourceEntityChange change,
-        IReadOnlyDictionary<string, ResourceEntityChange> changesById,
-        int maxDepth)
-    {
-        var visited = new HashSet<string>(StringComparer.Ordinal) { change.ResourceId };
-        var currentId = change.ParentResourceId;
-        var depth = 1;
-
-        while (!string.IsNullOrWhiteSpace(currentId))
-        {
-            if (!visited.Add(currentId))
-            {
-                throw new InvalidOperationException("FGA resource hierarchy contains a cycle.");
-            }
-
-            if (depth > maxDepth)
-            {
-                throw new InvalidOperationException($"FGA resource hierarchy exceeds the configured maximum depth of {maxDepth}.");
-            }
-
-            currentId = GetParentId(context, currentId, changesById);
-            depth++;
-        }
-    }
-
-    private static async Task EnsureParentChainDoesNotCreateCycleAsync(
-        DbContext context,
-        ResourceEntityChange change,
-        IReadOnlyDictionary<string, ResourceEntityChange> changesById,
-        int maxDepth,
-        CancellationToken cancellationToken)
-    {
-        var visited = new HashSet<string>(StringComparer.Ordinal) { change.ResourceId };
-        var currentId = change.ParentResourceId;
-        var depth = 1;
-
-        while (!string.IsNullOrWhiteSpace(currentId))
-        {
-            if (!visited.Add(currentId))
-            {
-                throw new InvalidOperationException("FGA resource hierarchy contains a cycle.");
-            }
-
-            if (depth > maxDepth)
-            {
-                throw new InvalidOperationException($"FGA resource hierarchy exceeds the configured maximum depth of {maxDepth}.");
-            }
-
-            currentId = await GetParentIdAsync(context, currentId, changesById, cancellationToken);
-            depth++;
-        }
-    }
-
-    private static string? GetParentId(
-        DbContext context,
-        string resourceId,
-        IReadOnlyDictionary<string, ResourceEntityChange> changesById)
-    {
-        if (changesById.TryGetValue(resourceId, out var change) && change.State != EntityState.Deleted)
-        {
-            return change.ParentResourceId;
-        }
-
-        var localEntry = FindLocalResourceEntry(context, resourceId);
-        if (localEntry != null)
-        {
-            return localEntry.State == EntityState.Deleted ? null : localEntry.Entity.ParentId;
-        }
-
-        return context.Set<SqlOSFgaResource>()
-            .AsNoTracking()
-            .Where(resource => resource.Id == resourceId)
-            .Select(resource => resource.ParentId)
-            .FirstOrDefault();
-    }
-
-    private static async Task<string?> GetParentIdAsync(
-        DbContext context,
-        string resourceId,
-        IReadOnlyDictionary<string, ResourceEntityChange> changesById,
-        CancellationToken cancellationToken)
-    {
-        if (changesById.TryGetValue(resourceId, out var change) && change.State != EntityState.Deleted)
-        {
-            return change.ParentResourceId;
-        }
-
-        var localEntry = FindLocalResourceEntry(context, resourceId);
-        if (localEntry != null)
-        {
-            return localEntry.State == EntityState.Deleted ? null : localEntry.Entity.ParentId;
-        }
-
-        return await context.Set<SqlOSFgaResource>()
-            .AsNoTracking()
-            .Where(resource => resource.Id == resourceId)
-            .Select(resource => resource.ParentId)
-            .FirstOrDefaultAsync(cancellationToken);
-    }
-
-    private static bool ResourceTypeExists(DbContext context, string resourceTypeId)
-    {
-        var localEntry = context.ChangeTracker
-            .Entries<SqlOSFgaResourceType>()
-            .FirstOrDefault(entry => entry.Entity.Id == resourceTypeId);
-        if (localEntry != null)
-        {
-            return localEntry.State != EntityState.Deleted;
-        }
-
-        return context.Set<SqlOSFgaResourceType>().Any(resourceType => resourceType.Id == resourceTypeId);
-    }
-
-    private static async Task<bool> ResourceTypeExistsAsync(
-        DbContext context,
-        string resourceTypeId,
-        CancellationToken cancellationToken)
-    {
-        var localEntry = context.ChangeTracker
-            .Entries<SqlOSFgaResourceType>()
-            .FirstOrDefault(entry => entry.Entity.Id == resourceTypeId);
-        if (localEntry != null)
-        {
-            return localEntry.State != EntityState.Deleted;
-        }
-
-        return await context.Set<SqlOSFgaResourceType>()
-            .AnyAsync(resourceType => resourceType.Id == resourceTypeId, cancellationToken);
-    }
-
-    private static bool ResourceExistsOrIsPending(
-        DbContext context,
-        string resourceId,
-        IReadOnlyDictionary<string, ResourceEntityChange> changesById)
-    {
-        if (changesById.TryGetValue(resourceId, out var change))
-        {
-            return change.State != EntityState.Deleted;
-        }
-
-        return ResourceExists(context, resourceId);
-    }
-
-    private static async Task<bool> ResourceExistsOrIsPendingAsync(
-        DbContext context,
-        string resourceId,
-        IReadOnlyDictionary<string, ResourceEntityChange> changesById,
-        CancellationToken cancellationToken)
-    {
-        if (changesById.TryGetValue(resourceId, out var change))
-        {
-            return change.State != EntityState.Deleted;
-        }
-
-        return await ResourceExistsAsync(context, resourceId, cancellationToken);
-    }
-
-    private static bool ResourceExists(DbContext context, string resourceId)
-        => FindResource(context, resourceId) != null;
-
-    private static async Task<bool> ResourceExistsAsync(
-        DbContext context,
-        string resourceId,
-        CancellationToken cancellationToken)
-        => await FindResourceAsync(context, resourceId, cancellationToken) != null;
-
-    private static SqlOSFgaResource? FindResource(DbContext context, string resourceId)
-    {
-        var localEntry = FindLocalResourceEntry(context, resourceId);
-        if (localEntry != null)
-        {
-            return localEntry.State == EntityState.Deleted ? null : localEntry.Entity;
-        }
-
-        return context.Set<SqlOSFgaResource>().FirstOrDefault(resource => resource.Id == resourceId);
-    }
-
-    private static async Task<SqlOSFgaResource?> FindResourceAsync(
-        DbContext context,
-        string resourceId,
-        CancellationToken cancellationToken)
-    {
-        var localEntry = FindLocalResourceEntry(context, resourceId);
-        if (localEntry != null)
-        {
-            return localEntry.State == EntityState.Deleted ? null : localEntry.Entity;
-        }
-
-        return await context.Set<SqlOSFgaResource>()
-            .FirstOrDefaultAsync(resource => resource.Id == resourceId, cancellationToken);
-    }
-
-    private static EntityEntry<SqlOSFgaResource>? FindLocalResourceEntry(DbContext context, string resourceId)
-        => context.ChangeTracker
-            .Entries<SqlOSFgaResource>()
-            .FirstOrDefault(entry => entry.Entity.Id == resourceId);
-
-    private static void EnsureResourceHasNoRemainingChildren(
-        DbContext context,
-        string resourceId,
-        ISet<string> deletingResourceIds)
-    {
-        var hasLocalChild = context.ChangeTracker
-            .Entries<SqlOSFgaResource>()
-            .Any(entry => entry.Entity.ParentId == resourceId
-                && !deletingResourceIds.Contains(entry.Entity.Id)
-                && entry.State != EntityState.Deleted);
-        if (hasLocalChild)
-        {
-            throw ChildResourceException(resourceId);
-        }
-
-        var hasStoredChild = context.Set<SqlOSFgaResource>()
-            .AsNoTracking()
-            .Any(resource => resource.ParentId == resourceId && !deletingResourceIds.Contains(resource.Id));
-        if (hasStoredChild)
-        {
-            throw ChildResourceException(resourceId);
-        }
-    }
-
-    private static async Task EnsureResourceHasNoRemainingChildrenAsync(
-        DbContext context,
-        string resourceId,
-        ISet<string> deletingResourceIds,
-        CancellationToken cancellationToken)
-    {
-        var hasLocalChild = context.ChangeTracker
-            .Entries<SqlOSFgaResource>()
-            .Any(entry => entry.Entity.ParentId == resourceId
-                && !deletingResourceIds.Contains(entry.Entity.Id)
-                && entry.State != EntityState.Deleted);
-        if (hasLocalChild)
-        {
-            throw ChildResourceException(resourceId);
-        }
-
-        var hasStoredChild = await context.Set<SqlOSFgaResource>()
-            .AsNoTracking()
-            .AnyAsync(resource => resource.ParentId == resourceId && !deletingResourceIds.Contains(resource.Id), cancellationToken);
-        if (hasStoredChild)
-        {
-            throw ChildResourceException(resourceId);
-        }
-    }
-
-    private static InvalidOperationException ChildResourceException(string resourceId)
-        => new($"FGA resource '{resourceId}' has child resources. Delete or reparent child resources before deleting this resource.");
-
-    private static void EnsureResourceParentIsNotSelf(string resourceId, string? parentId)
-    {
-        if (string.Equals(resourceId, parentId, StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException("FGA resource parent cannot be the resource itself.");
-        }
-    }
-
-    private static string RequireValue(string value, string name)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            throw new InvalidOperationException($"{name} is required.");
-        }
-
-        return value.Trim();
-    }
-
-    private static string? NormalizeOptional(string? value)
-        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private sealed record ResourceEntityChange(
-        EntityEntry Entry,
         EntityState State,
         string ResourceId,
         string ResourceTypeId,
@@ -548,31 +133,20 @@ internal static class SqlOSResourceEntitySynchronizer
         string? ResourceDescription,
         bool ResourceIsActive)
     {
-        public static ResourceEntityChange From(EntityEntry entry, ISqlOSResourceEntity entity)
+        public static ResourceEntityChange From(EntityEntry entry)
         {
-            var resourceId = RequireValue(entity.ResourceId, nameof(ISqlOSResourceEntity.ResourceId));
-            if (entry.State == EntityState.Deleted)
-            {
-                return new(
-                    entry,
+            var entity = (ISqlOSResourceEntity)entry.Entity;
+            var resourceId = SqlOSFgaWrites.RequireValue(entity.ResourceId, nameof(ISqlOSResourceEntity.ResourceId));
+            return entry.State == EntityState.Deleted
+                ? new(entry.State, resourceId, string.Empty, string.Empty, null, null, true)
+                : new(
                     entry.State,
                     resourceId,
-                    string.Empty,
-                    string.Empty,
-                    null,
-                    null,
-                    true);
-            }
-
-            return new(
-                entry,
-                entry.State,
-                resourceId,
-                RequireValue(entity.ResourceTypeId, nameof(ISqlOSResourceEntity.ResourceTypeId)),
-                RequireValue(entity.ResourceName, nameof(ISqlOSResourceEntity.ResourceName)),
-                NormalizeOptional(entity.ParentResourceId),
-                NormalizeOptional(entity.ResourceDescription),
-                entity.ResourceIsActive);
+                    SqlOSFgaWrites.RequireValue(entity.ResourceTypeId, nameof(ISqlOSResourceEntity.ResourceTypeId)),
+                    SqlOSFgaWrites.RequireValue(entity.ResourceName, nameof(ISqlOSResourceEntity.ResourceName)),
+                    SqlOSFgaWrites.NormalizeOptional(entity.ParentResourceId),
+                    SqlOSFgaWrites.NormalizeOptional(entity.ResourceDescription),
+                    entity.ResourceIsActive);
         }
     }
 }

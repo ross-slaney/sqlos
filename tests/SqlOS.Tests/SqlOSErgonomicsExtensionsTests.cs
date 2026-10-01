@@ -182,12 +182,7 @@ public sealed class SqlOSErgonomicsExtensionsTests
         context.Set<SqlOSFgaResourceType>().AddRange(
             FgaTestModel.ResourceType("root", "Root"),
             FgaTestModel.ResourceType("workspace", "Workspace"));
-        context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
-        {
-            Id = "root",
-            Name = "Root",
-            ResourceTypeId = "root"
-        });
+        context.Set<SqlOSFgaResource>().Add(FgaTestModel.Resource("root", "Root", "root"));
         context.SaveChanges();
         context.CreateResource("root", "Level 1", "workspace", "level_1");
         context.SaveChanges();
@@ -507,12 +502,7 @@ public sealed class SqlOSErgonomicsExtensionsTests
         context.Set<SqlOSFgaResourceType>().AddRange(
             FgaTestModel.ResourceType("root", "Root"),
             FgaTestModel.ResourceType("workspace", "Workspace"));
-        context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
-        {
-            Id = "root",
-            Name = "Root",
-            ResourceTypeId = "root"
-        });
+        context.Set<SqlOSFgaResource>().Add(FgaTestModel.Resource("root", "Root", "root"));
         context.Set<SqlOSFgaRole>().Add(FgaTestModel.Role("role_owner", key: "owner", name: "Owner"));
     }
 

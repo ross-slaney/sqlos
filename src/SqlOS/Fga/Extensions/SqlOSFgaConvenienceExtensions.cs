@@ -31,6 +31,10 @@ public static class SqlOSFgaConvenienceExtensions
     /// <param name="resourceTypeId">The resource type identifier.</param>
     /// <param name="id">Optional custom resource ID. If null, a GUID is generated.</param>
     /// <returns>The resource ID (either the provided one or the generated GUID).</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The parent or the resource type does not exist, or the resource would be its own ancestor or
+    /// deeper than the maximum hierarchy depth.
+    /// </exception>
     public static string CreateResource(
         this ISqlOSFgaDbContext context,
         string parentId,
@@ -39,57 +43,42 @@ public static class SqlOSFgaConvenienceExtensions
         string? id = null)
     {
         var resourceId = id ?? Guid.NewGuid().ToString();
-        EnsureParentChainDoesNotCreateCycle(
-            context,
-            resourceId,
-            parentId,
-            SqlOSFgaHierarchyDepth.Resolve(context));
-        var resource = new SqlOSFgaResource
-        {
-            Id = resourceId,
-            ParentId = parentId,
-            Name = name,
-            ResourceTypeId = resourceTypeId
-        };
-        context.Set<SqlOSFgaResource>().Add(resource);
-        return resourceId;
+        return CreateResourceAsync(context, parentId, name, resourceTypeId, resourceId).GetAwaiter().GetResult();
     }
 
-    private static void EnsureParentChainDoesNotCreateCycle(
+    private static async Task<string> CreateResourceAsync(
         ISqlOSFgaDbContext context,
-        string resourceId,
         string parentId,
-        int maxDepth)
+        string name,
+        string resourceTypeId,
+        string resourceId)
     {
         if (string.Equals(resourceId, parentId, StringComparison.Ordinal))
         {
             throw new InvalidOperationException("FGA resource parent cannot be the resource itself.");
         }
 
-        var visited = new HashSet<string>(StringComparer.Ordinal) { resourceId };
-        string? currentId = parentId;
-        var depth = 1;
-
-        while (!string.IsNullOrWhiteSpace(currentId))
+        var tree = new SqlOSFgaResourceTree(context);
+        if (!await tree.ResourceTypeExistsAsync(resourceTypeId, CancellationToken.None).ConfigureAwait(false))
         {
-            if (!visited.Add(currentId))
-            {
-                throw new InvalidOperationException("FGA resource hierarchy contains a cycle.");
-            }
-
-            if (depth > maxDepth)
-            {
-                throw new InvalidOperationException($"FGA resource hierarchy exceeds the configured maximum depth of {maxDepth}.");
-            }
-
-            var parent = context.Set<SqlOSFgaResource>()
-                .AsNoTracking()
-                .Where(r => r.Id == currentId)
-                .Select(r => new { r.ParentId })
-                .FirstOrDefault();
-            currentId = parent?.ParentId;
-            depth++;
+            throw new InvalidOperationException($"FGA resource type '{resourceTypeId}' was not found. Seed or create the resource type before provisioning resources.");
         }
+
+        if (!await tree.ExistsAsync(parentId, CancellationToken.None).ConfigureAwait(false)
+            && !SqlOSFgaWrites.IsPendingResourceEntity(context, parentId))
+        {
+            throw new InvalidOperationException($"FGA resource '{parentId}' was not found.");
+        }
+
+        var ancestry = await tree.AncestryAsync(resourceId, parentId, CancellationToken.None).ConfigureAwait(false);
+        context.Set<SqlOSFgaResource>().Add(SqlOSFgaResource.Create(
+            resourceId,
+            name,
+            resourceTypeId,
+            description: null,
+            ancestry,
+            SqlOSFgaWrites.Now(context)));
+        return resourceId;
     }
 
     /// <summary>

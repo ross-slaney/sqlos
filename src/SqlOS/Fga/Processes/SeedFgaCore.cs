@@ -1,3 +1,4 @@
+using SqlOS.Fga;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
@@ -24,12 +25,13 @@ internal sealed class SeedFgaCore(ISqlOSFgaDbContext context, SqlOSFgaOptions op
 
         if (await context.Set<SqlOSFgaResource>().FindAsync([options.RootResourceId], cancellationToken) == null)
         {
-            context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
-            {
-                Id = options.RootResourceId,
-                Name = options.RootResourceName,
-                ResourceTypeId = "root",
-            });
+            context.Set<SqlOSFgaResource>().Add(SqlOSFgaResource.Create(
+                options.RootResourceId,
+                options.RootResourceName,
+                "root",
+                description: null,
+                SqlOSFgaAncestry.None,
+                SqlOSFgaWrites.Now(context)));
         }
 
         await context.SaveChangesAsync(cancellationToken);

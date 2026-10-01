@@ -55,14 +55,7 @@ public sealed class UtcTimestampIntegrationTests
                 ApprovedAt = ExpiresAt.AddMinutes(-5)
             });
             setup.Set<SqlOSFgaResourceType>().Add(FgaTestModel.ResourceType("utc_type", "UTC"));
-            setup.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
-            {
-                Id = "utc_resource",
-                Name = "UTC",
-                ResourceTypeId = "utc_type",
-                CreatedAt = ExpiresAt,
-                UpdatedAt = ExpiresAt
-            });
+            setup.Set<SqlOSFgaResource>().Add(FgaTestModel.Resource("utc_resource", "UTC", "utc_type", createdAt: ExpiresAt));
             await setup.SaveChangesAsync();
 
             await using var fresh = new TestSqlOSDbContext(new DbContextOptionsBuilder<TestSqlOSDbContext>()

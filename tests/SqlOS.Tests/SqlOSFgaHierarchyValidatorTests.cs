@@ -93,12 +93,6 @@ public sealed class SqlOSFgaHierarchyValidatorTests
         TestSqlOSInMemoryDbContext context,
         params (string Id, string? ParentId)[] resources)
     {
-        context.Set<SqlOSFgaResource>().AddRange(resources.Select(resource => new SqlOSFgaResource
-        {
-            Id = resource.Id,
-            ParentId = resource.ParentId,
-            Name = resource.Id,
-            ResourceTypeId = "workspace"
-        }));
+        context.Set<SqlOSFgaResource>().AddRange(resources.Select(resource => FgaTestModel.Resource(resource.Id, resource.Id, "workspace", parentId: resource.ParentId)));
     }
 }

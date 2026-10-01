@@ -691,15 +691,7 @@ public sealed class SqlOSControlPlaneParityTests
             (OtherTenantStore, "org::other", "store")
         })
         {
-            harness.Context.Set<SqlOS.Fga.Models.SqlOSFgaResource>().Add(new SqlOS.Fga.Models.SqlOSFgaResource
-            {
-                Id = id,
-                ParentId = parentId,
-                ResourceTypeId = type,
-                Name = id,
-                CreatedAt = now,
-                UpdatedAt = now
-            });
+            harness.Context.Set<SqlOS.Fga.Models.SqlOSFgaResource>().Add(FgaTestModel.Resource(id, id, type, parentId: parentId, createdAt: now));
         }
         harness.Context.Set<SqlOS.Fga.Models.SqlOSFgaPermission>().Add(FgaTestModel.Permission("perm_store_manage", "STORE_MANAGE", name: "Manage store", resourceTypeId: "store"));
         harness.Context.Set<SqlOS.Fga.Models.SqlOSFgaRole>().Add(FgaTestModel.Role("role_store_manager", key: "store_manager", name: "Store manager"));

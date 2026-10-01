@@ -298,7 +298,7 @@ public sealed class SqlOSMachineClientAdminServiceTests
     private static async Task<(SqlOSOrganization Organization, SqlOSFgaResource Resource, SqlOSFgaRole Role)> SeedDependenciesAsync(TestSqlOSInMemoryDbContext context, SqlOSAdminService admin)
     {
         var organization = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Machines", $"machines-{Guid.NewGuid():N}"));
-        var resource = new SqlOSFgaResource { Id = $"res_{Guid.NewGuid():N}", Name = "Jobs", ResourceTypeId = "workspace", IsActive = true };
+        var resource = FgaTestModel.Resource($"res_{Guid.NewGuid():N}", "Jobs", "workspace");
         var role = FgaTestModel.Role($"role_{Guid.NewGuid():N}", key: "runner", name: "Runner");
         context.Set<SqlOSFgaResource>().Add(resource);
         context.Set<SqlOSFgaRole>().Add(role);

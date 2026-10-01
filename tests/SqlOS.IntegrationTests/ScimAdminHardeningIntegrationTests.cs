@@ -122,23 +122,8 @@ public sealed class ScimAdminHardeningIntegrationTests
                 new SqlOSCreateOrganizationRequest("Grant batch organization", "grant-batch"));
             // Mapped grants must stay inside the connection's grant boundary (#421).
             setupContext.Set<SqlOSFgaResourceType>().Add(FgaTestModel.ResourceType("batch_resource_type", "Batch resource"));
-            setupContext.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
-            {
-                Id = "batch_root",
-                ResourceTypeId = "batch_resource_type",
-                Name = "Batch organization root",
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            });
-            setupContext.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
-            {
-                Id = "batch_resource",
-                ParentId = "batch_root",
-                ResourceTypeId = "batch_resource_type",
-                Name = "Batch resource",
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            });
+            setupContext.Set<SqlOSFgaResource>().Add(FgaTestModel.Resource("batch_root", "Batch organization root", "batch_resource_type", createdAt: DateTime.UtcNow));
+            setupContext.Set<SqlOSFgaResource>().Add(FgaTestModel.Resource("batch_resource", "Batch resource", "batch_resource_type", parentId: "batch_root", createdAt: DateTime.UtcNow));
             await setupContext.SaveChangesAsync();
             var connection = await setupAdmin.CreateScimConnectionAsync(
                 new SqlOSCreateScimConnectionRequest(organization.Id, "Grant batch directory", Enabled: true)

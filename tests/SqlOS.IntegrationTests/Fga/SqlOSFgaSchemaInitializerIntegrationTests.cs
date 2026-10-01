@@ -167,21 +167,10 @@ public class SqlOSFgaSchemaInitializerIntegrationTests : FgaIntegrationTestBase
             Context.Set<SqlOS.Fga.Models.SqlOSFgaRole>().Add(FgaTestModel.Role(roleId, $"bound_{token}", "Bound index role"));
             await Context.SaveChangesAsync();
 
-            Context.Set<SqlOS.Fga.Models.SqlOSFgaResource>().Add(new()
-            {
-                Id = parentId,
-                Name = "Bound parent",
-                ResourceTypeId = resourceTypeId
-            });
+            Context.Set<SqlOS.Fga.Models.SqlOSFgaResource>().Add(FgaTestModel.Resource(parentId, "Bound parent", resourceTypeId));
             await Context.SaveChangesAsync();
 
-            Context.Set<SqlOS.Fga.Models.SqlOSFgaResource>().Add(new()
-            {
-                Id = childId,
-                ParentId = parentId,
-                Name = "Bound child",
-                ResourceTypeId = resourceTypeId
-            });
+            Context.Set<SqlOS.Fga.Models.SqlOSFgaResource>().Add(FgaTestModel.Resource(childId, "Bound child", resourceTypeId, parentId: parentId));
             Context.Set<SqlOS.Fga.Models.SqlOSFgaSubject>().Add(new()
             {
                 Id = subjectId,

@@ -7,7 +7,6 @@
 SqlOS.AuthServer.Models.SqlOSAuditEvent::.ctor -> DateTime.UtcNow
 SqlOS.Fga.Models.SqlOSFgaAgent::.ctor -> DateTime.UtcNow
 SqlOS.Fga.Models.SqlOSFgaGrant::.ctor -> DateTime.UtcNow
-SqlOS.Fga.Models.SqlOSFgaResource::.ctor -> DateTime.UtcNow
 SqlOS.Fga.Models.SqlOSFgaServiceAccount::.ctor -> DateTime.UtcNow
 SqlOS.Fga.Models.SqlOSFgaSubject::.ctor -> DateTime.UtcNow
 SqlOS.Fga.Models.SqlOSFgaUser::.ctor -> DateTime.UtcNow

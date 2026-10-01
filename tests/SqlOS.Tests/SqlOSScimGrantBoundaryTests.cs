@@ -219,7 +219,7 @@ public sealed class SqlOSScimGrantBoundaryTests
         await PushGroupAsync(f, connection, "grp-gone", "Store-1-Managers");
         (await f.Context.Set<SqlOSFgaGrant>().CountAsync()).Should().Be(1);
         var store = await f.Context.Set<SqlOSFgaResource>().SingleAsync(x => x.Id == "org::gone::store::1");
-        store.ParentId = null;
+        FgaTestModel.Set(store, nameof(SqlOSFgaResource.ParentId), null);
         f.Context.Remove(await f.Context.Set<SqlOSFgaResource>().SingleAsync(x => x.Id == "org::gone"));
         await f.Context.SaveChangesAsync();
 
@@ -735,15 +735,7 @@ public sealed class SqlOSScimGrantBoundaryTests
         => (await f.Context.Set<SqlOSScimExternalId>().SingleAsync(x => x.ResourceType == "User" && x.EntityId == userId)).FgaSubjectId!;
 
     private static void AddResource(TestSqlOSInMemoryDbContext context, string id, string? parentId, string type, string name)
-        => context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
-        {
-            Id = id,
-            ParentId = parentId,
-            ResourceTypeId = type,
-            Name = name,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        });
+        => context.Set<SqlOSFgaResource>().Add(FgaTestModel.Resource(id, name, type, parentId: parentId, createdAt: DateTime.UtcNow));
 
     private static async Task<Fixture> CreateFixtureAsync(SqlOSAuthServerOptions? optionsValue = null)
     {

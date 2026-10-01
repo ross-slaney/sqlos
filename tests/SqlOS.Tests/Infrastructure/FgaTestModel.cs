@@ -37,6 +37,31 @@ internal static class FgaTestModel
         return Existing(role);
     }
 
+    /// <summary>
+    /// A stored resource. Its parent is set as given, unchecked, so a fixture can also hold a tree
+    /// SqlOS would refuse to build (a cycle, a dangling parent, one too deep).
+    /// </summary>
+    public static SqlOSFgaResource Resource(
+        string id,
+        string name,
+        string resourceTypeId,
+        string? parentId = null,
+        bool isActive = true,
+        DateTime? createdAt = null)
+    {
+        var resource = SqlOSFgaResource.Create(id, name, resourceTypeId, description: null, SqlOSFgaAncestry.None, createdAt ?? Now, isActive);
+        Set(resource, nameof(SqlOSFgaResource.ParentId), parentId);
+        return Existing(resource);
+    }
+
+    /// <summary>Sets a persisted property directly, for state the write model would not produce.</summary>
+    public static T Set<T>(T entity, string property, object? value)
+        where T : class
+    {
+        typeof(T).GetProperty(property)!.SetValue(entity, value);
+        return entity;
+    }
+
     /// <summary>Drops the events <paramref name="aggregate"/> raised while the fixture built it.</summary>
     public static T Existing<T>(T aggregate)
         where T : ISqlOSAggregate

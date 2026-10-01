@@ -9,6 +9,7 @@ using SqlOS.IntegrationTests.Fga.Infrastructure;
 using SqlOS.IntegrationTests.Infrastructure;
 using SqlOS.Fga.Models;
 using SqlOS.Fga.Services;
+using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.IntegrationTests.Fga;
 
@@ -71,20 +72,8 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
             Options.Create(options),
             loggerFactory.CreateLogger<SqlOSFgaFunctionInitializer>());
         var suffix = Guid.NewGuid().ToString("N");
-        var level1 = new SqlOSFgaResource
-        {
-            Id = $"depth_level_1_{suffix}",
-            ParentId = "root",
-            Name = "Depth level 1",
-            ResourceTypeId = "agency"
-        };
-        var level2 = new SqlOSFgaResource
-        {
-            Id = $"depth_level_2_{suffix}",
-            ParentId = level1.Id,
-            Name = "Depth level 2",
-            ResourceTypeId = "project"
-        };
+        var level1 = FgaTestModel.Resource($"depth_level_1_{suffix}", "Depth level 1", "agency", parentId: "root");
+        var level2 = FgaTestModel.Resource($"depth_level_2_{suffix}", "Depth level 2", "project", parentId: level1.Id);
 
         try
         {
@@ -157,19 +146,8 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
             Options.Create(new SqlOSFgaOptions()),
             loggerFactory.CreateLogger<SqlOSFgaFunctionInitializer>());
         var suffix = Guid.NewGuid().ToString("N");
-        var first = new SqlOSFgaResource
-        {
-            Id = $"cycle_a_{suffix}",
-            Name = "Cycle A",
-            ResourceTypeId = "agency"
-        };
-        var second = new SqlOSFgaResource
-        {
-            Id = $"cycle_b_{suffix}",
-            ParentId = first.Id,
-            Name = "Cycle B",
-            ResourceTypeId = "agency"
-        };
+        var first = FgaTestModel.Resource($"cycle_a_{suffix}", "Cycle A", "agency");
+        var second = FgaTestModel.Resource($"cycle_b_{suffix}", "Cycle B", "agency", parentId: first.Id);
         var grant = new SqlOSFgaGrant
         {
             Id = $"cycle_grant_{suffix}",

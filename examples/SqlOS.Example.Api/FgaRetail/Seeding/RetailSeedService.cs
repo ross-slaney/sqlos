@@ -5,6 +5,7 @@ using SqlOS.AuthServer.Services;
 using SqlOS.Example.Api.Data;
 using SqlOS.Example.Api.FgaRetail.Models;
 using SqlOS.Example.Api.Services;
+using SqlOS.Extensions;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
 using SqlOS.Fga.Services;
@@ -149,41 +150,31 @@ public class RetailSeedService
         await _subjectService.AddToGroupAsync(inventorySyncAgent.SubjectId, WalmartRegionalGroupId);
         await _context.SaveChangesAsync(ct);
 
-        _context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
+        await _context.CreateResourceWithIdAsync("retail_root", "root", "Retail Root", parentResourceId: "root", cancellationToken: ct);
+        foreach (var (id, name) in new[]
         {
-            Id = "retail_root",
-            ParentId = "root",
-            Name = "Retail Root",
-            ResourceTypeId = "root"
-        });
-        await _context.SaveChangesAsync(ct);
+            (WalmartChainResourceId, "Walmart"),
+            (TargetChainResourceId, "Target"),
+            (CostcoChainResourceId, "Costco"),
+            (KrogerChainResourceId, "Kroger"),
+            (AldiChainResourceId, "Aldi")
+        })
+        {
+            await _context.CreateResourceWithIdAsync(id, RetailResourceTypeIds.Chain, name, parentResourceId: "retail_root", cancellationToken: ct);
+        }
 
-        _context.Set<SqlOSFgaResource>().AddRange(
-            new SqlOSFgaResource { Id = WalmartChainResourceId, ParentId = "retail_root", Name = "Walmart", ResourceTypeId = RetailResourceTypeIds.Chain },
-            new SqlOSFgaResource { Id = TargetChainResourceId, ParentId = "retail_root", Name = "Target", ResourceTypeId = RetailResourceTypeIds.Chain },
-            new SqlOSFgaResource { Id = CostcoChainResourceId, ParentId = "retail_root", Name = "Costco", ResourceTypeId = RetailResourceTypeIds.Chain },
-            new SqlOSFgaResource { Id = KrogerChainResourceId, ParentId = "retail_root", Name = "Kroger", ResourceTypeId = RetailResourceTypeIds.Chain },
-            new SqlOSFgaResource { Id = AldiChainResourceId, ParentId = "retail_root", Name = "Aldi", ResourceTypeId = RetailResourceTypeIds.Chain }
-        );
-        await _context.SaveChangesAsync(ct);
-
-        _context.Set<SqlOSFgaResource>().AddRange(
-            new SqlOSFgaResource { Id = Store001ResourceId, ParentId = WalmartChainResourceId, Name = "Store 001", ResourceTypeId = RetailResourceTypeIds.Location },
-            new SqlOSFgaResource { Id = Store002ResourceId, ParentId = WalmartChainResourceId, Name = "Store 002", ResourceTypeId = RetailResourceTypeIds.Location },
-            new SqlOSFgaResource { Id = Store100ResourceId, ParentId = TargetChainResourceId, Name = "Store 100", ResourceTypeId = RetailResourceTypeIds.Location }
-        );
-        await _context.SaveChangesAsync(ct);
+        await _context.CreateResourceWithIdAsync(Store001ResourceId, RetailResourceTypeIds.Location, "Store 001", parentResourceId: WalmartChainResourceId, cancellationToken: ct);
+        await _context.CreateResourceWithIdAsync(Store002ResourceId, RetailResourceTypeIds.Location, "Store 002", parentResourceId: WalmartChainResourceId, cancellationToken: ct);
+        await _context.CreateResourceWithIdAsync(Store100ResourceId, RetailResourceTypeIds.Location, "Store 100", parentResourceId: TargetChainResourceId, cancellationToken: ct);
 
         var laptopResourceId = "res_inv_laptop";
         var phoneResourceId = "res_inv_phone";
         var tabletResourceId = "res_inv_tablet";
         var headphonesResourceId = "res_inv_headphones";
-        _context.Set<SqlOSFgaResource>().AddRange(
-            new SqlOSFgaResource { Id = laptopResourceId, ParentId = Store001ResourceId, Name = "Laptop", ResourceTypeId = RetailResourceTypeIds.InventoryItem },
-            new SqlOSFgaResource { Id = phoneResourceId, ParentId = Store001ResourceId, Name = "Phone", ResourceTypeId = RetailResourceTypeIds.InventoryItem },
-            new SqlOSFgaResource { Id = tabletResourceId, ParentId = Store002ResourceId, Name = "Tablet", ResourceTypeId = RetailResourceTypeIds.InventoryItem },
-            new SqlOSFgaResource { Id = headphonesResourceId, ParentId = Store100ResourceId, Name = "Headphones", ResourceTypeId = RetailResourceTypeIds.InventoryItem }
-        );
+        await _context.CreateResourceWithIdAsync(laptopResourceId, RetailResourceTypeIds.InventoryItem, "Laptop", parentResourceId: Store001ResourceId, cancellationToken: ct);
+        await _context.CreateResourceWithIdAsync(phoneResourceId, RetailResourceTypeIds.InventoryItem, "Phone", parentResourceId: Store001ResourceId, cancellationToken: ct);
+        await _context.CreateResourceWithIdAsync(tabletResourceId, RetailResourceTypeIds.InventoryItem, "Tablet", parentResourceId: Store002ResourceId, cancellationToken: ct);
+        await _context.CreateResourceWithIdAsync(headphonesResourceId, RetailResourceTypeIds.InventoryItem, "Headphones", parentResourceId: Store100ResourceId, cancellationToken: ct);
         await _context.SaveChangesAsync(ct);
 
         var walmartChain = new Chain { Id = "chain_walmart", ResourceId = WalmartChainResourceId, Name = "Walmart", Description = "Walmart Inc.", HeadquartersAddress = "702 SW 8th St, Bentonville, AR 72716" };

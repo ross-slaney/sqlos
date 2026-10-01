@@ -73,8 +73,8 @@ public class SqlOSFgaSubjectServiceTests
     public void CreateResource_WhenExistingParentChainHasCycle_Throws()
     {
         _context.Set<SqlOSFgaResource>().AddRange(
-            new SqlOSFgaResource { Id = "res_a", ParentId = "res_b", Name = "A", ResourceTypeId = "root" },
-            new SqlOSFgaResource { Id = "res_b", ParentId = "res_a", Name = "B", ResourceTypeId = "root" });
+            FgaTestModel.Resource("res_a", "A", "root", parentId: "res_b"),
+            FgaTestModel.Resource("res_b", "B", "root", parentId: "res_a"));
         _context.SaveChanges();
 
         Assert.ThrowsException<InvalidOperationException>(() =>

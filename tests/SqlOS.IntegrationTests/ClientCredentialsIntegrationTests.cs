@@ -238,7 +238,7 @@ public sealed class ClientCredentialsIntegrationTests
         var organization = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"Unified {suffix}", $"unified-{suffix}"));
         var resourceTypeId = await context.Set<SqlOSFgaResourceType>().Select(x => x.Id).FirstAsync();
         var role = FgaTestModel.Role($"role_{suffix}", key: $"runner-{suffix}", name: "Runner");
-        var resource = new SqlOSFgaResource { Id = $"res_{suffix}", ResourceTypeId = resourceTypeId, Name = "Jobs", IsActive = true };
+        var resource = FgaTestModel.Resource($"res_{suffix}", "Jobs", resourceTypeId);
         context.Set<SqlOSFgaRole>().Add(role);
         context.Set<SqlOSFgaResource>().Add(resource);
         await context.SaveChangesAsync();

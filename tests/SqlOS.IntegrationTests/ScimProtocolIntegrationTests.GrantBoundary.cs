@@ -245,7 +245,7 @@ public sealed partial class ScimProtocolIntegrationTests
             AddResource(context, "store::deep", parent, "store");
             await context.SaveChangesAsync();
             // Foreign keys allow a cycle once both rows exist.
-            (await context.Set<SqlOSFgaResource>().SingleAsync(x => x.Id == "loop_1")).ParentId = "loop_2";
+            FgaTestModel.Set(await context.Set<SqlOSFgaResource>().SingleAsync(x => x.Id == "loop_1"), nameof(SqlOSFgaResource.ParentId), "loop_2");
             await context.SaveChangesAsync();
         }
         await BoundConnectionToTenantRootAsync(server, BoundaryTenantRoot);
@@ -325,13 +325,5 @@ public sealed partial class ScimProtocolIntegrationTests
         => (await context.Set<SqlOSScimExternalId>().SingleAsync(x => x.ResourceType == "User" && x.EntityId == userId)).FgaSubjectId!;
 
     private static void AddResource(TestSqlOSDbContext context, string id, string? parentId, string resourceTypeId)
-        => context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
-        {
-            Id = id,
-            ParentId = parentId,
-            ResourceTypeId = resourceTypeId,
-            Name = id,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        });
+        => context.Set<SqlOSFgaResource>().Add(FgaTestModel.Resource(id, id, resourceTypeId, parentId: parentId, createdAt: DateTime.UtcNow));
 }

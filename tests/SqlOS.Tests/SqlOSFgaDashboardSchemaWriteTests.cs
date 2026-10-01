@@ -162,13 +162,7 @@ public sealed class SqlOSFgaDashboardSchemaWriteTests
                 var context = scope.ServiceProvider.GetRequiredService<TestSqlOSInMemoryDbContext>();
                 context.Set<SqlOSFgaSubjectType>().Add(FgaTestModel.SubjectType("user", "User"));
                 context.Set<SqlOSFgaResourceType>().Add(FgaTestModel.ResourceType("root", "Root"));
-                context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
-                {
-                    Id = "root",
-                    Name = "Root",
-                    ResourceTypeId = "root",
-                    IsActive = true
-                });
+                context.Set<SqlOSFgaResource>().Add(FgaTestModel.Resource("root", "Root", "root"));
                 context.Set<SqlOSFgaSubject>().Add(new SqlOSFgaSubject
                 {
                     Id = "user-1",

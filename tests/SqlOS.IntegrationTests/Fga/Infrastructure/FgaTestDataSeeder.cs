@@ -85,10 +85,10 @@ public static class FgaTestDataSeeder
 
         // Resources (hierarchy: root > agency > team/project, root > other_agency)
         context.Set<SqlOSFgaResource>().AddRange(
-            new SqlOSFgaResource { Id = TestAgencyResourceId, ParentId = "root", Name = "Test Agency", ResourceTypeId = "agency" },
-            new SqlOSFgaResource { Id = TestTeamResourceId, ParentId = TestAgencyResourceId, Name = "Test Team", ResourceTypeId = "team" },
-            new SqlOSFgaResource { Id = TestProjectResourceId, ParentId = TestAgencyResourceId, Name = "Test Project", ResourceTypeId = "project" },
-            new SqlOSFgaResource { Id = OtherAgencyResourceId, ParentId = "root", Name = "Other Agency", ResourceTypeId = "agency" }
+            FgaTestModel.Resource(TestAgencyResourceId, "Test Agency", "agency", parentId: "root"),
+            FgaTestModel.Resource(TestTeamResourceId, "Test Team", "team", parentId: TestAgencyResourceId),
+            FgaTestModel.Resource(TestProjectResourceId, "Test Project", "project", parentId: TestAgencyResourceId),
+            FgaTestModel.Resource(OtherAgencyResourceId, "Other Agency", "agency", parentId: "root")
         );
 
         // Subjects

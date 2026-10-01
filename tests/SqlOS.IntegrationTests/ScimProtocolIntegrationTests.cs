@@ -381,15 +381,7 @@ public sealed partial class ScimProtocolIntegrationTests
             var context = scope.ServiceProvider.GetRequiredService<TestSqlOSDbContext>();
             context.Set<SqlOSFgaResourceType>().Add(FgaTestModel.ResourceType("store", "Store"));
             context.Set<SqlOSFgaRole>().Add(FgaTestModel.Role("role_manager", key: "manager", name: "Manager"));
-            context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
-            {
-                Id = "store_123",
-                ParentId = "tenant_root",
-                ResourceTypeId = "store",
-                Name = "Store 123",
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            });
+            context.Set<SqlOSFgaResource>().Add(FgaTestModel.Resource("store_123", "Store 123", "store", parentId: "tenant_root", createdAt: DateTime.UtcNow));
             await context.SaveChangesAsync();
             var admin = scope.ServiceProvider.GetRequiredService<SqlOSAdminService>();
             var mapping = await admin.CreateScimGroupMappingAsync(server.ConnectionId, new SqlOSCreateScimGroupMappingRequest(
@@ -427,15 +419,7 @@ public sealed partial class ScimProtocolIntegrationTests
             var context = setup.ServiceProvider.GetRequiredService<TestSqlOSDbContext>();
             context.Set<SqlOSFgaResourceType>().Add(FgaTestModel.ResourceType("site", "Site"));
             context.Set<SqlOSFgaRole>().Add(FgaTestModel.Role("role_site_admin", key: "site_admin", name: "Site admin"));
-            context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
-            {
-                Id = "site_1",
-                ParentId = "tenant_root",
-                ResourceTypeId = "site",
-                Name = "Site 1",
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            });
+            context.Set<SqlOSFgaResource>().Add(FgaTestModel.Resource("site_1", "Site 1", "site", parentId: "tenant_root", createdAt: DateTime.UtcNow));
             await context.SaveChangesAsync();
             await setup.ServiceProvider.GetRequiredService<SqlOSAdminService>()
                 .CreateScimGroupMappingAsync(server.ConnectionId, new SqlOSCreateScimGroupMappingRequest(
@@ -473,15 +457,7 @@ public sealed partial class ScimProtocolIntegrationTests
             var context = setup.ServiceProvider.GetRequiredService<TestSqlOSDbContext>();
             context.Set<SqlOSFgaResourceType>().Add(FgaTestModel.ResourceType("warehouse", "Warehouse"));
             context.Set<SqlOSFgaRole>().Add(FgaTestModel.Role("role_operator", key: "operator", name: "Operator"));
-            context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
-            {
-                Id = "warehouse_123",
-                ParentId = "tenant_root",
-                ResourceTypeId = "warehouse",
-                Name = "Warehouse 123",
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            });
+            context.Set<SqlOSFgaResource>().Add(FgaTestModel.Resource("warehouse_123", "Warehouse 123", "warehouse", parentId: "tenant_root", createdAt: DateTime.UtcNow));
             await context.SaveChangesAsync();
             await setup.ServiceProvider.GetRequiredService<SqlOSAdminService>()
                 .CreateScimGroupMappingAsync(server.ConnectionId, new SqlOSCreateScimGroupMappingRequest(

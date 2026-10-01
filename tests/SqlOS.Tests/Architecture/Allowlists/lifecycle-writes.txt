@@ -186,11 +186,7 @@ SqlOS.Email.Services.SqlOSEmailAdminService::CreateTemplateAsync -> SqlOSEmailTe
 SqlOS.Email.Services.SqlOSEmailAdminService::DeleteTemplateAsync -> SqlOSEmailTemplate.IsActive
 SqlOS.Email.Services.SqlOSEmailAdminService::EnsureBuiltInTemplatesAsync -> SqlOSEmailTemplate.IsActive
 SqlOS.Email.Services.SqlOSEmailAdminService::UpdateTemplateAsync -> SqlOSEmailTemplate.IsActive
-SqlOS.Extensions.SqlOSErgonomicsExtensions::CreateResource -> SqlOSFgaResource.IsActive
-SqlOS.Extensions.SqlOSErgonomicsExtensions::ProvisionResourceWithIdAsync -> SqlOSFgaResource.IsActive
 SqlOS.Extensions.SqlOSErgonomicsExtensions::ProvisionServiceAccountSubjectAsync -> SqlOSFgaServiceAccount.ExpiresAt
 SqlOS.Extensions.SqlOSErgonomicsExtensions::ProvisionUserSubjectAsync -> SqlOSFgaUser.IsActive
 SqlOS.Fga.Services.SqlOSFgaSubjectService::CreateServiceAccountAsync -> SqlOSFgaServiceAccount.ExpiresAt
 SqlOS.Fga.Services.SqlOSFgaSubjectService::CreateUserAsync -> SqlOSFgaUser.IsActive
-SqlOS.Fga.SqlOSResourceEntitySynchronizer::ApplyResourceValues -> SqlOSFgaResource.IsActive
-SqlOS.Fga.SqlOSResourceEntitySynchronizer::CreateResource -> SqlOSFgaResource.IsActive

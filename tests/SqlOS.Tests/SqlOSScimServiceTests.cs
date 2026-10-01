@@ -886,23 +886,8 @@ public sealed class SqlOSScimServiceTests
         context.Set<SqlOSFgaResourceType>().Add(FgaTestModel.ResourceType("organization", "Organization"));
         context.Set<SqlOSFgaRole>().Add(FgaTestModel.Role("role_store_manager", key: "store_manager", name: "Store Manager"));
         // The organization's root resource is the SCIM grant boundary for mapped grants.
-        context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
-        {
-            Id = AcmeBoundary,
-            ResourceTypeId = "organization",
-            Name = "Acme",
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        });
-        context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
-        {
-            Id = "store_100",
-            ParentId = AcmeBoundary,
-            ResourceTypeId = "store",
-            Name = "Store 100",
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        });
+        context.Set<SqlOSFgaResource>().Add(FgaTestModel.Resource(AcmeBoundary, "Acme", "organization", createdAt: DateTime.UtcNow));
+        context.Set<SqlOSFgaResource>().Add(FgaTestModel.Resource("store_100", "Store 100", "store", parentId: AcmeBoundary, createdAt: DateTime.UtcNow));
         await context.SaveChangesAsync();
     }
 
