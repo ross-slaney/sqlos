@@ -110,6 +110,35 @@ public sealed class PublicPasswordResetScenarios
     }
 
     [Scenario]
+    [Covers("POST /sqlos/auth/password/reset")]
+    [Covers("POST /sqlos/auth/password/login")]
+    public async Task A_blank_new_password_is_refused_before_the_link_is_spent()
+    {
+        await using var t = await PublicHost.StartAsync(HostProfiles.Hosted);
+        var alice = await t.Setup.CreateUserAsync("alice");
+        var newPassword = t.Unique.Password("alice-new");
+        t.Discard(await t.Api.PostJsonAsync("/sqlos/auth/password/forgot", new { email = alice.Email, clientId = Client }));
+        var token = t.LatestEmailLinkToken(alice.Email);
+        await t.SkipAuditAsync();
+
+        t.Observe(
+            await t.Api.PostJsonAsync("/sqlos/auth/password/reset", new { token, newPassword = string.Empty }),
+            "an empty new password is refused before the link is spent; this route answers every refused reset unhandled (#456), and 7.2.1 stored the empty password");
+        t.Observe(
+            await t.Api.PostJsonAsync("/sqlos/auth/password/reset", new { token, newPassword }),
+            "the same link then sets a real password");
+        t.Observe(
+            await t.Api.PostJsonAsync("/sqlos/auth/password/login", new { email = alice.Email, password = string.Empty, clientId = Client }),
+            "an empty password does not sign in");
+        t.Observe(
+            await t.Api.PostJsonAsync("/sqlos/auth/password/login", new { email = alice.Email, password = newPassword, clientId = Client }),
+            "the new password does");
+
+        await t.ObserveAuditAsync("reset and sign-in events");
+        await t.ApproveAsync();
+    }
+
+    [Scenario]
     [Covers("POST /sqlos/auth/password/forgot")]
     public async Task Reset_requests_answer_generically_and_are_throttled_per_address()
     {

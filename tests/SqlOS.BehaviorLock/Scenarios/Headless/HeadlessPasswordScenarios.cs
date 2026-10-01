@@ -86,6 +86,39 @@ public sealed class HeadlessPasswordScenarios
     }
 
     [Scenario]
+    [Covers("POST /sqlos/auth/headless/password/reset")]
+    [Covers("POST /sqlos/auth/headless/password/login")]
+    public async Task A_blank_new_password_is_refused_and_the_reset_token_still_sets_a_real_one()
+    {
+        await using var t = await Transcript.StartAsync(HostProfiles.Headless);
+        var alice = await t.Setup.CreateUserAsync("alice");
+        var requestId = await OpenAuthorizeAsync(t, t.Urls.Authorize());
+        t.Discard(await t.PostJsonAsync($"{Api}/password/forgot", new { email = alice.Email, requestId }));
+        var resetToken = EmailLinkToken(t, alice.Email);
+        var newPassword = t.Unique.Password("alice-new");
+        await t.SkipAuditAsync();
+
+        t.Observe(
+            await t.PostJsonAsync($"{Api}/password/reset", new { token = resetToken, newPassword = string.Empty }),
+            "an empty new password is refused, and the token is not spent (7.2.1 stored it)");
+        t.Observe(
+            await t.PostJsonAsync($"{Api}/password/reset", new { token = resetToken, newPassword = "   " }),
+            "so is a blank one");
+        t.Observe(
+            await t.PostJsonAsync($"{Api}/password/reset", new { token = resetToken, newPassword }),
+            "the same token then sets a real password");
+        t.Observe(
+            await t.PostJsonAsync($"{Api}/password/login", new { requestId, email = alice.Email, password = string.Empty }),
+            "an empty password does not sign in");
+        t.Observe(
+            await t.PostJsonAsync($"{Api}/password/login", new { requestId, email = alice.Email, password = newPassword }),
+            "the new password signs in");
+
+        await t.ObserveAuditAsync("reset and sign-in events");
+        await t.ApproveAsync();
+    }
+
+    [Scenario]
     [Covers("POST /sqlos/auth/headless/password/login")]
     public async Task A_wrong_password_and_an_unknown_email_get_the_same_password_view_error()
     {

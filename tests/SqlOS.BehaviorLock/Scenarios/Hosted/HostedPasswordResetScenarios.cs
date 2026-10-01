@@ -123,6 +123,44 @@ public sealed class HostedPasswordResetScenarios
     }
 
     [Scenario]
+    [Covers("POST /sqlos/auth/password/reset/submit")]
+    [Covers("POST /sqlos/auth/login/password")]
+    public async Task A_blank_new_password_is_refused_and_the_link_still_sets_a_real_one()
+    {
+        await using var t = await Transcript.StartAsync(HostProfiles.Hosted);
+        var alice = await t.Setup.CreateUserAsync("alice");
+        var newPassword = t.Unique.Password("alice-new");
+        var forgot = t.Discard(await t.GetAsync("/sqlos/auth/password/forgot"));
+        t.Discard(await t.SubmitAsync(forgot.Form("/password/forgot/submit").With("email", alice.Email)));
+        var token = HostedFlows.LinkToken(t, alice.Email, "reset-token");
+        var reset = t.Discard(await t.GetAsync($"/sqlos/auth/password/reset?token={Uri.EscapeDataString(token)}"));
+        await t.SkipAuditAsync();
+        var form = HostedFlows.ResetForm(reset);
+
+        t.Observe(
+            await t.SubmitAsync(form.With("newPassword", string.Empty).With("confirmPassword", string.Empty)),
+            "an empty new password is refused, and the link is not spent (7.2.1 stored it)");
+        t.Observe(
+            await t.SubmitAsync(form.With("newPassword", "   ").With("confirmPassword", "   ")),
+            "so is a blank one");
+        t.Observe(
+            await t.SubmitAsync(form.With("newPassword", newPassword).With("confirmPassword", newPassword)),
+            "the same link then sets a real password");
+        await t.ObserveAuditAsync("reset events");
+
+        var signIn = await HostedFlows.BeginAsync(t, extra: new Dictionary<string, string?> { ["view"] = "password" });
+        t.Observe(
+            await t.SubmitAsync(signIn.Page.Form("/login/password").With("email", alice.Email).With("password", string.Empty)),
+            "an empty password does not sign in");
+        t.Observe(
+            await t.SubmitAsync(signIn.Page.Form("/login/password").With("email", alice.Email).With("password", newPassword)),
+            "the new password signs in");
+
+        await t.ObserveAuditAsync("sign-in events");
+        await t.ApproveAsync();
+    }
+
+    [Scenario]
     [Covers("GET /sqlos/auth/password/reset")]
     [Covers("POST /sqlos/auth/password/reset/submit")]
     [Covers("POST /sqlos/auth/token")]

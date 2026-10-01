@@ -9,6 +9,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.AuthServer.Policies;
 using SqlOS.Domain;
 using SqlOS.Domain.Events;
 using SqlOS.Email.Contracts;
@@ -1519,6 +1520,12 @@ public sealed class SqlOSAuthService
         if (!credentialSettings.PasswordEnabled)
         {
             throw new InvalidOperationException("Local password authentication is disabled.");
+        }
+
+        // The policy decides before the link is spent, so a refused password leaves the link usable.
+        if (PasswordPolicy.Default.Check(request.NewPassword) is { } refusal)
+        {
+            throw new InvalidOperationException(refusal.Message);
         }
 
         var token = await _cryptoService.ConsumeTemporaryTokenAsync(SqlOSTemporaryTokenKinds.PasswordReset, request.Token, cancellationToken);
