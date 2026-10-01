@@ -2,6 +2,7 @@ using System.Data.Common;
 using System.Runtime.CompilerServices;
 using System.Transactions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -25,9 +26,13 @@ namespace SqlOS.Database;
 /// Rows are ordered by when their events were raised.
 /// </para>
 /// <para>
-/// <b>A save that fails or is canceled</b> leaves the unit of work exactly as it was: its rows are
-/// detached and its events go back to the aggregates that raised them, so a retried save projects
-/// them once and an abandoned unit of work writes nothing.
+/// <b>A save that fails or is canceled</b> leaves the unit of work as it was: its rows are detached
+/// and its events go back to the aggregates that raised them, so a retried save projects them once
+/// and an abandoned unit of work writes nothing. EF reports most failures to interceptors at once;
+/// a concurrency conflict, or a failure before EF begins writing, it reports to none, so that save
+/// is undone when the context next saves. A unit of work discarded after a failure
+/// (<c>ChangeTracker.Clear()</c>) writes nothing for it: only tracked aggregates are drained.
+/// Reloading an aggregate does not discard the events it raised.
 /// </para>
 /// <para>
 /// <b>After the save</b>, the events go to every <see cref="ISqlOSPostCommitHandler{TEvent}"/>
@@ -179,8 +184,8 @@ internal sealed class SqlOSDomainEventsInterceptor : ISaveChangesInterceptor, ID
             return;
         }
 
-        // A save that ended without completing or failing (it threw before EF began writing) is
-        // abandoned, so its events are projected afresh with this one.
+        // A save EF never reported as completed or failed (a concurrency conflict, or a throw
+        // before EF began writing) is undone first, so its events are projected afresh with this one.
         Abandon(context);
 
         var drained = Drain(context);
@@ -306,25 +311,15 @@ internal sealed class SqlOSDomainEventsInterceptor : ISaveChangesInterceptor, ID
     private static List<DrainedEvent> Drain(DbContext context)
     {
         var drained = new List<DrainedEvent>();
-        var tracker = context.ChangeTracker;
-        var detectChanges = tracker.AutoDetectChangesEnabled;
-
-        // Events are not EF state: finding the aggregates needs no DetectChanges, which the save
-        // runs right after this interceptor anyway.
-        tracker.AutoDetectChangesEnabled = false;
-        try
+        using (new DetectChangesSuspended(context.ChangeTracker))
         {
-            foreach (var entry in tracker.Entries())
+            foreach (var entry in context.ChangeTracker.Entries())
             {
                 if (entry.Entity is ISqlOSAggregate aggregate)
                 {
                     Take(aggregate.Events);
                 }
             }
-        }
-        finally
-        {
-            tracker.AutoDetectChangesEnabled = detectChanges;
         }
 
         if (SqlOSUnitOfWorkEvents.TryGet(context, out var unitOfWork))
@@ -351,12 +346,15 @@ internal sealed class SqlOSDomainEventsInterceptor : ISaveChangesInterceptor, ID
     /// </summary>
     private static void Restore(DbContext context, PendingSave save)
     {
-        foreach (var row in save.Rows)
+        using (new DetectChangesSuspended(context.ChangeTracker))
         {
-            var entry = context.Entry(row);
-            if (entry.State == EntityState.Added)
+            foreach (var row in save.Rows)
             {
-                entry.State = EntityState.Detached;
+                var entry = context.Entry(row);
+                if (entry.State == EntityState.Added)
+                {
+                    entry.State = EntityState.Detached;
+                }
             }
         }
 
@@ -383,6 +381,26 @@ internal sealed class SqlOSDomainEventsInterceptor : ISaveChangesInterceptor, ID
     }
 
     private readonly record struct DrainedEvent(DomainEventBuffer Source, RaisedDomainEvent Raised);
+
+    /// <summary>
+    /// Turns EF's automatic change detection off until disposed. Events and staged rows are not EF
+    /// state, so finding them needs no DetectChanges (the save runs it right after this
+    /// interceptor), and undoing a save must not fail on the state that made it fail.
+    /// </summary>
+    private readonly ref struct DetectChangesSuspended
+    {
+        private readonly ChangeTracker _tracker;
+        private readonly bool _wasEnabled;
+
+        public DetectChangesSuspended(ChangeTracker tracker)
+        {
+            _tracker = tracker;
+            _wasEnabled = tracker.AutoDetectChangesEnabled;
+            tracker.AutoDetectChangesEnabled = false;
+        }
+
+        public void Dispose() => _tracker.AutoDetectChangesEnabled = _wasEnabled;
+    }
 
     private sealed class PendingSave(List<DrainedEvent> drained, SqlOSRequestContext request)
     {

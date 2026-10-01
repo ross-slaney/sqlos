@@ -144,6 +144,86 @@ public sealed class DomainEventsInterceptorTests
     }
 
     [TestMethod]
+    public async Task A_save_retried_after_a_concurrency_conflict_writes_each_row_once()
+    {
+        await using var pipeline = new Pipeline();
+        await pipeline.SeedAccountAsync("acc_contested");
+        await using var scope = pipeline.CreateScope();
+        var context = scope.Context;
+        var account = await context.Set<LedgerAccount>().SingleAsync(candidate => candidate.Id == "acc_contested");
+        account.Deposit(5);
+        await pipeline.BumpVersionAsync("acc_contested");
+
+        // EF reports a concurrency conflict to no interceptor: the next save undoes this one first.
+        var conflict = await FluentActions.Invoking(() => context.SaveChangesAsync()).Should().ThrowAsync<DbUpdateConcurrencyException>();
+        (await pipeline.ReadRowsAsync()).Should().BeEmpty();
+
+        var entry = conflict.Which.Entries.Should().ContainSingle().Subject;
+        entry.OriginalValues.SetValues((await entry.GetDatabaseValuesAsync())!);
+        await context.SaveChangesAsync();
+
+        (await pipeline.ReadRowsAsync()).Select(row => row.MetadataJson).Should().Equal("{\"accountId\":\"acc_contested\",\"amount\":5}");
+        context.ChangeTracker.Entries<SqlOSAuditEvent>().Should().ContainSingle();
+        pipeline.Log.Entries.Should().Equal(new HandlerEntry("deposited acc_contested:5", InTransaction: false));
+    }
+
+    [TestMethod]
+    public async Task A_unit_of_work_discarded_after_a_concurrency_conflict_writes_none_of_its_rows()
+    {
+        await using var pipeline = new Pipeline();
+        await pipeline.SeedAccountAsync("acc_lost");
+        await using var scope = pipeline.CreateScope();
+        var context = scope.Context;
+        var account = await context.Set<LedgerAccount>().SingleAsync(candidate => candidate.Id == "acc_lost");
+        account.Deposit(5);
+        await pipeline.BumpVersionAsync("acc_lost");
+        await FluentActions.Invoking(() => context.SaveChangesAsync()).Should().ThrowAsync<DbUpdateConcurrencyException>();
+
+        context.ChangeTracker.Clear();
+        scope.Recorder.Record(new DepositRejected("acc_lost", "conflict"));
+        await context.SaveChangesAsync();
+
+        (await pipeline.ReadRowsAsync()).Select(row => row.EventType).Should().Equal("ledger.deposit_rejected");
+        pipeline.Log.Entries.Should().BeEmpty("the discarded deposit never committed");
+    }
+
+    [TestMethod]
+    public async Task Failure_records_a_pooled_context_never_saved_do_not_reach_its_next_lease()
+    {
+        using var connection = PipelineDbContext.OpenDatabase();
+        var services = new ServiceCollection();
+        services.AddDbContextPool<PipelineDbContext>(options => options.UseSqlite(connection));
+        services.ConfigureDbContext<PipelineDbContext>(
+            static (_, options) => SqlOSDomainEventsInterceptor.AttachTo(options),
+            ServiceLifetime.Singleton);
+        services.AddScoped<ISqlOSAuthServerDbContext>(provider => provider.GetRequiredService<PipelineDbContext>());
+        services.AddSingleton(PipelineProjections.Standard().Build());
+        services.AddScoped<IAuditRecorder, SqlOSAuditRecorder>();
+        await using var provider = services.BuildServiceProvider();
+        DbContextId firstLease;
+        await using (var scope = provider.CreateAsyncScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<PipelineDbContext>();
+            await context.Database.EnsureCreatedAsync();
+            firstLease = context.ContextId;
+            scope.ServiceProvider.GetRequiredService<IAuditRecorder>().Record(new DepositRejected("acc", "never saved"));
+        }
+
+        await using (var scope = provider.CreateAsyncScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<PipelineDbContext>();
+            context.ContextId.InstanceId.Should().Be(firstLease.InstanceId, "the pool hands the same context to the next scope");
+            context.ContextId.Lease.Should().NotBe(firstLease.Lease);
+            SqlOSUnitOfWorkEvents.TryGet(context, out _).Should().BeFalse();
+            context.Add(new LedgerAccount("next_lease"));
+
+            await context.SaveChangesAsync();
+
+            (await context.Set<SqlOSAuditEvent>().CountAsync()).Should().Be(0);
+        }
+    }
+
+    [TestMethod]
     public async Task A_rolled_back_transaction_keeps_no_row_and_runs_no_handler()
     {
         await using var pipeline = new Pipeline();
@@ -667,6 +747,23 @@ public sealed class DomainEventsInterceptorTests
         {
             await using var scope = _services.CreateAsyncScope();
             return await scope.ServiceProvider.GetRequiredService<PipelineDbContext>().Set<LedgerAccount>().CountAsync();
+        }
+
+        public async Task SeedAccountAsync(string id)
+        {
+            await using var scope = _services.CreateAsyncScope();
+            var context = scope.ServiceProvider.GetRequiredService<PipelineDbContext>();
+            context.Add(new LedgerAccount(id));
+            await context.SaveChangesAsync();
+        }
+
+        /// <summary>Another writer changes the account, so a save holding the old version conflicts.</summary>
+        public async Task BumpVersionAsync(string id)
+        {
+            await using var scope = _services.CreateAsyncScope();
+            await scope.ServiceProvider.GetRequiredService<PipelineDbContext>().Set<LedgerAccount>()
+                .Where(account => account.Id == id)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(account => account.Version, account => account.Version + 1));
         }
 
         public async ValueTask DisposeAsync()

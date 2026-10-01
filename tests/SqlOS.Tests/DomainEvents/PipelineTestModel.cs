@@ -23,6 +23,9 @@ internal sealed class LedgerAccount : ISqlOSAggregate
 
     public int Balance { get; private set; }
 
+    /// <summary>A concurrency token another writer bumps to make a save conflict.</summary>
+    public int Version { get; private set; }
+
     DomainEventBuffer ISqlOSAggregate.Events => _events;
 
     public IReadOnlyList<ISqlOSDomainEvent> PendingEvents => _events.Pending;
@@ -84,6 +87,7 @@ internal sealed class PipelineDbContext(DbContextOptions<PipelineDbContext> opti
         modelBuilder.Entity<LedgerAccount>(entity =>
         {
             entity.HasKey(account => account.Id);
+            entity.Property(account => account.Version).IsConcurrencyToken();
             entity.Ignore(account => account.PendingEvents);
         });
         modelBuilder.Entity<SqlOSAuditEvent>(entity =>
