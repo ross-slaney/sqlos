@@ -1,0 +1,105 @@
+# SqlOS behavior lock transcript
+scenario: HeadlessRequestScenarios.Unknown_and_finished_requests_are_rejected_as_json_errors
+profile: headless
+
+## 1. browser: an authorization request that never existed
+> GET /sqlos/auth/headless/requests/{req#1}
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "error": "invalid_request",
+      "message": "Authorization request is invalid or expired."
+    }
+
+## 2. browser: a request that already issued its code
+> GET /sqlos/auth/headless/requests/{req#2}
+> Cookie: sqlos_auth_page={cookie#1}
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "error": "invalid_request",
+      "message": "Authorization request is invalid or expired."
+    }
+
+## 3. browser: identify on the finished request
+> POST /sqlos/auth/headless/identify
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "email": "{email:alice}",
+>     "requestId": "{req#2}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "message": "Authorization request is invalid or expired."
+    }
+
+## 4. browser: a second password sign-in on the finished request
+> POST /sqlos/auth/headless/password/login
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "email": "{email:alice}",
+>     "password": "{password:alice}",
+>     "requestId": "{req#2}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "message": "Authorization request is invalid or expired."
+    }
+
+## audit: rejection events
+  - {
+      "action": "password.login.succeeded",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "password.login.succeeded",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "AuthorizationRequestId": "[redacted]",
+        "ClientKey": "behavior-lock-app",
+        "NormalizedEmail": "{email:ALICE}",
+        "Surface": "headless",
+        "UserAgentHash": null,
+        "details": {
+          "resetScopes": [
+            "email",
+            "user"
+          ]
+        },
+        "maskedEmail": "AL***@EXAMPLE.TEST"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }

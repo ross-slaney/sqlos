@@ -1,0 +1,293 @@
+# SqlOS behavior lock transcript
+scenario: HeadlessDisabledApiScenarios.{token#1}
+profile: hosted
+
+## 1. browser: loading a live hosted request through the disabled API
+> GET /sqlos/auth/headless/requests/{req#1}
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+< 404 Not Found
+< Cache-Control: no-store
+< Pragma: no-cache
+
+## 2. browser: POST /start
+> POST /sqlos/auth/headless/start
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "requestId": "{req#1}"
+>   }
+< 404 Not Found
+
+## 3. browser: POST /invitations/resolve
+> POST /sqlos/auth/headless/invitations/resolve
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "requestId": "{req#1}"
+>   }
+< 404 Not Found
+
+## 4. browser: POST /device/resolve
+> POST /sqlos/auth/headless/device/resolve
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "requestId": "{req#1}"
+>   }
+< 404 Not Found
+
+## 5. browser: POST /device/approve
+> POST /sqlos/auth/headless/device/approve
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "requestId": "{req#1}"
+>   }
+< 404 Not Found
+
+## 6. browser: POST /device/deny
+> POST /sqlos/auth/headless/device/deny
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "requestId": "{req#1}"
+>   }
+< 404 Not Found
+
+## 7. browser: POST /consent/approve
+> POST /sqlos/auth/headless/consent/approve
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "requestId": "{req#1}"
+>   }
+< 404 Not Found
+
+## 8. browser: POST /consent/deny
+> POST /sqlos/auth/headless/consent/deny
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "requestId": "{req#1}"
+>   }
+< 404 Not Found
+
+## 9. browser: POST /identify
+> POST /sqlos/auth/headless/identify
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "requestId": "{req#1}"
+>   }
+< 404 Not Found
+
+## 10. browser: POST /password/login
+> POST /sqlos/auth/headless/password/login
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "requestId": "{req#1}"
+>   }
+< 404 Not Found
+
+## 11. browser: POST /password/forgot
+> POST /sqlos/auth/headless/password/forgot
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "requestId": "{req#1}"
+>   }
+< 404 Not Found
+
+## 12. browser: POST /password/reset
+> POST /sqlos/auth/headless/password/reset
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "requestId": "{req#1}"
+>   }
+< 404 Not Found
+
+## 13. browser: POST /email-otp/start
+> POST /sqlos/auth/headless/email-otp/start
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "requestId": "{req#1}"
+>   }
+< 404 Not Found
+
+## 14. browser: POST /email-otp/verify
+> POST /sqlos/auth/headless/email-otp/verify
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "requestId": "{req#1}"
+>   }
+< 404 Not Found
+
+## 15. browser: POST /magic-link/start
+> POST /sqlos/auth/headless/magic-link/start
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "requestId": "{req#1}"
+>   }
+< 404 Not Found
+
+## 16. browser: POST /magic-link/complete
+> POST /sqlos/auth/headless/magic-link/complete
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "requestId": "{req#1}"
+>   }
+< 404 Not Found
+
+## 17. browser: POST /signup/email-otp/start
+> POST /sqlos/auth/headless/signup/email-otp/start
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "requestId": "{req#1}"
+>   }
+< 404 Not Found
+
+## 18. browser: POST /signup/email-otp/verify
+> POST /sqlos/auth/headless/signup/email-otp/verify
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "requestId": "{req#1}"
+>   }
+< 404 Not Found
+
+## 19. browser: POST /invitations/signup
+> POST /sqlos/auth/headless/invitations/signup
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "requestId": "{req#1}"
+>   }
+< 404 Not Found
+
+## 20. browser: POST /phone-otp/start
+> POST /sqlos/auth/headless/phone-otp/start
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "requestId": "{req#1}"
+>   }
+< 404 Not Found
+
+## 21. browser: POST /phone-otp/verify
+> POST /sqlos/auth/headless/phone-otp/verify
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "requestId": "{req#1}"
+>   }
+< 404 Not Found
+
+## 22. browser: POST /signup/phone-otp/start
+> POST /sqlos/auth/headless/signup/phone-otp/start
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "requestId": "{req#1}"
+>   }
+< 404 Not Found
+
+## 23. browser: POST /signup/phone-otp/verify
+> POST /sqlos/auth/headless/signup/phone-otp/verify
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "requestId": "{req#1}"
+>   }
+< 404 Not Found
+
+## 24. browser: POST /signup
+> POST /sqlos/auth/headless/signup
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "requestId": "{req#1}"
+>   }
+< 404 Not Found
+
+## 25. browser: POST /organization/select
+> POST /sqlos/auth/headless/organization/select
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "requestId": "{req#1}"
+>   }
+< 404 Not Found
+
+## 26. browser: POST /mfa/verify
+> POST /sqlos/auth/headless/mfa/verify
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "requestId": "{req#1}"
+>   }
+< 404 Not Found
+
+## 27. browser: POST /mfa/totp/enroll/start
+> POST /sqlos/auth/headless/mfa/totp/enroll/start
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "requestId": "{req#1}"
+>   }
+< 404 Not Found
+
+## 28. browser: POST /mfa/totp/enroll/verify
+> POST /sqlos/auth/headless/mfa/totp/enroll/verify
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "requestId": "{req#1}"
+>   }
+< 404 Not Found
+
+## 29. browser: POST /provider/start
+> POST /sqlos/auth/headless/provider/start
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "requestId": "{req#1}"
+>   }
+< 404 Not Found
+
+## audit: no events
+  (no new events)

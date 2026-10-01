@@ -1,0 +1,28 @@
+# SqlOS behavior lock transcript
+scenario: HeadlessNativeStartScenarios.Native_start_with_prompt_none_returns_login_required_to_the_app
+profile: headless
+
+## 1. client: prompt none without a session: a redirect action carrying login_required and the state
+> POST /sqlos/auth/headless/start
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "codeChallenge": "{pkce-challenge#1}",
+>     "codeChallengeMethod": "S256",
+>     "nonce": "{nonce#1}",
+>     "prompt": "none",
+>     "redirectUri": "https://sqlos.example.test/auth/callback",
+>     "responseType": "code",
+>     "scope": "openid profile email offline_access",
+>     "state": "{state#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "redirectUrl": "https://sqlos.example.test/auth/callback?error=login_required&state={state#1}&error_description=The%20user%20is%20not%20signed%20in.",
+      "type": "redirect",
+      "viewModel": null
+    }
+
+## audit: prompt none events
+  (no new events)

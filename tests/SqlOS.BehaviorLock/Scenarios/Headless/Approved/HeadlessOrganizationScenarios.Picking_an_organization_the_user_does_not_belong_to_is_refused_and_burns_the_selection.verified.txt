@@ -1,0 +1,94 @@
+# SqlOS behavior lock transcript
+scenario: HeadlessOrganizationScenarios.Picking_an_organization_the_user_does_not_belong_to_is_refused_and_burns_the_selection
+profile: headless
+
+## 1. browser: pick an organization frank is not a member of: refused
+> POST /sqlos/auth/headless/organization/select
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "organizationId": "{org#1}",
+>     "pendingToken": "{pending-token#1}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "message": "The selected organization is not available to this user."
+    }
+
+## 2. browser: the refused pick consumed the selection token, so a valid pick fails too
+> POST /sqlos/auth/headless/organization/select
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "organizationId": "{org#2}",
+>     "pendingToken": "{pending-token#1}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "message": "The organization selection session is invalid or expired."
+    }
+
+## 3. browser: an unknown selection token
+> POST /sqlos/auth/headless/organization/select
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "organizationId": "{org#2}",
+>     "pendingToken": "not-a-pending-token"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "message": "The organization selection session is invalid or expired."
+    }
+
+## audit: refused selection events
+  - {
+      "action": "password.login.succeeded",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "password.login.succeeded",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "AuthorizationRequestId": "[redacted]",
+        "ClientKey": "behavior-lock-app",
+        "NormalizedEmail": "{email:FRANK}",
+        "Surface": "headless",
+        "UserAgentHash": null,
+        "details": {
+          "resetScopes": [
+            "email",
+            "user"
+          ]
+        },
+        "maskedEmail": "FR***@EXAMPLE.TEST"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
