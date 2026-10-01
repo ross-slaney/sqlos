@@ -745,8 +745,16 @@ emit("max_constructor_parameters", widest[0][0])
 emit("max_constructor_parameters_class", widest[0][1])
 
 # --------------------------------------------------------------------------
-# Duplicated flows: distinct *Service classes declaring a public or internal
-# method whose name matches the flow.
+# Duplicated flows: distinct *Service classes that implement the flow, that
+# is, declare a public or internal method whose name matches the flow and
+# whose body does not hand the flow to process code. Process code is every
+# type in a *.Processes.* namespace: a process (a class that declares
+# ExecuteAsync) is invoked through its constructor or the factory method named
+# after it, and a step the processes share (a static class there) through one
+# of its methods. A method that only calls a forwarding method of its own
+# class forwards too (overloads). A facade or adapter that forwards is an
+# entry point, not an implementation; the process is the one implementation,
+# so a flow implemented only by its process reads 0.
 # --------------------------------------------------------------------------
 
 FLOWS = (
@@ -756,10 +764,70 @@ FLOWS = (
     ("magic_link_complete", r"(?:Verify|Complete)\w*MagicLink\w*Async"),
     ("organization_select", r"(?:Select|Complete)\w*Organization\w*Async"),
 )
+
+
+def in_processes(key):
+    return "Processes" in key.split(".")
+
+
+process_classes = set(td.name for td in TYPES
+                      if td.kind == "class" and not td.is_static and in_processes(td.key)
+                      and any(m.name == "ExecuteAsync" and m.type_key == td.key for m in METHODS))
+process_steps = set(td.name for td in TYPES if td.kind == "class" and td.is_static and in_processes(td.key))
+forwards_rx = None
+if process_classes or process_steps:
+    alternatives = []
+    if process_classes:
+        names = "|".join(sorted(map(re.escape, process_classes)))
+        alternatives.append(r"\bnew\s+(?:" + names + r")\s*\(")
+        alternatives.append(r"\.\s*(?:" + names + r")\s*\(")
+    if process_steps:
+        alternatives.append(r"\b(?:" + "|".join(sorted(map(re.escape, process_steps))) + r")\s*\.\s*\w+\s*(?:<[^()]*>)?\s*\(")
+    forwards_rx = re.compile("|".join(alternatives))
+
+
+def body_of(m):
+    return CODE[m.file][m.start:m.end + 1]
+
+
+def member_id(m):
+    return (m.file, m.start)
+
+
+# Each method is judged on its own body, so an implementing overload is never excused by a
+# forwarding overload of the same name. A call to a method of the same class is resolved by name
+# to every overload but the caller, and forwards only when all of them forward.
+same_class = {}
+for m in METHODS:
+    if not m.is_ctor:
+        same_class.setdefault((m.type_key, m.name), []).append(m)
+
+forwarding = set()
+if forwards_rx:
+    for m in METHODS:
+        if not m.is_ctor and not in_processes(m.type_key) and forwards_rx.search(body_of(m)):
+            forwarding.add(member_id(m))
+    changed = True
+    while changed:
+        changed = False
+        for m in METHODS:
+            if m.is_ctor or in_processes(m.type_key) or member_id(m) in forwarding:
+                continue
+            body = body_of(m)[m.body_open - m.start + 1:] if m.body_open else body_of(m)
+            callees = []
+            for name in set(re.findall(r"(?<![\w.])(\w+)\s*\(", body)):
+                overloads = [o for o in same_class.get((m.type_key, name), []) if member_id(o) != member_id(m)]
+                if overloads:
+                    callees.append(overloads)
+            if callees and all(member_id(o) in forwarding for overloads in callees for o in overloads):
+                forwarding.add(member_id(m))
+                changed = True
+
 for key, pattern in FLOWS:
     owners = set(m.type_name for m in METHODS
                  if not m.is_ctor and m.type_name.endswith("Service")
-                 and m.mods & {"public", "internal"} and re.fullmatch(pattern, m.name))
+                 and m.mods & {"public", "internal"} and re.fullmatch(pattern, m.name)
+                 and member_id(m) not in forwarding)
     emit("duplicated_flow_" + key + "_services", len(owners))
 
 if FORMAT == "json":
