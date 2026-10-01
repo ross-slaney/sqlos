@@ -1,0 +1,6 @@
+# Rule 7: domain and process code has no HTTP dependency (ArchitectureTests.Domain_and_process_code_has_no_http_dependency).
+# docs/architecture/domain-model.md section 11. One line per reference from domain or process code to Microsoft.AspNetCore.Http:
+# Namespace.Type[::Method] -> Type.
+# These are the violations that existed when the rule was introduced. The list only shrinks: fix a
+# violation, delete its line and lower this file's mark in high-water-marks.txt. Never add a line.
+# Every allowlist is empty by the end of the 8.0.0 refactor (layer 5). Sorted ordinally.

@@ -1,0 +1,10 @@
+# The size of every allowlist in this directory. A list may only shrink, and its mark moves with it:
+# AllowlistTests fails when a list is longer than its mark (fix the new violations instead) and when
+# it is shorter (lower the mark so the list cannot grow back). Raising a mark needs a reason in the
+# pull request that a reviewer accepts.
+adapter-database-access.txt 29
+domain-clock-reads.txt 9
+domain-http-dependencies.txt 0
+entity-public-setters.txt 929
+lifecycle-writes.txt 251
+save-call-sites.txt 218
