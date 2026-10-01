@@ -258,6 +258,24 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
     }
 
     [TestMethod]
+    public async Task ScimBasePath_PassesThroughOnlyWhenScimIsEnabled()
+    {
+        using var enabled = CreateHarness(scimEnabled: true);
+        using var disabled = CreateHarness();
+
+        // The next delegate answers 418: the request reached the SCIM endpoints, not the dashboard.
+        (await enabled.GetAsync("/sqlos/scim/v2/Users")).StatusCode.Should().Be(StatusCodes.Status418ImATeapot);
+        (await enabled.GetAsync("/SQLOS/SCIM/V2/ServiceProviderConfig")).StatusCode.Should().Be(StatusCodes.Status418ImATeapot);
+        (await enabled.GetAsync("/sqlos/scim/v2")).StatusCode.Should().Be(StatusCodes.Status418ImATeapot);
+        (await enabled.GetAsync("/sqlos/scim/v2-other")).StatusCode.Should().Be(StatusCodes.Status302Found);
+        (await enabled.GetDashboardAsync()).StatusCode.Should().Be(StatusCodes.Status302Found);
+
+        var claimed = await disabled.GetAsync("/sqlos/scim/v2/Users");
+        claimed.StatusCode.Should().Be(StatusCodes.Status302Found);
+        claimed.Location.Should().StartWith("/sqlos/login?next=");
+    }
+
+    [TestMethod]
     public async Task DashboardShell_IncludesLockedSecurityHeadersAndNonce()
     {
         using var harness = CreateHarness(options =>
