@@ -1,5 +1,5 @@
 # SqlOS behavior lock transcript
-scenario: LegacyWiringScenarios.A_manual_MapAuthServer_call_withdraws_the_module_admin_apis_CurrentBehavior_UnfiledDefect
+scenario: LegacyWiringScenarios.A_manual_MapAuthServer_call_withdraws_the_module_admin_apis_CurrentBehavior_KnownDefect_Unfiled
 profile: legacy-host
 
 ## 1. operator: the auth admin API that MapAuthServer maps answers

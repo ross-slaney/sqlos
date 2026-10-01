@@ -11,8 +11,8 @@ namespace SqlOS.BehaviorLock.Gates;
 /// <summary>
 /// The route coverage gate. Every method and route any profile exposes (every
 /// <c>EndpointDataSource</c> route plus the string-routed dashboard manifest) needs at least one
-/// <c>[Covers]</c> scenario, the dashboard scripts may only call known routes, and every approved
-/// transcript must belong to a scenario.
+/// <c>[Covers]</c> scenario that ran in a profile exposing it, the dashboard scripts may only call
+/// known routes, and every approved transcript must belong to a scenario.
 /// </summary>
 [TestClass]
 [TestCategory("gate")]
@@ -21,7 +21,6 @@ public sealed class CoverageGateTests
     public TestContext TestContext { get; set; } = null!;
 
     [TestMethod]
-    [Ignore("The layer-1 scenario catalog is still being written. The lead enables this gate when the catalog agents finish; until then Route_coverage_report lists the uncovered routes.")]
     public void Every_route_in_every_profile_has_a_scenario()
     {
         var missing = UncoveredRoutes();
@@ -38,16 +37,24 @@ public sealed class CoverageGateTests
     [TestMethod]
     public void Route_coverage_report()
     {
-        var covers = RouteInventory.DeclaredCoverage().Select(item => item.Cover).ToList();
+        var declared = RouteInventory.DeclaredCoverage();
+        var covers = declared.Select(item => item.Cover).ToList();
         var report = new StringBuilder();
         report.Append("# Behavior-lock route coverage\n\n");
-        report.Append("| Profile | Endpoint routes | SqlOS | Host | With dashboard manifest | Covered |\n|---|---|---|---|---|---|\n");
+        report.Append("Covered: a scenario in any profile covers the route. Exercised here: a scenario that ran in this profile covers it.\n\n");
+        report.Append("| Profile | Endpoint routes | SqlOS | Host | With dashboard manifest | Covered | Scenarios | Exercised here |\n|---|---|---|---|---|---|---|---|\n");
         foreach (var profile in HostProfiles.All)
         {
             var endpoints = RouteInventory.ByProfile[profile.Name];
             var all = RouteInventory.ForProfile(profile.Name);
+            var here = declared
+                .Where(item => ApprovedScenarioProfiles.Of(item.Scenario) == profile.Name)
+                .ToList();
+            var hereCovers = here.Select(item => item.Cover).ToList();
+            var scenarios = ApprovedScenarioProfiles.ByScenario.Values.Count(name => name == profile.Name);
             report.Append($"| {profile.Name} | {endpoints.Count} | {endpoints.Count(route => route.Owner == "sqlos")} | " +
-                          $"{endpoints.Count(route => route.Owner == "host")} | {all.Count} | {all.Count(route => RouteInventory.IsCovered(route, covers))} |\n");
+                          $"{endpoints.Count(route => route.Owner == "host")} | {all.Count} | {all.Count(route => RouteInventory.IsCovered(route, covers))} | " +
+                          $"{scenarios} | {all.Count(route => RouteInventory.IsCovered(route, hereCovers))} |\n");
         }
 
         var union = RouteInventory.Union();
@@ -100,6 +107,27 @@ public sealed class CoverageGateTests
         if (unknown.Count > 0)
         {
             Assert.Fail("[Covers] names routes no profile exposes (check the method and the exact RoutePattern.RawText):\n" + string.Join('\n', unknown));
+        }
+    }
+
+    /// <summary>
+    /// A scenario's <c>[Covers]</c> routes must exist in the profile it runs in, which its approved
+    /// transcript names. Together with <see cref="Every_route_in_every_profile_has_a_scenario"/> this
+    /// proves, without running anything, that every route was exercised in a profile that exposes it.
+    /// </summary>
+    [TestMethod]
+    public void Every_scenario_covers_routes_its_own_profile_exposes()
+    {
+        var mismatched = RouteInventory.DeclaredCoverage()
+            .Select(item => (item.Cover, item.Scenario, Profile: ApprovedScenarioProfiles.Of(item.Scenario)))
+            .Where(item => item.Profile != null
+                           && !RouteInventory.ForProfile(item.Profile).Any(route => route.Template == item.Cover.Template
+                                                                                     && (route.Method == "*" || route.Method == item.Cover.Method)))
+            .Select(item => $"{item.Cover.Route}  ({item.Scenario.DeclaringType!.Name}.{item.Scenario.Name} runs in {item.Profile})")
+            .ToList();
+        if (mismatched.Count > 0)
+        {
+            Assert.Fail("[Covers] names routes the scenario's own profile does not expose:\n" + string.Join('\n', mismatched));
         }
     }
 

@@ -98,6 +98,52 @@ public static class RouteInventory
     }
 }
 
+/// <summary>
+/// The profile each scenario ran in, read from the <c>profile:</c> line of its approved transcript.
+/// A transcript only approves when every <c>[Covers]</c> route served one of its observed
+/// exchanges, so this map proves statically which profile exercised which route.
+/// </summary>
+public static class ApprovedScenarioProfiles
+{
+    private static readonly Lazy<IReadOnlyDictionary<string, string>> Profiles = new(Load);
+
+    /// <summary>Scenario name (<c>Class.Method</c>) to profile name.</summary>
+    public static IReadOnlyDictionary<string, string> ByScenario => Profiles.Value;
+
+    /// <summary>The profile <paramref name="scenario"/> ran in, or null when it has no approved transcript yet.</summary>
+    public static string? Of(MethodInfo scenario)
+        => ByScenario.TryGetValue($"{scenario.DeclaringType!.Name}.{scenario.Name}", out var profile) ? profile : null;
+
+    private static IReadOnlyDictionary<string, string> Load()
+    {
+        var profiles = new Dictionary<string, string>(StringComparer.Ordinal);
+        var root = RepositoryPaths.Combine("tests", "SqlOS.BehaviorLock", "Scenarios");
+        foreach (var path in Directory.EnumerateFiles(root, "*.verified.txt", SearchOption.AllDirectories))
+        {
+            string? scenario = null;
+            string? profile = null;
+            foreach (var line in File.ReadLines(path).Take(4))
+            {
+                if (line.StartsWith("scenario: ", StringComparison.Ordinal))
+                {
+                    scenario = line["scenario: ".Length..];
+                }
+                else if (line.StartsWith("profile: ", StringComparison.Ordinal))
+                {
+                    profile = line["profile: ".Length..];
+                }
+            }
+
+            if (scenario != null && profile != null)
+            {
+                profiles[scenario] = profile;
+            }
+        }
+
+        return profiles;
+    }
+}
+
 /// <summary>Reads <c>Coverage/dashboard-routes.manifest</c>.</summary>
 public static class DashboardManifest
 {
