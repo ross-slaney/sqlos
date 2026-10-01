@@ -260,7 +260,7 @@ A policy is a pure decision object, composed of small rules, with no I/O. Proces
 |---|---|---|
 | `SqlOSUser` | `SqlOSUserEmail`, `SqlOSUserPhoneNumber`, `SqlOSCredential`, `SqlOSUserAuthenticator`, `SqlOSRecoveryCode`, `SqlOSExternalIdentity`, `SqlOSUserMfaPolicyOverride` | See the rules below. |
 | `SqlOSEmailOtpChallenge`, `SqlOSPhoneOtpChallenge` | — | Built from `Expiry`, `Consumption`, `AttemptBudget` and `HashedSecret`, plus the **stored** recipient. Codes go only to the stored recipient. Attempts can't be lost under concurrency, because `AttemptCount` is a concurrency token (#424). |
-| `SqlOSTemporaryToken` | — | Split into **one subtype per purpose** (table-per-hierarchy on the existing `Purpose` column; no schema change). Each subtype carries its own payload type and rules, and `Set<SqlOSTemporaryToken>()` still works. Derive the purposes from the code: password reset, email verification, MFA challenge, TOTP enrollment, pending authorization, auth-page consent, authorization continuation, magic link, email-OTP and phone-OTP signup, calendar connect. |
+| `SqlOSTemporaryToken` | — | Issued and consumed only through **typed token kinds** (`TemporaryTokenKind<TPayload>`), one per purpose, carrying the payload type, lifetime, single use and bindings (§15 Amendment 1). Built from `Expiry`, `Consumption` and `HashedSecret`. Payload JSON is unchanged. |
 | Infrastructure | password-login and MFA-attempt buckets and reservations | Behind one internal admission gate. The algorithms are unchanged. |
 
 **`SqlOSUser` rules:**
@@ -369,7 +369,7 @@ The read path is unchanged.
 
 - **Setters and construction.** Setters are private, EF uses them, and a private parameterless constructor exists for EF.
 - **Collections.** Aggregate collections use backing fields: `builder.Navigation(x => x.Emails).UsePropertyAccessMode(PropertyAccessMode.Field)`.
-- **Temporary tokens.** `SqlOSTemporaryToken` is mapped table-per-hierarchy on `Purpose`.
+- **Temporary tokens.** `SqlOSTemporaryToken` keeps one mapping. Purposes are typed token kinds, not table-per-hierarchy subtypes (§15).
 - **Schema.** No change except the ledgered additions: both providers, the upgrade gate, and the schema approval updated in the same PR.
 - **UTC.** A model-wide UTC converter for `DateTime` and `DateTime?`.
 
@@ -433,3 +433,18 @@ Each layer keeps every gate green, and every external difference is ledgered.
 | Entities keep their names and namespaces | Moving them to a new `Domain` namespace | Host source compatibility. |
 | FGA read path untouched | Modeling reads as objects | Performance and the published algorithm. The write side gets the model. |
 | Public domain events deferred to #286 (9.1.0) | Public events in 8.0 | Keep 8.0 focused. The internal pipeline makes #286 small. |
+
+## 15. Amendments
+
+### Amendment 1: after the foundation slice (layer 2, T2-A)
+
+| Topic | Amendment | Why |
+|---|---|---|
+| Temporary tokens (§4, §9) | `SqlOSTemporaryToken` uses **typed token kinds** instead of table-per-hierarchy subtypes. A `TemporaryTokenKind<TPayload>` value carries each purpose's rules: the purpose string, the payload type, the lifetime, single use, and bindings (client, request, organization, issuer session). The entity issues and consumes only through a kind, and payload JSON stays byte-identical. | About 15 purposes are created in 8 services, including layer 4's OIDC browser state. EF table-per-hierarchy needs one discriminator value per type, and a row with an unmapped purpose fails to load. Kinds are composition, change no public shape, and have no discriminator hazard. |
+| `RedirectUri` (§3.3) | The value object **owns** the redirect rules, and `SqlOSRedirectUriPolicy` delegates to it. | The domain must not depend on AuthServer services. |
+| Email canonical form (§3.3) | `EmailAddress` rejects invisible control and format characters, but still accepts the visible ASCII that 7.2.1 accepted. Rejecting markup characters would be a ledgered behavior change (#425 tracks it). | Moving the rules must not change them. |
+| Errors (§8) | `SqlOSDomainException` derives from `InvalidOperationException`, so existing catch blocks keep working. Adapters must map it explicitly, or its type name would leak into the public error event. | Compatibility while layers migrate. |
+| Domain events (§6) | **Every event type must have a registered projection**, or the save fails before anything is written. Events carry a process-wide sequence number, so one save orders events across aggregates. **Post-commit handlers run only after the real commit**: the save's own transaction, an ambient EF transaction, or a `TransactionScope`. Pending work is keyed by EF's transaction object, and a rolled-back or failed commit runs nothing. Handlers get a fresh DI scope carrying the saving scope's request context. A handler that throws is logged and the rest still run, because the change is already committed. | Correctness under pooled connections (Npgsql reuses transaction objects), `TransactionScope` and retried commits. Each bug was proven by a failing test before the fix. |
+| Time (§7) | `TimeProvider.System` is registered, but ASP.NET Core 9's `AddAuthentication`, which `AddSqlOS` calls, already registers it. That's no external change, so there's no ledger entry. | Accuracy. |
+| Architecture tests (§11) | Mono.Cecil (test-only) scans the compiled IL. Allowlists are sorted, checked-in files. Growth is capped by a committed `high-water-marks.txt`. A stale entry fails. Self-tests prove that each rule fires. | Rules hold in CI without a deep clone of main. |
+| Behavior lock (§12) | Layer 1's approvals are **frozen as the 7.2.1 baseline set**. Package runs compare every scenario against the baseline, and source runs compare against the current approvals. A gate requires the difference between the baseline and current sets to be exactly the files the ledger names. | The before/after proof keeps full strength as intended changes accumulate. |
