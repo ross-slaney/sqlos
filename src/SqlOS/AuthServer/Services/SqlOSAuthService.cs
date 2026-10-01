@@ -17,6 +17,7 @@ using SqlOS.Email.Contracts;
 using SqlOS.Email.Interfaces;
 using SqlOS.Email.Models;
 using SqlOS.Email.Services;
+using SqlOS.Hosting;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -87,129 +88,51 @@ public sealed class SqlOSAuthService
         _totpMfaService = totpMfaService;
     }
 
-    public async Task<SqlOSLoginResult> SignUpAsync(SqlOSSignupRequest request, HttpContext httpContext, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// The identity processes this facade delegates to. Its sign-ins complete as first-party direct
+    /// logins (<see cref="FinalizeClientLoginAsync"/>).
+    /// </summary>
+    private SqlOSIdentityProcesses Processes => new(_context, _adminService, _cryptoService, _settingsService, _options)
     {
-        var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
-        if (!credentialSettings.PasswordSignupEnabled)
-        {
-            throw new InvalidOperationException("Password signup is disabled.");
-        }
+        PasswordAdmission = _admission,
+        Auth = this,
+        Invitations = _invitationService,
+        EmailCodes = _emailOtpService,
+        SignInLinks = _magicLinkService,
+        PhoneCodes = _phoneOtpService
+    };
 
-        var input = SqlOSSignupOrchestration.NormalizePasswordSignup(
-            request.DisplayName,
-            request.Email,
-            request.Password,
-            request.OrganizationName);
-        SqlOSSignupJoinPolicy.RejectUnauthorizedOrganizationJoin(request.OrganizationId);
-        var client = await _adminService.RequireClientAsync(request.ClientId, null, cancellationToken);
-        await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(_adminService, client, httpContext, userId: null, cancellationToken);
-
-        SqlOSPasswordAuthenticationResult? signup = null;
-        try
-        {
-            return await SqlOSSignupOrchestration.ExecuteAsync(_context, async ct =>
-            {
-                signup = await SqlOSSignupOrchestration.CreatePasswordAccountAsync(
-                    _adminService,
-                    _context,
-                    input,
-                    ct);
-                var organizationId = signup.Organizations.FirstOrDefault()?.Id;
-                await _adminService.RecordAuditAsync(
-                    "user.signup",
-                    "user",
-                    signup.User.Id,
-                    userId: signup.User.Id,
-                    organizationId: organizationId,
-                    ipAddress: GetIp(httpContext),
-                    cancellationToken: ct);
-                return await FinalizeClientLoginAsync(
-                    signup.User,
-                    client,
-                    organizationId,
-                    "password",
-                    httpContext,
-                    ct);
-            }, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            if (!SupportsDatabaseTransactions())
-            {
-                await CleanupNonTransactionalSignupArtifactsAsync(
-                    signup,
-                    existingOrganizationId: null,
-                    input.OrganizationName,
-                    cancellationToken);
-            }
-            else
-            {
-                await PersistRolledBackSignupAccessDenialAsync(
-                    ex,
-                    client,
-                    signup,
-                    httpContext,
-                    cancellationToken);
-            }
-
-            throw;
-        }
-    }
+    public async Task<SqlOSLoginResult> SignUpAsync(SqlOSSignupRequest request, HttpContext httpContext, CancellationToken cancellationToken = default)
+        => DirectLogin(await Processes.SignUpWithPassword(httpContext).ExecuteAsync(
+            new SignUpWithPasswordCommand(
+                request.DisplayName,
+                request.Email,
+                request.Password,
+                request.OrganizationName,
+                request.OrganizationId,
+                Invitation: null,
+                CustomFields: null,
+                new LoginTarget.DirectLogin(request.ClientId),
+                SqlOSHttpRequestContext.FromOptional(httpContext, SqlOSRequestSurface.PublicApi)),
+            cancellationToken));
 
     public async Task<SqlOSLoginResult> LoginWithPasswordAsync(SqlOSPasswordLoginRequest request, HttpContext httpContext, CancellationToken cancellationToken = default)
     {
-        var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
-        if (!credentialSettings.PasswordEnabled)
+        var outcome = await Processes.SignInWithPassword(httpContext).ExecuteAsync(
+            new SignInWithPasswordCommand(
+                request.Email,
+                request.Password,
+                new LoginTarget.DirectLogin(request.ClientId, request.OrganizationId),
+                CarriesInvitation: false,
+                new PasswordAttemptContext(request.ClientId, AuthorizationRequestId: null, "api"),
+                SqlOSHttpRequestContext.FromOptional(httpContext, SqlOSRequestSurface.PublicApi)),
+            cancellationToken);
+        return outcome switch
         {
-            throw new InvalidOperationException("Local password authentication is disabled.");
-        }
-
-        var client = await _adminService.RequireClientAsync(request.ClientId, null, cancellationToken);
-        // Refuse a third-party client before the password is checked: its UI must not collect credentials.
-        await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(_adminService, client, httpContext, userId: null, cancellationToken);
-        var normalizedEmail = SqlOSAdminService.NormalizeEmail(request.Email);
-        var attempt = _admission.BeginPasswordAttempt(
-            normalizedEmail,
-            AdmissionOrigin.Of(httpContext),
-            clientKey: request.ClientId,
-            surface: "api");
-
-        var email = await _context.Set<SqlOSUserEmail>()
-            .AsNoTracking()
-            .FindByEmailAsync(request.Email, cancellationToken);
-        attempt = attempt with { UserId = email?.UserId };
-
-        if (email != null && _options.RequireVerifiedEmailForPasswordLogin && !email.IsVerified)
-        {
-            throw new InvalidOperationException("Email must be verified before password login.");
-        }
-
-        var credential = email == null
-            ? null
-            : await _context.Set<SqlOSCredential>()
-                .AsNoTracking()
-                .FirstOrDefaultAsync(x => x.UserId == email.UserId && x.Type == "password" && x.RevokedAt == null, cancellationToken);
-        await _admission.AdmitPasswordAttemptAsync(attempt, cancellationToken);
-        var passwordMatches = _cryptoService.VerifyPassword(
-            credential?.SecretHash ?? SqlOSClientAuthenticationService.DummyCredentialHash,
-            request.Password);
-        if (credential == null || !passwordMatches)
-        {
-            var failureReason = email == null
-                ? "unknown_email"
-                : credential == null
-                    ? "missing_password_credential"
-                    : "invalid_password";
-            await _admission.RecordPasswordAttemptFailedAsync(attempt, failureReason, cancellationToken);
-            throw new InvalidOperationException(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
-        }
-
-        var user = await _context.Set<SqlOSUser>().AsNoTracking().FirstAsync(x => x.Id == email!.UserId, cancellationToken);
-        await _admission.RecordPasswordAttemptSucceededAsync(attempt, cancellationToken);
-        var account = await _context.GetUserAsync(user.Id, SqlOSUserParts.Credentials, cancellationToken);
-        account.RecordPasswordSignIn(credential.Id, DateTime.UtcNow);
-        await _context.SaveChangesAsync(cancellationToken);
-        return await FinalizeClientLoginAsync(user, client, request.OrganizationId, "password", httpContext, cancellationToken);
+            SignInOutcome.SignedIn { Completion: LoginCompletion.DirectLoginCompleted completed } => completed.Result,
+            SignInOutcome.Refused refused => throw refused.Refusal.ToException(),
+            _ => throw new InvalidOperationException($"Unknown sign-in outcome '{outcome.GetType().Name}'.")
+        };
     }
 
     public async Task<SqlOSEmailOtpStartResult> RequestEmailOtpAsync(
@@ -303,116 +226,31 @@ public sealed class SqlOSAuthService
         SqlOSAcceptEmailInvitationSignupRequest request,
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
-    {
-        // Gate the client before the signup transaction: a rejected client creates no account and
-        // runs no signup hook, and its audit event is not rolled back with the transaction.
-        var client = await _adminService.RequireClientAsync(request.ClientId, null, cancellationToken);
-        await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(_adminService, client, httpContext, userId: null, cancellationToken);
-
-        IDbContextTransaction? transaction = null;
-        SqlOSPasswordAuthenticationResult? signup = null;
-
-        try
-        {
-            if (SupportsDatabaseTransactions())
-            {
-                transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
-            }
-
-            var invitation = await RequireInvitationService().ResolveEmailInvitationAsync(
-                request.InvitationToken,
-                httpContext,
-                cancellationToken);
-
-            signup = await CreateInvitationSignupUserAsync(
+        => DirectLogin(await Processes.SignUpWithInvitation(httpContext).ExecuteAsync(
+            new SignUpWithInvitationCommand(
                 request.DisplayName,
-                invitation.Email,
-                cancellationToken);
-
-            if (_options.Headless.OnHeadlessSignupAsync != null)
-            {
-                var organization = await _context.Set<SqlOSOrganization>()
-                    .FirstOrDefaultAsync(x => x.Id == invitation.OrganizationId, cancellationToken);
-                await _options.Headless.OnHeadlessSignupAsync(
-                    new SqlOSHeadlessSignupHookContext(
-                        httpContext,
-                        null,
-                        signup.User,
-                        organization,
-                        request.CustomFields ?? invitation.CustomFields ?? new JsonObject()),
-                    cancellationToken);
-            }
-
-            var acceptance = await RequireInvitationService().AcceptEmailInvitationInCurrentTransactionAsync(
-                new SqlOSAcceptEmailInvitationRequest(request.InvitationToken, signup.User.Id) { AuthenticationMethod = signup.AuthenticationMethod },
-                httpContext,
-                cancellationToken);
-
-            await _adminService.RecordAuditAsync(
-                "user.signup.invitation",
-                "user",
-                signup.User.Id,
-                userId: signup.User.Id,
-                organizationId: acceptance.OrganizationId,
-                ipAddress: GetIp(httpContext),
-                cancellationToken: cancellationToken);
-
-            var result = await FinalizeClientLoginAsync(
-                signup.User,
-                client,
-                acceptance.OrganizationId,
-                signup.AuthenticationMethod,
-                httpContext,
-                cancellationToken);
-            var organizations = await _adminService.GetUserOrganizationsAsync(signup.User.Id, cancellationToken);
-
-            if (transaction != null)
-            {
-                await transaction.CommitAsync(cancellationToken);
-            }
-
-            return result with { Organizations = organizations };
-        }
-        catch
-        {
-            if (transaction != null)
-            {
-                await transaction.RollbackAsync(cancellationToken);
-            }
-            else
-            {
-                await CleanupNonTransactionalSignupArtifactsAsync(
-                    signup,
-                    existingOrganizationId: null,
-                    organizationName: null,
-                    cancellationToken: cancellationToken);
-            }
-
-            throw;
-        }
-    }
+                request.InvitationToken,
+                Invitation: null,
+                request.CustomFields,
+                new LoginTarget.DirectLogin(request.ClientId),
+                SqlOSHttpRequestContext.FromOptional(httpContext, SqlOSRequestSurface.PublicApi)),
+            cancellationToken));
 
     public async Task<SqlOSLoginResult> VerifyEmailOtpAsync(
         SqlOSEmailOtpVerifyRequest request,
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
-        var verification = await _emailOtpService.VerifyAsync(request, cancellationToken);
-        if (verification.Challenge.ClientApplicationId == null)
-        {
-            throw new InvalidOperationException("The sign-in code is invalid or expired.");
-        }
-
-        var client = await _context.Set<SqlOSClientApplication>()
-            .FirstAsync(x => x.Id == verification.Challenge.ClientApplicationId, cancellationToken);
-
-        return await FinalizeClientLoginAsync(
-            verification.User,
-            client,
-            verification.Challenge.RequestedOrganizationId,
-            verification.AuthenticationMethod,
-            httpContext,
+        var target = new LoginTarget.DirectLogin();
+        var outcome = await Processes.VerifyEmailOtpSignIn(httpContext).ExecuteAsync(
+            new VerifyEmailOtpSignInCommand(request.ChallengeToken, request.Code, target, ChallengeBinding.For(target)),
             cancellationToken);
+        return outcome switch
+        {
+            EmailCodeSignInOutcome.SignedIn { Completion: LoginCompletion.DirectLoginCompleted completed } => completed.Result,
+            EmailCodeSignInOutcome.Refused refused => throw refused.Refusal.ToException(),
+            _ => throw new InvalidOperationException($"Unknown email-code sign-in outcome '{outcome.GetType().Name}'.")
+        };
     }
 
     public async Task<SqlOSLoginResult> CompleteMagicLinkAsync(
@@ -420,26 +258,15 @@ public sealed class SqlOSAuthService
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
-        var verification = await RequireMagicLinkService().CompleteAsync(
-            request,
-            expectedAuthorizationRequestId: null,
-            requireAuthorizationRequestMatch: true,
+        var outcome = await Processes.CompleteMagicLinkSignIn(httpContext).ExecuteAsync(
+            new CompleteMagicLinkSignInCommand(request.Token, SignInLinkTarget.DirectLogin.Instance),
             cancellationToken);
-        if (verification.Token.ClientApplicationId == null)
+        return outcome switch
         {
-            throw new InvalidOperationException("The sign-in link is invalid or expired.");
-        }
-
-        var client = await _context.Set<SqlOSClientApplication>()
-            .FirstAsync(x => x.Id == verification.Token.ClientApplicationId, cancellationToken);
-
-        return await FinalizeClientLoginAsync(
-            verification.User,
-            client,
-            verification.Payload.RequestedOrganizationId,
-            verification.AuthenticationMethod,
-            httpContext,
-            cancellationToken);
+            SignInLinkOutcome.SignedIn { Completion: LoginCompletion.DirectLoginCompleted completed } => completed.Result,
+            SignInLinkOutcome.Refused refused => throw refused.Refusal.ToException(),
+            _ => throw new InvalidOperationException($"Unknown sign-in link outcome '{outcome.GetType().Name}'.")
+        };
     }
 
     public async Task<SqlOSLoginResult> VerifyPhoneOtpAsync(
@@ -447,222 +274,53 @@ public sealed class SqlOSAuthService
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
-        var verification = await RequirePhoneOtpService().VerifyAsync(request, cancellationToken);
-        if (verification.Challenge.ClientApplicationId == null)
-        {
-            throw new InvalidOperationException("The sign-in code is invalid or expired.");
-        }
-
-        var client = await _context.Set<SqlOSClientApplication>()
-            .FirstAsync(x => x.Id == verification.Challenge.ClientApplicationId, cancellationToken);
-
-        return await FinalizeClientLoginAsync(
-            verification.User,
-            client,
-            verification.Challenge.RequestedOrganizationId,
-            verification.AuthenticationMethod,
-            httpContext,
+        var target = new LoginTarget.DirectLogin();
+        var outcome = await Processes.VerifyPhoneOtpSignIn(httpContext).ExecuteAsync(
+            new VerifyPhoneOtpSignInCommand(request.ChallengeToken, request.Code, target, ChallengeBinding.For(target)),
             cancellationToken);
+        return outcome switch
+        {
+            PhoneCodeSignInOutcome.SignedIn { Completion: LoginCompletion.DirectLoginCompleted completed } => completed.Result,
+            PhoneCodeSignInOutcome.Refused refused => throw refused.Refusal.ToException(),
+            _ => throw new InvalidOperationException($"Unknown phone-code sign-in outcome '{outcome.GetType().Name}'.")
+        };
     }
 
     public async Task<SqlOSLoginResult> VerifyPhoneOtpSignupAsync(
         SqlOSPhoneOtpSignupVerifyRequest request,
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
-    {
-        // Only a signup token issued before the direct-login gate can name a third-party client.
-        // Refuse it before the signup transaction so its audit event is not rolled back.
-        await EnsureArtifactClientIsFirstPartyAsync(
-            await FindSignupTokenAsync(SqlOSTemporaryTokenKinds.PhoneOtpSignup, request.SignupToken, cancellationToken),
-            httpContext,
-            cancellationToken);
-
-        IDbContextTransaction? transaction = null;
-        SqlOSPasswordAuthenticationResult? signup = null;
-        SqlOSPhoneOtpSignupVerificationResult? verification = null;
-
-        try
-        {
-            if (SupportsDatabaseTransactions())
-            {
-                transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
-            }
-
-            verification = await RequirePhoneOtpService().VerifySignupAsync(
-                request,
-                expectedAuthorizationRequestId: null,
-                requireAuthorizationRequestMatch: false,
-                cancellationToken);
-
-            if (string.IsNullOrWhiteSpace(verification.ClientApplicationId))
-            {
-                throw new InvalidOperationException("The sign-in code is invalid or expired.");
-            }
-
-            var client = await _context.Set<SqlOSClientApplication>()
-                .FirstAsync(x => x.Id == verification.ClientApplicationId, cancellationToken);
-            await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(_adminService, client, httpContext, userId: null, cancellationToken);
-
-            signup = await CreatePhoneOtpSignupUserAsync(
-                verification.DisplayName,
-                verification.PhoneNumber,
-                verification.OrganizationName,
-                verification.OrganizationId,
-                cancellationToken);
-
-            var selectedOrganizationId = verification.OrganizationId ?? signup.Organizations.FirstOrDefault()?.Id;
-            var result = await FinalizeClientLoginAsync(
-                signup.User,
-                client,
-                selectedOrganizationId,
-                signup.AuthenticationMethod,
-                httpContext,
-                cancellationToken);
-
-            await RequirePhoneOtpService().ConsumeSignupTokenAsync(verification.SignupToken, cancellationToken);
-            await _adminService.RecordAuditAsync(
-                "user.signup.phone_otp",
-                "user",
-                signup.User.Id,
-                userId: signup.User.Id,
-                organizationId: selectedOrganizationId,
-                ipAddress: GetIp(httpContext),
-                cancellationToken: cancellationToken);
-
-            if (transaction != null)
-            {
-                await transaction.CommitAsync(cancellationToken);
-            }
-
-            return result;
-        }
-        catch
-        {
-            if (transaction != null)
-            {
-                await transaction.RollbackAsync(cancellationToken);
-            }
-            else
-            {
-                await CleanupNonTransactionalSignupArtifactsAsync(
-                    signup,
-                    verification?.OrganizationId,
-                    verification?.OrganizationName,
-                    cancellationToken);
-            }
-
-            throw;
-        }
-    }
+        => DirectLogin(await Processes.CompletePhoneOtpSignUp(httpContext).ExecuteAsync(
+            new CompletePhoneOtpSignUpCommand(
+                request.SignupToken,
+                request.ChallengeToken,
+                request.Code,
+                CarriesInvitation: false,
+                new LoginTarget.DirectLogin(),
+                SqlOSHttpRequestContext.FromOptional(httpContext, SqlOSRequestSurface.PublicApi)),
+            cancellationToken));
 
     public async Task<SqlOSLoginResult> VerifyEmailOtpSignupAsync(
         SqlOSEmailOtpSignupVerifyRequest request,
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
+        => DirectLogin(await Processes.CompleteEmailOtpSignUp(httpContext).ExecuteAsync(
+            new CompleteEmailOtpSignUpCommand(
+                request.SignupToken,
+                request.ChallengeToken,
+                request.Code,
+                Invitation: null,
+                new LoginTarget.DirectLogin(),
+                SqlOSHttpRequestContext.FromOptional(httpContext, SqlOSRequestSurface.PublicApi)),
+            cancellationToken));
+
+    /// <summary>The direct login a sign-up completed, or its refusal as the 7.x exception.</summary>
+    private static SqlOSLoginResult DirectLogin(SignUpOutcome outcome) => outcome switch
     {
-        // Only a signup token issued before the direct-login gate can name a third-party client.
-        // Refuse it before the signup transaction so its audit event is not rolled back.
-        await EnsureArtifactClientIsFirstPartyAsync(
-            await FindSignupTokenAsync(SqlOSTemporaryTokenKinds.EmailOtpSignup, request.SignupToken, cancellationToken),
-            httpContext,
-            cancellationToken);
-
-        IDbContextTransaction? transaction = null;
-        SqlOSPasswordAuthenticationResult? signup = null;
-        SqlOSEmailOtpSignupVerificationResult? verification = null;
-
-        try
-        {
-            if (SupportsDatabaseTransactions())
-            {
-                transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
-            }
-
-            verification = await _emailOtpService.VerifySignupAsync(
-                request,
-                expectedAuthorizationRequestId: null,
-                requireAuthorizationRequestMatch: false,
-                cancellationToken);
-
-            if (string.IsNullOrWhiteSpace(verification.ClientApplicationId))
-            {
-                throw new InvalidOperationException("The sign-in code is invalid or expired.");
-            }
-
-            var client = await _context.Set<SqlOSClientApplication>()
-                .FirstAsync(x => x.Id == verification.ClientApplicationId, cancellationToken);
-            await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(_adminService, client, httpContext, userId: null, cancellationToken);
-
-            signup = await CreateEmailOtpSignupUserAsync(
-                verification.DisplayName,
-                verification.Email,
-                verification.OrganizationName,
-                verification.OrganizationId,
-                cancellationToken);
-
-            var selectedOrganizationId = verification.OrganizationId ?? signup.Organizations.FirstOrDefault()?.Id;
-            SqlOSOrganization? organization = null;
-            if (!string.IsNullOrWhiteSpace(selectedOrganizationId))
-            {
-                organization = await _context.Set<SqlOSOrganization>()
-                    .FirstOrDefaultAsync(x => x.Id == selectedOrganizationId, cancellationToken);
-            }
-
-            if (_options.Headless.OnHeadlessSignupAsync != null)
-            {
-                await _options.Headless.OnHeadlessSignupAsync(
-                    new SqlOSHeadlessSignupHookContext(
-                        httpContext,
-                        null,
-                        signup.User,
-                        organization,
-                        verification.CustomFields ?? new JsonObject()),
-                    cancellationToken);
-            }
-
-            await _emailOtpService.ConsumeSignupTokenAsync(verification.SignupToken, cancellationToken);
-            await _adminService.RecordAuditAsync(
-                "user.signup.email_otp",
-                "user",
-                signup.User.Id,
-                userId: signup.User.Id,
-                organizationId: selectedOrganizationId,
-                ipAddress: GetIp(httpContext),
-                cancellationToken: cancellationToken);
-
-            var result = await FinalizeClientLoginAsync(
-                signup.User,
-                client,
-                selectedOrganizationId,
-                signup.AuthenticationMethod,
-                httpContext,
-                cancellationToken);
-
-            if (transaction != null)
-            {
-                await transaction.CommitAsync(cancellationToken);
-            }
-
-            return result;
-        }
-        catch
-        {
-            if (transaction != null)
-            {
-                await transaction.RollbackAsync(cancellationToken);
-            }
-            else
-            {
-                await CleanupNonTransactionalSignupArtifactsAsync(
-                    signup,
-                    verification?.OrganizationId,
-                    verification?.OrganizationName,
-                    cancellationToken);
-            }
-
-            throw;
-        }
-    }
+        SignUpOutcome.SignedUp { Completion: LoginCompletion.DirectLoginCompleted completed } => completed.Result,
+        SignUpOutcome.Refused refused => throw refused.Refusal.ToException(),
+        _ => throw new InvalidOperationException($"Unknown sign-up outcome '{outcome.GetType().Name}'.")
+    };
 
     public async Task<SqlOSLoginResult> CompleteExternalLoginAsync(
         SqlOSUser user,
@@ -2280,9 +1938,9 @@ public sealed class SqlOSAuthService
     }
 
     /// <summary>
-    /// Refuses the third-party client bound to a direct-login artifact (a signup token or MFA
-    /// challenge issued before the direct-login gate) before the caller writes anything or opens a
-    /// transaction, so the refusal's audit event is never rolled back.
+    /// Refuses the third-party client bound to a direct-login artifact (an MFA challenge issued
+    /// before the direct-login gate) before the caller writes anything or opens a transaction, so
+    /// the refusal's audit event is never rolled back.
     /// </summary>
     private async Task EnsureArtifactClientIsFirstPartyAsync(
         SqlOSTemporaryToken? token,
@@ -2301,14 +1959,6 @@ public sealed class SqlOSAuthService
             await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(_adminService, client, httpContext, token.UserId, cancellationToken);
         }
     }
-
-    private async Task<SqlOSTemporaryToken?> FindSignupTokenAsync(
-        TemporaryTokenKind kind,
-        string? signupToken,
-        CancellationToken cancellationToken)
-        => string.IsNullOrWhiteSpace(signupToken)
-            ? null
-            : await _cryptoService.FindTemporaryTokenAsync(kind, signupToken.Trim(), cancellationToken);
 
     private async Task<SqlOSMfaChallengeVerifyResult> CompleteConsumedMfaChallengeAsync(
         SqlOSTemporaryToken token,
@@ -2934,180 +2584,6 @@ public sealed class SqlOSAuthService
 
     private bool SupportsDatabaseTransactions()
         => !string.Equals(_context.Database.ProviderName, "Microsoft.EntityFrameworkCore.InMemory", StringComparison.Ordinal);
-
-    private async Task<SqlOSPasswordAuthenticationResult> CreateEmailOtpSignupUserAsync(
-        string displayName,
-        string email,
-        string? organizationName,
-        string? organizationId,
-        CancellationToken cancellationToken)
-    {
-        var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
-        if (!credentialSettings.EmailOtpEnabled)
-        {
-            throw new InvalidOperationException("Email sign-in is unavailable.");
-        }
-
-        SqlOSSignupJoinPolicy.RejectUnauthorizedOrganizationJoin(organizationId);
-
-        // The caller verified the sign-up code sent to this address, which proves the mailbox.
-        var user = await _adminService.CreateUserAsync(
-            new SqlOSCreateUserRequest(displayName, email, null),
-            SignupProof(email, OwnershipProofMethod.EmailOtp),
-            cancellationToken);
-
-        if (!string.IsNullOrWhiteSpace(organizationName))
-        {
-            var createdOrganization = await _adminService.CreateOrganizationAsync(
-                new SqlOSCreateOrganizationRequest(organizationName, null),
-                cancellationToken);
-            await _adminService.CreateMembershipAsync(createdOrganization.Id, new SqlOSCreateMembershipRequest(user.Id, "owner"), cancellationToken);
-        }
-
-        await _context.SaveChangesAsync(cancellationToken);
-
-        var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
-        return new SqlOSPasswordAuthenticationResult(user, organizations, "email_otp");
-    }
-
-    private async Task<SqlOSPasswordAuthenticationResult> CreatePhoneOtpSignupUserAsync(
-        string displayName,
-        string phoneNumber,
-        string? organizationName,
-        string? organizationId,
-        CancellationToken cancellationToken)
-    {
-        var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
-        if (!credentialSettings.PhoneOtpEnabled)
-        {
-            throw new InvalidOperationException("Phone sign-in is unavailable.");
-        }
-
-        SqlOSSignupJoinPolicy.RejectUnauthorizedOrganizationJoin(organizationId);
-
-        var user = SqlOSUser.Register(displayName, DateTime.UtcNow);
-        _context.Set<SqlOSUser>().Add(user);
-        await _context.SaveChangesAsync(cancellationToken);
-        await RequirePhoneOtpService().AddVerifiedPhoneNumberAsync(user, phoneNumber, cancellationToken);
-
-        if (!string.IsNullOrWhiteSpace(organizationName))
-        {
-            var createdOrganization = await _adminService.CreateOrganizationAsync(
-                new SqlOSCreateOrganizationRequest(organizationName, null),
-                cancellationToken);
-            await _adminService.CreateMembershipAsync(createdOrganization.Id, new SqlOSCreateMembershipRequest(user.Id, "owner"), cancellationToken);
-        }
-
-        var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
-        return new SqlOSPasswordAuthenticationResult(user, organizations, "phone_otp");
-    }
-
-    private async Task<SqlOSPasswordAuthenticationResult> CreateInvitationSignupUserAsync(
-        string displayName,
-        string email,
-        CancellationToken cancellationToken)
-    {
-        // The invitation was mailed to this address and its token is presented now, which proves the mailbox.
-        var user = await _adminService.CreateUserAsync(
-            new SqlOSCreateUserRequest(displayName, email, null),
-            SignupProof(email, OwnershipProofMethod.Invitation),
-            cancellationToken);
-
-        return new SqlOSPasswordAuthenticationResult(
-            user,
-            Array.Empty<SqlOSOrganizationOption>(),
-            "invitation");
-    }
-
-    /// <summary>
-    /// The proof a sign-up's verified code or presented invitation gives for the address it signs
-    /// up. An address that is not valid has none, and registration refuses it as 7.x did.
-    /// </summary>
-    private static OwnershipProof? SignupProof(string email, OwnershipProofMethod method)
-        => EmailAddress.TryParse(email, out var address) ? new OwnershipProof(address, method) : null;
-
-    private async Task PersistRolledBackSignupAccessDenialAsync(
-        Exception exception,
-        SqlOSClientApplication client,
-        SqlOSPasswordAuthenticationResult? signup,
-        HttpContext httpContext,
-        CancellationToken cancellationToken)
-    {
-        if (signup == null
-            || exception is not InvalidOperationException
-            || !string.Equals(exception.Message, "Application access is not allowed.", StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        if (_context is DbContext tracked)
-        {
-            tracked.ChangeTracker.Clear();
-        }
-
-        try
-        {
-            await _adminService.EnsureApplicationAccessAsync(
-                client,
-                signup.User.Id,
-                signup.Organizations.FirstOrDefault()?.Id,
-                "application.access.token_denied",
-                GetIp(httpContext),
-                cancellationToken);
-        }
-        catch (InvalidOperationException persistException)
-            when (string.Equals(persistException.Message, exception.Message, StringComparison.Ordinal))
-        {
-        }
-    }
-
-    private async Task CleanupNonTransactionalSignupArtifactsAsync(
-        SqlOSPasswordAuthenticationResult? signup,
-        string? existingOrganizationId,
-        string? organizationName,
-        CancellationToken cancellationToken)
-    {
-        if (signup == null)
-        {
-            return;
-        }
-
-        if (!string.IsNullOrWhiteSpace(organizationName) && string.IsNullOrWhiteSpace(existingOrganizationId))
-        {
-            var organizationIds = signup.Organizations
-                .Select(static x => x.Id)
-                .Distinct(StringComparer.Ordinal)
-                .ToArray();
-
-            if (organizationIds.Length > 0)
-            {
-                var organizations = await _context.Set<SqlOSOrganization>()
-                    .Where(x => organizationIds.Contains(x.Id))
-                    .ToListAsync(cancellationToken);
-                if (organizations.Count > 0)
-                {
-                    _context.Set<SqlOSOrganization>().RemoveRange(organizations);
-                }
-            }
-        }
-
-        var user = await _context.Set<SqlOSUser>()
-            .FirstOrDefaultAsync(x => x.Id == signup.User.Id, cancellationToken);
-        if (user != null)
-        {
-            var phoneNumbers = await _context.Set<SqlOSUserPhoneNumber>()
-                .Where(x => x.UserId == user.Id)
-                .ToListAsync(cancellationToken);
-            if (phoneNumbers.Count > 0)
-            {
-                _context.Set<SqlOSUserPhoneNumber>().RemoveRange(phoneNumbers);
-            }
-
-            _context.Set<SqlOSUser>().Remove(user);
-        }
-
-        await _context.SaveChangesAsync(cancellationToken);
-    }
 
     private SqlOSPhoneOtpService RequirePhoneOtpService()
         => _phoneOtpService ?? throw new InvalidOperationException("Phone OTP service is not registered.");

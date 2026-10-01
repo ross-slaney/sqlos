@@ -10,7 +10,9 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.AuthServer.Processes.Identity;
 using SqlOS.Domain;
+using SqlOS.Hosting;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -67,6 +69,16 @@ public sealed class SqlOSAuthorizationServerService
 
     /// <summary>The admission gate the hosted and headless password sign-ins pass.</summary>
     internal IAdmissionGate PasswordAdmission => _admission;
+
+    /// <summary>The identity processes this service's facades delegate to.</summary>
+    private SqlOSIdentityProcesses Processes => new(_context, _adminService, _cryptoService, _settingsService, _options)
+    {
+        PasswordAdmission = _admission,
+        AuthorizationServer = this,
+        Auth = _authService,
+        IssuerSessions = _issuerSessionService,
+        Invitations = _invitationService
+    };
 
     public async Task<SqlOSAuthorizationServerMetadataDto> GetMetadataAsync(HttpContext httpContext, CancellationToken cancellationToken = default)
     {
@@ -612,6 +624,10 @@ public sealed class SqlOSAuthorizationServerService
         "The application's registration changed while consent was pending. Start the request again.";
 
 
+    /// <summary>
+    /// Checks an address and password without completing a sign-in: the password sign-in
+    /// (<see cref="SignInWithPassword"/>) with only its credential. Its caller completes the login.
+    /// </summary>
     public async Task<SqlOSPasswordAuthenticationResult> AuthenticatePasswordAsync(
         string email,
         string password,
@@ -622,71 +638,30 @@ public sealed class SqlOSAuthorizationServerService
         string? authorizationRequestId = null,
         string? surface = null)
     {
-        var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
-        if (!credentialSettings.PasswordEnabled)
+        var outcome = await Processes.SignInWithPassword(httpContext).ExecuteAsync(
+            new SignInWithPasswordCommand(
+                email,
+                password,
+                LoginTarget.CredentialOnly.Instance,
+                allowUnverifiedEmailForInvitation,
+                new PasswordAttemptContext(clientKey, authorizationRequestId, surface ?? "authorization"),
+                SqlOSHttpRequestContext.FromOptional(httpContext, SqlOSRequestSurface.Hosted)),
+            cancellationToken);
+        var signedIn = outcome switch
         {
-            throw new InvalidOperationException("Local password authentication is disabled.");
-        }
+            SignInOutcome.SignedIn success => success,
+            SignInOutcome.Refused refused => throw refused.Refusal.ToException(),
+            _ => throw new InvalidOperationException($"Unknown sign-in outcome '{outcome.GetType().Name}'.")
+        };
 
-        var normalizedEmail = SqlOSAdminService.NormalizeEmail(email);
-        var attempt = _admission.BeginPasswordAttempt(
-            normalizedEmail,
-            AdmissionOrigin.Of(httpContext),
-            clientKey,
-            authorizationRequestId,
-            surface ?? "authorization");
-
-        var emailRecord = await _context.Set<SqlOSUserEmail>()
-            .AsNoTracking()
-            .FindByEmailAsync(email, cancellationToken);
-        attempt = attempt with { UserId = emailRecord?.UserId };
-
-        if (emailRecord != null
-            && _options.RequireVerifiedEmailForPasswordLogin
-            && !emailRecord.IsVerified
-            && !allowUnverifiedEmailForInvitation)
-        {
-            throw new InvalidOperationException("Email must be verified before password login.");
-        }
-
-        var credential = emailRecord == null
-            ? null
-            : await _context.Set<SqlOSCredential>()
-                .AsNoTracking()
-                .FirstOrDefaultAsync(x => x.UserId == emailRecord.UserId && x.Type == "password" && x.RevokedAt == null, cancellationToken);
-        await _admission.AdmitPasswordAttemptAsync(attempt, cancellationToken);
-        var passwordMatches = _cryptoService.VerifyPassword(
-            credential?.SecretHash ?? SqlOSClientAuthenticationService.DummyCredentialHash,
-            password);
-        if (credential == null || !passwordMatches)
-        {
-            var failureReason = emailRecord == null
-                ? "unknown_email"
-                : credential == null
-                    ? "missing_password_credential"
-                    : "invalid_password";
-            await _admission.RecordPasswordAttemptFailedAsync(attempt, failureReason, cancellationToken);
-            throw new InvalidOperationException(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
-        }
-
-        var user = await _context.Set<SqlOSUser>()
-            .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == emailRecord!.UserId, cancellationToken);
-        if (user == null || !user.IsActive)
-        {
-            await _admission.RecordPasswordAttemptFailedAsync(attempt, "inactive_user", cancellationToken);
-            throw new InvalidOperationException(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
-        }
-
-        await _admission.RecordPasswordAttemptSucceededAsync(attempt, cancellationToken);
-        var account = await _context.GetUserAsync(user.Id, SqlOSUserParts.Credentials, cancellationToken);
-        account.RecordPasswordSignIn(credential.Id, DateTime.UtcNow);
-        await _context.SaveChangesAsync(cancellationToken);
-
-        var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
-        return new SqlOSPasswordAuthenticationResult(user, organizations, "password");
+        var organizations = await _adminService.GetUserOrganizationsAsync(signedIn.Evidence.UserId, cancellationToken);
+        return new SqlOSPasswordAuthenticationResult(signedIn.Evidence.User, organizations, signedIn.Evidence.AuthenticationMethod);
     }
 
+    /// <summary>
+    /// Registers a password account without signing it in: the password sign-up
+    /// (<see cref="SignUpWithPassword"/>) with only its account. Its caller completes the login.
+    /// </summary>
     public async Task<SqlOSPasswordAuthenticationResult> SignUpAsync(
         string displayName,
         string email,
@@ -695,27 +670,27 @@ public sealed class SqlOSAuthorizationServerService
         string? organizationId,
         CancellationToken cancellationToken = default)
     {
-        var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
-        if (!credentialSettings.PasswordSignupEnabled)
-        {
-            throw new InvalidOperationException("Password signup is disabled.");
-        }
-
-        var input = SqlOSSignupOrchestration.NormalizePasswordSignup(
-            displayName,
-            email,
-            password,
-            organizationName);
-        SqlOSSignupJoinPolicy.RejectUnauthorizedOrganizationJoin(organizationId);
-
-        return await SqlOSSignupOrchestration.ExecuteAsync(
-            _context,
-            cancellationToken => SqlOSSignupOrchestration.CreatePasswordAccountAsync(
-                _adminService,
-                _context,
-                input,
-                cancellationToken),
+        var outcome = await Processes.SignUpWithPassword(httpContext: null).ExecuteAsync(
+            new SignUpWithPasswordCommand(
+                displayName,
+                email,
+                password,
+                organizationName,
+                organizationId,
+                Invitation: null,
+                CustomFields: null,
+                LoginTarget.CredentialOnly.Instance,
+                SqlOSRequestContext.System),
             cancellationToken);
+        var signedUp = outcome switch
+        {
+            SignUpOutcome.SignedUp success => success,
+            SignUpOutcome.Refused refused => throw refused.Refusal.ToException(),
+            _ => throw new InvalidOperationException($"Unknown sign-up outcome '{outcome.GetType().Name}'.")
+        };
+
+        var organizations = await _adminService.GetUserOrganizationsAsync(signedUp.Evidence.UserId, cancellationToken);
+        return new SqlOSPasswordAuthenticationResult(signedUp.Evidence.User, organizations, signedUp.Evidence.AuthenticationMethod);
     }
 
     public Task EnsureSignupAuthorizationContextAsync(
@@ -728,6 +703,10 @@ public sealed class SqlOSAuthorizationServerService
             authorizationRequest,
             cancellationToken);
 
+    /// <summary>
+    /// Registers the account of an email-code sign-up whose code the caller already verified,
+    /// without signing it in (the step <see cref="CompleteEmailOtpSignUp"/> runs).
+    /// </summary>
     public async Task<SqlOSPasswordAuthenticationResult> SignUpWithEmailOtpAsync(
         string displayName,
         string email,
@@ -735,35 +714,25 @@ public sealed class SqlOSAuthorizationServerService
         string? organizationId,
         CancellationToken cancellationToken = default)
     {
-        var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
-        if (!credentialSettings.EmailOtpEnabled)
-        {
-            throw new InvalidOperationException("Email sign-in is unavailable.");
-        }
-
-        SqlOSSignupJoinPolicy.RejectUnauthorizedOrganizationJoin(organizationId);
-
         // The caller verified the sign-up code sent to this address, which proves the mailbox.
-        var user = await _adminService.CreateUserAsync(
-            new SqlOSCreateUserRequest(displayName, email, null),
+        var registered = await AccountRegistration.RegisterWithEmailOtpAsync(
+            _context,
+            _adminService,
+            _settingsService,
+            displayName,
+            email,
             SignupProof(email, OwnershipProofMethod.EmailOtp),
+            organizationName,
+            organizationId,
+            _cryptoService.Clock.GetUtcNow().UtcDateTime,
             cancellationToken);
-
-        if (!string.IsNullOrWhiteSpace(organizationName))
-        {
-            var createdOrganization = await _adminService.CreateOrganizationAsync(
-                new SqlOSCreateOrganizationRequest(organizationName, null),
-                cancellationToken);
-            await _adminService.CreateMembershipAsync(createdOrganization.Id, new SqlOSCreateMembershipRequest(user.Id, "owner"), cancellationToken);
-        }
-
-        await _context.SaveChangesAsync(cancellationToken);
-
-        var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
-
-        return new SqlOSPasswordAuthenticationResult(user, organizations, "email_otp");
+        return Registered(registered, AuthenticationMethods.EmailOtp);
     }
 
+    /// <summary>
+    /// Registers the account of a phone-code sign-up whose code the caller already verified,
+    /// without signing it in (the step <see cref="CompletePhoneOtpSignUp"/> runs).
+    /// </summary>
     public async Task<SqlOSPasswordAuthenticationResult> SignUpWithPhoneOtpAsync(
         string displayName,
         string phoneNumber,
@@ -771,58 +740,48 @@ public sealed class SqlOSAuthorizationServerService
         string? organizationId,
         CancellationToken cancellationToken = default)
     {
-        var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
-        if (!credentialSettings.PhoneOtpEnabled)
-        {
-            throw new InvalidOperationException("Phone sign-in is unavailable.");
-        }
-
-        SqlOSSignupJoinPolicy.RejectUnauthorizedOrganizationJoin(organizationId);
-
-        var phoneHash = _cryptoService.HashToken(phoneNumber);
-        var existingPhone = await _context.Set<SqlOSUserPhoneNumber>()
-            .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.PhoneNumberHash == phoneHash && x.RemovedAt == null, cancellationToken);
-        if (existingPhone != null)
-        {
-            throw new InvalidOperationException("An account already exists for this phone number. Sign in with a phone code instead.");
-        }
-
-        var now = DateTime.UtcNow;
-        var user = SqlOSUser.Register(displayName, now);
-        user.AddVerifiedPhone(phoneNumber, _cryptoService.ProtectSecret(phoneNumber), now);
-        _context.Set<SqlOSUser>().Add(user);
-
-        if (!string.IsNullOrWhiteSpace(organizationName))
-        {
-            var createdOrganization = await _adminService.CreateOrganizationAsync(
-                new SqlOSCreateOrganizationRequest(organizationName, null),
-                cancellationToken);
-            await _adminService.CreateMembershipAsync(createdOrganization.Id, new SqlOSCreateMembershipRequest(user.Id, "owner"), cancellationToken);
-        }
-
-        await _context.SaveChangesAsync(cancellationToken);
-
-        var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
-        return new SqlOSPasswordAuthenticationResult(user, organizations, "phone_otp");
+        var registered = await AccountRegistration.RegisterWithPhoneOtpAsync(
+            _context,
+            _adminService,
+            _settingsService,
+            _cryptoService,
+            displayName,
+            phoneNumber,
+            organizationName,
+            organizationId,
+            _cryptoService.Clock.GetUtcNow().UtcDateTime,
+            cancellationToken);
+        return Registered(registered, AuthenticationMethods.PhoneOtp);
     }
 
+    /// <summary>
+    /// Registers the account an invitation the caller resolved was sent for, without signing it in
+    /// or accepting the invitation (the step <see cref="SignUpWithInvitation"/> runs).
+    /// </summary>
     public async Task<SqlOSPasswordAuthenticationResult> SignUpWithInvitationAsync(
         string displayName,
         string email,
         CancellationToken cancellationToken = default)
     {
         // The invitation was mailed to this address and its token is presented now, which proves the mailbox.
-        var user = await _adminService.CreateUserAsync(
-            new SqlOSCreateUserRequest(displayName, email, null),
+        var registration = await AccountRegistration.RegisterWithInvitationAsync(
+            _context,
+            displayName,
+            email,
             SignupProof(email, OwnershipProofMethod.Invitation),
+            _cryptoService.Clock.GetUtcNow().UtcDateTime,
             cancellationToken);
-
-        return new SqlOSPasswordAuthenticationResult(
-            user,
-            Array.Empty<SqlOSOrganizationOption>(),
-            "invitation");
+        return new SqlOSPasswordAuthenticationResult(registration.User, registration.Organizations, AuthenticationMethods.Invitation);
     }
+
+    private static SqlOSPasswordAuthenticationResult Registered(SignupRegistrationOutcome registered, string authenticationMethod)
+        => registered switch
+        {
+            SignupRegistrationOutcome.Registered { Registration: var registration }
+                => new SqlOSPasswordAuthenticationResult(registration.User, registration.Organizations, authenticationMethod),
+            SignupRegistrationOutcome.Refused refused => throw refused.Refusal.ToException(),
+            _ => throw new InvalidOperationException($"Unknown registration outcome '{registered.GetType().Name}'.")
+        };
 
     /// <summary>
     /// The proof a sign-up's verified code or presented invitation gives for the address it signs

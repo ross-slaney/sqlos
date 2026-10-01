@@ -15,6 +15,7 @@ using SqlOS.Email.Contracts;
 using SqlOS.Email.Interfaces;
 using SqlOS.Email.Models;
 using SqlOS.Email.Services;
+using SqlOS.Hosting;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -69,46 +70,34 @@ public sealed class SqlOSMagicLinkService
     /// <summary>Delivers sign-in links for the request <paramref name="httpContext"/> serves.</summary>
     internal SqlOSSignInLinkDelivery Delivery(HttpContext? httpContext) => new(this, httpContext);
 
+    /// <summary>The identity processes the sign-in link facades below delegate to.</summary>
+    private SqlOSIdentityProcesses Processes => new(_context, _adminService, _cryptoService, _settingsService, _authOptions)
+    {
+        SignInLinks = this
+    };
+
     public async Task<SqlOSMagicLinkStartResult> StartForAuthorizationRequestAsync(
         SqlOSAuthorizationRequest? authorizationRequest,
         string email,
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
-    {
-        await EnsureMagicLinkEnabledAsync(cancellationToken);
-
-        if (authorizationRequest != null)
-        {
-            authorizationRequest.LoginHintEmail = email.Trim();
-            await _context.SaveChangesAsync(cancellationToken);
-        }
-
-        return await CreateLinkAsync(
-            email,
-            authorizationRequestId: authorizationRequest?.Id,
-            clientApplicationId: authorizationRequest?.ClientApplicationId,
-            requestedOrganizationId: null,
-            httpContext,
-            cancellationToken);
-    }
+        => Started(await Processes.StartMagicLinkSignIn(httpContext).ExecuteAsync(
+            new StartMagicLinkSignInCommand(
+                email,
+                LoginTarget.ForBrowser(authorizationRequest, invitationToken: null),
+                SqlOSHttpRequestContext.FromOptional(httpContext, SqlOSRequestSurface.Hosted)),
+            cancellationToken));
 
     public async Task<SqlOSMagicLinkStartResult> StartForClientAsync(
         SqlOSMagicLinkStartRequest request,
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
-    {
-        await EnsureMagicLinkEnabledAsync(cancellationToken);
-
-        var client = await _adminService.RequireClientAsync(request.ClientId, null, cancellationToken);
-        await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(_adminService, client, httpContext, userId: null, cancellationToken);
-        return await CreateLinkAsync(
-            request.Email,
-            authorizationRequestId: null,
-            clientApplicationId: client.Id,
-            requestedOrganizationId: request.OrganizationId,
-            httpContext,
-            cancellationToken);
-    }
+        => Started(await Processes.StartMagicLinkSignIn(httpContext).ExecuteAsync(
+            new StartMagicLinkSignInCommand(
+                request.Email,
+                new LoginTarget.DirectLogin(request.ClientId, request.OrganizationId),
+                SqlOSHttpRequestContext.FromOptional(httpContext, SqlOSRequestSurface.PublicApi)),
+            cancellationToken));
 
     internal async Task<SqlOSMagicLinkVerificationResult> CompleteAsync(
         SqlOSMagicLinkCompleteRequest request,
@@ -204,144 +193,6 @@ public sealed class SqlOSMagicLinkService
             "magic_link");
     }
 
-    private async Task<SqlOSMagicLinkStartResult> CreateLinkAsync(
-        string email,
-        string? authorizationRequestId,
-        string? clientApplicationId,
-        string? requestedOrganizationId,
-        HttpContext? httpContext,
-        CancellationToken cancellationToken)
-    {
-        var trimmedEmail = email?.Trim();
-        if (string.IsNullOrWhiteSpace(trimmedEmail))
-        {
-            throw new InvalidOperationException("Email address is required.");
-        }
-
-        if (!SqlOSEmailAddress.TryCanonicalize(trimmedEmail, out var typedAddress, out var normalizedEmail))
-        {
-            throw new InvalidOperationException(SqlOSEmailAddress.InvalidEmailMessage);
-        }
-
-        trimmedEmail = typedAddress;
-        var now = DateTime.UtcNow;
-        var origin = AdmissionOrigin.Of(httpContext);
-        var ipAddress = origin.IpAddress;
-        var maskedEmail = Masked.Email(trimmedEmail);
-
-        // The send is admitted atomically before anything is written, so requests sent together
-        // can never exceed a limit between them (#424).
-        var admission = await _admission.AdmitSignInLinkAsync(EmailAddress.Parse(typedAddress), origin, clientApplicationId, now, cancellationToken);
-        if (!admission.Admitted)
-        {
-            _auditRecorder.Record(new MagicLinkSendRateLimited(maskedEmail, ipAddress, admission.RefusedLimit!, clientApplicationId, requestedOrganizationId));
-            await _context.SaveChangesAsync(cancellationToken);
-            throw new InvalidOperationException("Too many sign-in link requests. Try again later.");
-        }
-
-        // Only this client's recent links can be in the same sign-in context.
-        var recent = (await _context.Set<SqlOSTemporaryToken>()
-                .Where(SqlOSTemporaryToken.OfKind(SqlOSTemporaryTokenKinds.MagicLink))
-                .Where(x => x.ClientApplicationId == clientApplicationId && x.CreatedAt >= now.Subtract(_options.RateLimitWindow))
-                .ToListAsync(cancellationToken))
-            .Select(token => new RecentMagicLinkToken(token, token.ReadPayload(SqlOSTemporaryTokenKinds.MagicLink)))
-            .Where(x => x.Payload != null)
-            .ToArray();
-
-        var latestContextToken = recent
-            .Where(x => x.Token.ConsumedAt == null
-                && x.Token.ExpiresAt > now
-                && string.Equals(x.Payload!.NormalizedEmail, normalizedEmail, StringComparison.Ordinal)
-                && string.Equals(x.Payload.AuthorizationRequestId, authorizationRequestId, StringComparison.Ordinal)
-                && string.Equals(x.Token.ClientApplicationId, clientApplicationId, StringComparison.Ordinal)
-                && string.Equals(x.Payload.RequestedOrganizationId, requestedOrganizationId, StringComparison.Ordinal))
-            .OrderByDescending(x => x.Token.CreatedAt)
-            .FirstOrDefault();
-        if (latestContextToken != null && latestContextToken.Token.CreatedAt > now.Subtract(_options.ResendCooldown))
-        {
-            // A resend the cooldown refuses sends nothing, so it does not count against a limit.
-            await _admission.WithdrawAsync(admission, now, cancellationToken);
-            throw new InvalidOperationException($"Wait {(int)Math.Ceiling(_options.ResendCooldown.TotalSeconds)} seconds before requesting another sign-in link.");
-        }
-
-        foreach (var activeToken in recent.Where(x => x.Token.ConsumedAt == null
-            && x.Token.ExpiresAt > now
-            && string.Equals(x.Payload!.NormalizedEmail, normalizedEmail, StringComparison.Ordinal)
-            && string.Equals(x.Payload.AuthorizationRequestId, authorizationRequestId, StringComparison.Ordinal)
-            && string.Equals(x.Token.ClientApplicationId, clientApplicationId, StringComparison.Ordinal)
-            && string.Equals(x.Payload.RequestedOrganizationId, requestedOrganizationId, StringComparison.Ordinal)))
-        {
-            activeToken.Token.Retire(now);
-        }
-
-        var emailRecord = await _context.Set<SqlOSUserEmail>()
-            .Include(x => x.User)
-            .FindByNormalizedEmailAsync(normalizedEmail, email, cancellationToken);
-        var shouldSend = emailRecord?.User != null && emailRecord.User.IsActive;
-        var expiresAt = now.Add(_options.TokenLifetime);
-
-        // A link for an existing account is only ever delivered to the address stored on that
-        // account, never to the typed spelling.
-        var deliveryAddress = emailRecord?.Email.Trim() ?? typedAddress;
-        var payload = new MagicLinkPayload(
-            deliveryAddress,
-            normalizedEmail,
-            maskedEmail,
-            emailRecord?.Id,
-            authorizationRequestId,
-            clientApplicationId,
-            requestedOrganizationId,
-            ipAddress,
-            httpContext?.Request.Headers.UserAgent.ToString(),
-            shouldSend);
-        var link = await _cryptoService.CreateTemporaryTokenAsync(
-            SqlOSTemporaryTokenKinds.MagicLink,
-            payload,
-            new TemporaryTokenBinding(emailRecord?.UserId, clientApplicationId, requestedOrganizationId),
-            _options.TokenLifetime,
-            cancellationToken);
-        var rawToken = link.RawToken;
-
-        if (shouldSend)
-        {
-            try
-            {
-                var context = await BuildMessageContextAsync(payload.Email, Masked.Email(payload.Email), rawToken, expiresAt, httpContext, cancellationToken);
-                await SendEmailAsync(context, rawToken, cancellationToken);
-            }
-            catch
-            {
-                link.Token.Retire(DateTime.UtcNow);
-                link.Token.Record(new MagicLinkDeliveryFailed(
-                    link.Token.Id,
-                    maskedEmail,
-                    ipAddress,
-                    clientApplicationId,
-                    authorizationRequestId,
-                    requestedOrganizationId));
-                await _context.SaveChangesAsync(cancellationToken);
-                throw new InvalidOperationException("We couldn't send a sign-in link right now.");
-            }
-        }
-
-        link.Token.Record(new MagicLinkRequested(
-            link.Token.Id,
-            maskedEmail,
-            ipAddress,
-            clientApplicationId,
-            authorizationRequestId,
-            requestedOrganizationId,
-            shouldSend));
-        await _context.SaveChangesAsync(cancellationToken);
-
-        return new SqlOSMagicLinkStartResult(
-            trimmedEmail,
-            maskedEmail,
-            $"If an account exists for {maskedEmail}, check your email for a sign-in link.",
-            expiresAt,
-            now.Add(_options.ResendCooldown));
-    }
-
     private void ValidateBinding(
         SqlOSTemporaryToken token,
         MagicLinkPayload payload,
@@ -393,6 +244,13 @@ public sealed class SqlOSMagicLinkService
         var context = await BuildMessageContextAsync(payload.Email, Masked.Email(payload.Email), rawToken, expiresAt, httpContext, cancellationToken);
         await SendEmailAsync(context, rawToken, cancellationToken);
     }
+
+    private static SqlOSMagicLinkStartResult Started(SignInLinkStartOutcome outcome) => outcome switch
+    {
+        SignInLinkStartOutcome.Sent sent => sent.Result,
+        SignInLinkStartOutcome.Refused refused => throw refused.Refusal.ToException(),
+        _ => throw new InvalidOperationException($"Unknown sign-in link start outcome '{outcome.GetType().Name}'.")
+    };
 
     private async Task SendEmailAsync(
         SqlOSMagicLinkMessageContext context,
@@ -507,8 +365,6 @@ public sealed class SqlOSMagicLinkService
             ["backgroundColor"] = context.Branding.BackgroundColor
         };
     }
-
-    private sealed record RecentMagicLinkToken(SqlOSTemporaryToken Token, MagicLinkPayload? Payload);
 }
 
 internal sealed record SqlOSMagicLinkVerificationResult(

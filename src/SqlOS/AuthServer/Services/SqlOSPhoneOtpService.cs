@@ -8,9 +8,10 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
-using SqlOS.AuthServer.Processes.Identity;
 using SqlOS.Domain;
+using SqlOS.AuthServer.Processes.Identity;
 using SqlOS.Domain.Events;
+using SqlOS.Hosting;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -25,6 +26,7 @@ public sealed class SqlOSPhoneOtpService
     private readonly ISqlOSOtpDeliveryChannel _deliveryChannel;
     private readonly IAdmissionGate _admission;
     private readonly IAuditRecorder _auditRecorder;
+    private readonly SqlOSAuthServerOptions _authOptions;
     private readonly SqlOSPhoneOtpOptions _options;
 
     public SqlOSPhoneOtpService(
@@ -48,6 +50,7 @@ public sealed class SqlOSPhoneOtpService
             options,
             deliveryAdmissionService ?? new SqlOSDeliveryAdmissionService());
         _auditRecorder = new SqlOSAuditRecorder(context);
+        _authOptions = options.Value;
         _options = options.Value.PhoneOtp;
     }
 
@@ -65,48 +68,34 @@ public sealed class SqlOSPhoneOtpService
     /// <summary>The provider that sends codes and checks them against the stored recipient.</summary>
     internal ISqlOSOtpDeliveryChannel DeliveryChannel => _deliveryChannel;
 
+    /// <summary>The identity processes the phone-code facades below delegate to.</summary>
+    private SqlOSIdentityProcesses Processes => new(_context, _adminService, _cryptoService, _settingsService, _authOptions)
+    {
+        PhoneCodes = this
+    };
+
     public async Task<SqlOSPhoneOtpStartResult> StartForAuthorizationRequestAsync(
         SqlOSAuthorizationRequest? authorizationRequest,
         string phoneNumber,
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
-    {
-        await EnsurePhoneOtpEnabledAsync(cancellationToken);
-
-        return await CreateChallengeAsync(
-            phoneNumber,
-            authorizationRequestId: authorizationRequest?.Id,
-            clientApplicationId: authorizationRequest?.ClientApplicationId,
-            requestedOrganizationId: null,
-            userId: null,
-            userPhoneNumberId: null,
-            sendWhenNoUser: false,
-            purpose: PhoneOtpPurposes.Login,
-            httpContext,
-            cancellationToken);
-    }
+        => Started(await Processes.StartPhoneOtpSignIn().ExecuteAsync(
+            new StartPhoneOtpSignInCommand(
+                phoneNumber,
+                LoginTarget.ForBrowser(authorizationRequest, invitationToken: null),
+                SqlOSHttpRequestContext.FromOptional(httpContext, SqlOSRequestSurface.Hosted)),
+            cancellationToken));
 
     public async Task<SqlOSPhoneOtpStartResult> StartForClientAsync(
         SqlOSPhoneOtpStartRequest request,
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
-    {
-        await EnsurePhoneOtpEnabledAsync(cancellationToken);
-
-        var client = await _adminService.RequireClientAsync(request.ClientId, null, cancellationToken);
-        await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(_adminService, client, httpContext, userId: null, cancellationToken);
-        return await CreateChallengeAsync(
-            request.PhoneNumber,
-            authorizationRequestId: null,
-            clientApplicationId: client.Id,
-            requestedOrganizationId: request.OrganizationId,
-            userId: null,
-            userPhoneNumberId: null,
-            sendWhenNoUser: false,
-            purpose: PhoneOtpPurposes.Login,
-            httpContext,
-            cancellationToken);
-    }
+        => Started(await Processes.StartPhoneOtpSignIn().ExecuteAsync(
+            new StartPhoneOtpSignInCommand(
+                request.PhoneNumber,
+                new LoginTarget.DirectLogin(request.ClientId, request.OrganizationId),
+                SqlOSHttpRequestContext.FromOptional(httpContext, SqlOSRequestSurface.PublicApi)),
+            cancellationToken));
 
     public async Task<SqlOSPhoneOtpSignupStartResult> StartSignupForAuthorizationRequestAsync(
         SqlOSAuthorizationRequest? authorizationRequest,
@@ -116,101 +105,31 @@ public sealed class SqlOSPhoneOtpService
         JsonObject? customFields = null,
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
-    {
-        await EnsurePhoneOtpEnabledAsync(cancellationToken);
-
-        var trimmedDisplayName = RequireText(displayName, "Display name is required.");
-        SqlOSSignupJoinPolicy.RejectUnauthorizedOrganizationJoin(authorizationRequest?.OrganizationId);
-        var normalizedPhoneNumber = await EnsurePhoneNumberAvailableForSignupAsync(phoneNumber, cancellationToken);
-
-        var challenge = await CreateChallengeAsync(
-            normalizedPhoneNumber,
-            authorizationRequestId: authorizationRequest?.Id,
-            clientApplicationId: authorizationRequest?.ClientApplicationId,
-            requestedOrganizationId: null,
-            userId: null,
-            userPhoneNumberId: null,
-            sendWhenNoUser: true,
-            purpose: PhoneOtpPurposes.Signup,
-            httpContext,
-            cancellationToken);
-
-        var signupToken = (await _cryptoService.CreateTemporaryTokenAsync(
-            SqlOSTemporaryTokenKinds.PhoneOtpSignup,
-            new PhoneOtpSignupPayload(
-                _cryptoService.HashToken(challenge.ChallengeToken),
-                authorizationRequest?.Id,
-                authorizationRequest?.ClientApplication?.ClientId,
-                authorizationRequest?.ClientApplicationId,
-                trimmedDisplayName,
-                challenge.PhoneNumber,
-                string.IsNullOrWhiteSpace(organizationName) ? null : organizationName.Trim(),
-                authorizationRequest?.OrganizationId,
-                customFields),
-            new TemporaryTokenBinding(ClientApplicationId: authorizationRequest?.ClientApplicationId),
-            _options.ChallengeLifetime,
-            cancellationToken)).RawToken;
-
-        return new SqlOSPhoneOtpSignupStartResult(
-            challenge.ChallengeToken,
-            signupToken,
-            challenge.PhoneNumber,
-            challenge.MaskedPhoneNumber,
-            challenge.Message,
-            challenge.ExpiresAt,
-            challenge.NextAllowedSendAt);
-    }
+        => Started(await Processes.StartPhoneOtpSignUp().ExecuteAsync(
+            new StartPhoneOtpSignUpCommand(
+                displayName,
+                phoneNumber,
+                organizationName,
+                customFields,
+                LoginTarget.ForBrowser(authorizationRequest, invitationToken: null),
+                CarriesInvitation: false,
+                SqlOSHttpRequestContext.FromOptional(httpContext, SqlOSRequestSurface.Hosted)),
+            cancellationToken));
 
     public async Task<SqlOSPhoneOtpSignupStartResult> StartSignupForClientAsync(
         SqlOSPhoneOtpSignupStartRequest request,
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
-    {
-        await EnsurePhoneOtpEnabledAsync(cancellationToken);
-
-        var client = await _adminService.RequireClientAsync(request.ClientId, null, cancellationToken);
-        await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(_adminService, client, httpContext, userId: null, cancellationToken);
-        var trimmedDisplayName = RequireText(request.DisplayName, "Display name is required.");
-        SqlOSSignupJoinPolicy.RejectUnauthorizedOrganizationJoin(request.OrganizationId);
-        var normalizedPhoneNumber = await EnsurePhoneNumberAvailableForSignupAsync(request.PhoneNumber, cancellationToken);
-
-        var challenge = await CreateChallengeAsync(
-            normalizedPhoneNumber,
-            authorizationRequestId: null,
-            clientApplicationId: client.Id,
-            requestedOrganizationId: null,
-            userId: null,
-            userPhoneNumberId: null,
-            sendWhenNoUser: true,
-            purpose: PhoneOtpPurposes.Signup,
-            httpContext,
-            cancellationToken);
-
-        var signupToken = (await _cryptoService.CreateTemporaryTokenAsync(
-            SqlOSTemporaryTokenKinds.PhoneOtpSignup,
-            new PhoneOtpSignupPayload(
-                _cryptoService.HashToken(challenge.ChallengeToken),
-                AuthorizationRequestId: null,
-                ClientId: client.ClientId,
-                ClientApplicationId: client.Id,
-                DisplayName: trimmedDisplayName,
-                PhoneNumber: challenge.PhoneNumber,
-                OrganizationName: string.IsNullOrWhiteSpace(request.OrganizationName) ? null : request.OrganizationName.Trim(),
-                OrganizationId: request.OrganizationId,
-                CustomFields: request.CustomFields),
-            new TemporaryTokenBinding(ClientApplicationId: client.Id, OrganizationId: request.OrganizationId),
-            _options.ChallengeLifetime,
-            cancellationToken)).RawToken;
-
-        return new SqlOSPhoneOtpSignupStartResult(
-            challenge.ChallengeToken,
-            signupToken,
-            challenge.PhoneNumber,
-            challenge.MaskedPhoneNumber,
-            challenge.Message,
-            challenge.ExpiresAt,
-            challenge.NextAllowedSendAt);
-    }
+        => Started(await Processes.StartPhoneOtpSignUp().ExecuteAsync(
+            new StartPhoneOtpSignUpCommand(
+                request.DisplayName,
+                request.PhoneNumber,
+                request.OrganizationName,
+                request.CustomFields,
+                new LoginTarget.DirectLogin(request.ClientId, request.OrganizationId),
+                CarriesInvitation: false,
+                SqlOSHttpRequestContext.FromOptional(httpContext, SqlOSRequestSurface.PublicApi)),
+            cancellationToken));
 
     public async Task<SqlOSPhoneOtpStartResult> StartEnrollmentAsync(
         SqlOSUser? authenticatedUser,
@@ -224,17 +143,22 @@ public sealed class SqlOSPhoneOtpService
             throw new InvalidOperationException("Sign in before changing phone numbers.");
         }
 
-        return await CreateChallengeAsync(
-            phoneNumber,
-            authorizationRequestId: null,
-            clientApplicationId: null,
-            requestedOrganizationId: null,
-            userId: authenticatedUser.Id,
-            userPhoneNumberId: null,
-            sendWhenNoUser: true,
-            purpose: PhoneOtpPurposes.Enrollment,
-            httpContext,
+        var issue = await new PhoneCodeChallenges(_context, this).IssueAsync(
+            new PhoneCodeIssueRequest(
+                phoneNumber,
+                PhoneOtpPurposes.Enrollment,
+                new PhoneOtpChallengeContext(null, null, null),
+                authenticatedUser.Id,
+                SendWhenNoAccount: true,
+                SqlOSHttpRequestContext.FromOptional(httpContext, SqlOSRequestSurface.Hosted)),
+            _cryptoService.Clock.GetUtcNow().UtcDateTime,
             cancellationToken);
+        return issue switch
+        {
+            PhoneCodeIssue.Issued issued => issued.Result,
+            PhoneCodeIssue.Refused refused => throw refused.Refusal.ToException(),
+            _ => throw new InvalidOperationException($"Unknown phone-code issue '{issue.GetType().Name}'.")
+        };
     }
 
     public async Task<SqlOSUserPhoneNumber> VerifyEnrollmentAsync(
@@ -248,19 +172,23 @@ public sealed class SqlOSPhoneOtpService
             throw new InvalidOperationException("Sign in before changing phone numbers.");
         }
 
-        var challenge = await VerifyChallengeAsync(
-            new SqlOSPhoneOtpVerifyRequest(request.ChallengeToken, request.Code),
-            expectedAuthorizationRequestId: null,
-            requireAuthorizationRequestMatch: false,
-            expectedPurpose: PhoneOtpPurposes.Enrollment,
+        var check = await new PhoneCodeChallenges(_context, this).VerifyAsync(
+            new PhoneCodeVerifyRequest(request.ChallengeToken, request.Code, PhoneOtpPurposes.Enrollment, new ChallengeBinding(null, RequireMatch: false)),
+            _cryptoService.Clock.GetUtcNow().UtcDateTime,
             cancellationToken);
+        var challenge = check switch
+        {
+            PhoneCodeCheck.Verified verified => verified.Challenge,
+            PhoneCodeCheck.Refused refused => throw refused.Refusal.ToException(),
+            _ => throw new InvalidOperationException($"Unknown phone-code check '{check.GetType().Name}'.")
+        };
 
         if (!string.Equals(challenge.UserId, authenticatedUser.Id, StringComparison.Ordinal))
         {
             throw new InvalidOperationException(PublicInvalidMessage);
         }
 
-        var phoneNumber = UnprotectPhoneNumber(challenge.PhoneNumberEncrypted);
+        var phoneNumber = Unprotect(challenge.PhoneNumberEncrypted);
         return await AddVerifiedPhoneNumberAsync(authenticatedUser, phoneNumber, enrollment: challenge, cancellationToken);
     }
 
@@ -273,38 +201,38 @@ public sealed class SqlOSPhoneOtpService
             requireAuthorizationRequestMatch: false,
             cancellationToken);
 
+    /// <summary>
+    /// Verifies a sign-in code without completing the sign-in: the phone-code sign-in
+    /// (<see cref="VerifyPhoneOtpSignIn"/>) with only its credential.
+    /// </summary>
     public async Task<SqlOSPhoneOtpVerificationResult> VerifyAsync(
         SqlOSPhoneOtpVerifyRequest request,
         string? expectedAuthorizationRequestId,
         bool requireAuthorizationRequestMatch,
         CancellationToken cancellationToken = default)
     {
-        await EnsurePhoneOtpEnabledAsync(cancellationToken);
-
-        var challenge = await VerifyChallengeAsync(
-            request,
-            expectedAuthorizationRequestId,
-            requireAuthorizationRequestMatch,
-            expectedPurpose: PhoneOtpPurposes.Login,
+        var outcome = await Processes.VerifyPhoneOtpSignIn(httpContext: null).ExecuteAsync(
+            new VerifyPhoneOtpSignInCommand(
+                request.ChallengeToken,
+                request.Code,
+                LoginTarget.CredentialOnly.Instance,
+                new ChallengeBinding(expectedAuthorizationRequestId, requireAuthorizationRequestMatch)),
             cancellationToken);
-
-        if (challenge.User == null || !challenge.User.IsActive)
+        var signedIn = outcome switch
         {
-            throw new InvalidOperationException(PublicInvalidMessage);
-        }
+            PhoneCodeSignInOutcome.SignedIn success => success,
+            PhoneCodeSignInOutcome.Refused refused => throw refused.Refusal.ToException(),
+            _ => throw new InvalidOperationException($"Unknown phone-code sign-in outcome '{outcome.GetType().Name}'.")
+        };
 
-        if (challenge.UserPhoneNumberId != null)
-        {
-            await _context.LoadUserPartsAsync(challenge.User, SqlOSUserParts.PhoneNumbers, cancellationToken);
-        }
-
-        challenge.User.RecordPhoneSignIn(challenge.UserPhoneNumberId, DateTime.UtcNow);
-        await _context.SaveChangesAsync(cancellationToken);
-
-        var organizations = await _adminService.GetUserOrganizationsAsync(challenge.User.Id, cancellationToken);
-        return new SqlOSPhoneOtpVerificationResult(challenge, challenge.User, organizations, "phone_otp");
+        var organizations = await _adminService.GetUserOrganizationsAsync(signedIn.Evidence.UserId, cancellationToken);
+        return new SqlOSPhoneOtpVerificationResult(signedIn.Challenge, signedIn.Evidence.User, organizations, signedIn.Evidence.AuthenticationMethod);
     }
 
+    /// <summary>
+    /// Verifies a phone-code sign-up's token and code without creating the account (the step the
+    /// phone-code sign-up runs inside its transaction).
+    /// </summary>
     public async Task<SqlOSPhoneOtpSignupVerificationResult> VerifySignupAsync(
         SqlOSPhoneOtpSignupVerifyRequest request,
         string? expectedAuthorizationRequestId,
@@ -312,66 +240,36 @@ public sealed class SqlOSPhoneOtpService
         CancellationToken cancellationToken = default)
     {
         await EnsurePhoneOtpEnabledAsync(cancellationToken);
-
-        var signupToken = request.SignupToken?.Trim()
-            ?? throw new InvalidOperationException(PublicInvalidMessage);
-        var token = await _cryptoService.FindTemporaryTokenAsync(SqlOSTemporaryTokenKinds.PhoneOtpSignup, signupToken, cancellationToken)
-            ?? throw new InvalidOperationException(PublicInvalidMessage);
-        var payload = token.ReadPayload(SqlOSTemporaryTokenKinds.PhoneOtpSignup)
-            ?? throw new InvalidOperationException(PublicInvalidMessage);
-
-        if (requireAuthorizationRequestMatch)
-        {
-            if (string.IsNullOrWhiteSpace(expectedAuthorizationRequestId))
-            {
-                if (!string.IsNullOrWhiteSpace(payload.AuthorizationRequestId))
-                {
-                    throw new InvalidOperationException(PublicInvalidMessage);
-                }
-            }
-            else if (!string.Equals(payload.AuthorizationRequestId, expectedAuthorizationRequestId, StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException(PublicInvalidMessage);
-            }
-        }
-
-        var rawChallengeToken = request.ChallengeToken?.Trim()
-            ?? throw new InvalidOperationException(PublicInvalidMessage);
-        if (!string.Equals(payload.ChallengeTokenHash, _cryptoService.HashToken(rawChallengeToken), StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(PublicInvalidMessage);
-        }
-
-        var challenge = await VerifyChallengeAsync(
-            new SqlOSPhoneOtpVerifyRequest(rawChallengeToken, request.Code),
-            expectedAuthorizationRequestId,
-            requireAuthorizationRequestMatch,
-            expectedPurpose: PhoneOtpPurposes.Signup,
+        var check = await PhoneOtpSignupTokens.VerifyAsync(
+            _context,
+            this,
+            request.SignupToken,
+            request.ChallengeToken,
+            request.Code,
+            new ChallengeBinding(expectedAuthorizationRequestId, requireAuthorizationRequestMatch),
+            _cryptoService.Clock.GetUtcNow().UtcDateTime,
             cancellationToken);
-
-        if (challenge.User != null)
+        return check switch
         {
-            throw new InvalidOperationException("An account already exists for this phone number. Sign in with a phone code instead.");
-        }
-
-        var existingPhone = await _context.Set<SqlOSUserPhoneNumber>()
-            .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.PhoneNumberHash == challenge.PhoneNumberHash && x.RemovedAt == null, cancellationToken);
-        if (existingPhone != null)
-        {
-            throw new InvalidOperationException("An account already exists for this phone number. Sign in with a phone code instead.");
-        }
-
-        return new SqlOSPhoneOtpSignupVerificationResult(
-            signupToken,
-            token.ClientApplicationId ?? payload.ClientApplicationId,
-            payload.ClientId,
-            payload.DisplayName,
-            payload.PhoneNumber,
-            payload.OrganizationName,
-            token.OrganizationId ?? payload.OrganizationId,
-            payload.CustomFields);
+            PhoneOtpSignupCheck.Verified verified => verified.Result,
+            PhoneOtpSignupCheck.Refused refused => throw refused.Refusal.ToException(),
+            _ => throw new InvalidOperationException($"Unknown phone-code sign-up check '{check.GetType().Name}'.")
+        };
     }
+
+    private static SqlOSPhoneOtpStartResult Started(PhoneCodeStartOutcome outcome) => outcome switch
+    {
+        PhoneCodeStartOutcome.Sent sent => sent.Result,
+        PhoneCodeStartOutcome.Refused refused => throw refused.Refusal.ToException(),
+        _ => throw new InvalidOperationException($"Unknown phone-code start outcome '{outcome.GetType().Name}'.")
+    };
+
+    private static SqlOSPhoneOtpSignupStartResult Started(PhoneCodeSignUpStartOutcome outcome) => outcome switch
+    {
+        PhoneCodeSignUpStartOutcome.Sent sent => sent.Result,
+        PhoneCodeSignUpStartOutcome.Refused refused => throw refused.Refusal.ToException(),
+        _ => throw new InvalidOperationException($"Unknown phone-code sign-up start outcome '{outcome.GetType().Name}'.")
+    };
 
     public async Task ConsumeSignupTokenAsync(
         string signupToken,
@@ -417,234 +315,6 @@ public sealed class SqlOSPhoneOtpService
         return record;
     }
 
-    private async Task<SqlOSPhoneOtpChallenge> VerifyChallengeAsync(
-        SqlOSPhoneOtpVerifyRequest request,
-        string? expectedAuthorizationRequestId,
-        bool requireAuthorizationRequestMatch,
-        string expectedPurpose,
-        CancellationToken cancellationToken)
-    {
-        var rawChallengeToken = request.ChallengeToken?.Trim()
-            ?? throw new InvalidOperationException(PublicInvalidMessage);
-        var normalizedCode = NormalizeCode(request.Code);
-        var challengeHash = _cryptoService.HashToken(rawChallengeToken);
-        var challenge = await _context.Set<SqlOSPhoneOtpChallenge>()
-            .Include(x => x.User)
-            .Include(x => x.UserPhoneNumber)
-            .Include(x => x.AuthorizationRequest)
-            .ThenInclude(x => x!.ClientApplication)
-            .Include(x => x.ClientApplication)
-            .FirstOrDefaultAsync(x => x.ChallengeTokenHash == challengeHash, cancellationToken)
-            ?? throw new InvalidOperationException(PublicInvalidMessage);
-
-        if (!challenge.IsOpen(DateTime.UtcNow)
-            || !challenge.IsFor(expectedPurpose)
-            || (requireAuthorizationRequestMatch && !challenge.AnswersAuthorizationRequest(expectedAuthorizationRequestId)))
-        {
-            throw new InvalidOperationException(PublicInvalidMessage);
-        }
-
-        if (!challenge.ProviderStarted)
-        {
-            await RejectChallengeAsync(challenge, SqlOSPhoneOtpChallenge.NotStartedReason, cancellationToken);
-            throw new InvalidOperationException(PublicInvalidMessage);
-        }
-
-        // The provider checks the code against the stored recipient, never a number from the request.
-        var phoneNumber = UnprotectPhoneNumber(challenge.PhoneNumberEncrypted);
-        var check = await _deliveryChannel.CheckAsync(
-            phoneNumber,
-            normalizedCode,
-            new SqlOSOtpDeliveryContext(
-                challenge.Purpose,
-                challenge.ClientApplicationId,
-                challenge.AuthorizationRequestId,
-                challenge.IpAddress,
-                challenge.UserAgent,
-                challenge.ProviderChallengeId),
-            cancellationToken);
-
-        if (challenge.RegisterCheck(check) == PhoneOtpCheckOutcome.Rejected)
-        {
-            await RejectChallengeAsync(
-                challenge,
-                check.SanitizedError ?? check.ProviderStatus ?? SqlOSPhoneOtpChallenge.ProviderRejectedReason,
-                cancellationToken);
-            throw new InvalidOperationException(PublicInvalidMessage);
-        }
-
-        challenge.Complete(DateTime.UtcNow);
-
-        try
-        {
-            await _context.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateConcurrencyException)
-        {
-            // A concurrent verification spent the challenge first; nothing this one staged may
-            // reach a later save of the same unit of work.
-            ((DbContext)_context).Entry(challenge).State = EntityState.Detached;
-            throw new InvalidOperationException(PublicInvalidMessage);
-        }
-
-        return challenge;
-    }
-
-    private async Task RejectChallengeAsync(
-        SqlOSPhoneOtpChallenge challenge,
-        string reason,
-        CancellationToken cancellationToken)
-    {
-        challenge.RejectCode(reason, DateTime.UtcNow);
-        await _context.SaveChangesAsync(cancellationToken);
-    }
-
-    private async Task<SqlOSPhoneOtpStartResult> CreateChallengeAsync(
-        string phoneNumber,
-        string? authorizationRequestId,
-        string? clientApplicationId,
-        string? requestedOrganizationId,
-        string? userId,
-        string? userPhoneNumberId,
-        bool sendWhenNoUser,
-        string purpose,
-        HttpContext? httpContext,
-        CancellationToken cancellationToken)
-    {
-        var normalized = NormalizePhoneNumber(phoneNumber);
-        var now = DateTime.UtcNow;
-        var ipAddress = httpContext?.Connection.RemoteIpAddress?.ToString();
-        var phoneHash = _cryptoService.HashToken(normalized.E164);
-        var maskedPhone = Masked.Phone(normalized.E164);
-        var context = new PhoneOtpChallengeContext(authorizationRequestId, clientApplicationId, requestedOrganizationId);
-
-        var phoneRecord = await _context.Set<SqlOSUserPhoneNumber>()
-            .Include(x => x.User)
-            .FirstOrDefaultAsync(x => x.PhoneNumberHash == phoneHash && x.RemovedAt == null && x.IsVerified, cancellationToken);
-
-        var effectiveUserId = userId ?? phoneRecord?.UserId;
-        var effectiveUserPhoneNumberId = userPhoneNumberId ?? phoneRecord?.Id;
-        var admission = await _admission.AdmitPhoneCodeAsync(
-            phoneHash,
-            effectiveUserId,
-            AdmissionOrigin.Of(httpContext),
-            clientApplicationId,
-            now,
-            cancellationToken);
-        if (!admission.Admitted)
-        {
-            _auditRecorder.Record(new PhoneOtpSendRateLimited(
-                purpose,
-                maskedPhone,
-                ipAddress,
-                admission.RefusedLimit ?? "phone",
-                clientApplicationId,
-                requestedOrganizationId));
-            await _context.SaveChangesAsync(cancellationToken);
-            throw new InvalidOperationException("Too many sign-in code requests. Try again later.");
-        }
-
-        now = DateTime.UtcNow;
-
-        var recentChallenges = await _context.Set<SqlOSPhoneOtpChallenge>()
-            .Where(x => x.PhoneNumberHash == phoneHash && x.CreatedAt >= now.Subtract(_options.RateLimitWindow))
-            .OrderByDescending(x => x.CreatedAt)
-            .ToListAsync(cancellationToken);
-
-        var latestContextChallenge = recentChallenges
-            .FirstOrDefault(x => x.WasStartedIn(context, purpose) && !x.IsInvalidated);
-        if (latestContextChallenge != null && latestContextChallenge.WasSentWithin(_options.ResendCooldown, now))
-        {
-            throw new InvalidOperationException($"Wait {(int)Math.Ceiling(_options.ResendCooldown.TotalSeconds)} seconds before requesting another code.");
-        }
-
-        var activeChallenges = await _context.Set<SqlOSPhoneOtpChallenge>()
-            .Where(x => x.PhoneNumberHash == phoneHash
-                && x.ConsumedAt == null
-                && x.InvalidatedAt == null
-                && x.ExpiresAt > now
-                && x.AuthorizationRequestId == authorizationRequestId
-                && x.ClientApplicationId == clientApplicationId
-                && x.RequestedOrganizationId == requestedOrganizationId
-                && x.Purpose == purpose)
-            .ToListAsync(cancellationToken);
-
-        foreach (var activeChallenge in activeChallenges)
-        {
-            activeChallenge.Supersede(now);
-        }
-
-        var issued = SqlOSPhoneOtpChallenge.Issue(
-            new PhoneOtpChallengeRequest(
-                normalized,
-                purpose,
-                context,
-                effectiveUserId,
-                effectiveUserPhoneNumberId,
-                ipAddress,
-                httpContext?.Request.Headers.UserAgent.ToString()),
-            _cryptoService.ProtectSecret(normalized.E164),
-            _options.ChallengeLifetime,
-            now);
-        var challenge = issued.Challenge;
-        _context.Set<SqlOSPhoneOtpChallenge>().Add(challenge);
-        await _context.SaveChangesAsync(cancellationToken);
-
-        var shouldSend = (phoneRecord?.User != null && phoneRecord.User.IsActive) || sendWhenNoUser;
-        if (shouldSend)
-        {
-            // The provider sends to the challenge's recipient, the only number the code goes to.
-            var delivery = await _deliveryChannel.StartAsync(
-                issued.Recipient.E164,
-                new SqlOSOtpDeliveryContext(purpose, clientApplicationId, authorizationRequestId, ipAddress, challenge.UserAgent),
-                cancellationToken);
-
-            if (!delivery.Accepted)
-            {
-                challenge.FailDelivery(delivery, DateTime.UtcNow);
-                await _context.SaveChangesAsync(cancellationToken);
-                throw new InvalidOperationException("We couldn't send a sign-in code right now.");
-            }
-
-            challenge.RecordProviderStart(delivery);
-        }
-        else
-        {
-            challenge.RecordStartWithoutSending();
-        }
-
-        await _context.SaveChangesAsync(cancellationToken);
-
-        return new SqlOSPhoneOtpStartResult(
-            issued.ChallengeToken,
-            normalized.E164,
-            maskedPhone,
-            purpose == PhoneOtpPurposes.Signup
-                ? $"Check {maskedPhone} for a sign-up code."
-                : purpose == PhoneOtpPurposes.Enrollment
-                    ? $"Check {maskedPhone} for a phone verification code."
-                    : PublicStartMessage,
-            challenge.ExpiresAt,
-            challenge.LastSentAt.Add(_options.ResendCooldown));
-    }
-
-    private async Task<string> EnsurePhoneNumberAvailableForSignupAsync(
-        string phoneNumber,
-        CancellationToken cancellationToken)
-    {
-        var normalized = NormalizePhoneNumber(phoneNumber);
-        var phoneHash = _cryptoService.HashToken(normalized.E164);
-        var existingPhone = await _context.Set<SqlOSUserPhoneNumber>()
-            .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.PhoneNumberHash == phoneHash && x.RemovedAt == null, cancellationToken);
-        if (existingPhone != null)
-        {
-            throw new InvalidOperationException("An account already exists for this phone number. Sign in with a phone code instead.");
-        }
-
-        return normalized.E164;
-    }
-
     private async Task EnsurePhoneOtpEnabledAsync(CancellationToken cancellationToken)
     {
         var settings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
@@ -652,22 +322,6 @@ public sealed class SqlOSPhoneOtpService
         {
             throw new InvalidOperationException("Phone sign-in is unavailable.");
         }
-    }
-
-    private PhoneNumber NormalizePhoneNumber(string phoneNumber)
-    {
-        var defaultRegion = string.IsNullOrWhiteSpace(_options.DefaultRegion) ? null : _options.DefaultRegion.Trim().ToUpperInvariant();
-        if (!PhoneNumber.TryParse(phoneNumber, defaultRegion, out var normalized, out var error))
-        {
-            throw new InvalidOperationException(error);
-        }
-
-        if (!IsCountryAllowed(normalized.Region))
-        {
-            throw new InvalidOperationException("Phone number country is not allowed.");
-        }
-
-        return normalized;
     }
 
     /// <summary>
@@ -716,38 +370,6 @@ public sealed class SqlOSPhoneOtpService
             .Select(static value => value.Trim().ToUpperInvariant())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
-
-    private string UnprotectPhoneNumber(string protectedPhoneNumber)
-        => _cryptoService.UnprotectSecret(protectedPhoneNumber);
-
-
-    private static string NormalizeCode(string? value)
-    {
-        var normalized = new string((value ?? string.Empty)
-            .Where(char.IsDigit)
-            .ToArray());
-
-        if (string.IsNullOrWhiteSpace(normalized))
-        {
-            throw new InvalidOperationException(PublicInvalidMessage);
-        }
-
-        return normalized;
-    }
-
-
-    private static string RequireText(string? value, string message)
-    {
-        var trimmed = value?.Trim();
-        if (string.IsNullOrWhiteSpace(trimmed))
-        {
-            throw new InvalidOperationException(message);
-        }
-
-        return trimmed;
-    }
-
-
 }
 
 public sealed record SqlOSPhoneOtpVerificationResult(
