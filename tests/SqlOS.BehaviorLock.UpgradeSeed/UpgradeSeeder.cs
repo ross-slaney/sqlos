@@ -186,6 +186,92 @@ internal sealed class UpgradeSeeder
             calendarConnectionId);
     }
 
+    /// <summary>
+    /// Seeds <see cref="UpgradeData.DirectorySubjectsDataset"/>: the FGA subjects a SCIM directory
+    /// gave SqlOS users before 8.0 (#448), described by <see cref="DirectorySubjectsManifest"/>.
+    /// </summary>
+    public async Task<DirectorySubjectsManifest> SeedDirectorySubjectsAsync()
+    {
+        Step("organization with a verified domain, and the FGA workspaces");
+        var organizationId = (await _operator.PostJsonAsync(
+                "/sqlos/admin/auth/api/organizations",
+                new { name = UpgradeData.OrganizationName, slug = UpgradeData.OrganizationSlug }))
+            .EnsureSuccess()
+            .JsonString("id");
+        await VerifyDomainAsync(organizationId);
+        await ProbeAsync("/__probe/fga/workspaces", new { name = "Acme", id = UpgradeData.RootWorkspaceId });
+        await ProbeAsync("/__probe/fga/workspaces", new { name = "Acme Projects", id = UpgradeData.ChildWorkspaceId, parentResourceId = UpgradeData.RootWorkspace });
+
+        Step("SCIM connection whose Engineering mapping grants reader on the child workspace");
+        var scim = (await _operator.PostJsonAsync(
+                $"/sqlos/admin/auth/api/organizations/{organizationId}/scim-connections",
+                new { displayName = "Acme Directory", enabled = true, grantBoundaryResourceId = UpgradeData.RootWorkspace }))
+            .EnsureSuccess();
+        var scimConnectionId = scim.JsonString("connectionId");
+        var scimToken = scim.JsonString("token");
+        var scimMappingId = (await _operator.PostJsonAsync(
+                $"/sqlos/admin/auth/api/scim-connections/{scimConnectionId}/mappings",
+                new
+                {
+                    matchType = "display_name",
+                    groupDisplayName = UpgradeData.ScimGroup,
+                    roleKey = BehaviorLockAuthorization.ReaderRole,
+                    resourceId = UpgradeData.ChildWorkspace,
+                    description = "Engineering reads Acme projects"
+                }))
+            .EnsureSuccess()
+            .JsonString("id");
+
+        Step("the directory provisions Bob and Ann into Engineering");
+        var bobId = (await ScimAsync(scimToken, "/Users", ScimUser("directory-bob", UpgradeData.BobEmail, "Bob", "Builder"))).JsonString("id");
+        var annId = (await ScimAsync(scimToken, "/Users", ScimUser("directory-ann", UpgradeData.AnnEmail, "Ann", "Archer"))).JsonString("id");
+        var scimGroupId = (await ScimAsync(scimToken, "/Groups", new JsonObject
+            {
+                ["schemas"] = new JsonArray("urn:ietf:params:scim:schemas:core:2.0:Group"),
+                ["externalId"] = "directory-engineering",
+                ["displayName"] = UpgradeData.ScimGroup,
+                ["members"] = new JsonArray(new JsonObject { ["value"] = bobId }, new JsonObject { ["value"] = annId })
+            }))
+            .JsonString("id");
+        var bobSubjectId = await FgaSubjectIdAsync(UpgradeData.BobEmail);
+        var annSubjectId = await FgaSubjectIdAsync(UpgradeData.AnnEmail);
+
+        Step("the host provisions Ann's subject by her user ID and grants it admin on the child workspace");
+        await ProbeAsync("/__probe/fga/subjects", new { type = "user", subjectId = annId, displayName = "Ann Archer (app)", email = UpgradeData.AnnEmail, organizationId });
+        await ProbeAsync("/__probe/fga/grants", new { subjectId = annId, resourceId = UpgradeData.ChildWorkspace, role = BehaviorLockAuthorization.AdminRole });
+
+        Step("an operator grants Ann's SCIM subject admin on the child workspace and reader on the root");
+        (await _operator.PostJsonAsync(
+                "/sqlos/admin/fga/api/grants",
+                new { subjectId = annSubjectId, roleId = BehaviorLockAuthorization.AdminRole, resourceId = UpgradeData.ChildWorkspace }))
+            .EnsureSuccess();
+        (await _operator.PostJsonAsync(
+                "/sqlos/admin/fga/api/grants",
+                new { subjectId = annSubjectId, roleId = BehaviorLockAuthorization.ReaderRole, resourceId = UpgradeData.RootWorkspace }))
+            .EnsureSuccess();
+
+        return new DirectorySubjectsManifest(
+            _sqlosVersion,
+            organizationId,
+            scimConnectionId,
+            scimToken,
+            scimGroupId,
+            scimMappingId,
+            new DirectoryUser(bobId, bobSubjectId),
+            new DirectoryUser(annId, annSubjectId));
+    }
+
+    private static JsonObject ScimUser(string externalId, string email, string givenName, string familyName)
+        => new()
+        {
+            ["schemas"] = new JsonArray("urn:ietf:params:scim:schemas:core:2.0:User"),
+            ["externalId"] = externalId,
+            ["userName"] = email,
+            ["name"] = new JsonObject { ["givenName"] = givenName, ["familyName"] = familyName },
+            ["emails"] = new JsonArray(new JsonObject { ["value"] = email, ["primary"] = true, ["type"] = "work" }),
+            ["active"] = true
+        };
+
     private void Step(string description) => _log.WriteLine($"- {description}");
 
     private async Task<string> CreateUserAsync(string displayName, string email, string password)

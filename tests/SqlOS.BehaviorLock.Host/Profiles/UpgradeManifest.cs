@@ -40,3 +40,23 @@ public sealed record UpgradeUser(string Id, string Email, string FgaSubjectId, s
 public sealed record UpgradeRefreshToken(string Label, string ClientId, string RefreshToken);
 
 public sealed record UpgradeDeviceAuthorization(string ClientId, string DeviceCode, string UserCode);
+
+/// <summary>
+/// What the <see cref="UpgradeData.DirectorySubjectsDataset"/> seed wrote: an organization whose
+/// SCIM directory provisioned Bob and Ann into its mapped Engineering group. The released package
+/// gave each a subject of SCIM's own; the host then provisioned Ann's subject by her user ID and
+/// granted it <c>workspace_admin</c> on the child workspace, and an operator granted her SCIM
+/// subject the same role there and <c>workspace_reader</c> on the root.
+/// </summary>
+public sealed record DirectorySubjectsManifest(
+    string SeededWith,
+    string OrganizationId,
+    string ScimConnectionId,
+    string ScimToken,
+    string ScimGroupId,
+    string ScimMappingId,
+    DirectoryUser Bob,
+    DirectoryUser Ann);
+
+/// <param name="ScimSubjectId">The subject SCIM created for the user, with an ID of its own.</param>
+public sealed record DirectoryUser(string Id, string ScimSubjectId);

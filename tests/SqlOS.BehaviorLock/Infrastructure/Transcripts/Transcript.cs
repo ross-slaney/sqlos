@@ -98,11 +98,12 @@ public sealed class Transcript : IAsyncDisposable
             ?? throw new InvalidOperationException("Transcript.StartAsync must run inside a [Scenario] test method.");
         var options = new ScenarioOptions();
         configure?.Invoke(options);
+        var hostStarting = DateTime.UtcNow;
         var host = await ScenarioHost.StartAsync(profile, options);
         var transcript = new Transcript(scenario, host);
         try
         {
-            await transcript.InitializeAsync();
+            await transcript.InitializeAsync(options.ObserveStartupAudit ? hostStarting : null);
             return transcript;
         }
         catch
@@ -327,7 +328,7 @@ public sealed class Transcript : IAsyncDisposable
         .OfType<RouteEndpoint>()
         .Any(endpoint => string.Equals(endpoint.RoutePattern.RawText, "/sqlos/admin/audit/api/events", StringComparison.Ordinal));
 
-    private async Task InitializeAsync()
+    private async Task InitializeAsync(DateTime? observeAuditFrom)
     {
         if (Profile.OperatorAccess == OperatorAccess.Password)
         {
@@ -335,7 +336,21 @@ public sealed class Transcript : IAsyncDisposable
         }
 
         // Startup reconciliation wrote audit events before the scenario began.
-        await SkipAuditAsync();
+        if (observeAuditFrom == null)
+        {
+            await SkipAuditAsync();
+            return;
+        }
+
+        // Only what an existing database already held is setup; what this host's startup wrote is not.
+        var existing = await ReadNewAuditEventsAsync();
+        lock (_gate)
+        {
+            foreach (var item in existing.Where(item => AuditOrdering.OccurredAt(item) >= observeAuditFrom))
+            {
+                _seenAuditEvents.Remove(item["id"]!.GetValue<string>());
+            }
+        }
     }
 
     private async Task SignInOperatorAsync()
@@ -434,6 +449,13 @@ public sealed class ScenarioOptions
     /// header. Turn it on for scenarios that lock a route's unhandled failure.
     /// </summary>
     public bool AnswerUnhandledExceptionsAsServerErrors { get; set; }
+
+    /// <summary>
+    /// Leave the audit events the host wrote while starting for the scenario's first audit
+    /// observation instead of skipping them as setup, so the upgrade gate records what the upgrade
+    /// itself wrote; events already in an <see cref="ExistingDatabase"/> stay skipped.
+    /// </summary>
+    public bool ObserveStartupAudit { get; set; }
 }
 
 /// <summary>How an audit observation orders the events it records.</summary>
@@ -493,6 +515,12 @@ internal static class AuditOrdering
             .ThenBy(item => item["action"]?.GetValue<string>() ?? string.Empty, StringComparer.Ordinal)
             .ThenBy(item => MaskGeneratedIds(item.ToJsonString()), StringComparer.Ordinal)
             .ToList();
+
+    /// <summary>When the event occurred, as UTC: SqlOS stores UTC, which 7.2.1 reads back without a zone (#325).</summary>
+    public static DateTime OccurredAt(JsonNode item)
+        => Timestamp(item["occurredAt"]) is var value && value.Kind == DateTimeKind.Unspecified
+            ? DateTime.SpecifyKind(value, DateTimeKind.Utc)
+            : value.ToUniversalTime();
 
     private static DateTime Timestamp(JsonNode? node)
         => node?.GetValue<string>() is { } value

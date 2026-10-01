@@ -26,6 +26,11 @@ public static class UpgradeData
     public const string CarolEmail = "carol@example.test";
     public const string CarolPassword = "Upgrade-Carol-2468!";
     public const string BobEmail = "bob@" + Domain;
+    public const string AnnEmail = "ann@" + Domain;
+
+    /// <summary>The seed's datasets: every persisted feature, or only SCIM users' FGA subjects (#448).</summary>
+    public const string FullDataset = "full";
+    public const string DirectorySubjectsDataset = "directory-subjects";
 
     public const string RootWorkspaceId = "acme";
     public const string RootWorkspace = "workspace::acme";

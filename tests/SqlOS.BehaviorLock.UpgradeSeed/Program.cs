@@ -18,7 +18,7 @@ catch (ArgumentException ex)
 
 var sqlosVersion = typeof(SqlOS.Configuration.SqlOSOptions).Assembly
     .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
-Console.WriteLine($"Seeding the upgrade dataset with SqlOS {sqlosVersion} ({arguments.Provider}).");
+Console.WriteLine($"Seeding the {arguments.Dataset} upgrade dataset with SqlOS {sqlosVersion} ({arguments.Provider}).");
 
 try
 {
@@ -31,10 +31,13 @@ try
         DataProtectionKeysDirectory = arguments.DataProtectionKeysDirectory
     });
     await app.StartAsync();
-    var manifest = await new UpgradeSeeder(app, sqlosVersion, Console.Out).SeedAsync();
+    var seeder = new UpgradeSeeder(app, sqlosVersion, Console.Out);
+    object manifest = arguments.Dataset == UpgradeData.DirectorySubjectsDataset
+        ? await seeder.SeedDirectorySubjectsAsync()
+        : await seeder.SeedAsync();
     await File.WriteAllTextAsync(
         arguments.ManifestPath,
-        JsonSerializer.Serialize(manifest, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true }));
+        JsonSerializer.Serialize(manifest, manifest.GetType(), new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true }));
     await app.StopAsync();
     Console.WriteLine($"Wrote {arguments.ManifestPath}.");
     return 0;
