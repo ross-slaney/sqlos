@@ -14,6 +14,12 @@ internal sealed class DomainEventBuffer
     private static long s_lastSequence;
     private readonly List<RaisedDomainEvent> _pending = [];
 
+    /// <summary>
+    /// The sequence number of the last event raised in this process, by any buffer. An event raised
+    /// after it was read has a greater sequence.
+    /// </summary>
+    public static long LastRaisedSequence => Interlocked.Read(ref s_lastSequence);
+
     /// <summary>The pending events, oldest first. Reading them does not drain them.</summary>
     public IReadOnlyList<ISqlOSDomainEvent> Pending => _pending.ConvertAll(static raised => raised.Event);
 
@@ -35,6 +41,14 @@ internal sealed class DomainEventBuffer
         _pending.Clear();
         return drained;
     }
+
+    /// <summary>
+    /// Removes the pending events raised after <paramref name="sequence"/> (see
+    /// <see cref="LastRaisedSequence"/>). A unit of work that discards the changes it staged since
+    /// then discards the events that described them, so no later save audits a change that never
+    /// happened.
+    /// </summary>
+    public void DiscardRaisedAfter(long sequence) => _pending.RemoveAll(raised => raised.Sequence > sequence);
 
     /// <summary>
     /// Puts drained events back, in sequence order, ahead of anything raised since. A save that

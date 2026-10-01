@@ -34,5 +34,26 @@ internal enum SqlOSDomainError
     InvalidPhoneNumber = 8,
 
     /// <summary>The input is not an absolute URI (<see cref="RedirectUri"/>).</summary>
-    InvalidRedirectUri = 9
+    InvalidRedirectUri = 9,
+
+    /// <summary>The password policy refused a password (<c>PasswordPolicy</c>).</summary>
+    PasswordRejected = 10,
+
+    /// <summary>
+    /// An ownership proof does not cover the address it was presented for: it proves another
+    /// mailbox (<see cref="OwnershipProof"/>).
+    /// </summary>
+    OwnershipProofMismatch = 11,
+
+    /// <summary>
+    /// An aggregate was asked to decide with a part of it that was not loaded, so it cannot see
+    /// everything its rule covers.
+    /// </summary>
+    AggregatePartNotLoaded = 12,
+
+    /// <summary>The aggregate has no member with the given identity (for example an authenticator).</summary>
+    UnknownMember = 13,
+
+    /// <summary>The member is not in a state that allows the change (for example an authenticator already confirmed).</summary>
+    InvalidMemberState = 14
 }

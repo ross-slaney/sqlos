@@ -9,10 +9,16 @@ namespace SqlOS.Domain;
 /// <para>
 /// Only the listed producers construct a proof (<c>proof-producers.txt</c>, enforced by the
 /// architecture tests). A completed email-code challenge produces one for its stored recipient;
-/// the sign-in link, password-reset link, invitation, upstream OIDC and SAML paths produce one
-/// where 7.2.1 decided the mailbox was proven, until their own aggregates take that decision over
-/// (layers 2 to 4). Consumers take the proof, never an address or a flag: claiming an unverified
-/// address requires one that covers it.
+/// the sign-in link, password-reset link, email-verification link, invitation, upstream OIDC,
+/// SAML and SCIM paths, and the email-code and invitation sign-ups, produce one where 7.2.1
+/// decided the mailbox was proven, until their own processes and aggregates take that decision
+/// over (layers 2 to 4).
+/// </para>
+/// <para>
+/// The <c>SqlOSUser</c> aggregate is the consumer: an address becomes verified only with a proof
+/// (<c>VerifyEmail</c>, <c>ClaimWithProof</c>, registration with a proven address,
+/// <c>SetPrimaryEmail</c>), and an external identity is linked to an existing account only with
+/// one (<c>LinkExternalIdentity</c>). Consumers take the proof, never an address or a flag.
 /// </para>
 /// <para>
 /// A proof is for one mailbox, compared by the canonical <see cref="EmailAddress"/> key (#422),
@@ -21,6 +27,9 @@ namespace SqlOS.Domain;
 /// </remarks>
 internal sealed class OwnershipProof : ISqlOSProof
 {
+    /// <summary>The 7.2.1 message for a proof presented for an address it does not cover.</summary>
+    internal const string MismatchMessage = "The ownership proof is for another mailbox.";
+
     internal OwnershipProof(EmailAddress address, OwnershipProofMethod method)
     {
         ArgumentNullException.ThrowIfNull(address);
@@ -42,7 +51,10 @@ internal sealed class OwnershipProof : ISqlOSProof
     /// <summary>
     /// The method as the 7.2.1 audit records it (the <c>proof</c> of <c>user.email.claimed</c>).
     /// </summary>
-    public string MethodName => Method switch
+    public string MethodName => NameOf(Method);
+
+    /// <summary>The name the audit records for <paramref name="method"/>.</summary>
+    public static string NameOf(OwnershipProofMethod method) => method switch
     {
         OwnershipProofMethod.EmailOtp => "email_otp",
         OwnershipProofMethod.MagicLink => "magic_link",
@@ -50,7 +62,9 @@ internal sealed class OwnershipProof : ISqlOSProof
         OwnershipProofMethod.Invitation => "invitation",
         OwnershipProofMethod.Oidc => "oidc",
         OwnershipProofMethod.Saml => "saml",
-        _ => throw new InvalidOperationException($"Unknown ownership proof method '{Method}'.")
+        OwnershipProofMethod.EmailVerification => "email_verification",
+        OwnershipProofMethod.Directory => "scim",
+        _ => throw new InvalidOperationException($"Unknown ownership proof method '{method}'.")
     };
 
     /// <summary>True when <paramref name="storedAddress"/> is the proven mailbox.</summary>
@@ -62,7 +76,7 @@ internal sealed class OwnershipProof : ISqlOSProof
 /// <summary>How an <see cref="OwnershipProof"/> proved a mailbox.</summary>
 internal enum OwnershipProofMethod
 {
-    /// <summary>A code sent to the mailbox came back (email-code sign-in).</summary>
+    /// <summary>A code sent to the mailbox came back (email-code sign-in or sign-up).</summary>
     EmailOtp = 1,
 
     /// <summary>A sign-in link sent to the mailbox was opened.</summary>
@@ -78,5 +92,17 @@ internal enum OwnershipProofMethod
     Oidc = 5,
 
     /// <summary>A SAML assertion from the organization that owns the address's domain (#420).</summary>
-    Saml = 6
+    Saml = 6,
+
+    /// <summary>
+    /// The email-verification link sent to the mailbox was opened. It confirms the address an
+    /// account registered with and, unlike a sign-in, never claims it.
+    /// </summary>
+    EmailVerification = 7,
+
+    /// <summary>
+    /// A SCIM directory set the address as the person's primary email inside a domain its
+    /// organization verified (#420). A directory never claims an address.
+    /// </summary>
+    Directory = 8
 }

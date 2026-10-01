@@ -33,7 +33,12 @@ public sealed class SqlOSDomainExceptionTests
         ((int)SqlOSDomainError.InvalidDomainName).Should().Be(7);
         ((int)SqlOSDomainError.InvalidPhoneNumber).Should().Be(8);
         ((int)SqlOSDomainError.InvalidRedirectUri).Should().Be(9);
-        Enum.GetValues<SqlOSDomainError>().Should().HaveCount(9, "a new code needs its own line above");
+        ((int)SqlOSDomainError.PasswordRejected).Should().Be(10);
+        ((int)SqlOSDomainError.OwnershipProofMismatch).Should().Be(11);
+        ((int)SqlOSDomainError.AggregatePartNotLoaded).Should().Be(12);
+        ((int)SqlOSDomainError.UnknownMember).Should().Be(13);
+        ((int)SqlOSDomainError.InvalidMemberState).Should().Be(14);
+        Enum.GetValues<SqlOSDomainError>().Should().HaveCount(14, "a new code needs its own line above");
     }
 
     [TestMethod]

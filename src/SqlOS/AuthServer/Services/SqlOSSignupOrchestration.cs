@@ -4,6 +4,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.AuthServer.Policies;
 using SqlOS.Database;
 
 namespace SqlOS.AuthServer.Services;
@@ -14,7 +15,7 @@ internal static class SqlOSSignupOrchestration
     public const int EmailMaxLength = 320;
     public const int OrganizationNameMaxLength = 200;
 
-    public const string PasswordRequiredMessage = "Password is required.";
+    public const string PasswordRequiredMessage = PasswordIsNotBlank.Message;
     public const string DisplayNameTooLongMessage = "Display name cannot exceed 200 characters.";
     public const string EmailTooLongMessage = "Email address cannot exceed 320 characters.";
     public const string OrganizationNameTooLongMessage = "Organization name cannot exceed 200 characters.";
@@ -44,9 +45,9 @@ internal static class SqlOSSignupOrchestration
             "Email address is required.",
             EmailMaxLength,
             EmailTooLongMessage);
-        if (requirePassword && string.IsNullOrWhiteSpace(password))
+        if (requirePassword && PasswordPolicy.Default.Check(password) is { } refusal)
         {
-            throw new InvalidOperationException(PasswordRequiredMessage);
+            throw new InvalidOperationException(refusal.Message);
         }
 
         string? trimmedOrganizationName = null;

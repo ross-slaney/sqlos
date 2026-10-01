@@ -65,6 +65,22 @@ public sealed class DomainEventBufferTests
     }
 
     [TestMethod]
+    public void Discarding_after_a_mark_drops_only_the_events_raised_since()
+    {
+        var buffer = new DomainEventBuffer();
+        buffer.Raise(new Happened("before"));
+        var mark = DomainEventBuffer.LastRaisedSequence;
+        buffer.Raise(new Happened("staged"));
+        buffer.Raise(new Happened("staged too"));
+
+        buffer.DiscardRaisedAfter(mark);
+
+        buffer.Pending.Should().Equal(new Happened("before"));
+        buffer.Drain().Single().Sequence.Should().BeLessThanOrEqualTo(mark);
+        DomainEventBuffer.LastRaisedSequence.Should().BeGreaterThan(mark, "a discarded sequence is never reused");
+    }
+
+    [TestMethod]
     public void Null_events_are_rejected()
     {
         var buffer = new DomainEventBuffer();

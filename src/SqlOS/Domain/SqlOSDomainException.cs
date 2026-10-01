@@ -50,6 +50,11 @@ internal sealed class SqlOSDomainException : InvalidOperationException
             SqlOSDomainError.InvalidDomainName => DomainName.InvalidDnsNameMessage,
             SqlOSDomainError.InvalidPhoneNumber => PhoneNumber.InvalidMessage,
             SqlOSDomainError.InvalidRedirectUri => RedirectUri.InvalidMessage,
+            SqlOSDomainError.PasswordRejected => "The password does not meet the password policy.",
+            SqlOSDomainError.OwnershipProofMismatch => OwnershipProof.MismatchMessage,
+            SqlOSDomainError.AggregatePartNotLoaded => "A part of the aggregate the change needs was not loaded.",
+            SqlOSDomainError.UnknownMember => "The aggregate has no such member.",
+            SqlOSDomainError.InvalidMemberState => "The member's state does not allow this change.",
             _ => throw new ArgumentOutOfRangeException(nameof(error), error, "Unknown domain error.")
         };
 }
