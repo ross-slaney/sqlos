@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
@@ -29,6 +31,13 @@ internal static class SqlOSFgaWrites
 
     public static string? NormalizeOptional(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    /// <summary>The deterministic identifier of a subject's typed record, such as <c>usr::…</c> for a user.</summary>
+    public static string TypedRecordId(string prefix, string subjectId)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes($"{prefix}\n{subjectId}"));
+        return $"{prefix}::{Convert.ToHexString(bytes).ToLowerInvariant()[..32]}";
+    }
 
     /// <summary>
     /// Whether <paramref name="resourceId"/> belongs to an <see cref="ISqlOSResourceEntity"/> this

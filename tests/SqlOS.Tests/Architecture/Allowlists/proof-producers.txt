@@ -9,6 +9,7 @@ SqlOS.Domain.GrantAuthority <- SqlOS.AuthServer.Services.SqlOSMachineClientAdmin
 SqlOS.Domain.GrantAuthority <- SqlOS.AuthServer.Services.SqlOSScimGrantBoundaryPolicy
 SqlOS.Domain.GrantAuthority <- SqlOS.Extensions.SqlOSErgonomicsExtensions
 SqlOS.Domain.GrantAuthority <- SqlOS.Fga.Dashboard.SqlOSFgaDashboardMiddleware
+SqlOS.Domain.GrantAuthority <- SqlOS.Fga.Processes.MergeDirectoryUserSubjects
 SqlOS.Domain.LoginEvidence <- SqlOS.AuthServer.Processes.Identity.CompleteEmailOtpSignUp
 SqlOS.Domain.LoginEvidence <- SqlOS.AuthServer.Processes.Identity.CompleteMagicLinkSignIn
 SqlOS.Domain.LoginEvidence <- SqlOS.AuthServer.Processes.Identity.CompletePhoneOtpSignUp

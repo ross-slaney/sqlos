@@ -268,6 +268,27 @@ public sealed class SqlOSFgaSubject : ISqlOSAggregate
         _events.Raise(new FgaGroupMemberRemoved(Id, group.Id, membership.SubjectId, actor));
     }
 
+    /// <summary>
+    /// Records that this user subject absorbed <paramref name="merged"/>, another user subject of
+    /// the same person, whose memberships and grants the caller moved or dropped; the caller deletes
+    /// it with its typed record.
+    /// </summary>
+    internal void Absorb(
+        SqlOSFgaSubject merged,
+        IReadOnlyList<string> groupIds,
+        IReadOnlyList<string> movedGrantIds,
+        IReadOnlyList<string> droppedGrantIds,
+        FgaActor actor)
+    {
+        ArgumentNullException.ThrowIfNull(merged);
+        if (SubjectTypeId != UserType || merged.SubjectTypeId != UserType || merged.Id == Id)
+        {
+            throw new InvalidOperationException($"FGA subject '{merged.Id}' cannot merge into '{Id}': only another user subject merges into a user subject.");
+        }
+
+        _events.Raise(new FgaSubjectMerged(Id, merged.Id, groupIds, movedGrantIds, droppedGrantIds, actor));
+    }
+
     /// <summary>Records that the subject is deleted; the caller deletes it with its typed record.</summary>
     internal void Delete(FgaActor actor) => _events.Raise(new FgaSubjectDeleted(Id, SubjectTypeId, actor));
 

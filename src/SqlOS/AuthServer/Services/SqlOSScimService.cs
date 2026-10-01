@@ -403,7 +403,7 @@ internal sealed class SqlOSScimService
                 }
             }
 
-            await DeprovisionUserAccessAsync(connection, user.Id, link.FgaSubjectId, cancellationToken);
+            await DeprovisionUserAccessAsync(connection, user.Id, link.FgaSubjectId, link.OwnsUserLifecycle, cancellationToken);
             if (link.OwnsUserLifecycle)
             {
                 var wasActive = user.IsActive;
@@ -759,6 +759,7 @@ internal sealed class SqlOSScimService
             request.DisplayName,
             request.PrimaryEmail,
             request.Active && user.IsActive,
+            ownsUserLifecycle,
             now,
             cancellationToken);
         link = await UpsertExternalLinkAsync(
@@ -786,7 +787,7 @@ internal sealed class SqlOSScimService
 
         if (!request.Active)
         {
-            await DeprovisionUserAccessAsync(connection, user.Id, fgaSubjectId, cancellationToken);
+            await DeprovisionUserAccessAsync(connection, user.Id, fgaSubjectId, ownsUserLifecycle, cancellationToken);
         }
 
         connection.LastSyncAt = now;
@@ -1229,47 +1230,60 @@ internal sealed class SqlOSScimService
         membership.IsActive = active;
     }
 
+    /// <summary>
+    /// The user's one FGA subject, keyed by the SqlOS user ID (#448): a subject an earlier version's
+    /// link points at merges into it, a host-provisioned one is reused, and a missing one is created.
+    /// Only the link that owns the person's lifecycle describes it or changes its active state.
+    /// </summary>
     private async Task<string> EnsureFgaUserAsync(
         SqlOSScimConnection connection,
         SqlOSUser user,
         string displayName,
         string? email,
         bool active,
+        bool ownsUserLifecycle,
         DateTime now,
         CancellationToken cancellationToken)
     {
-        var existingSubjectId = await FindFgaSubjectIdForUserAsync(connection.Id, connection.OrganizationId, user.Id, cancellationToken);
-        if (!string.IsNullOrWhiteSpace(existingSubjectId))
-        {
-            var subject = await _context.Set<SqlOSFgaSubject>()
+        var actor = FgaActor.Directory(connection.Id);
+        var subject = await new MergeDirectoryUserSubjects((DbContext)_context).MergeUserAsync(user.Id, actor, cancellationToken)
+            ?? await _context.Set<SqlOSFgaSubject>()
                 .Include(x => x.User)
-                .FirstOrDefaultAsync(x => x.Id == existingSubjectId, cancellationToken);
-            if (subject != null)
-            {
-                subject.Describe(displayName, subject.OrganizationId, subject.ExternalRef, now);
-                if (subject.User != null)
-                {
-                    subject.DescribeUser(email, now);
-                    subject.ChangeActivity(active, FgaActor.Directory(connection.Id), now);
-                }
-            }
-
-            return existingSubjectId;
+                .FirstOrDefaultAsync(x => x.Id == user.Id, cancellationToken);
+        if (subject == null)
+        {
+            await EnsureFgaSubjectTypeAsync("user", "User", cancellationToken);
+            subject = SqlOSFgaSubject.CreateUser(
+                user.Id,
+                displayName,
+                connection.OrganizationId,
+                user.Id,
+                SqlOSFgaWrites.TypedRecordId("usr", user.Id),
+                email,
+                active,
+                actor,
+                now);
+            _context.Set<SqlOSFgaSubject>().Add(subject);
+            return subject.Id;
         }
 
-        await EnsureFgaSubjectTypeAsync("user", "User", cancellationToken);
-        var newSubject = SqlOSFgaSubject.CreateUser(
-            _cryptoService.GenerateId("subj"),
-            displayName,
-            connection.OrganizationId,
-            user.Id,
-            _cryptoService.GenerateId("fusr"),
-            email,
-            active,
-            FgaActor.Directory(connection.Id),
-            now);
-        _context.Set<SqlOSFgaSubject>().Add(newSubject);
-        return newSubject.Id;
+        if (subject.SubjectTypeId != SqlOSFgaSubject.UserType)
+        {
+            throw new InvalidOperationException($"FGA subject '{subject.Id}' already exists as type '{subject.SubjectTypeId}', not '{SqlOSFgaSubject.UserType}'.");
+        }
+
+        if (subject.User == null)
+        {
+            subject.AttachUser(SqlOSFgaWrites.TypedRecordId("usr", user.Id), email, active, now);
+        }
+        else if (ownsUserLifecycle)
+        {
+            subject.Describe(displayName, subject.OrganizationId, subject.ExternalRef, now);
+            subject.DescribeUser(email, now);
+            subject.ChangeActivity(active, actor, now);
+        }
+
+        return subject.Id;
     }
 
     private async Task EnsureFgaSubjectTypeAsync(string id, string name, CancellationToken cancellationToken)
@@ -1280,21 +1294,17 @@ internal sealed class SqlOSScimService
         }
     }
 
-    private async Task<string?> FindFgaSubjectIdForUserAsync(
-        string connectionId,
-        string organizationId,
+    /// <summary>
+    /// Ends the user's access through this directory: its membership, its sessions in the
+    /// organization and its groups. The user's FGA subject is deactivated only by the link that owns
+    /// the person's lifecycle, since other organizations share it.
+    /// </summary>
+    private async Task DeprovisionUserAccessAsync(
+        SqlOSScimConnection connection,
         string userId,
+        string? fgaSubjectId,
+        bool ownsUserLifecycle,
         CancellationToken cancellationToken)
-        => await _context.Set<SqlOSScimExternalId>()
-            .Where(x => x.ConnectionId == connectionId && x.ResourceType == "User" && x.EntityId == userId)
-            .Select(x => x.FgaSubjectId)
-            .FirstOrDefaultAsync(cancellationToken)
-        ?? await _context.Set<SqlOSFgaSubject>()
-            .Where(x => x.SubjectTypeId == "user" && x.ExternalRef == userId && x.OrganizationId == organizationId)
-            .Select(x => x.Id)
-            .FirstOrDefaultAsync(cancellationToken);
-
-    private async Task DeprovisionUserAccessAsync(SqlOSScimConnection connection, string userId, string? fgaSubjectId, CancellationToken cancellationToken)
     {
         var membership = await _context.Set<SqlOSMembership>()
             .FirstOrDefaultAsync(x => x.OrganizationId == connection.OrganizationId && x.UserId == userId, cancellationToken);
@@ -1318,7 +1328,7 @@ internal sealed class SqlOSScimService
             var subject = await _context.Set<SqlOSFgaSubject>()
                 .Include(x => x.User)
                 .FirstOrDefaultAsync(x => x.Id == fgaSubjectId, cancellationToken);
-            if (subject?.User != null)
+            if (ownsUserLifecycle && subject?.User != null)
             {
                 subject.ChangeActivity(false, actor, DateTime.UtcNow);
             }

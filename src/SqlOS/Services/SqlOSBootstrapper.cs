@@ -94,6 +94,7 @@ public sealed class SqlOSBootstrapper
         await _adminService.CleanupExpiredRefreshTokensAsync(cancellationToken);
         await _adminService.CleanupStaleDynamicClientsAsync(cancellationToken);
 
+        await _adminService.MergeScimUserSubjectsAsync(cancellationToken);
         await _adminService.ReconcileDisabledScimManagedGrantsAsync(cancellationToken);
 
         await _fgaHierarchyValidator.ValidateExistingDataAsync(cancellationToken);

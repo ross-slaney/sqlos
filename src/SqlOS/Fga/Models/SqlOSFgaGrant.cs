@@ -100,6 +100,18 @@ public sealed class SqlOSFgaGrant : ISqlOSAggregate
     }
 
     /// <summary>
+    /// Gives the grant to <paramref name="subject"/>, which absorbed the subject that held it; the
+    /// merge records the move.
+    /// </summary>
+    internal void MoveTo(SqlOSFgaSubject subject, GrantAuthority authority, DateTime now)
+    {
+        ArgumentNullException.ThrowIfNull(subject);
+        ArgumentNullException.ThrowIfNull(authority);
+        authority.EnsureCovers(subject.Id, ResourceId);
+        (SubjectId, UpdatedAt) = (subject.Id, now);
+    }
+
+    /// <summary>
     /// Records that the grant is revoked; the caller deletes its row in the same save.
     /// <paramref name="reason"/> names the change that caused it, when another one did.
     /// </summary>

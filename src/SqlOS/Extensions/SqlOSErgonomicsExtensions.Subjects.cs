@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using Microsoft.EntityFrameworkCore;
 using SqlOS.Domain;
 using SqlOS.Fga.Interfaces;
@@ -288,10 +286,4 @@ public static partial class SqlOSErgonomicsExtensions
             SqlOSFgaSubject.GroupType => context.Set<SqlOSFgaUserGroup>().Where(row => row.SubjectId == subject.Id).LoadAsync(cancellationToken),
             _ => Task.CompletedTask
         };
-
-    private static string TypedRecordId(string prefix, string subjectId)
-    {
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes($"{prefix}\n{subjectId}"));
-        return $"{prefix}::{Convert.ToHexString(bytes).ToLowerInvariant()[..32]}";
-    }
 }

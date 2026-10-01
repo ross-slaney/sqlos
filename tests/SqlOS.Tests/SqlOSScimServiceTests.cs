@@ -3,13 +3,19 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
+using SqlOS.Domain;
+using SqlOS.Extensions;
+using SqlOS.Fga;
+using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Models;
+using SqlOS.Fga.Services;
 using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.Tests;
@@ -834,6 +840,127 @@ public sealed class SqlOSScimServiceTests
         error.Which.ScimType.Should().Be("invalidFilter");
     }
 
+    [TestMethod]
+    public async Task A_directory_user_s_fga_subject_is_keyed_by_the_user_id_so_mapped_group_grants_reach_it()
+    {
+        using var context = CreateContext();
+        await SeedOrganizationAsync(context);
+        await SeedFgaRoleAndResourceAsync(context);
+        var harness = CreateHarness(context);
+        var connection = await CreateConnectionAsync(harness.Admin, AcmeBoundary);
+        await harness.Admin.CreateScimGroupMappingAsync(connection.Id, StoreManagersMapping());
+
+        var user = await harness.Scim.UpsertUserAsync(connection, Ada(), replace: false);
+        await harness.Scim.UpsertGroupAsync(connection, StoreManagers("idp-user-1"), replace: false);
+
+        var userId = user["id"]!.GetValue<string>();
+        var subject = await context.Set<SqlOSFgaSubject>().Include(x => x.User).SingleAsync(x => x.SubjectTypeId == "user");
+        subject.Should().BeEquivalentTo(new { Id = userId, ExternalRef = userId, OrganizationId = "org_acme", DisplayName = "Ada Lovelace" });
+        subject.User!.Id.Should().Be(SqlOSFgaWrites.TypedRecordId("usr", userId));
+        (await context.Set<SqlOSScimExternalId>().SingleAsync(x => x.ResourceType == "User")).FgaSubjectId.Should().Be(userId);
+        (await context.Set<SqlOSFgaUserGroupMembership>().SingleAsync()).SubjectId.Should().Be(userId);
+        (await Fga(context).CheckAccessAsync(userId, "store.manage", "store_100")).Allowed.Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task A_host_provisioned_user_subject_is_reused_and_a_directory_that_does_not_own_the_person_leaves_it_alone()
+    {
+        using var context = CreateContext();
+        await SeedOrganizationAsync(context);
+        await SeedFgaRoleAndResourceAsync(context);
+        var harness = CreateHarness(context);
+        var existing = await TestAccounts.RegisterAsync(
+            context,
+            new SqlOSCreateUserRequest("Ada", "ada@example.test", null),
+            new OwnershipProof(EmailAddress.Parse("ada@example.test"), OwnershipProofMethod.EmailOtp));
+        await context.ProvisionUserSubjectAsync(existing.Id, "Ada (app)", "ada@example.test", organizationId: "org_acme");
+        await context.SaveChangesAsync();
+        var connection = await CreateConnectionAsync(harness.Admin, AcmeBoundary);
+        await harness.Admin.CreateScimGroupMappingAsync(connection.Id, StoreManagersMapping());
+
+        var user = await harness.Scim.UpsertUserAsync(connection, Ada(), replace: false);
+        await harness.Scim.UpsertGroupAsync(connection, StoreManagers("idp-user-1"), replace: false);
+        var linked = await context.Set<SqlOSFgaSubject>().Include(x => x.User).SingleAsync(x => x.SubjectTypeId == "user");
+        var allowed = (await Fga(context).CheckAccessAsync(existing.Id, "store.manage", "store_100")).Allowed;
+        await harness.Scim.UpsertUserAsync(connection, Ada(active: false), replace: true);
+
+        user["id"]!.GetValue<string>().Should().Be(existing.Id);
+        linked.Should().BeEquivalentTo(new { Id = existing.Id, DisplayName = "Ada (app)" }, "the link does not own the person, so the host's description stays");
+        allowed.Should().BeTrue();
+        (await context.Set<SqlOSFgaUser>().SingleAsync()).IsActive.Should().BeTrue("another organization may still rely on the shared subject");
+        (await context.Set<SqlOSFgaUserGroupMembership>().AnyAsync()).Should().BeFalse("the directory's own groups lose the person");
+    }
+
+    [TestMethod]
+    public async Task A_directory_write_merges_the_subject_an_earlier_version_created_for_the_user()
+    {
+        using var context = CreateContext();
+        await SeedOrganizationAsync(context);
+        await SeedFgaRoleAndResourceAsync(context);
+        var harness = CreateHarness(context);
+        var connection = await CreateConnectionAsync(harness.Admin, AcmeBoundary);
+        var userId = (await harness.Scim.UpsertUserAsync(connection, Ada(), replace: false))["id"]!.GetValue<string>();
+        // Rewind to what 7.x stored: a subject of SCIM's own, linked, in a group, holding a grant.
+        var current = await context.Set<SqlOSFgaSubject>().Include(x => x.User).SingleAsync(x => x.Id == userId);
+        context.Remove(current.User!);
+        context.Remove(current);
+        context.AddRange(
+            FgaTestModel.Subject("subj_ada", "user", "Ada Lovelace", "org_acme", externalRef: userId),
+            FgaTestModel.User("fusr_ada", "subj_ada", "ada@example.test"),
+            FgaTestModel.Subject("grp_support", "group", "Support", "org_acme"),
+            FgaTestModel.Group("fgrp_support", "grp_support", "Support"),
+            FgaTestModel.Membership("subj_ada", "fgrp_support"),
+            FgaTestModel.Grant("grant_ada_store", "subj_ada", "store_100", "role_store_manager"));
+        (await context.Set<SqlOSScimExternalId>().SingleAsync(x => x.ResourceType == "User")).FgaSubjectId = "subj_ada";
+        await context.SaveChangesAsync();
+
+        await harness.Scim.PatchUserAsync(connection, userId, new JsonObject
+        {
+            ["schemas"] = new JsonArray("urn:ietf:params:scim:api:messages:2.0:PatchOp"),
+            ["Operations"] = new JsonArray(new JsonObject { ["op"] = "replace", ["path"] = "displayName", ["value"] = "Ada Byron" })
+        });
+
+        (await context.Set<SqlOSFgaSubject>().Where(x => x.SubjectTypeId == "user").Select(x => x.Id).ToListAsync()).Should().Equal(userId);
+        (await context.Set<SqlOSFgaSubject>().SingleAsync(x => x.Id == userId)).DisplayName.Should().Be("Ada Byron");
+        (await context.Set<SqlOSFgaUserGroupMembership>().SingleAsync()).SubjectId.Should().Be(userId);
+        (await context.Set<SqlOSFgaGrant>().SingleAsync()).Should().BeEquivalentTo(new { Id = "grant_ada_store", SubjectId = userId });
+        (await context.Set<SqlOSScimExternalId>().SingleAsync(x => x.ResourceType == "User")).FgaSubjectId.Should().Be(userId);
+        (await context.Set<SqlOSAuditEvent>().SingleAsync(x => x.EventType == "fga.subject.merged")).ActorType.Should().Be("scim");
+    }
+
+    private static SqlOSCreateScimGroupMappingRequest StoreManagersMapping()
+        => new(
+            SqlOSScimGroupMappingMatchTypes.DisplayName,
+            "Store 100 Managers",
+            GroupExternalId: null,
+            GroupPattern: null,
+            RoleKey: "store_manager",
+            ResourceId: "store_100",
+            ResourceIdTemplate: null,
+            Description: "SCIM store manager access",
+            Enabled: true);
+
+    private static JsonObject Ada(bool active = true)
+        => new()
+        {
+            ["externalId"] = "idp-user-1",
+            ["userName"] = "ada@example.test",
+            ["displayName"] = "Ada Lovelace",
+            ["active"] = active,
+            ["emails"] = new JsonArray(new JsonObject { ["value"] = "ada@example.test", ["primary"] = true, ["type"] = "work" })
+        };
+
+    private static JsonObject StoreManagers(string memberExternalId)
+        => new()
+        {
+            ["externalId"] = "idp-group-1",
+            ["displayName"] = "Store 100 Managers",
+            ["members"] = new JsonArray(new JsonObject { ["value"] = memberExternalId })
+        };
+
+    private static SqlOSFgaAuthService Fga(TestSqlOSInMemoryDbContext context)
+        => new(context, Options.Create(new SqlOSFgaOptions()), NullLogger<SqlOSFgaAuthService>.Instance);
+
     private static Harness CreateHarness(TestSqlOSInMemoryDbContext context, SqlOSAuthServerOptions? optionsValue = null)
     {
         var options = Options.Create(optionsValue ?? new SqlOSAuthServerOptions());
@@ -884,7 +1011,9 @@ public sealed class SqlOSScimServiceTests
     {
         context.Set<SqlOSFgaResourceType>().Add(FgaTestModel.ResourceType("store", "Store"));
         context.Set<SqlOSFgaResourceType>().Add(FgaTestModel.ResourceType("organization", "Organization"));
-        context.Set<SqlOSFgaRole>().Add(FgaTestModel.Role("role_store_manager", key: "store_manager", name: "Store Manager"));
+        var manage = FgaTestModel.Permission("perm_store_manage", "store.manage", resourceTypeId: "store");
+        context.Set<SqlOSFgaPermission>().Add(manage);
+        context.Set<SqlOSFgaRole>().Add(FgaTestModel.Role("role_store_manager", "store_manager", "Store Manager", manage));
         // The organization's root resource is the SCIM grant boundary for mapped grants.
         context.Set<SqlOSFgaResource>().Add(FgaTestModel.Resource(AcmeBoundary, "Acme", "organization", createdAt: DateTime.UtcNow));
         context.Set<SqlOSFgaResource>().Add(FgaTestModel.Resource("store_100", "Store 100", "store", parentId: AcmeBoundary, createdAt: DateTime.UtcNow));

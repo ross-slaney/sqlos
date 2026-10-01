@@ -295,6 +295,25 @@ public sealed class SqlOSScimGrantBoundaryTests
     }
 
     [TestMethod]
+    public async Task AnotherTenantsDirectory_CannotPutAUserItDoesNotLinkInItsGroup_ByTheirUserIdSubject()
+    {
+        using var f = await CreateFixtureAsync();
+        var acme = await CreateConnectionAsync(f, OrgA, BoundaryA);
+        var beta = await CreateConnectionAsync(f, OrgB, BoundaryB);
+        await f.Admin.CreateScimGroupMappingAsync(beta.Id, FixedMapping("Beta-Admins", BoundaryB));
+        var ada = await PushUserAsync(f, acme, "ada");
+
+        var byUserId = () => PushGroupAsync(f, beta, "grp-beta-admins", "Beta-Admins", ada);
+        var byExternalId = () => PushGroupAsync(f, beta, "grp-beta-admins", "Beta-Admins", "idp-ada");
+
+        (await SubjectIdAsync(f, ada)).Should().Be(ada, "a SqlOS user's one FGA subject is keyed by the user ID");
+        await byUserId.Should().ThrowAsync<SqlOSScimException>().WithMessage("*was not found in this directory connection*");
+        await byExternalId.Should().ThrowAsync<SqlOSScimException>().WithMessage("*was not found in this directory connection*");
+        (await f.Context.Set<SqlOSFgaUserGroupMembership>().AnyAsync()).Should().BeFalse("Beta's directory does not link Ada");
+        (await f.Fga.CheckAccessAsync(ada, ManageStore, StoreB9001)).Allowed.Should().BeFalse();
+    }
+
+    [TestMethod]
     public async Task EnabledMappingOnAConnectionWithoutBoundary_IsRejectedWithATypedError()
     {
         using var f = await CreateFixtureAsync();
