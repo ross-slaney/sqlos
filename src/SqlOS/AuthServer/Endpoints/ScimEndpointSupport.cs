@@ -190,7 +190,7 @@ public static partial class EndpointRouteBuilderExtensions
             ?? throw new SqlOSScimException(StatusCodes.Status400BadRequest, "SCIM JSON body must be a JSON object.", "invalidSyntax");
     }
 
-    private static string NormalizeScimBasePath(string? basePath)
+    internal static string NormalizeScimBasePath(string? basePath)
     {
         var path = string.IsNullOrWhiteSpace(basePath) ? "/sqlos/scim/v2" : basePath.Trim();
         if (!path.StartsWith('/'))
