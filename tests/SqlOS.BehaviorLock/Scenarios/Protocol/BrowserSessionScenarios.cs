@@ -27,12 +27,12 @@ public sealed class BrowserSessionScenarios
         var session = await t.Setup.SignInWithPasswordAsync(alice);
 
         var loggedOut = t.Observe(await t.GetAsync("/sqlos/auth/logout"), "Alice signs out: the issuer cookie is deleted");
-        t.ObservePage(await t.GetAsync(loggedOut.Location!), "the signed-out page, which deletes the cookie again");
+        t.Observe(await t.GetAsync(loggedOut.Location!), "the signed-out page, which deletes the cookie again");
         t.Observe(await t.GetAsync(t.Urls.Authorize().Url), "the next authorization request asks her to sign in");
         t.ObserveTokens(
             await t.Api.PostFormAsync("/sqlos/auth/token", Refresh(BehaviorLockConstants.AppClientId, session.RefreshToken)),
             "the refresh token issued before the sign-out still rotates");
-        t.ObserveResource(await t.Api.GetAsync("/api/me", options => options.Bearer(session.AccessToken)), "and the access token still opens the API");
+        t.Observe(await t.Api.GetAsync("/api/me", options => options.Bearer(session.AccessToken)), "and the access token still opens the API");
         t.Observe(await t.NewBrowser("never-signed-in").GetAsync("/sqlos/auth/logout"), "signing out without a session still deletes the cookie");
 
         await t.ObserveAuditAsync("browser sign-out writes no audit events");

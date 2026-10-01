@@ -79,7 +79,7 @@ public sealed class AdminIdentityMembershipScenarios
     [Covers("GET /sqlos/admin/auth/api/organizations/{organizationId}/memberships")]
     public async Task Memberships_for_unknown_users_or_organizations_fail_in_the_database()
     {
-        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback, AdminIdentity.AnswerUnhandledExceptionsAsServerErrors);
+        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback, options => options.AnswerUnhandledExceptionsAsServerErrors = true);
         var alice = await t.Setup.CreateUserAsync("alice");
         var acme = await t.Setup.CreateOrganizationAsync("acme");
         var acmeMemberships = $"{AdminIdentity.Api}/organizations/{acme.Id}/memberships";

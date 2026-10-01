@@ -1,6 +1,5 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Text.RegularExpressions;
 using AngleSharp.Html.Parser;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.BehaviorLock.Infrastructure.Transcripts;
@@ -13,18 +12,8 @@ namespace SqlOS.BehaviorLock.Scenarios.Protocol;
 /// what the harness cannot capture as an exchange (an unhandled exception) or pair an exchange
 /// with the audit events that distinguish its branch.
 /// </summary>
-internal static partial class ProtocolObservations
+internal static class ProtocolObservations
 {
-    /// <summary>
-    /// JWT time claims the host echoes as strings. ASP.NET materializes every claim value as a
-    /// string, so the host's <c>claims</c> list carries <c>iat</c>, <c>nbf</c>, and <c>exp</c> as
-    /// <c>"1790800611"</c>, which the JSON-number <c>{epoch}</c> rule does not reach.
-    /// </summary>
-    private static readonly HashSet<string> TimeClaims = new(StringComparer.Ordinal)
-    {
-        "iat", "nbf", "exp", "auth_time"
-    };
-
     /// <summary>
     /// Records an exchange and then the audit events it wrote. Public auth errors collapse to a
     /// few generic messages; the audit event <c>auth.public_error.mapped</c> carries the internal
@@ -33,7 +22,6 @@ internal static partial class ProtocolObservations
     public static async Task<HttpExchange> ObserveWithAuditAsync(this Transcript t, HttpExchange exchange, string caption)
     {
         NameAccessTokenHashes(t, exchange);
-        NamePageDateTimes(t, exchange);
         t.Observe(exchange, caption);
         await t.ObserveAuditAsync();
         return exchange;
@@ -49,44 +37,6 @@ internal static partial class ProtocolObservations
     public static HttpExchange ObserveTokens(this Transcript t, HttpExchange exchange, string caption)
     {
         NameAccessTokenHashes(t, exchange);
-        return t.Observe(exchange, caption);
-    }
-
-    /// <summary>
-    /// Records a resource-route exchange (<c>/api/me</c>, <c>/mcp</c>, <c>/billing/me</c>,
-    /// <c>/resource-api/me</c>). The time claims the host echoes as strings are clock readings, so
-    /// each becomes <c>{epoch:claim}</c>. One name for every time claim keeps the transcript stable
-    /// when two of them coincide in one run and differ by a second in the next; the decoded token
-    /// above the exchange still shows the exact lifetimes.
-    /// </summary>
-    public static HttpExchange ObserveResource(this Transcript t, HttpExchange exchange, string caption)
-    {
-        if (exchange.Json?["claims"] is JsonArray claims)
-        {
-            foreach (var claim in claims.OfType<JsonObject>())
-            {
-                if (claim["type"]?.GetValue<string>() is { } type
-                    && TimeClaims.Contains(type)
-                    && claim["value"]?.GetValue<string>() is { } value
-                    && long.TryParse(value, out _))
-                {
-                    t.Scrub(value, "epoch", "claim");
-                }
-            }
-        }
-
-        return t.Observe(exchange, caption);
-    }
-
-    /// <summary>
-    /// Records a hosted page that prints a clock reading as <c>MM/dd/yyyy HH:mm</c> (the device
-    /// approval page prints its expiry that way, with a literal UTC label). The scrubber's
-    /// timestamp patterns only know ISO 8601 and RFC 1123, so each such value is registered as
-    /// <c>{datetime:MM/dd/yyyy_HH:mm}</c>, which still shows the format.
-    /// </summary>
-    public static HttpExchange ObservePage(this Transcript t, HttpExchange exchange, string caption)
-    {
-        NamePageDateTimes(t, exchange);
         return t.Observe(exchange, caption);
     }
 
@@ -111,7 +61,6 @@ internal static partial class ProtocolObservations
             return;
         }
 
-        NamePageDateTimes(t, exchange);
         t.Observe(exchange, caption);
     }
 
@@ -223,16 +172,4 @@ internal static partial class ProtocolObservations
             }
         }
     }
-
-    /// <summary>Registers every <c>MM/dd/yyyy HH:mm</c> clock reading on a page (see <see cref="ObservePage"/>).</summary>
-    private static void NamePageDateTimes(Transcript t, HttpExchange exchange)
-    {
-        foreach (Match match in PageDateTime().Matches(exchange.ResponseBody))
-        {
-            t.Scrub(match.Value, "datetime", "MM/dd/yyyy_HH:mm");
-        }
-    }
-
-    [GeneratedRegex(@"(?<![\d/])\d{2}/\d{2}/\d{4} \d{2}:\d{2}(?![\d:])")]
-    private static partial Regex PageDateTime();
 }

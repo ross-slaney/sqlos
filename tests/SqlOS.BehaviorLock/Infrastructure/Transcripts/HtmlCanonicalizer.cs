@@ -207,7 +207,8 @@ public static partial class HtmlCanonicalizer
     [GeneratedRegex(@"\s+")]
     private static partial Regex Whitespace();
 
-    [GeneratedRegex(@"[a-z][a-z0-9+.\-]*://[^\s<>""']+", RegexOptions.IgnoreCase)]
+    /// <summary>A URL printed as page text; like a link in an email, it never ends in sentence punctuation.</summary>
+    [GeneratedRegex(@"[a-z][a-z0-9+.\-]*://[^\s<>""']*[^\s<>""'.,;:!?]", RegexOptions.IgnoreCase)]
     private static partial Regex UrlInText();
 
     [GeneratedRegex(@"url=(?<url>\S+)", RegexOptions.IgnoreCase)]

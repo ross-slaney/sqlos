@@ -76,7 +76,7 @@ public sealed class AdminLibraryScenarios
         var duplicate = t.Observe(
             await probe.PostJsonAsync("/__probe/admin/organizations", new { name = "Acme Two", slug = acme.Slug }),
             "a slug that is taken gets a random suffix");
-        t.Scrub(duplicate.JsonString("slug"), "slug", "acme-with-suffix");
+        t.ScrubSlugSuffix(duplicate.JsonString("slug"), acme.Slug);
         t.Observe(
             await probe.PostJsonAsync("/__probe/admin/organizations", new { name = "Gamma", slug = "  Gamma Corp! " }),
             "a slug is normalized");

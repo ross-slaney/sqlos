@@ -256,7 +256,7 @@ public sealed class SamlAcsScenarios
     [Covers("POST /sqlos/auth/saml/acs/{connectionId}")]
     public async Task Malformed_saml_responses_fail_with_a_server_error()
     {
-        await using var t = await Transcript.StartAsync(HostProfiles.Enterprise, EnterpriseHosting.AnswerUnhandledExceptionsLikeKestrel);
+        await using var t = await Transcript.StartAsync(HostProfiles.Enterprise, options => options.AnswerUnhandledExceptionsAsServerErrors = true);
         using var idp = new TestSamlIdentityProvider();
         var acme = await t.Setup.CreateOrganizationAsync("acme");
         var domain = await t.VerifyDomainAsync(acme, "acme");

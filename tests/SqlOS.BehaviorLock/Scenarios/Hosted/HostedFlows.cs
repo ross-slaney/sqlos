@@ -1,11 +1,6 @@
-using System.Globalization;
 using System.Net;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.DependencyInjection;
 using SqlOS.BehaviorLock.Host;
 using SqlOS.BehaviorLock.Host.Support;
 using SqlOS.BehaviorLock.Infrastructure.Transcripts;
@@ -157,14 +152,6 @@ internal static partial class HostedFlows
         var inviteUrl = created.JsonString("inviteUrl");
         var token = Uri.UnescapeDataString(LinkTokenValue().Match(inviteUrl).Groups["token"].Value);
         t.Scrub(token, "invitation-token");
-        // The hosted invitation card prints the expiry as "Expires {ExpiresAt:g, invariant} UTC."
-        // (SqlOSAuthPageRenderer), which the generic timestamp patterns do not recognize. Name that
-        // exact rendering; a different format would no longer match and would show as a diff.
-        var expiresAt = DateTime.Parse(
-            created.JsonString("expiresAt"),
-            CultureInfo.InvariantCulture,
-            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
-        t.Scrub(expiresAt.ToString("g", CultureInfo.InvariantCulture), "datetime", "invariant-g");
         return token;
     }
 
@@ -231,80 +218,6 @@ internal static partial class HostedFlows
         return (code, step);
     }
 
-    /// <summary>
-    /// TestServer rethrows an unhandled application exception into the calling client, where
-    /// Kestrel answers <c>500</c> with no headers and no body. Scenarios that lock a route's
-    /// unhandled failure install this so the transcript shows what a browser receives.
-    /// </summary>
-    public static void AnswerUnhandledExceptionsLikeKestrel(ScenarioOptions options)
-    {
-        var previous = options.ConfigureServices;
-        options.ConfigureServices = services =>
-        {
-            previous?.Invoke(services);
-            services.AddSingleton<IStartupFilter, KestrelErrorResponseStartupFilter>();
-        };
-    }
-
-    /// <summary>The IDs of every audit event written so far, read through the admin audit API.</summary>
-    public static async Task<HashSet<string>> AuditEventIdsAsync(Transcript t)
-        => (await ReadAuditEventsAsync(t)).Select(item => item["id"]!.GetValue<string>()).ToHashSet(StringComparer.Ordinal);
-
-    /// <summary>
-    /// Records the audit events written since <paramref name="seen"/> as notes, sorted by action and
-    /// then by content, instead of in write order. Only for events SqlOS writes in an unspecified
-    /// order: the password-login abuse service writes one <c>password.login.locked</c> event per
-    /// locked bucket, in the order EF loads <c>reservation.Buckets</c> (an Include with no ORDER BY;
-    /// PostgreSQL returns them in heap order, which changes once earlier reservations are deleted),
-    /// and lists <c>lockedScopes</c> the same way. Arrays of scopes are sorted too.
-    /// </summary>
-    public static async Task ObserveAuditSortedAsync(Transcript t, IReadOnlySet<string> seen, string caption)
-    {
-        var fresh = (await ReadAuditEventsAsync(t))
-            .Where(item => !seen.Contains(item["id"]!.GetValue<string>()))
-            .Select(item => $"{item["action"]!.GetValue<string>()} {CanonicalMetadata(item["metadata"])}")
-            .OrderBy(line => line, StringComparer.Ordinal)
-            .ToList();
-        t.Note($"audit, sorted by action and content (SqlOS writes these in unspecified order): {caption}");
-        foreach (var line in fresh)
-        {
-            t.Note($"  - {line}");
-        }
-
-        await t.SkipAuditAsync();
-    }
-
-    private static async Task<List<JsonNode>> ReadAuditEventsAsync(Transcript t)
-    {
-        var events = new List<JsonNode>();
-        string? cursor = null;
-        do
-        {
-            var target = "/sqlos/admin/audit/api/events?pageSize=200" + (cursor == null ? string.Empty : "&cursor=" + Uri.EscapeDataString(cursor));
-            var page = t.Discard(await t.Operator.GetAsync(target));
-            EnsureStatus(page, 200);
-            events.AddRange(page.Json!["data"]!.AsArray().Select(item => item!.DeepClone()));
-            cursor = page.Json!["hasNextPage"]?.GetValue<bool>() == true ? page.Json!["nextCursor"]?.GetValue<string>() : null;
-        }
-        while (cursor != null);
-
-        return events;
-    }
-
-    /// <summary>JSON with object members sorted and arrays of scope names sorted.</summary>
-    private static string CanonicalMetadata(JsonNode? node)
-        => node switch
-        {
-            JsonObject item => "{" + string.Join(",", item
-                .OrderBy(member => member.Key, StringComparer.Ordinal)
-                .Select(member => $"\"{member.Key}\":{CanonicalMetadata(member.Value)}")) + "}",
-            JsonArray items => "[" + string.Join(",", items
-                .Select(CanonicalMetadata)
-                .OrderBy(value => value, StringComparer.Ordinal)) + "]",
-            null => "null",
-            _ => node.ToJsonString()
-        };
-
     /// <summary>Fails the scenario when a precondition exchange did not answer <paramref name="status"/>.</summary>
     public static void EnsureStatus(HttpExchange exchange, int status)
     {
@@ -330,29 +243,6 @@ internal static partial class HostedFlows
 
     [GeneratedRegex(@"<span>Setup key</span>\s*<code>(?<secret>[^<]+)</code>")]
     private static partial Regex SetupKey();
-
-    /// <summary>Innermost startup filter: turns an exception the endpoints left unhandled into Kestrel's bare 500.</summary>
-    private sealed class KestrelErrorResponseStartupFilter : IStartupFilter
-    {
-        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
-        {
-            app.Use(async (context, nextMiddleware) =>
-            {
-                try
-                {
-                    await nextMiddleware(context);
-                }
-                catch (Exception) when (!context.Response.HasStarted)
-                {
-                    // Kestrel resets the response headers and answers 500 with Content-Length: 0.
-                    context.Response.Clear();
-                    context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-                    context.Response.ContentLength = 0;
-                }
-            });
-            next(app);
-        };
-    }
 }
 
 /// <summary>An authorization request opened in the browser: the request, the ID its hosted forms post, and the page.</summary>

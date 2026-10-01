@@ -106,6 +106,12 @@ public static partial class JwtRendering
             }
         }
 
+        return DescribeLifetimes(values);
+    }
+
+    /// <summary>Relative lifetimes between the epoch claims in <paramref name="values"/> (claim name to Unix time).</summary>
+    internal static string DescribeLifetimes(IReadOnlyDictionary<string, long> values)
+    {
         var parts = new List<string>();
         if (values.TryGetValue("exp", out var exp))
         {

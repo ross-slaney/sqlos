@@ -41,14 +41,14 @@ public sealed class DeviceFlowScenarios
             await cli.PostFormAsync("/sqlos/auth/token", DevicePoll(AtlasClients.Cli, deviceCode)),
             "polling again at once: slow_down, and the interval grows by five seconds");
 
-        var entry = t.ObservePage(await t.GetAsync("/sqlos/auth/device"), "Alice opens the verification page");
+        var entry = t.Observe(await t.GetAsync("/sqlos/auth/device"), "Alice opens the verification page");
         var typed = userCode.ToLowerInvariant().Replace('-', ' ');
         t.Scrub(typed, "user-code", "as-typed");
         var verified = t.Observe(
             await t.SubmitAsync(entry.Form("/device/verify").With("userCode", typed)),
             "she types the code in lower case with a space; SqlOS redirects without checking it");
-        var resolved = t.ObservePage(await t.GetAsync(verified.Location!), "the code resolves for her signed-in session: SqlOS continues to the approval page");
-        var approval = t.ObservePage(await t.GetAsync(resolved.NextUrl!), "the approval page names the CLI, the code, the scopes, and the expiry");
+        var resolved = t.Observe(await t.GetAsync(verified.Location!), "the code resolves for her signed-in session: SqlOS continues to the approval page");
+        var approval = t.Observe(await t.GetAsync(resolved.NextUrl!), "the approval page names the CLI, the code, the scopes, and the expiry");
         await t.ObserveWithAuditAsync(await t.SubmitAsync(approval.Form("/device/approve")), "she approves");
 
         var tokens = await t.ObserveWithAuditAsync(
@@ -58,7 +58,7 @@ public sealed class DeviceFlowScenarios
         t.ObserveTokens(
             await cli.PostFormAsync("/sqlos/auth/token", Refresh(AtlasClients.Cli, tokens.JsonString("refresh_token"))),
             "the CLI rotates its refresh token");
-        t.ObservePage(await t.GetAsync($"/sqlos/auth/device?user_code={Uri.EscapeDataString(userCode)}"), "the consumed code is no longer accepted on the device page");
+        t.Observe(await t.GetAsync($"/sqlos/auth/device?user_code={Uri.EscapeDataString(userCode)}"), "the consumed code is no longer accepted on the device page");
 
         await t.ObserveStateAsync($"/sqlos/admin/auth/api/users/{alice.Id}/sessions", "Alice's sessions");
         await t.ObserveAuditAsync("remaining events");
@@ -80,16 +80,16 @@ public sealed class DeviceFlowScenarios
         var deviceCode = started.JsonString("device_code");
         var userCode = started.JsonString("user_code");
 
-        var login = t.ObservePage(
+        var login = t.Observe(
             await t.GetAsync(new Uri(started.JsonString("verification_uri_complete")).PathAndQuery),
             "the complete verification URI asks Alice to sign in to approve CLI access");
-        var password = t.ObservePage(
+        var password = t.Observe(
             await t.SubmitAsync(login.Form("/login/identify").With("email", alice.Email)),
             "she enters her email");
-        var signedIn = t.ObservePage(
+        var signedIn = t.Observe(
             await t.SubmitAsync(password.Form("/login/password").With("email", alice.Email).With("password", alice.Password)),
             "she enters her password");
-        var approval = t.ObservePage(await t.GetAsync(signedIn.NextUrl!), "SqlOS continues to the approval page");
+        var approval = t.Observe(await t.GetAsync(signedIn.NextUrl!), "SqlOS continues to the approval page");
         await t.ObserveWithAuditAsync(await t.SubmitAsync(approval.Form("/device/approve")), "she approves");
         await t.ObserveWithAuditAsync(await cli.PostFormAsync("/sqlos/auth/token", DevicePoll(AtlasClients.Cli, deviceCode)), "the CLI's poll returns tokens");
 
@@ -112,7 +112,7 @@ public sealed class DeviceFlowScenarios
         var userCode = started.JsonString("user_code");
 
         var resolved = t.Discard(await t.GetAsync($"/sqlos/auth/device?user_code={Uri.EscapeDataString(userCode)}"));
-        var approval = t.ObservePage(await t.GetAsync(resolved.NextUrl!), "the approval page");
+        var approval = t.Observe(await t.GetAsync(resolved.NextUrl!), "the approval page");
         await t.ObserveWithAuditAsync(
             await t.SubmitAsync(approval.Form("/device/deny")),
             "Alice denies; the page says access was denied above a card that says it was approved");
@@ -124,7 +124,7 @@ public sealed class DeviceFlowScenarios
         await t.ObserveUnhandledAsync(
             async () => await t.GetAsync(resolved.NextUrl!),
             "reopening the approval page of the cancelled request");
-        t.ObservePage(await t.GetAsync($"/sqlos/auth/device?user_code={Uri.EscapeDataString(userCode)}"), "the denied code is no longer pending");
+        t.Observe(await t.GetAsync($"/sqlos/auth/device?user_code={Uri.EscapeDataString(userCode)}"), "the denied code is no longer pending");
 
         await t.ObserveAuditAsync("remaining events");
         await t.ApproveAsync();
@@ -243,7 +243,7 @@ public sealed class DeviceFlowScenarios
         await Task.Delay(TimeSpan.FromSeconds(3));
         t.Note("Three seconds later the device code has expired.");
         t.ObserveTokens(await cli.PostFormAsync("/sqlos/auth/token", DevicePoll(AtlasClients.Cli, started.JsonString("device_code"))), "the CLI's poll is expired_token");
-        t.ObservePage(
+        t.Observe(
             await t.GetAsync($"/sqlos/auth/device?user_code={Uri.EscapeDataString(started.JsonString("user_code"))}"),
             "the device page no longer accepts the code");
 
@@ -265,7 +265,7 @@ public sealed class DeviceFlowScenarios
         t.Observe(await cli.GetAsync("/sqlos/auth/.well-known/oauth-authorization-server"), "the metadata a CLI reads first");
         t.Observe(await cli.PostFormAsync("/sqlos/auth/device_authorization", Form(("client_id", AtlasClients.Cli), ("scope", CliScope))), "starting a device authorization");
         t.ObserveTokens(await cli.PostFormAsync("/sqlos/auth/token", DevicePoll(AtlasClients.Cli, "any-device-code")), "polling");
-        t.ObservePage(await t.GetAsync("/sqlos/auth/device"), "the code entry page still renders");
+        t.Observe(await t.GetAsync("/sqlos/auth/device"), "the code entry page still renders");
         await t.ObserveWithAuditAsync(await t.GetAsync("/sqlos/auth/device?user_code=ABCD-EFGH"), "entering a code");
 
         await t.ApproveAsync();

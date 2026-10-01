@@ -5,26 +5,41 @@ namespace SqlOS.BehaviorLock.Infrastructure.Transcripts;
 
 /// <summary>
 /// What renderers report values to while they walk a response: role-bearing values are
-/// registered with the <see cref="Scrubber"/>, and JWTs are collected so the transcript can show
-/// their decoded header and claims.
+/// registered with the <see cref="Scrubber"/>, JWTs are collected so the transcript can show
+/// their decoded header and claims, and the lifetimes of claims a host echoes are collected so
+/// the transcript can show them next to the body.
 /// </summary>
 public sealed partial class TranscriptValueSink
 {
     private readonly Scrubber _scrubber;
+    private readonly bool _recording;
     private readonly List<string> _jwts = [];
     private readonly HashSet<string> _seenJwts = new(StringComparer.Ordinal);
+    private readonly List<string> _claimLifetimes = [];
 
     public TranscriptValueSink(Scrubber scrubber)
+        : this(scrubber, recording: true)
+    {
+    }
+
+    private TranscriptValueSink(Scrubber scrubber, bool recording)
     {
         _scrubber = scrubber;
+        _recording = recording;
     }
 
     public Scrubber Scrubber => _scrubber;
 
+    /// <summary>
+    /// A sink that registers and collects nothing, for rendering content only to compare it
+    /// (see <see cref="Scrubber.Mask"/>) without changing what the transcript registers.
+    /// </summary>
+    public static TranscriptValueSink Detached(Scrubber scrubber) => new(scrubber, recording: false);
+
     /// <summary>Registers <paramref name="value"/> when it looks like an opaque secret rather than a word or code name.</summary>
     public void Register(string? value, string kind)
     {
-        if (value != null && LooksOpaque(value, kind))
+        if (_recording && value != null && LooksOpaque(value, kind))
         {
             _scrubber.Register(value, kind);
         }
@@ -85,7 +100,7 @@ public sealed partial class TranscriptValueSink
     /// <summary>Queues a JWT for decoding once per identity (see <see cref="JwtRendering.Identity"/>).</summary>
     public void AddJwt(string jwt)
     {
-        if (_seenJwts.Add(JwtRendering.Identity(jwt)))
+        if (_recording && _seenJwts.Add(JwtRendering.Identity(jwt)))
         {
             _jwts.Add(jwt);
         }
@@ -100,12 +115,35 @@ public sealed partial class TranscriptValueSink
     }
 
     /// <summary>
+    /// Records the relative lifetimes (<c>exp-iat=10m</c>) of a claims list a host echoed, whose
+    /// epoch values render as <c>{epoch}</c> (see <see cref="CanonicalJson"/>).
+    /// </summary>
+    public void AddClaimLifetimes(string lifetimes)
+    {
+        if (_recording && lifetimes.Length > 0)
+        {
+            _claimLifetimes.Add(lifetimes);
+        }
+    }
+
+    /// <summary>Returns the echoed-claim lifetimes collected since the last call, in body order.</summary>
+    public IReadOnlyList<string> DrainClaimLifetimes()
+    {
+        var drained = _claimLifetimes.ToList();
+        _claimLifetimes.Clear();
+        return drained;
+    }
+
+    /// <summary>
     /// Opaque values carry a digit or mixed case and no whitespace. That keeps error codes such as
     /// <c>invalid_grant</c> readable even when they sit under a role-bearing field like <c>code</c>.
+    /// A redaction marker such as SqlOS's <c>[redacted]</c> is never a secret, even under a field
+    /// named <c>password</c>: registering it would scrub every redaction in the transcript into a
+    /// password placeholder.
     /// </summary>
     internal static bool LooksOpaque(string value, string kind)
     {
-        if (string.IsNullOrWhiteSpace(value) || value.Any(char.IsWhiteSpace))
+        if (string.IsNullOrWhiteSpace(value) || value.Any(char.IsWhiteSpace) || RedactionMarker().IsMatch(value))
         {
             return false;
         }
@@ -120,4 +158,8 @@ public sealed partial class TranscriptValueSink
 
     [GeneratedRegex(@"eyJ[A-Za-z0-9_\-]{4,}\.eyJ[A-Za-z0-9_\-]{4,}\.[A-Za-z0-9_\-]*", RegexOptions.CultureInvariant)]
     private static partial Regex EmbeddedJwt();
+
+    /// <summary>A bracketed word that stands in for a removed value: <c>[redacted]</c>, <c>[hidden]</c>.</summary>
+    [GeneratedRegex(@"^\[[A-Za-z][A-Za-z _\-]*\]$", RegexOptions.CultureInvariant)]
+    private static partial Regex RedactionMarker();
 }

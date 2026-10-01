@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.BehaviorLock.Host;
-using SqlOS.BehaviorLock.Host.Fakes;
 using SqlOS.BehaviorLock.Host.Profiles;
 using SqlOS.BehaviorLock.Infrastructure.Scenarios;
 using SqlOS.BehaviorLock.Infrastructure.Transcripts;
@@ -66,10 +65,9 @@ public sealed class CalendarAdminScenarios
         t.Observe(await t.Operator.GetAsync("/sqlos/admin/calendar/api/summary"), "the summary counts one active connection");
         t.Observe(await t.Operator.GetAsync(ConnectionsRoute), "the connection list");
         t.Observe(await t.Operator.GetAsync($"{ConnectionsRoute}/{connectionId}"), "no calendar is enrolled before the first sync");
-        var initial = t.Observe(
+        t.Observe(
             await t.Operator.PostJsonAsync($"{ConnectionsRoute}/{connectionId}/sync", new { }),
             "the first sync enrolls the primary calendar and pulls its events");
-        NameSyncWindow(t, initial);
         t.Observe(
             await t.Operator.PostJsonAsync($"{ConnectionsRoute}/{connectionId}/sync", new { }),
             "the next sync is incremental, from the provider's sync token");
@@ -121,10 +119,9 @@ public sealed class CalendarAdminScenarios
             "Microsoft returns to the SqlOS callback");
         var connectionId = connected.NextUrlParameter("calendarConnectionId");
 
-        var initial = t.Observe(
+        t.Observe(
             await t.Operator.PostJsonAsync($"{ConnectionsRoute}/{connectionId}/sync", new { }),
             "the first sync enrolls the default calendar and reads a Graph delta window");
-        NameSyncWindow(t, initial);
         t.Observe(
             await t.Operator.PostJsonAsync($"{ConnectionsRoute}/{connectionId}/sync", new { }),
             "the next sync follows the stored delta link: one event removed, one moved");
@@ -240,26 +237,4 @@ public sealed class CalendarAdminScenarios
 
     private static string Callback(HttpExchange started, string code)
         => QueryHelpers.AddQueryString(CallbackRoute, new Dictionary<string, string?> { ["state"] = State(started), ["code"] = code });
-
-    /// <summary>
-    /// A first sync asks the provider for events in a window around "now", written URL-encoded
-    /// (<c>timeMin=2026-08-31T21%3A57%3A54Z</c>), which no timestamp pattern recognizes; name it.
-    /// </summary>
-    private static void NameSyncWindow(Transcript t, HttpExchange sync)
-    {
-        foreach (var effect in sync.Effects.OfType<HttpEffect>())
-        {
-            foreach (var (key, value) in QueryHelpers.ParseQuery(new Uri(effect.Url).Query))
-            {
-                if (key is "timeMin" or "startDateTime")
-                {
-                    t.Scrub(value.ToString(), "datetime", "sync-window-start");
-                }
-                else if (key is "timeMax" or "endDateTime")
-                {
-                    t.Scrub(value.ToString(), "datetime", "sync-window-end");
-                }
-            }
-        }
-    }
 }

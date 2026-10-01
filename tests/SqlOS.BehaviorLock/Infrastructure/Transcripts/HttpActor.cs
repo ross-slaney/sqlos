@@ -11,20 +11,21 @@ namespace SqlOS.BehaviorLock.Infrastructure.Transcripts;
 /// Someone who talks to the host: a browser (keeps cookies and sends <c>Origin</c> on unsafe
 /// requests, as browsers do), the operator (adds the profile's admin credential), or a plain API
 /// client (no cookies). Every request is numbered and captured as an <see cref="HttpExchange"/>;
-/// nothing is recorded until the scenario observes it.
+/// nothing is recorded until the scenario observes it. An actor may send several requests at
+/// once; its cookie jar is updated under a lock as each response arrives.
 /// </summary>
 public sealed class HttpActor
 {
     private readonly Transcript _transcript;
     private readonly Func<HttpRequestMessage, Task>? _authenticate;
 
-    internal HttpActor(Transcript transcript, string name, bool isBrowser, Func<HttpRequestMessage, Task>? authenticate = null)
+    internal HttpActor(Transcript transcript, string name, bool isBrowser, Func<HttpRequestMessage, Task>? authenticate = null, CookieContainer? cookies = null)
     {
         _transcript = transcript;
         Name = name;
         IsBrowser = isBrowser;
         _authenticate = authenticate;
-        Cookies = isBrowser || authenticate != null ? new CookieContainer() : null;
+        Cookies = cookies ?? (isBrowser || authenticate != null ? new CookieContainer() : null);
     }
 
     public string Name { get; }
@@ -42,7 +43,32 @@ public sealed class HttpActor
             throw new InvalidOperationException($"{Name} is an API client and keeps no cookies.");
         }
 
-        Cookies.Add(new Uri(BehaviorLockConstants.PublicOrigin), new Cookie(name, value, path) { Secure = true, HttpOnly = true });
+        lock (Cookies)
+        {
+            Cookies.Add(new Uri(BehaviorLockConstants.PublicOrigin), new Cookie(name, value, path) { Secure = true, HttpOnly = true });
+        }
+    }
+
+    /// <summary>
+    /// Another tab of this browser, labeled <paramref name="name"/> in the transcript, that starts
+    /// with a copy of the cookies this browser holds now. Responses to the tab update only the
+    /// tab's copy, so several tabs can post at once with the same session, as an attacker
+    /// replaying one form from many tabs does.
+    /// </summary>
+    public HttpActor Tab(string name)
+    {
+        if (!IsBrowser || Cookies == null)
+        {
+            throw new InvalidOperationException($"{Name} is not a browser, so it has no tabs.");
+        }
+
+        var copy = new CookieContainer();
+        lock (Cookies)
+        {
+            copy.Add(Cookies.GetAllCookies());
+        }
+
+        return new HttpActor(_transcript, name, isBrowser: true, _authenticate, copy);
     }
 
     public Task<HttpExchange> GetAsync(string target, Action<RequestOptions>? configure = null)
@@ -104,7 +130,7 @@ public sealed class HttpActor
             request.Headers.TryAddWithoutValidation(name, value);
         }
 
-        if (Cookies != null && options.SendCookies && Cookies.GetCookieHeader(uri) is { Length: > 0 } cookieHeader)
+        if (Cookies != null && options.SendCookies && CookieHeader(uri) is { Length: > 0 } cookieHeader)
         {
             request.Headers.TryAddWithoutValidation("Cookie", cookieHeader);
         }
@@ -145,9 +171,12 @@ public sealed class HttpActor
         var setCookies = response.Headers.TryGetValues("Set-Cookie", out var cookies) ? cookies.ToList() : [];
         if (Cookies != null)
         {
-            foreach (var setCookie in setCookies)
+            lock (Cookies)
             {
-                Cookies.SetCookies(uri, setCookie);
+                foreach (var setCookie in setCookies)
+                {
+                    Cookies.SetCookies(uri, setCookie);
+                }
             }
         }
 
@@ -175,6 +204,14 @@ public sealed class HttpActor
             completed);
         _transcript.Captured(exchange);
         return exchange;
+    }
+
+    private string CookieHeader(Uri uri)
+    {
+        lock (Cookies!)
+        {
+            return Cookies.GetCookieHeader(uri);
+        }
     }
 
     private static bool IsUnsafe(HttpMethod method)

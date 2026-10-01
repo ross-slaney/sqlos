@@ -113,7 +113,7 @@ public sealed class SsoPortalValidationScenarios
     [Covers("POST /sqlos/admin/auth/sso-portal/api/organization-sessions/revoke")]
     public async Task The_portal_refuses_unusable_metadata_and_out_of_order_actions()
     {
-        await using var t = await Transcript.StartAsync(HostProfiles.Enterprise, EnterpriseHosting.AnswerUnhandledExceptionsLikeKestrel);
+        await using var t = await Transcript.StartAsync(HostProfiles.Enterprise, options => options.AnswerUnhandledExceptionsAsServerErrors = true);
         using var idp = new TestSamlIdentityProvider();
         using var other = new TestSamlIdentityProvider("urn:behavior-lock:other-idp", "https://other-idp.example.test/sso");
         idp.RegisterWith(t);

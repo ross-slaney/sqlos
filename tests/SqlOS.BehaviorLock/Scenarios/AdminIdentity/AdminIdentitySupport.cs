@@ -1,7 +1,3 @@
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.DependencyInjection;
 using SqlOS.BehaviorLock.Host;
 using SqlOS.BehaviorLock.Infrastructure.Transcripts;
 
@@ -9,9 +5,8 @@ namespace SqlOS.BehaviorLock.Scenarios.AdminIdentity;
 
 /// <summary>
 /// Surface-local helpers for the admin identity API catalog (<c>AdminIdentityEndpoints</c>): the
-/// route table the sweeps walk, the scenario option that answers unhandled exceptions the way a
-/// production server does, and setup steps these scenarios share. Nothing here is recorded unless
-/// a scenario observes it.
+/// route table the sweeps walk and setup steps these scenarios share. Nothing here is recorded
+/// unless a scenario observes it.
 /// </summary>
 internal static class AdminIdentity
 {
@@ -76,22 +71,6 @@ internal static class AdminIdentity
         new("POST", "/machine-clients/{clientId}/grants", "/machine-clients/missing-machine/grants", HasBody: true),
         new("DELETE", "/machine-clients/{clientId}/grants/{grantId}", "/machine-clients/missing-machine/grants/grant_missing")
     ];
-
-    /// <summary>
-    /// Scenario option: answer an unhandled exception the way Kestrel does in production (the
-    /// response is cleared and becomes <c>500</c> with no body) instead of TestServer's default of
-    /// rethrowing it into the test. Several admin routes let service exceptions escape; this makes
-    /// that outcome an ordinary, approvable exchange. Only scenarios that lock such a path use it.
-    /// </summary>
-    public static void AnswerUnhandledExceptionsAsServerErrors(ScenarioOptions options)
-    {
-        var previous = options.ConfigureServices;
-        options.ConfigureServices = services =>
-        {
-            previous?.Invoke(services);
-            services.AddSingleton<IStartupFilter, ServerErrorStartupFilter>();
-        };
-    }
 
     /// <summary>Sends a request to a route of the table, with <c>{}</c> as the body where it binds one.</summary>
     public static Task<HttpExchange> SendAsync(HttpActor actor, AdminRoute route, Action<RequestOptions>? configure = null)
@@ -183,41 +162,6 @@ internal static class AdminIdentity
         return new SignedInSession(login.JsonString("tokens.accessToken"), login.JsonString("tokens.refreshToken"), null, t.Urls.Authorize(clientId));
     }
 
-    /// <summary>
-    /// The hosted invitation page prints the invitation's expiry as local text ("Expires
-    /// 10/07/2026 20:52 UTC."), a clock-derived value the scrubber's timestamp patterns do not
-    /// recognize. Registers the printed value under its digit mask, for example
-    /// <c>{displayed-expiry:nn/nn/nnnn_nn:nn}</c>, so the transcript stays deterministic and a
-    /// change of format still shows.
-    /// </summary>
-    public static HttpExchange ScrubDisplayedExpiry(Transcript t, HttpExchange page)
-    {
-        foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(page.ResponseBody, @"Expires (?<value>[^<]+?) UTC\."))
-        {
-            var value = match.Groups["value"].Value;
-            var mask = new string(value.Select(character => char.IsDigit(character) ? 'n' : character == ' ' ? '_' : character).ToArray());
-            t.Scrub(value, "displayed-expiry", mask);
-        }
-
-        return page;
-    }
-
-    /// <summary>
-    /// SqlOS resolves a slug collision by appending a hyphen and eight random hex characters (the
-    /// start of a GUID). Registers those characters, after checking the slug has exactly that
-    /// shape, so the transcript reads <c>acme-{slug-suffix#1}</c>.
-    /// </summary>
-    public static void ScrubSlugSuffix(Transcript t, string slug, string expectedBase)
-    {
-        var suffix = slug.StartsWith(expectedBase + "-", StringComparison.Ordinal) ? slug[(expectedBase.Length + 1)..] : string.Empty;
-        if (suffix.Length != 8 || !suffix.All(Uri.IsHexDigit))
-        {
-            throw new InvalidOperationException($"Expected '{expectedBase}' plus a random suffix, got '{slug}'.");
-        }
-
-        t.Scrub(suffix, "slug-suffix");
-    }
-
     /// <summary>The token-endpoint form that refreshes <paramref name="refreshToken"/> for a public client.</summary>
     public static IEnumerable<KeyValuePair<string, string>> Refresh(
         string refreshToken,
@@ -232,32 +176,6 @@ internal static class AdminIdentity
     public static string Basic(string clientId, string secret)
         => Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(
             Uri.EscapeDataString(clientId) + ":" + Uri.EscapeDataString(secret)));
-
-    /// <summary>
-    /// Kestrel's answer to an exception that escapes the application before the response starts:
-    /// the response is reset to an empty <c>500</c>. Registered through
-    /// <see cref="ScenarioOptions.ConfigureServices"/>, after <c>AddSqlOS</c>, so it wraps the
-    /// application's routing and endpoints inside SqlOS's pipeline.
-    /// </summary>
-    private sealed class ServerErrorStartupFilter : IStartupFilter
-    {
-        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
-        {
-            app.Use(async (context, nextMiddleware) =>
-            {
-                try
-                {
-                    await nextMiddleware(context);
-                }
-                catch (Exception) when (!context.Response.HasStarted && !context.RequestAborted.IsCancellationRequested)
-                {
-                    context.Response.Clear();
-                    context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-                }
-            });
-            next(app);
-        };
-    }
 }
 
 /// <summary>One route of <c>AdminIdentityEndpoints</c>: its method, template below the admin API base, and a concrete path.</summary>

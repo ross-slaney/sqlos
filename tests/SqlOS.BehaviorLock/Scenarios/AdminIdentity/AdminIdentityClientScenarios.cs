@@ -129,7 +129,7 @@ public sealed class AdminIdentityClientScenarios
     [Covers("POST /sqlos/auth/password/login")]
     public async Task Operator_revokes_sessions_and_disables_an_operator_registered_client()
     {
-        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback, AdminIdentity.AnswerUnhandledExceptionsAsServerErrors);
+        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback, options => options.AnswerUnhandledExceptionsAsServerErrors = true);
         var alice = await t.Setup.CreateUserAsync("alice");
         var bob = await t.Setup.CreateUserAsync("bob");
         var portalId = await AdminIdentity.CreateClientAsync(t, new
@@ -191,7 +191,7 @@ public sealed class AdminIdentityClientScenarios
     [Covers("POST /sqlos/auth/password/login")]
     public async Task A_code_owned_client_takes_only_the_emergency_switches()
     {
-        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback, AdminIdentity.AnswerUnhandledExceptionsAsServerErrors);
+        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback, options => options.AnswerUnhandledExceptionsAsServerErrors = true);
         var alice = await t.Setup.CreateUserAsync("alice");
         var client = $"{AdminIdentity.Api}/clients/{BehaviorLockConstants.AppClientId}";
 
@@ -275,7 +275,7 @@ public sealed class AdminIdentityClientScenarios
     [Covers("GET /sqlos/auth/authorize")]
     public async Task An_operator_registered_third_party_client_cannot_skip_consent_through_direct_login()
     {
-        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback, AdminIdentity.AnswerUnhandledExceptionsAsServerErrors);
+        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback, options => options.AnswerUnhandledExceptionsAsServerErrors = true);
         var alice = await t.Setup.CreateUserAsync("alice");
         var browser = t.NewBrowser("alice-browser");
         await AdminIdentity.SignInAsync(t, alice, browser: browser);

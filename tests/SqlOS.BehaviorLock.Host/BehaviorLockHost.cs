@@ -56,6 +56,13 @@ public sealed class BehaviorLockHostOptions
     /// <summary>Scenario-specific service overrides, applied last.</summary>
     public Action<IServiceCollection>? ConfigureServices { get; init; }
 
+    /// <summary>
+    /// Answer an exception that escapes the application as Kestrel does (an empty <c>500</c>), naming
+    /// it in the <see cref="BehaviorLockHost.UnhandledExceptionHeader"/> response header, instead of
+    /// letting TestServer rethrow it into the caller. See <see cref="Diagnostics.UnhandledExceptionStartupFilter"/>.
+    /// </summary>
+    public bool AnswerUnhandledExceptionsAsServerErrors { get; init; }
+
     public string[] Args { get; init; } = [];
 
     public LogLevel MinimumLogLevel { get; init; } = LogLevel.Warning;
@@ -73,6 +80,12 @@ public static class BehaviorLockHost
 
     /// <summary>Lets a scenario present a different client address, for per-IP throttling cases.</summary>
     public const string ClientAddressHeader = "X-BehaviorLock-Client-IP";
+
+    /// <summary>
+    /// Harness-only response header that names an exception the application did not handle, when
+    /// <see cref="BehaviorLockHostOptions.AnswerUnhandledExceptionsAsServerErrors"/> is on.
+    /// </summary>
+    public const string UnhandledExceptionHeader = "X-BehaviorLock-Unhandled-Exception";
 
     /// <summary>Schema for the host's own tables, kept apart from SqlOS's so the schema gate ignores them.</summary>
     public const string ApplicationSchema = "behaviorlock";
@@ -137,6 +150,11 @@ public static class BehaviorLockHost
 
         profile.ConfigureHost?.Invoke(builder, context);
         options.ConfigureServices?.Invoke(builder.Services);
+        if (options.AnswerUnhandledExceptionsAsServerErrors)
+        {
+            // Registered last, so it is the innermost startup filter (see the filter's remarks).
+            builder.Services.AddSingleton<IStartupFilter, UnhandledExceptionStartupFilter>();
+        }
 
         app = builder.Build();
         profile.MapApplication?.Invoke(app, context);

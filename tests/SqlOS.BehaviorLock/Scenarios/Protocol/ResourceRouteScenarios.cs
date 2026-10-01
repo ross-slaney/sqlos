@@ -31,7 +31,7 @@ public sealed class ResourceRouteScenarios
         t.Observe(await api.GetAsync("/api/me", options => options.Header("Authorization", "Basic YWxpY2U6c2VjcmV0")), "a non-Bearer credential counts as no token");
         t.Observe(await api.GetAsync("/api/me", options => options.Bearer("not-a-jwt")), "a malformed bearer token is invalid_token");
         t.Observe(await api.GetAsync("/api/me", options => options.Bearer(session.IdToken!)), "the ID token is not an access token for the API");
-        t.ObserveResource(await api.GetAsync("/api/me", options => options.Bearer(session.AccessToken)), "the access token minted for the API: the route reads the validated token");
+        t.Observe(await api.GetAsync("/api/me", options => options.Bearer(session.AccessToken)), "the access token minted for the API: the route reads the validated token");
 
         t.Discard(await t.Api.PostJsonAsync("/sqlos/auth/logout", new { refreshToken = session.RefreshToken }));
         await t.SkipAuditAsync();
@@ -62,7 +62,7 @@ public sealed class ResourceRouteScenarios
         t.Observe(
             await mcp.PostJsonAsync("/mcp", new { jsonrpc = "2.0", id = 2, method = "tools/list" }, options => options.Bearer(apiSession.AccessToken)),
             "a token minted for /api is refused by the MCP policy");
-        t.ObserveResource(
+        t.Observe(
             await mcp.PostJsonAsync("/mcp", new { jsonrpc = "2.0", id = 3, method = "tools/list" }, options => options.Bearer(mcpSession.AccessToken)),
             "a token minted for the MCP resource (resource indicator on /authorize) is accepted");
         t.Observe(await mcp.GetAsync("/api/me", options => options.Bearer(mcpSession.AccessToken)), "the MCP token does not open the first-party API");
@@ -96,14 +96,14 @@ public sealed class ResourceRouteScenarios
         var api = t.NewClient("resource-client");
 
         t.Observe(await api.GetAsync("/resource-api/me"), "AddJwtBearer challenges a request without a token");
-        t.ObserveResource(await api.GetAsync("/resource-api/me", options => options.Bearer(portal.AccessToken)), "AddJwtBearer validates the portal token against discovery and the JWKS");
+        t.Observe(await api.GetAsync("/resource-api/me", options => options.Bearer(portal.AccessToken)), "AddJwtBearer validates the portal token against discovery and the JWKS");
         t.Observe(await api.GetAsync("/billing/me"), "AddSqlOSJwt(\"Billing\") challenges with its own realm and no resource metadata");
         t.Observe(await api.GetAsync("/billing/me", options => options.Bearer(portal.AccessToken)), "the portal token is for another audience");
-        t.ObserveResource(await api.GetAsync("/billing/me", options => options.Bearer(billing.AccessToken)), "a token minted for the billing client's audience is accepted");
+        t.Observe(await api.GetAsync("/billing/me", options => options.Bearer(billing.AccessToken)), "a token minted for the billing client's audience is accepted");
 
         t.Discard(await t.Api.PostJsonAsync("/__probe/auth/logout-all", new { userId = alice.Id }));
         t.Note("Every session of Alice is revoked (SqlOSAuthService.LogoutAllAsync).");
-        t.ObserveResource(await api.GetAsync("/resource-api/me", options => options.Bearer(portal.AccessToken)), "the JWKS-validated API still accepts the unexpired token: revoke-at-exp");
+        t.Observe(await api.GetAsync("/resource-api/me", options => options.Bearer(portal.AccessToken)), "the JWKS-validated API still accepts the unexpired token: revoke-at-exp");
         t.Observe(await api.GetAsync("/billing/me", options => options.Bearer(billing.AccessToken)), "the same-process scheme looks the session up and rejects the revoked token");
 
         await t.ApproveAsync();

@@ -6,7 +6,7 @@ using SqlOS.BehaviorLock.Host.Diagnostics;
 using SqlOS.BehaviorLock.Host.Fakes;
 using SqlOS.BehaviorLock.Host.Profiles;
 using SqlOS.BehaviorLock.Infrastructure.Database;
-using SqlOS.Configuration;
+using SqlOS.BehaviorLock.Infrastructure.Transcripts;
 
 namespace SqlOS.BehaviorLock.Infrastructure.Hosting;
 
@@ -43,14 +43,12 @@ public sealed class ScenarioHost : IAsyncDisposable
 
     public static async Task<ScenarioHost> StartAsync(
         string profile,
-        Action<SqlOSOptions>? configureSqlOS = null,
-        Action<IServiceCollection>? configureServices = null,
-        string? existingConnectionString = null,
-        string? dataProtectionKeysDirectory = null,
+        ScenarioOptions? options = null,
         CancellationToken cancellationToken = default)
     {
+        options ??= new ScenarioOptions();
         var hostProfile = HostProfiles.Get(profile);
-        var connectionString = existingConnectionString
+        var connectionString = options.ExistingDatabase
             ?? await BehaviorLockDatabase.CreateDatabaseAsync(profile, cancellationToken);
         WebApplication? app = null;
         try
@@ -60,12 +58,13 @@ public sealed class ScenarioHost : IAsyncDisposable
                 Profile = profile,
                 Provider = BehaviorLockDatabase.Provider,
                 ConnectionString = connectionString,
-                ConfigureSqlOS = configureSqlOS,
-                ConfigureServices = configureServices,
-                DataProtectionKeysDirectory = dataProtectionKeysDirectory
+                ConfigureSqlOS = options.ConfigureSqlOS,
+                ConfigureServices = options.ConfigureServices,
+                DataProtectionKeysDirectory = options.DataProtectionKeysDirectory,
+                AnswerUnhandledExceptionsAsServerErrors = options.AnswerUnhandledExceptionsAsServerErrors
             });
             await app.StartAsync(cancellationToken);
-            return new ScenarioHost(hostProfile, app, connectionString, ownsDatabase: existingConnectionString == null);
+            return new ScenarioHost(hostProfile, app, connectionString, ownsDatabase: options.ExistingDatabase == null);
         }
         catch
         {
@@ -74,7 +73,7 @@ public sealed class ScenarioHost : IAsyncDisposable
                 await app.DisposeAsync();
             }
 
-            if (existingConnectionString == null)
+            if (options.ExistingDatabase == null)
             {
                 await BehaviorLockDatabase.DropDatabaseAsync(connectionString, CancellationToken.None);
             }

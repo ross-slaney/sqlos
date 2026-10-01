@@ -201,7 +201,7 @@ public sealed class TokenEndpointScenarios
         var rotated = t.ObserveTokens(await client.PostFormAsync("/sqlos/auth/token", Refresh(appClient, session.RefreshToken)), "rotate the refresh token");
         await t.ObserveWithAuditAsync(await client.PostFormAsync("/sqlos/auth/token", Refresh(appClient, session.RefreshToken)), "replay the rotated one: reuse detected");
         await t.ObserveWithAuditAsync(await client.PostFormAsync("/sqlos/auth/token", Refresh(appClient, rotated.JsonString("refresh_token"))), "the legitimate successor dies with the family");
-        t.ObserveResource(
+        t.Observe(
             await client.GetAsync("/api/me", options => options.Bearer(rotated.JsonString("access_token"))),
             "and so does the successor's unexpired access token");
 
@@ -280,7 +280,7 @@ public sealed class TokenEndpointScenarios
             "a public client asking for client_credentials");
 
         var token = issued.JsonString("access_token");
-        t.ObserveResource(await worker.GetAsync("/resource-api/me", options => options.Bearer(token)), "the separate resource API accepts the machine token");
+        t.Observe(await worker.GetAsync("/resource-api/me", options => options.Bearer(token)), "the separate resource API accepts the machine token");
         t.Observe(await worker.GetAsync("/sqlos/auth/userinfo", options => options.Bearer(token)), "UserInfo has no user for a machine token");
 
         await t.ApproveAsync();

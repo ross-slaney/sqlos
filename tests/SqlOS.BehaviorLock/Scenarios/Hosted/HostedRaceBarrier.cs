@@ -47,33 +47,20 @@ internal sealed class HostedRaceBarrier : DbCommandInterceptor
 
     /// <summary>
     /// Posts <paramref name="forms"/> all at once from the transcript's browser: the first through
-    /// the browser actor (so the scenario can observe it), the rest as other tabs of the same
-    /// browser (same cookies and origin) through a plain client, whose status codes are returned.
-    /// The transcript records exchanges one at a time, so only one of the concurrent requests goes
-    /// through it.
+    /// the browser itself (so the scenario can observe it), the rest from other tabs of the same
+    /// browser (<see cref="HttpActor.Tab"/>: the same cookies and origin), whose exchanges are
+    /// discarded and whose status codes are returned. Every tab copies the cookies before any
+    /// request runs, because the shown request may update the browser's own.
     /// </summary>
     public static async Task<(HttpExchange Shown, IReadOnlyList<int> OtherStatuses)> PostTogetherAsync(
         Transcript t,
         IReadOnlyList<HtmlForm> forms)
     {
-        using var tabs = t.Host.CreateClient();
-        // Read the browser's cookies before any request runs; the shown request may update them.
-        var cookies = forms
-            .Select(form => t.Browser.Cookies!.GetCookieHeader(new Uri(new Uri(BehaviorLockConstants.PublicOrigin), form.Action)))
-            .ToList();
-        var others = forms.Skip(1).Select((form, index) => PostFromAnotherTabAsync(tabs, form, cookies[index + 1])).ToList();
+        var tabs = forms.Skip(1).Select((_, index) => t.Browser.Tab($"tab-{index + 2}")).ToList();
+        var others = forms.Skip(1).Select((form, index) => tabs[index].SubmitAsync(form)).ToList();
         var shown = t.SubmitAsync(forms[0]);
-        await Task.WhenAll(others.Cast<Task>().Append(shown));
-        return (await shown, others.Select(task => task.Result).ToList());
-    }
-
-    private static async Task<int> PostFromAnotherTabAsync(HttpClient tabs, HtmlForm form, string cookies)
-    {
-        using var request = new HttpRequestMessage(HttpMethod.Post, form.Action) { Content = new FormUrlEncodedContent(form.Fields) };
-        request.Headers.TryAddWithoutValidation("Origin", BehaviorLockConstants.PublicOrigin);
-        request.Headers.TryAddWithoutValidation("Cookie", cookies);
-        using var response = await tabs.SendAsync(request);
-        return (int)response.StatusCode;
+        await Task.WhenAll(others.Append(shown));
+        return (await shown, others.Select(other => t.Discard(other.Result).StatusCode).ToList());
     }
 
     /// <summary>Adds the barrier to the host's SqlOS <see cref="DbContext"/> (a scenario option).</summary>

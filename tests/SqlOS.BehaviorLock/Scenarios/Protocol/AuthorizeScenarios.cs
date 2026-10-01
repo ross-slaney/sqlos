@@ -309,7 +309,7 @@ public sealed class AuthorizeScenarios
         await t.ObserveWithAuditAsync(
             await t.Api.PostFormAsync("/sqlos/auth/token", Refresh(AtlasClients.Portal, session.RefreshToken)),
             "its refresh token");
-        t.ObserveResource(
+        t.Observe(
             await t.Api.GetAsync("/resource-api/me", options => options.Bearer(session.AccessToken)),
             "the separate resource API still accepts its unexpired access token");
 

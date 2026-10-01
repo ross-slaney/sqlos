@@ -112,7 +112,7 @@ public sealed class HeadlessPasswordScenarios
         await using var t = await Transcript.StartAsync(HostProfiles.Headless);
         var alice = await t.Setup.CreateUserAsync("alice");
         var requestId = await OpenAuthorizeAsync(t, t.Urls.Authorize());
-        var seen = await AuditEventIdsAsync(t);
+        await t.SkipAuditAsync();
 
         for (var attempt = 1; attempt <= 5; attempt++)
         {
@@ -125,7 +125,8 @@ public sealed class HeadlessPasswordScenarios
             await t.PostJsonAsync($"{Api}/password/login", new { requestId, email = alice.Email, password = alice.Password }),
             "the right password while the account is locked: the same generic error");
 
-        await ObserveAuditSortedAsync(t, seen, "failure and lockout events");
+        // SqlOS writes one lock event per locked bucket in database order (see AuditOrder.Content).
+        await t.ObserveAuditAsync("failure and lockout events", AuditOrder.Content);
         await t.ApproveAsync();
     }
 

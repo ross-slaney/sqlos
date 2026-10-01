@@ -89,12 +89,10 @@ public sealed class PublicPasswordLoginScenarios
         }
 
         await t.ObserveAuditAsync("four failures");
-        await t.ObserveAuditInContentOrderAsync(
-            async () => t.Observe(
-                await t.Api.PostJsonAsync("/sqlos/auth/password/login", new { email = alice.Email, password = "Wrong-Password-5!", clientId = BehaviorLockConstants.AppClientId }),
-                "wrong password, attempt 5: the email and user buckets lock"),
-            "the fifth failure and one lock event per locked bucket",
-            "lockedScopes");
+        t.Observe(
+            await t.Api.PostJsonAsync("/sqlos/auth/password/login", new { email = alice.Email, password = "Wrong-Password-5!", clientId = BehaviorLockConstants.AppClientId }),
+            "wrong password, attempt 5: the email and user buckets lock");
+        await t.ObserveAuditAsync("the fifth failure and one lock event per locked bucket", AuditOrder.Content);
 
         t.Observe(
             await t.Api.PostJsonAsync("/sqlos/auth/password/login", new { email = alice.Email, password = alice.Password, clientId = BehaviorLockConstants.AppClientId }),

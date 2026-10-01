@@ -38,7 +38,7 @@ public sealed partial class HostedUpstreamRedirectScenarios
     [Covers("GET /sqlos/auth/login/oidc/{connectionId}")]
     public async Task Unknown_connections_and_requests_are_unhandled_errors()
     {
-        await using var t = await Transcript.StartAsync(HostProfiles.Hosted, HostedFlows.AnswerUnhandledExceptionsLikeKestrel);
+        await using var t = await Transcript.StartAsync(HostProfiles.Hosted, options => options.AnswerUnhandledExceptionsAsServerErrors = true);
         var begun = await HostedFlows.BeginAsync(t);
         var google = ProviderLink(begun.Page, "Google");
 

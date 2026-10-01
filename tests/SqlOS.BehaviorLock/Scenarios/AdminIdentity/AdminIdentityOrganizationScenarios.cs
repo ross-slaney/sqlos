@@ -21,14 +21,14 @@ public sealed class AdminIdentityOrganizationScenarios
     [Covers("GET /sqlos/admin/auth/api/organizations/{organizationId}")]
     public async Task Operator_creates_organizations_with_derived_and_explicit_slugs_and_domains()
     {
-        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback, AdminIdentity.AnswerUnhandledExceptionsAsServerErrors);
+        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback, options => options.AnswerUnhandledExceptionsAsServerErrors = true);
         var organizations = AdminIdentity.Api + "/organizations";
 
         var acme = t.Observe(await t.Operator.PostJsonAsync(organizations, new { name = "Acme" }), "the slug is derived from the name");
         var second = t.Observe(
             await t.Operator.PostJsonAsync(organizations, new { name = "Acme Second", slug = "ACME" }),
             "a slug already in use gets a random eight-character suffix");
-        AdminIdentity.ScrubSlugSuffix(t, second.JsonString("slug"), "acme");
+        t.ScrubSlugSuffix(second.JsonString("slug"), "acme");
         t.Observe(
             await t.Operator.PostJsonAsync(organizations, new { name = "Globex", slug = "  Globex Industries!  ", primaryDomain = "  Globex.EXAMPLE.test. " }),
             "an explicit slug is slugified and the primary domain trimmed and lower-cased");
@@ -69,7 +69,7 @@ public sealed class AdminIdentityOrganizationScenarios
     [Covers("GET /sqlos/admin/auth/api/organizations/{organizationId}")]
     public async Task Operator_renames_moves_and_deactivates_an_organization()
     {
-        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback, AdminIdentity.AnswerUnhandledExceptionsAsServerErrors);
+        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback, options => options.AnswerUnhandledExceptionsAsServerErrors = true);
         var acme = await t.Setup.CreateOrganizationAsync("acme");
         var globex = await t.Setup.CreateOrganizationAsync("globex");
         var target = $"{AdminIdentity.Api}/organizations/{acme.Id}";
@@ -80,7 +80,7 @@ public sealed class AdminIdentityOrganizationScenarios
         var moved = t.Observe(
             await t.Operator.PutJsonAsync(target, new { name = "Acme", slug = globex.Slug }),
             "moving onto another organization's slug gets a random suffix");
-        AdminIdentity.ScrubSlugSuffix(t, moved.JsonString("slug"), globex.Slug);
+        t.ScrubSlugSuffix(moved.JsonString("slug"), globex.Slug);
         t.Observe(
             await t.Operator.PutJsonAsync(target, new { name = "Acme", slug = "acme", primaryDomain = "Acme.Example.Test" }),
             "set a slug and a primary domain");
@@ -123,7 +123,7 @@ public sealed class AdminIdentityOrganizationScenarios
     [Covers("POST /sqlos/auth/password/login")]
     public async Task Deactivating_an_organization_ends_its_members_sessions_until_it_is_reactivated()
     {
-        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback, AdminIdentity.AnswerUnhandledExceptionsAsServerErrors);
+        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback, options => options.AnswerUnhandledExceptionsAsServerErrors = true);
         var alice = await t.Setup.CreateUserAsync("alice");
         var bob = await t.Setup.CreateUserAsync("bob");
         var acme = await t.Setup.CreateOrganizationAsync("acme");
@@ -165,7 +165,7 @@ public sealed class AdminIdentityOrganizationScenarios
     [Covers("POST /__probe/auth/validate")]
     public async Task Deactivating_an_organization_misses_a_session_refreshed_into_it_CurrentBehavior_KnownDefect_427()
     {
-        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback, AdminIdentity.AnswerUnhandledExceptionsAsServerErrors);
+        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback, options => options.AnswerUnhandledExceptionsAsServerErrors = true);
         var alice = await t.Setup.CreateUserAsync("alice");
         var acme = await t.Setup.CreateOrganizationAsync("acme");
         var globex = await t.Setup.CreateOrganizationAsync("globex");

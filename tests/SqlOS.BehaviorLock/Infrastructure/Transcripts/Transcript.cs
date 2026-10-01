@@ -26,21 +26,27 @@ namespace SqlOS.BehaviorLock.Infrastructure.Transcripts;
 /// (<see cref="Discard"/>); outbound effects are attributed to the exchange that caused them;
 /// <see cref="ApproveAsync"/> scrubs the rendered transcript and compares it with the approved
 /// file next to the scenario.
+/// <para>
+/// Actors may send requests concurrently (a race scenario starts several and awaits them with
+/// <see cref="Task.WhenAll(IEnumerable{Task})"/>): capturing, scrubber registrations, and the
+/// effect log are thread-safe. The transcript records exchanges in the order the scenario
+/// observes them, never in the order they completed, so observe concurrent results in a fixed
+/// order (the order of the <c>Task.WhenAll</c> results).
+/// </para>
 /// </summary>
 public sealed class Transcript : IAsyncDisposable
 {
+    private readonly object _gate = new();
     private readonly List<TranscriptEntry> _entries = [];
     private readonly List<HttpExchange> _pending = [];
     private readonly HashSet<string> _seenAuditEvents = new(StringComparer.Ordinal);
-    private readonly ScenarioOptions _options;
     private int _exchangeNumber;
     private long _effectsWatermark;
 
-    private Transcript(ScenarioContext scenario, ScenarioHost host, ScenarioOptions options)
+    private Transcript(ScenarioContext scenario, ScenarioHost host)
     {
         Scenario = scenario;
         Host = host;
-        _options = options;
         Client = host.CreateClient();
         Scrubber = new Scrubber();
         Browser = new HttpActor(this, "browser", isBrowser: true);
@@ -92,13 +98,8 @@ public sealed class Transcript : IAsyncDisposable
             ?? throw new InvalidOperationException("Transcript.StartAsync must run inside a [Scenario] test method.");
         var options = new ScenarioOptions();
         configure?.Invoke(options);
-        var host = await ScenarioHost.StartAsync(
-            profile,
-            options.ConfigureSqlOS,
-            options.ConfigureServices,
-            options.ExistingDatabase,
-            options.DataProtectionKeysDirectory);
-        var transcript = new Transcript(scenario, host, options);
+        var host = await ScenarioHost.StartAsync(profile, options);
+        var transcript = new Transcript(scenario, host);
         try
         {
             await transcript.InitializeAsync();
@@ -136,37 +137,48 @@ public sealed class Transcript : IAsyncDisposable
     public HttpExchange Observe(HttpExchange exchange, string? caption = null)
     {
         ArgumentNullException.ThrowIfNull(exchange);
-        if (!_pending.Remove(exchange))
+        lock (_gate)
         {
-            throw new InvalidOperationException($"Exchange {exchange.Describe()} was already observed or discarded.");
+            if (!_pending.Remove(exchange))
+            {
+                throw new InvalidOperationException($"Exchange {exchange.Describe()} was already observed or discarded.");
+            }
+
+            _entries.Add(TranscriptEntry.ForExchange(exchange, caption));
         }
 
-        _entries.Add(TranscriptEntry.ForExchange(exchange, caption));
         return exchange;
     }
 
     /// <summary>Marks an exchange as deliberately unrecorded (a precondition, not part of the locked behavior).</summary>
     public HttpExchange Discard(HttpExchange exchange)
     {
-        _pending.Remove(exchange);
+        lock (_gate)
+        {
+            _pending.Remove(exchange);
+        }
+
         return exchange;
     }
 
     /// <summary>Adds a free-form line to the transcript, for context a reviewer needs.</summary>
-    public void Note(string text) => _entries.Add(TranscriptEntry.ForNote(text));
+    public void Note(string text) => Add(TranscriptEntry.ForNote(text));
 
     /// <summary>
     /// Records a document the journey decoded, such as the SAML AuthnRequest SqlOS sent to an
     /// identity provider. XML is pretty-printed; everything is scrubbed like the rest of the transcript.
     /// </summary>
     public void ObserveDocument(string caption, string content)
-        => _entries.Add(TranscriptEntry.ForDocument(caption, DocumentText.Normalize(content)));
+        => Add(TranscriptEntry.ForDocument(caption, DocumentText.Normalize(content)));
 
-    /// <summary>Records the audit events written since the last audit observation, oldest first.</summary>
-    public async Task ObserveAuditAsync(string? caption = null)
+    /// <summary>
+    /// Records the audit events written since the last audit observation, oldest first, or in
+    /// content order (<see cref="AuditOrder.Content"/>) for events SqlOS writes in no defined order.
+    /// </summary>
+    public async Task ObserveAuditAsync(string? caption = null, AuditOrder order = AuditOrder.Chronological)
     {
         var events = await ReadNewAuditEventsAsync();
-        _entries.Add(TranscriptEntry.ForAudit(caption, events));
+        Add(TranscriptEntry.ForAudit(caption, events, order));
     }
 
     /// <summary>Reads and forgets the audit events written so far (setup noise).</summary>
@@ -185,9 +197,18 @@ public sealed class Transcript : IAsyncDisposable
     /// <summary>Records outbound effects that no exchange caused (for example work triggered out of band).</summary>
     public void ObserveUnattributedEffects(string caption)
     {
-        var effects = Fakes.Effects.Since(_effectsWatermark).Where(effect => effect.Exchange == null).ToList();
-        _effectsWatermark = Fakes.Effects.Sequence;
-        _entries.Add(TranscriptEntry.ForEffects(caption, effects));
+        lock (_gate)
+        {
+            // One snapshot decides both what is recorded and the new watermark, so an effect that
+            // lands while this runs is left for the next call instead of being skipped.
+            var recent = Fakes.Effects.Since(_effectsWatermark);
+            if (recent.Count > 0)
+            {
+                _effectsWatermark = recent[^1].Sequence;
+            }
+
+            _entries.Add(TranscriptEntry.ForEffects(caption, recent.Where(effect => effect.Exchange == null).ToList()));
+        }
     }
 
     /// <summary>Registers a value the scrubber cannot infer (for example a code shown only in page text).</summary>
@@ -195,6 +216,24 @@ public sealed class Transcript : IAsyncDisposable
 
     /// <summary>Registers a value under a fixed, readable placeholder: <c>{kind:name}</c>.</summary>
     public void Scrub(string value, string kind, string name) => Scrubber.RegisterNamed(value, kind, name);
+
+    /// <summary>
+    /// SqlOS resolves a slug collision by appending a hyphen and eight random hex characters (the
+    /// start of a GUID). Registers those characters after checking <paramref name="slug"/> is
+    /// <paramref name="baseSlug"/> plus exactly that suffix, so the transcript reads
+    /// <c>acme-{slug-suffix#1}</c> (or <c>{slug:acme}-{slug-suffix#1}</c> for a unique base) and a
+    /// change to the suffix's shape fails the scenario.
+    /// </summary>
+    public void ScrubSlugSuffix(string slug, string baseSlug)
+    {
+        var suffix = slug.StartsWith(baseSlug + "-", StringComparison.Ordinal) ? slug[(baseSlug.Length + 1)..] : string.Empty;
+        if (suffix.Length != 8 || !suffix.All(Uri.IsHexDigit))
+        {
+            throw new InvalidOperationException($"Expected '{baseSlug}' plus a random eight-character suffix, got '{slug}'.");
+        }
+
+        Scrubber.Register(suffix, "slug-suffix");
+    }
 
     /// <summary>Emails the fakes captured so far, oldest first.</summary>
     public IReadOnlyList<EmailEffect> Emails => Fakes.Effects.All().OfType<EmailEffect>().ToList();
@@ -216,16 +255,22 @@ public sealed class Transcript : IAsyncDisposable
     public async Task ApproveAsync()
     {
         Scenario.MarkApproved();
-        if (_pending.Count > 0)
+        List<TranscriptEntry> entries;
+        lock (_gate)
         {
-            throw new InvalidOperationException(
-                "Every exchange must be observed or discarded. Not recorded: " +
-                string.Join("; ", _pending.Select(exchange => exchange.Describe())) +
-                ". Pass it to t.Observe(...) or, for a precondition, t.Discard(...).");
+            if (_pending.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    "Every exchange must be observed or discarded. Not recorded: " +
+                    string.Join("; ", _pending.Select(exchange => exchange.Describe())) +
+                    ". Pass it to t.Observe(...) or, for a precondition, t.Discard(...).");
+            }
+
+            entries = _entries.ToList();
         }
 
-        CoverageVerification.Verify(Scenario, _entries);
-        var text = TranscriptRenderer.Render(Scenario, Profile.Name, _entries, Scrubber);
+        CoverageVerification.Verify(Scenario, entries);
+        var text = TranscriptRenderer.Render(Scenario, Profile.Name, entries, Scrubber);
         await Approvals.VerifyTranscriptAsync(Scenario, text);
     }
 
@@ -247,7 +292,10 @@ public sealed class Transcript : IAsyncDisposable
             Scrubber.Register(hit.TraceIdentifier, "trace");
         }
 
-        _pending.Add(exchange);
+        lock (_gate)
+        {
+            _pending.Add(exchange);
+        }
     }
 
     internal bool OperatorCanReadAudit => Profile.OperatorAccess != OperatorAccess.None && AuditApiIsMapped;
@@ -321,12 +369,15 @@ public sealed class Transcript : IAsyncDisposable
                 throw new InvalidOperationException($"Reading audit events failed: {page.Describe()} {page.Preview()}");
             }
 
-            foreach (var item in data)
+            lock (_gate)
             {
-                var id = item?["id"]?.GetValue<string>();
-                if (item != null && id != null && _seenAuditEvents.Add(id))
+                foreach (var item in data)
                 {
-                    fresh.Add(item.DeepClone());
+                    var id = item?["id"]?.GetValue<string>();
+                    if (item != null && id != null && _seenAuditEvents.Add(id))
+                    {
+                        fresh.Add(item.DeepClone());
+                    }
                 }
             }
 
@@ -335,6 +386,14 @@ public sealed class Transcript : IAsyncDisposable
         while (cursor != null);
 
         return AuditOrdering.Chronological(fresh);
+    }
+
+    private void Add(TranscriptEntry entry)
+    {
+        lock (_gate)
+        {
+            _entries.Add(entry);
+        }
     }
 }
 
@@ -349,6 +408,34 @@ public sealed class ScenarioOptions
     public string? ExistingDatabase { get; set; }
 
     public string? DataProtectionKeysDirectory { get; set; }
+
+    /// <summary>
+    /// Answer an exception the application leaves unhandled the way Kestrel does in production,
+    /// an empty <c>500</c>, instead of TestServer's default of rethrowing it into the scenario, and
+    /// name the exception in the harness-only <c>X-BehaviorLock-Unhandled-Exception</c> response
+    /// header. Turn it on for scenarios that lock a route's unhandled failure.
+    /// </summary>
+    public bool AnswerUnhandledExceptionsAsServerErrors { get; set; }
+}
+
+/// <summary>How an audit observation orders the events it records.</summary>
+public enum AuditOrder
+{
+    /// <summary>Oldest first: the order SqlOS wrote them. The default.</summary>
+    Chronological,
+
+    /// <summary>
+    /// By action, then by content with every per-run value masked. Only for events SqlOS writes
+    /// in no defined order, where the write order is not behavior:
+    /// <list type="bullet">
+    /// <item>A password lockout writes one <c>password.login.locked</c> (or
+    /// <c>password.login.suspicious_pattern</c>) event per bucket it locked, iterating buckets it
+    /// loaded with no <c>ORDER BY</c> (<c>SqlOSPasswordLoginAbuseService.RecordFailureAsync</c>).</item>
+    /// <item>Requests a scenario sends in parallel write their events in whatever order their
+    /// threads run, and the fake email provider numbers its messages in the order sends arrive.</item>
+    /// </list>
+    /// </summary>
+    Content
 }
 
 /// <summary>One section of a transcript.</summary>
@@ -360,9 +447,12 @@ internal sealed record TranscriptEntry(
     IReadOnlyList<OutboundEffect>? Effects,
     string? Note)
 {
+    public AuditOrder AuditOrder { get; init; }
+
     public static TranscriptEntry ForExchange(HttpExchange exchange, string? caption) => new("exchange", caption, exchange, null, null, null);
 
-    public static TranscriptEntry ForAudit(string? caption, IReadOnlyList<JsonNode> events) => new("audit", caption, null, events, null, null);
+    public static TranscriptEntry ForAudit(string? caption, IReadOnlyList<JsonNode> events, AuditOrder order)
+        => new("audit", caption, null, events, null, null) { AuditOrder = order };
 
     public static TranscriptEntry ForEffects(string caption, IReadOnlyList<OutboundEffect> effects) => new("effects", caption, null, null, effects, null);
 

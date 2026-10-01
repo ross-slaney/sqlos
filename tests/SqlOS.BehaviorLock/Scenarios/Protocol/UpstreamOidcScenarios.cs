@@ -56,7 +56,7 @@ public sealed class UpstreamOidcScenarios
         var exchanged = await t.ObserveWithAuditAsync(
             await app.PostJsonAsync("/sqlos/auth/oidc/exchange", direct.Exchange(callback.NextUrlParameter("code"))),
             "the app exchanges the code with its PKCE verifier for tokens");
-        t.ObserveResource(
+        t.Observe(
             await app.GetAsync("/api/me", options => options.Bearer(exchanged.JsonString("tokens.accessToken"))),
             "the access token opens the API");
         await t.ObserveUnhandledAsync(

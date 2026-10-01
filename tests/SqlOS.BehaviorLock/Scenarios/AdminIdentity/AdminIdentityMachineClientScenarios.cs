@@ -159,7 +159,7 @@ public sealed class AdminIdentityMachineClientScenarios
     [Covers("DELETE /sqlos/admin/auth/api/machine-clients/{clientId}/grants/{grantId}")]
     public async Task Machine_client_requests_are_validated()
     {
-        await using var t = await Transcript.StartAsync(HostProfiles.MultiApp, AdminIdentity.AnswerUnhandledExceptionsAsServerErrors);
+        await using var t = await Transcript.StartAsync(HostProfiles.MultiApp, options => options.AnswerUnhandledExceptionsAsServerErrors = true);
         var machines = AdminIdentity.Api + "/machine-clients";
         object Create(string clientId, string? displayName = "Worker", string? audience = Audience, string[]? scopes = null, string? organizationId = null, object[]? grants = null)
             => new { clientId, displayName, audience, scopes = scopes ?? [BehaviorLockAuthorization.ReadPermission], organizationId, grants = grants ?? [] };

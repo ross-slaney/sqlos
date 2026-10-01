@@ -153,12 +153,11 @@ public sealed class HostedPasswordSignInScenarios
         }
 
         await t.SkipAuditAsync();
-        var seen = await HostedFlows.AuditEventIdsAsync(t);
         t.Observe(await t.SubmitAsync(form.With("password", "Wrong-Password-5")), "the fifth wrong password locks the account");
         t.Observe(await t.SubmitAsync(form.With("password", alice.Password)), "the right password is refused while locked");
 
-        // One password.login.locked event per locked bucket, in database order; see the helper.
-        await HostedFlows.ObserveAuditSortedAsync(t, seen, "the lock (email and user buckets) and the refused attempt");
+        // One password.login.locked event per locked bucket, in database order (see AuditOrder.Content).
+        await t.ObserveAuditAsync("the lock (email and user buckets) and the refused attempt", AuditOrder.Content);
         await t.ApproveAsync();
     }
 

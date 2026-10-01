@@ -10,7 +10,10 @@ namespace SqlOS.BehaviorLock.Infrastructure.Transcripts;
 /// JSON, and sorting keeps refactors that reorder DTO properties from producing noise), arrays in
 /// the order the API returned them, two-space indentation, and minimal string escaping. While
 /// rendering it registers role-bearing values (see <see cref="ValueRoles"/>) with the scrubber and
-/// collects JWTs for decoding. Integers in the Unix-epoch range render as <c>{epoch}</c>.
+/// collects JWTs for decoding. Integers in the Unix-epoch range render as <c>{epoch}</c>, and so do
+/// the epoch claims a host echoes as <c>{ "type": "exp", "value": "1790800611" }</c> objects (ASP.NET
+/// materializes every claim value as a string); the list's lifetimes (<c>exp-iat=10m</c>) are
+/// reported to the sink so the transcript keeps them, as it does for a decoded JWT.
 /// </summary>
 public static partial class CanonicalJson
 {
@@ -33,9 +36,18 @@ public static partial class CanonicalJson
     {
         // SqlOSPasswordLoginAbuseService builds it from an EF Include with no ORDER BY.
         ["resetScopes"] = "password-login bucket scopes",
+        // SqlOSPasswordLoginAbuseService.RecordFailureAsync lists the buckets a failure locked in the
+        // order the same Include loaded them (password.login.failed audit metadata).
+        ["lockedScopes"] = "password-login bucket scopes",
         // SqlOSAdminService.GetUserOrganizationsAsync selects memberships with no ORDER BY, so rows
         // come back in (random) organization-ID order. The headless view model's organization picker.
         ["organizationSelection"] = "a user's organizations"
+    };
+
+    /// <summary>JWT claims that hold a Unix time (RFC 7519 §4.1 and OpenID Connect Core §2).</summary>
+    private static readonly HashSet<string> EpochClaims = new(StringComparer.Ordinal)
+    {
+        "iat", "nbf", "exp", "auth_time"
     };
 
     private static readonly JsonSerializerOptions StringEscaping = new()
@@ -78,13 +90,22 @@ public static partial class CanonicalJson
                     return;
                 }
 
+                var echoedEpoch = EchoedEpochClaim(element, out _);
                 builder.Append('{');
                 for (var index = 0; index < properties.Count; index++)
                 {
                     var property = properties[index];
                     builder.Append('\n').Append(' ', (indent + 1) * 2);
                     builder.Append(Quote(property.Name)).Append(": ");
-                    Write(builder, property.Value, sink, indent + 1, property.Name);
+                    if (echoedEpoch && property.Name == "value")
+                    {
+                        builder.Append(property.Value.ValueKind == JsonValueKind.String ? "\"{epoch}\"" : "{epoch}");
+                    }
+                    else
+                    {
+                        Write(builder, property.Value, sink, indent + 1, property.Name);
+                    }
+
                     if (index < properties.Count - 1)
                     {
                         builder.Append(',');
@@ -108,6 +129,7 @@ public static partial class CanonicalJson
                     items = items.OrderBy(item => GeneratedId().Replace(item.GetRawText(), "id"), StringComparer.Ordinal).ToList();
                 }
 
+                ReportClaimLifetimes(items, sink);
                 var elementKind = propertyName == null ? null : ValueRoles.ElementKindFor(propertyName);
                 builder.Append('[');
                 for (var index = 0; index < items.Count; index++)
@@ -155,6 +177,51 @@ public static partial class CanonicalJson
             default:
                 builder.Append(element.GetRawText());
                 return;
+        }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="element"/> is a claim a host echoed as <c>{ "type", "value" }</c>
+    /// whose type holds a Unix time and whose value, a string or a number, is one.
+    /// </summary>
+    private static bool EchoedEpochClaim(JsonElement element, out long seconds)
+    {
+        seconds = 0;
+        if (!element.TryGetProperty("type", out var type)
+            || type.ValueKind != JsonValueKind.String
+            || !EpochClaims.Contains(type.GetString()!)
+            || !element.TryGetProperty("value", out var value))
+        {
+            return false;
+        }
+
+        var parsed = value.ValueKind switch
+        {
+            JsonValueKind.String => long.TryParse(value.GetString(), NumberStyles.None, CultureInfo.InvariantCulture, out seconds),
+            JsonValueKind.Number => value.TryGetInt64(out seconds),
+            _ => false
+        };
+        return parsed && seconds is >= 1_000_000_000 and <= 9_999_999_999;
+    }
+
+    /// <summary>
+    /// Reports the relative lifetimes of a list of echoed claims, such as the <c>claims</c> a
+    /// resource route returns for its caller, the way a decoded JWT shows them.
+    /// </summary>
+    private static void ReportClaimLifetimes(IReadOnlyList<JsonElement> items, TranscriptValueSink sink)
+    {
+        var values = new Dictionary<string, long>(StringComparer.Ordinal);
+        foreach (var item in items)
+        {
+            if (item.ValueKind == JsonValueKind.Object && EchoedEpochClaim(item, out var seconds))
+            {
+                values.TryAdd(item.GetProperty("type").GetString()!, seconds);
+            }
+        }
+
+        if (values.Count > 0)
+        {
+            sink.AddClaimLifetimes(JwtRendering.DescribeLifetimes(values));
         }
     }
 

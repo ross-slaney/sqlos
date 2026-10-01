@@ -31,7 +31,7 @@ public sealed class DeploymentModelScenarios
         t.ObserveTokens(
             await t.Api.PostFormAsync("/sqlos/auth/token", Refresh(BehaviorLockConstants.AppClientId, tokens.JsonString("refresh_token"))),
             "and so does the refresh");
-        t.ObserveResource(await t.Api.GetAsync("/api/me", options => options.Bearer(tokens.JsonString("access_token"))), "the access token opens the API");
+        t.Observe(await t.Api.GetAsync("/api/me", options => options.Bearer(tokens.JsonString("access_token"))), "the access token opens the API");
 
         await t.ObserveAuditAsync("events");
         await t.ApproveAsync();

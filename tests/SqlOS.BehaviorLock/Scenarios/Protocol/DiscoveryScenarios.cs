@@ -52,8 +52,8 @@ public sealed class DiscoveryScenarios
 
         var after = await t.Setup.SignInWithPasswordAsync(alice, browser: t.NewBrowser("second-device"));
         t.Note("A token signed before the rotation and one signed after it: the kid in each header names the key that signed it.");
-        t.ObserveResource(await client.GetAsync("/api/me", options => options.Bearer(before.AccessToken)), "a token signed with the retiring key still validates");
-        t.ObserveResource(await client.GetAsync("/api/me", options => options.Bearer(after.AccessToken)), "a token signed with the new key validates");
+        t.Observe(await client.GetAsync("/api/me", options => options.Bearer(before.AccessToken)), "a token signed with the retiring key still validates");
+        t.Observe(await client.GetAsync("/api/me", options => options.Bearer(after.AccessToken)), "a token signed with the new key validates");
 
         await t.ObserveAuditAsync("key rotation events");
         await t.ApproveAsync();

@@ -1,9 +1,5 @@
 using System.Text;
 using System.Text.Json.Nodes;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.DependencyInjection;
 using SqlOS.BehaviorLock.Host;
 using SqlOS.BehaviorLock.Infrastructure.Fakes;
 using SqlOS.BehaviorLock.Infrastructure.Transcripts;
@@ -300,40 +296,6 @@ internal static class SamlMetadata
               </md:IDPSSODescriptor>
             </md:EntityDescriptor>
             """;
-}
-
-/// <summary>Host adjustments the enterprise scenarios need, applied through <see cref="ScenarioOptions"/>.</summary>
-internal static class EnterpriseHosting
-{
-    /// <summary>
-    /// TestServer rethrows an exception that escapes the application into the test, where Kestrel
-    /// would answer <c>500</c> with no body. This restores the server's answer for scenarios that
-    /// lock what a malformed request does today. It wraps only the application's endpoints, inside
-    /// SqlOS's own middleware, so nothing else about the pipeline changes.
-    /// </summary>
-    public static void AnswerUnhandledExceptionsLikeKestrel(ScenarioOptions options)
-        => options.ConfigureServices = services => services.AddSingleton<IStartupFilter>(new KestrelErrorResponse());
-
-    private sealed class KestrelErrorResponse : IStartupFilter
-    {
-        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
-        {
-            app.Use(async (context, nextMiddleware) =>
-            {
-                try
-                {
-                    await nextMiddleware(context);
-                }
-                catch (Exception) when (!context.Response.HasStarted)
-                {
-                    // Kestrel's answer to an unhandled exception: headers cleared, 500, empty body.
-                    context.Response.Clear();
-                    context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-                }
-            });
-            next(app);
-        };
-    }
 }
 
 /// <summary>Starts SAML sign-ins the way a browser does, through home realm discovery on the hosted page.</summary>

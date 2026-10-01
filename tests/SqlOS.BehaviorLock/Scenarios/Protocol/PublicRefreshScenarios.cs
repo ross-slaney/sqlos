@@ -110,7 +110,7 @@ public sealed class PublicRefreshScenarios
         var toGlobex = t.ObserveTokens(
             await backend.PostJsonAsync("/sqlos/auth/token/refresh", new { refreshToken = session.RefreshToken, organizationId = globex.Id }),
             "refresh into Globex, where Alice is an admin");
-        t.ObserveResource(
+        t.Observe(
             await backend.GetAsync("/api/me", options => options.Bearer(toGlobex.JsonString("accessToken"))),
             "the API sees Globex");
         var back = t.ObserveTokens(
@@ -143,7 +143,7 @@ public sealed class PublicRefreshScenarios
         t.Observe(
             await t.Operator.PostJsonAsync("/sqlos/admin/auth/api/sessions/revocation", new { organizationId = globex.Id, reason = "tenant incident", confirm = true, expectedMatchedSessions = 0 }),
             "confirming it finds nothing to revoke");
-        t.ObserveResource(
+        t.Observe(
             await backend.GetAsync("/api/me", options => options.Bearer(toGlobex.JsonString("accessToken"))),
             "known defect #427: the Globex access token still opens the API");
         t.ObserveTokens(

@@ -14,8 +14,8 @@ namespace SqlOS.BehaviorLock.Scenarios.Public;
 /// <see cref="SqlCommandBarrier"/> to hold every request's write until all six have done their
 /// reads, which is the interleaving an attacker gets by sending them together; without it the
 /// outcome would depend on timing. The parallel step's audit events are recorded in content order,
-/// because parallel requests write them in whatever order their threads run. When the limits
-/// become atomic, these approvals change.
+/// because parallel requests write them in whatever order their threads run
+/// (<see cref="AuditOrder.Content"/>). When the limits become atomic, these approvals change.
 /// </summary>
 [TestClass]
 public sealed class PublicRaceScenarios
@@ -100,25 +100,26 @@ public sealed class PublicRaceScenarios
         await t.ApproveAsync();
     }
 
-    /// <summary>Sends <see cref="Parallel"/> requests together through the armed barrier and observes them in order.</summary>
-    private static Task SendInParallelAsync(
+    /// <summary>
+    /// Sends <see cref="Parallel"/> requests together through the armed barrier, observes them in
+    /// the order they were listed, and records the audit events they wrote in content order: the
+    /// requests write them in whatever order their threads run.
+    /// </summary>
+    private static async Task SendInParallelAsync(
         Transcript t,
         SqlCommandBarrier barrier,
         Func<int, Task<HttpExchange>> request,
         Func<string, string> caption,
         string auditCaption)
-        => t.ObserveAuditInContentOrderAsync(
-            async () =>
-            {
-                barrier.Arm();
-                var exchanges = await ParallelRequests.SendAsync(Enumerable.Range(1, Parallel)
-                    .Select(number => (Func<Task<HttpExchange>>)(() => request(number)))
-                    .ToList());
-                barrier.Disarm();
-                for (var index = 0; index < exchanges.Count; index++)
-                {
-                    t.Observe(exchanges[index], caption($"{(index + 1).ToString(CultureInfo.InvariantCulture)} of {Parallel.ToString(CultureInfo.InvariantCulture)}"));
-                }
-            },
-            auditCaption);
+    {
+        barrier.Arm();
+        var exchanges = await Task.WhenAll(Enumerable.Range(1, Parallel).Select(request));
+        barrier.Disarm();
+        for (var index = 0; index < exchanges.Length; index++)
+        {
+            t.Observe(exchanges[index], caption($"{(index + 1).ToString(CultureInfo.InvariantCulture)} of {Parallel.ToString(CultureInfo.InvariantCulture)}"));
+        }
+
+        await t.ObserveAuditAsync(auditCaption, AuditOrder.Content);
+    }
 }

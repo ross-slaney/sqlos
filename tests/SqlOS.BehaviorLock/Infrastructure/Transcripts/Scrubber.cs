@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Net;
-using System.Text;
 using System.Text.RegularExpressions;
 
 namespace SqlOS.BehaviorLock.Infrastructure.Transcripts;
@@ -24,12 +23,18 @@ namespace SqlOS.BehaviorLock.Infrastructure.Transcripts;
 /// </list>
 /// Timestamps are scrubbed by format class rather than value, so a change of format stays visible:
 /// <c>{datetime:utc-z}</c> (ISO 8601 with <c>Z</c>), <c>{datetime:offset}</c> (ISO 8601 with a
-/// numeric offset), <c>{datetime:unspecified}</c> (ISO 8601 without a zone), and
-/// <c>{datetime:rfc1123}</c>; date-only values become <c>{date}</c>. Existing <c>{…}</c>
-/// placeholders are never rescrubbed.
+/// numeric offset), <c>{datetime:unspecified}</c> (ISO 8601 without a zone), each with
+/// <c>,url-encoded</c> when it appears percent-encoded in a URL (<c>2026-09-30T18%3A02%3A05Z</c>),
+/// <c>{datetime:rfc1123}</c>, and <c>{datetime:MM/dd/yyyy_HH:mm}</c> (the invariant-culture
+/// "g" format hosted pages print, such as "Expires 10/07/2026 20:52 UTC."); date-only values become
+/// <c>{date}</c>. Existing <c>{…}</c> placeholders are never rescrubbed.
+/// <para>
+/// It is thread-safe: actors that send requests concurrently register values from several threads.
+/// </para>
 /// </summary>
 public sealed partial class Scrubber
 {
+    private readonly object _gate = new();
     private readonly Dictionary<string, Registration> _registrations = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _placeholders = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _counters = new(StringComparer.Ordinal);
@@ -47,7 +52,13 @@ public sealed partial class Scrubber
     }
 
     /// <summary>Whether <paramref name="value"/> has been registered.</summary>
-    public bool IsRegistered(string value) => _registrations.ContainsKey(value);
+    public bool IsRegistered(string value)
+    {
+        lock (_gate)
+        {
+            return _registrations.ContainsKey(value);
+        }
+    }
 
     /// <summary>
     /// Scrubs <paramref name="text"/> in one left-to-right pass. Placeholder numbering continues
@@ -56,16 +67,43 @@ public sealed partial class Scrubber
     public string Scrub(string text)
     {
         ArgumentNullException.ThrowIfNull(text);
-        var registered = _registeredPattern ??= BuildRegisteredPattern();
-        var afterRegistered = registered == null
-            ? text
-            : registered.Replace(text, match => Placeholder(_registrations[match.Value]));
-        return DetectedPattern().Replace(afterRegistered, ReplaceDetected);
+        lock (_gate)
+        {
+            var registered = _registeredPattern ??= BuildRegisteredPattern();
+            var afterRegistered = registered == null
+                ? text
+                : registered.Replace(text, match => Placeholder(_registrations[match.Value]));
+            return DetectedPattern().Replace(afterRegistered, ReplaceDetected);
+        }
+    }
+
+    /// <summary>
+    /// <paramref name="text"/> with every per-run value replaced by its kind, unnumbered:
+    /// <c>{usr}</c>, <c>{code}</c>, <c>{email:alice}</c>, <c>{datetime:utc-z}</c>. It allocates no
+    /// placeholders, so callers can compare content (to order records that have no defined order)
+    /// without changing how the transcript is numbered.
+    /// </summary>
+    public string Mask(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        lock (_gate)
+        {
+            var registered = _registeredPattern ??= BuildRegisteredPattern();
+            var afterRegistered = registered == null
+                ? text
+                : registered.Replace(text, match => MaskOf(_registrations[match.Value]));
+            return DetectedPattern().Replace(afterRegistered, match => Detect(match, MaskOf));
+        }
     }
 
     /// <summary>The placeholder a value maps to, allocating one if needed.</summary>
     public string PlaceholderFor(string value, string kind)
-        => Placeholder(new Registration(value, kind, Name: null));
+    {
+        lock (_gate)
+        {
+            return Placeholder(new Registration(value, kind, Name: null));
+        }
+    }
 
     private void RegisterCore(string? value, string kind, string? name)
     {
@@ -77,12 +115,15 @@ public sealed partial class Scrubber
 
         var registration = new Registration(value, kind, name);
         var canonical = JwtRendering.LooksLikeJwt(value) ? JwtRendering.Identity(value) : value;
-        foreach (var variant in Variants(value))
+        lock (_gate)
         {
-            // First registration wins: a value keeps the role it was first seen in.
-            if (_registrations.TryAdd(variant, registration with { Canonical = canonical }))
+            foreach (var variant in Variants(value))
             {
-                _registeredPattern = null;
+                // First registration wins: a value keeps the role it was first seen in.
+                if (_registrations.TryAdd(variant, registration with { Canonical = canonical }))
+                {
+                    _registeredPattern = null;
+                }
             }
         }
     }
@@ -163,7 +204,17 @@ public sealed partial class Scrubber
         return placeholder;
     }
 
-    private string ReplaceDetected(Match match)
+    private string ReplaceDetected(Match match) => Detect(match, Placeholder);
+
+    /// <summary>A registration's kind without a number, for <see cref="Mask"/>.</summary>
+    private static string MaskOf(Registration registration)
+        => registration.Name != null ? $"{{{registration.Kind}:{registration.Name}}}" : $"{{{registration.Kind}}}";
+
+    /// <summary>
+    /// What a detected value becomes: <paramref name="replace"/> decides how a value with an
+    /// identity is written (a numbered placeholder when scrubbing, its bare kind when masking).
+    /// </summary>
+    private static string Detect(Match match, Func<Registration, string> replace)
     {
         if (match.Groups["placeholder"].Success)
         {
@@ -172,33 +223,40 @@ public sealed partial class Scrubber
 
         if (match.Groups["jwt"].Success)
         {
-            return Placeholder(new Registration(match.Value, "jwt", null) { Canonical = JwtRendering.Identity(match.Value) });
+            return replace(new Registration(match.Value, "jwt", null) { Canonical = JwtRendering.Identity(match.Value) });
         }
 
         if (match.Groups["sqlosid"].Success)
         {
-            return Placeholder(new Registration(match.Value, match.Groups["prefix"].Value, null));
+            return replace(new Registration(match.Value, match.Groups["prefix"].Value, null));
         }
 
         if (match.Groups["guid"].Success)
         {
-            return Placeholder(new Registration(match.Value, "guid", null));
+            return replace(new Registration(match.Value, "guid", null));
         }
 
         if (match.Groups["isodate"].Success)
         {
-            var zone = match.Groups["zone"].Value;
-            return zone switch
-            {
-                "" => "{datetime:unspecified}",
-                "Z" or "z" => "{datetime:utc-z}",
-                _ => "{datetime:offset}"
-            };
+            return $"{{datetime:{ZoneClass(match.Groups["zone"].Value)}}}";
+        }
+
+        if (match.Groups["encodeddate"].Success)
+        {
+            // A timestamp in a query string, such as a calendar sync window. The class keeps the
+            // zone and says it was percent-encoded, so a change of either still shows.
+            return $"{{datetime:{ZoneClass(match.Groups["encodedzone"].Value)},url-encoded}}";
         }
 
         if (match.Groups["rfc1123"].Success)
         {
             return "{datetime:rfc1123}";
+        }
+
+        if (match.Groups["clocktext"].Success)
+        {
+            // The invariant-culture "g" format (MM/dd/yyyy HH:mm) hosted pages print an expiry in.
+            return "{datetime:MM/dd/yyyy_HH:mm}";
         }
 
         if (match.Groups["date"].Success)
@@ -210,25 +268,34 @@ public sealed partial class Scrubber
         {
             // A readable identifier with a random suffix, such as a derived cookie name:
             // keep the words, scrub the suffix.
-            return match.Groups["words"].Value + Placeholder(new Registration(match.Groups["suffix"].Value, "hex", null));
+            return match.Groups["words"].Value + replace(new Registration(match.Groups["suffix"].Value, "hex", null));
         }
 
         if (match.Groups["hex"].Success)
         {
             return IsHighEntropyHex(match.Value)
-                ? Placeholder(new Registration(match.Value, "hex", null))
+                ? replace(new Registration(match.Value, "hex", null))
                 : match.Value;
         }
 
         if (match.Groups["token"].Success)
         {
             return IsHighEntropyToken(match.Value)
-                ? Placeholder(new Registration(match.Value, "token", null))
+                ? replace(new Registration(match.Value, "token", null))
                 : match.Value;
         }
 
         return match.Value;
     }
+
+    /// <summary>The format class of an ISO 8601 zone designator, plain or percent-encoded.</summary>
+    private static string ZoneClass(string zone)
+        => zone switch
+        {
+            "" => "unspecified",
+            "Z" or "z" => "utc-z",
+            _ => "offset"
+        };
 
     private static bool IsHighEntropyHex(string value)
         => value.Any(char.IsDigit) && value.Any(character => character is >= 'a' and <= 'f' or >= 'A' and <= 'F');
@@ -275,7 +342,9 @@ public sealed partial class Scrubber
         |(?<sqlosid>\b(?<prefix>[a-z][a-z0-9]{0,11})_[0-9a-f]{16,32}\b)
         |(?<guid>\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b)
         |(?<isodate>\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?<zone>Z|z|[+\-]\d{2}:?\d{2})?(?![\d:.]))
+        |(?<encodeddate>\b\d{4}-\d{2}-\d{2}(?:T|%20|\+)\d{2}%3[Aa]\d{2}(?:%3[Aa]\d{2}(?:\.\d{1,9})?)?(?<encodedzone>Z|z|(?:%2[Bb]|-)\d{2}(?:%3[Aa])?\d{2})?(?![\d.]|%3[Aa]))
         |(?<rfc1123>\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\x20\d{2}\x20(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\x20\d{4}\x20\d{2}:\d{2}:\d{2}\x20GMT\b)
+        |(?<clocktext>(?<![\d/])\d{2}/\d{2}/\d{4}\x20\d{2}:\d{2}(?![\d:]))
         |(?<date>(?<!\d)\d{4}-\d{2}-\d{2}(?![\d\-T:]))
         |(?<compound>(?<![A-Za-z0-9_\-])(?<words>(?:[a-z]+[_\-])+)(?<suffix>[0-9a-f]{16,})(?![A-Za-z0-9_\-]))
         |(?<hex>(?<![A-Za-z0-9\-])(?:[0-9a-f]{16,}|[0-9A-F]{16,})(?![A-Za-z0-9_\-]))

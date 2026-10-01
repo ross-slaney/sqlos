@@ -74,7 +74,7 @@ public sealed class HostedInvitationScenarios
         // membership, and refuses. The error page then tries to show the invitation, which the
         // change tracker still holds as accepted, and throws: Kestrel answers a bare 500. The
         // transaction rolled back, so no account exists and the invitation is still pending.
-        await using var t = await Transcript.StartAsync(HostProfiles.Hosted, HostedFlows.AnswerUnhandledExceptionsLikeKestrel);
+        await using var t = await Transcript.StartAsync(HostProfiles.Hosted, options => options.AnswerUnhandledExceptionsAsServerErrors = true);
         var acme = await t.Setup.CreateOrganizationAsync("acme");
         var email = t.Unique.Email("carol");
         var token = await HostedFlows.InviteAsync(t, acme, email);
@@ -97,7 +97,7 @@ public sealed class HostedInvitationScenarios
     {
         // The same defect through the password sign-up form the invitation page shows when email
         // codes are off.
-        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback, HostedFlows.AnswerUnhandledExceptionsLikeKestrel);
+        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback, options => options.AnswerUnhandledExceptionsAsServerErrors = true);
         var acme = await t.Setup.CreateOrganizationAsync("acme");
         var email = t.Unique.Email("carol");
         var token = await HostedFlows.InviteAsync(t, acme, email);

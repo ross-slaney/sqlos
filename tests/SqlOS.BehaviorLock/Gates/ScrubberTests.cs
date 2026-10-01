@@ -124,6 +124,123 @@ public sealed class ScrubberTests
     }
 
     [TestMethod]
+    public void Url_encoded_timestamps_are_scrubbed_by_format_class_and_keep_their_encoding_visible()
+    {
+        var scrubber = new Scrubber();
+
+        var scrubbed = scrubber.Scrub(
+            "timeMin=2026-08-31T21%3A57%3A54Z&timeMax=2026-09-30T21%3A57%3A54.1234567%2B02%3A00" +
+            "&at=2026-09-30%2018%3A00&until=2026-09-30T18%3a00%3a00-07%3a00&day=2026-09-30");
+
+        Assert.AreEqual(
+            "timeMin={datetime:utc-z,url-encoded}&timeMax={datetime:offset,url-encoded}" +
+            "&at={datetime:unspecified,url-encoded}&until={datetime:offset,url-encoded}&day={date}",
+            scrubbed);
+    }
+
+    [TestMethod]
+    public void Clock_text_hosted_pages_print_is_scrubbed_by_format_class()
+    {
+        var scrubber = new Scrubber();
+
+        Assert.AreEqual(
+            "Expires {datetime:MM/dd/yyyy_HH:mm} UTC. Code 12/34 and 1/2/2026 stay.",
+            scrubber.Scrub("Expires 10/07/2026 20:52 UTC. Code 12/34 and 1/2/2026 stay."));
+    }
+
+    [TestMethod]
+    public void Links_in_email_text_do_not_swallow_the_sentence_punctuation_after_them()
+    {
+        var sink = new TranscriptValueSink(new Scrubber());
+        const string text = "Reset it: https://sqlos.example.test/sqlos/auth/password/reset?token=Qx7vB2nM9kL4pR8s. This link expires in 1 hour(s)!";
+        const string html = """<a href="https://sqlos.example.test/sqlos/auth/password/reset?token=Qx7vB2nM9kL4pR8s">Reset</a>""";
+
+        var rendered = string.Join('\n', TranscriptRenderer.RenderBody("text/plain", text, sink, isRequest: false))
+                       + '\n' + HtmlCanonicalizer.Render(html, sink);
+        var scrubbed = sink.Scrubber.Scrub(rendered);
+
+        StringAssert.Contains(scrubbed, "reset?token={link-token#1}. This link");
+        StringAssert.Contains(scrubbed, "href=\"https://sqlos.example.test/sqlos/auth/password/reset?token={link-token#1}\"");
+        Assert.IsFalse(scrubbed.Contains("{link-token#2}", StringComparison.Ordinal), "The text and the HTML link carry one token.\n" + scrubbed);
+    }
+
+    [TestMethod]
+    public void Urls_printed_as_page_text_do_not_swallow_the_sentence_punctuation_after_them()
+    {
+        var sink = new TranscriptValueSink(new Scrubber());
+
+        var rendered = HtmlCanonicalizer.Render(
+            "<html><body><p>Open https://sqlos.example.test/sqlos/auth/invitations/accept?token=Zr4kP9wQ2mX7vN3b, then sign in.</p></body></html>",
+            sink);
+
+        StringAssert.Contains(sink.Scrubber.Scrub(rendered), "accept?token={link-token#1}, then sign in.");
+    }
+
+    [TestMethod]
+    public void Epoch_claims_a_host_echoes_as_strings_or_numbers_render_as_epoch_and_keep_their_lifetimes()
+    {
+        var sink = new TranscriptValueSink(new Scrubber());
+        using var document = JsonDocument.Parse(
+            """
+            {"claims":[
+              {"type":"amr","value":"password"},
+              {"type":"exp","value":"1790000600"},
+              {"type":"iat","value":"1790000000"},
+              {"type":"nbf","value":1790000000},
+              {"type":"auth_time","value":"1789999990"},
+              {"type":"sub","value":"1790000000"}
+            ]}
+            """);
+
+        var rendered = CanonicalJson.Render(document.RootElement, sink);
+
+        StringAssert.Contains(rendered, "\"type\": \"exp\",\n      \"value\": \"{epoch}\"");
+        StringAssert.Contains(rendered, "\"type\": \"iat\",\n      \"value\": \"{epoch}\"");
+        StringAssert.Contains(rendered, "\"type\": \"nbf\",\n      \"value\": {epoch}");
+        StringAssert.Contains(rendered, "\"type\": \"auth_time\",\n      \"value\": \"{epoch}\"");
+        StringAssert.Contains(rendered, "\"type\": \"sub\",\n      \"value\": \"1790000000\"", "Only claims that hold a time are clock readings.");
+        CollectionAssert.AreEqual(new[] { "exp-iat=10m exp-nbf=10m nbf-iat=0s" }, sink.DrainClaimLifetimes().ToArray());
+    }
+
+    [TestMethod]
+    public void A_redaction_marker_under_a_password_field_is_not_a_password()
+    {
+        var scrubber = new Scrubber();
+        var sink = new TranscriptValueSink(scrubber);
+
+        sink.RegisterRole("password", "[redacted]");
+        sink.RegisterRole("password", "Lock-Alice-2468!");
+
+        Assert.AreEqual(
+            "\"password\": \"[redacted]\", \"api_key\": \"[redacted]\", typed {password#1}",
+            scrubber.Scrub("\"password\": \"[redacted]\", \"api_key\": \"[redacted]\", typed Lock-Alice-2468!"));
+    }
+
+    [TestMethod]
+    public void Masking_hides_per_run_values_without_numbering_them()
+    {
+        var scrubber = new Scrubber();
+        scrubber.Register("Kd8sLp2QwE5rT7yU", "code");
+        scrubber.RegisterNamed("alice-1a2b3c4d@example.test", "email", "alice");
+        const string text = "usr_765489504f5d455186cf1e01 code=Kd8sLp2QwE5rT7yU to alice-1a2b3c4d@example.test at 2026-09-30T18:02:05Z";
+
+        Assert.AreEqual("{usr} code={code} to {email:alice} at {datetime:utc-z}", scrubber.Mask(text));
+        Assert.AreEqual("{usr#1} code={code#1} to {email:alice} at {datetime:utc-z}", scrubber.Scrub(text), "Masking allocated no placeholders.");
+    }
+
+    [TestMethod]
+    public void Values_registered_from_parallel_requests_are_all_scrubbed()
+    {
+        var scrubber = new Scrubber();
+        var values = Enumerable.Range(0, 400).Select(index => $"Tr4ce{index:D4}Q9wE7rT2yU").ToList();
+
+        Parallel.ForEach(values, new ParallelOptions { MaxDegreeOfParallelism = 8 }, value => scrubber.Register(value, "trace"));
+
+        var scrubbed = scrubber.Scrub(string.Join(' ', values));
+        Assert.AreEqual(string.Join(' ', values.Select((_, index) => $"{{trace#{index + 1}}}")), scrubbed);
+    }
+
+    [TestMethod]
     public void High_entropy_tokens_and_hex_digests_are_scrubbed_but_identifiers_and_codes_stay_readable()
     {
         var scrubber = new Scrubber();
@@ -202,6 +319,17 @@ public sealed class ScrubberTests
             }
             """.ReplaceLineEndings("\n"),
             rendered);
+    }
+
+    [TestMethod]
+    public void Canonical_json_sorts_the_bucket_scopes_a_password_lockout_lists_in_load_order()
+    {
+        var sink = new TranscriptValueSink(new Scrubber());
+        using var document = JsonDocument.Parse("""{"failureReason":"invalid_password","lockedScopes":["user","email"]}""");
+
+        var rendered = CanonicalJson.Render(document.RootElement, sink);
+
+        StringAssert.Contains(rendered, "\"lockedScopes\": [\n    \"email\",\n    \"user\"\n  ]");
     }
 
     [TestMethod]

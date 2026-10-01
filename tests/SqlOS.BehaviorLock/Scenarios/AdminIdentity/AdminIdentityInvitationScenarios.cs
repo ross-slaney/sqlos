@@ -43,7 +43,7 @@ public sealed class AdminIdentityInvitationScenarios
             await t.Operator.GetAsync(invitations + "?pageSize=1&cursor=" + Uri.EscapeDataString(page.JsonString("nextCursor"))),
             "the next page");
         t.Observe(
-            AdminIdentity.ScrubDisplayedExpiry(t, await t.NewBrowser("dana").GetAsync(new Uri(dana.JsonString("inviteUrl")).PathAndQuery)),
+            await t.NewBrowser("dana").GetAsync(new Uri(dana.JsonString("inviteUrl")).PathAndQuery),
             "dana's link opens the invitation on the hosted page");
         await t.ApproveAsync();
     }
@@ -53,7 +53,7 @@ public sealed class AdminIdentityInvitationScenarios
     [Covers("GET /sqlos/admin/auth/api/organizations/{organizationId}/invitations")]
     public async Task Invitation_requests_are_validated_before_anything_is_sent()
     {
-        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback, AdminIdentity.AnswerUnhandledExceptionsAsServerErrors);
+        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback, options => options.AnswerUnhandledExceptionsAsServerErrors = true);
         var acme = await t.Setup.CreateOrganizationAsync("acme");
         var dormant = await t.Setup.CreateOrganizationAsync("dormant");
         t.Discard(await t.Operator.PutJsonAsync($"{AdminIdentity.Api}/organizations/{dormant.Id}", new { name = dormant.Name, slug = dormant.Slug, isActive = false }));
@@ -112,7 +112,7 @@ public sealed class AdminIdentityInvitationScenarios
             await t.Operator.PostJsonAsync($"{AdminIdentity.Api}/invitations/{second.JsonString("id")}/resend", new { }),
             "resend the pending invitation with a fresh link");
         t.Observe(await browser.GetAsync(Accept(second)), "the replaced link no longer opens");
-        t.Observe(AdminIdentity.ScrubDisplayedExpiry(t, await browser.GetAsync(Accept(resent))), "the resent link opens");
+        t.Observe(await browser.GetAsync(Accept(resent)), "the resent link opens");
         t.Observe(
             await t.Operator.PostJsonAsync($"{AdminIdentity.Api}/invitations/{first.JsonString("id")}/resend", new { }),
             "a superseded invitation cannot be resent");

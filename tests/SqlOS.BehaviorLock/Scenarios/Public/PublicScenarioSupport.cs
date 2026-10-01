@@ -1,12 +1,8 @@
 using System.Data.Common;
 using System.Text.Json.Nodes;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using SqlOS.BehaviorLock.Host;
 using SqlOS.BehaviorLock.Host.Support;
 using SqlOS.BehaviorLock.Infrastructure.Transcripts;
@@ -18,22 +14,17 @@ namespace SqlOS.BehaviorLock.Scenarios.Public;
 /// an <see cref="InvalidOperationException"/> from the auth service escape the endpoint (only the
 /// public-error mapping of <c>/signup</c>, <c>/mfa/challenge/*</c>, and <c>/account/grants/revoke</c>
 /// catches it). A deployed host without exception-handling middleware then answers the way Kestrel
-/// does: <c>500</c> with no headers and no body. TestServer instead rethrows the exception into the
-/// test's <see cref="HttpClient"/>, which would end the scenario instead of recording the response,
-/// so every host started here gets <see cref="KestrelServerErrorStartupFilter"/>.
+/// does: <c>500</c> with no headers and no body. Every host started here answers that way too
+/// (<see cref="ScenarioOptions.AnswerUnhandledExceptionsAsServerErrors"/>), instead of TestServer
+/// rethrowing the exception into the scenario.
 /// </summary>
 internal static class PublicHost
 {
     public static Task<Transcript> StartAsync(string profile, Action<ScenarioOptions>? configure = null)
         => Transcript.StartAsync(profile, options =>
         {
+            options.AnswerUnhandledExceptionsAsServerErrors = true;
             configure?.Invoke(options);
-            var scenarioServices = options.ConfigureServices;
-            options.ConfigureServices = services =>
-            {
-                services.AddSingleton<IStartupFilter, KestrelServerErrorStartupFilter>();
-                scenarioServices?.Invoke(services);
-            };
         });
 
     /// <summary>
@@ -42,41 +33,6 @@ internal static class PublicHost
     /// </summary>
     public static Action<IServiceCollection> Interleave(SqlCommandBarrier barrier)
         => services => services.ConfigureDbContext<BehaviorLockDbContext>(db => db.AddInterceptors(barrier));
-}
-
-/// <summary>
-/// Answers an exception that escaped the endpoint as Kestrel does when the host adds no exception
-/// handling: status 500, every response header cleared (cookies included), and an empty body. It is
-/// registered after <c>AddSqlOS</c>, so it wraps the application's routing and endpoints (where
-/// SqlOS routes run) and sits inside SqlOS's dashboard middleware and the harness's recorders.
-/// The exception is logged for the scenario author; the transcript records only what a client sees.
-/// </summary>
-internal sealed class KestrelServerErrorStartupFilter : IStartupFilter
-{
-    public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
-    {
-        var logger = app.ApplicationServices.GetRequiredService<ILoggerFactory>().CreateLogger("SqlOS.BehaviorLock.Public");
-        app.Use(async (context, nextMiddleware) =>
-        {
-            try
-            {
-                await nextMiddleware(context);
-            }
-            catch (Exception exception) when (!context.Response.HasStarted && !context.RequestAborted.IsCancellationRequested)
-            {
-                logger.LogWarning(
-                    "{Method} {Path} escaped the endpoint with {ExceptionType}: {Message}",
-                    context.Request.Method,
-                    context.Request.Path.Value,
-                    exception.GetType().FullName,
-                    exception.Message);
-                context.Response.Clear();
-                context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-                context.Response.ContentLength = 0;
-            }
-        });
-        next(app);
-    };
 }
 
 /// <summary>
@@ -192,107 +148,6 @@ internal sealed class SqlCommandBarrier : DbCommandInterceptor
 /// </summary>
 internal static class PublicSetup
 {
-    /// <summary>
-    /// Runs <paramref name="step"/> (which observes its own exchanges) and records the audit events
-    /// it wrote sorted by content instead of time, with the string arrays named in
-    /// <paramref name="unorderedArrays"/> sorted too. Use it only for a step whose events have no
-    /// defined order:
-    /// <list type="bullet">
-    /// <item>A password lockout writes one <c>password.login.locked</c> event per bucket it locked,
-    /// iterating buckets it read with no <c>ORDER BY</c>
-    /// (<c>SqlOSPasswordLoginAbuseService.RecordFailureCoreAsync</c>), and lists them in that order
-    /// in <c>lockedScopes</c>.</item>
-    /// <item>Parallel requests interleave their events by thread timing, and the fake email
-    /// provider numbers its message IDs in the order the sends happen.</item>
-    /// </list>
-    /// Observe earlier audit events before calling this; everything else uses
-    /// <see cref="Transcript.ObserveAuditAsync"/>.
-    /// </summary>
-    public static async Task ObserveAuditInContentOrderAsync(
-        this Transcript t,
-        Func<Task> step,
-        string auditCaption,
-        params string[] unorderedArrays)
-    {
-        var before = (await ReadAuditEventsAsync(t)).Select(item => item["id"]!.GetValue<string>()).ToHashSet(StringComparer.Ordinal);
-        await step();
-        var written = (await ReadAuditEventsAsync(t))
-            .Where(item => !before.Contains(item["id"]!.GetValue<string>()))
-            .Select(item => SortArrays(item.DeepClone(), unorderedArrays))
-            .OrderBy(item => item["action"]?.GetValue<string>() ?? string.Empty, StringComparer.Ordinal)
-            .ThenBy(item => ContentKey(item), StringComparer.Ordinal)
-            .ToList();
-        await t.SkipAuditAsync();
-
-        var sink = new TranscriptValueSink(t.Scrubber);
-        var text = new System.Text.StringBuilder();
-        foreach (var item in written)
-        {
-            using var document = System.Text.Json.JsonDocument.Parse(item.ToJsonString());
-            text.Append("- ").Append(CanonicalJson.Render(document.RootElement, sink).Replace("\n", "\n  ", StringComparison.Ordinal)).Append('\n');
-        }
-
-        t.ObserveDocument($"audit, sorted by content (these events have no defined order): {auditCaption}", written.Count == 0 ? "(no new events)" : text.ToString());
-    }
-
-    private static async Task<IReadOnlyList<JsonNode>> ReadAuditEventsAsync(Transcript t)
-    {
-        var events = new List<JsonNode>();
-        string? cursor = null;
-        do
-        {
-            var page = t.Discard(await t.Operator.GetAsync(
-                "/sqlos/admin/audit/api/events?pageSize=200" + (cursor == null ? string.Empty : "&cursor=" + Uri.EscapeDataString(cursor))));
-            EnsureSucceeded(page);
-            events.AddRange(page.Json!["data"]!.AsArray().Select(item => item!.DeepClone()));
-            cursor = page.Json!["hasNextPage"]?.GetValue<bool>() == true ? page.Json!["nextCursor"]?.GetValue<string>() : null;
-        }
-        while (cursor != null);
-
-        return events;
-    }
-
-    private static JsonNode SortArrays(JsonNode node, IReadOnlyCollection<string> names)
-    {
-        switch (node)
-        {
-            case JsonObject item:
-                foreach (var (name, value) in item.ToList())
-                {
-                    if (value is JsonArray array && names.Contains(name) && array.All(element => element is JsonValue))
-                    {
-                        item[name] = new JsonArray(array
-                            .Select(element => element!.GetValue<string>())
-                            .OrderBy(element => element, StringComparer.Ordinal)
-                            .Select(element => (JsonNode)JsonValue.Create(element)!)
-                            .ToArray());
-                    }
-                    else if (value != null)
-                    {
-                        SortArrays(value, names);
-                    }
-                }
-
-                break;
-            case JsonArray array:
-                foreach (var element in array.Where(element => element != null))
-                {
-                    SortArrays(element!, names);
-                }
-
-                break;
-        }
-
-        return node;
-    }
-
-    /// <summary>The event's content with generated IDs and timestamps masked, so equal events compare equal.</summary>
-    private static string ContentKey(JsonNode item)
-        => System.Text.RegularExpressions.Regex.Replace(
-            System.Text.RegularExpressions.Regex.Replace(item.ToJsonString(), "[a-z][a-z0-9]{0,11}_[0-9a-f]{16,32}", "id"),
-            @"\d{4}-\d{2}-\d{2}T[0-9:.]+Z?",
-            "time");
-
     /// <summary>Signs <paramref name="user"/> in through <c>POST /sqlos/auth/password/login</c> and returns the response.</summary>
     public static async Task<JsonNode> PasswordLoginAsync(
         this Transcript t,
@@ -554,83 +409,3 @@ internal static class PublicSetup
 /// <param name="EnrolledStep">The TOTP step the enrollment consumed; later codes must use a later step.</param>
 /// <param name="RecoveryCodes">The recovery codes the enrollment issued.</param>
 internal sealed record EnrolledAuthenticator(string Secret, long EnrolledStep, IReadOnlyList<string> RecoveryCodes);
-
-/// <summary>
-/// Sends requests in parallel through the harness actors. The requests run concurrently on the
-/// host, but every continuation inside the actors runs one at a time on a dedicated thread: the
-/// transcript's capture bookkeeping (pending exchanges, scrubber registrations) is not
-/// thread-safe, and exchange numbers are assigned in the order the requests are listed, so the
-/// transcript is the same on every run.
-/// </summary>
-internal static class ParallelRequests
-{
-    public static async Task<IReadOnlyList<HttpExchange>> SendAsync(IReadOnlyList<Func<Task<HttpExchange>>> requests)
-    {
-        var context = new SerialSynchronizationContext();
-        var previous = SynchronizationContext.Current;
-        Task<HttpExchange[]> all;
-        SynchronizationContext.SetSynchronizationContext(context);
-        try
-        {
-            all = Task.WhenAll(requests.Select(request => request()).ToArray());
-        }
-        finally
-        {
-            SynchronizationContext.SetSynchronizationContext(previous);
-        }
-
-        _ = all.ContinueWith(_ => context.Complete(), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
-        await context.RunAsync();
-        return await all;
-    }
-
-    private sealed class SerialSynchronizationContext : SynchronizationContext
-    {
-        private readonly System.Collections.Concurrent.BlockingCollection<(SendOrPostCallback Callback, object? State)> _queue = new();
-
-        public override void Post(SendOrPostCallback d, object? state)
-        {
-            try
-            {
-                _queue.Add((d, state));
-            }
-            catch (InvalidOperationException)
-            {
-                // The parallel section has finished; later work continues on the thread pool.
-                ThreadPool.QueueUserWorkItem(_ => d(state));
-            }
-        }
-
-        public override void Send(SendOrPostCallback d, object? state) => throw new NotSupportedException();
-
-        public void Complete() => _queue.CompleteAdding();
-
-        public Task RunAsync()
-        {
-            var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            var thread = new Thread(() =>
-            {
-                SetSynchronizationContext(this);
-                try
-                {
-                    foreach (var (callback, state) in _queue.GetConsumingEnumerable())
-                    {
-                        callback(state);
-                    }
-
-                    completion.SetResult();
-                }
-                catch (Exception exception)
-                {
-                    completion.SetException(exception);
-                }
-            })
-            {
-                IsBackground = true,
-                Name = "behavior-lock-parallel-requests"
-            };
-            thread.Start();
-            return completion.Task;
-        }
-    }
-}

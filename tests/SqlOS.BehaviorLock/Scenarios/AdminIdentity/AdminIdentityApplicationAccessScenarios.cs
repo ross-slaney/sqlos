@@ -35,7 +35,7 @@ public sealed class AdminIdentityApplicationAccessScenarios
     [Covers("POST /sqlos/auth/password/login")]
     public async Task Operator_restricts_an_application_to_assigned_organizations()
     {
-        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback, AdminIdentity.AnswerUnhandledExceptionsAsServerErrors);
+        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback, options => options.AnswerUnhandledExceptionsAsServerErrors = true);
         var alice = await t.Setup.CreateUserAsync("alice");
         var bob = await t.Setup.CreateUserAsync("bob");
         var acme = await t.Setup.CreateOrganizationAsync("acme");

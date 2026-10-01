@@ -18,8 +18,7 @@ namespace SqlOS.BehaviorLock.Infrastructure.Transcripts;
 /// </summary>
 public sealed partial class HttpExchange
 {
-    private JsonNode? _json;
-    private bool _jsonParsed;
+    private readonly Lazy<JsonNode?> _json;
 
     internal HttpExchange(
         int number,
@@ -53,6 +52,7 @@ public sealed partial class HttpExchange
         ResponseBody = responseBody;
         Started = started;
         Completed = completed;
+        _json = new Lazy<JsonNode?>(ParseJson, LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
     /// <summary>The internal exchange number stamped on the request, used to attribute effects and route hits.</summary>
@@ -95,26 +95,7 @@ public sealed partial class HttpExchange
     public IReadOnlyList<RouteHit> RouteHits { get; internal set; } = [];
 
     /// <summary>The response parsed as JSON, or null when the body is not JSON.</summary>
-    public JsonNode? Json
-    {
-        get
-        {
-            if (!_jsonParsed)
-            {
-                _jsonParsed = true;
-                try
-                {
-                    _json = string.IsNullOrWhiteSpace(ResponseBody) ? null : JsonNode.Parse(ResponseBody);
-                }
-                catch (JsonException)
-                {
-                    _json = null;
-                }
-            }
-
-            return _json;
-        }
-    }
+    public JsonNode? Json => _json.Value;
 
     /// <summary>Reads a string property from the JSON response, failing clearly when it is missing.</summary>
     public string JsonString(string path)
@@ -250,6 +231,18 @@ public sealed partial class HttpExchange
         }
 
         return new HtmlForm(WebUtility.HtmlDecode(form.GetAttribute("action") ?? string.Empty), fields);
+    }
+
+    private JsonNode? ParseJson()
+    {
+        try
+        {
+            return string.IsNullOrWhiteSpace(ResponseBody) ? null : JsonNode.Parse(ResponseBody);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>A one-line description used in failure messages.</summary>

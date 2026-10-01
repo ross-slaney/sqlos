@@ -54,7 +54,7 @@ public sealed class AdminIdentityUserScenarios
     [Covers("POST /sqlos/auth/password/login")]
     public async Task An_operator_created_user_signs_in_only_with_the_password_the_operator_set()
     {
-        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback, AdminIdentity.AnswerUnhandledExceptionsAsServerErrors);
+        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback, options => options.AnswerUnhandledExceptionsAsServerErrors = true);
         var withPassword = t.Unique.Email("pat");
         var withoutPassword = t.Unique.Email("nopass");
         var blankPassword = t.Unique.Email("blank");
@@ -88,7 +88,7 @@ public sealed class AdminIdentityUserScenarios
     [Covers("GET /sqlos/admin/auth/api/users")]
     public async Task A_taken_or_invalid_email_fails_user_creation_with_a_server_error()
     {
-        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback, AdminIdentity.AnswerUnhandledExceptionsAsServerErrors);
+        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback, options => options.AnswerUnhandledExceptionsAsServerErrors = true);
         var users = AdminIdentity.Api + "/users";
         var dana = t.Unique.Email("dana");
 
@@ -120,7 +120,7 @@ public sealed class AdminIdentityUserScenarios
     [Covers("GET /sqlos/admin/auth/api/users")]
     public async Task A_lookalike_domain_is_a_different_mailbox_while_its_idna_form_is_the_same_one()
     {
-        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback, AdminIdentity.AnswerUnhandledExceptionsAsServerErrors);
+        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback, options => options.AnswerUnhandledExceptionsAsServerErrors = true);
         var users = AdminIdentity.Api + "/users";
 
         t.Note("The 7.2.1 fix for #422 keys accounts by a canonical email (NFC, IDNA ASCII domain, ASCII-only case folding) and confirms matches ordinally, so a look-alike never selects another person's account.");
@@ -145,7 +145,7 @@ public sealed class AdminIdentityUserScenarios
     [Covers("GET /sqlos/admin/auth/api/users/{userId}/applications")]
     public async Task User_detail_memberships_sessions_and_applications_follow_the_user()
     {
-        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback, AdminIdentity.AnswerUnhandledExceptionsAsServerErrors);
+        await using var t = await Transcript.StartAsync(HostProfiles.DashboardCallback, options => options.AnswerUnhandledExceptionsAsServerErrors = true);
         var alice = await t.Setup.CreateUserAsync("alice");
         var bob = await t.Setup.CreateUserAsync("bob");
         var acme = await t.Setup.CreateOrganizationAsync("acme");

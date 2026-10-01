@@ -3,7 +3,6 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.WebUtilities;
-using SqlOS.BehaviorLock.Host;
 using SqlOS.BehaviorLock.Host.Fakes;
 using SqlOS.BehaviorLock.Infrastructure.Scenarios;
 
@@ -52,7 +51,7 @@ internal static partial class TranscriptRenderer
                     RenderExchange(builder, ++exchangeNumber, entry.Caption, entry.Exchange!, sink);
                     break;
                 case "audit":
-                    RenderAudit(builder, entry.Caption, entry.AuditEvents!, sink);
+                    RenderAudit(builder, entry.Caption, entry.AuditEvents!, entry.AuditOrder, sink);
                     break;
                 case "effects":
                     builder.Append("## effects: ").Append(entry.Caption).Append('\n');
@@ -145,6 +144,10 @@ internal static partial class TranscriptRenderer
             {
                 builder.Append(">   ").Append(line).Append('\n');
             }
+
+            // Lifetimes belong to claims a host echoes in a response; a scenario's own request
+            // body never carries them, so nothing is left for the response to report.
+            sink.DrainClaimLifetimes();
         }
     }
 
@@ -186,6 +189,12 @@ internal static partial class TranscriptRenderer
             foreach (var line in RenderBody(exchange.ResponseContentType, exchange.ResponseBody, sink, isRequest: false))
             {
                 builder.Append("    ").Append(line).Append('\n');
+            }
+
+            // Echoed claims render their Unix times as {epoch}; their lifetimes stay exact.
+            foreach (var lifetimes in sink.DrainClaimLifetimes())
+            {
+                builder.Append("  claim lifetimes: ").Append(lifetimes).Append('\n');
             }
         }
     }
@@ -253,9 +262,9 @@ internal static partial class TranscriptRenderer
         return trimmed.StartsWith('{') || trimmed.StartsWith('[');
     }
 
-    private static void RenderAudit(StringBuilder builder, string? caption, IReadOnlyList<JsonNode> events, TranscriptValueSink sink)
+    private static void RenderAudit(StringBuilder builder, string? caption, IReadOnlyList<JsonNode> events, AuditOrder order, TranscriptValueSink sink)
     {
-        builder.Append("## audit");
+        builder.Append(order == AuditOrder.Content ? "## audit, sorted by content" : "## audit");
         if (!string.IsNullOrWhiteSpace(caption))
         {
             builder.Append(": ").Append(caption);
@@ -268,11 +277,28 @@ internal static partial class TranscriptRenderer
             return;
         }
 
-        foreach (var item in events)
+        var rendered = events
+            .Select(item =>
+            {
+                using var document = JsonDocument.Parse(item.ToJsonString());
+                return (Action: item["action"]?.GetValue<string>() ?? string.Empty, Text: CanonicalJson.Render(document.RootElement, sink));
+            })
+            .ToList();
+        // Lifetimes reported by an audit row's metadata have nowhere to go; the values show as {epoch}.
+        sink.DrainClaimLifetimes();
+        if (order == AuditOrder.Content)
         {
-            using var document = JsonDocument.Parse(item.ToJsonString());
-            var rendered = CanonicalJson.Render(document.RootElement, sink);
-            builder.Append("  - ").Append(rendered.Replace("\n", "\n    ", StringComparison.Ordinal)).Append('\n');
+            // Every value this transcript scrubs is masked to its kind, so the order depends only
+            // on what the events say, never on IDs, times, or which request wrote first.
+            rendered = rendered
+                .OrderBy(item => item.Action, StringComparer.Ordinal)
+                .ThenBy(item => sink.Scrubber.Mask(item.Text), StringComparer.Ordinal)
+                .ToList();
+        }
+
+        foreach (var (_, text) in rendered)
+        {
+            builder.Append("  - ").Append(text.Replace("\n", "\n    ", StringComparison.Ordinal)).Append('\n');
         }
     }
 
@@ -334,6 +360,8 @@ internal static partial class TranscriptRenderer
                         {
                             builder.Append("      ").Append(line).Append('\n');
                         }
+
+                        sink.DrainClaimLifetimes();
                     }
 
                     break;
@@ -369,6 +397,11 @@ internal static partial class TranscriptRenderer
     [GeneratedRegex(@"(?<![\d])\d{6}(?![\d])")]
     private static partial Regex SixDigitCode();
 
-    [GeneratedRegex(@"https?://[^\s""'<>]+")]
+    /// <summary>
+    /// A URL in text. It never ends in sentence punctuation: the built-in email templates end a
+    /// sentence right after a link ("...?token=abc. This link..."), and the period is not part of
+    /// the link or of the token it carries.
+    /// </summary>
+    [GeneratedRegex(@"https?://[^\s""'<>]*[^\s""'<>.,;:!?]")]
     private static partial Regex Url();
 }

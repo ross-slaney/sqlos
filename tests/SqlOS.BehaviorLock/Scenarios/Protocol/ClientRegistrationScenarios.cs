@@ -142,7 +142,7 @@ public sealed class ClientRegistrationScenarios
         var tokens = t.ObserveTokens(
             await inspector.PostFormAsync("/sqlos/auth/token", request.TokenRequest(approved.NextUrlParameter("code"), BehaviorLockConstants.McpAudience)),
             "the client redeems the code for the MCP resource");
-        t.ObserveResource(
+        t.Observe(
             await inspector.PostJsonAsync("/mcp", new { jsonrpc = "2.0", id = 1, method = "tools/list" }, options => options.Bearer(tokens.JsonString("access_token"))),
             "and calls the MCP endpoint");
 
@@ -219,7 +219,7 @@ public sealed class ClientRegistrationScenarios
         var tokens = t.ObserveTokens(
             await rogue.PostFormAsync("/sqlos/auth/token", request.TokenRequest(approved.NextUrlParameter("code"), BehaviorLockConstants.ApiAudience)),
             "known defect #429: the access token's audience is the first-party API");
-        t.ObserveResource(await rogue.GetAsync("/api/me", options => options.Bearer(tokens.JsonString("access_token"))), "known defect #429: the first-party API accepts it");
+        t.Observe(await rogue.GetAsync("/api/me", options => options.Bearer(tokens.JsonString("access_token"))), "known defect #429: the first-party API accepts it");
 
         var silent = t.Urls.Authorize(clientId, redirectUri, extra: new Dictionary<string, string?> { ["prompt"] = "none", ["resource"] = "https://attacker.example/any-audience" });
         var redirect = t.Observe(await t.GetAsync(silent.Url), "known defect #429: the remembered grant ignores the resource, so prompt=none issues a code for any audience");

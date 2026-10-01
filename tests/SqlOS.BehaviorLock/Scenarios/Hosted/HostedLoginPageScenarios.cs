@@ -84,7 +84,7 @@ public sealed class HostedLoginPageScenarios
     [Covers("GET /sqlos/auth/login/magic-link")]
     public async Task An_unresolvable_invitation_token_on_a_hosted_page_is_an_unhandled_error()
     {
-        await using var t = await Transcript.StartAsync(HostProfiles.Hosted, HostedFlows.AnswerUnhandledExceptionsLikeKestrel);
+        await using var t = await Transcript.StartAsync(HostProfiles.Hosted, options => options.AnswerUnhandledExceptionsAsServerErrors = true);
 
         t.Observe(await t.GetAsync("/sqlos/auth/login?invitationToken=not-an-invitation"), "the sign-in page");
         t.Observe(
@@ -106,7 +106,7 @@ public sealed class HostedLoginPageScenarios
     [Covers("POST /sqlos/auth/signup/submit")]
     public async Task An_unresolvable_invitation_token_in_a_hosted_form_is_an_unhandled_error()
     {
-        await using var t = await Transcript.StartAsync(HostProfiles.Hosted, HostedFlows.AnswerUnhandledExceptionsLikeKestrel);
+        await using var t = await Transcript.StartAsync(HostProfiles.Hosted, options => options.AnswerUnhandledExceptionsAsServerErrors = true);
         var alice = await t.Setup.CreateUserAsync("alice");
         var begun = await HostedFlows.BeginAsync(t, extra: new Dictionary<string, string?> { ["view"] = "password" });
         var fields = begun.Page.Form("/login/password").With("invitationToken", "not-an-invitation");
