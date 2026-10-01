@@ -869,16 +869,18 @@ public sealed class SqlOSHeadlessAuthService
 
         try
         {
-            if (SupportsDatabaseTransactions())
-            {
-                transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
-            }
-
+            // Check the code before the sign-up transaction opens: a wrong code's attempt must
+            // survive the rollback below, or the code could be guessed without limit.
             verification = await _emailOtpService.VerifySignupAsync(
                 new SqlOSEmailOtpSignupVerifyRequest(request.SignupToken, request.ChallengeToken, request.Code),
                 authorizationRequest.Id,
                 requireAuthorizationRequestMatch: true,
                 cancellationToken);
+
+            if (SupportsDatabaseTransactions())
+            {
+                transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+            }
 
             signup = await _authorizationServerService.SignUpWithEmailOtpAsync(
                 verification.DisplayName,
@@ -1151,21 +1153,23 @@ public sealed class SqlOSHeadlessAuthService
 
         try
         {
-            if (SupportsDatabaseTransactions())
-            {
-                transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
-            }
-
             if (await GetBoundInvitationOrNullAsync(authorizationRequest, cancellationToken) != null)
             {
                 throw new InvalidOperationException("Phone signup is not available for email invitations.");
             }
 
+            // Check the code before the sign-up transaction opens: a rejected code must keep its
+            // challenge invalidated through the rollback below.
             verification = await RequirePhoneOtpService().VerifySignupAsync(
                 new SqlOSPhoneOtpSignupVerifyRequest(request.SignupToken, request.ChallengeToken, request.Code),
                 authorizationRequest.Id,
                 requireAuthorizationRequestMatch: true,
                 cancellationToken);
+
+            if (SupportsDatabaseTransactions())
+            {
+                transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+            }
 
             signup = await _authorizationServerService.SignUpWithPhoneOtpAsync(
                 verification.DisplayName,

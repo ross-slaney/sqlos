@@ -486,20 +486,22 @@ public static partial class EndpointRouteBuilderExtensions
 
             try
             {
-                if (SupportsDatabaseTransactions(dbContext))
-                {
-                    transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
-                }
-
                 var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
                 var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken)
                     ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken);
                 email = invitation?.Email ?? email;
+                // Check the code before the sign-up transaction opens: a wrong code's attempt must
+                // survive the rollback below, or the code could be guessed without limit.
                 var signupVerification = await emailOtpService.VerifySignupAsync(
                     new SqlOSEmailOtpSignupVerifyRequest(signupToken, challengeToken, code),
                     authorizationRequest?.Id,
                     requireAuthorizationRequestMatch: true,
                     cancellationToken);
+
+                if (SupportsDatabaseTransactions(dbContext))
+                {
+                    transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+                }
 
                 var signup = await authorizationServerService.SignUpWithEmailOtpAsync(
                     signupVerification.DisplayName,
@@ -673,11 +675,6 @@ public static partial class EndpointRouteBuilderExtensions
 
             try
             {
-                if (SupportsDatabaseTransactions(dbContext))
-                {
-                    transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
-                }
-
                 var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
                 var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken)
                     ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken);
@@ -686,11 +683,18 @@ public static partial class EndpointRouteBuilderExtensions
                     throw new InvalidOperationException("Phone signup is not available for email invitations.");
                 }
 
+                // Check the code before the sign-up transaction opens: a rejected code must keep
+                // its challenge invalidated through the rollback below.
                 var signupVerification = await phoneOtpService.VerifySignupAsync(
                     new SqlOSPhoneOtpSignupVerifyRequest(signupToken, challengeToken, code),
                     authorizationRequest?.Id,
                     requireAuthorizationRequestMatch: true,
                     cancellationToken);
+
+                if (SupportsDatabaseTransactions(dbContext))
+                {
+                    transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+                }
 
                 var signup = await authorizationServerService.SignUpWithPhoneOtpAsync(
                     signupVerification.DisplayName,
