@@ -10,12 +10,13 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Domain;
 
 namespace SqlOS.AuthServer.Services;
 
 public sealed class SqlOSTotpMfaService
 {
-    public const string EnrollmentPurpose = "mfa_totp_enrollment";
+    public const string EnrollmentPurpose = SqlOSTemporaryTokenKinds.Purposes.TotpEnrollment;
 
     private static readonly char[] Base32Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".ToCharArray();
 
@@ -185,14 +186,12 @@ public sealed class SqlOSTotpMfaService
         var user = await _context.Set<SqlOSUser>()
             .AsNoTracking()
             .FirstAsync(x => x.Id == userId, cancellationToken);
-        var token = await _cryptoService.CreateTemporaryTokenAsync(
-            EnrollmentPurpose,
-            userId,
-            clientApplicationId,
-            organizationId,
+        var token = (await _cryptoService.CreateTemporaryTokenAsync(
+            SqlOSTemporaryTokenKinds.TotpEnrollment,
             new TotpEnrollmentPayload(authenticatorId, challengeBinding),
+            new TemporaryTokenBinding(UserId: userId, ClientApplicationId: clientApplicationId, OrganizationId: organizationId),
             _options.Mfa.Totp.EnrollmentTokenLifetime,
-            cancellationToken);
+            cancellationToken)).RawToken;
 
         var provisioningUri = BuildProvisioningUri(user, secret);
 
@@ -209,14 +208,14 @@ public sealed class SqlOSTotpMfaService
         SqlOSTotpEnrollmentVerifyRequest request,
         CancellationToken cancellationToken = default)
     {
-        var temporaryToken = await _cryptoService.FindTemporaryTokenAsync(EnrollmentPurpose, request.EnrollmentToken, cancellationToken)
+        var temporaryToken = await _cryptoService.FindTemporaryTokenAsync(SqlOSTemporaryTokenKinds.TotpEnrollment, request.EnrollmentToken, cancellationToken)
             ?? throw new InvalidOperationException("Authenticator enrollment is invalid or expired.");
         if (temporaryToken.UserId == null)
         {
             throw new InvalidOperationException("Authenticator enrollment is invalid.");
         }
 
-        var payload = _cryptoService.DeserializePayload<TotpEnrollmentPayload>(temporaryToken)
+        var payload = temporaryToken.ReadPayload(SqlOSTemporaryTokenKinds.TotpEnrollment)
             ?? throw new InvalidOperationException("Authenticator enrollment payload is invalid.");
         if (payload.ChallengeBinding != null)
         {
@@ -238,18 +237,18 @@ public sealed class SqlOSTotpMfaService
         }
 
         var challengeToken = await _cryptoService.FindTemporaryTokenAsync(
-                SqlOSAuthService.MfaChallengePurpose,
+                SqlOSTemporaryTokenKinds.MfaChallenge,
                 request.MfaToken,
                 cancellationToken)
             ?? throw ChallengeEnrollmentRejected();
         var enrollmentToken = await _cryptoService.FindTemporaryTokenAsync(
-                EnrollmentPurpose,
+                SqlOSTemporaryTokenKinds.TotpEnrollment,
                 request.EnrollmentToken,
                 cancellationToken)
             ?? throw ChallengeEnrollmentRejected();
-        var challengePayload = _cryptoService.DeserializePayload<SqlOSMfaChallengePayload>(challengeToken)
+        var challengePayload = challengeToken.ReadPayload(SqlOSTemporaryTokenKinds.MfaChallenge)
             ?? throw ChallengeEnrollmentRejected();
-        var enrollmentPayload = _cryptoService.DeserializePayload<TotpEnrollmentPayload>(enrollmentToken)
+        var enrollmentPayload = enrollmentToken.ReadPayload(SqlOSTemporaryTokenKinds.TotpEnrollment)
             ?? throw ChallengeEnrollmentRejected();
         var binding = enrollmentPayload.ChallengeBinding
             ?? throw ChallengeEnrollmentRejected();
@@ -333,11 +332,8 @@ public sealed class SqlOSTotpMfaService
         authenticator.ConfirmedAt = DateTime.UtcNow;
         authenticator.LastUsedAt = DateTime.UtcNow;
         authenticator.LastAcceptedTimeStep = matchedStep;
-        temporaryToken.ConsumedAt = DateTime.UtcNow;
-        if (challengeToken != null)
-        {
-            challengeToken.ConsumedAt = DateTime.UtcNow;
-        }
+        temporaryToken.Consume(SqlOSTemporaryTokenKinds.TotpEnrollment, DateTime.UtcNow);
+        challengeToken?.Consume(SqlOSTemporaryTokenKinds.MfaChallenge, DateTime.UtcNow);
 
         var recoveryCodes = await ReplaceRecoveryCodesAsync(
             temporaryToken.UserId,
@@ -398,7 +394,7 @@ public sealed class SqlOSTotpMfaService
     }
 
     internal async Task<SqlOSTemporaryToken> GetPendingMfaTokenAsync(string mfaToken, CancellationToken cancellationToken)
-        => await _cryptoService.FindTemporaryTokenAsync(SqlOSAuthService.MfaChallengePurpose, mfaToken, cancellationToken)
+        => await _cryptoService.FindTemporaryTokenAsync(SqlOSTemporaryTokenKinds.MfaChallenge, mfaToken, cancellationToken)
             ?? throw new InvalidOperationException("MFA challenge is invalid or expired.");
 
     private async Task<bool> TryVerifyTotpAsync(
@@ -709,20 +705,6 @@ public sealed class SqlOSTotpMfaService
 
     private static InvalidOperationException ChallengeEnrollmentRejected()
         => new("MFA enrollment is not authorized for this challenge.");
-
-    private sealed record TotpEnrollmentPayload(
-        string AuthenticatorId,
-        TotpEnrollmentChallengeBinding? ChallengeBinding = null);
-
-    private sealed record TotpEnrollmentChallengeBinding(
-        string ChallengeTokenId,
-        string UserId,
-        string ClientApplicationId,
-        string? OrganizationId,
-        string Flow,
-        string ClientId,
-        string? AuthorizationRequestId,
-        string? Resource);
 }
 
 internal sealed record SqlOSTotpChallengeEnrollmentVerification(

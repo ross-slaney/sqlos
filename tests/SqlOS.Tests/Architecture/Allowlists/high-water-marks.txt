@@ -5,6 +5,6 @@
 adapter-database-access.txt 29
 domain-clock-reads.txt 9
 domain-http-dependencies.txt 0
-entity-public-setters.txt 929
-lifecycle-writes.txt 251
+entity-public-setters.txt 917
+lifecycle-writes.txt 236
 save-call-sites.txt 218

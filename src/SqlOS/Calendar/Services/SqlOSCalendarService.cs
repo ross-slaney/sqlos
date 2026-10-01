@@ -10,6 +10,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Domain;
 using SqlOS.AuthServer.Services;
 using SqlOS.Calendar.Configuration;
 using SqlOS.Calendar.Contracts;
@@ -28,7 +29,6 @@ namespace SqlOS.Calendar.Services;
 /// </summary>
 public sealed class SqlOSCalendarService
 {
-    internal const string ConnectRequestTokenPurpose = "calendar_connect_request";
 
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSAdminService _adminService;
@@ -101,11 +101,8 @@ public sealed class SqlOSCalendarService
         var callbackUri = BuildCallbackUri(httpContext);
         var codeVerifier = _cryptoService.GenerateOpaqueToken();
 
-        var state = await _cryptoService.CreateTemporaryTokenAsync(
-            ConnectRequestTokenPurpose,
-            request.UserId,
-            null,
-            request.OrganizationId,
+        var state = (await _cryptoService.CreateTemporaryTokenAsync(
+            SqlOSTemporaryTokenKinds.CalendarConnectRequest,
             new CalendarConnectRequestPayload(
                 oidcConnection.Id,
                 request.Mode,
@@ -117,8 +114,9 @@ public sealed class SqlOSCalendarService
                 codeVerifier,
                 callbackUri,
                 endpoints.TokenEndpoint),
+            new TemporaryTokenBinding(UserId: request.UserId, OrganizationId: request.OrganizationId),
             _calendarOptions.ConnectSessionLifetime,
-            cancellationToken);
+            cancellationToken)).RawToken;
 
         var authorizationParameters = new Dictionary<string, string?>
         {
@@ -173,13 +171,13 @@ public sealed class SqlOSCalendarService
             return RenderCallbackError("The calendar connect callback was missing the provider state.");
         }
 
-        var requestToken = await _cryptoService.ConsumeTemporaryTokenAsync(ConnectRequestTokenPurpose, state, cancellationToken);
+        var requestToken = await _cryptoService.ConsumeTemporaryTokenAsync(SqlOSTemporaryTokenKinds.CalendarConnectRequest, state, cancellationToken);
         if (requestToken == null)
         {
             return RenderCallbackError("The calendar connect request is invalid or expired.");
         }
 
-        var payload = _cryptoService.DeserializePayload<CalendarConnectRequestPayload>(requestToken);
+        var payload = requestToken.ReadPayload(SqlOSTemporaryTokenKinds.CalendarConnectRequest);
         if (payload == null)
         {
             return RenderCallbackError("The calendar connect request payload is invalid.");

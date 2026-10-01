@@ -9,6 +9,8 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Domain;
+using SqlOS.Domain.Events;
 using SqlOS.Email.Contracts;
 using SqlOS.Email.Interfaces;
 using SqlOS.Email.Models;
@@ -18,15 +20,11 @@ namespace SqlOS.AuthServer.Services;
 
 public sealed class SqlOSAuthService
 {
-    public const string MfaChallengePurpose = "mfa_challenge";
+    public const string MfaChallengePurpose = SqlOSTemporaryTokenKinds.Purposes.MfaChallenge;
     internal const string MfaChallengeFailureMessage = "MFA code is invalid.";
     private const string MfaChallengeFailedAuditEvent = "user.mfa.challenge_failed";
-    private const string PasswordResetPurpose = "password_reset";
-    private const string PasswordResetRequestPurpose = "password_reset_request";
     private const string PasswordResetGenericMessage = "If an account can be reset, you'll receive a password reset email shortly.";
-    private const string EmailVerificationPurpose = "email_verification";
     private const string EmailVerificationGenericMessage = "If the email can be verified, you'll receive a verification email shortly.";
-    private static readonly TimeSpan EmailVerificationLifetime = TimeSpan.FromDays(1);
     private static readonly TimeSpan EmailVerificationResendCooldown = TimeSpan.FromMinutes(1);
 
     private readonly ISqlOSAuthServerDbContext _context;
@@ -472,7 +470,7 @@ public sealed class SqlOSAuthService
         // Only a signup token issued before the direct-login gate can name a third-party client.
         // Refuse it before the signup transaction so its audit event is not rolled back.
         await EnsureArtifactClientIsFirstPartyAsync(
-            await FindSignupTokenAsync("phone_otp_signup", request.SignupToken, cancellationToken),
+            await FindSignupTokenAsync(SqlOSTemporaryTokenKinds.PhoneOtpSignup, request.SignupToken, cancellationToken),
             httpContext,
             cancellationToken);
 
@@ -562,7 +560,7 @@ public sealed class SqlOSAuthService
         // Only a signup token issued before the direct-login gate can name a third-party client.
         // Refuse it before the signup transaction so its audit event is not rolled back.
         await EnsureArtifactClientIsFirstPartyAsync(
-            await FindSignupTokenAsync("email_otp_signup", request.SignupToken, cancellationToken),
+            await FindSignupTokenAsync(SqlOSTemporaryTokenKinds.EmailOtpSignup, request.SignupToken, cancellationToken),
             httpContext,
             cancellationToken);
 
@@ -676,13 +674,12 @@ public sealed class SqlOSAuthService
 
         if (organizations.Count > 1)
         {
-            var pendingAuthToken = await _cryptoService.CreateTemporaryTokenAsync(
-                "pending_auth",
-                user.Id,
-                client.Id,
-                null,
+            var pendingAuthToken = (await _cryptoService.CreateTemporaryTokenAsync(
+                SqlOSTemporaryTokenKinds.PendingAuth,
                 new PendingAuthPayload(client.ClientId, authenticationMethod),
-                cancellationToken: cancellationToken);
+                new TemporaryTokenBinding(UserId: user.Id, ClientApplicationId: client.Id),
+                _options.TemporaryTokenLifetime,
+                cancellationToken)).RawToken;
 
             return new SqlOSLoginResult(true, pendingAuthToken, organizations, null);
         }
@@ -704,7 +701,7 @@ public sealed class SqlOSAuthService
 
     public async Task<SqlOSLoginResult> SelectOrganizationForLoginAsync(SqlOSSelectOrganizationRequest request, HttpContext httpContext, CancellationToken cancellationToken = default)
     {
-        var token = await _cryptoService.ConsumeTemporaryTokenAsync("pending_auth", request.PendingAuthToken, cancellationToken)
+        var token = await _cryptoService.ConsumeTemporaryTokenAsync(SqlOSTemporaryTokenKinds.PendingAuth, request.PendingAuthToken, cancellationToken)
             ?? throw new InvalidOperationException("Pending auth token is invalid or expired.");
         if (token.UserId == null || token.ClientApplicationId == null)
         {
@@ -718,7 +715,7 @@ public sealed class SqlOSAuthService
 
         var user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == token.UserId, cancellationToken);
         var client = await _context.Set<SqlOSClientApplication>().FirstAsync(x => x.Id == token.ClientApplicationId, cancellationToken);
-        var payload = _cryptoService.DeserializePayload<PendingAuthPayload>(token);
+        var payload = token.ReadPayload(SqlOSTemporaryTokenKinds.PendingAuth);
         var authMethod = payload?.AuthenticationMethod ?? "password";
         var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
         var result = await FinalizeClientLoginAsync(user, client, request.OrganizationId, authMethod, httpContext, cancellationToken);
@@ -1524,7 +1521,7 @@ public sealed class SqlOSAuthService
             throw new InvalidOperationException("Local password authentication is disabled.");
         }
 
-        var token = await _cryptoService.ConsumeTemporaryTokenAsync(PasswordResetPurpose, request.Token, cancellationToken);
+        var token = await _cryptoService.ConsumeTemporaryTokenAsync(SqlOSTemporaryTokenKinds.PasswordReset, request.Token, cancellationToken);
         if (token == null)
         {
             await RecordPasswordResetAuditAsync(
@@ -1574,7 +1571,7 @@ public sealed class SqlOSAuthService
 
         var now = DateTime.UtcNow;
         var claim = SqlOSEmailClaimOutcome.NotClaimed;
-        var payload = _cryptoService.DeserializePayload<PasswordResetPayload>(token);
+        var payload = token.ReadPayload(SqlOSTemporaryTokenKinds.PasswordReset);
         var resetEmail = payload == null
             ? null
             : await _context.Set<SqlOSUserEmail>()
@@ -1628,15 +1625,13 @@ public sealed class SqlOSAuthService
 
         var expiresAt = DateTime.UtcNow.Add(_passwordResetOptions.TokenLifetime);
         var token = await _cryptoService.CreateTemporaryTokenAsync(
-            PasswordResetPurpose,
-            email.UserId,
-            clientApplicationId,
-            null,
+            SqlOSTemporaryTokenKinds.PasswordReset,
             new PasswordResetPayload(email.Id, email.NormalizedEmail),
+            new TemporaryTokenBinding(UserId: email.UserId, ClientApplicationId: clientApplicationId),
             _passwordResetOptions.TokenLifetime,
             cancellationToken);
 
-        return (token, expiresAt);
+        return (token.RawToken, expiresAt);
     }
 
     public async Task<string> CreateEmailVerificationTokenAsync(SqlOSCreateVerificationTokenRequest request, CancellationToken cancellationToken = default)
@@ -1644,17 +1639,14 @@ public sealed class SqlOSAuthService
         var email = await _context.Set<SqlOSUserEmail>().FindByEmailAsync(request.Email, cancellationToken)
             ?? throw new InvalidOperationException("Unknown email address.");
 
-        var token = await _cryptoService.CreateTemporaryTokenAsync(
-            EmailVerificationPurpose,
-            email.UserId,
-            null,
-            null,
+        var issued = await _cryptoService.CreateTemporaryTokenAsync(
+            SqlOSTemporaryTokenKinds.EmailVerification,
             new EmailVerificationPayload(email.Id),
-            EmailVerificationLifetime,
+            new TemporaryTokenBinding(UserId: email.UserId),
+            configuredLifetime: null,
             cancellationToken);
 
-        await _adminService.RecordAuditAsync("user.email-verification-token-created", "system", null, userId: email.UserId, cancellationToken: cancellationToken);
-        return token;
+        return issued.RawToken;
     }
 
     public async Task<SqlOSEmailVerificationRequestResult> RequestEmailVerificationAsync(
@@ -1683,14 +1675,13 @@ public sealed class SqlOSAuthService
         }
 
         var recentTokens = await _context.Set<SqlOSTemporaryToken>()
-            .Where(x => x.Purpose == EmailVerificationPurpose
-                && x.UserId == email.UserId
-                && x.ConsumedAt == null
-                && x.ExpiresAt >= now
+            .Where(SqlOSTemporaryToken.OfKind(SqlOSTemporaryTokenKinds.EmailVerification))
+            .Where(SqlOSTemporaryToken.UsableAt(now))
+            .Where(x => x.UserId == email.UserId
                 && x.CreatedAt >= now.Subtract(EmailVerificationResendCooldown))
             .ToListAsync(cancellationToken);
         if (recentTokens.Any(token =>
-                _cryptoService.DeserializePayload<EmailVerificationPayload>(token)?.EmailId == email.Id))
+                token.ReadPayload(SqlOSTemporaryTokenKinds.EmailVerification)?.EmailId == email.Id))
         {
             return new SqlOSEmailVerificationRequestResult(EmailVerificationGenericMessage);
         }
@@ -1720,7 +1711,7 @@ public sealed class SqlOSAuthService
                             ["logoTextDisplay"] = string.IsNullOrWhiteSpace(branding.LogoBase64) ? "block" : "none",
                             ["maskedEmail"] = MaskEmail(email.Email),
                             ["verificationUrl"] = verificationUrl,
-                            ["expiresInHours"] = (int)EmailVerificationLifetime.TotalHours,
+                            ["expiresInHours"] = (int)SqlOSTemporaryTokenKinds.EmailVerification.Lifetime.FixedLifetime!.Value.TotalHours,
                             ["primaryColor"] = branding.PrimaryColor,
                             ["accentColor"] = branding.AccentColor,
                             ["backgroundColor"] = branding.BackgroundColor
@@ -1747,12 +1738,12 @@ public sealed class SqlOSAuthService
             if (rawToken != null)
             {
                 var token = await _cryptoService.FindTemporaryTokenAsync(
-                    EmailVerificationPurpose,
+                    SqlOSTemporaryTokenKinds.EmailVerification,
                     rawToken,
                     CancellationToken.None);
                 if (token != null)
                 {
-                    token.ConsumedAt = DateTime.UtcNow;
+                    token.Retire(DateTime.UtcNow);
                     await _context.SaveChangesAsync(CancellationToken.None);
                 }
             }
@@ -1772,9 +1763,9 @@ public sealed class SqlOSAuthService
 
     public async Task VerifyEmailAsync(SqlOSVerifyEmailRequest request, CancellationToken cancellationToken = default)
     {
-        var token = await _cryptoService.ConsumeTemporaryTokenAsync(EmailVerificationPurpose, request.Token, cancellationToken)
+        var token = await _cryptoService.ConsumeTemporaryTokenAsync(SqlOSTemporaryTokenKinds.EmailVerification, request.Token, cancellationToken)
             ?? throw new InvalidOperationException("Email verification token is invalid or expired.");
-        var payload = _cryptoService.DeserializePayload<EmailVerificationPayload>(token)
+        var payload = token.ReadPayload(SqlOSTemporaryTokenKinds.EmailVerification)
             ?? throw new InvalidOperationException("Email verification token payload is invalid.");
 
         var email = await _context.Set<SqlOSUserEmail>().FirstAsync(x => x.Id == payload.EmailId, cancellationToken);
@@ -1895,7 +1886,7 @@ public sealed class SqlOSAuthService
 
         // Outside the enrollment transaction, so a refused client's audit event is not rolled back.
         await EnsureClientFlowChallengeIsFirstPartyAsync(
-            await _cryptoService.FindTemporaryTokenAsync(MfaChallengePurpose, request.MfaToken, cancellationToken),
+            await _cryptoService.FindTemporaryTokenAsync(SqlOSTemporaryTokenKinds.MfaChallenge, request.MfaToken, cancellationToken),
             httpContext,
             cancellationToken);
 
@@ -1978,7 +1969,7 @@ public sealed class SqlOSAuthService
             throw new InvalidOperationException("MFA challenge payload is invalid.");
         }
 
-        var payload = _cryptoService.DeserializePayload<SqlOSMfaChallengePayload>(token)
+        var payload = token.ReadPayload(SqlOSTemporaryTokenKinds.MfaChallenge)
             ?? throw new InvalidOperationException("MFA challenge payload is invalid.");
         if (!payload.EnrollmentRequired
             || payload.PermittedEnrollmentFactors?.Contains(SqlOSMfaFactorTypes.Totp, StringComparer.OrdinalIgnoreCase) != true
@@ -2048,14 +2039,14 @@ public sealed class SqlOSAuthService
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
     {
-        var token = await _cryptoService.FindTemporaryTokenAsync(MfaChallengePurpose, request.MfaToken, cancellationToken)
+        var token = await _cryptoService.FindTemporaryTokenAsync(SqlOSTemporaryTokenKinds.MfaChallenge, request.MfaToken, cancellationToken)
             ?? throw new InvalidOperationException("MFA challenge is invalid or expired.");
         if (token.UserId == null || token.ClientApplicationId == null)
         {
             throw new InvalidOperationException("MFA challenge payload is invalid.");
         }
 
-        var payload = _cryptoService.DeserializePayload<SqlOSMfaChallengePayload>(token)
+        var payload = token.ReadPayload(SqlOSTemporaryTokenKinds.MfaChallenge)
             ?? throw new InvalidOperationException("MFA challenge payload is invalid.");
         if (!string.Equals(payload.Flow, "client", StringComparison.Ordinal))
         {
@@ -2069,7 +2060,7 @@ public sealed class SqlOSAuthService
 
         await EnsureClientFlowChallengeIsFirstPartyAsync(token, httpContext, cancellationToken);
         var factorMethod = await VerifyMfaChallengeFactorAsync(token, request.Code, httpContext, cancellationToken);
-        token.ConsumedAt = DateTime.UtcNow;
+        token.Consume(SqlOSTemporaryTokenKinds.MfaChallenge, DateTime.UtcNow);
         return await CompleteConsumedMfaChallengeAsync(token, factorMethod, httpContext, cancellationToken);
     }
 
@@ -2084,7 +2075,7 @@ public sealed class SqlOSAuthService
             throw new InvalidOperationException("MFA challenge payload is invalid.");
         }
 
-        var payload = _cryptoService.DeserializePayload<SqlOSMfaChallengePayload>(token)
+        var payload = token.ReadPayload(SqlOSTemporaryTokenKinds.MfaChallenge)
             ?? throw new InvalidOperationException("MFA challenge payload is invalid.");
         var reservationId = await _mfaAttemptAdmissionService.ReserveAsync(
             token,
@@ -2140,11 +2131,8 @@ public sealed class SqlOSAuthService
             throw new InvalidOperationException(MfaChallengeFailureMessage);
         }
 
-        return await _cryptoService.CreateTemporaryTokenAsync(
-            MfaChallengePurpose,
-            user.Id,
-            client.Id,
-            organizationId,
+        var challenge = await _cryptoService.CreateTemporaryTokenAsync(
+            SqlOSTemporaryTokenKinds.MfaChallenge,
             new SqlOSMfaChallengePayload(
                 flow,
                 client.ClientId,
@@ -2154,8 +2142,10 @@ public sealed class SqlOSAuthService
                 enrollmentRequired,
                 permittedEnrollmentFactors,
                 CredentialSignIn: credentialSignIn),
+            new TemporaryTokenBinding(UserId: user.Id, ClientApplicationId: client.Id, OrganizationId: organizationId),
             _options.Mfa.Totp.ChallengeTokenLifetime,
             cancellationToken);
+        return challenge.RawToken;
     }
 
     private async Task<int> RecordMfaChallengeFailureAsync(
@@ -2164,7 +2154,7 @@ public sealed class SqlOSAuthService
     {
         while (true)
         {
-            var payload = _cryptoService.DeserializePayload<SqlOSMfaChallengePayload>(token)
+            var payload = token.ReadPayload(SqlOSTemporaryTokenKinds.MfaChallenge)
                 ?? throw new InvalidOperationException("MFA challenge payload is invalid.");
             if (token.ConsumedAt != null)
             {
@@ -2172,10 +2162,11 @@ public sealed class SqlOSAuthService
             }
 
             var attemptCount = payload.FailedAttempts + 1;
-            token.PayloadJson = JsonSerializer.Serialize(payload with { FailedAttempts = attemptCount });
+            token.ReplacePayload(SqlOSTemporaryTokenKinds.MfaChallenge, payload with { FailedAttempts = attemptCount });
             if (attemptCount >= _options.Mfa.Totp.MaxFailedAttemptsPerChallenge)
             {
-                token.ConsumedAt = DateTime.UtcNow;
+                // The last allowed failure locks the challenge: it is withdrawn, never completed.
+                token.Retire(DateTime.UtcNow);
             }
 
             try
@@ -2244,7 +2235,7 @@ public sealed class SqlOSAuthService
             throw new InvalidOperationException("MFA challenge is invalid or expired.");
         }
 
-        var payload = _cryptoService.DeserializePayload<SqlOSMfaChallengePayload>(token);
+        var payload = token.ReadPayload(SqlOSTemporaryTokenKinds.MfaChallenge);
         if (payload == null
             || !string.Equals(payload.Flow, "authorization", StringComparison.Ordinal)
             || !string.Equals(payload.AuthorizationRequestId, authorizationRequestId, StringComparison.Ordinal))
@@ -2279,7 +2270,7 @@ public sealed class SqlOSAuthService
     {
         if (token != null
             && string.Equals(
-                _cryptoService.DeserializePayload<SqlOSMfaChallengePayload>(token)?.Flow,
+                token.ReadPayload(SqlOSTemporaryTokenKinds.MfaChallenge)?.Flow,
                 "client",
                 StringComparison.Ordinal))
         {
@@ -2311,12 +2302,12 @@ public sealed class SqlOSAuthService
     }
 
     private async Task<SqlOSTemporaryToken?> FindSignupTokenAsync(
-        string purpose,
+        TemporaryTokenKind kind,
         string? signupToken,
         CancellationToken cancellationToken)
         => string.IsNullOrWhiteSpace(signupToken)
             ? null
-            : await _cryptoService.FindTemporaryTokenAsync(purpose, signupToken.Trim(), cancellationToken);
+            : await _cryptoService.FindTemporaryTokenAsync(kind, signupToken.Trim(), cancellationToken);
 
     private async Task<SqlOSMfaChallengeVerifyResult> CompleteConsumedMfaChallengeAsync(
         SqlOSTemporaryToken token,
@@ -2329,7 +2320,7 @@ public sealed class SqlOSAuthService
             throw new InvalidOperationException("MFA challenge payload is invalid.");
         }
 
-        var payload = _cryptoService.DeserializePayload<SqlOSMfaChallengePayload>(token)
+        var payload = token.ReadPayload(SqlOSTemporaryTokenKinds.MfaChallenge)
             ?? throw new InvalidOperationException("MFA challenge payload is invalid.");
         if (!string.Equals(payload.Flow, "client", StringComparison.Ordinal))
         {
@@ -2784,23 +2775,20 @@ public sealed class SqlOSAuthService
         CancellationToken cancellationToken)
     {
         await _cryptoService.CreateTemporaryTokenAsync(
-            PasswordResetRequestPurpose,
-            userId,
-            clientApplicationId,
-            organizationId: null,
-            payload: new PasswordResetRequestPayload(normalizedEmail, ipAddress, clientKey, surface),
-            lifetime: _passwordResetOptions.RateLimitWindow,
-            cancellationToken: cancellationToken);
+            SqlOSTemporaryTokenKinds.PasswordResetRequest,
+            new PasswordResetRequestPayload(normalizedEmail, ipAddress, clientKey, surface),
+            new TemporaryTokenBinding(UserId: userId, ClientApplicationId: clientApplicationId),
+            _passwordResetOptions.RateLimitWindow,
+            cancellationToken);
     }
 
     private async Task InvalidateActivePasswordResetTokensAsync(string userId, CancellationToken cancellationToken)
     {
         var now = DateTime.UtcNow;
         var activeTokens = await _context.Set<SqlOSTemporaryToken>()
-            .Where(x => x.Purpose == PasswordResetPurpose
-                && x.UserId == userId
-                && x.ConsumedAt == null
-                && x.ExpiresAt > now)
+            .Where(SqlOSTemporaryToken.OfKind(SqlOSTemporaryTokenKinds.PasswordReset))
+            .Where(SqlOSTemporaryToken.UsableAt(now))
+            .Where(x => x.UserId == userId)
             .ToListAsync(cancellationToken);
 
         if (activeTokens.Count == 0)
@@ -2810,7 +2798,8 @@ public sealed class SqlOSAuthService
 
         foreach (var activeToken in activeTokens)
         {
-            activeToken.ConsumedAt = now;
+            // A newer reset link replaces every older one.
+            activeToken.Retire(now);
         }
 
         await _context.SaveChangesAsync(cancellationToken);
@@ -3227,13 +3216,12 @@ public sealed class SqlOSAuthService
 
         if (organizations.Count > 1)
         {
-            var pendingAuthToken = await _cryptoService.CreateTemporaryTokenAsync(
-                "pending_auth",
-                user.Id,
-                client.Id,
-                null,
+            var pendingAuthToken = (await _cryptoService.CreateTemporaryTokenAsync(
+                SqlOSTemporaryTokenKinds.PendingAuth,
                 new PendingAuthPayload(client.ClientId, authenticationMethod),
-                cancellationToken: cancellationToken);
+                new TemporaryTokenBinding(UserId: user.Id, ClientApplicationId: client.Id),
+                _options.TemporaryTokenLifetime,
+                cancellationToken)).RawToken;
 
             return new SqlOSLoginResult(true, pendingAuthToken, organizations, null);
         }
@@ -3363,17 +3351,8 @@ public sealed class SqlOSAuthService
         }
     }
 
-    private sealed record PendingAuthPayload(string ClientId, string AuthenticationMethod);
-    private sealed record AuthCodePayload(string ClientId, string RedirectUri, string AuthenticationMethod);
     // IdToken defaults so replacement payloads cached before OP mode deserialize cleanly.
     private sealed record RefreshTokenReplacementPayload(string AccessToken, string RefreshToken, string? IdToken = null);
-    private sealed record PasswordResetPayload(string EmailId, string NormalizedEmail);
-    private sealed record PasswordResetRequestPayload(
-        string NormalizedEmail,
-        string? IpAddress,
-        string? ClientKey,
-        string Surface);
-    private sealed record EmailVerificationPayload(string EmailId);
 
     private SqlOSInvitationService RequireInvitationService()
         => _invitationService ?? throw new InvalidOperationException("SqlOS invitations are not configured.");

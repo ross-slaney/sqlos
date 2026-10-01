@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using SqlOS.AuditLogs.Projections;
 using SqlOS.AuthServer.Models;
 using SqlOS.Domain;
 
@@ -20,7 +21,8 @@ namespace SqlOS.AuditLogs;
 /// A builder reproduces the 7.2.1 row for its action exactly: event type, source, actor, targets,
 /// context and metadata shape, usually through <see cref="SqlOSAuditRows"/>. Layers 2 to 4 of the
 /// 8.0.0 refactor register only actions 7.2.1 audits, moving one audit call site at a time; #415
-/// adds the missing ones in layer 5. No event is registered yet.
+/// adds the missing ones in layer 5. Each area registers its events in its own builder extension
+/// (<c>AuditLogs/Projections</c>).
 /// </para>
 /// </remarks>
 internal sealed class SqlOSAuditProjection
@@ -31,7 +33,9 @@ internal sealed class SqlOSAuditProjection
         => _projections = projections.ToFrozenDictionary();
 
     /// <summary>SqlOS's projection, registered once in dependency injection.</summary>
-    public static SqlOSAuditProjection Default { get; } = new SqlOSAuditProjectionBuilder().Build();
+    public static SqlOSAuditProjection Default { get; } = new SqlOSAuditProjectionBuilder()
+        .AddTemporaryTokenEvents()
+        .Build();
 
     /// <summary>The registered event types, audited or not.</summary>
     public IEnumerable<Type> EventTypes => _projections.Keys;

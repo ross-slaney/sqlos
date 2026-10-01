@@ -108,7 +108,8 @@ public static class ServiceCollectionExtensions
                 authOptions,
                 new SqlOSDataProtectionSigningKeyCustody(dataProtection),
                 dataProtection,
-                cache);
+                cache,
+                sp.GetRequiredService<TimeProvider>());
         });
         services.AddScoped<ISqlOSAuditLogService, SqlOSAuditLogService>();
         services.AddScoped<SqlOSSettingsService>();

@@ -736,8 +736,8 @@ public sealed class SqlOSSsoPortalService
         var issuerSessions = eligibleUserIds.Count == 0
             ? []
             : await _context.Set<SqlOSTemporaryToken>()
-                .Where(x => x.Purpose == SqlOSAuthLifecyclePolicy.IssuerSessionPurpose
-                    && x.OrganizationId == session.OrganizationId
+                .Where(SqlOSTemporaryToken.OfKind(SqlOSTemporaryTokenKinds.IssuerSession))
+                .Where(x => x.OrganizationId == session.OrganizationId
                     && x.ConsumedAt == null
                     && eligibleUserIds.Contains(x.UserId!))
                 .ToListAsync(cancellationToken);
@@ -762,7 +762,7 @@ public sealed class SqlOSSsoPortalService
 
         foreach (var issuerSession in issuerSessions)
         {
-            issuerSession.ConsumedAt = now;
+            issuerSession.Retire(now);
         }
 
         foreach (var issuerSessionFamily in issuerSessionFamilies)

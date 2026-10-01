@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Domain;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -38,7 +39,7 @@ public sealed class SqlOSIssuerSessionService
             return null;
         }
 
-        var token = await _cryptoService.FindTemporaryTokenAsync(SqlOSAuthLifecyclePolicy.IssuerSessionPurpose, rawToken, cancellationToken);
+        var token = await _cryptoService.FindTemporaryTokenAsync(SqlOSTemporaryTokenKinds.IssuerSession, rawToken, cancellationToken);
         if (token?.UserId == null)
         {
             return null;
@@ -64,7 +65,7 @@ public sealed class SqlOSIssuerSessionService
                 lifecycle,
                 now,
                 cancellationToken);
-            token.ConsumedAt = now;
+            token.Retire(now);
             SqlOSAuthLifecyclePolicy.AddDeniedAudit(
                 _context,
                 _cryptoService.GenerateId("aud"),
@@ -84,7 +85,7 @@ public sealed class SqlOSIssuerSessionService
             return null;
         }
 
-        var payload = _cryptoService.DeserializePayload<IssuerSessionPayload>(token);
+        var payload = token.ReadPayload(SqlOSTemporaryTokenKinds.IssuerSession);
         var authenticatedAt = payload is { AuthenticatedAt: var stamped } && stamped != default
             ? stamped
             : token.CreatedAt;
@@ -149,15 +150,12 @@ public sealed class SqlOSIssuerSessionService
 
         var family = await ResolveFamilyForSignInAsync(httpContext, user.Id, organizationId, continueExistingSession, cancellationToken);
         var securitySettings = await _settingsService.GetResolvedSecuritySettingsAsync(cancellationToken);
-        var rawToken = await _cryptoService.CreateTemporaryTokenAsync(
-            SqlOSAuthLifecyclePolicy.IssuerSessionPurpose,
-            user.Id,
-            null,
-            organizationId,
+        var rawToken = (await _cryptoService.CreateTemporaryTokenAsync(
+            SqlOSTemporaryTokenKinds.IssuerSession,
             new IssuerSessionPayload(authenticationMethod, authenticatedAt ?? DateTime.UtcNow),
+            new TemporaryTokenBinding(UserId: user.Id, OrganizationId: organizationId, IssuerSessionFamilyId: family.Id),
             securitySettings.SessionIdleTimeout,
-            cancellationToken,
-            family.Id);
+            cancellationToken)).RawToken;
 
         var revokedAt = await _context.Set<SqlOSIssuerSessionFamily>()
             .AsNoTracking()
@@ -166,10 +164,27 @@ public sealed class SqlOSIssuerSessionService
             .FirstAsync(cancellationToken);
         if (revokedAt != null)
         {
-            await _cryptoService.ConsumeTemporaryTokenAsync(
-                SqlOSAuthLifecyclePolicy.IssuerSessionPurpose,
+            // The family was revoked while this cookie was being issued: withdraw it at once.
+            var issued = await _cryptoService.FindTemporaryTokenAsync(
+                SqlOSTemporaryTokenKinds.IssuerSession,
                 rawToken,
                 cancellationToken);
+            if (issued != null)
+            {
+                issued.Retire(DateTime.UtcNow);
+                try
+                {
+                    await _context.SaveChangesAsync(cancellationToken);
+                }
+                catch (DbUpdateConcurrencyException ex)
+                {
+                    foreach (var entry in ex.Entries)
+                    {
+                        entry.State = EntityState.Detached;
+                    }
+                }
+            }
+
             throw new InvalidOperationException(SessionNoLongerActiveMessage);
         }
 
@@ -407,9 +422,8 @@ public sealed class SqlOSIssuerSessionService
         }
 
         var tokens = await _context.Set<SqlOSTemporaryToken>()
-            .Where(x => x.Purpose == SqlOSAuthLifecyclePolicy.IssuerSessionPurpose
-                && x.IssuerSessionFamilyId == familyId
-                && x.ConsumedAt == null)
+            .Where(SqlOSTemporaryToken.OfKind(SqlOSTemporaryTokenKinds.IssuerSession))
+            .Where(x => x.IssuerSessionFamilyId == familyId && x.ConsumedAt == null)
             .ToListAsync(cancellationToken);
         if (tokens.Count == 0)
         {
@@ -418,7 +432,7 @@ public sealed class SqlOSIssuerSessionService
 
         foreach (var sibling in tokens)
         {
-            sibling.ConsumedAt = now;
+            sibling.Retire(now);
         }
 
         try
@@ -440,14 +454,14 @@ public sealed class SqlOSIssuerSessionService
         CancellationToken cancellationToken)
     {
         var unlinked = await _context.Set<SqlOSTemporaryToken>()
-            .Where(x => x.Purpose == SqlOSAuthLifecyclePolicy.IssuerSessionPurpose
-                && x.ConsumedAt == null
+            .Where(SqlOSTemporaryToken.OfKind(SqlOSTemporaryTokenKinds.IssuerSession))
+            .Where(x => x.ConsumedAt == null
                 && x.IssuerSessionFamilyId == null
                 && x.UserId == presenting.UserId)
             .ToListAsync(cancellationToken);
         foreach (var token in unlinked)
         {
-            token.ConsumedAt = now;
+            token.Retire(now);
         }
 
         if (unlinked.Count > 0)
@@ -463,7 +477,7 @@ public sealed class SqlOSIssuerSessionService
             return;
         }
 
-        token.ConsumedAt = DateTime.UtcNow;
+        token.Retire(DateTime.UtcNow);
         try
         {
             await _context.SaveChangesAsync(cancellationToken);
@@ -482,22 +496,17 @@ public sealed class SqlOSIssuerSessionService
         bool unconsumedOnly,
         CancellationToken cancellationToken)
     {
-        var hash = _cryptoService.HashToken(rawToken);
         var query = _context.Set<SqlOSTemporaryToken>()
-            .Where(x => x.Purpose == SqlOSAuthLifecyclePolicy.IssuerSessionPurpose && x.TokenHash == hash);
+            .Where(SqlOSTemporaryToken.OfKind(SqlOSTemporaryTokenKinds.IssuerSession))
+            .Where(SqlOSTemporaryToken.Presented(rawToken));
         if (unconsumedOnly)
         {
-            var now = DateTime.UtcNow;
-            query = query.Where(x => x.ConsumedAt == null && x.ExpiresAt >= now);
+            query = query.Where(SqlOSTemporaryToken.UsableAt(DateTime.UtcNow));
         }
 
         return await query.FirstOrDefaultAsync(cancellationToken);
     }
 
-    // AuthenticatedAt defaults so cookies minted before the field existed still
-    // deserialize; a default value means "unknown" and falls back to the
-    // temporary token's CreatedAt.
-    private sealed record IssuerSessionPayload(string AuthenticationMethod, DateTime AuthenticatedAt = default);
 }
 
 public sealed record SqlOSIssuerSession(

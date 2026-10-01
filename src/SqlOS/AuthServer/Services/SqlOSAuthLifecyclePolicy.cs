@@ -10,15 +10,16 @@ internal static class SqlOSAuthLifecyclePolicy
 {
     internal const string DeniedEventType = "auth.lifecycle.denied";
     internal const string CalendarConnectionRevokedEventType = "calendar.connection.disconnected";
-    internal const string IssuerSessionPurpose = "auth_page_session";
+    // The temporary tokens that lead to a session; revoking an account's or an organization's
+    // sessions withdraws them too.
     private static readonly string[] SessionIssuanceTemporaryTokenPurposes =
     [
-        IssuerSessionPurpose,
-        "auth_code",
-        "auth_page_pending",
-        "mfa_challenge",
-        "oidc_browser_code",
-        "pending_auth"
+        SqlOSTemporaryTokenKinds.IssuerSession.Purpose,
+        SqlOSTemporaryTokenKinds.Purposes.LegacySamlAuthorizationCode,
+        SqlOSTemporaryTokenKinds.AuthPagePending.Purpose,
+        SqlOSTemporaryTokenKinds.MfaChallenge.Purpose,
+        SqlOSTemporaryTokenKinds.OidcBrowserCode.Purpose,
+        SqlOSTemporaryTokenKinds.PendingAuth.Purpose
     ];
 
     internal static async Task<SqlOSAuthLifecycleDecision> EvaluateAsync(
@@ -256,7 +257,7 @@ internal static class SqlOSAuthLifecyclePolicy
 
         foreach (var temporaryToken in temporaryTokens.Where(x => x.ConsumedAt == null))
         {
-            temporaryToken.ConsumedAt = now;
+            temporaryToken.Retire(now);
         }
 
         foreach (var family in issuerSessionFamilies.Where(x => x.RevokedAt == null))

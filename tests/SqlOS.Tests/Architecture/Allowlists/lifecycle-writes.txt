@@ -61,7 +61,6 @@ SqlOS.AuthServer.Services.SqlOSAuthLifecyclePolicy::RevokeAsync -> SqlOSRefreshT
 SqlOS.AuthServer.Services.SqlOSAuthLifecyclePolicy::RevokeAsync -> SqlOSRefreshToken.RevokedAt
 SqlOS.AuthServer.Services.SqlOSAuthLifecyclePolicy::RevokeAsync -> SqlOSSession.RevocationReason
 SqlOS.AuthServer.Services.SqlOSAuthLifecyclePolicy::RevokeAsync -> SqlOSSession.RevokedAt
-SqlOS.AuthServer.Services.SqlOSAuthLifecyclePolicy::RevokeAsync -> SqlOSTemporaryToken.ConsumedAt
 SqlOS.AuthServer.Services.SqlOSAuthLifecyclePolicy::RevokeCalendarConnectionsAsync -> SqlOSCalendarConnection.AccessTokenExpiresAt
 SqlOS.AuthServer.Services.SqlOSAuthLifecyclePolicy::RevokeCalendarConnectionsAsync -> SqlOSCalendarConnection.RevokedAt
 SqlOS.AuthServer.Services.SqlOSAuthLifecyclePolicy::RevokeSessionAsync -> SqlOSRefreshToken.ReplacementAccessTokenExpiresAt
@@ -75,13 +74,10 @@ SqlOS.AuthServer.Services.SqlOSAuthService::CreateInvitationSignupUserAsync -> S
 SqlOS.AuthServer.Services.SqlOSAuthService::CreateSessionAndTokensAsync -> SqlOSRefreshToken.ExpiresAt
 SqlOS.AuthServer.Services.SqlOSAuthService::CreateSessionAndTokensAsync -> SqlOSSession.AbsoluteExpiresAt
 SqlOS.AuthServer.Services.SqlOSAuthService::CreateSessionAndTokensAsync -> SqlOSSession.IdleExpiresAt
-SqlOS.AuthServer.Services.SqlOSAuthService::InvalidateActivePasswordResetTokensAsync -> SqlOSTemporaryToken.ConsumedAt
-SqlOS.AuthServer.Services.SqlOSAuthService::RecordMfaChallengeFailureAsync -> SqlOSTemporaryToken.ConsumedAt
 SqlOS.AuthServer.Services.SqlOSAuthService::RefreshWithSessionScopeAsync -> SqlOSRefreshToken.ConsumedAt
 SqlOS.AuthServer.Services.SqlOSAuthService::RefreshWithSessionScopeAsync -> SqlOSRefreshToken.ExpiresAt
 SqlOS.AuthServer.Services.SqlOSAuthService::RefreshWithSessionScopeAsync -> SqlOSRefreshToken.ReplacementAccessTokenExpiresAt
 SqlOS.AuthServer.Services.SqlOSAuthService::RefreshWithSessionScopeAsync -> SqlOSSession.IdleExpiresAt
-SqlOS.AuthServer.Services.SqlOSAuthService::RequestEmailVerificationAsync -> SqlOSTemporaryToken.ConsumedAt
 SqlOS.AuthServer.Services.SqlOSAuthService::RevokeRefreshTokenFamilyAsync -> SqlOSRefreshToken.ReplacementAccessTokenExpiresAt
 SqlOS.AuthServer.Services.SqlOSAuthService::RevokeRefreshTokenFamilyAsync -> SqlOSRefreshToken.ReplacementAccessTokenExpiresAt (bulk update)
 SqlOS.AuthServer.Services.SqlOSAuthService::RevokeRefreshTokenFamilyAsync -> SqlOSRefreshToken.RevokedAt
@@ -96,8 +92,6 @@ SqlOS.AuthServer.Services.SqlOSAuthService::RevokeSessionAsync -> SqlOSSession.R
 SqlOS.AuthServer.Services.SqlOSAuthService::RevokeSessionAsync -> SqlOSSession.RevokedAt
 SqlOS.AuthServer.Services.SqlOSAuthService::VerifyEmailAsync -> SqlOSUserEmail.IsVerified
 SqlOS.AuthServer.Services.SqlOSAuthService::VerifyEmailAsync -> SqlOSUserEmail.VerifiedAt
-SqlOS.AuthServer.Services.SqlOSAuthService::VerifyMfaChallengeAsync -> SqlOSTemporaryToken.ConsumedAt
-SqlOS.AuthServer.Services.SqlOSAuthorizationServerService::CompleteMfaChallengeAsync -> SqlOSTemporaryToken.ConsumedAt
 SqlOS.AuthServer.Services.SqlOSAuthorizationServerService::ConsumeIssuedAuthorizationCodeAsync -> SqlOSAuthorizationCode.ConsumedAt
 SqlOS.AuthServer.Services.SqlOSAuthorizationServerService::CreateAuthorizationRequestAsync -> SqlOSAuthorizationRequest.ExpiresAt
 SqlOS.AuthServer.Services.SqlOSAuthorizationServerService::ExchangeAuthorizationCodeAsync -> SqlOSAuthorizationCode.ConsumedAt
@@ -125,9 +119,7 @@ SqlOS.AuthServer.Services.SqlOSConsentService::RevokeGrantOnceAsync -> SqlOSCons
 SqlOS.AuthServer.Services.SqlOSConsentService::RevokeGrantOnceAsync -> SqlOSConsentGrant.RevokedAt
 SqlOS.AuthServer.Services.SqlOSConsentService::UpsertGrantOnceAsync -> SqlOSConsentGrant.RevocationReason
 SqlOS.AuthServer.Services.SqlOSConsentService::UpsertGrantOnceAsync -> SqlOSConsentGrant.RevokedAt
-SqlOS.AuthServer.Services.SqlOSCryptoService::ConsumeTemporaryTokenAsync -> SqlOSTemporaryToken.ConsumedAt
 SqlOS.AuthServer.Services.SqlOSCryptoService::CreateSigningKeyAsync -> SqlOSSigningKey.IsActive
-SqlOS.AuthServer.Services.SqlOSCryptoService::CreateTemporaryTokenAsync -> SqlOSTemporaryToken.ExpiresAt
 SqlOS.AuthServer.Services.SqlOSCryptoService::RotateSigningKeyAsync -> SqlOSSigningKey.IsActive
 SqlOS.AuthServer.Services.SqlOSCryptoService::ValidateAccessTokenCoreAsync -> SqlOSSession.IdleExpiresAt
 SqlOS.AuthServer.Services.SqlOSDeviceAuthorizationService::CreateOrGetAuthorizationRequestAsync -> SqlOSAuthorizationRequest.ExpiresAt
@@ -151,12 +143,8 @@ SqlOS.AuthServer.Services.SqlOSInvitationService::AcceptInvitationForUserAsync -
 SqlOS.AuthServer.Services.SqlOSInvitationService::CreateEmailInvitationAsync -> SqlOSInvitation.ExpiresAt
 SqlOS.AuthServer.Services.SqlOSInvitationService::CreateEmailInvitationAsync -> SqlOSInvitation.RevokedAt
 SqlOS.AuthServer.Services.SqlOSInvitationService::RevokeEmailInvitationAsync -> SqlOSInvitation.RevokedAt
-SqlOS.AuthServer.Services.SqlOSIssuerSessionService::ConsumeLegacyUnlinkedAsync -> SqlOSTemporaryToken.ConsumedAt
-SqlOS.AuthServer.Services.SqlOSIssuerSessionService::ConsumePresentingTokenAsync -> SqlOSTemporaryToken.ConsumedAt
 SqlOS.AuthServer.Services.SqlOSIssuerSessionService::RevokeFamilyAsync -> SqlOSIssuerSessionFamily.RevocationReason
 SqlOS.AuthServer.Services.SqlOSIssuerSessionService::RevokeFamilyAsync -> SqlOSIssuerSessionFamily.RevokedAt
-SqlOS.AuthServer.Services.SqlOSIssuerSessionService::RevokeFamilyAsync -> SqlOSTemporaryToken.ConsumedAt
-SqlOS.AuthServer.Services.SqlOSIssuerSessionService::TryGetSessionAsync -> SqlOSTemporaryToken.ConsumedAt
 SqlOS.AuthServer.Services.SqlOSMachineClientAdminService::CreateAsync -> SqlOSFgaServiceAccount.ExpiresAt
 SqlOS.AuthServer.Services.SqlOSMachineClientAdminService::CreateClient -> SqlOSClientApplication.IsActive
 SqlOS.AuthServer.Services.SqlOSMachineClientAdminService::EmergencyDisableAsync -> SqlOSClientApplication.DisabledAt
@@ -172,7 +160,6 @@ SqlOS.AuthServer.Services.SqlOSMachineClientAdminService::RevokeAsync -> SqlOSCl
 SqlOS.AuthServer.Services.SqlOSMachineClientAdminService::RevokeAsync -> SqlOSFgaServiceAccount.ExpiresAt
 SqlOS.AuthServer.Services.SqlOSMachineClientAdminService::RotateAsync -> SqlOSClientCredential.RevokedAt
 SqlOS.AuthServer.Services.SqlOSMachineClientAdminService::UpsertSeededMachineClientsCoreAsync -> SqlOSFgaServiceAccount.ExpiresAt
-SqlOS.AuthServer.Services.SqlOSMagicLinkService::CreateLinkAsync -> SqlOSTemporaryToken.ConsumedAt
 SqlOS.AuthServer.Services.SqlOSMfaAttemptAdmissionService::CleanupExpiredReservationsForBucketsAsync -> SqlOSMfaAttemptBucket.AttemptCount
 SqlOS.AuthServer.Services.SqlOSMfaAttemptAdmissionService::FinalizeAsync -> SqlOSMfaAttemptBucket.AttemptCount
 SqlOS.AuthServer.Services.SqlOSMfaAttemptAdmissionService::RebaseIfWindowExpiredAsync -> SqlOSMfaAttemptBucket.AttemptCount
@@ -227,10 +214,8 @@ SqlOS.AuthServer.Services.SqlOSSsoPortalService::RevokeOrganizationSessionsCoreA
 SqlOS.AuthServer.Services.SqlOSSsoPortalService::RevokeOrganizationSessionsCoreAsync -> SqlOSRefreshToken.RevokedAt
 SqlOS.AuthServer.Services.SqlOSSsoPortalService::RevokeOrganizationSessionsCoreAsync -> SqlOSSession.RevocationReason
 SqlOS.AuthServer.Services.SqlOSSsoPortalService::RevokeOrganizationSessionsCoreAsync -> SqlOSSession.RevokedAt
-SqlOS.AuthServer.Services.SqlOSSsoPortalService::RevokeOrganizationSessionsCoreAsync -> SqlOSTemporaryToken.ConsumedAt
 SqlOS.AuthServer.Services.SqlOSSsoPortalService::RevokePresentedSessionCoreAsync -> SqlOSSsoPortalSession.RevokedAt
 SqlOS.AuthServer.Services.SqlOSSsoPortalService::RevokeSessionAsync -> SqlOSSsoPortalSession.RevokedAt
-SqlOS.AuthServer.Services.SqlOSTotpMfaService::ConfirmEnrollmentAsync -> SqlOSTemporaryToken.ConsumedAt
 SqlOS.AuthServer.Services.SqlOSTotpMfaService::CreateEnrollmentAsync -> SqlOSUserAuthenticator.RevocationReason
 SqlOS.AuthServer.Services.SqlOSTotpMfaService::CreateEnrollmentAsync -> SqlOSUserAuthenticator.RevokedAt
 SqlOS.AuthServer.Services.SqlOSTotpMfaService::ReplaceRecoveryCodesAsync -> SqlOSRecoveryCode.RevokedAt

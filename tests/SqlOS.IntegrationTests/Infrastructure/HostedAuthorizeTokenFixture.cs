@@ -593,7 +593,7 @@ public sealed class HostedAuthorizeTokenFixture : IAsyncDisposable
             var hash = crypto.HashToken(value);
             tokens.Add(await db.Set<SqlOSTemporaryToken>()
                 .AsNoTracking()
-                .FirstOrDefaultAsync(x => x.Purpose == SqlOSAuthLifecyclePolicy.IssuerSessionPurpose
+                .FirstOrDefaultAsync(x => x.Purpose == SqlOSTemporaryTokenKinds.IssuerSession.Purpose
                     && x.TokenHash == hash));
         }
 

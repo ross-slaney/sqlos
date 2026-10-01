@@ -33,6 +33,7 @@ public sealed class SqlOSCryptoService
     private readonly IDataProtector? _secretProtector;
     private readonly ITimeLimitedDataProtector? _refreshTokenResponseProtector;
     private readonly ISqlOSSigningKeyCustody _signingKeyCustody;
+    private readonly TimeProvider _timeProvider;
 
     public SqlOSCryptoService(
         ISqlOSAuthServerDbContext context,
@@ -52,7 +53,8 @@ public sealed class SqlOSCryptoService
         IOptions<SqlOSAuthServerOptions> options,
         ISqlOSSigningKeyCustody signingKeyCustody,
         IDataProtectionProvider? dataProtectionProvider = null,
-        SqlOSValidationSigningKeyCache? validationSigningKeyCache = null)
+        SqlOSValidationSigningKeyCache? validationSigningKeyCache = null,
+        TimeProvider? timeProvider = null)
     {
         _context = context;
         _options = options.Value;
@@ -62,6 +64,7 @@ public sealed class SqlOSCryptoService
             .CreateProtector("SqlOS.AuthServer.RefreshTokenResponse.v1")
             .ToTimeLimitedDataProtector();
         _signingKeyCustody = signingKeyCustody;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public string HashPassword(string password) => HashedSecret.Pbkdf2(password).Hash;
@@ -172,11 +175,7 @@ public sealed class SqlOSCryptoService
 
     public string GenerateId(string prefix) => SqlOSIds.New(prefix);
 
-    public string GenerateOpaqueToken(int numBytes = 32)
-    {
-        var bytes = RandomNumberGenerator.GetBytes(numBytes);
-        return Base64UrlEncoder.Encode(bytes);
-    }
+    public string GenerateOpaqueToken(int numBytes = 32) => OpaqueSecret.NewValue(numBytes);
 
     public string HashToken(string rawToken) => HashedSecret.Sha256(rawToken).Hash;
 
@@ -229,6 +228,12 @@ public sealed class SqlOSCryptoService
             or >= 'a' and <= 'z'
             or >= '0' and <= '9';
 
+    /// <summary>
+    /// Issues a temporary token of a host's own purpose (for example an OIDC hand-off) and returns
+    /// the raw token, which is never stored. SqlOS's own tokens are issued through their
+    /// <see cref="TemporaryTokenKind"/> (<see cref="SqlOSTemporaryTokenKinds"/>).
+    /// </summary>
+    /// <param name="lifetime">How long the token lives; <see cref="SqlOSAuthServerOptions.TemporaryTokenLifetime"/> when null.</param>
     public async Task<string> CreateTemporaryTokenAsync(
         string purpose,
         string? userId,
@@ -239,67 +244,121 @@ public sealed class SqlOSCryptoService
         CancellationToken cancellationToken = default,
         string? issuerSessionFamilyId = null)
     {
-        var rawToken = GenerateOpaqueToken();
-        var now = DateTime.UtcNow;
-        var token = new SqlOSTemporaryToken
-        {
-            Id = GenerateId("tmp"),
-            Purpose = purpose,
-            TokenHash = HashToken(rawToken),
-            UserId = userId,
-            ClientApplicationId = clientApplicationId,
-            OrganizationId = organizationId,
-            IssuerSessionFamilyId = issuerSessionFamilyId,
-            PayloadJson = payload != null ? JsonSerializer.Serialize(payload) : null,
-            CreatedAt = now,
-            ExpiresAt = now.Add(lifetime ?? _options.TemporaryTokenLifetime)
-        };
-        _context.Set<SqlOSTemporaryToken>().Add(token);
+        var issued = await CreateTemporaryTokenAsync(
+            SqlOSTemporaryTokenKinds.ForHost(purpose),
+            payload,
+            new TemporaryTokenBinding(userId, clientApplicationId, organizationId, issuerSessionFamilyId),
+            lifetime ?? _options.TemporaryTokenLifetime,
+            cancellationToken);
+        return issued.RawToken;
+    }
+
+    /// <summary>
+    /// The unspent, unexpired token of the host purpose <paramref name="purpose"/> whose raw value is
+    /// <paramref name="rawToken"/>, without spending it.
+    /// </summary>
+    public Task<SqlOSTemporaryToken?> FindTemporaryTokenAsync(
+        string purpose,
+        string rawToken,
+        CancellationToken cancellationToken = default)
+        => FindTemporaryTokenAsync(SqlOSTemporaryTokenKinds.ForHost(purpose), rawToken, cancellationToken);
+
+    /// <summary>
+    /// Spends the token of the host purpose <paramref name="purpose"/> whose raw value is
+    /// <paramref name="rawToken"/>, or returns null when there is none or a concurrent request
+    /// spent it first.
+    /// </summary>
+    public Task<SqlOSTemporaryToken?> ConsumeTemporaryTokenAsync(
+        string purpose,
+        string rawToken,
+        CancellationToken cancellationToken = default)
+        => ConsumeTemporaryTokenAsync(SqlOSTemporaryTokenKinds.ForHost(purpose), rawToken, cancellationToken);
+
+    /// <summary>Reads a host token's payload as <typeparamref name="T"/>.</summary>
+    public T? DeserializePayload<T>(SqlOSTemporaryToken token)
+        => string.IsNullOrWhiteSpace(token.PayloadJson) ? default : JsonSerializer.Deserialize<T>(token.PayloadJson);
+
+    /// <summary>
+    /// Issues a token of <paramref name="kind"/> and saves it. The kind decides the purpose, the
+    /// payload format, the allowed bindings and, unless it is configured, the lifetime.
+    /// </summary>
+    /// <param name="configuredLifetime">The configured lifetime of a kind whose lifetime is configured; null for a fixed one.</param>
+    internal async Task<IssuedTemporaryToken> CreateTemporaryTokenAsync<TPayload>(
+        TemporaryTokenKind<TPayload> kind,
+        TPayload? payload,
+        TemporaryTokenBinding binding,
+        TimeSpan? configuredLifetime,
+        CancellationToken cancellationToken = default)
+        where TPayload : class
+    {
+        var issued = SqlOSTemporaryToken.Issue(
+            kind,
+            payload,
+            binding,
+            kind.Lifetime.Resolve(configuredLifetime),
+            _timeProvider.GetUtcNow().UtcDateTime);
+        _context.Set<SqlOSTemporaryToken>().Add(issued.Token);
         await _context.SaveChangesAsync(cancellationToken);
-        return rawToken;
+        return issued;
     }
 
-    public async Task<SqlOSTemporaryToken?> FindTemporaryTokenAsync(
-        string purpose,
+    /// <summary>
+    /// The unspent, unexpired token of <paramref name="kind"/> whose raw value is
+    /// <paramref name="rawToken"/>, without spending it.
+    /// </summary>
+    internal Task<SqlOSTemporaryToken?> FindTemporaryTokenAsync(
+        TemporaryTokenKind kind,
+        string rawToken,
+        CancellationToken cancellationToken = default)
+        => FindUsableTemporaryTokenAsync(kind, rawToken, _timeProvider.GetUtcNow().UtcDateTime, cancellationToken);
+
+    /// <summary>
+    /// Spends the single-use token of <paramref name="kind"/> whose raw value is
+    /// <paramref name="rawToken"/>, or returns null when there is none or a concurrent request spent
+    /// it first (its <c>ConsumedAt</c> is a concurrency token).
+    /// </summary>
+    internal async Task<SqlOSTemporaryToken?> ConsumeTemporaryTokenAsync(
+        TemporaryTokenKind kind,
         string rawToken,
         CancellationToken cancellationToken = default)
     {
-        var hash = HashToken(rawToken);
-        var now = DateTime.UtcNow;
-        return await _context.Set<SqlOSTemporaryToken>()
-            .FirstOrDefaultAsync(x => x.Purpose == purpose && x.TokenHash == hash && x.ConsumedAt == null && x.ExpiresAt >= now, cancellationToken);
-    }
-
-    public async Task<SqlOSTemporaryToken?> ConsumeTemporaryTokenAsync(
-        string purpose,
-        string rawToken,
-        CancellationToken cancellationToken = default)
-    {
-        var token = await FindTemporaryTokenAsync(purpose, rawToken, cancellationToken);
+        var now = _timeProvider.GetUtcNow().UtcDateTime;
+        var token = await FindUsableTemporaryTokenAsync(kind, rawToken, now, cancellationToken);
         if (token == null)
         {
             return null;
         }
 
-        token.ConsumedAt = DateTime.UtcNow;
+        token.Consume(kind, now);
         try
         {
             await _context.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateConcurrencyException ex)
         {
+            // A concurrent request spent the token first. Detaching it discards this request's
+            // change and its events, so a later save of the same unit of work writes neither.
             foreach (var entry in ex.Entries)
             {
                 entry.State = EntityState.Detached;
             }
+
             return null;
         }
 
         return token;
     }
 
-    public T? DeserializePayload<T>(SqlOSTemporaryToken token)
-        => string.IsNullOrWhiteSpace(token.PayloadJson) ? default : JsonSerializer.Deserialize<T>(token.PayloadJson);
+    private Task<SqlOSTemporaryToken?> FindUsableTemporaryTokenAsync(
+        TemporaryTokenKind kind,
+        string rawToken,
+        DateTime now,
+        CancellationToken cancellationToken)
+        => _context.Set<SqlOSTemporaryToken>()
+            .Where(SqlOSTemporaryToken.OfKind(kind))
+            .Where(SqlOSTemporaryToken.Presented(rawToken))
+            .Where(SqlOSTemporaryToken.UsableAt(now))
+            .FirstOrDefaultAsync(cancellationToken);
 
     public Task<SqlOSSigningKey> EnsureActiveSigningKeyAsync(CancellationToken cancellationToken = default)
         => EnsureActiveSigningKeyCoreAsync(validateExistingCustody: true, cancellationToken);

@@ -11,6 +11,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Domain;
 using SqlOS.Email.Contracts;
 using SqlOS.Email.Interfaces;
 using SqlOS.Email.Models;
@@ -126,12 +127,9 @@ public sealed class SqlOSEmailOtpService
             sendWhenNoUser: true,
             purpose: "signup");
 
-        var signupToken = await _cryptoService.CreateTemporaryTokenAsync(
-            "email_otp_signup",
-            userId: null,
-            clientApplicationId: authorizationRequest?.ClientApplicationId,
-            organizationId: null,
-            payload: new EmailOtpSignupPayload(
+        var signupToken = (await _cryptoService.CreateTemporaryTokenAsync(
+            SqlOSTemporaryTokenKinds.EmailOtpSignup,
+            new EmailOtpSignupPayload(
                 _cryptoService.HashToken(challenge.ChallengeToken),
                 authorizationRequest?.Id,
                 authorizationRequest?.ClientApplication?.ClientId,
@@ -141,8 +139,9 @@ public sealed class SqlOSEmailOtpService
                 string.IsNullOrWhiteSpace(organizationName) ? null : organizationName.Trim(),
                 OrganizationId: null,
                 CustomFields: customFields),
-            lifetime: _options.ChallengeLifetime,
-            cancellationToken);
+            new TemporaryTokenBinding(ClientApplicationId: authorizationRequest?.ClientApplicationId),
+            _options.ChallengeLifetime,
+            cancellationToken)).RawToken;
 
         return new SqlOSEmailOtpSignupStartResult(
             challenge.ChallengeToken,
@@ -197,12 +196,9 @@ public sealed class SqlOSEmailOtpService
             sendWhenNoUser: true,
             purpose: "signup");
 
-        var signupToken = await _cryptoService.CreateTemporaryTokenAsync(
-            "email_otp_signup",
-            userId: null,
-            clientApplicationId: client.Id,
-            organizationId: null,
-            payload: new EmailOtpSignupPayload(
+        var signupToken = (await _cryptoService.CreateTemporaryTokenAsync(
+            SqlOSTemporaryTokenKinds.EmailOtpSignup,
+            new EmailOtpSignupPayload(
                 _cryptoService.HashToken(challenge.ChallengeToken),
                 AuthorizationRequestId: null,
                 ClientId: client.ClientId,
@@ -212,8 +208,9 @@ public sealed class SqlOSEmailOtpService
                 OrganizationName: string.IsNullOrWhiteSpace(request.OrganizationName) ? null : request.OrganizationName.Trim(),
                 OrganizationId: null,
                 CustomFields: request.CustomFields),
-            lifetime: _options.ChallengeLifetime,
-            cancellationToken);
+            new TemporaryTokenBinding(ClientApplicationId: client.Id),
+            _options.ChallengeLifetime,
+            cancellationToken)).RawToken;
 
         return new SqlOSEmailOtpSignupStartResult(
             challenge.ChallengeToken,
@@ -286,9 +283,9 @@ public sealed class SqlOSEmailOtpService
 
         var signupToken = request.SignupToken?.Trim()
             ?? throw new InvalidOperationException("The sign-in code is invalid or expired.");
-        var token = await _cryptoService.FindTemporaryTokenAsync("email_otp_signup", signupToken, cancellationToken)
+        var token = await _cryptoService.FindTemporaryTokenAsync(SqlOSTemporaryTokenKinds.EmailOtpSignup, signupToken, cancellationToken)
             ?? throw new InvalidOperationException("The sign-in code is invalid or expired.");
-        var payload = _cryptoService.DeserializePayload<EmailOtpSignupPayload>(token)
+        var payload = token.ReadPayload(SqlOSTemporaryTokenKinds.EmailOtpSignup)
             ?? throw new InvalidOperationException("The sign-in code is invalid or expired.");
 
         if (requireAuthorizationRequestMatch)
@@ -374,7 +371,7 @@ public sealed class SqlOSEmailOtpService
     {
         var rawSignupToken = signupToken?.Trim()
             ?? throw new InvalidOperationException("The sign-in code is invalid or expired.");
-        _ = await _cryptoService.ConsumeTemporaryTokenAsync("email_otp_signup", rawSignupToken, cancellationToken)
+        _ = await _cryptoService.ConsumeTemporaryTokenAsync(SqlOSTemporaryTokenKinds.EmailOtpSignup, rawSignupToken, cancellationToken)
             ?? throw new InvalidOperationException("The sign-in code is invalid or expired.");
     }
 
@@ -898,16 +895,6 @@ public sealed class SqlOSEmailOtpService
             },
             cancellationToken);
 
-    private sealed record EmailOtpSignupPayload(
-        string ChallengeTokenHash,
-        string? AuthorizationRequestId,
-        string? ClientId,
-        string? ClientApplicationId,
-        string DisplayName,
-        string Email,
-        string? OrganizationName,
-        string? OrganizationId,
-        JsonObject? CustomFields);
 }
 
 public sealed record SqlOSEmailOtpVerificationResult(

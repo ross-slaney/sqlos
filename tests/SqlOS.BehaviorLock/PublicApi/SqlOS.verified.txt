@@ -3676,19 +3676,18 @@ namespace SqlOS.AuthServer.Models
     }
     public sealed class SqlOSTemporaryToken
     {
-        public SqlOSTemporaryToken() { }
-        public string? ClientApplicationId { get; set; }
-        public System.DateTime? ConsumedAt { get; set; }
-        public System.DateTime CreatedAt { get; set; }
-        public System.DateTime ExpiresAt { get; set; }
-        public string Id { get; set; }
-        public SqlOS.AuthServer.Models.SqlOSIssuerSessionFamily? IssuerSessionFamily { get; set; }
-        public string? IssuerSessionFamilyId { get; set; }
-        public string? OrganizationId { get; set; }
-        public string? PayloadJson { get; set; }
-        public string Purpose { get; set; }
-        public string TokenHash { get; set; }
-        public string? UserId { get; set; }
+        public string? ClientApplicationId { get; }
+        public System.DateTime? ConsumedAt { get; }
+        public System.DateTime CreatedAt { get; }
+        public System.DateTime ExpiresAt { get; }
+        public string Id { get; }
+        public SqlOS.AuthServer.Models.SqlOSIssuerSessionFamily? IssuerSessionFamily { get; }
+        public string? IssuerSessionFamilyId { get; }
+        public string? OrganizationId { get; }
+        public string? PayloadJson { get; }
+        public string Purpose { get; }
+        public string TokenHash { get; }
+        public string? UserId { get; }
     }
     public sealed class SqlOSUser
     {

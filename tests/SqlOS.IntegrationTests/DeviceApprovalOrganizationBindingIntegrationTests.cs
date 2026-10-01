@@ -70,7 +70,7 @@ public sealed class DeviceApprovalOrganizationBindingIntegrationTests
         stored.CompletedAt.Should().BeNull();
         stored.CancelledAt.Should().BeNull();
         (await db.Set<SqlOSTemporaryToken>()
-                .AnyAsync(x => x.Purpose == SqlOSAuthorizationServerService.ConsentTokenPurpose))
+                .AnyAsync(x => x.Purpose == SqlOSTemporaryTokenKinds.AuthPageConsent.Purpose))
             .Should().BeFalse();
     }
 

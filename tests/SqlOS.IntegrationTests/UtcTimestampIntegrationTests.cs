@@ -115,7 +115,7 @@ public sealed class UtcTimestampIntegrationTests
             var live = await crypto.CreateTemporaryTokenAsync("utc_test", null, null, null, null, TimeSpan.FromMinutes(5));
             var expired = await crypto.CreateTemporaryTokenAsync("utc_test", null, null, null, null, TimeSpan.FromMinutes(5));
             var expiredRow = await setup.Set<SqlOSTemporaryToken>().SingleAsync(x => x.TokenHash == crypto.HashToken(expired));
-            expiredRow.ExpiresAt = DateTime.UtcNow.AddSeconds(-1);
+            setup.Entry(expiredRow).Property(x => x.ExpiresAt).CurrentValue = DateTime.UtcNow.AddSeconds(-1);
             await setup.SaveChangesAsync();
 
             await using var fresh = new TestSqlOSDbContext(new DbContextOptionsBuilder<TestSqlOSDbContext>()

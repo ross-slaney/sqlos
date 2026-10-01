@@ -630,7 +630,7 @@ public sealed partial class SamlServiceIntegrationTests
                 stored.PendingConsentUserId.Should().BeNull();
                 stored.ResolvedAuthMethod.Should().BeNull();
                 (await verify.Set<SqlOSTemporaryToken>()
-                        .AnyAsync(x => x.Purpose == SqlOSAuthorizationServerService.ConsentTokenPurpose))
+                        .AnyAsync(x => x.Purpose == SqlOSTemporaryTokenKinds.AuthPageConsent.Purpose))
                     .Should().BeFalse();
             }
 

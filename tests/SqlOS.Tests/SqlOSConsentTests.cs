@@ -547,7 +547,7 @@ public sealed class SqlOSConsentTests
         // A token minted mid-deploy carries neither AuthenticatedAt nor
         // ClientMetadataFingerprint; the 10-minute token lifetime bounds the exposure.
         var legacyToken = await harness.Crypto.CreateTemporaryTokenAsync(
-            SqlOSAuthorizationServerService.ConsentTokenPurpose,
+            SqlOSTemporaryTokenKinds.AuthPageConsent.Purpose,
             user.Id,
             request.ClientApplicationId,
             null,
@@ -619,7 +619,7 @@ public sealed class SqlOSConsentTests
             .WithMessage("The combined consent grant scope cannot exceed 4000 characters.");
 
         var tokenRow = await harness.Context.Set<SqlOSTemporaryToken>()
-            .SingleAsync(x => x.Purpose == SqlOSAuthorizationServerService.ConsentTokenPurpose);
+            .SingleAsync(x => x.Purpose == SqlOSTemporaryTokenKinds.AuthPageConsent.Purpose);
         tokenRow.ConsumedAt.Should().BeNull("the overflow precheck must fire before the one-time token is consumed");
 
         // Once the stored grant no longer overflows, the SAME token still approves.
@@ -766,7 +766,7 @@ public sealed class SqlOSConsentTests
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*not valid for this authorization request*");
         var tokenRow = await harness.Context.Set<SqlOSTemporaryToken>()
-            .SingleAsync(x => x.Purpose == SqlOSAuthorizationServerService.ConsentTokenPurpose);
+            .SingleAsync(x => x.Purpose == SqlOSTemporaryTokenKinds.AuthPageConsent.Purpose);
         tokenRow.ConsumedAt.Should().BeNull(
             "a binding failure must not burn the flow's only approval/denial credential");
 

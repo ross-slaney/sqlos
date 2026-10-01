@@ -7,6 +7,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Domain;
 using SqlOS.Email.Contracts;
 using SqlOS.Email.Interfaces;
 using SqlOS.Email.Models;
@@ -16,7 +17,7 @@ namespace SqlOS.AuthServer.Services;
 
 public sealed class SqlOSMagicLinkService
 {
-    public const string TokenPurpose = "auth.magic_link";
+    public const string TokenPurpose = SqlOSTemporaryTokenKinds.Purposes.MagicLink;
     private const string InvalidLinkMessage = "The sign-in link is invalid or expired.";
 
     private readonly ISqlOSAuthServerDbContext _context;
@@ -105,7 +106,7 @@ public sealed class SqlOSMagicLinkService
             throw new InvalidOperationException(InvalidLinkMessage);
         }
 
-        var token = await _cryptoService.FindTemporaryTokenAsync(TokenPurpose, rawToken, cancellationToken);
+        var token = await _cryptoService.FindTemporaryTokenAsync(SqlOSTemporaryTokenKinds.MagicLink, rawToken, cancellationToken);
         if (token == null)
         {
             await RecordMagicLinkAuditAsync(
@@ -118,12 +119,12 @@ public sealed class SqlOSMagicLinkService
             throw new InvalidOperationException(InvalidLinkMessage);
         }
 
-        var payload = _cryptoService.DeserializePayload<MagicLinkPayload>(token)
+        var payload = token.ReadPayload(SqlOSTemporaryTokenKinds.MagicLink)
             ?? throw new InvalidOperationException(InvalidLinkMessage);
 
         ValidateBinding(token, payload, expectedAuthorizationRequestId, requireAuthorizationRequestMatch);
 
-        var consumed = await _cryptoService.ConsumeTemporaryTokenAsync(TokenPurpose, rawToken, cancellationToken);
+        var consumed = await _cryptoService.ConsumeTemporaryTokenAsync(SqlOSTemporaryTokenKinds.MagicLink, rawToken, cancellationToken);
         if (consumed == null)
         {
             await RecordMagicLinkAuditAsync(
@@ -224,10 +225,11 @@ public sealed class SqlOSMagicLinkService
         var maskedEmail = MaskEmail(trimmedEmail);
 
         var recentTokens = await _context.Set<SqlOSTemporaryToken>()
-            .Where(x => x.Purpose == TokenPurpose && x.CreatedAt >= now.Subtract(_options.RateLimitWindow))
+            .Where(SqlOSTemporaryToken.OfKind(SqlOSTemporaryTokenKinds.MagicLink))
+            .Where(x => x.CreatedAt >= now.Subtract(_options.RateLimitWindow))
             .ToListAsync(cancellationToken);
         var recent = recentTokens
-            .Select(token => new RecentMagicLinkToken(token, _cryptoService.DeserializePayload<MagicLinkPayload>(token)))
+            .Select(token => new RecentMagicLinkToken(token, token.ReadPayload(SqlOSTemporaryTokenKinds.MagicLink)))
             .Where(x => x.Payload != null)
             .ToArray();
 
@@ -272,7 +274,7 @@ public sealed class SqlOSMagicLinkService
             && string.Equals(x.Token.ClientApplicationId, clientApplicationId, StringComparison.Ordinal)
             && string.Equals(x.Payload.RequestedOrganizationId, requestedOrganizationId, StringComparison.Ordinal)))
         {
-            activeToken.Token.ConsumedAt = now;
+            activeToken.Token.Retire(now);
         }
 
         var emailRecord = await _context.Set<SqlOSUserEmail>()
@@ -295,14 +297,12 @@ public sealed class SqlOSMagicLinkService
             ipAddress,
             httpContext?.Request.Headers.UserAgent.ToString(),
             shouldSend);
-        var rawToken = await _cryptoService.CreateTemporaryTokenAsync(
-            TokenPurpose,
-            emailRecord?.UserId,
-            clientApplicationId,
-            requestedOrganizationId,
+        var rawToken = (await _cryptoService.CreateTemporaryTokenAsync(
+            SqlOSTemporaryTokenKinds.MagicLink,
             payload,
+            new TemporaryTokenBinding(emailRecord?.UserId, clientApplicationId, requestedOrganizationId),
             _options.TokenLifetime,
-            cancellationToken);
+            cancellationToken)).RawToken;
 
         if (shouldSend)
         {
@@ -313,12 +313,13 @@ public sealed class SqlOSMagicLinkService
             }
             catch
             {
-                var tokenHash = _cryptoService.HashToken(rawToken);
                 var createdToken = await _context.Set<SqlOSTemporaryToken>()
-                    .FirstOrDefaultAsync(x => x.Purpose == TokenPurpose && x.TokenHash == tokenHash, cancellationToken);
+                    .Where(SqlOSTemporaryToken.OfKind(SqlOSTemporaryTokenKinds.MagicLink))
+                    .Where(SqlOSTemporaryToken.Presented(rawToken))
+                    .FirstOrDefaultAsync(cancellationToken);
                 if (createdToken != null)
                 {
-                    createdToken.ConsumedAt = DateTime.UtcNow;
+                    createdToken.Retire(DateTime.UtcNow);
                     await _context.SaveChangesAsync(cancellationToken);
                 }
 
@@ -555,24 +556,13 @@ public sealed class SqlOSMagicLinkService
         return $"{local[..visibleCount]}***@{domain}";
     }
 
-    internal sealed record MagicLinkPayload(
-        string Email,
-        string NormalizedEmail,
-        string MaskedEmail,
-        string? UserEmailId,
-        string? AuthorizationRequestId,
-        string? ClientApplicationId,
-        string? RequestedOrganizationId,
-        string? IpAddress,
-        string? UserAgent,
-        bool Sent);
 
     private sealed record RecentMagicLinkToken(SqlOSTemporaryToken Token, MagicLinkPayload? Payload);
 }
 
 internal sealed record SqlOSMagicLinkVerificationResult(
     SqlOSTemporaryToken Token,
-    SqlOSMagicLinkService.MagicLinkPayload Payload,
+    MagicLinkPayload Payload,
     SqlOSUser User,
     SqlOSUserEmail UserEmail,
     IReadOnlyList<SqlOSOrganizationOption> Organizations,

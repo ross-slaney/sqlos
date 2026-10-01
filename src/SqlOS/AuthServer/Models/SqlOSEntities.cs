@@ -679,23 +679,6 @@ public sealed class SqlOSSigningKey
     public DateTime? RetiredAt { get; set; }
 }
 
-public sealed class SqlOSTemporaryToken
-{
-    public string Id { get; set; } = string.Empty;
-    public string Purpose { get; set; } = string.Empty;
-    public string TokenHash { get; set; } = string.Empty;
-    public string? UserId { get; set; }
-    public string? ClientApplicationId { get; set; }
-    public string? OrganizationId { get; set; }
-    public string? IssuerSessionFamilyId { get; set; }
-    public string? PayloadJson { get; set; }
-    public DateTime CreatedAt { get; set; }
-    public DateTime ExpiresAt { get; set; }
-    public DateTime? ConsumedAt { get; set; }
-
-    public SqlOSIssuerSessionFamily? IssuerSessionFamily { get; set; }
-}
-
 /// <summary>
 /// Durable issuer-session cookie family. The issuer session is the browser
 /// sign-in at the authorization server that hosted, headless, and

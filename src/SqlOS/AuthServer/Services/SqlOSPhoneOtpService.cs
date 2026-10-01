@@ -113,12 +113,9 @@ public sealed class SqlOSPhoneOtpService
             httpContext,
             cancellationToken);
 
-        var signupToken = await _cryptoService.CreateTemporaryTokenAsync(
-            "phone_otp_signup",
-            userId: null,
-            clientApplicationId: authorizationRequest?.ClientApplicationId,
-            organizationId: null,
-            payload: new PhoneOtpSignupPayload(
+        var signupToken = (await _cryptoService.CreateTemporaryTokenAsync(
+            SqlOSTemporaryTokenKinds.PhoneOtpSignup,
+            new PhoneOtpSignupPayload(
                 _cryptoService.HashToken(challenge.ChallengeToken),
                 authorizationRequest?.Id,
                 authorizationRequest?.ClientApplication?.ClientId,
@@ -128,8 +125,9 @@ public sealed class SqlOSPhoneOtpService
                 string.IsNullOrWhiteSpace(organizationName) ? null : organizationName.Trim(),
                 authorizationRequest?.OrganizationId,
                 customFields),
-            lifetime: _options.ChallengeLifetime,
-            cancellationToken);
+            new TemporaryTokenBinding(ClientApplicationId: authorizationRequest?.ClientApplicationId),
+            _options.ChallengeLifetime,
+            cancellationToken)).RawToken;
 
         return new SqlOSPhoneOtpSignupStartResult(
             challenge.ChallengeToken,
@@ -166,12 +164,9 @@ public sealed class SqlOSPhoneOtpService
             httpContext,
             cancellationToken);
 
-        var signupToken = await _cryptoService.CreateTemporaryTokenAsync(
-            "phone_otp_signup",
-            userId: null,
-            clientApplicationId: client.Id,
-            organizationId: request.OrganizationId,
-            payload: new PhoneOtpSignupPayload(
+        var signupToken = (await _cryptoService.CreateTemporaryTokenAsync(
+            SqlOSTemporaryTokenKinds.PhoneOtpSignup,
+            new PhoneOtpSignupPayload(
                 _cryptoService.HashToken(challenge.ChallengeToken),
                 AuthorizationRequestId: null,
                 ClientId: client.ClientId,
@@ -181,8 +176,9 @@ public sealed class SqlOSPhoneOtpService
                 OrganizationName: string.IsNullOrWhiteSpace(request.OrganizationName) ? null : request.OrganizationName.Trim(),
                 OrganizationId: request.OrganizationId,
                 CustomFields: request.CustomFields),
-            lifetime: _options.ChallengeLifetime,
-            cancellationToken);
+            new TemporaryTokenBinding(ClientApplicationId: client.Id, OrganizationId: request.OrganizationId),
+            _options.ChallengeLifetime,
+            cancellationToken)).RawToken;
 
         return new SqlOSPhoneOtpSignupStartResult(
             challenge.ChallengeToken,
@@ -306,9 +302,9 @@ public sealed class SqlOSPhoneOtpService
 
         var signupToken = request.SignupToken?.Trim()
             ?? throw new InvalidOperationException(PublicInvalidMessage);
-        var token = await _cryptoService.FindTemporaryTokenAsync("phone_otp_signup", signupToken, cancellationToken)
+        var token = await _cryptoService.FindTemporaryTokenAsync(SqlOSTemporaryTokenKinds.PhoneOtpSignup, signupToken, cancellationToken)
             ?? throw new InvalidOperationException(PublicInvalidMessage);
-        var payload = _cryptoService.DeserializePayload<PhoneOtpSignupPayload>(token)
+        var payload = token.ReadPayload(SqlOSTemporaryTokenKinds.PhoneOtpSignup)
             ?? throw new InvalidOperationException(PublicInvalidMessage);
 
         if (requireAuthorizationRequestMatch)
@@ -370,7 +366,7 @@ public sealed class SqlOSPhoneOtpService
     {
         var rawSignupToken = signupToken?.Trim()
             ?? throw new InvalidOperationException(PublicInvalidMessage);
-        _ = await _cryptoService.ConsumeTemporaryTokenAsync("phone_otp_signup", rawSignupToken, cancellationToken)
+        _ = await _cryptoService.ConsumeTemporaryTokenAsync(SqlOSTemporaryTokenKinds.PhoneOtpSignup, rawSignupToken, cancellationToken)
             ?? throw new InvalidOperationException(PublicInvalidMessage);
     }
 
@@ -879,16 +875,6 @@ public sealed class SqlOSPhoneOtpService
             },
             cancellationToken: cancellationToken);
 
-    private sealed record PhoneOtpSignupPayload(
-        string ChallengeTokenHash,
-        string? AuthorizationRequestId,
-        string? ClientId,
-        string? ClientApplicationId,
-        string DisplayName,
-        string PhoneNumber,
-        string? OrganizationName,
-        string? OrganizationId,
-        JsonObject? CustomFields);
 }
 
 public sealed record SqlOSPhoneOtpVerificationResult(

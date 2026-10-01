@@ -11,6 +11,7 @@ using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Errors;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Domain;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -70,11 +71,8 @@ public sealed class SqlOSOidcBrowserAuthService
         var callbackUri = GetProviderCallbackUri(httpContext);
         var providerNonce = _cryptoService.GenerateOpaqueToken();
         var providerCodeVerifier = _cryptoService.GenerateOpaqueToken();
-        var providerState = await _cryptoService.CreateTemporaryTokenAsync(
-            "oidc_browser_request",
-            null,
-            client.Id,
-            null,
+        var providerState = (await _cryptoService.CreateTemporaryTokenAsync(
+            SqlOSTemporaryTokenKinds.OidcBrowserRequest,
             new OidcBrowserRequestPayload(
                 request.ClientId,
                 request.RedirectUri,
@@ -86,8 +84,9 @@ public sealed class SqlOSOidcBrowserAuthService
                 providerNonce,
                 providerCodeVerifier,
                 callbackUri),
+            new TemporaryTokenBinding(ClientApplicationId: client.Id),
             _options.TemporaryTokenLifetime,
-            cancellationToken);
+            cancellationToken)).RawToken;
 
         var providerResult = await _oidcAuthService.StartAuthorizationAsync(
             new SqlOSStartOidcAuthorizationRequest(
@@ -122,11 +121,8 @@ public sealed class SqlOSOidcBrowserAuthService
         var callbackUri = GetProviderCallbackUri(httpContext);
         var providerNonce = _cryptoService.GenerateOpaqueToken();
         var providerCodeVerifier = _cryptoService.GenerateOpaqueToken();
-        var providerState = await _cryptoService.CreateTemporaryTokenAsync(
-            "oidc_authorization_request",
-            null,
-            client.Id,
-            authorizationRequest.OrganizationId,
+        var providerState = (await _cryptoService.CreateTemporaryTokenAsync(
+            SqlOSTemporaryTokenKinds.OidcAuthorizationRequest,
             new OidcAuthorizationRequestPayload(
                 authorizationRequest.Id,
                 connectionId,
@@ -134,8 +130,9 @@ public sealed class SqlOSOidcBrowserAuthService
                 providerCodeVerifier,
                 callbackUri,
                 email),
+            new TemporaryTokenBinding(ClientApplicationId: client.Id, OrganizationId: authorizationRequest.OrganizationId),
             _options.TemporaryTokenLifetime,
-            cancellationToken);
+            cancellationToken)).RawToken;
 
         var providerResult = await _oidcAuthService.StartAuthorizationAsync(
             new SqlOSStartOidcAuthorizationRequest(
@@ -169,10 +166,10 @@ public sealed class SqlOSOidcBrowserAuthService
             return RenderCallbackError("The OIDC callback was missing the provider state.");
         }
 
-        var requestToken = await _cryptoService.ConsumeTemporaryTokenAsync("oidc_browser_request", callbackInput.State, cancellationToken);
+        var requestToken = await _cryptoService.ConsumeTemporaryTokenAsync(SqlOSTemporaryTokenKinds.OidcBrowserRequest, callbackInput.State, cancellationToken);
         if (requestToken == null)
         {
-            var authorizationRequestToken = await _cryptoService.ConsumeTemporaryTokenAsync("oidc_authorization_request", callbackInput.State, cancellationToken);
+            var authorizationRequestToken = await _cryptoService.ConsumeTemporaryTokenAsync(SqlOSTemporaryTokenKinds.OidcAuthorizationRequest, callbackInput.State, cancellationToken);
             if (authorizationRequestToken != null)
             {
                 return await HandleAuthorizationRequestCallbackAsync(httpContext, callbackInput, authorizationRequestToken, cancellationToken);
@@ -184,7 +181,7 @@ public sealed class SqlOSOidcBrowserAuthService
             return RenderCallbackError("The OIDC browser login request is invalid or expired.");
         }
 
-        var payload = _cryptoService.DeserializePayload<OidcBrowserRequestPayload>(requestToken);
+        var payload = requestToken.ReadPayload(SqlOSTemporaryTokenKinds.OidcBrowserRequest);
         if (payload == null)
         {
             return RenderCallbackError("The OIDC browser login request payload is invalid.");
@@ -237,19 +234,17 @@ public sealed class SqlOSOidcBrowserAuthService
                 cancellationToken);
             await InvokeSocialSignupHookAsync(httpContext, authorizationRequest: null, result, cancellationToken);
 
-            var code = await _cryptoService.CreateTemporaryTokenAsync(
-                "oidc_browser_code",
-                result.UserId,
-                requestToken.ClientApplicationId,
-                null,
+            var code = (await _cryptoService.CreateTemporaryTokenAsync(
+                SqlOSTemporaryTokenKinds.OidcBrowserCode,
                 new OidcBrowserCodePayload(
                     payload.ClientId,
                     payload.RedirectUri,
                     payload.CodeChallenge,
                     payload.CodeChallengeMethod,
                     result.AuthenticationMethod),
-                TimeSpan.FromMinutes(5),
-                cancellationToken);
+                new TemporaryTokenBinding(UserId: result.UserId, ClientApplicationId: requestToken.ClientApplicationId),
+                configuredLifetime: null,
+                cancellationToken)).RawToken;
 
             return Results.Redirect(BuildAppRedirectUri(
                 payload.RedirectUri,
@@ -278,7 +273,7 @@ public sealed class SqlOSOidcBrowserAuthService
         SqlOSTemporaryToken authorizationRequestToken,
         CancellationToken cancellationToken)
     {
-        var payload = _cryptoService.DeserializePayload<OidcAuthorizationRequestPayload>(authorizationRequestToken);
+        var payload = authorizationRequestToken.ReadPayload(SqlOSTemporaryTokenKinds.OidcAuthorizationRequest);
         if (payload == null)
         {
             return RenderCallbackError("The OIDC authorization request payload is invalid.");
@@ -406,9 +401,9 @@ public sealed class SqlOSOidcBrowserAuthService
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
-        var token = await _cryptoService.ConsumeTemporaryTokenAsync("oidc_browser_code", request.Code, cancellationToken)
+        var token = await _cryptoService.ConsumeTemporaryTokenAsync(SqlOSTemporaryTokenKinds.OidcBrowserCode, request.Code, cancellationToken)
             ?? throw new InvalidOperationException("Authorization code is invalid or expired.");
-        var payload = _cryptoService.DeserializePayload<OidcBrowserCodePayload>(token)
+        var payload = token.ReadPayload(SqlOSTemporaryTokenKinds.OidcBrowserCode)
             ?? throw new InvalidOperationException("Authorization code payload is invalid.");
 
         if (token.UserId == null)
@@ -564,33 +559,6 @@ public sealed class SqlOSOidcBrowserAuthService
             query["error_description"].ToString(),
             query["user"].ToString());
     }
-
-    private sealed record OidcBrowserRequestPayload(
-        string ClientId,
-        string RedirectUri,
-        string State,
-        string CodeChallenge,
-        string CodeChallengeMethod,
-        string ConnectionId,
-        string? Email,
-        string ProviderNonce,
-        string ProviderCodeVerifier,
-        string CallbackUri);
-
-    private sealed record OidcAuthorizationRequestPayload(
-        string AuthorizationRequestId,
-        string ConnectionId,
-        string ProviderNonce,
-        string ProviderCodeVerifier,
-        string CallbackUri,
-        string? Email);
-
-    private sealed record OidcBrowserCodePayload(
-        string ClientId,
-        string RedirectUri,
-        string CodeChallenge,
-        string CodeChallengeMethod,
-        string AuthenticationMethod);
 
     private sealed record OidcCallbackInput(
         string Code,

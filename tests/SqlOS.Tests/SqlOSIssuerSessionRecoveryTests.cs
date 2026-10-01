@@ -542,7 +542,7 @@ public sealed class SqlOSIssuerSessionRecoveryTests
             var hash = Crypto.HashToken(cookie);
             var token = await Context.Set<SqlOSTemporaryToken>()
                 .AsNoTracking()
-                .SingleAsync(x => x.Purpose == SqlOSAuthLifecyclePolicy.IssuerSessionPurpose && x.TokenHash == hash);
+                .SingleAsync(x => x.Purpose == SqlOSTemporaryTokenKinds.IssuerSession.Purpose && x.TokenHash == hash);
             return await Context.Set<SqlOSIssuerSessionFamily>()
                 .AsNoTracking()
                 .SingleAsync(x => x.Id == token.IssuerSessionFamilyId);

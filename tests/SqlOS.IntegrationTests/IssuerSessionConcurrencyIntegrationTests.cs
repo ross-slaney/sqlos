@@ -64,7 +64,7 @@ public sealed class IssuerSessionConcurrencyIntegrationTests
         family.RevokedAt.Should().NotBeNull();
 
         var liveTokens = await verify.Set<SqlOSTemporaryToken>()
-            .Where(x => x.Purpose == SqlOSAuthLifecyclePolicy.IssuerSessionPurpose
+            .Where(x => x.Purpose == SqlOSTemporaryTokenKinds.IssuerSession.Purpose
                 && x.UserId == user.Id
                 && x.ConsumedAt == null)
             .ToListAsync();
@@ -119,7 +119,7 @@ public sealed class IssuerSessionConcurrencyIntegrationTests
         var family = await verify.Set<SqlOSIssuerSessionFamily>().SingleAsync();
         family.RevokedAt.Should().NotBeNull();
         (await verify.Set<SqlOSTemporaryToken>()
-            .CountAsync(x => x.Purpose == SqlOSAuthLifecyclePolicy.IssuerSessionPurpose
+            .CountAsync(x => x.Purpose == SqlOSTemporaryTokenKinds.IssuerSession.Purpose
                 && x.UserId == user.Id
                 && x.ConsumedAt == null)).Should().Be(0);
     }

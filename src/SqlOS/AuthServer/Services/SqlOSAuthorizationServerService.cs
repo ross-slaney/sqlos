@@ -10,6 +10,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Domain;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -340,7 +341,7 @@ public sealed class SqlOSAuthorizationServerService
         if (!string.IsNullOrWhiteSpace(completion.PendingToken))
         {
             _ = await _cryptoService.ConsumeTemporaryTokenAsync(
-                "auth_page_pending",
+                SqlOSTemporaryTokenKinds.AuthPagePending,
                 completion.PendingToken,
                 cancellationToken);
         }
@@ -348,7 +349,7 @@ public sealed class SqlOSAuthorizationServerService
         if (!string.IsNullOrWhiteSpace(completion.MfaToken))
         {
             _ = await _cryptoService.ConsumeTemporaryTokenAsync(
-                SqlOSAuthService.MfaChallengePurpose,
+                SqlOSTemporaryTokenKinds.MfaChallenge,
                 completion.MfaToken,
                 cancellationToken);
         }
@@ -356,7 +357,7 @@ public sealed class SqlOSAuthorizationServerService
         if (!string.IsNullOrWhiteSpace(completion.ConsentToken))
         {
             _ = await _cryptoService.ConsumeTemporaryTokenAsync(
-                ConsentTokenPurpose,
+                SqlOSTemporaryTokenKinds.AuthPageConsent,
                 completion.ConsentToken,
                 cancellationToken);
         }
@@ -375,7 +376,7 @@ public sealed class SqlOSAuthorizationServerService
     {
         // Validate without consuming first: precheck failures (stale metadata, scope-union
         // overflow) must not burn the one-time token the user would need for a retry.
-        var token = await _cryptoService.FindTemporaryTokenAsync(ConsentTokenPurpose, consentToken, cancellationToken)
+        var token = await _cryptoService.FindTemporaryTokenAsync(SqlOSTemporaryTokenKinds.AuthPageConsent, consentToken, cancellationToken)
             ?? throw new InvalidOperationException("The consent session is invalid or expired.");
         var (payload, authorizationRequest) = await ValidateConsentTokenAsync(token, authorizationRequestId, cancellationToken);
 
@@ -413,7 +414,7 @@ public sealed class SqlOSAuthorizationServerService
                 cancellationToken),
             grantedScopes);
 
-        _ = await _cryptoService.ConsumeTemporaryTokenAsync(ConsentTokenPurpose, consentToken, cancellationToken)
+        _ = await _cryptoService.ConsumeTemporaryTokenAsync(SqlOSTemporaryTokenKinds.AuthPageConsent, consentToken, cancellationToken)
             ?? throw new InvalidOperationException("The consent session is invalid or expired.");
 
         var user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == token.UserId, cancellationToken);
@@ -540,11 +541,11 @@ public sealed class SqlOSAuthorizationServerService
         // with the binding error while the flow's only approval/denial credential stays
         // usable — headless native flows may have no continuation cookie or auth-page
         // session from which the reload endpoint could re-mint it.
-        var token = await _cryptoService.FindTemporaryTokenAsync(ConsentTokenPurpose, consentToken, cancellationToken)
+        var token = await _cryptoService.FindTemporaryTokenAsync(SqlOSTemporaryTokenKinds.AuthPageConsent, consentToken, cancellationToken)
             ?? throw new InvalidOperationException("The consent session is invalid or expired.");
         var (_, authorizationRequest) = await ValidateConsentTokenAsync(token, authorizationRequestId, cancellationToken);
 
-        _ = await _cryptoService.ConsumeTemporaryTokenAsync(ConsentTokenPurpose, consentToken, cancellationToken)
+        _ = await _cryptoService.ConsumeTemporaryTokenAsync(SqlOSTemporaryTokenKinds.AuthPageConsent, consentToken, cancellationToken)
             ?? throw new InvalidOperationException("The consent session is invalid or expired.");
         await _adminService.RecordAuditAsync(
             "oauth.consent.denied",
@@ -576,7 +577,7 @@ public sealed class SqlOSAuthorizationServerService
             throw new InvalidOperationException("The consent session is invalid.");
         }
 
-        var payload = _cryptoService.DeserializePayload<PendingConsentPayload>(token)
+        var payload = token.ReadPayload(SqlOSTemporaryTokenKinds.AuthPageConsent)
             ?? throw new InvalidOperationException("The consent session payload is invalid.");
         if (!string.Equals(payload.AuthorizationRequestId, authorizationRequestId, StringComparison.Ordinal))
         {
@@ -600,16 +601,6 @@ public sealed class SqlOSAuthorizationServerService
     internal const string ConsentClientMetadataChangedMessage =
         "The application's registration changed while consent was pending. Start the request again.";
 
-    // AuthenticatedAt, ClientMetadataFingerprint, and CredentialSignIn default so consent
-    // tokens minted before the fields existed still deserialize; null AuthenticatedAt falls
-    // back to issuance-time resolution, null fingerprint skips the staleness check, and a
-    // missing CredentialSignIn keeps the presented-session check.
-    private sealed record PendingConsentPayload(
-        string AuthorizationRequestId,
-        string AuthenticationMethod,
-        DateTime? AuthenticatedAt = null,
-        string? ClientMetadataFingerprint = null,
-        bool CredentialSignIn = false);
 
     public async Task<SqlOSPasswordAuthenticationResult> AuthenticatePasswordAsync(
         string email,
@@ -880,18 +871,17 @@ public sealed class SqlOSAuthorizationServerService
         // the caller does not know a better value, the pending token is being
         // created at the moment of a just-completed interactive login, so now
         // is the correct authentication time.
-        return await _cryptoService.CreateTemporaryTokenAsync(
-            "auth_page_pending",
-            user.Id,
-            authorizationRequest.ClientApplicationId,
-            null,
+        var pending = await _cryptoService.CreateTemporaryTokenAsync(
+            SqlOSTemporaryTokenKinds.AuthPagePending,
             new PendingAuthorizationPayload(
                 authorizationRequest.Id,
                 authenticationMethod,
                 authenticatedAt ?? DateTime.UtcNow,
                 evidence == SqlOSSignInEvidence.Credential),
-            TimeSpan.FromMinutes(10),
+            new TemporaryTokenBinding(UserId: user.Id, ClientApplicationId: authorizationRequest.ClientApplicationId),
+            configuredLifetime: null,
             cancellationToken);
+        return pending.RawToken;
     }
 
     public async Task<string> CompletePendingOrganizationSelectionAsync(
@@ -923,9 +913,9 @@ public sealed class SqlOSAuthorizationServerService
         // max_age lapsed while the user parked on the organization chooser, reject
         // without consuming anything so the interaction can be retried after
         // reauthentication instead of dead-ending the flow.
-        var peekedToken = await _cryptoService.FindTemporaryTokenAsync("auth_page_pending", pendingToken, cancellationToken)
+        var peekedToken = await _cryptoService.FindTemporaryTokenAsync(SqlOSTemporaryTokenKinds.AuthPagePending, pendingToken, cancellationToken)
             ?? throw new InvalidOperationException("The organization selection session is invalid or expired.");
-        var peekedPayload = _cryptoService.DeserializePayload<PendingAuthorizationPayload>(peekedToken)
+        var peekedPayload = peekedToken.ReadPayload(SqlOSTemporaryTokenKinds.AuthPagePending)
             ?? throw new InvalidOperationException("The organization selection session payload is invalid.");
         var peekedRequest = await GetRequiredAuthorizationRequestAsync(peekedPayload.AuthorizationRequestId, cancellationToken);
         if (peekedRequest.MaxAgeSeconds is { } pendingMaxAgeSeconds
@@ -936,14 +926,14 @@ public sealed class SqlOSAuthorizationServerService
             throw new InvalidOperationException("Authentication is older than the requested max_age.");
         }
 
-        var temporaryToken = await _cryptoService.ConsumeTemporaryTokenAsync("auth_page_pending", pendingToken, cancellationToken)
+        var temporaryToken = await _cryptoService.ConsumeTemporaryTokenAsync(SqlOSTemporaryTokenKinds.AuthPagePending, pendingToken, cancellationToken)
             ?? throw new InvalidOperationException("The organization selection session is invalid or expired.");
         if (temporaryToken.UserId == null)
         {
             throw new InvalidOperationException("The organization selection session is invalid.");
         }
 
-        var payload = _cryptoService.DeserializePayload<PendingAuthorizationPayload>(temporaryToken)
+        var payload = temporaryToken.ReadPayload(SqlOSTemporaryTokenKinds.AuthPagePending)
             ?? throw new InvalidOperationException("The organization selection session payload is invalid.");
         var authorizationRequest = await GetRequiredAuthorizationRequestAsync(payload.AuthorizationRequestId, cancellationToken);
         if (!await _adminService.UserHasMembershipAsync(temporaryToken.UserId, organizationId, cancellationToken))
@@ -972,14 +962,14 @@ public sealed class SqlOSAuthorizationServerService
         string authorizationRequestId,
         CancellationToken cancellationToken = default)
     {
-        var temporaryToken = await _cryptoService.FindTemporaryTokenAsync("auth_page_pending", pendingToken, cancellationToken)
+        var temporaryToken = await _cryptoService.FindTemporaryTokenAsync(SqlOSTemporaryTokenKinds.AuthPagePending, pendingToken, cancellationToken)
             ?? throw new InvalidOperationException("The organization selection session is invalid or expired.");
         if (temporaryToken.UserId == null)
         {
             throw new InvalidOperationException("The organization selection session is invalid.");
         }
 
-        var payload = _cryptoService.DeserializePayload<PendingAuthorizationPayload>(temporaryToken)
+        var payload = temporaryToken.ReadPayload(SqlOSTemporaryTokenKinds.AuthPagePending)
             ?? throw new InvalidOperationException("The organization selection session payload is invalid.");
         if (!string.Equals(payload.AuthorizationRequestId, authorizationRequestId, StringComparison.Ordinal))
         {
@@ -995,7 +985,6 @@ public sealed class SqlOSAuthorizationServerService
             AuthorizationRequestId: authorizationRequestId);
     }
 
-    internal const string AuthorizationContinuationPurpose = "authorization_continue";
     internal const string AuthorizationContinuationCookiePrefix = "sqlos_auth_continue_";
 
     /// <summary>
@@ -1041,18 +1030,16 @@ public sealed class SqlOSAuthorizationServerService
             throw new InvalidOperationException("The consent interaction is missing its consent binding.");
         }
 
-        var handle = await _cryptoService.CreateTemporaryTokenAsync(
-            AuthorizationContinuationPurpose,
-            userId: null,
-            clientApplicationId: null,
-            organizationId: null,
+        var handle = (await _cryptoService.CreateTemporaryTokenAsync(
+            SqlOSTemporaryTokenKinds.AuthorizationContinuation,
             new AuthorizationContinuationPayload(
                 completion.AuthorizationRequestId,
                 completion.MfaToken,
                 completion.PendingToken,
                 completion.ConsentToken),
+            TemporaryTokenBinding.None,
             _options.Mfa.Totp.ChallengeTokenLifetime,
-            cancellationToken);
+            cancellationToken)).RawToken;
 
         var continuePath = $"{_options.BasePath.TrimEnd('/')}/continue";
         // The cookie must reach both /continue and the headless request-reload endpoint
@@ -1110,11 +1097,11 @@ public sealed class SqlOSAuthorizationServerService
         CancellationToken cancellationToken = default)
     {
         var token = await _cryptoService.FindTemporaryTokenAsync(
-            AuthorizationContinuationPurpose,
+            SqlOSTemporaryTokenKinds.AuthorizationContinuation,
             continuationHandle,
             cancellationToken)
             ?? throw new InvalidOperationException("Authorization continuation is invalid or expired.");
-        var payload = _cryptoService.DeserializePayload<AuthorizationContinuationPayload>(token)
+        var payload = token.ReadPayload(SqlOSTemporaryTokenKinds.AuthorizationContinuation)
             ?? throw new InvalidOperationException("Authorization continuation is invalid.");
         if (!string.Equals(payload.AuthorizationRequestId, authorizationRequestId, StringComparison.Ordinal))
         {
@@ -1163,9 +1150,9 @@ public sealed class SqlOSAuthorizationServerService
         string authorizationRequestId,
         CancellationToken cancellationToken = default)
     {
-        var token = await _cryptoService.FindTemporaryTokenAsync(ConsentTokenPurpose, consentToken, cancellationToken)
+        var token = await _cryptoService.FindTemporaryTokenAsync(SqlOSTemporaryTokenKinds.AuthPageConsent, consentToken, cancellationToken)
             ?? throw new InvalidOperationException("The consent session is invalid or expired.");
-        var payload = _cryptoService.DeserializePayload<PendingConsentPayload>(token)
+        var payload = token.ReadPayload(SqlOSTemporaryTokenKinds.AuthPageConsent)
             ?? throw new InvalidOperationException("The consent session payload is invalid.");
         if (!string.Equals(payload.AuthorizationRequestId, authorizationRequestId, StringComparison.Ordinal))
         {
@@ -1185,14 +1172,7 @@ public sealed class SqlOSAuthorizationServerService
             ConsentScopes: await _consentService.BuildScopeDisplaysAsync(grantedScopes, cancellationToken));
     }
 
-    private sealed record AuthorizationContinuationPayload(
-        string AuthorizationRequestId,
-        string? MfaToken,
-        string? PendingToken,
-        string? ConsentToken = null);
 
-    internal const string ConsentTokenPurpose = "auth_page_consent";
-    private static readonly TimeSpan ConsentTokenLifetime = TimeSpan.FromMinutes(10);
 
     /// <summary>
     /// Re-mints a consent pending token for a consent view reloaded through the headless
@@ -1231,12 +1211,12 @@ public sealed class SqlOSAuthorizationServerService
         }
 
         var continuation = await _cryptoService.FindTemporaryTokenAsync(
-            AuthorizationContinuationPurpose,
+            SqlOSTemporaryTokenKinds.AuthorizationContinuation,
             continuationHandle,
             cancellationToken);
         var continuationPayload = continuation == null
             ? null
-            : _cryptoService.DeserializePayload<AuthorizationContinuationPayload>(continuation);
+            : continuation.ReadPayload(SqlOSTemporaryTokenKinds.AuthorizationContinuation);
         if (continuationPayload == null
             || !string.Equals(continuationPayload.AuthorizationRequestId, authorizationRequest.Id, StringComparison.Ordinal)
             || string.IsNullOrWhiteSpace(continuationPayload.ConsentToken))
@@ -1245,12 +1225,12 @@ public sealed class SqlOSAuthorizationServerService
         }
 
         var consentTokenRecord = await _cryptoService.FindTemporaryTokenAsync(
-            ConsentTokenPurpose,
+            SqlOSTemporaryTokenKinds.AuthPageConsent,
             continuationPayload.ConsentToken,
             cancellationToken);
         var consentPayload = consentTokenRecord == null
             ? null
-            : _cryptoService.DeserializePayload<PendingConsentPayload>(consentTokenRecord);
+            : consentTokenRecord.ReadPayload(SqlOSTemporaryTokenKinds.AuthPageConsent);
         if (consentTokenRecord?.UserId == null
             || consentPayload == null
             || !string.Equals(consentPayload.AuthorizationRequestId, authorizationRequest.Id, StringComparison.Ordinal)
@@ -1267,11 +1247,8 @@ public sealed class SqlOSAuthorizationServerService
             return null;
         }
 
-        return await _cryptoService.CreateTemporaryTokenAsync(
-            ConsentTokenPurpose,
-            consentTokenRecord.UserId,
-            authorizationRequest.ClientApplicationId,
-            null,
+        var reminted = await _cryptoService.CreateTemporaryTokenAsync(
+            SqlOSTemporaryTokenKinds.AuthPageConsent,
             // Carry the original payload's authentication instant and metadata fingerprint
             // forward so the re-minted token behaves exactly like the one it replaces.
             new PendingConsentPayload(
@@ -1280,8 +1257,10 @@ public sealed class SqlOSAuthorizationServerService
                 consentPayload.AuthenticatedAt,
                 consentPayload.ClientMetadataFingerprint,
                 consentPayload.CredentialSignIn),
-            ConsentTokenLifetime,
+            new TemporaryTokenBinding(UserId: consentTokenRecord.UserId, ClientApplicationId: authorizationRequest.ClientApplicationId),
+            configuredLifetime: null,
             cancellationToken);
+        return reminted.RawToken;
     }
 
     private async Task<string?> TryMintConsentTokenFromIssuerSessionAsync(
@@ -1330,18 +1309,17 @@ public sealed class SqlOSAuthorizationServerService
             return null;
         }
 
-        return await _cryptoService.CreateTemporaryTokenAsync(
-            ConsentTokenPurpose,
-            session.User.Id,
-            authorizationRequest.ClientApplicationId,
-            null,
+        var consent = await _cryptoService.CreateTemporaryTokenAsync(
+            SqlOSTemporaryTokenKinds.AuthPageConsent,
             new PendingConsentPayload(
                 authorizationRequest.Id,
                 session.AuthenticationMethod,
                 session.AuthenticatedAt,
                 clientMetadataFingerprint),
-            ConsentTokenLifetime,
+            new TemporaryTokenBinding(UserId: session.User.Id, ClientApplicationId: authorizationRequest.ClientApplicationId),
+            configuredLifetime: null,
             cancellationToken);
+        return consent.RawToken;
     }
 
     /// <summary>
@@ -1458,11 +1436,8 @@ public sealed class SqlOSAuthorizationServerService
                     // the same save that mints the token, so reload re-minting and approval
                     // can reject a browser whose session cookie switched accounts.
                     authorizationRequest.PendingConsentUserId = user.Id;
-                    var consentToken = await _cryptoService.CreateTemporaryTokenAsync(
-                        ConsentTokenPurpose,
-                        user.Id,
-                        authorizationRequest.ClientApplicationId,
-                        null,
+                    var consentToken = (await _cryptoService.CreateTemporaryTokenAsync(
+                        SqlOSTemporaryTokenKinds.AuthPageConsent,
                         new PendingConsentPayload(
                             authorizationRequest.Id,
                             authenticationMethod,
@@ -1477,8 +1452,9 @@ public sealed class SqlOSAuthorizationServerService
                                 ?? await ResolveAuthenticatedAtAsync(httpContext, user.Id, cancellationToken),
                             clientMetadataFingerprint,
                             evidence == SqlOSSignInEvidence.Credential),
-                        ConsentTokenLifetime,
-                        cancellationToken);
+                        new TemporaryTokenBinding(UserId: user.Id, ClientApplicationId: authorizationRequest.ClientApplicationId),
+                        configuredLifetime: null,
+                        cancellationToken)).RawToken;
                     return new SqlOSAuthorizationRequestLoginResult(
                         null,
                         false,
@@ -1580,14 +1556,14 @@ public sealed class SqlOSAuthorizationServerService
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
-        var token = await _cryptoService.FindTemporaryTokenAsync(SqlOSAuthService.MfaChallengePurpose, mfaToken, cancellationToken)
+        var token = await _cryptoService.FindTemporaryTokenAsync(SqlOSTemporaryTokenKinds.MfaChallenge, mfaToken, cancellationToken)
             ?? throw new InvalidOperationException("MFA challenge is invalid or expired.");
         if (token.UserId == null || token.ClientApplicationId == null)
         {
             throw new InvalidOperationException("MFA challenge payload is invalid.");
         }
 
-        var payload = _cryptoService.DeserializePayload<SqlOSMfaChallengePayload>(token)
+        var payload = token.ReadPayload(SqlOSTemporaryTokenKinds.MfaChallenge)
             ?? throw new InvalidOperationException("MFA challenge payload is invalid.");
         if (!string.Equals(payload.Flow, "authorization", StringComparison.Ordinal)
             || string.IsNullOrWhiteSpace(payload.AuthorizationRequestId))
@@ -1602,7 +1578,7 @@ public sealed class SqlOSAuthorizationServerService
 
         await GetRequiredAuthorizationRequestAsync(payload.AuthorizationRequestId, cancellationToken);
         var factorMethod = await _authService.VerifyMfaChallengeFactorAsync(token, code, httpContext, cancellationToken);
-        token.ConsumedAt = DateTime.UtcNow;
+        token.Consume(SqlOSTemporaryTokenKinds.MfaChallenge, DateTime.UtcNow);
         return await CompleteConsumedMfaChallengeAsync(token, factorMethod, httpContext, cancellationToken);
     }
 
@@ -1663,7 +1639,7 @@ public sealed class SqlOSAuthorizationServerService
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
-        var payload = _cryptoService.DeserializePayload<SqlOSMfaChallengePayload>(token)
+        var payload = token.ReadPayload(SqlOSTemporaryTokenKinds.MfaChallenge)
             ?? throw new InvalidOperationException("MFA challenge payload is invalid.");
         if (!string.Equals(payload.Flow, "authorization", StringComparison.Ordinal))
         {
@@ -2389,14 +2365,6 @@ public sealed class SqlOSAuthorizationServerService
             && !scope.StartsWith("auth:", StringComparison.Ordinal)
             && !ReservedOidcScopeNames.Contains(scope);
 
-    // AuthenticatedAt defaults so pending tokens minted before the field existed
-    // still deserialize; null means "unknown" and issuance falls back to its own
-    // resolution.
-    private sealed record PendingAuthorizationPayload(
-        string AuthorizationRequestId,
-        string AuthenticationMethod,
-        DateTime? AuthenticatedAt = null,
-        bool CredentialSignIn = false);
 
     private SqlOSInvitationService RequireInvitationService()
         => _invitationService ?? throw new InvalidOperationException("SqlOS invitations are not configured.");

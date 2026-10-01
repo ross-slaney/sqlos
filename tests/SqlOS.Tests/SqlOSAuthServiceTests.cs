@@ -2294,7 +2294,8 @@ public sealed class SqlOSAuthServiceTests
             new DefaultHttpContext());
         var rawToken = ExtractMagicLinkToken(harness.EmailSender.Messages.Single().TextBody);
         var stored = await harness.Context.Set<SqlOSTemporaryToken>().SingleAsync();
-        stored.ExpiresAt = DateTime.UtcNow.AddMinutes(-1);
+        // Store the link as if it had expired a minute ago.
+        harness.Context.Entry(stored).Property(x => x.ExpiresAt).CurrentValue = DateTime.UtcNow.AddMinutes(-1);
         await harness.Context.SaveChangesAsync();
 
         var act = async () => await harness.Auth.CompleteMagicLinkAsync(

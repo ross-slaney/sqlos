@@ -166,7 +166,7 @@ public sealed class SqlOSIssuanceAssuranceTests
         (await harness.Context.Set<SqlOSAuthorizationCode>()
             .CountAsync(x => x.AuthorizationRequestId == secondRequest.Id)).Should().Be(0);
         (await harness.Context.Set<SqlOSTemporaryToken>()
-            .CountAsync(x => x.Purpose == SqlOSAuthLifecyclePolicy.IssuerSessionPurpose && x.UserId == user.Id))
+            .CountAsync(x => x.Purpose == SqlOSTemporaryTokenKinds.IssuerSession.Purpose && x.UserId == user.Id))
             .Should().Be(1);
     }
 
@@ -477,7 +477,7 @@ public sealed class SqlOSIssuanceAssuranceTests
             .SingleAsync(x => x.Purpose == "auth_page_pending" && x.UserId == user.Id);
         var payload = System.Text.Json.Nodes.JsonNode.Parse(pending.PayloadJson!)!.AsObject();
         payload["AuthenticatedAt"] = originalAuthenticatedAt.ToString("O");
-        pending.PayloadJson = payload.ToJsonString();
+        harness.Context.Entry(pending).Property(x => x.PayloadJson).CurrentValue = payload.ToJsonString();
         await harness.Context.SaveChangesAsync();
 
         var result = await harness.Authorization.CompletePendingOrganizationSelectionForLoginAsync(
@@ -519,7 +519,7 @@ public sealed class SqlOSIssuanceAssuranceTests
             .SingleAsync(x => x.Purpose == "auth_page_pending" && x.UserId == user.Id);
         var payload = System.Text.Json.Nodes.JsonNode.Parse(pending.PayloadJson!)!.AsObject();
         payload["AuthenticatedAt"] = DateTime.UtcNow.AddMinutes(-30).ToString("O");
-        pending.PayloadJson = payload.ToJsonString();
+        harness.Context.Entry(pending).Property(x => x.PayloadJson).CurrentValue = payload.ToJsonString();
         await harness.Context.SaveChangesAsync();
 
         var act = async () => await harness.Authorization.CompletePendingOrganizationSelectionForLoginAsync(
@@ -659,7 +659,7 @@ public sealed class SqlOSIssuanceAssuranceTests
         (await harness.Context.Set<SqlOSRefreshToken>().CountAsync()).Should().Be(0);
         (await harness.Context.Set<SqlOSDeviceAuthorization>().CountAsync(x => x.ApprovedAt != null)).Should().Be(0);
         (await harness.Context.Set<SqlOSTemporaryToken>()
-            .CountAsync(x => x.Purpose == SqlOSAuthLifecyclePolicy.IssuerSessionPurpose && x.UserId == userId))
+            .CountAsync(x => x.Purpose == SqlOSTemporaryTokenKinds.IssuerSession.Purpose && x.UserId == userId))
             .Should().Be(0);
     }
 
