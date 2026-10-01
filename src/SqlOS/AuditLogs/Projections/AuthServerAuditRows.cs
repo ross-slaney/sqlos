@@ -29,9 +29,10 @@ internal static class AuthServerAuditRows
         string userId,
         SqlOSAuditProjectionContext context,
         string? ipAddress = null,
-        object? data = null)
+        object? data = null,
+        string? organizationId = null)
         => SqlOSAuditRows.Create(
-            SqlOSAuditRows.AuthServerRequest(eventType, "user", userId, userId: userId, ipAddress: ipAddress, data: data),
+            SqlOSAuditRows.AuthServerRequest(eventType, "user", userId, userId: userId, organizationId: organizationId, ipAddress: ipAddress, data: data),
             SqlOSIds.New("evt"),
             context.Now);
 }

@@ -6,9 +6,9 @@ using SqlOS.Domain.Events;
 namespace SqlOS.AuditLogs.Projections;
 
 /// <summary>
-/// The audit rows of the User aggregate. 7.2.1 audited three of its actions; their rows are
-/// reproduced exactly. Every other user event is registered unaudited, as its action was in 7.2.1,
-/// until #415 adds rows for them in layer 5.
+/// The audit rows of the User aggregate. 7.2.1 audited three of its actions, and the sign-ups of
+/// some surfaces; their rows are reproduced exactly. Every other user event is registered
+/// unaudited, as its action was in 7.2.1, until #415 adds rows for them in layer 5.
 /// </summary>
 internal static class UserAuditProjections
 {
@@ -47,7 +47,14 @@ internal static class UserAuditProjections
                     provider = provisioned.Provider,
                     oidcConnectionId = provisioned.OidcConnectionId
                 }))
-            .Audit<UserEmailClaimed>(static (claimed, _) => ClaimRow(claimed));
+            .Audit<UserEmailClaimed>(static (claimed, _) => ClaimRow(claimed))
+            // SqlOSAdminService.RecordAuditAsync("user.signup[.method]", "user", userId, userId: userId, organizationId, ipAddress)
+            .Audit<UserSignedUp>(static (signedUp, context) => AuthServerAuditRows.User(
+                signedUp.AuditEventType,
+                signedUp.UserId,
+                context,
+                ipAddress: signedUp.IpAddress,
+                organizationId: signedUp.OrganizationId));
 
     /// <summary>
     /// The row 7.2.1's <c>SqlOSEmailOwnershipClaim</c> added for a claim, built the way it built

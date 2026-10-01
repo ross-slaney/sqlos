@@ -10,6 +10,18 @@ namespace SqlOS.Domain.Events;
 internal sealed record UserRegistered(string UserId) : ISqlOSDomainEvent;
 
 /// <summary>
+/// A person signed up with <paramref name="Method"/> (<c>password</c>, <c>email_otp</c>,
+/// <c>phone_otp</c> or <c>invitation</c>) into <paramref name="OrganizationId"/>, from
+/// <paramref name="IpAddress"/>. Raised where 7.2.1 audited the sign-up (<c>user.signup</c>,
+/// <c>user.signup.email_otp</c>, …); #415 audits every surface's sign-ups in layer 5.
+/// </summary>
+internal sealed record UserSignedUp(string UserId, string Method, string? OrganizationId, string? IpAddress) : ISqlOSDomainEvent
+{
+    /// <summary>The 7.2.1 audit event: <c>user.signup</c> for a password, else <c>user.signup.{method}</c>.</summary>
+    public string AuditEventType => Method == "password" ? "user.signup" : $"user.signup.{Method}";
+}
+
+/// <summary>
 /// An upstream OpenID provider's first sign-in created the account
 /// (<c>user.login.oidc.provisioned</c>).
 /// </summary>

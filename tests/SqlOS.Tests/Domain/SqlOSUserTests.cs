@@ -642,6 +642,20 @@ public sealed class SqlOSUserTests
         user.Emails.IsReadOnly.Should().BeTrue();
     }
 
+    [TestMethod]
+    public void Recording_a_sign_up_raises_the_event_its_audit_row_is_projected_from()
+    {
+        var user = Account();
+        Drain(user);
+
+        user.RecordSignUp("email_otp", "org_1", "203.0.113.10");
+
+        Events(user).Should().ContainSingle().Which.Should().Be(new UserSignedUp(user.Id, "email_otp", "org_1", "203.0.113.10"));
+        new UserSignedUp(user.Id, "password", null, null).AuditEventType.Should().Be("user.signup");
+        new UserSignedUp(user.Id, "phone_otp", null, null).AuditEventType.Should().Be("user.signup.phone_otp");
+        FluentActions.Invoking(() => user.RecordSignUp(" ", null, null)).Should().Throw<ArgumentException>();
+    }
+
     // ---- Helpers -------------------------------------------------------------------------------
 
     private static SqlOSUser Account() => SqlOSUser.Register("Alice", EmailAddress.Parse("alice@example.test"), Now);

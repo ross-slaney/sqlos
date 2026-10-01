@@ -174,6 +174,17 @@ public sealed class SqlOSUser : ISqlOSAggregate
         return user;
     }
 
+    /// <summary>
+    /// The person who registered the account signed up with <paramref name="method"/> into
+    /// <paramref name="organizationId"/> (the organization the sign-up created or the invitation
+    /// named), from <paramref name="ipAddress"/>.
+    /// </summary>
+    internal void RecordSignUp(string method, string? organizationId, string? ipAddress)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(method);
+        _events.Raise(new UserSignedUp(Id, method, organizationId, ipAddress));
+    }
+
     // ---------------------------------------------------------------------------------------
     // Reading
     // ---------------------------------------------------------------------------------------

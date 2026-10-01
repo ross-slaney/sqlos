@@ -194,6 +194,23 @@ public sealed class IdentityAuditProjectionTests
                 Now));
 
     [TestMethod]
+    public void Signing_up_projects_the_7_2_1_user_signup_rows()
+    {
+        // The 7.2.1 sign-up call sites: SqlOSAdminService.RecordAuditAsync(eventType, "user", userId,
+        // userId: userId, organizationId: organizationId, ipAddress: ipAddress).
+        AssertRow(new UserSignedUp("usr_1", "password", "org_1", Ip), Signup721("user.signup", "org_1", Ip));
+        AssertRow(new UserSignedUp("usr_1", "email_otp", null, Ip), Signup721("user.signup.email_otp", null, Ip));
+        AssertRow(new UserSignedUp("usr_1", "phone_otp", "org_1", null), Signup721("user.signup.phone_otp", "org_1", null));
+        AssertRow(new UserSignedUp("usr_1", "invitation", "org_1", Ip), Signup721("user.signup.invitation", "org_1", Ip));
+
+        static SqlOSAuditEvent Signup721(string eventType, string? organizationId, string? ipAddress)
+            => SqlOSAuditRows.Create(
+                SqlOSAuditRows.AuthServerRequest(eventType, "user", "usr_1", userId: "usr_1", organizationId: organizationId, ipAddress: ipAddress),
+                "evt_expected",
+                Now);
+    }
+
+    [TestMethod]
     public void Lifecycle_events_without_a_7_2_1_row_project_none()
     {
         ISqlOSDomainEvent[] unaudited =
