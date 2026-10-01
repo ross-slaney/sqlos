@@ -5,6 +5,7 @@
 #   SQLOS_TEST_PROVIDER=postgresql scripts/behavior-lock.sh
 #   scripts/behavior-lock.sh --mode package          # the released baseline package
 #   scripts/behavior-lock.sh --filter "FullyQualifiedName~Scenarios.Saml"
+#   scripts/behavior-lock.sh --shard auth-pages      # one CI shard: auth-pages, protocol-enterprise, or admin-and-rest
 #   scripts/behavior-lock.sh --no-build              # reuse ./scripts/build.sh output (source mode)
 #
 # Environment: BEHAVIOR_LOCK_ACCEPT=1 accepts changed approvals (never on CI),
@@ -16,12 +17,14 @@ cd "$repo_root"
 
 mode="source"
 filter=""
+shard=""
 build=1
 workers=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --mode) mode="$2"; shift 2 ;;
         --filter) filter="$2"; shift 2 ;;
+        --shard) shard="$2"; shift 2 ;;
         --no-build) build=0; shift ;;
         --workers) workers="$2"; shift 2 ;;
         *) echo "Unknown argument: $1" >&2; exit 2 ;;
@@ -33,11 +36,38 @@ if [ "$mode" != "source" ] && [ "$mode" != "package" ]; then
     exit 2
 fi
 
+# CI runs the suite in shards split by scenario area (tests/SqlOS.BehaviorLock/Scenarios/<Area>),
+# so each job stays well under 20 minutes. The last shard takes everything the others do not
+# name (the gates, the remaining areas, and any area added later), so every test runs exactly once.
+scenarios="FullyQualifiedName~SqlOS.BehaviorLock.Scenarios"
+auth_pages=(Hosted Headless)
+protocol_enterprise=(Protocol Enterprise Saml Scim Social Tokens Dcr Upgrade)
+any_of() {
+    local area joined=""
+    for area in "$@"; do joined+="${joined:+|}${scenarios}.${area}."; done
+    printf '%s' "$joined"
+}
+none_of() {
+    local area joined=""
+    for area in "$@"; do joined+="${joined:+&}${scenarios/\~/!~}.${area}."; done
+    printf '%s' "$joined"
+}
+case "$shard" in
+    "") shard_filter="" ;;
+    auth-pages) shard_filter="$(any_of "${auth_pages[@]}")" ;;
+    protocol-enterprise) shard_filter="$(any_of "${protocol_enterprise[@]}")" ;;
+    admin-and-rest) shard_filter="$(none_of "${auth_pages[@]}" "${protocol_enterprise[@]}")" ;;
+    *) echo "--shard must be auth-pages, protocol-enterprise, or admin-and-rest" >&2; exit 2 ;;
+esac
+if [ -n "$shard_filter" ]; then
+    filter="${filter:+(${filter})&}(${shard_filter})"
+fi
+
 provider="$(printf '%s' "${SQLOS_TEST_PROVIDER:-sqlserver}" | tr '[:upper:]' '[:lower:]')"
-results="TestResults/BehaviorLock/${mode}-${provider}"
+results="TestResults/BehaviorLock/${mode}-${provider}${shard:+-${shard}}"
 mkdir -p "$results"
 
-echo "=== Behavior lock: SqlOS ${mode}, provider ${provider} ==="
+echo "=== Behavior lock: SqlOS ${mode}, provider ${provider}${shard:+, shard ${shard}} ==="
 if [ "$build" -eq 1 ]; then
     dotnet build tests/SqlOS.BehaviorLock/SqlOS.BehaviorLock.csproj --configuration Release -p:SqlOSUnderTest="$mode"
 elif [ "$mode" = "package" ]; then
