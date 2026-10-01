@@ -39,6 +39,9 @@ checks are measured twice (`fn_IsResourceAccessible` now and as the previous rel
 - **The lineage is verified.** At the first scale, the lineage and scope columns the loader generated are
   compared (counts and order-independent hashes over every column) with the same after the maintenance pass
   and with what SqlOS rebuilds from the resource tree alone with its own procedure.
+- **Every query has a budget** (`--scenario-budget`, 600 s by default). A scenario whose first execution
+  exceeds it is reported as `> 600 s‡` and counted at the budget, a lower bound, in every ratio: the
+  previous function's sparse pages take hours at 50M, and they bound the run instead of ending it.
 
 ## The dataset
 
@@ -136,7 +139,9 @@ repositories.
 Most of the full run is loading: 90M new rows in each of two tables, then rebuilding indexes. PostgreSQL
 loads in parallel `COPY` streams. SQL Server takes the table lock that minimal logging needs, so it has one
 bulk stream per table. SQL Server's data, log, and tempdb files are capped below the disk's free space, so
-overflowing fails the benchmark with a SQL error instead of taking down the runner.
+overflowing fails the benchmark with a SQL error instead of taking down the runner. Before growing to the
+next scale the harness projects the database's size from the current one; a scale that would not fit the
+disk is reported as a failed `disk` gate and not attempted.
 
 The Markdown summary is on the run page, and the JSON results and plans are uploaded as artifacts.
 

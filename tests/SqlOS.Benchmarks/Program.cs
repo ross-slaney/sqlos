@@ -148,10 +148,29 @@ var report = new BenchmarkReport
 };
 log.Info($"Engine: {report.Engine}");
 
-var runner = new ScenarioRunner(CreateContext, CreateScopedContext, options.Provider, fga, tree, Path.Combine(outputDirectory, "plans"), log);
+var runner = new ScenarioRunner(CreateContext, CreateScopedContext, options.Provider, fga, tree, Path.Combine(outputDirectory, "plans"), options.ScenarioBudgetSeconds, log);
+var extraGates = new List<GateResult>();
 long loaded = 0;
+long lastSize = 0;
 foreach (var target in options.Scales)
 {
+    // The database grows with the product count. A scale that would not fit the disk is reported, not
+    // attempted: running out mid-load loses the run.
+    if (loaded > 0 && FreeBytes() is { } available)
+    {
+        var projected = (long)(lastSize * ((double)target / loaded) * 1.1);
+        var fits = projected - lastSize <= available - 4_000_000_000L;
+        if (!fits)
+        {
+            var detail = string.Create(
+                CultureInfo.InvariantCulture,
+                $"about {projected / 1e9:F0} GB at {RetailTree.Count(target)} products ({lastSize / 1e9:F1} GB at {RetailTree.Count(loaded)}), {available / 1e9:F0} GB free");
+            log.Info($"Not growing to {RetailTree.Count(target)} products: {detail}.");
+            extraGates.Add(new GateResult("disk", RetailTree.Count(target), false, detail));
+            break;
+        }
+    }
+
     log.Info($"Growing the catalog to {RetailTree.Count(target)} products ({target - loaded:N0} new rows in each of two tables, lineage and scope columns included)...");
     var timing = await loader.GrowProductsAsync(tree, typeSeq, loaded, target, cancellation);
     if (loaded == 0)
@@ -164,6 +183,7 @@ foreach (var target in options.Scales)
     loaded = target;
 
     var size = await loader.DatabaseSizeBytesAsync(cancellation);
+    lastSize = size;
     log.Info(
         $"Measuring at {RetailTree.Count(target)} products ({tree.TotalResources(target):N0} resources, {size / 1e9:F1} GB)" +
         (FreeBytes() is { } left ? $", {left / 1e9:F0} GB free on the data disk..." : "..."));
@@ -235,7 +255,7 @@ foreach (var target in options.Scales)
     });
 }
 
-report.Gates = GateEvaluator.Evaluate(report, GateConfig.Load(options.GatesPath));
+report.Gates = [.. GateEvaluator.Evaluate(report, GateConfig.Load(options.GatesPath)), .. extraGates];
 report.DurationSeconds = log.Elapsed.TotalSeconds;
 var summary = await ReportWriter.WriteAsync(report, outputDirectory, options.SummaryPath, cancellation);
 Console.WriteLine();

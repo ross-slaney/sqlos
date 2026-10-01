@@ -36,6 +36,13 @@ internal sealed record BenchmarkOptions
     /// <summary>Memory given to the database engine. The CI runner has 16 GB; the harness itself needs little.</summary>
     public int DatabaseMemoryMegabytes { get; init; } = 8192;
 
+    /// <summary>
+    /// The longest a single query may run. A scenario whose first execution exceeds it is reported as
+    /// "did not finish" and counted at the budget, so the previous function's sparse scans (hours at 50M)
+    /// bound the run instead of ending it.
+    /// </summary>
+    public int ScenarioBudgetSeconds { get; init; } = 600;
+
     public const string Usage = """
         SqlOS SHRBAC benchmarks: the shipped FGA schema and fn_IsResourceAccessible on a realistic
         retail hierarchy, measured as the product count grows.
@@ -58,6 +65,8 @@ internal sealed record BenchmarkOptions
           --keep                   leave the container running afterwards
           --seed <n>               dataset seed (default 20260930)
           --exclude <ids>          scenario ids to skip, comma-separated (e.g. list.store.first-page)
+          --scenario-budget <s>    the longest a single query may run, in seconds (default 600); a
+                                   scenario that exceeds it is reported as not finished, at the budget
         """;
 
     public static BenchmarkOptions? Parse(string[] args)
@@ -72,6 +81,7 @@ internal sealed record BenchmarkOptions
         var seed = 20260930;
         var memory = 8192;
         var exclude = new HashSet<string>(StringComparer.Ordinal);
+        var budget = 600;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -127,6 +137,9 @@ internal sealed record BenchmarkOptions
                 case "--exclude":
                     exclude.UnionWith(Next().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
                     break;
+                case "--scenario-budget":
+                    budget = int.Parse(Next(), CultureInfo.InvariantCulture);
+                    break;
                 default:
                     throw new ArgumentException($"Unknown option '{args[i]}'.");
             }
@@ -157,6 +170,7 @@ internal sealed record BenchmarkOptions
             Seed = seed,
             DatabaseMemoryMegabytes = memory,
             Exclude = exclude,
+            ScenarioBudgetSeconds = budget,
         };
     }
 

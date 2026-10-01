@@ -86,7 +86,7 @@ internal static class GateEvaluator
         var results = new List<GateResult>();
         foreach (var step in report.Steps)
         {
-            foreach (var scenario in step.Scenarios.Concat(step.Density))
+            foreach (var scenario in step.Scenarios.Concat(step.Density).Where(s => !s.TimedOut))
             {
                 results.Add(new GateResult(
                     "correctness",
@@ -114,7 +114,7 @@ internal static class GateEvaluator
             foreach (var scenario in largest.Scenarios.Where(s => !config.Scale.Exempt.Contains(s.Id)))
             {
                 var baseline = smallest.Scenarios.FirstOrDefault(s => s.Id == scenario.Id);
-                if (baseline is null || !baseline.FullPage || !scenario.FullPage)
+                if (baseline is null || !baseline.FullPage || !scenario.FullPage || baseline.TimedOut || scenario.TimedOut)
                 {
                     // A short page means the engine read to the end of the table, and only because the catalog
                     // is too small for this principal to fill a page.

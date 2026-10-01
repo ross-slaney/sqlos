@@ -26,6 +26,13 @@ internal static class SqlOSFgaLineage
     /// <summary>A caller holding more roots than this is checked row by row by <c>fn_IsResourceAccessible</c> instead of by a listed predicate.</summary>
     public const int MaxListedRoots = 1_000;
 
+    /// <summary>
+    /// Rows per transaction when the lineage is rebuilt over the whole table: every write of the rebuild is
+    /// a range of the resources table in key order, committed on its own, so the transaction log stays
+    /// small however large the table is, and a failed rebuild is resumed by the next startup.
+    /// </summary>
+    public const int RebuildRangeRows = 500_000;
+
     /// <summary>The ancestor column for a level: <c>Ancestor0</c> is the top of the resource's tree.</summary>
     public static string AncestorColumn(int level) => "Ancestor" + level.ToString(System.Globalization.CultureInfo.InvariantCulture);
 

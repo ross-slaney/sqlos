@@ -116,9 +116,14 @@ internal static class ReportWriter
 
         text.AppendLine();
         text.AppendLine("Median milliseconds per query as the application sees it, warm cache; every answer is checked against ground truth. Product rows read and server times come from the actual plan.");
-        if (steps.SelectMany(s => s.Scenarios).Any(s => !s.FullPage))
+        if (steps.SelectMany(s => s.Scenarios).Any(s => !s.FullPage && !s.TimedOut))
         {
             text.AppendLine("† Fewer authorized rows than the page asks for exist at this scale, so the engine read to the end of the table; excluded from the scale gate.");
+        }
+
+        if (steps.SelectMany(s => s.Scenarios).Any(s => s.TimedOut))
+        {
+            text.AppendLine("‡ Did not finish within the run's budget for one query; counted at the budget, a lower bound, in every ratio.");
         }
 
         AppendTwins(text, largest, "ListReference", "**Previous function** (regression check, same data, same job)",
@@ -220,6 +225,11 @@ internal static class ReportWriter
         if (result is null)
         {
             return "–";
+        }
+
+        if (result.TimedOut)
+        {
+            return string.Create(CultureInfo.InvariantCulture, $"> {result.MedianMs / 1_000:F0} s‡");
         }
 
         var mark = !result.Correct ? " ❌" : !result.FullPage ? "†" : "";

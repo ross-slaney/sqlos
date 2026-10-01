@@ -294,8 +294,12 @@ internal sealed partial class PostgreSqlDatabaseProvider
             $sqlos$;
             """;
 
-        // Level by level over the whole table. The function body is one transaction: a failed rebuild leaves
-        // the previous lineage.
+        // The whole table: the internal nodes (every resource that is some row's parent; few next to the
+        // leaves) get their lineage level by level in a temp table, then the nodes take it from there, the
+        // leaves from their parent node, and the application rows from their resource. The function body is
+        // one transaction: a failed rebuild leaves the previous lineage.
+        var nodes = "pg_temp.\"SqlOSLineageNodes\"";
+        var nodeColumns = new[] { "\"Depth\"", "\"Reach\"" }.Concat(Enumerable.Range(0, levels).Select(l => QuoteIdentifier(SqlOSFgaLineage.AncestorColumn(l)))).ToList();
         var rebuildFunction = $"""
             CREATE OR REPLACE FUNCTION {rebuild}()
             RETURNS void
@@ -305,22 +309,54 @@ internal sealed partial class PostgreSqlDatabaseProvider
                 v_rows bigint;
                 v_level int;
             BEGIN
-                UPDATE {resources} SET {nulls}
-                WHERE "Depth" IS NOT NULL OR "Reach" IS NOT NULL OR {QuoteIdentifier(SqlOSFgaLineage.AncestorColumn(0))} IS NOT NULL;
-                UPDATE {resources} r SET
+                -- 1. The internal nodes, level by level.
+                DROP TABLE IF EXISTS {nodes};
+                CREATE TEMP TABLE "SqlOSLineageNodes" AS
+                SELECT r."Id", r."ParentId", r."IsActive", r."Seq",
+                    NULL::smallint AS "Depth", NULL::smallint AS "Reach",
+                    {string.Join(", ", Enumerable.Range(0, levels).Select(l => $"NULL::bigint AS {QuoteIdentifier(SqlOSFgaLineage.AncestorColumn(l))}"))}
+                FROM {resources} r
+                WHERE EXISTS (SELECT 1 FROM {resources} c WHERE c."ParentId" = r."Id");
+                CREATE UNIQUE INDEX ON {nodes} ("Id");
+                ANALYZE {nodes};
+
+                UPDATE {nodes} n SET
                     "Depth" = 0,
-                    "Reach" = CASE WHEN r."IsActive" THEN 0 END,
-                    {QuoteIdentifier(SqlOSFgaLineage.AncestorColumn(0))} = r."Seq"
-                WHERE r."ParentId" IS NULL;
+                    "Reach" = CASE WHEN n."IsActive" THEN 0 END,
+                    {QuoteIdentifier(SqlOSFgaLineage.AncestorColumn(0))} = n."Seq"
+                WHERE n."ParentId" IS NULL;
                 FOR v_level IN 1..{maxLevel} LOOP
-                    UPDATE {resources} r SET
-                        {Lineage("r", "p", "v_level")}
-                    FROM {resources} p
-                    WHERE p."Id" = r."ParentId" AND p."Depth" = v_level - 1;
+                    UPDATE {nodes} n SET
+                        {Lineage("n", "p", "v_level")}
+                    FROM {nodes} p
+                    WHERE p."Id" = n."ParentId" AND p."Depth" = v_level - 1;
                     GET DIAGNOSTICS v_rows = ROW_COUNT;
                     EXIT WHEN v_rows = 0;
                 END LOOP;
-                {Propagate(resources)}
+
+                -- 2. The nodes take their lineage; the leaves take theirs from their parent node, or stand
+                --    alone as roots.
+                UPDATE {resources} r SET
+                    {string.Join(",\n        ", nodeColumns.Select(c => $"{c} = n.{c}"))}
+                FROM {nodes} n
+                WHERE n."Id" = r."Id";
+
+                UPDATE {resources} r SET
+                    {Lineage("r", "p", "nd.\"Depth\"")}
+                FROM {nodes} p
+                CROSS JOIN LATERAL (SELECT CASE WHEN p."Depth" IS NULL OR p."Depth" >= {maxLevel} THEN NULL ELSE p."Depth" + 1 END AS "Depth") nd
+                WHERE p."Id" = r."ParentId"
+                  AND NOT EXISTS (SELECT 1 FROM {nodes} n WHERE n."Id" = r."Id");
+
+                UPDATE {resources} r SET
+                    {Lineage("r", "p", "0")}
+                FROM (SELECT NULL::smallint AS "Reach", {string.Join(", ", Enumerable.Range(0, levels).Select(l => $"NULL::bigint AS {QuoteIdentifier(SqlOSFgaLineage.AncestorColumn(l))}"))}) p
+                WHERE r."ParentId" IS NULL
+                  AND NOT EXISTS (SELECT 1 FROM {nodes} n WHERE n."Id" = r."Id");
+
+                -- 3. The scope columns of every application row.
+                {string.Concat(scopeTables.Select(t => BuildScopeFillSql(options, t) + ";\n"))}
+                DROP TABLE {nodes};
             END
             $sqlos$;
             """;

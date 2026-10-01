@@ -312,19 +312,39 @@ internal sealed partial class SqlServerDatabaseProvider
             END
             """;
 
-        // Level by level over the whole table, in one transaction: a failed rebuild leaves the previous lineage.
+        // The whole table, in ranges of the key: the internal nodes (every resource that is some row's parent;
+        // few next to the leaves) get their lineage level by level in a temp table, then every range of the
+        // table takes its rows' lineage in one transaction: the nodes' from the temp table, the leaves' from
+        // their parent node, and the scope columns of the range's application rows. A failed rebuild leaves
+        // some ranges written and the routines' hash unstored, so the next startup runs it again.
+        var nodeColumns = string.Join(", ", new[] { "Depth", "Reach" }.Concat(Enumerable.Range(0, levels).Select(SqlOSFgaLineage.AncestorColumn)));
+        var copyNode = string.Join(", ", new[] { "Depth", "Reach" }.Concat(Enumerable.Range(0, levels).Select(SqlOSFgaLineage.AncestorColumn)).Select(c => $"{c} = n.{c}"));
         var rebuildProcedure = $"""
             CREATE OR ALTER PROCEDURE {rebuild}
             AS
             BEGIN
                 SET NOCOUNT ON;
                 SET XACT_ABORT ON;
-                BEGIN TRANSACTION;
-                UPDATE {resources} SET {nulls} WHERE Depth IS NOT NULL OR Reach IS NOT NULL OR {SqlOSFgaLineage.AncestorColumn(0)} IS NOT NULL;
+
+                -- 1. The internal nodes, level by level.
+                CREATE TABLE #SqlOSLineageNodes (
+                    Id NVARCHAR(450) COLLATE DATABASE_DEFAULT NOT NULL PRIMARY KEY,
+                    ParentId NVARCHAR(450) COLLATE DATABASE_DEFAULT NULL,
+                    IsActive BIT NOT NULL,
+                    Seq BIGINT NOT NULL,
+                    Depth SMALLINT NULL,
+                    Reach SMALLINT NULL,
+                    {string.Join(",\n        ", Enumerable.Range(0, levels).Select(l => $"{SqlOSFgaLineage.AncestorColumn(l)} BIGINT NULL"))}
+                );
+                INSERT INTO #SqlOSLineageNodes (Id, ParentId, IsActive, Seq)
+                SELECT r.Id, r.ParentId, r.IsActive, r.Seq
+                FROM {resources} r
+                WHERE EXISTS (SELECT 1 FROM {resources} c WHERE c.ParentId = r.Id);
+
                 UPDATE r SET
                     {Lineage("nd.Depth")}
-                FROM {resources} r
-                LEFT JOIN {resources} p ON 1 = 0
+                FROM #SqlOSLineageNodes r
+                LEFT JOIN #SqlOSLineageNodes p ON 1 = 0
                 CROSS APPLY (SELECT 0 AS Depth) nd
                 WHERE r.ParentId IS NULL;
                 DECLARE @level INT = 1;
@@ -332,15 +352,40 @@ internal sealed partial class SqlServerDatabaseProvider
                 BEGIN
                     UPDATE r SET
                         {Lineage("nd.Depth")}
-                    FROM {resources} r
-                    INNER JOIN {resources} p ON p.Id = r.ParentId
+                    FROM #SqlOSLineageNodes r
+                    INNER JOIN #SqlOSLineageNodes p ON p.Id = r.ParentId
                     CROSS APPLY (SELECT @level AS Depth) nd
                     WHERE p.Depth = @level - 1;
                     IF @@ROWCOUNT = 0 BREAK;
                     SET @level += 1;
                 END
-                {Propagate(resources)}
-                COMMIT TRANSACTION;
+
+                -- 2. Every range of the table: its nodes, its leaves, its application rows.
+                {RangeLoop(resources, $"""
+                UPDATE r SET {copyNode}
+                FROM {resources} r
+                INNER JOIN #SqlOSLineageNodes n ON n.Id = r.Id
+                WHERE r.Id >= @from AND r.Id <= @to;
+
+                UPDATE r SET
+                    {Lineage("nd.Depth")}
+                FROM {resources} r
+                INNER JOIN #SqlOSLineageNodes p ON p.Id = r.ParentId
+                CROSS APPLY (SELECT {newDepth} AS Depth) nd
+                WHERE r.Id >= @from AND r.Id <= @to
+                  AND NOT EXISTS (SELECT 1 FROM #SqlOSLineageNodes n WHERE n.Id = r.Id);
+
+                UPDATE r SET
+                    {Lineage("nd.Depth")}
+                FROM {resources} r
+                LEFT JOIN {resources} p ON 1 = 0
+                CROSS APPLY (SELECT 0 AS Depth) nd
+                WHERE r.Id >= @from AND r.Id <= @to
+                  AND r.ParentId IS NULL
+                  AND NOT EXISTS (SELECT 1 FROM #SqlOSLineageNodes n WHERE n.Id = r.Id);
+                {string.Concat(scopeTables.Select(t => ScopeFillRange(options, t, levels)))}
+                """)}
+                DROP TABLE #SqlOSLineageNodes;
             END
             """;
 
@@ -484,17 +529,65 @@ internal sealed partial class SqlServerDatabaseProvider
         return $"EXEC [{Escape(options.Schema)}].[sp_{Escape(SqlOSFgaLineage.RebuildRoutineName(options.TableNames.Resources))}];";
     }
 
-    /// <summary>Fills the scope columns of every row of one application table from the lineage, once.</summary>
+    /// <summary>
+    /// Fills the scope columns of every row of one application table from the lineage, once, in ranges of
+    /// the resources table's key, each its own transaction.
+    /// </summary>
     public string BuildScopeFillSql(SqlOSFgaOptions options, SqlOSFgaScopeTable table)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(table);
-        var schema = Escape(options.Schema);
+        var resources = $"[{Escape(options.Schema)}].[{Escape(options.TableNames.Resources)}]";
         return $"""
-            UPDATE t SET {ScopeAssignments(SqlOSFgaLineage.Levels(options), "r", "rt")}
+            SET NOCOUNT ON;
+            SET XACT_ABORT ON;
+            {RangeLoop(resources, ScopeFillRange(options, table, SqlOSFgaLineage.Levels(options)))}
+            """;
+    }
+
+    /// <summary>
+    /// Runs <paramref name="body"/> once per range of <see cref="SqlOSFgaLineage.RebuildRangeRows"/> resources
+    /// in key order, with <c>@from</c> and <c>@to</c> the range's first and last id (inclusive), each range
+    /// in its own transaction. The ranges are found with one ordered pass over the key.
+    /// </summary>
+    private static string RangeLoop(string resources, string body)
+        => $"""
+            CREATE TABLE #SqlOSLineageRanges (
+                N INT IDENTITY(1, 1) PRIMARY KEY,
+                FromId NVARCHAR(450) COLLATE DATABASE_DEFAULT NOT NULL,
+                ToId NVARCHAR(450) COLLATE DATABASE_DEFAULT NOT NULL
+            );
+            INSERT INTO #SqlOSLineageRanges (FromId, ToId)
+            SELECT MIN(x.Id), MAX(x.Id)
+            FROM (SELECT Id, (ROW_NUMBER() OVER (ORDER BY Id) - 1) / {SqlOSFgaLineage.RebuildRangeRows.ToString(CultureInfo.InvariantCulture)} AS Range FROM {resources}) x
+            GROUP BY x.Range
+            ORDER BY x.Range;
+            DECLARE @n INT = 1, @ranges INT = (SELECT COUNT(*) FROM #SqlOSLineageRanges);
+            DECLARE @from NVARCHAR(450), @to NVARCHAR(450);
+            WHILE @n <= @ranges
+            BEGIN
+                SELECT @from = FromId, @to = ToId FROM #SqlOSLineageRanges WHERE N = @n;
+                BEGIN TRANSACTION;
+                {body}
+                COMMIT TRANSACTION;
+                SET @n += 1;
+            END
+            DROP TABLE #SqlOSLineageRanges;
+            """;
+
+    /// <summary>The scope columns of one application table's rows whose resource id lies in <c>@from</c>..<c>@to</c>.</summary>
+    private static string ScopeFillRange(SqlOSFgaOptions options, SqlOSFgaScopeTable table, int levels)
+    {
+        var schema = Escape(options.Schema);
+        var resourceId = $"t.[{Escape(table.ResourceIdColumn)}]";
+        return $"""
+
+            UPDATE t SET {ScopeAssignments(levels, "r", "rt")}
             FROM {ScopeTable(table)} t
-            INNER JOIN [{schema}].[{Escape(options.TableNames.Resources)}] r ON r.Id = t.[{Escape(table.ResourceIdColumn)}]
+            INNER JOIN [{schema}].[{Escape(options.TableNames.Resources)}] r ON r.Id = {resourceId}
             INNER JOIN [{schema}].[{Escape(options.TableNames.ResourceTypes)}] rt ON rt.Id = r.ResourceTypeId
+            WHERE {resourceId} >= @from AND {resourceId} <= @to
+              AND r.Id >= @from AND r.Id <= @to;
             """;
     }
 

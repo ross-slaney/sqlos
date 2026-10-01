@@ -154,24 +154,28 @@ public class SqlOSFgaFunctionInitializer
             await _context.Database.ExecuteSqlRawAsync(batch, cancellationToken);
         }
 
-        await _context.Database.ExecuteSqlRawAsync(
-            provider.BuildStoreRoutinesHashSql(_options),
-            [provider.CreateParameter("@RoutinesHash", hash)],
-            cancellationToken);
         _logger.LogInformation("fn_IsResourceAccessible TVF is ready.");
 
         if (await LineageNeedsBuildAsync(provider, cancellationToken))
         {
             // The rebuild fills the scope columns of every application table as well.
             await BuildLineageAsync(provider, cancellationToken);
-            return;
+        }
+        else
+        {
+            foreach (var table in scopeTables)
+            {
+                _logger.LogInformation("Filling the FGA scope columns of {Schema}.{Table} from the resource lineage...", table.Schema ?? "(default)", table.Table);
+                await ExecuteNonQueryAsync(provider.BuildScopeFillSql(_options, table), cancellationToken);
+            }
         }
 
-        foreach (var table in scopeTables)
-        {
-            _logger.LogInformation("Filling the FGA scope columns of {Schema}.{Table} from the resource lineage...", table.Schema ?? "(default)", table.Table);
-            await ExecuteNonQueryAsync(provider.BuildScopeFillSql(_options, table), cancellationToken);
-        }
+        // Stored last: a build or fill that fails part-way (its ranges commit one by one) leaves the hash
+        // behind, so the next startup applies the definitions and builds again.
+        await _context.Database.ExecuteSqlRawAsync(
+            provider.BuildStoreRoutinesHashSql(_options),
+            [provider.CreateParameter("@RoutinesHash", hash)],
+            cancellationToken);
     }
 
     /// <summary>

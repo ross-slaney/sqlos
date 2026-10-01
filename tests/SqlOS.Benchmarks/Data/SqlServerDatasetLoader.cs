@@ -38,8 +38,10 @@ internal sealed class SqlServerDatasetLoader(string connectionString, SqlOSFgaOp
             // Cap the files below the disk's free space, so running out fails this benchmark with a SQL error
             // instead of filling the disk the CI runner itself needs (which loses every log).
             var gb = budget / 1_000_000_000;
-            var logGb = Math.Max(4, gb / 16);
-            var temp = Math.Max(8, gb / 8);
+            // Every bulk-copy batch, and every range of SqlOS's lineage rebuild, commits on its own, so the log
+            // needs little; the index rebuilds sort in tempdb.
+            var logGb = Math.Max(4, gb / 25);
+            var temp = Math.Max(8, gb / 10);
             var data = Math.Max(8, gb - logGb - temp);
             await ExecuteAsync(
                 $"""

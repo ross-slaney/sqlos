@@ -119,6 +119,8 @@ public class SqlOSDatabaseProviderTests
         var all = string.Join("\n", batches);
         all.Should().Contain("CREATE OR REPLACE FUNCTION \"ten\"\"ant\".\"fn_res\"\"ources_LineageRefresh\"(p_ids varchar[], p_reject boolean)");
         all.Should().Contain("CREATE OR REPLACE FUNCTION \"ten\"\"ant\".\"fn_res\"\"ources_LineageRebuild\"()");
+        all.Should().Contain("CREATE TEMP TABLE \"SqlOSLineageNodes\" AS");
+        all.Should().Contain("WHERE EXISTS (SELECT 1 FROM \"ten\"\"ant\".\"res\"\"ources\" c WHERE c.\"ParentId\" = r.\"Id\")");
         all.Should().Contain("CREATE TEMP TABLE \"SqlOSLineageAffected\"");
         all.Should().Contain("AFTER INSERT ON \"ten\"\"ant\".\"res\"\"ources\"\n    REFERENCING NEW TABLE AS new_rows\n    FOR EACH STATEMENT");
         all.Should().Contain("AFTER UPDATE ON \"ten\"\"ant\".\"res\"\"ources\"\n    REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows");

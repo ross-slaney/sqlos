@@ -64,7 +64,7 @@ internal sealed class PlanCapture(DatabaseProvider provider) : DbCommandIntercep
     {
         await using var explain = command.Connection!.CreateCommand();
         explain.Transaction = command.Transaction;
-        explain.CommandTimeout = 0;
+        explain.CommandTimeout = command.CommandTimeout;
         foreach (DbParameter parameter in command.Parameters)
         {
             explain.Parameters.Add(((ICloneable)parameter).Clone());

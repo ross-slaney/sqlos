@@ -24,6 +24,7 @@ internal sealed class ScenarioRunner(
     SqlOSFgaOptions fga,
     RetailTree tree,
     string planDirectory,
+    int budgetSeconds,
     Log log)
 {
     private const string ProductPermissionId = "perm_product_view";
@@ -35,7 +36,14 @@ internal sealed class ScenarioRunner(
         // the engine reads freshly rebuilt index pages for the first time. The sparse scans warm themselves below.
         foreach (var scenario in scenarios.Where(s => !IsSparseScan(s)))
         {
-            await ExecuteAsync(scenario, cancellationToken);
+            try
+            {
+                await ExecuteAsync(scenario, cancellationToken);
+            }
+            catch (Exception ex) when (IsTimeout(ex))
+            {
+                // Recorded by the measured run below.
+            }
         }
 
         var results = new List<ScenarioResult>(scenarios.Count);
@@ -58,7 +66,39 @@ internal sealed class ScenarioRunner(
         // The first execution is untimed: its answer is the one verified, and for page scenarios the same
         // command is run once more under EXPLAIN ANALYZE / STATISTICS XML for rows examined and server time.
         var capture = scenario.IsPage ? new CapturedPlan { Relation = "Products" } : null;
-        var first = await ExecuteAsync(scenario, cancellationToken, capture);
+        Execution first;
+        try
+        {
+            first = await ExecuteAsync(scenario, cancellationToken, capture);
+        }
+        catch (Exception ex) when (IsTimeout(ex))
+        {
+            // Counted at the budget: a lower bound on its real cost, which keeps the comparisons sound and the
+            // run bounded.
+            log.Info($"  {scenario.Id,-44} did not finish within {budgetSeconds} s");
+            return new ScenarioResult(
+                scenario.Id,
+                scenario.Title,
+                scenario.Kind.ToString(),
+                scenario.Baseline,
+                scenario.Selectivity,
+                scenario.ProductDepth,
+                scenario.IsPage ? scenario.PageSize : 1,
+                Iterations: 0,
+                MedianMs: budgetSeconds * 1_000d,
+                P95Ms: budgetSeconds * 1_000d,
+                MinMs: budgetSeconds * 1_000d,
+                MaxMs: budgetSeconds * 1_000d,
+                Correct: true,
+                FullPage: false,
+                CorrectnessDetail: null,
+                RowsExamined: null,
+                ServerPlanningMs: null,
+                ServerExecutionMs: null,
+                PlanFile: null)
+            { TimedOut = true };
+        }
+
         var (correct, fullPage, detail) = Verify(scenario, first, productCount);
         var plan = capture is null ? null : await SavePlanAsync(scenario, capture, productCount, cancellationToken);
 
@@ -112,9 +152,26 @@ internal sealed class ScenarioRunner(
         return result;
     }
 
+    /// <summary>A query the engine stopped at the budget: SQL Server's timeout, or PostgreSQL's cancellation on Npgsql's.</summary>
+    internal static bool IsTimeout(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException!)
+        {
+            if (current is TimeoutException
+                || current is Microsoft.Data.SqlClient.SqlException { Number: -2 }
+                || current is Npgsql.PostgresException { SqlState: "57014" })
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private async Task<Execution> ExecuteAsync(Scenario scenario, CancellationToken cancellationToken, CapturedPlan? capture = null)
     {
         await using BenchDbContextBase db = scenario.Kind == ScenarioKind.ListScoped ? createScopedContext() : createContext();
+        db.Database.SetCommandTimeout(TimeSpan.FromSeconds(budgetSeconds));
         var service = new SqlOSFgaAuthService(db, Options.Create(fga), NullLogger<SqlOSFgaAuthService>.Instance);
         switch (scenario.Kind)
         {
@@ -323,6 +380,9 @@ internal sealed record ScenarioResult(
     double? ServerExecutionMs,
     string? PlanFile)
 {
+    /// <summary>The first execution exceeded the run's budget; the timings hold the budget, a lower bound.</summary>
+    public bool TimedOut { get; init; }
+
     /// <summary>
     /// Server execution time per row examined, in microseconds: the paper's per-row constant, without
     /// planning, network, or EF Core overhead.

@@ -10,7 +10,8 @@ name: Benchmarks
 # 1M -> 10M -> 50M, runs on every merge to main, weekly, on demand, and on a pull request labelled
 # `benchmark-full`. 50M is the largest scale that fits a standard runner's disk with the per-level indexes.
 # The full tier skips the previous release's function for the many-grants people's pages: it takes about a
-# minute per page on SQL Server at 10M and grows with the catalog; the PR tier keeps that comparison.
+# minute per page on SQL Server at 10M and grows with the catalog; the PR tier keeps that comparison. Every
+# query has a budget (600 s): a page that exceeds it is reported as "> 600 s" and counted at the budget.
 # Standard runners are free for public repositories.
 
 on:

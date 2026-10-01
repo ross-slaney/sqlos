@@ -105,6 +105,17 @@ public class SqlOSFgaFunctionInitializerTests
 
         all.Should().Contain("CREATE OR ALTER PROCEDURE [dbo].[sp_SqlOSFgaResources_LineageRefresh]");
         all.Should().Contain("CREATE OR ALTER PROCEDURE [dbo].[sp_SqlOSFgaResources_LineageRebuild]");
+
+        // The rebuild never runs as one transaction: the nodes are computed in a temp table, then every range
+        // of the key commits on its own.
+        var rebuild = batches.Single(b => b.Contains("sp_SqlOSFgaResources_LineageRebuild]\nAS", StringComparison.Ordinal));
+        rebuild.Should().Contain("CREATE TABLE #SqlOSLineageNodes");
+        rebuild.Should().Contain("CREATE TABLE #SqlOSLineageRanges");
+        rebuild.Should().Contain("/ 500000 AS Range");
+        rebuild.Should().Contain("WHERE r.Id >= @from AND r.Id <= @to");
+        rebuild.Should().Contain("BEGIN TRANSACTION;");
+        rebuild.Should().Contain("COMMIT TRANSACTION;");
+        rebuild.IndexOf("BEGIN TRANSACTION;", StringComparison.Ordinal).Should().BeGreaterThan(rebuild.IndexOf("WHILE @n <= @ranges", StringComparison.Ordinal));
         all.Should().Contain("CREATE OR ALTER TRIGGER [dbo].[TR_SqlOSFgaResources_Lineage_Insert] ON [dbo].[SqlOSFgaResources]");
         all.Should().Contain("CREATE OR ALTER TRIGGER [dbo].[TR_SqlOSFgaResources_Lineage_Update] ON [dbo].[SqlOSFgaResources]");
         all.Should().Contain("CREATE OR ALTER TRIGGER [dbo].[TR_SqlOSFgaResources_Lineage_Delete] ON [dbo].[SqlOSFgaResources]");
