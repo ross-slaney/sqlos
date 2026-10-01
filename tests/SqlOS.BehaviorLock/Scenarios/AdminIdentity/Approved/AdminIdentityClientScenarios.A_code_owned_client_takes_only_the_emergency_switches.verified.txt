@@ -175,6 +175,7 @@ profile: dashboard-callback
 >     "password": "{password:alice}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Client 'behavior-lock-app' is inactive.
 
 ## 9. operator: the ordinary enable still refuses
 > POST /sqlos/admin/auth/api/clients/behavior-lock-app/enable

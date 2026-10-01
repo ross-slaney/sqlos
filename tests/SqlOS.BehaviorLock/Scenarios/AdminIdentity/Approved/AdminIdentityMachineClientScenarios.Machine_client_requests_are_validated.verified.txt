@@ -200,6 +200,7 @@ profile: multi-app
 >     ]
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.ArgumentNullException: Value cannot be null. (Parameter 'source')
 
 ## 11. operator: and one without a scopes array too
 > POST /sqlos/admin/auth/api/machine-clients
@@ -212,6 +213,7 @@ profile: multi-app
 >     "grants": []
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.ArgumentNullException: Value cannot be null. (Parameter 'source')
 
 ## 12. operator: rotate on an unknown machine client is refused
 > POST /sqlos/admin/auth/api/machine-clients/missing-machine/rotate
@@ -304,6 +306,7 @@ profile: multi-app
 >     "scopes": []
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.NullReferenceException: Object reference not set to an instance of an object.
 
 ## audit: no audit event for refused requests
   (no new events)

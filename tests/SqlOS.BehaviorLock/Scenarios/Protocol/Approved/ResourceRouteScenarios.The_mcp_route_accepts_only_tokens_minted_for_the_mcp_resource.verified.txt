@@ -89,11 +89,11 @@ profile: mcp
         },
         {
           "type": "exp",
-          "value": "{epoch:claim}"
+          "value": "{epoch}"
         },
         {
           "type": "iat",
-          "value": "{epoch:claim}"
+          "value": "{epoch}"
         },
         {
           "type": "iss",
@@ -101,7 +101,7 @@ profile: mcp
         },
         {
           "type": "nbf",
-          "value": "{epoch:claim}"
+          "value": "{epoch}"
         },
         {
           "type": "scope",
@@ -122,6 +122,7 @@ profile: mcp
       "sessionId": "{ses#2}",
       "userId": "{usr#1}"
     }
+  claim lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
   jwt {access-token#2}
     header: {
       "alg": "RS256",

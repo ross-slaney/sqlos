@@ -133,7 +133,7 @@ profile: modules
       "eventsUpserted": 2
     }
   ~ http SqlOSGoogleCalendarAdapter: GET https://www.googleapis.com/calendar/v3/users/me/calendarList -> 200
-  ~ http SqlOSGoogleCalendarAdapter: GET https://www.googleapis.com/calendar/v3/calendars/google-primary/events?singleEvents=true&timeMin={datetime:sync-window-start}&timeMax={datetime:sync-window-end} -> 200
+  ~ http SqlOSGoogleCalendarAdapter: GET https://www.googleapis.com/calendar/v3/calendars/google-primary/events?singleEvents=true&timeMin={datetime:utc-z,url-encoded}&timeMax={datetime:utc-z,url-encoded} -> 200
 
 ## 8. operator: the next sync is incremental, from the provider's sync token
 > POST /sqlos/admin/calendar/api/connections/{cal#1}/sync

@@ -33,7 +33,7 @@ profile: dashboard-callback
   ~ email (transactional) to {email:dana}
       subject: You're invited to Acme
       text:
-        You're invited to Acme as admin. Accept the invitation for da***@example.test: https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#2} This link expires in 7 day(s).
+        You're invited to Acme as admin. Accept the invitation for da***@example.test: https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#1}. This link expires in 7 day(s).
       html:
         <!DOCTYPE html>
         <html lang="en">
@@ -80,7 +80,7 @@ profile: dashboard-callback
       "email": "{email:erin}",
       "expiresAt": "{datetime:utc-z}",
       "id": "{inv#2}",
-      "inviteUrl": "https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#3}",
+      "inviteUrl": "https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#2}",
       "lastSendError": null,
       "lastSentAt": null,
       "organizationId": "{org#1}",
@@ -384,7 +384,7 @@ profile: dashboard-callback
                   <div class="invite-summary">
                     <strong>Acme</strong>
                     <span>{email:dana} invited as admin.</span>
-                    <span>Expires {displayed-expiry:nn/nn/nnnn_nn:nn} UTC.</span>
+                    <span>Expires {datetime:MM/dd/yyyy_HH:mm} UTC.</span>
                   </div>
                   <form class="auth-form" method="post" action="/sqlos/auth/signup/submit?invitationToken={link-token#1}">
                     <input type="hidden" name="__RequestVerificationToken" value="{csrf#1}" />

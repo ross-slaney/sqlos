@@ -11,6 +11,7 @@ profile: dashboard-callback
 >     "userId": "usr_missing"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: Microsoft.EntityFrameworkCore.DbUpdateException: An error occurred while saving the entity changes. See the inner exception for details.
 
 ## 2. operator: an unknown organization breaks the foreign key: 500
 > POST /sqlos/admin/auth/api/memberships
@@ -22,6 +23,7 @@ profile: dashboard-callback
 >     "userId": "{usr#1}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: Microsoft.EntityFrameworkCore.DbUpdateException: An error occurred while saving the entity changes. See the inner exception for details.
 
 ## 3. operator: a missing role reaches the database: 500
 > POST /sqlos/admin/auth/api/organizations/{org#1}/memberships
@@ -31,6 +33,7 @@ profile: dashboard-callback
 >     "userId": "{usr#1}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: Microsoft.EntityFrameworkCore.DbUpdateException: An error occurred while saving the entity changes. See the inner exception for details.
 
 ## 4. operator: a role longer than its fifty-character column: 500
 > POST /sqlos/admin/auth/api/organizations/{org#1}/memberships
@@ -41,6 +44,7 @@ profile: dashboard-callback
 >     "userId": "{usr#1}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: Microsoft.EntityFrameworkCore.DbUpdateException: An error occurred while saving the entity changes. See the inner exception for details.
 
 ## 5. operator: an empty role is accepted
 > POST /sqlos/admin/auth/api/organizations/{org#1}/memberships

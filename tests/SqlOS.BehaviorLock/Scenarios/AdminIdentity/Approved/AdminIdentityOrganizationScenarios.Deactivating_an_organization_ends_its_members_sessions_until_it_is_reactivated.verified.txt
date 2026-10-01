@@ -177,6 +177,7 @@ profile: dashboard-callback
 >     "password": "{password:alice}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: User is not a member of the selected organization.
 
 ## 7. operator: reactivate acme
 > PUT /sqlos/admin/auth/api/organizations/{org#1}

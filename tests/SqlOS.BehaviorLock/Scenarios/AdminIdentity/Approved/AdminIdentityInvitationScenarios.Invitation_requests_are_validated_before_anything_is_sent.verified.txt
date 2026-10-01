@@ -145,7 +145,7 @@ profile: dashboard-callback
   ~ email (transactional) to {email:dana}
       subject: You're invited to Acme
       text:
-        You're invited to Acme as member. Accept the invitation for da***@example.test: https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#2} This link expires in 7 day(s).
+        You're invited to Acme as member. Accept the invitation for da***@example.test: https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#1}. This link expires in 7 day(s).
       html:
         <!DOCTYPE html>
         <html lang="en">

@@ -48,7 +48,7 @@ profile: modules
       "eventsUpserted": 2
     }
   ~ http SqlOSMicrosoftGraphCalendarAdapter: GET https://graph.microsoft.com/v1.0/me/calendars -> 200
-  ~ http SqlOSMicrosoftGraphCalendarAdapter: GET https://graph.microsoft.com/v1.0/me/calendars/graph-default/calendarView/delta?startDateTime={datetime:sync-window-start}&endDateTime={datetime:sync-window-end} -> 200
+  ~ http SqlOSMicrosoftGraphCalendarAdapter: GET https://graph.microsoft.com/v1.0/me/calendars/graph-default/calendarView/delta?startDateTime={datetime:utc-z,url-encoded}&endDateTime={datetime:utc-z,url-encoded} -> 200
 
 ## 4. operator: the next sync follows the stored delta link: one event removed, one moved
 > POST /sqlos/admin/calendar/api/connections/{cal#1}/sync

@@ -374,6 +374,7 @@ profile: dashboard-callback
 >     "password": "{password:bob}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Application access is not allowed.
 
 ## audit: the refusal is audited as a denied access check
   - {

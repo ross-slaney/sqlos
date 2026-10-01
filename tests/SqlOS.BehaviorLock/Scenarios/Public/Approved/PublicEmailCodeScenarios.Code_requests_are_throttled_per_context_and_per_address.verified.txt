@@ -47,6 +47,7 @@ profile: hosted
 >     "email": "{email:alice}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Wait 30 seconds before requesting another code.
 
 ## 3. client: another requested organization is another context, so no cooldown (request 2 this hour)
 > POST /sqlos/auth/email-otp/start
@@ -209,6 +210,7 @@ profile: hosted
 >     "organizationId": "workspace-6"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Too many sign-in code requests. Try again later.
 
 ## audit: five challenges and the rate-limit rejection
   - {

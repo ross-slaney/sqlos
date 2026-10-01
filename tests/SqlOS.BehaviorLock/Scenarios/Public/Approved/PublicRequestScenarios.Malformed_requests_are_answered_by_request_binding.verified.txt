@@ -40,6 +40,7 @@ profile: hosted
 > Content-Type: application/x-www-form-urlencoded; charset=utf-8
 >   refreshToken=x
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Unable to read the request as JSON because the request content type 'application/x-www-form-urlencoded; charset=utf-8' is not a known JSON content type.
 
 ## audit: nothing reached SqlOS
   (no new events)

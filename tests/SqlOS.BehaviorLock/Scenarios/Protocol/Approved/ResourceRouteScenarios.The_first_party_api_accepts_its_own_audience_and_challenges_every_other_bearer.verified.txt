@@ -92,11 +92,11 @@ profile: hosted
         },
         {
           "type": "exp",
-          "value": "{epoch:claim}"
+          "value": "{epoch}"
         },
         {
           "type": "iat",
-          "value": "{epoch:claim}"
+          "value": "{epoch}"
         },
         {
           "type": "iss",
@@ -104,7 +104,7 @@ profile: hosted
         },
         {
           "type": "nbf",
-          "value": "{epoch:claim}"
+          "value": "{epoch}"
         },
         {
           "type": "scope",
@@ -125,6 +125,7 @@ profile: hosted
       "sessionId": "{ses#1}",
       "userId": "{usr#1}"
     }
+  claim lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
   jwt {access-token#1}
     header: {
       "alg": "RS256",

@@ -153,6 +153,7 @@ profile: dashboard-callback
 >     "refreshToken": "{refresh-token#2}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Session is no longer active.
 
 ## 6. client: refreshing without an organization keeps the session alive
 > POST /sqlos/auth/token/refresh

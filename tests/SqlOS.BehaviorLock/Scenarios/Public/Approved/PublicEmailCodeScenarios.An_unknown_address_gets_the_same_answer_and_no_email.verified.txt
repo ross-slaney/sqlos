@@ -65,6 +65,7 @@ profile: hosted
 >     "email": "not an address"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Enter a valid email address.
 
 ## 4. client: an unknown client id escapes the endpoint
 > POST /sqlos/auth/email-otp/start
@@ -74,6 +75,7 @@ profile: hosted
 >     "email": "{email:alice}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Unknown client 'unknown-client'.
 
 ## audit: challenge events record whether a code was sent
   - {

@@ -353,11 +353,11 @@ profile: mcp
         },
         {
           "type": "exp",
-          "value": "{epoch:claim}"
+          "value": "{epoch}"
         },
         {
           "type": "iat",
-          "value": "{epoch:claim}"
+          "value": "{epoch}"
         },
         {
           "type": "iss",
@@ -365,7 +365,7 @@ profile: mcp
         },
         {
           "type": "nbf",
-          "value": "{epoch:claim}"
+          "value": "{epoch}"
         },
         {
           "type": "scope",
@@ -386,6 +386,7 @@ profile: mcp
       "sessionId": "{ses#1}",
       "userId": "{usr#1}"
     }
+  claim lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
 
 ## 6. operator: the operator's client list includes the metadata-document client
 > GET /sqlos/admin/auth/api/clients

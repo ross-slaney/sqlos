@@ -206,3 +206,4 @@ profile: dashboard-callback
 > GET /sqlos/admin/auth/api/users/usr_missing
 > X-BehaviorLock-Operator: behavior-lock-operator
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: User not found.

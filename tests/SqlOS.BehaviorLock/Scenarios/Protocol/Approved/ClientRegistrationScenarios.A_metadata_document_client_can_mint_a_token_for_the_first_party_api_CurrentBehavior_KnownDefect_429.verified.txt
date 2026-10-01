@@ -349,11 +349,11 @@ profile: mcp
         },
         {
           "type": "exp",
-          "value": "{epoch:claim}"
+          "value": "{epoch}"
         },
         {
           "type": "iat",
-          "value": "{epoch:claim}"
+          "value": "{epoch}"
         },
         {
           "type": "iss",
@@ -361,7 +361,7 @@ profile: mcp
         },
         {
           "type": "nbf",
-          "value": "{epoch:claim}"
+          "value": "{epoch}"
         },
         {
           "type": "scope",
@@ -382,6 +382,7 @@ profile: mcp
       "sessionId": "{ses#1}",
       "userId": "{usr#1}"
     }
+  claim lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
 
 ## 6. browser: known defect #429: the remembered grant ignores the resource, so prompt=none issues a code for any audience
 > GET /sqlos/auth/authorize?response_type=code&client_id=https%3A%2F%2Fclient.example.test%2Frogue-mcp-client.json&redirect_uri=https%3A%2F%2Fclient.example.test%2Frogue-mcp-client%2Fcallback&scope=openid%20profile%20email%20offline_access&state={state#2}&nonce={nonce#2}&code_challenge={pkce-challenge#2}&code_challenge_method=S256&prompt=none&resource=https%3A%2F%2Fattacker.example%2Fany-audience

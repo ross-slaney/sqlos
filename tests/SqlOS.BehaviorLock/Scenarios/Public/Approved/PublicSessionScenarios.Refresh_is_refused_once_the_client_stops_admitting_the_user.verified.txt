@@ -137,6 +137,7 @@ profile: hosted
 >     "refreshToken": "{refresh-token#1}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Application access is not allowed.
 
 ## audit: the refresh denial is audited
   - {

@@ -21,7 +21,7 @@ profile: hosted
   ~ email (transactional) to {email:alice}
       subject: Sign in to Behavior Lock
       text:
-        Sign in to Behavior Lock as al***@example.test: https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#1} This link expires in 10 minute(s).
+        Sign in to Behavior Lock as al***@example.test: https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#1}. This link expires in 10 minute(s).
       html:
         <!DOCTYPE html>
         <html lang="en">
@@ -33,10 +33,10 @@ profile: hosted
               <h1 style="margin:0 0 12px;font-size:28px;line-height:1.1;color:#0f172a;">Sign in to Behavior Lock</h1>
               <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">Use this one-time link to finish signing in as al***@example.test. It expires in 10 minute(s).</p>
               <p style="margin:0 0 20px;">
-                <a href="https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#2}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Continue sign in</a>
+                <a href="https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#1}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Continue sign in</a>
               </p>
               <p style="margin:0 0 12px;font-size:13px;line-height:1.6;color:#64748b;">
-                If the button does not work, open this link: https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#2}
+                If the button does not work, open this link: https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#1}
               </p>
               <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">If you did not request this link, you can ignore this email.</p>
             </div>
@@ -62,7 +62,7 @@ profile: hosted
   ~ email (transactional) to {email:alice}
       subject: Sign in to Behavior Lock
       text:
-        Sign in to Behavior Lock as al***@example.test: https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#3} This link expires in 10 minute(s).
+        Sign in to Behavior Lock as al***@example.test: https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#2}. This link expires in 10 minute(s).
       html:
         <!DOCTYPE html>
         <html lang="en">
@@ -74,10 +74,10 @@ profile: hosted
               <h1 style="margin:0 0 12px;font-size:28px;line-height:1.1;color:#0f172a;">Sign in to Behavior Lock</h1>
               <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">Use this one-time link to finish signing in as al***@example.test. It expires in 10 minute(s).</p>
               <p style="margin:0 0 20px;">
-                <a href="https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#4}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Continue sign in</a>
+                <a href="https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#2}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Continue sign in</a>
               </p>
               <p style="margin:0 0 12px;font-size:13px;line-height:1.6;color:#64748b;">
-                If the button does not work, open this link: https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#4}
+                If the button does not work, open this link: https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#2}
               </p>
               <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">If you did not request this link, you can ignore this email.</p>
             </div>
@@ -103,7 +103,7 @@ profile: hosted
   ~ email (transactional) to {email:alice}
       subject: Sign in to Behavior Lock
       text:
-        Sign in to Behavior Lock as al***@example.test: https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#5} This link expires in 10 minute(s).
+        Sign in to Behavior Lock as al***@example.test: https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#3}. This link expires in 10 minute(s).
       html:
         <!DOCTYPE html>
         <html lang="en">
@@ -115,10 +115,10 @@ profile: hosted
               <h1 style="margin:0 0 12px;font-size:28px;line-height:1.1;color:#0f172a;">Sign in to Behavior Lock</h1>
               <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">Use this one-time link to finish signing in as al***@example.test. It expires in 10 minute(s).</p>
               <p style="margin:0 0 20px;">
-                <a href="https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#6}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Continue sign in</a>
+                <a href="https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#3}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Continue sign in</a>
               </p>
               <p style="margin:0 0 12px;font-size:13px;line-height:1.6;color:#64748b;">
-                If the button does not work, open this link: https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#6}
+                If the button does not work, open this link: https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#3}
               </p>
               <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">If you did not request this link, you can ignore this email.</p>
             </div>
@@ -144,7 +144,7 @@ profile: hosted
   ~ email (transactional) to {email:alice}
       subject: Sign in to Behavior Lock
       text:
-        Sign in to Behavior Lock as al***@example.test: https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#7} This link expires in 10 minute(s).
+        Sign in to Behavior Lock as al***@example.test: https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#4}. This link expires in 10 minute(s).
       html:
         <!DOCTYPE html>
         <html lang="en">
@@ -156,10 +156,10 @@ profile: hosted
               <h1 style="margin:0 0 12px;font-size:28px;line-height:1.1;color:#0f172a;">Sign in to Behavior Lock</h1>
               <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">Use this one-time link to finish signing in as al***@example.test. It expires in 10 minute(s).</p>
               <p style="margin:0 0 20px;">
-                <a href="https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#8}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Continue sign in</a>
+                <a href="https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#4}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Continue sign in</a>
               </p>
               <p style="margin:0 0 12px;font-size:13px;line-height:1.6;color:#64748b;">
-                If the button does not work, open this link: https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#8}
+                If the button does not work, open this link: https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#4}
               </p>
               <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">If you did not request this link, you can ignore this email.</p>
             </div>
@@ -185,7 +185,7 @@ profile: hosted
   ~ email (transactional) to {email:alice}
       subject: Sign in to Behavior Lock
       text:
-        Sign in to Behavior Lock as al***@example.test: https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#9} This link expires in 10 minute(s).
+        Sign in to Behavior Lock as al***@example.test: https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#5}. This link expires in 10 minute(s).
       html:
         <!DOCTYPE html>
         <html lang="en">
@@ -197,10 +197,10 @@ profile: hosted
               <h1 style="margin:0 0 12px;font-size:28px;line-height:1.1;color:#0f172a;">Sign in to Behavior Lock</h1>
               <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">Use this one-time link to finish signing in as al***@example.test. It expires in 10 minute(s).</p>
               <p style="margin:0 0 20px;">
-                <a href="https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#10}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Continue sign in</a>
+                <a href="https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#5}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Continue sign in</a>
               </p>
               <p style="margin:0 0 12px;font-size:13px;line-height:1.6;color:#64748b;">
-                If the button does not work, open this link: https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#10}
+                If the button does not work, open this link: https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#5}
               </p>
               <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">If you did not request this link, you can ignore this email.</p>
             </div>
@@ -226,7 +226,7 @@ profile: hosted
   ~ email (transactional) to {email:alice}
       subject: Sign in to Behavior Lock
       text:
-        Sign in to Behavior Lock as al***@example.test: https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#11} This link expires in 10 minute(s).
+        Sign in to Behavior Lock as al***@example.test: https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#6}. This link expires in 10 minute(s).
       html:
         <!DOCTYPE html>
         <html lang="en">
@@ -238,437 +238,437 @@ profile: hosted
               <h1 style="margin:0 0 12px;font-size:28px;line-height:1.1;color:#0f172a;">Sign in to Behavior Lock</h1>
               <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">Use this one-time link to finish signing in as al***@example.test. It expires in 10 minute(s).</p>
               <p style="margin:0 0 20px;">
-                <a href="https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#12}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Continue sign in</a>
+                <a href="https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#6}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Continue sign in</a>
               </p>
               <p style="margin:0 0 12px;font-size:13px;line-height:1.6;color:#64748b;">
-                If the button does not work, open this link: https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#12}
+                If the button does not work, open this link: https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#6}
               </p>
               <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">If you did not request this link, you can ignore this email.</p>
             </div>
           </body>
         </html>
 
-## document: audit, sorted by content (these events have no defined order): six links requested and six emails queued
-    - {
-        "action": "email.send.queued",
-        "actor": {
-          "displayName": null,
-          "id": "{edl#1}",
-          "type": "email_delivery"
-        },
-        "applicationId": null,
-        "applicationKey": null,
-        "context": null,
+## audit, sorted by content: six links requested and six emails queued
+  - {
+      "action": "email.send.queued",
+      "actor": {
+        "displayName": null,
+        "id": "{edl#1}",
+        "type": "email_delivery"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "email.send.queued",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "deliveryId": "{edl#1}",
+        "providerMessageId": "behavior-lock-email-1",
+        "templateKey": "auth.magic-link",
+        "templateVersion": 1
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "email.send.queued",
+      "actor": {
+        "displayName": null,
+        "id": "{edl#2}",
+        "type": "email_delivery"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "email.send.queued",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "deliveryId": "{edl#2}",
+        "providerMessageId": "behavior-lock-email-2",
+        "templateKey": "auth.magic-link",
+        "templateVersion": 1
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "email.send.queued",
+      "actor": {
+        "displayName": null,
+        "id": "{edl#3}",
+        "type": "email_delivery"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "email.send.queued",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "deliveryId": "{edl#3}",
+        "providerMessageId": "behavior-lock-email-3",
+        "templateKey": "auth.magic-link",
+        "templateVersion": 1
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "email.send.queued",
+      "actor": {
+        "displayName": null,
+        "id": "{edl#4}",
+        "type": "email_delivery"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "email.send.queued",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "deliveryId": "{edl#4}",
+        "providerMessageId": "behavior-lock-email-4",
+        "templateKey": "auth.magic-link",
+        "templateVersion": 1
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "email.send.queued",
+      "actor": {
+        "displayName": null,
+        "id": "{edl#5}",
+        "type": "email_delivery"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "email.send.queued",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "deliveryId": "{edl#5}",
+        "providerMessageId": "behavior-lock-email-5",
+        "templateKey": "auth.magic-link",
+        "templateVersion": 1
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "email.send.queued",
+      "actor": {
+        "displayName": null,
+        "id": "{edl#6}",
+        "type": "email_delivery"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "email.send.queued",
+      "id": "{evt#6}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "deliveryId": "{edl#6}",
+        "providerMessageId": "behavior-lock-email-6",
+        "templateKey": "auth.magic-link",
+        "templateVersion": 1
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "magic_link.requested",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
         "correlationId": null,
-        "eventType": "email.send.queued",
-        "id": "{evt#1}",
-        "ingestedAt": "{datetime:unspecified}",
-        "ipAddress": null,
-        "metadata": {
-          "deliveryId": "{edl#1}",
-          "providerMessageId": "behavior-lock-email-1",
-          "templateKey": "auth.magic-link",
-          "templateVersion": 1
-        },
-        "occurredAt": "{datetime:unspecified}",
-        "organizationId": null,
-        "requestId": null,
-        "sessionId": null,
-        "source": "authserver",
-        "targets": [],
-        "userAgent": null,
-        "userId": null
-      }
-    - {
-        "action": "email.send.queued",
-        "actor": {
-          "displayName": null,
-          "id": "{edl#2}",
-          "type": "email_delivery"
-        },
-        "applicationId": null,
-        "applicationKey": null,
-        "context": null,
-        "correlationId": null,
-        "eventType": "email.send.queued",
-        "id": "{evt#2}",
-        "ingestedAt": "{datetime:unspecified}",
-        "ipAddress": null,
-        "metadata": {
-          "deliveryId": "{edl#2}",
-          "providerMessageId": "behavior-lock-email-2",
-          "templateKey": "auth.magic-link",
-          "templateVersion": 1
-        },
-        "occurredAt": "{datetime:unspecified}",
-        "organizationId": null,
-        "requestId": null,
-        "sessionId": null,
-        "source": "authserver",
-        "targets": [],
-        "userAgent": null,
-        "userId": null
-      }
-    - {
-        "action": "email.send.queued",
-        "actor": {
-          "displayName": null,
-          "id": "{edl#3}",
-          "type": "email_delivery"
-        },
-        "applicationId": null,
-        "applicationKey": null,
-        "context": null,
-        "correlationId": null,
-        "eventType": "email.send.queued",
-        "id": "{evt#3}",
-        "ingestedAt": "{datetime:unspecified}",
-        "ipAddress": null,
-        "metadata": {
-          "deliveryId": "{edl#3}",
-          "providerMessageId": "behavior-lock-email-3",
-          "templateKey": "auth.magic-link",
-          "templateVersion": 1
-        },
-        "occurredAt": "{datetime:unspecified}",
-        "organizationId": null,
-        "requestId": null,
-        "sessionId": null,
-        "source": "authserver",
-        "targets": [],
-        "userAgent": null,
-        "userId": null
-      }
-    - {
-        "action": "email.send.queued",
-        "actor": {
-          "displayName": null,
-          "id": "{edl#4}",
-          "type": "email_delivery"
-        },
-        "applicationId": null,
-        "applicationKey": null,
-        "context": null,
-        "correlationId": null,
-        "eventType": "email.send.queued",
-        "id": "{evt#4}",
-        "ingestedAt": "{datetime:unspecified}",
-        "ipAddress": null,
-        "metadata": {
-          "deliveryId": "{edl#4}",
-          "providerMessageId": "behavior-lock-email-4",
-          "templateKey": "auth.magic-link",
-          "templateVersion": 1
-        },
-        "occurredAt": "{datetime:unspecified}",
-        "organizationId": null,
-        "requestId": null,
-        "sessionId": null,
-        "source": "authserver",
-        "targets": [],
-        "userAgent": null,
-        "userId": null
-      }
-    - {
-        "action": "email.send.queued",
-        "actor": {
-          "displayName": null,
-          "id": "{edl#5}",
-          "type": "email_delivery"
-        },
-        "applicationId": null,
-        "applicationKey": null,
-        "context": null,
-        "correlationId": null,
-        "eventType": "email.send.queued",
-        "id": "{evt#5}",
-        "ingestedAt": "{datetime:unspecified}",
-        "ipAddress": null,
-        "metadata": {
-          "deliveryId": "{edl#5}",
-          "providerMessageId": "behavior-lock-email-5",
-          "templateKey": "auth.magic-link",
-          "templateVersion": 1
-        },
-        "occurredAt": "{datetime:unspecified}",
-        "organizationId": null,
-        "requestId": null,
-        "sessionId": null,
-        "source": "authserver",
-        "targets": [],
-        "userAgent": null,
-        "userId": null
-      }
-    - {
-        "action": "email.send.queued",
-        "actor": {
-          "displayName": null,
-          "id": "{edl#6}",
-          "type": "email_delivery"
-        },
-        "applicationId": null,
-        "applicationKey": null,
-        "context": null,
-        "correlationId": null,
-        "eventType": "email.send.queued",
-        "id": "{evt#6}",
-        "ingestedAt": "{datetime:unspecified}",
-        "ipAddress": null,
-        "metadata": {
-          "deliveryId": "{edl#6}",
-          "providerMessageId": "behavior-lock-email-6",
-          "templateKey": "auth.magic-link",
-          "templateVersion": 1
-        },
-        "occurredAt": "{datetime:unspecified}",
-        "organizationId": null,
-        "requestId": null,
-        "sessionId": null,
-        "source": "authserver",
-        "targets": [],
-        "userAgent": null,
-        "userId": null
-      }
-    - {
-        "action": "magic_link.requested",
-        "actor": {
-          "displayName": null,
-          "id": null,
-          "type": "system"
-        },
-        "applicationId": null,
-        "applicationKey": null,
-        "context": {
-          "correlationId": null,
-          "ipAddress": "203.0.113.10",
-          "requestId": null,
-          "sessionId": null,
-          "userAgent": null
-        },
-        "correlationId": null,
-        "eventType": "magic_link.requested",
-        "id": "{evt#7}",
-        "ingestedAt": "{datetime:unspecified}",
         "ipAddress": "203.0.113.10",
-        "metadata": {
-          "details": {
-            "authorizationRequestId": "[redacted]",
-            "clientApplicationId": "{cli#1}",
-            "requestedOrganizationId": null,
-            "sent": true
-          },
-          "maskedEmail": "al***@example.test",
-          "phase": "start"
-        },
-        "occurredAt": "{datetime:unspecified}",
-        "organizationId": null,
         "requestId": null,
         "sessionId": null,
-        "source": "authserver",
-        "targets": [],
-        "userAgent": null,
-        "userId": null
-      }
-    - {
-        "action": "magic_link.requested",
-        "actor": {
-          "displayName": null,
-          "id": null,
-          "type": "system"
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "magic_link.requested",
+      "id": "{evt#7}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "details": {
+          "authorizationRequestId": "[redacted]",
+          "clientApplicationId": "{cli#1}",
+          "requestedOrganizationId": null,
+          "sent": true
         },
-        "applicationId": null,
-        "applicationKey": null,
-        "context": {
-          "correlationId": null,
-          "ipAddress": "203.0.113.10",
-          "requestId": null,
-          "sessionId": null,
-          "userAgent": null
-        },
+        "maskedEmail": "al***@example.test",
+        "phase": "start"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "magic_link.requested",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
         "correlationId": null,
-        "eventType": "magic_link.requested",
-        "id": "{evt#8}",
-        "ingestedAt": "{datetime:unspecified}",
         "ipAddress": "203.0.113.10",
-        "metadata": {
-          "details": {
-            "authorizationRequestId": "[redacted]",
-            "clientApplicationId": "{cli#1}",
-            "requestedOrganizationId": null,
-            "sent": true
-          },
-          "maskedEmail": "al***@example.test",
-          "phase": "start"
-        },
-        "occurredAt": "{datetime:unspecified}",
-        "organizationId": null,
         "requestId": null,
         "sessionId": null,
-        "source": "authserver",
-        "targets": [],
-        "userAgent": null,
-        "userId": null
-      }
-    - {
-        "action": "magic_link.requested",
-        "actor": {
-          "displayName": null,
-          "id": null,
-          "type": "system"
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "magic_link.requested",
+      "id": "{evt#8}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "details": {
+          "authorizationRequestId": "[redacted]",
+          "clientApplicationId": "{cli#1}",
+          "requestedOrganizationId": null,
+          "sent": true
         },
-        "applicationId": null,
-        "applicationKey": null,
-        "context": {
-          "correlationId": null,
-          "ipAddress": "203.0.113.10",
-          "requestId": null,
-          "sessionId": null,
-          "userAgent": null
-        },
+        "maskedEmail": "al***@example.test",
+        "phase": "start"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "magic_link.requested",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
         "correlationId": null,
-        "eventType": "magic_link.requested",
-        "id": "{evt#9}",
-        "ingestedAt": "{datetime:unspecified}",
         "ipAddress": "203.0.113.10",
-        "metadata": {
-          "details": {
-            "authorizationRequestId": "[redacted]",
-            "clientApplicationId": "{cli#1}",
-            "requestedOrganizationId": null,
-            "sent": true
-          },
-          "maskedEmail": "al***@example.test",
-          "phase": "start"
-        },
-        "occurredAt": "{datetime:unspecified}",
-        "organizationId": null,
         "requestId": null,
         "sessionId": null,
-        "source": "authserver",
-        "targets": [],
-        "userAgent": null,
-        "userId": null
-      }
-    - {
-        "action": "magic_link.requested",
-        "actor": {
-          "displayName": null,
-          "id": null,
-          "type": "system"
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "magic_link.requested",
+      "id": "{evt#9}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "details": {
+          "authorizationRequestId": "[redacted]",
+          "clientApplicationId": "{cli#1}",
+          "requestedOrganizationId": null,
+          "sent": true
         },
-        "applicationId": null,
-        "applicationKey": null,
-        "context": {
-          "correlationId": null,
-          "ipAddress": "203.0.113.10",
-          "requestId": null,
-          "sessionId": null,
-          "userAgent": null
-        },
+        "maskedEmail": "al***@example.test",
+        "phase": "start"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "magic_link.requested",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
         "correlationId": null,
-        "eventType": "magic_link.requested",
-        "id": "{evt#10}",
-        "ingestedAt": "{datetime:unspecified}",
         "ipAddress": "203.0.113.10",
-        "metadata": {
-          "details": {
-            "authorizationRequestId": "[redacted]",
-            "clientApplicationId": "{cli#1}",
-            "requestedOrganizationId": null,
-            "sent": true
-          },
-          "maskedEmail": "al***@example.test",
-          "phase": "start"
-        },
-        "occurredAt": "{datetime:unspecified}",
-        "organizationId": null,
         "requestId": null,
         "sessionId": null,
-        "source": "authserver",
-        "targets": [],
-        "userAgent": null,
-        "userId": null
-      }
-    - {
-        "action": "magic_link.requested",
-        "actor": {
-          "displayName": null,
-          "id": null,
-          "type": "system"
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "magic_link.requested",
+      "id": "{evt#10}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "details": {
+          "authorizationRequestId": "[redacted]",
+          "clientApplicationId": "{cli#1}",
+          "requestedOrganizationId": null,
+          "sent": true
         },
-        "applicationId": null,
-        "applicationKey": null,
-        "context": {
-          "correlationId": null,
-          "ipAddress": "203.0.113.10",
-          "requestId": null,
-          "sessionId": null,
-          "userAgent": null
-        },
+        "maskedEmail": "al***@example.test",
+        "phase": "start"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "magic_link.requested",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
         "correlationId": null,
-        "eventType": "magic_link.requested",
-        "id": "{evt#11}",
-        "ingestedAt": "{datetime:unspecified}",
         "ipAddress": "203.0.113.10",
-        "metadata": {
-          "details": {
-            "authorizationRequestId": "[redacted]",
-            "clientApplicationId": "{cli#1}",
-            "requestedOrganizationId": null,
-            "sent": true
-          },
-          "maskedEmail": "al***@example.test",
-          "phase": "start"
-        },
-        "occurredAt": "{datetime:unspecified}",
-        "organizationId": null,
         "requestId": null,
         "sessionId": null,
-        "source": "authserver",
-        "targets": [],
-        "userAgent": null,
-        "userId": null
-      }
-    - {
-        "action": "magic_link.requested",
-        "actor": {
-          "displayName": null,
-          "id": null,
-          "type": "system"
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "magic_link.requested",
+      "id": "{evt#11}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "details": {
+          "authorizationRequestId": "[redacted]",
+          "clientApplicationId": "{cli#1}",
+          "requestedOrganizationId": null,
+          "sent": true
         },
-        "applicationId": null,
-        "applicationKey": null,
-        "context": {
-          "correlationId": null,
-          "ipAddress": "203.0.113.10",
-          "requestId": null,
-          "sessionId": null,
-          "userAgent": null
-        },
+        "maskedEmail": "al***@example.test",
+        "phase": "start"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "magic_link.requested",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
         "correlationId": null,
-        "eventType": "magic_link.requested",
-        "id": "{evt#12}",
-        "ingestedAt": "{datetime:unspecified}",
         "ipAddress": "203.0.113.10",
-        "metadata": {
-          "details": {
-            "authorizationRequestId": "[redacted]",
-            "clientApplicationId": "{cli#1}",
-            "requestedOrganizationId": null,
-            "sent": true
-          },
-          "maskedEmail": "al***@example.test",
-          "phase": "start"
-        },
-        "occurredAt": "{datetime:unspecified}",
-        "organizationId": null,
         "requestId": null,
         "sessionId": null,
-        "source": "authserver",
-        "targets": [],
-        "userAgent": null,
-        "userId": null
-      }
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "magic_link.requested",
+      "id": "{evt#12}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "details": {
+          "authorizationRequestId": "[redacted]",
+          "clientApplicationId": "{cli#1}",
+          "requestedOrganizationId": null,
+          "sent": true
+        },
+        "maskedEmail": "al***@example.test",
+        "phase": "start"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
 
 ## 7. client: six links went out against a limit of five an hour; only now is the limit enforced
 > POST /sqlos/auth/magic-link/start
@@ -678,6 +678,7 @@ profile: hosted
 >     "email": "{email:alice}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Too many sign-in link requests. Try again later.
 
 ## audit: the rejection
   - {

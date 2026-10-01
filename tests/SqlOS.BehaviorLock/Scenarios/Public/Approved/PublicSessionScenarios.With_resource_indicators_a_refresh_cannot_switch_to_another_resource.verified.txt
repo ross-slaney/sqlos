@@ -61,6 +61,7 @@ profile: mcp
 >     "resource": "https://sqlos.example.test/mcp"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Resource does not match the original authorization.
 
 ## 3. client: the refusal did not consume the token: without a resource it refreshes
 > POST /sqlos/auth/token/refresh

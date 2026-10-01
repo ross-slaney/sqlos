@@ -51,6 +51,7 @@ profile: dashboard-callback
 >     "email": "bob@XN--BUSINE-GTA.example.test"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Email 'bob@XN--BUSINE-GTA.example.test' already exists.
 
 ## 4. operator: and the upper-case ASCII address is bob's (500)
 > POST /sqlos/admin/auth/api/users
@@ -61,6 +62,7 @@ profile: dashboard-callback
 >     "email": "BOB@BUSINESS.EXAMPLE.TEST"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Email 'BOB@BUSINESS.EXAMPLE.TEST' already exists.
 
 ## 5. operator: exactly two users, each with the address as written
 > GET /sqlos/admin/auth/api/users?search=bob

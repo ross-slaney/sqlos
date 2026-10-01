@@ -87,6 +87,7 @@ profile: dashboard-callback
 >     "primaryDomain": "globex.example.test"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: Microsoft.EntityFrameworkCore.DbUpdateException: An error occurred while saving the entity changes. See the inner exception for details.
 
 ## 6. operator: organizations are listed by name
 > GET /sqlos/admin/auth/api/organizations
@@ -322,11 +323,13 @@ profile: dashboard-callback
 >     "primaryDomain": "nameless.example.test"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.NullReferenceException: Object reference not set to an instance of an object.
 
 ## 16. operator: an unknown organization's detail escapes 'Organization not found.' as a 500
 > GET /sqlos/admin/auth/api/organizations/org_missing
 > X-BehaviorLock-Operator: behavior-lock-operator
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Organization not found.
 
 ## audit: organization creation writes no audit event
   (no new events)

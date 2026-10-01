@@ -225,6 +225,7 @@ profile: enterprise
 >     "metadataXml": "not xml at all"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.Xml.XmlException: Data at the root level is invalid. Line 1, position 1.
 
 ## 14. customer-admin: import metadata whose entity ID Globex's connection already uses
 > POST /sqlos/admin/auth/sso-portal/api/metadata

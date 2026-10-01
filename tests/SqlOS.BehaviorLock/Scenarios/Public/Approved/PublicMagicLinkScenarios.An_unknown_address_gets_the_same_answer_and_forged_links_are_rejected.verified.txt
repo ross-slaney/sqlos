@@ -27,6 +27,7 @@ profile: hosted
 >     "email": "not an address"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Enter a valid email address.
 
 ## 3. client: a token SqlOS never issued is rejected and audited
 > POST /sqlos/auth/magic-link/complete
@@ -35,6 +36,7 @@ profile: hosted
 >     "token": "forged-link-token-that-was-never-issued"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: The sign-in link is invalid or expired.
 
 ## 4. client: a blank token is rejected before any lookup
 > POST /sqlos/auth/magic-link/complete
@@ -43,6 +45,7 @@ profile: hosted
 >     "token": "   "
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: The sign-in link is invalid or expired.
 
 ## audit: the unsent link and the rejected completion
   - {

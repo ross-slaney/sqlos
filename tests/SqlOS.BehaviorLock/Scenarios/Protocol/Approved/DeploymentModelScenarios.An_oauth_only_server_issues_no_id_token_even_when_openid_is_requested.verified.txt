@@ -188,11 +188,11 @@ profile: oauth-only
         },
         {
           "type": "exp",
-          "value": "{epoch:claim}"
+          "value": "{epoch}"
         },
         {
           "type": "iat",
-          "value": "{epoch:claim}"
+          "value": "{epoch}"
         },
         {
           "type": "iss",
@@ -200,7 +200,7 @@ profile: oauth-only
         },
         {
           "type": "nbf",
-          "value": "{epoch:claim}"
+          "value": "{epoch}"
         },
         {
           "type": "scope",
@@ -221,6 +221,7 @@ profile: oauth-only
       "sessionId": "{ses#1}",
       "userId": "{usr#1}"
     }
+  claim lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
 
 ## audit: events
   - {

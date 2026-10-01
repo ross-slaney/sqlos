@@ -6,13 +6,16 @@ profile: hosted
 > GET /sqlos/auth/login/oidc/not-a-connection?request={req#1}&email=
 > Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: No enabled OIDC connection was found for this request.
 
 ## 2. browser: a request SqlOS does not know
 > GET /sqlos/auth/login/oidc/{oidc#1}?request=not-a-request&email=
 > Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Authorization request is invalid or expired.
 
 ## 3. browser: an invitation token SqlOS cannot resolve
 > GET /sqlos/auth/login/oidc/{oidc#1}?request={req#1}&email=&invitationToken=not-an-invitation
 > Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Invitation is invalid or expired.

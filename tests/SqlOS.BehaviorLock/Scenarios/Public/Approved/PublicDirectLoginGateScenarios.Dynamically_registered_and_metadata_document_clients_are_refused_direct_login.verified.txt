@@ -95,6 +95,7 @@ profile: dcr
 >     "email": "{email:alice}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Email sign-in is unavailable.
 
 ## audit: registration and rejection events
   - {

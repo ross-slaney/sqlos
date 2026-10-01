@@ -47,6 +47,7 @@ profile: hosted
 >     "code": "{otp#1}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: The sign-in code is invalid or expired.
 
 ## 3. client: a code without digits fails before the challenge is read
 > POST /sqlos/auth/email-otp/verify
@@ -56,6 +57,7 @@ profile: hosted
 >     "code": "no digits"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: The sign-in code is invalid or expired.
 
 ## 4. client: wrong code, attempt 1
 > POST /sqlos/auth/email-otp/verify
@@ -65,6 +67,7 @@ profile: hosted
 >     "code": "{code#1}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: The sign-in code is invalid or expired.
 
 ## 5. client: wrong code, attempt 2
 > POST /sqlos/auth/email-otp/verify
@@ -74,6 +77,7 @@ profile: hosted
 >     "code": "{code#2}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: The sign-in code is invalid or expired.
 
 ## 6. client: wrong code, attempt 3
 > POST /sqlos/auth/email-otp/verify
@@ -83,6 +87,7 @@ profile: hosted
 >     "code": "{code#3}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: The sign-in code is invalid or expired.
 
 ## 7. client: wrong code, attempt 4
 > POST /sqlos/auth/email-otp/verify
@@ -92,6 +97,7 @@ profile: hosted
 >     "code": "{code#4}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: The sign-in code is invalid or expired.
 
 ## 8. client: wrong code, attempt 5
 > POST /sqlos/auth/email-otp/verify
@@ -101,6 +107,7 @@ profile: hosted
 >     "code": "{code#5}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: The sign-in code is invalid or expired.
 
 ## 9. client: five wrong codes invalidated the challenge: the right code is refused
 > POST /sqlos/auth/email-otp/verify
@@ -110,6 +117,7 @@ profile: hosted
 >     "code": "{otp#1}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: The sign-in code is invalid or expired.
 
 ## audit: failed attempts, the last one invalidating the challenge
   - {

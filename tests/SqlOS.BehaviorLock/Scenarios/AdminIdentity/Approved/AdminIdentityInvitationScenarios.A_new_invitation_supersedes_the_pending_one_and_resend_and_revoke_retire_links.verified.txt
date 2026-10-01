@@ -33,7 +33,7 @@ profile: dashboard-callback
   ~ email (transactional) to {email:dana}
       subject: You're invited to Acme
       text:
-        You're invited to Acme as member. Accept the invitation for da***@example.test: https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#2} This link expires in 7 day(s).
+        You're invited to Acme as member. Accept the invitation for da***@example.test: https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#1}. This link expires in 7 day(s).
       html:
         <!DOCTYPE html>
         <html lang="en">
@@ -72,7 +72,7 @@ profile: dashboard-callback
       "email": "{email:dana}",
       "expiresAt": "{datetime:utc-z}",
       "id": "{inv#2}",
-      "inviteUrl": "https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#3}",
+      "inviteUrl": "https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#2}",
       "lastSendError": null,
       "lastSentAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
@@ -85,7 +85,7 @@ profile: dashboard-callback
   ~ email (transactional) to {email:dana}
       subject: You're invited to Acme
       text:
-        You're invited to Acme as admin. Accept the invitation for da***@example.test: https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#4} This link expires in 7 day(s).
+        You're invited to Acme as admin. Accept the invitation for da***@example.test: https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#2}. This link expires in 7 day(s).
       html:
         <!DOCTYPE html>
         <html lang="en">
@@ -97,10 +97,10 @@ profile: dashboard-callback
               <h1 style="margin:0 0 12px;font-size:28px;line-height:1.1;color:#0f172a;">You're invited to Acme</h1>
               <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">Accept this invitation for da***@example.test to join as admin. This link expires in 7 day(s).</p>
               <p style="margin:0 0 20px;">
-                <a href="https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#3}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Accept invitation</a>
+                <a href="https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#2}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Accept invitation</a>
               </p>
               <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">
-                If the button does not work, open this link: https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#3}
+                If the button does not work, open this link: https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#2}
               </p>
             </div>
           </body>
@@ -235,7 +235,7 @@ profile: dashboard-callback
       "email": "{email:dana}",
       "expiresAt": "{datetime:unspecified}",
       "id": "{inv#2}",
-      "inviteUrl": "https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#5}",
+      "inviteUrl": "https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#3}",
       "lastSendError": null,
       "lastSentAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
@@ -248,7 +248,7 @@ profile: dashboard-callback
   ~ email (transactional) to {email:dana}
       subject: You're invited to Acme
       text:
-        You're invited to Acme as admin. Accept the invitation for da***@example.test: https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#6} This link expires in 7 day(s).
+        You're invited to Acme as admin. Accept the invitation for da***@example.test: https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#3}. This link expires in 7 day(s).
       html:
         <!DOCTYPE html>
         <html lang="en">
@@ -260,17 +260,17 @@ profile: dashboard-callback
               <h1 style="margin:0 0 12px;font-size:28px;line-height:1.1;color:#0f172a;">You're invited to Acme</h1>
               <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">Accept this invitation for da***@example.test to join as admin. This link expires in 7 day(s).</p>
               <p style="margin:0 0 20px;">
-                <a href="https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#5}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Accept invitation</a>
+                <a href="https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#3}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Accept invitation</a>
               </p>
               <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">
-                If the button does not work, open this link: https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#5}
+                If the button does not work, open this link: https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#3}
               </p>
             </div>
           </body>
         </html>
 
 ## 6. dana: the replaced link no longer opens
-> GET /sqlos/auth/invitations/accept?token={link-token#3}
+> GET /sqlos/auth/invitations/accept?token={link-token#2}
 > Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
 < 400 Bad Request
 < Cache-Control: no-store
@@ -335,7 +335,7 @@ profile: dashboard-callback
     </html>
 
 ## 7. dana: the resent link opens
-> GET /sqlos/auth/invitations/accept?token={link-token#5}
+> GET /sqlos/auth/invitations/accept?token={link-token#3}
 > Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
 < 200 OK
 < Cache-Control: no-store
@@ -373,11 +373,11 @@ profile: dashboard-callback
                   <div class="invite-summary">
                     <strong>Acme</strong>
                     <span>{email:dana} invited as admin.</span>
-                    <span>Expires {displayed-expiry:nn/nn/nnnn_nn:nn} UTC.</span>
+                    <span>Expires {datetime:MM/dd/yyyy_HH:mm} UTC.</span>
                   </div>
-                  <form class="auth-form" method="post" action="/sqlos/auth/signup/submit?invitationToken={link-token#5}">
+                  <form class="auth-form" method="post" action="/sqlos/auth/signup/submit?invitationToken={link-token#3}">
                     <input type="hidden" name="__RequestVerificationToken" value="{csrf#3}" />
-                    <input type="hidden" name="invitationToken" value="{link-token#5}" />
+                    <input type="hidden" name="invitationToken" value="{link-token#3}" />
                     <label class="field">
                       <span>Display name</span>
                       <input name="displayName" value="" placeholder="Jane Doe" autocomplete="name" required="" />
@@ -392,9 +392,9 @@ profile: dashboard-callback
                       <span class="loader loader-sm button-loader" aria-hidden="true"></span>
                     </button>
                   </form>
-                  <form class="auth-form" method="post" action="/sqlos/auth/login/password?invitationToken={link-token#5}">
+                  <form class="auth-form" method="post" action="/sqlos/auth/login/password?invitationToken={link-token#3}">
                     <input type="hidden" name="__RequestVerificationToken" value="{csrf#3}" />
-                    <input type="hidden" name="invitationToken" value="{link-token#5}" />
+                    <input type="hidden" name="invitationToken" value="{link-token#3}" />
                     <input type="hidden" name="email" value="{email:dana}" />
                     <label class="field">
                       <span>Password</span>
@@ -797,7 +797,7 @@ profile: dashboard-callback
     }
 
 ## 14. dana: the revoked invitation's link no longer opens
-> GET /sqlos/auth/invitations/accept?token={link-token#5}
+> GET /sqlos/auth/invitations/accept?token={link-token#3}
 > Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
 < 400 Bad Request
 < Cache-Control: no-store

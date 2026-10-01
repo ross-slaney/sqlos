@@ -13,6 +13,7 @@ profile: hosted
 >   password=
 >   invitationToken=not-an-invitation
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Invitation is invalid or expired.
 
 ## 2. browser: the password form: the error page itself fails to render
 > POST /sqlos/auth/login/password
@@ -25,6 +26,7 @@ profile: hosted
 >   password={password:alice}
 >   invitationToken=not-an-invitation
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Invitation is invalid or expired.
 
 ## 3. browser: the email-code form
 > POST /sqlos/auth/login/email-otp/start
@@ -37,6 +39,7 @@ profile: hosted
 >   password=
 >   invitationToken=not-an-invitation
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Invitation is invalid or expired.
 
 ## 4. browser: the magic-link form
 > POST /sqlos/auth/login/magic-link/start
@@ -49,6 +52,7 @@ profile: hosted
 >   password=
 >   invitationToken=not-an-invitation
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Invitation is invalid or expired.
 
 ## 5. browser: the sign-up form
 > POST /sqlos/auth/signup/submit
@@ -62,6 +66,7 @@ profile: hosted
 >   invitationToken=not-an-invitation
 >   displayName=Dana
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Invitation is invalid or expired.
 
 ## audit: nothing is audited
   (no new events)

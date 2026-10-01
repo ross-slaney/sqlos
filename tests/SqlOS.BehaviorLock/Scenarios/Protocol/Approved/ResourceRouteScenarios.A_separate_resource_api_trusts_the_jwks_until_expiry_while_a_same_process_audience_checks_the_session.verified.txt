@@ -32,11 +32,11 @@ profile: multi-app
         },
         {
           "type": "exp",
-          "value": "{epoch:claim}"
+          "value": "{epoch}"
         },
         {
           "type": "iat",
-          "value": "{epoch:claim}"
+          "value": "{epoch}"
         },
         {
           "type": "iss",
@@ -44,7 +44,7 @@ profile: multi-app
         },
         {
           "type": "nbf",
-          "value": "{epoch:claim}"
+          "value": "{epoch}"
         },
         {
           "type": "scope",
@@ -61,6 +61,7 @@ profile: multi-app
       ],
       "scheme": "ResourceApi"
     }
+  claim lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
   jwt {access-token#1}
     header: {
       "alg": "RS256",
@@ -131,11 +132,11 @@ profile: multi-app
         },
         {
           "type": "exp",
-          "value": "{epoch:claim}"
+          "value": "{epoch}"
         },
         {
           "type": "iat",
-          "value": "{epoch:claim}"
+          "value": "{epoch}"
         },
         {
           "type": "iss",
@@ -143,7 +144,7 @@ profile: multi-app
         },
         {
           "type": "nbf",
-          "value": "{epoch:claim}"
+          "value": "{epoch}"
         },
         {
           "type": "scope",
@@ -164,6 +165,7 @@ profile: multi-app
       "sessionId": "{ses#2}",
       "userId": "{usr#1}"
     }
+  claim lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
   jwt {access-token#2}
     header: {
       "alg": "RS256",
@@ -214,11 +216,11 @@ profile: multi-app
         },
         {
           "type": "exp",
-          "value": "{epoch:claim}"
+          "value": "{epoch}"
         },
         {
           "type": "iat",
-          "value": "{epoch:claim}"
+          "value": "{epoch}"
         },
         {
           "type": "iss",
@@ -226,7 +228,7 @@ profile: multi-app
         },
         {
           "type": "nbf",
-          "value": "{epoch:claim}"
+          "value": "{epoch}"
         },
         {
           "type": "scope",
@@ -243,6 +245,7 @@ profile: multi-app
       ],
       "scheme": "ResourceApi"
     }
+  claim lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
 
 ## 7. resource-client: the same-process scheme looks the session up and rejects the revoked token
 > GET /billing/me

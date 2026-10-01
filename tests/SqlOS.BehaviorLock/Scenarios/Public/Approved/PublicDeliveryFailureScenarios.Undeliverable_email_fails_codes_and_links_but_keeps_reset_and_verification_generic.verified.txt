@@ -10,6 +10,7 @@ profile: hosted
 >     "email": "{email:alice}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: We couldn't send a sign-in code right now.
 
 ## 2. client: so does a sign-in link
 > POST /sqlos/auth/magic-link/start
@@ -19,6 +20,7 @@ profile: hosted
 >     "email": "{email:alice}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: We couldn't send a sign-in link right now.
 
 ## 3. client: a password reset keeps its generic answer
 > POST /sqlos/auth/password/forgot

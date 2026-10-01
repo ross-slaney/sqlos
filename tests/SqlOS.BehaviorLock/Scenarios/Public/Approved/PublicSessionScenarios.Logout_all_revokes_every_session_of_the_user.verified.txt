@@ -25,6 +25,7 @@ profile: hosted
 >     "refreshToken": "{refresh-token#2}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Refresh token is no longer valid.
 
 ## 4. client: a revoked token can no longer sign out everywhere
 > POST /sqlos/auth/logout-all

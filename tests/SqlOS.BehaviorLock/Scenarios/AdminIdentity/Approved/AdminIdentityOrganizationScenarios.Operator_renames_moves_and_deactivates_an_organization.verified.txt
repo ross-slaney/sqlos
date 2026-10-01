@@ -237,6 +237,7 @@ profile: dashboard-callback
 >     "name": "Ghost"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Organization not found.
 
 ## 10. operator: a missing name escapes as a 500
 > PUT /sqlos/admin/auth/api/organizations/{org#1}
@@ -246,6 +247,7 @@ profile: dashboard-callback
 >     "slug": "acme"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.NullReferenceException: Object reference not set to an instance of an object.
 
 ## 11. operator: a primary domain another organization has escapes the unique index as a 500
 > PUT /sqlos/admin/auth/api/organizations/{org#1}
@@ -257,6 +259,7 @@ profile: dashboard-callback
 >     "slug": "acme"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: Microsoft.EntityFrameworkCore.DbUpdateException: An error occurred while saving the entity changes. See the inner exception for details.
 
 ## 12. operator: the organization is unchanged by the failures
 > GET /sqlos/admin/auth/api/organizations/{org#1}

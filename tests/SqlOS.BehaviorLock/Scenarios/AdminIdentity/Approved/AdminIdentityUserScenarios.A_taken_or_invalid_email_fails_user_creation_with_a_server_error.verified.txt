@@ -30,6 +30,7 @@ profile: dashboard-callback
 >     "email": "{email:dana}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Email '{email:dana}' already exists.
 
 ## 3. operator: the same mailbox in upper case with surrounding spaces is taken too
 > POST /sqlos/admin/auth/api/users
@@ -40,6 +41,7 @@ profile: dashboard-callback
 >     "email": "  {email:DANA}  "
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Email '  {email:DANA}  ' already exists.
 
 ## 4. operator: an address without @ is rejected as invalid, also as an unhandled 500
 > POST /sqlos/admin/auth/api/users
@@ -50,6 +52,7 @@ profile: dashboard-callback
 >     "email": "not-an-email"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Enter a valid email address.
 
 ## 5. operator: an ASCII look-alike character (long s) is rejected as invalid
 > POST /sqlos/admin/auth/api/users
@@ -60,6 +63,7 @@ profile: dashboard-callback
 >     "email": "ſam@example.test"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Enter a valid email address.
 
 ## 6. operator: a missing email is invalid
 > POST /sqlos/admin/auth/api/users
@@ -69,6 +73,7 @@ profile: dashboard-callback
 >     "displayName": "Missing Email"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Enter a valid email address.
 
 ## 7. operator: a missing display name reaches the database
 > POST /sqlos/admin/auth/api/users
@@ -78,6 +83,7 @@ profile: dashboard-callback
 >     "email": "{email:nameless}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: Microsoft.EntityFrameworkCore.DbUpdateException: An error occurred while saving the entity changes. See the inner exception for details.
 
 ## 8. operator: what was created
 > GET /sqlos/admin/auth/api/users

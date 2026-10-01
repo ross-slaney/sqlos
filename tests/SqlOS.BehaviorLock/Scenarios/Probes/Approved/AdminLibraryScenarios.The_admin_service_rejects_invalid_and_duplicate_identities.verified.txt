@@ -44,7 +44,7 @@ profile: dashboard-callback
       "id": "{org#1}",
       "isActive": true,
       "name": "Acme Two",
-      "slug": "{slug:acme-with-suffix}"
+      "slug": "{slug:acme}-{slug-suffix#1}"
     }
 
 ## 4. probe: a slug is normalized

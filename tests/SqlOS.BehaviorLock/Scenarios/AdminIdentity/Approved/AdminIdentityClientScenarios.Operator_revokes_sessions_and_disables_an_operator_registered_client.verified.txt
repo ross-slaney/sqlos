@@ -212,6 +212,7 @@ profile: dashboard-callback
 >     "password": "{password:alice}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Client 'portal' is inactive.
 
 ## 8. operator: the disabled client in the disabled filter
 > GET /sqlos/admin/auth/api/clients?status=disabled

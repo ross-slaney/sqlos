@@ -41,7 +41,7 @@ profile: hosted
                   <div class="invite-summary">
                     <strong>Acme</strong>
                     <span>{email:carol} invited as member.</span>
-                    <span>Expires {datetime:invariant-g} UTC.</span>
+                    <span>Expires {datetime:MM/dd/yyyy_HH:mm} UTC.</span>
                   </div>
                   <form class="auth-form" method="post" action="/sqlos/auth/login/email-otp/start?invitationToken={invitation-token#1}">
                     <input type="hidden" name="__RequestVerificationToken" value="{csrf#1}" />
@@ -106,6 +106,7 @@ profile: hosted
 >   displayName=Carol
 >   email={email:carol}
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Invitation is invalid or expired.
 
 ## audit: nothing survives the rollback
   - {

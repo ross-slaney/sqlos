@@ -159,7 +159,7 @@ profile: hosted
   ~ email (transactional) to {email:alice}
       subject: Sign in to Behavior Lock
       text:
-        Sign in to Behavior Lock as al***@example.test: https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#1} This link expires in 10 minute(s).
+        Sign in to Behavior Lock as al***@example.test: https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#1}. This link expires in 10 minute(s).
       html:
         <!DOCTYPE html>
         <html lang="en">
@@ -171,10 +171,10 @@ profile: hosted
               <h1 style="margin:0 0 12px;font-size:28px;line-height:1.1;color:#0f172a;">Sign in to Behavior Lock</h1>
               <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">Use this one-time link to finish signing in as al***@example.test. It expires in 10 minute(s).</p>
               <p style="margin:0 0 20px;">
-                <a href="https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#2}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Continue sign in</a>
+                <a href="https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#1}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Continue sign in</a>
               </p>
               <p style="margin:0 0 12px;font-size:13px;line-height:1.6;color:#64748b;">
-                If the button does not work, open this link: https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#2}
+                If the button does not work, open this link: https://sqlos.example.test/sqlos/auth/login/magic-link/complete?token={link-token#1}
               </p>
               <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">If you did not request this link, you can ignore this email.</p>
             </div>
@@ -182,7 +182,7 @@ profile: hosted
         </html>
 
 ## 3. browser: open the link
-> GET /sqlos/auth/login/magic-link/complete?token={link-token#2}
+> GET /sqlos/auth/login/magic-link/complete?token={link-token#1}
 > Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
 < 200 OK
 < Cache-Control: no-store
@@ -219,7 +219,7 @@ profile: hosted
                   </div>
                   <form class="auth-form" method="post" action="/sqlos/auth/login/magic-link/complete">
                     <input type="hidden" name="__RequestVerificationToken" value="{csrf#2}" />
-                    <input type="hidden" name="token" value="{link-token#2}" />
+                    <input type="hidden" name="token" value="{link-token#1}" />
                     <button class="primary-action" type="submit" data-loading-label="Signing in">
                       <span class="button-label">Continue sign in</span>
                       <span class="loader loader-sm button-loader" aria-hidden="true"></span>
@@ -243,7 +243,7 @@ profile: hosted
 > Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
 > Origin: https://sqlos.example.test
 >   __RequestVerificationToken={csrf#2}
->   token={link-token#2}
+>   token={link-token#1}
 < 302 Found
 < Location: /sqlos/auth/login?status=signed-in
 < Set-Cookie: sqlos_auth_page={cookie#2}; expires=+7d; path=/; secure; samesite=lax; httponly

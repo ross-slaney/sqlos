@@ -97,6 +97,7 @@ profile: hosted
 >     "code": "{otp#1}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: The sign-in code is invalid or expired.
 
 ## audit: email-code events
   - {

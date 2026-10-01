@@ -191,6 +191,7 @@ profile: hosted
 >     "refreshToken": "{refresh-token#3}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Session is no longer active.
 
 ## 8. client: but the session itself was never revoked: it still refreshes into Acme
 > POST /sqlos/auth/token/refresh

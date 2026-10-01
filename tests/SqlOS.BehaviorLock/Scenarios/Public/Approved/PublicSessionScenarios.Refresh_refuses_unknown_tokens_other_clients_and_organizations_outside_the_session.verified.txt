@@ -9,6 +9,7 @@ profile: hosted
 >     "refreshToken": "not-a-refresh-token"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Refresh token is invalid.
 
 ## 2. client: a client id other than the session's escapes the endpoint
 > POST /sqlos/auth/token/refresh
@@ -18,6 +19,7 @@ profile: hosted
 >     "refreshToken": "{refresh-token#1}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Refresh token was not issued for this client.
 
 ## 3. client: refreshing into an organization Alice does not belong to is a lifecycle denial
 > POST /sqlos/auth/token/refresh
@@ -27,6 +29,7 @@ profile: hosted
 >     "refreshToken": "{refresh-token#1}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Session is no longer active.
 
 ## 4. client: none of those consumed the token: it still refreshes
 > POST /sqlos/auth/token/refresh
@@ -132,6 +135,7 @@ profile: hosted
 >     "refreshToken": "{refresh-token#3}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Current MFA policy is not satisfied.
 
 ## audit: the MFA step-up refusal is not audited
   (no new events)

@@ -49,6 +49,7 @@ profile: hosted
 >     "refreshToken": "{refresh-token#1}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Refresh token has already been used.
 
 ## 3. client: the legitimate rotated token now fails too
 > POST /sqlos/auth/token/refresh
@@ -57,6 +58,7 @@ profile: hosted
 >     "refreshToken": "{refresh-token#2}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Refresh token is no longer valid.
 
 ## 4. client: and its access token no longer validates (the session is revoked)
 > POST /__probe/auth/validate

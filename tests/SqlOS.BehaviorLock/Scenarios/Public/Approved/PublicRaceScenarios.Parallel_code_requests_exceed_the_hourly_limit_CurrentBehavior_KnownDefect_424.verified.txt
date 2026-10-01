@@ -224,427 +224,427 @@ profile: hosted
           </body>
         </html>
 
-## document: audit, sorted by content (these events have no defined order): six challenges started and six emails queued
-    - {
-        "action": "email.send.queued",
-        "actor": {
-          "displayName": null,
-          "id": "{edl#1}",
-          "type": "email_delivery"
-        },
-        "applicationId": null,
-        "applicationKey": null,
-        "context": null,
+## audit, sorted by content: six challenges started and six emails queued
+  - {
+      "action": "email.send.queued",
+      "actor": {
+        "displayName": null,
+        "id": "{edl#1}",
+        "type": "email_delivery"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "email.send.queued",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "deliveryId": "{edl#1}",
+        "providerMessageId": "behavior-lock-email-1",
+        "templateKey": "auth.email-otp",
+        "templateVersion": 1
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "email.send.queued",
+      "actor": {
+        "displayName": null,
+        "id": "{edl#2}",
+        "type": "email_delivery"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "email.send.queued",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "deliveryId": "{edl#2}",
+        "providerMessageId": "behavior-lock-email-2",
+        "templateKey": "auth.email-otp",
+        "templateVersion": 1
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "email.send.queued",
+      "actor": {
+        "displayName": null,
+        "id": "{edl#3}",
+        "type": "email_delivery"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "email.send.queued",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "deliveryId": "{edl#3}",
+        "providerMessageId": "behavior-lock-email-3",
+        "templateKey": "auth.email-otp",
+        "templateVersion": 1
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "email.send.queued",
+      "actor": {
+        "displayName": null,
+        "id": "{edl#4}",
+        "type": "email_delivery"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "email.send.queued",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "deliveryId": "{edl#4}",
+        "providerMessageId": "behavior-lock-email-4",
+        "templateKey": "auth.email-otp",
+        "templateVersion": 1
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "email.send.queued",
+      "actor": {
+        "displayName": null,
+        "id": "{edl#5}",
+        "type": "email_delivery"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "email.send.queued",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "deliveryId": "{edl#5}",
+        "providerMessageId": "behavior-lock-email-5",
+        "templateKey": "auth.email-otp",
+        "templateVersion": 1
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "email.send.queued",
+      "actor": {
+        "displayName": null,
+        "id": "{edl#6}",
+        "type": "email_delivery"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "email.send.queued",
+      "id": "{evt#6}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "deliveryId": "{edl#6}",
+        "providerMessageId": "behavior-lock-email-6",
+        "templateKey": "auth.email-otp",
+        "templateVersion": 1
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "email_otp.challenge_started",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
         "correlationId": null,
-        "eventType": "email.send.queued",
-        "id": "{evt#1}",
-        "ingestedAt": "{datetime:unspecified}",
-        "ipAddress": null,
-        "metadata": {
-          "deliveryId": "{edl#1}",
-          "providerMessageId": "behavior-lock-email-1",
-          "templateKey": "auth.email-otp",
-          "templateVersion": 1
-        },
-        "occurredAt": "{datetime:unspecified}",
-        "organizationId": null,
-        "requestId": null,
-        "sessionId": null,
-        "source": "authserver",
-        "targets": [],
-        "userAgent": null,
-        "userId": null
-      }
-    - {
-        "action": "email.send.queued",
-        "actor": {
-          "displayName": null,
-          "id": "{edl#2}",
-          "type": "email_delivery"
-        },
-        "applicationId": null,
-        "applicationKey": null,
-        "context": null,
-        "correlationId": null,
-        "eventType": "email.send.queued",
-        "id": "{evt#2}",
-        "ingestedAt": "{datetime:unspecified}",
-        "ipAddress": null,
-        "metadata": {
-          "deliveryId": "{edl#2}",
-          "providerMessageId": "behavior-lock-email-2",
-          "templateKey": "auth.email-otp",
-          "templateVersion": 1
-        },
-        "occurredAt": "{datetime:unspecified}",
-        "organizationId": null,
-        "requestId": null,
-        "sessionId": null,
-        "source": "authserver",
-        "targets": [],
-        "userAgent": null,
-        "userId": null
-      }
-    - {
-        "action": "email.send.queued",
-        "actor": {
-          "displayName": null,
-          "id": "{edl#3}",
-          "type": "email_delivery"
-        },
-        "applicationId": null,
-        "applicationKey": null,
-        "context": null,
-        "correlationId": null,
-        "eventType": "email.send.queued",
-        "id": "{evt#3}",
-        "ingestedAt": "{datetime:unspecified}",
-        "ipAddress": null,
-        "metadata": {
-          "deliveryId": "{edl#3}",
-          "providerMessageId": "behavior-lock-email-3",
-          "templateKey": "auth.email-otp",
-          "templateVersion": 1
-        },
-        "occurredAt": "{datetime:unspecified}",
-        "organizationId": null,
-        "requestId": null,
-        "sessionId": null,
-        "source": "authserver",
-        "targets": [],
-        "userAgent": null,
-        "userId": null
-      }
-    - {
-        "action": "email.send.queued",
-        "actor": {
-          "displayName": null,
-          "id": "{edl#4}",
-          "type": "email_delivery"
-        },
-        "applicationId": null,
-        "applicationKey": null,
-        "context": null,
-        "correlationId": null,
-        "eventType": "email.send.queued",
-        "id": "{evt#4}",
-        "ingestedAt": "{datetime:unspecified}",
-        "ipAddress": null,
-        "metadata": {
-          "deliveryId": "{edl#4}",
-          "providerMessageId": "behavior-lock-email-4",
-          "templateKey": "auth.email-otp",
-          "templateVersion": 1
-        },
-        "occurredAt": "{datetime:unspecified}",
-        "organizationId": null,
-        "requestId": null,
-        "sessionId": null,
-        "source": "authserver",
-        "targets": [],
-        "userAgent": null,
-        "userId": null
-      }
-    - {
-        "action": "email.send.queued",
-        "actor": {
-          "displayName": null,
-          "id": "{edl#5}",
-          "type": "email_delivery"
-        },
-        "applicationId": null,
-        "applicationKey": null,
-        "context": null,
-        "correlationId": null,
-        "eventType": "email.send.queued",
-        "id": "{evt#5}",
-        "ingestedAt": "{datetime:unspecified}",
-        "ipAddress": null,
-        "metadata": {
-          "deliveryId": "{edl#5}",
-          "providerMessageId": "behavior-lock-email-5",
-          "templateKey": "auth.email-otp",
-          "templateVersion": 1
-        },
-        "occurredAt": "{datetime:unspecified}",
-        "organizationId": null,
-        "requestId": null,
-        "sessionId": null,
-        "source": "authserver",
-        "targets": [],
-        "userAgent": null,
-        "userId": null
-      }
-    - {
-        "action": "email.send.queued",
-        "actor": {
-          "displayName": null,
-          "id": "{edl#6}",
-          "type": "email_delivery"
-        },
-        "applicationId": null,
-        "applicationKey": null,
-        "context": null,
-        "correlationId": null,
-        "eventType": "email.send.queued",
-        "id": "{evt#6}",
-        "ingestedAt": "{datetime:unspecified}",
-        "ipAddress": null,
-        "metadata": {
-          "deliveryId": "{edl#6}",
-          "providerMessageId": "behavior-lock-email-6",
-          "templateKey": "auth.email-otp",
-          "templateVersion": 1
-        },
-        "occurredAt": "{datetime:unspecified}",
-        "organizationId": null,
-        "requestId": null,
-        "sessionId": null,
-        "source": "authserver",
-        "targets": [],
-        "userAgent": null,
-        "userId": null
-      }
-    - {
-        "action": "email_otp.challenge_started",
-        "actor": {
-          "displayName": null,
-          "id": null,
-          "type": "system"
-        },
-        "applicationId": null,
-        "applicationKey": null,
-        "context": {
-          "correlationId": null,
-          "ipAddress": "203.0.113.10",
-          "requestId": null,
-          "sessionId": null,
-          "userAgent": null
-        },
-        "correlationId": null,
-        "eventType": "email_otp.challenge_started",
-        "id": "{evt#7}",
-        "ingestedAt": "{datetime:unspecified}",
         "ipAddress": "203.0.113.10",
-        "metadata": {
-          "details": {
-            "authorizationRequestId": "[redacted]",
-            "clientApplicationId": "{cli#1}",
-            "requestedOrganizationId": null,
-            "sent": true
-          },
-          "maskedEmail": "al***@example.test",
-          "purpose": "login"
-        },
-        "occurredAt": "{datetime:unspecified}",
-        "organizationId": null,
         "requestId": null,
         "sessionId": null,
-        "source": "authserver",
-        "targets": [],
-        "userAgent": null,
-        "userId": null
-      }
-    - {
-        "action": "email_otp.challenge_started",
-        "actor": {
-          "displayName": null,
-          "id": null,
-          "type": "system"
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "email_otp.challenge_started",
+      "id": "{evt#7}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "details": {
+          "authorizationRequestId": "[redacted]",
+          "clientApplicationId": "{cli#1}",
+          "requestedOrganizationId": null,
+          "sent": true
         },
-        "applicationId": null,
-        "applicationKey": null,
-        "context": {
-          "correlationId": null,
-          "ipAddress": "203.0.113.10",
-          "requestId": null,
-          "sessionId": null,
-          "userAgent": null
-        },
+        "maskedEmail": "al***@example.test",
+        "purpose": "login"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "email_otp.challenge_started",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
         "correlationId": null,
-        "eventType": "email_otp.challenge_started",
-        "id": "{evt#8}",
-        "ingestedAt": "{datetime:unspecified}",
         "ipAddress": "203.0.113.10",
-        "metadata": {
-          "details": {
-            "authorizationRequestId": "[redacted]",
-            "clientApplicationId": "{cli#1}",
-            "requestedOrganizationId": null,
-            "sent": true
-          },
-          "maskedEmail": "al***@example.test",
-          "purpose": "login"
-        },
-        "occurredAt": "{datetime:unspecified}",
-        "organizationId": null,
         "requestId": null,
         "sessionId": null,
-        "source": "authserver",
-        "targets": [],
-        "userAgent": null,
-        "userId": null
-      }
-    - {
-        "action": "email_otp.challenge_started",
-        "actor": {
-          "displayName": null,
-          "id": null,
-          "type": "system"
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "email_otp.challenge_started",
+      "id": "{evt#8}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "details": {
+          "authorizationRequestId": "[redacted]",
+          "clientApplicationId": "{cli#1}",
+          "requestedOrganizationId": null,
+          "sent": true
         },
-        "applicationId": null,
-        "applicationKey": null,
-        "context": {
-          "correlationId": null,
-          "ipAddress": "203.0.113.10",
-          "requestId": null,
-          "sessionId": null,
-          "userAgent": null
-        },
+        "maskedEmail": "al***@example.test",
+        "purpose": "login"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "email_otp.challenge_started",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
         "correlationId": null,
-        "eventType": "email_otp.challenge_started",
-        "id": "{evt#9}",
-        "ingestedAt": "{datetime:unspecified}",
         "ipAddress": "203.0.113.10",
-        "metadata": {
-          "details": {
-            "authorizationRequestId": "[redacted]",
-            "clientApplicationId": "{cli#1}",
-            "requestedOrganizationId": null,
-            "sent": true
-          },
-          "maskedEmail": "al***@example.test",
-          "purpose": "login"
-        },
-        "occurredAt": "{datetime:unspecified}",
-        "organizationId": null,
         "requestId": null,
         "sessionId": null,
-        "source": "authserver",
-        "targets": [],
-        "userAgent": null,
-        "userId": null
-      }
-    - {
-        "action": "email_otp.challenge_started",
-        "actor": {
-          "displayName": null,
-          "id": null,
-          "type": "system"
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "email_otp.challenge_started",
+      "id": "{evt#9}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "details": {
+          "authorizationRequestId": "[redacted]",
+          "clientApplicationId": "{cli#1}",
+          "requestedOrganizationId": null,
+          "sent": true
         },
-        "applicationId": null,
-        "applicationKey": null,
-        "context": {
-          "correlationId": null,
-          "ipAddress": "203.0.113.10",
-          "requestId": null,
-          "sessionId": null,
-          "userAgent": null
-        },
+        "maskedEmail": "al***@example.test",
+        "purpose": "login"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "email_otp.challenge_started",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
         "correlationId": null,
-        "eventType": "email_otp.challenge_started",
-        "id": "{evt#10}",
-        "ingestedAt": "{datetime:unspecified}",
         "ipAddress": "203.0.113.10",
-        "metadata": {
-          "details": {
-            "authorizationRequestId": "[redacted]",
-            "clientApplicationId": "{cli#1}",
-            "requestedOrganizationId": null,
-            "sent": true
-          },
-          "maskedEmail": "al***@example.test",
-          "purpose": "login"
-        },
-        "occurredAt": "{datetime:unspecified}",
-        "organizationId": null,
         "requestId": null,
         "sessionId": null,
-        "source": "authserver",
-        "targets": [],
-        "userAgent": null,
-        "userId": null
-      }
-    - {
-        "action": "email_otp.challenge_started",
-        "actor": {
-          "displayName": null,
-          "id": null,
-          "type": "system"
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "email_otp.challenge_started",
+      "id": "{evt#10}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "details": {
+          "authorizationRequestId": "[redacted]",
+          "clientApplicationId": "{cli#1}",
+          "requestedOrganizationId": null,
+          "sent": true
         },
-        "applicationId": null,
-        "applicationKey": null,
-        "context": {
-          "correlationId": null,
-          "ipAddress": "203.0.113.10",
-          "requestId": null,
-          "sessionId": null,
-          "userAgent": null
-        },
+        "maskedEmail": "al***@example.test",
+        "purpose": "login"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "email_otp.challenge_started",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
         "correlationId": null,
-        "eventType": "email_otp.challenge_started",
-        "id": "{evt#11}",
-        "ingestedAt": "{datetime:unspecified}",
         "ipAddress": "203.0.113.10",
-        "metadata": {
-          "details": {
-            "authorizationRequestId": "[redacted]",
-            "clientApplicationId": "{cli#1}",
-            "requestedOrganizationId": null,
-            "sent": true
-          },
-          "maskedEmail": "al***@example.test",
-          "purpose": "login"
-        },
-        "occurredAt": "{datetime:unspecified}",
-        "organizationId": null,
         "requestId": null,
         "sessionId": null,
-        "source": "authserver",
-        "targets": [],
-        "userAgent": null,
-        "userId": null
-      }
-    - {
-        "action": "email_otp.challenge_started",
-        "actor": {
-          "displayName": null,
-          "id": null,
-          "type": "system"
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "email_otp.challenge_started",
+      "id": "{evt#11}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "details": {
+          "authorizationRequestId": "[redacted]",
+          "clientApplicationId": "{cli#1}",
+          "requestedOrganizationId": null,
+          "sent": true
         },
-        "applicationId": null,
-        "applicationKey": null,
-        "context": {
-          "correlationId": null,
-          "ipAddress": "203.0.113.10",
-          "requestId": null,
-          "sessionId": null,
-          "userAgent": null
-        },
+        "maskedEmail": "al***@example.test",
+        "purpose": "login"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "email_otp.challenge_started",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
         "correlationId": null,
-        "eventType": "email_otp.challenge_started",
-        "id": "{evt#12}",
-        "ingestedAt": "{datetime:unspecified}",
         "ipAddress": "203.0.113.10",
-        "metadata": {
-          "details": {
-            "authorizationRequestId": "[redacted]",
-            "clientApplicationId": "{cli#1}",
-            "requestedOrganizationId": null,
-            "sent": true
-          },
-          "maskedEmail": "al***@example.test",
-          "purpose": "login"
-        },
-        "occurredAt": "{datetime:unspecified}",
-        "organizationId": null,
         "requestId": null,
         "sessionId": null,
-        "source": "authserver",
-        "targets": [],
-        "userAgent": null,
-        "userId": null
-      }
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "email_otp.challenge_started",
+      "id": "{evt#12}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "details": {
+          "authorizationRequestId": "[redacted]",
+          "clientApplicationId": "{cli#1}",
+          "requestedOrganizationId": null,
+          "sent": true
+        },
+        "maskedEmail": "al***@example.test",
+        "purpose": "login"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
 
 ## 7. client: six codes went out against a limit of five an hour; only now is the limit enforced
 > POST /sqlos/auth/email-otp/start
@@ -654,6 +654,7 @@ profile: hosted
 >     "email": "{email:alice}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Too many sign-in code requests. Try again later.
 
 ## audit: the rejection
   - {

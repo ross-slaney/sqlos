@@ -268,11 +268,11 @@ profile: hosted
         },
         {
           "type": "exp",
-          "value": "{epoch:claim}"
+          "value": "{epoch}"
         },
         {
           "type": "iat",
-          "value": "{epoch:claim}"
+          "value": "{epoch}"
         },
         {
           "type": "iss",
@@ -280,7 +280,7 @@ profile: hosted
         },
         {
           "type": "nbf",
-          "value": "{epoch:claim}"
+          "value": "{epoch}"
         },
         {
           "type": "sid",
@@ -297,6 +297,7 @@ profile: hosted
       "sessionId": "{ses#1}",
       "userId": "{usr#1}"
     }
+  claim lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
 
 # exchanging the same code again: SqlOS throws System.InvalidOperationException "Authorization code is invalid or expired." and writes no response (Kestrel answers 500).
 

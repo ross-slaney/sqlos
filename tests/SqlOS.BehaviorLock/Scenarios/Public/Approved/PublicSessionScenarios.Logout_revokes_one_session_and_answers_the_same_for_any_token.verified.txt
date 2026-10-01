@@ -17,6 +17,7 @@ profile: hosted
 >     "refreshToken": "{refresh-token#1}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Refresh token is no longer valid.
 
 ## 3. client: nor does its access token
 > POST /__probe/auth/validate
@@ -117,6 +118,7 @@ profile: hosted
 ## 8. client: no body at all escapes the endpoint
 > POST /sqlos/auth/logout
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Unable to read the request as JSON because the request content type '' is not a known JSON content type.
 
 ## audit: one logout event
   - {

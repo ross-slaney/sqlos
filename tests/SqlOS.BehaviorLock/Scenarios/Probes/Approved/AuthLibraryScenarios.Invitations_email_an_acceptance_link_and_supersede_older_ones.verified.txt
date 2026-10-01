@@ -33,7 +33,7 @@ profile: hosted
   ~ email (transactional) to {email:bob}
       subject: You're invited to Acme
       text:
-        You're invited to Acme as member. Accept the invitation for bo***@example.test: https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#2} This link expires in 7 day(s).
+        You're invited to Acme as member. Accept the invitation for bo***@example.test: https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#1}. This link expires in 7 day(s).
       html:
         <!DOCTYPE html>
         <html lang="en">
@@ -73,7 +73,7 @@ profile: hosted
       "email": "{email:bob}",
       "expiresAt": "{datetime:utc-z}",
       "id": "{inv#2}",
-      "inviteUrl": "https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#3}",
+      "inviteUrl": "https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#2}",
       "lastSendError": null,
       "lastSentAt": null,
       "organizationId": "{org#1}",
@@ -104,7 +104,7 @@ profile: hosted
       "email": "{email:bob}",
       "expiresAt": "{datetime:utc-z}",
       "id": "{inv#3}",
-      "inviteUrl": "https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#4}",
+      "inviteUrl": "https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#3}",
       "lastSendError": null,
       "lastSentAt": "{datetime:utc-z}",
       "organizationId": "{org#1}",
@@ -117,7 +117,7 @@ profile: hosted
   ~ email (transactional) to {email:bob}
       subject: You're invited to Acme
       text:
-        You're invited to Acme as member. Accept the invitation for bo***@example.test: https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#5} This link expires in 7 day(s).
+        You're invited to Acme as member. Accept the invitation for bo***@example.test: https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#3}. This link expires in 7 day(s).
       html:
         <!DOCTYPE html>
         <html lang="en">
@@ -129,10 +129,10 @@ profile: hosted
               <h1 style="margin:0 0 12px;font-size:28px;line-height:1.1;color:#0f172a;">You're invited to Acme</h1>
               <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">Accept this invitation for bo***@example.test to join as member. This link expires in 7 day(s).</p>
               <p style="margin:0 0 20px;">
-                <a href="https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#4}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Accept invitation</a>
+                <a href="https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#3}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Accept invitation</a>
               </p>
               <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">
-                If the button does not work, open this link: https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#4}
+                If the button does not work, open this link: https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#3}
               </p>
             </div>
           </body>

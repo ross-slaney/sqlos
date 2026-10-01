@@ -241,6 +241,7 @@ profile: hosted
 >     "password": "{password:alice}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: MFA code is invalid.
 
 ## audit: challenge failures, locks, and the refused challenge
   - {

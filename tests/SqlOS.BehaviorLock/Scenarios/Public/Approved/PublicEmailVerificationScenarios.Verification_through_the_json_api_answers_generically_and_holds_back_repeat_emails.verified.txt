@@ -16,7 +16,7 @@ profile: hosted
   ~ email (transactional) to {email:alice}
       subject: Verify your Behavior Lock email
       text:
-        Confirm that al***@example.test belongs to your Behavior Lock account: https://sqlos.example.test/sqlos/auth/email/verify?token={link-token#1} This link expires in 24 hour(s). If you did not sign up for Behavior Lock with this address, ignore this email.
+        Confirm that al***@example.test belongs to your Behavior Lock account: https://sqlos.example.test/sqlos/auth/email/verify?token={link-token#1}. This link expires in 24 hour(s). If you did not sign up for Behavior Lock with this address, ignore this email.
       html:
         <!DOCTYPE html>
         <html lang="en">
@@ -30,10 +30,10 @@ profile: hosted
                 Use this link to confirm that al***@example.test belongs to your Behavior Lock account. It expires in 24 hour(s).
               </p>
               <p style="margin:0 0 20px;">
-                <a href="https://sqlos.example.test/sqlos/auth/email/verify?token={link-token#2}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Verify email</a>
+                <a href="https://sqlos.example.test/sqlos/auth/email/verify?token={link-token#1}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Verify email</a>
               </p>
               <p style="margin:0 0 12px;font-size:13px;line-height:1.6;color:#64748b;">
-                If the button does not work, open this link: https://sqlos.example.test/sqlos/auth/email/verify?token={link-token#2}
+                If the button does not work, open this link: https://sqlos.example.test/sqlos/auth/email/verify?token={link-token#1}
               </p>
               <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">
                 If you did not sign up for Behavior Lock with this address, ignore this email. The address stays unverified.
@@ -58,7 +58,7 @@ profile: hosted
 > POST /sqlos/auth/email/verify
 > Content-Type: application/json; charset=utf-8
 >   {
->     "token": "{link-token#2}"
+>     "token": "{link-token#1}"
 >   }
 < 204 No Content
 
@@ -66,9 +66,10 @@ profile: hosted
 > POST /sqlos/auth/email/verify
 > Content-Type: application/json; charset=utf-8
 >   {
->     "token": "{link-token#2}"
+>     "token": "{link-token#1}"
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Email verification token is invalid or expired.
 
 ## 5. client: a verified address gets the generic answer and no email
 > POST /sqlos/auth/email/verification-email
@@ -101,6 +102,7 @@ profile: hosted
 >     "email": " "
 >   }
 < 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Email address is required.
 
 ## audit: requests record eligibility; only the first was sent
   - {
