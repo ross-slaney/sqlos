@@ -12,6 +12,22 @@ SqlOS is an OpenID Provider and an FGA engine. It is not an API gateway.
 - Do not add `RequireSqlOSAccessToken`, surface `EndpointDataSource` wrappers, path-inferred middleware, or any other hide that decides the application's lock for it.
 - Session lookup stays inside `ValidateAccessTokenAsync` (and therefore inside the `SqlOS` handler). That is not a reason to hide `[Authorize]` or to tell hosts they cannot use a JWT bearer scheme.
 
+## Domain model rules
+
+SqlOS is built as a rich domain model. The full design record is `docs/architecture/domain-model.md`; these rules are the part every change must follow.
+
+- **Entities own their state.** Persisted state has private setters. Every state change is an intention-revealing entity method that validates, changes state and raises a domain event. Never add a public setter, and never set another entity's fields from a service or endpoint.
+- **Compose lifecycle parts; don't re-implement them.** Expiry, consumption, revocation, attempt budgets, verification, enablement and hashed secrets each have one part in `SqlOS.Domain`. The entity keeps the flat column and delegates the rule to the part.
+- **Use value objects for strings with rules**: `EmailAddress`, `DomainName`, `PhoneNumber`, `HashedSecret`, `RedirectUri`, `ScopeSet`, `ResourceIndicator`. Look emails up only by `EmailAddress` canonical equality.
+- **Security decisions are proof types.** `LoginEvidence`, `OwnershipProof`, `LoginDecision`, `GrantAuthority` and `DnsProof` have internal constructors and only their listed producers create them (enforced by architecture tests). Consumers take the proof, never a boolean.
+- **Policies decide, and new rules extend them.** Add a login rule to `LoginPolicy`, a password rule to `PasswordPolicy`, and so on. Don't branch inside a process.
+- **One process per use case, one save per process.** Processes are internal, surface-agnostic classes: load aggregates, call methods, ask policies, save once. The hosted, headless and public-API surfaces of the same flow call the same process.
+- **Adapters stay thin.** Endpoints, renderers and middleware parse input, call one process and map its outcome. They never use a `DbContext`.
+- **Time is a parameter.** Domain methods take `now`. Processes read `TimeProvider` once. No `DateTime.UtcNow` in domain or process code.
+- **Audit comes from events.** State changes raise domain events, and the audit projection writes rows in the same transaction. Failure records go through `IAuditRecorder`. Don't call audit writers directly from new code.
+- **The FGA read path is off limits.** `fn_IsResourceAccessible`, `CheckAccessAsync`, `BuildFilterAsync` and their SQL implement the published algorithm. FGA writes go through the FGA write model and a `GrantAuthority`.
+- **External behavior is locked.** `tests/SqlOS.BehaviorLock` must stay green against source and against the last released package. Any intended change to an approved snapshot, the public API approval, the schema approval or the headless contract needs an entry in `docs/architecture/8.0-behavior-ledger.md` in the same change.
+
 ## Product control-plane parity
 
 Administrative product capabilities should be designed as one domain model exposed through three control planes. Do not build separate policy or validation implementations for code, HTTP APIs, and the dashboard.
