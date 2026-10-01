@@ -104,6 +104,45 @@ namespace SqlOS.Tests.Architecture.Fixtures.Domain
     }
 }
 
+namespace SqlOS.Tests.Architecture.Fixtures.Aggregates
+{
+    internal sealed class FixtureRoot
+    {
+        private readonly List<FixtureMember> _members = [];
+
+        // The root creates and changes its members: allowed.
+        public FixtureMember Add(string name)
+        {
+            var member = FixtureMember.Create(name);
+            member.Rename(name + "!");
+            _members.Add(member);
+            return member;
+        }
+    }
+
+    internal sealed class FixtureMember
+    {
+        private FixtureMember(string name) => Name = name;
+
+        public string Name { get; private set; }
+
+        // A member builds itself: allowed.
+        internal static FixtureMember Create(string name) => new(name);
+
+        internal void Rename(string name) => Name = name;
+    }
+
+    internal static class FixtureMemberService
+    {
+        // Reading a member: allowed.
+        public static string Read(FixtureMember member) => member.Name;
+
+        public static FixtureMember Forge() => FixtureMember.Create("forged");
+
+        public static void Rename(FixtureMember member) => member.Rename("bypassed");
+    }
+}
+
 namespace SqlOS.Tests.Architecture.Fixtures.Proofs
 {
     internal sealed record FixtureProof : ISqlOSProof

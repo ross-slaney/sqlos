@@ -88,6 +88,16 @@ public sealed class ArchitectureRuleSelfTests
     }
 
     [TestMethod]
+    public void Member_changes_outside_their_root_are_found()
+    {
+        var members = AggregateMembers.Parse([$"{Fixtures}.Aggregates.FixtureMember <- {Fixtures}.Aggregates.FixtureRoot"]);
+
+        ArchitectureRules.MemberChangesOutsideTheirRoot(IlScanner.Tests, members).Should().Equal(
+            $"{Fixtures}.Aggregates.FixtureMemberService::Forge -> FixtureMember::Create",
+            $"{Fixtures}.Aggregates.FixtureMemberService::Rename -> FixtureMember::Rename");
+    }
+
+    [TestMethod]
     public void Clock_reads_in_domain_and_process_code_are_found()
     {
         ArchitectureRules.DomainClockReads(

@@ -1,0 +1,11 @@
+# Rule 8: an aggregate's members are created and changed only through its root (ArchitectureTests.Aggregate_members_change_only_through_their_root).
+# docs/architecture/domain-model.md sections 3.1 and 15. This is the specification of each aggregate's
+# members, not an allowlist: one line per member, MemberType <- RootType, sorted ordinally. Only the
+# member itself and its root may call a member's constructors, methods or setters; anyone may read it.
+SqlOS.AuthServer.Models.SqlOSCredential <- SqlOS.AuthServer.Models.SqlOSUser
+SqlOS.AuthServer.Models.SqlOSExternalIdentity <- SqlOS.AuthServer.Models.SqlOSUser
+SqlOS.AuthServer.Models.SqlOSRecoveryCode <- SqlOS.AuthServer.Models.SqlOSUser
+SqlOS.AuthServer.Models.SqlOSUserAuthenticator <- SqlOS.AuthServer.Models.SqlOSUser
+SqlOS.AuthServer.Models.SqlOSUserEmail <- SqlOS.AuthServer.Models.SqlOSUser
+SqlOS.AuthServer.Models.SqlOSUserMfaPolicyOverride <- SqlOS.AuthServer.Models.SqlOSUser
+SqlOS.AuthServer.Models.SqlOSUserPhoneNumber <- SqlOS.AuthServer.Models.SqlOSUser

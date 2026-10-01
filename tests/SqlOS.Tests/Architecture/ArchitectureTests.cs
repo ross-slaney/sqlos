@@ -1,3 +1,4 @@
+using FluentAssertions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace SqlOS.Tests.Architecture;
@@ -45,6 +46,26 @@ public sealed class ArchitectureTests
     }
 
     [TestMethod]
+    public void Aggregate_members_change_only_through_their_root()
+    {
+        var violations = ArchitectureRules.MemberChangesOutsideTheirRoot(IlScanner.SqlOS, AggregateMembers.Load());
+
+        Assert.AreEqual(0, violations.Count, string.Join(Environment.NewLine, violations));
+    }
+
+    [TestMethod]
+    public void Every_listed_aggregate_member_is_an_entity_of_its_root()
+    {
+        foreach (var (member, root) in AggregateMembers.Load())
+        {
+            SqlOSCode.EntityNames.Should().Contain(member, $"{member} is listed as a member of {root}");
+            SqlOSCode.EntityNames.Should().Contain(root, $"{root} is listed as the root of {member}");
+            SqlOSCode.Entities.Single(type => type.FullName == root).GetInterface("SqlOS.Domain.ISqlOSAggregate")
+                .Should().NotBeNull($"{root} is an aggregate root");
+        }
+    }
+
+    [TestMethod]
     public void Domain_and_process_code_reads_no_clock()
         => Allowlist.AssertMatches(
             "domain-clock-reads.txt",
@@ -55,6 +76,21 @@ public sealed class ArchitectureTests
         => Allowlist.AssertMatches(
             "domain-http-dependencies.txt",
             ArchitectureRules.DomainHttpDependencies(IlScanner.SqlOS, type => SqlOSCode.IsDomain(type) || SqlOSCode.IsProcess(type)));
+}
+
+/// <summary>Reads <c>aggregate-members.txt</c>: lines of <c>MemberType &lt;- RootType</c>.</summary>
+internal static class AggregateMembers
+{
+    public static IReadOnlyDictionary<string, string> Load()
+        => Parse(Allowlist.Read(Allowlist.AggregateMembersFile));
+
+    public static IReadOnlyDictionary<string, string> Parse(IEnumerable<string> lines)
+        => lines
+            .Select(line => line.Split(" <- ", 2, StringSplitOptions.TrimEntries))
+            .Select(parts => parts.Length == 2
+                ? (Member: parts[0], Root: parts[1])
+                : throw new FormatException($"Expected 'MemberType <- RootType' in {Allowlist.AggregateMembersFile}."))
+            .ToDictionary(pair => pair.Member, pair => pair.Root, StringComparer.Ordinal);
 }
 
 /// <summary>Reads <c>proof-producers.txt</c>: lines of <c>ProofType &lt;- ProducerType</c>.</summary>

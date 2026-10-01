@@ -225,6 +225,39 @@ internal static class ArchitectureRules
     }
 
     /// <summary>
+    /// Rule 8: an aggregate's members are created and changed only through its root (§3.1). A call
+    /// to a member's constructor, its static or instance methods, or its setters from any type
+    /// other than the member and its root is a violation; reading the member (a property getter)
+    /// is not. <paramref name="rootOfMember"/> maps each member type to its root. Returns the
+    /// violations; there is no allowlist.
+    /// </summary>
+    public static IReadOnlyList<string> MemberChangesOutsideTheirRoot(
+        IlScanner scanner,
+        IReadOnlyDictionary<string, string> rootOfMember)
+    {
+        var findings = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var method in scanner.Methods(static _ => true))
+        {
+            var site = IlScanner.TypeName(IlScanner.Outermost(method.DeclaringType));
+            foreach (var (_, target) in IlScanner.Calls(method))
+            {
+                var member = IlScanner.TypeName(target.DeclaringType);
+                if (!rootOfMember.TryGetValue(member, out var root)
+                    || site == member
+                    || site == root
+                    || target.Name.StartsWith("get_", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                findings.Add($"{IlScanner.SourceMember(method)} -> {ShortName(member)}::{target.Name}");
+            }
+        }
+
+        return findings.ToList();
+    }
+
+    /// <summary>
     /// Rule 6: clock reads in domain and process code. Domain code (building blocks, policies and
     /// entities) reads no clock at all; processes read <see cref="TimeProvider"/> only.
     /// </summary>

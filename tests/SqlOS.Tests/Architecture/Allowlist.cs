@@ -14,6 +14,9 @@ internal static class Allowlist
     /// <summary>The proof producers: the specification of rule 5, not an allowlist.</summary>
     public const string ProofProducersFile = "proof-producers.txt";
 
+    /// <summary>The aggregates' members and their roots: the specification of rule 8, not an allowlist.</summary>
+    public const string AggregateMembersFile = "aggregate-members.txt";
+
     public static string Directory { get; } = Path.Combine(FindRepositoryRoot(), "tests", "SqlOS.Tests", "Architecture", "Allowlists");
 
     /// <summary>The lines of a list file, without comments and blank lines, in file order.</summary>

@@ -20,7 +20,7 @@ public sealed class AllowlistTests
     [TestMethod]
     public void Every_allowlist_is_sorted_without_duplicates()
     {
-        foreach (var file in AllowlistFiles().Append(Allowlist.ProofProducersFile))
+        foreach (var file in AllowlistFiles().Append(Allowlist.ProofProducersFile).Append(Allowlist.AggregateMembersFile))
         {
             var lines = Allowlist.Read(file);
 
@@ -48,7 +48,7 @@ public sealed class AllowlistTests
         => Directory.GetFiles(Allowlist.Directory, "*.txt")
             .Select(Path.GetFileName)
             .OfType<string>()
-            .Where(file => file is not (Allowlist.HighWaterMarksFile or Allowlist.ProofProducersFile))
+            .Where(file => file is not (Allowlist.HighWaterMarksFile or Allowlist.ProofProducersFile or Allowlist.AggregateMembersFile))
             .Order(StringComparer.Ordinal);
 
     private static Dictionary<string, int> ReadMarks()
