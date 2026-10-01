@@ -1,0 +1,282 @@
+# SqlOS behavior lock transcript
+scenario: HostedMfaScenarios.A_required_authenticator_is_enrolled_during_sign_in_CurrentBehavior_KnownDefect_415
+profile: hosted
+
+## 1. browser: sign in: the authenticator setup page
+> POST /sqlos/auth/login/password
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#1}
+>   email={email:alice}
+>   password={password:alice}
+< 200 OK
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#1}'; style-src 'self' 'nonce-{csp-nonce#1}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Behavior Lock</title>
+        <style nonce="{csp-nonce#1}">{style-sha256:4961352b3f23eca1}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Behavior Lock</h1>
+                <p class="brand-subtitle">Behavior lock hosted sign-in.</p>
+              </div>
+              <div class="messages"></div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <div class="panel-intro">
+                    <span class="panel-kicker">Add authenticator app</span>
+                    <p>Use an authenticator app to add a second step before continuing.</p>
+                  </div>
+                  <div class="qr-panel">
+                    <img class="qr-code" src="{data-uri:image/svg+xml}" alt="Authenticator setup QR code" />
+                    <p>Scan this QR code with your authenticator app.</p>
+                  </div>
+                  <details class="manual-setup">
+                    <summary>Use manual setup</summary>
+                    <div class="secret-panel">
+                      <span>Setup key</span>
+                      <code>{totp-secret#1}</code>
+                    </div>
+                    <div class="secret-panel">
+                      <span>Provisioning URI</span>
+                      <code>
+                        otpauth://totp/SqlOS:{email:alice}?secret={totp-secret#1}&amp;issuer=SqlOS&amp;algorithm=SHA1&amp;digits=6&amp;period=30
+                      </code>
+                    </div>
+                  </details>
+                  <form class="auth-form" method="post" action="/sqlos/auth/mfa/totp/enroll/verify">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#2}" />
+                    <input type="hidden" name="requestId" value="{req#1}" />
+                    <input type="hidden" name="mfaToken" value="{mfa-token#1}" />
+                    <input type="hidden" name="enrollmentToken" value="{enrollment-token#1}" />
+                    <label class="field">
+                      <span>Code</span>
+                      <input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" required="" autofocus="" />
+                    </label>
+                    <button class="primary-action" type="submit" data-loading-label="Verifying">
+                      <span class="button-label">Verify and continue</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                  </form>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#1}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+
+## 2. browser: enter the first authenticator code
+> POST /sqlos/auth/mfa/totp/enroll/verify
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#2}
+>   requestId={req#1}
+>   mfaToken={mfa-token#1}
+>   enrollmentToken={enrollment-token#1}
+>   code={totp#1}
+< 200 OK
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#2}'; style-src 'self' 'nonce-{csp-nonce#2}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+< Set-Cookie: sqlos_auth_page={cookie#2}; expires=+7d; path=/; secure; samesite=lax; httponly
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="refresh" content="0;url=https://sqlos.example.test/auth/callback?code={code#1}&amp;state={state#1}&amp;scope=openid%20profile%20email%20offline_access" />
+        <title>Continuing…</title>
+      </head>
+      <body>
+        <p>
+          Returning to the application…
+          <a href="https://sqlos.example.test/auth/callback?code={code#1}&amp;state={state#1}&amp;scope=openid%20profile%20email%20offline_access">Continue</a>
+        </p>
+      </body>
+    </html>
+
+## 3. client: redeem the authorization code
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=authorization_code
+>   code={code#1}
+>   client_id=behavior-lock-app
+>   redirect_uri=https://sqlos.example.test/auth/callback
+>   code_verifier={pkce-verifier#1}
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "access_token": "{access-token#1}",
+      "expires_in": ~600,
+      "id_token": "{id-token#1}",
+      "refresh_token": "{refresh-token#1}",
+      "scope": "openid profile email offline_access",
+      "token_type": "Bearer"
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password",
+        "totp"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "scope": "openid profile email offline_access",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+  jwt {id-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "JWT"
+    }
+    claims: {
+      "amr": [
+        "password",
+        "totp"
+      ],
+      "at_hash": "{hash#1}",
+      "aud": "behavior-lock-app",
+      "auth_time": {epoch},
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nonce": "{nonce#1}",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=5m
+
+## audit: enrollment events: no enrollment event
+  - {
+      "action": "password.login.succeeded",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "password.login.succeeded",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "AuthorizationRequestId": "[redacted]",
+        "ClientKey": "behavior-lock-app",
+        "NormalizedEmail": "{email:ALICE}",
+        "Surface": "hosted",
+        "UserAgentHash": null,
+        "details": {
+          "resetScopes": [
+            "email",
+            "user"
+          ]
+        },
+        "maskedEmail": "AL***@EXAMPLE.TEST"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "user.login.mfa",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.mfa",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+
+## 4. client: the documented MFA status API: Alice now has an authenticator (the admin user view shows none)
+> POST /__probe/auth/mfa-status
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "userId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "availableFactors": [
+        "totp"
+      ],
+      "enrollmentRequired": false,
+      "hasTotp": true,
+      "mfaEnabled": true,
+      "policyReason": "all_users",
+      "recoveryCodeCount": 0,
+      "required": true,
+      "userSelfEnrollmentEnabled": true
+    }

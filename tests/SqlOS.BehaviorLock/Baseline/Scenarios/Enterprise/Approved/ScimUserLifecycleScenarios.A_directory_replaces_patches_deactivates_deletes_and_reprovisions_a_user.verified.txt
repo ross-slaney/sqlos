@@ -1,0 +1,1095 @@
+# SqlOS behavior lock transcript
+scenario: ScimUserLifecycleScenarios.A_directory_replaces_patches_deactivates_deletes_and_reprovisions_a_user
+profile: enterprise-scim-path
+
+## 1. directory: provision Judy
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "emails": [
+>       {
+>         "primary": true,
+>         "type": "work",
+>         "value": "{email:judy}"
+>       }
+>     ],
+>     "externalId": "directory-judy",
+>     "name": {
+>       "familyName": "Hopps",
+>       "givenName": "Judy"
+>     },
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:judy}"
+>   }
+< 201 Created
+< Content-Location: /scim/v2/Users/{usr:judy}
+< Content-Type: application/scim+json
+< Location: /scim/v2/Users/{usr:judy}
+    {
+      "active": true,
+      "displayName": "Judy Hopps",
+      "emails": [
+        {
+          "primary": true,
+          "type": "work",
+          "value": "{email:judy}"
+        }
+      ],
+      "externalId": "directory-judy",
+      "groups": [],
+      "id": "{usr:judy}",
+      "meta": {
+        "created": "{datetime:utc-z}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Users/{usr:judy}",
+        "resourceType": "User"
+      },
+      "name": {
+        "familyName": "Hopps",
+        "formatted": "Judy Hopps",
+        "givenName": "Judy"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:judy}"
+    }
+
+## 2. directory: replace Judy: new userName, given name, and work email at the verified domain
+> PUT /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "emails": [
+>       {
+>         "primary": true,
+>         "type": "work",
+>         "value": "{email:hopps}"
+>       }
+>     ],
+>     "externalId": "directory-judy",
+>     "name": {
+>       "familyName": "Hopps",
+>       "givenName": "Judith"
+>     },
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:hopps}"
+>   }
+< 200 OK
+< Content-Location: /scim/v2/Users/{usr:judy}
+< Content-Type: application/scim+json
+    {
+      "active": true,
+      "displayName": "Judith Hopps",
+      "emails": [
+        {
+          "primary": true,
+          "type": "work",
+          "value": "{email:hopps}"
+        }
+      ],
+      "externalId": "directory-judy",
+      "groups": [],
+      "id": "{usr:judy}",
+      "meta": {
+        "created": "{datetime:unspecified}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Users/{usr:judy}",
+        "resourceType": "User"
+      },
+      "name": {
+        "familyName": "Hopps",
+        "formatted": "Judith Hopps",
+        "givenName": "Judith"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:hopps}"
+    }
+
+## 3. directory: patch the given name, display name, and externalId
+> PATCH /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "name.givenName",
+>         "value": "Jude"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Jude Hopps"
+>       },
+>       {
+>         "op": "add",
+>         "path": "externalId",
+>         "value": "directory-jude"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 200 OK
+< Content-Location: /scim/v2/Users/{usr:judy}
+< Content-Type: application/scim+json
+    {
+      "active": true,
+      "displayName": "Jude Hopps",
+      "emails": [
+        {
+          "primary": true,
+          "type": "work",
+          "value": "{email:hopps}"
+        }
+      ],
+      "externalId": "directory-jude",
+      "groups": [],
+      "id": "{usr:judy}",
+      "meta": {
+        "created": "{datetime:unspecified}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Users/{usr:judy}",
+        "resourceType": "User"
+      },
+      "name": {
+        "familyName": "Hopps",
+        "formatted": "Jude Hopps",
+        "givenName": "Jude"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:hopps}"
+    }
+
+## 4. directory: deactivate with a pathless replace, as Entra sends it
+> PATCH /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "value": {
+>           "active": false
+>         }
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 200 OK
+< Content-Location: /scim/v2/Users/{usr:judy}
+< Content-Type: application/scim+json
+    {
+      "active": false,
+      "displayName": "Jude Hopps",
+      "emails": [
+        {
+          "primary": true,
+          "type": "work",
+          "value": "{email:hopps}"
+        }
+      ],
+      "externalId": "directory-jude",
+      "groups": [],
+      "id": "{usr:judy}",
+      "meta": {
+        "created": "{datetime:unspecified}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Users/{usr:judy}",
+        "resourceType": "User"
+      },
+      "name": {
+        "familyName": "Hopps",
+        "formatted": "Jude Hopps",
+        "givenName": "Jude"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:hopps}"
+    }
+
+## 5. directory: the deactivated user reads back inactive
+> GET /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Location: /scim/v2/Users/{usr:judy}
+< Content-Type: application/scim+json
+    {
+      "active": false,
+      "displayName": "Jude Hopps",
+      "emails": [
+        {
+          "primary": true,
+          "type": "work",
+          "value": "{email:hopps}"
+        }
+      ],
+      "externalId": "directory-jude",
+      "groups": [],
+      "id": "{usr:judy}",
+      "meta": {
+        "created": "{datetime:unspecified}",
+        "lastModified": "{datetime:unspecified}",
+        "location": "/scim/v2/Users/{usr:judy}",
+        "resourceType": "User"
+      },
+      "name": {
+        "familyName": "Hopps",
+        "formatted": "Jude Hopps",
+        "givenName": "Jude"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:hopps}"
+    }
+
+## 6. directory: reactivate, asking for a projected response
+> PATCH /scim/v2/Users/{usr:judy}?attributes=active,userName
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "active",
+>         "value": true
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 200 OK
+< Content-Location: /scim/v2/Users/{usr:judy}
+< Content-Type: application/scim+json
+    {
+      "active": true,
+      "id": "{usr:judy}",
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:hopps}"
+    }
+
+## 7. directory: remove the family name
+> PATCH /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "remove",
+>         "path": "name.familyName"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 200 OK
+< Content-Location: /scim/v2/Users/{usr:judy}
+< Content-Type: application/scim+json
+    {
+      "active": true,
+      "displayName": "Jude Hopps",
+      "emails": [
+        {
+          "primary": true,
+          "type": "work",
+          "value": "{email:hopps}"
+        }
+      ],
+      "externalId": "directory-jude",
+      "groups": [],
+      "id": "{usr:judy}",
+      "meta": {
+        "created": "{datetime:unspecified}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Users/{usr:judy}",
+        "resourceType": "User"
+      },
+      "name": {
+        "formatted": "Jude",
+        "givenName": "Jude"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:hopps}"
+    }
+
+## 8. directory: delete Judy
+> DELETE /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+< 204 No Content
+
+## 9. directory: a deleted user is gone
+> GET /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+< 404 Not Found
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM user not found.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "status": "404"
+    }
+
+## 10. directory: deleting again
+> DELETE /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+< 404 Not Found
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM user not found.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "status": "404"
+    }
+
+## 11. directory: replacing a deleted user
+> PUT /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "emails": [
+>       {
+>         "primary": true,
+>         "type": "work",
+>         "value": "{email:hopps}"
+>       }
+>     ],
+>     "externalId": "directory-jude",
+>     "name": {
+>       "familyName": "Hopps",
+>       "givenName": "Jude"
+>     },
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:hopps}"
+>   }
+< 404 Not Found
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM user not found.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "status": "404"
+    }
+
+## 12. directory: patching a deleted user
+> PATCH /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "active",
+>         "value": true
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 404 Not Found
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM user not found.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "status": "404"
+    }
+
+## 13. directory: provisioning the same externalId again reactivates the same person
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "emails": [
+>       {
+>         "primary": true,
+>         "type": "work",
+>         "value": "{email:hopps}"
+>       }
+>     ],
+>     "externalId": "directory-jude",
+>     "name": {
+>       "familyName": "Hopps",
+>       "givenName": "Jude"
+>     },
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:hopps}"
+>   }
+< 201 Created
+< Content-Location: /scim/v2/Users/{usr:judy}
+< Content-Type: application/scim+json
+< Location: /scim/v2/Users/{usr:judy}
+    {
+      "active": true,
+      "displayName": "Jude Hopps",
+      "emails": [
+        {
+          "primary": true,
+          "type": "work",
+          "value": "{email:hopps}"
+        }
+      ],
+      "externalId": "directory-jude",
+      "groups": [],
+      "id": "{usr:judy}",
+      "meta": {
+        "created": "{datetime:unspecified}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Users/{usr:judy}",
+        "resourceType": "User"
+      },
+      "name": {
+        "familyName": "Hopps",
+        "formatted": "Jude Hopps",
+        "givenName": "Jude"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:hopps}"
+    }
+
+## 14. directory: delete again
+> DELETE /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+< 204 No Content
+
+## 15. directory: the deleted userName cannot be claimed by a different externalId
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "emails": [
+>       {
+>         "primary": true,
+>         "type": "work",
+>         "value": "{email:hopps}"
+>       }
+>     ],
+>     "externalId": "directory-someone-else",
+>     "name": {
+>       "familyName": "Hopps",
+>       "givenName": "Jude"
+>     },
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:hopps}"
+>   }
+< 409 Conflict
+< Content-Type: application/scim+json
+    {
+      "detail": "The SCIM userName belongs to a deleted resource with a different externalId and cannot be reassigned implicitly.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "uniqueness",
+      "status": "409"
+    }
+
+## 16. operator: dashboard: the connection's sync events, newest first
+> GET /sqlos/admin/auth/api/scim-connections/{scim#1}/sync-events?pageSize=50
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "action": "scim.user.deleted",
+          "connectionId": "{scim#1}",
+          "dataJson": null,
+          "error": null,
+          "externalId": "directory-jude",
+          "id": "{scevt#1}",
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "resourceId": "{usr:judy}",
+          "resourceType": "User",
+          "result": "success"
+        },
+        {
+          "action": "scim.user.reactivated",
+          "connectionId": "{scim#1}",
+          "dataJson": "{\"attributeNames\":[\"active\",\"emails\",\"externalId\",\"name\",\"schemas\",\"userName\"],\"operationCount\":null,\"sensitiveAttributesRedacted\":false}",
+          "error": null,
+          "externalId": "directory-jude",
+          "id": "{scevt#2}",
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "resourceId": "{usr:judy}",
+          "resourceType": "User",
+          "result": "success"
+        },
+        {
+          "action": "scim.user.deleted",
+          "connectionId": "{scim#1}",
+          "dataJson": null,
+          "error": null,
+          "externalId": "directory-jude",
+          "id": "{scevt#3}",
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "resourceId": "{usr:judy}",
+          "resourceType": "User",
+          "result": "success"
+        },
+        {
+          "action": "scim.user.updated",
+          "connectionId": "{scim#1}",
+          "dataJson": "{\"attributeNames\":[\"Operations\",\"schemas\"],\"operationCount\":1,\"sensitiveAttributesRedacted\":false}",
+          "error": null,
+          "externalId": "directory-jude",
+          "id": "{scevt#4}",
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "resourceId": "{usr:judy}",
+          "resourceType": "User",
+          "result": "success"
+        },
+        {
+          "action": "scim.user.updated",
+          "connectionId": "{scim#1}",
+          "dataJson": "{\"attributeNames\":[\"Operations\",\"schemas\"],\"operationCount\":1,\"sensitiveAttributesRedacted\":false}",
+          "error": null,
+          "externalId": "directory-jude",
+          "id": "{scevt#5}",
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "resourceId": "{usr:judy}",
+          "resourceType": "User",
+          "result": "success"
+        },
+        {
+          "action": "scim.user.deactivated",
+          "connectionId": "{scim#1}",
+          "dataJson": "{\"attributeNames\":[\"Operations\",\"schemas\"],\"operationCount\":1,\"sensitiveAttributesRedacted\":false}",
+          "error": null,
+          "externalId": "directory-jude",
+          "id": "{scevt#6}",
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "resourceId": "{usr:judy}",
+          "resourceType": "User",
+          "result": "success"
+        },
+        {
+          "action": "scim.user.updated",
+          "connectionId": "{scim#1}",
+          "dataJson": "{\"attributeNames\":[\"Operations\",\"schemas\"],\"operationCount\":3,\"sensitiveAttributesRedacted\":false}",
+          "error": null,
+          "externalId": "directory-jude",
+          "id": "{scevt#7}",
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "resourceId": "{usr:judy}",
+          "resourceType": "User",
+          "result": "success"
+        },
+        {
+          "action": "scim.user.updated",
+          "connectionId": "{scim#1}",
+          "dataJson": "{\"attributeNames\":[\"active\",\"emails\",\"externalId\",\"name\",\"schemas\",\"userName\"],\"operationCount\":null,\"sensitiveAttributesRedacted\":false}",
+          "error": null,
+          "externalId": "directory-judy",
+          "id": "{scevt#8}",
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "resourceId": "{usr:judy}",
+          "resourceType": "User",
+          "result": "success"
+        },
+        {
+          "action": "scim.user.created",
+          "connectionId": "{scim#1}",
+          "dataJson": "{\"attributeNames\":[\"active\",\"emails\",\"externalId\",\"name\",\"schemas\",\"userName\"],\"operationCount\":null,\"sensitiveAttributesRedacted\":false}",
+          "error": null,
+          "externalId": "directory-judy",
+          "id": "{scevt#9}",
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "resourceId": "{usr:judy}",
+          "resourceType": "User",
+          "result": "success"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 50
+    }
+
+## audit: user lifecycle events
+  - {
+      "action": "scim.user.created",
+      "actor": {
+        "displayName": null,
+        "id": "directory-judy",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.created",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-judy",
+        "payload": {
+          "active": true,
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:judy}"
+            }
+          ],
+          "externalId": "directory-judy",
+          "name": {
+            "familyName": "Hopps",
+            "givenName": "Judy"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:judy}"
+        },
+        "resourceId": "{usr:judy}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:judy}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.user.updated",
+      "actor": {
+        "displayName": null,
+        "id": "directory-judy",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.updated",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-judy",
+        "payload": {
+          "active": true,
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:hopps}"
+            }
+          ],
+          "externalId": "directory-judy",
+          "name": {
+            "familyName": "Hopps",
+            "givenName": "Judith"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:hopps}"
+        },
+        "resourceId": "{usr:judy}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:judy}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.user.updated",
+      "actor": {
+        "displayName": null,
+        "id": "directory-jude",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.updated",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-jude",
+        "payload": {
+          "Operations": [
+            {
+              "op": "replace",
+              "path": "name.givenName",
+              "value": "Jude"
+            },
+            {
+              "op": "replace",
+              "path": "displayName",
+              "value": "Jude Hopps"
+            },
+            {
+              "op": "add",
+              "path": "externalId",
+              "value": "directory-jude"
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ]
+        },
+        "resourceId": "{usr:judy}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:judy}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.user.deactivated",
+      "actor": {
+        "displayName": null,
+        "id": "directory-jude",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.deactivated",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-jude",
+        "payload": {
+          "Operations": [
+            {
+              "op": "replace",
+              "value": {
+                "active": false
+              }
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ]
+        },
+        "resourceId": "{usr:judy}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:judy}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.user.updated",
+      "actor": {
+        "displayName": null,
+        "id": "directory-jude",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.updated",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-jude",
+        "payload": {
+          "Operations": [
+            {
+              "op": "replace",
+              "path": "active",
+              "value": true
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ]
+        },
+        "resourceId": "{usr:judy}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:judy}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.user.updated",
+      "actor": {
+        "displayName": null,
+        "id": "directory-jude",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.updated",
+      "id": "{evt#6}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-jude",
+        "payload": {
+          "Operations": [
+            {
+              "op": "remove",
+              "path": "name.familyName"
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ]
+        },
+        "resourceId": "{usr:judy}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:judy}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.user.deleted",
+      "actor": {
+        "displayName": null,
+        "id": "directory-jude",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.deleted",
+      "id": "{evt#7}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-jude",
+        "payload": null,
+        "resourceId": "{usr:judy}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:judy}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.user.reactivated",
+      "actor": {
+        "displayName": null,
+        "id": "directory-jude",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.reactivated",
+      "id": "{evt#8}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-jude",
+        "payload": {
+          "active": true,
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:hopps}"
+            }
+          ],
+          "externalId": "directory-jude",
+          "name": {
+            "familyName": "Hopps",
+            "givenName": "Jude"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:hopps}"
+        },
+        "resourceId": "{usr:judy}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:judy}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.user.deleted",
+      "actor": {
+        "displayName": null,
+        "id": "directory-jude",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.deleted",
+      "id": "{evt#9}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-jude",
+        "payload": null,
+        "resourceId": "{usr:judy}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:judy}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }

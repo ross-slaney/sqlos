@@ -1,0 +1,1417 @@
+# SqlOS schema (SqlServer) after bootstrap
+
+## Schema version
+auth: 47
+fga: 10
+
+## Applied migrations
+001 SqlOS.AuthServer.Schema.001_Initial.sql
+002 SqlOS.AuthServer.Schema.002_WebAuth.sql
+003 SqlOS.AuthServer.Schema.003_SocialAuth.sql
+004 SqlOS.AuthServer.Schema.004_OidcExpansion.sql
+005 SqlOS.AuthServer.Schema.005_AuthPageAndOauthSurface.sql
+006 SqlOS.AuthServer.Schema.006_SigningKeyRotation.sql
+007 SqlOS.AuthServer.Schema.007_HeadlessAuth.sql
+008 SqlOS.AuthServer.Schema.008_OidcProviderLogos.sql
+009 SqlOS.AuthServer.Schema.009_ClientRegistrationAndResourceBinding.sql
+010 SqlOS.AuthServer.Schema.010_RefreshTokenGraceWindow.sql
+011 SqlOS.AuthServer.Schema.011_NativeHeadlessAuth.sql
+012 SqlOS.AuthServer.Schema.012_EmailOtp.sql
+013 SqlOS.AuthServer.Schema.013_Invitations.sql
+014 SqlOS.AuthServer.Schema.014_EmailBranding.sql
+015 SqlOS.AuthServer.Schema.015_DeviceAuthorization.sql
+016 SqlOS.AuthServer.Schema.016_DeviceAuthorizationRequestBinding.sql
+017 SqlOS.AuthServer.Schema.017_ApplicationAssignments.sql
+017 SqlOS.AuthServer.Schema.017_PasswordLoginAbuse.sql
+017 SqlOS.AuthServer.Schema.017_TransactionalEmail.sql
+018 SqlOS.AuthServer.Schema.018_PhoneOtp.sql
+019 SqlOS.AuthServer.Schema.019_MfaTotp.sql
+020 SqlOS.AuthServer.Schema.020_GitHubSocialProvider.sql
+021 SqlOS.AuthServer.Schema.021_SsoPortalSessions.sql
+022 SqlOS.AuthServer.Schema.022_OrganizationDomains.sql
+023 SqlOS.AuthServer.Schema.023_AuditLogs.sql
+024 SqlOS.AuthServer.Schema.024_RepairApplicationAssignments.sql
+025 SqlOS.AuthServer.Schema.025_AtomicOAuthArtifacts.sql
+026 SqlOS.AuthServer.Schema.026_CalendarIntegration.sql
+027 SqlOS.AuthServer.Schema.027_OAuthStateLength.sql
+028 SqlOS.AuthServer.Schema.028_SigningKeyCustody.sql
+029 SqlOS.AuthServer.Schema.029_ScimDirectorySync.sql
+030 SqlOS.AuthServer.Schema.030_ScimDirectorySyncHardening.sql
+031 SqlOS.AuthServer.Schema.031_SamlReplayProtection.sql
+032 SqlOS.AuthServer.Schema.032_DistributedRateLimits.sql
+033 SqlOS.AuthServer.Schema.033_UpstreamMfaTrust.sql
+034 SqlOS.AuthServer.Schema.034_ConfigurationOwnership.sql
+035 SqlOS.AuthServer.Schema.035_ApplicationAssignmentOwnership.sql
+036 SqlOS.AuthServer.Schema.036_SamlConnectionOwnership.sql
+037 SqlOS.AuthServer.Schema.037_ClientCredentials.sql
+038 SqlOS.AuthServer.Schema.038_ScopedAuditIdempotency.sql
+039 SqlOS.AuthServer.Schema.039_AtomicPasswordLoginAdmission.sql
+040 SqlOS.AuthServer.Schema.040_MfaAttemptAdmission.sql
+041 SqlOS.AuthServer.Schema.041_AdminCursorIndexes.sql
+042 SqlOS.AuthServer.Schema.042_AuthPageBrandingOwnership.sql
+043 SqlOS.AuthServer.Schema.043_OidcCodeAndSessionPlumbing.sql
+044 SqlOS.AuthServer.Schema.044_ConsentAndScopeDisplayNames.sql
+045 SqlOS.AuthServer.Schema.045_AuthPageSessionFamilies.sql
+046 SqlOS.AuthServer.Schema.046_SamlExternalIdentityUserUniqueness.sql
+047 SqlOS.AuthServer.Schema.047_ScimGrantBoundary.sql
+
+## Tables
+
+### SqlOSApplicationAssignments
+  Id nvarchar(64) NOT NULL
+  ClientApplicationId nvarchar(64) NOT NULL
+  OrganizationId nvarchar(64) NULL
+  PrincipalType nvarchar(40) NOT NULL
+  PrincipalId nvarchar(128) NULL
+  RoleKey nvarchar(80) NULL
+  Access nvarchar(20) NOT NULL
+  Reason nvarchar(500) NULL
+  CreatedAt datetime2(7) NOT NULL
+  CreatedByActorType nvarchar(80) NULL
+  CreatedByActorId nvarchar(128) NULL
+  RevokedAt datetime2(7) NULL
+  RevokedByActorType nvarchar(80) NULL
+  RevokedByActorId nvarchar(128) NULL
+  ConfigurationOwner nvarchar(40) NOT NULL DEFAULT (N'dashboard') [DF_SqlOSApplicationAssignments_ConfigurationOwner]
+  ConfigurationSourceKey nvarchar(160) NULL
+  ConfigurationFingerprint nvarchar(64) NULL
+  LastReconciledAt datetime2(7) NULL
+  ConfigurationOrphanedAt datetime2(7) NULL
+  PRIMARY KEY PK_SqlOSApplicationAssignments (Id)
+  FOREIGN KEY FK_SqlOSApplicationAssignments_ClientApplication (ClientApplicationId) REFERENCES SqlOSClientApplications (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSApplicationAssignments_Organization (OrganizationId) REFERENCES SqlOSOrganizations (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSApplicationAssignments_Client_CreatedAt_Id NONCLUSTERED (ClientApplicationId, CreatedAt DESC, Id DESC)
+  INDEX IX_SqlOSApplicationAssignments_ClientApplicationId_RevokedAt NONCLUSTERED (ClientApplicationId, RevokedAt)
+  INDEX IX_SqlOSApplicationAssignments_OrganizationId_RevokedAt NONCLUSTERED (OrganizationId, RevokedAt)
+  INDEX IX_SqlOSApplicationAssignments_Target NONCLUSTERED (ClientApplicationId, PrincipalType, PrincipalId, OrganizationId, RoleKey, RevokedAt)
+  INDEX UX_SqlOSApplicationAssignments_Client_Owner_SourceKey UNIQUE NONCLUSTERED (ClientApplicationId, ConfigurationOwner, ConfigurationSourceKey) WHERE ([ConfigurationSourceKey] IS NOT NULL)
+
+### SqlOSAppliedMigrations
+  Sequence bigint NOT NULL IDENTITY
+  ScriptName nvarchar(450) NOT NULL
+  Version int NOT NULL
+  AppliedAt datetime2(7) NOT NULL
+  PRIMARY KEY PK_SqlOSAppliedMigrations (ScriptName)
+  UNIQUE UX_SqlOSAppliedMigrations_Sequence (Sequence)
+
+### SqlOSAuditEvents
+  Id nvarchar(64) NOT NULL
+  OrganizationId nvarchar(64) NULL
+  ApplicationId nvarchar(64) NULL
+  ApplicationKey nvarchar(200) NULL
+  UserId nvarchar(64) NULL
+  SessionId nvarchar(64) NULL
+  EventType nvarchar(160) NOT NULL
+  Source nvarchar(80) NOT NULL DEFAULT ('authserver') [DF_SqlOSAuditEvents_Source]
+  Action nvarchar(160) NOT NULL DEFAULT ('') [DF_SqlOSAuditEvents_Action]
+  ActorType nvarchar(80) NOT NULL
+  ActorId nvarchar(128) NULL
+  ActorDisplayName nvarchar(320) NULL
+  TargetsJson nvarchar(max) NOT NULL DEFAULT ('[]') [DF_SqlOSAuditEvents_TargetsJson]
+  ContextJson nvarchar(max) NULL
+  MetadataJson nvarchar(max) NULL
+  OccurredAt datetime2(7) NOT NULL
+  IngestedAt datetime2(7) NOT NULL DEFAULT (sysutcdatetime()) [DF_SqlOSAuditEvents_IngestedAt]
+  IpAddress nvarchar(128) NULL
+  UserAgent nvarchar(512) NULL
+  RequestId nvarchar(128) NULL
+  CorrelationId nvarchar(128) NULL
+  IdempotencyKeyHash nvarchar(128) NULL
+  DataJson nvarchar(max) NULL
+  IdempotencyScopeHash nvarchar(128) NULL
+  PRIMARY KEY {system-named} (Id)
+  INDEX IX_SqlOSAuditEvents_Action_OccurredAt NONCLUSTERED (Action, OccurredAt DESC)
+  INDEX IX_SqlOSAuditEvents_Actor_OccurredAt NONCLUSTERED (ActorType, ActorId, OccurredAt DESC)
+  INDEX IX_SqlOSAuditEvents_ApplicationId_OccurredAt NONCLUSTERED (ApplicationId, OccurredAt DESC)
+  INDEX IX_SqlOSAuditEvents_ApplicationKey_OccurredAt NONCLUSTERED (ApplicationKey, OccurredAt DESC)
+  INDEX IX_SqlOSAuditEvents_OccurredAt NONCLUSTERED (OccurredAt DESC)
+  INDEX IX_SqlOSAuditEvents_OccurredAt_IngestedAt_Id NONCLUSTERED (OccurredAt DESC, IngestedAt DESC, Id DESC)
+  INDEX IX_SqlOSAuditEvents_OrganizationId_OccurredAt NONCLUSTERED (OrganizationId, OccurredAt DESC)
+  INDEX IX_SqlOSAuditEvents_Source_OccurredAt NONCLUSTERED (Source, OccurredAt DESC)
+  INDEX UX_SqlOSAuditEvents_IdempotencyKeyHash UNIQUE NONCLUSTERED (IdempotencyKeyHash) WHERE ([IdempotencyKeyHash] IS NOT NULL)
+  INDEX UX_SqlOSAuditEvents_IdempotencyScopeHash UNIQUE NONCLUSTERED (IdempotencyScopeHash) WHERE ([IdempotencyScopeHash] IS NOT NULL)
+
+### SqlOSAuthOidcConnections
+  Id nvarchar(64) NOT NULL
+  ProviderType nvarchar(40) NOT NULL
+  DisplayName nvarchar(200) NOT NULL
+  ClientId nvarchar(300) NOT NULL
+  ClientSecretEncrypted nvarchar(max) NULL
+  AllowedCallbackUrisJson nvarchar(max) NOT NULL
+  UseDiscovery bit NOT NULL
+  DiscoveryUrl nvarchar(500) NULL
+  Issuer nvarchar(500) NULL
+  AuthorizationEndpoint nvarchar(1000) NULL
+  TokenEndpoint nvarchar(1000) NULL
+  UserInfoEndpoint nvarchar(1000) NULL
+  JwksUri nvarchar(1000) NULL
+  MicrosoftTenant nvarchar(200) NULL
+  ScopesJson nvarchar(max) NOT NULL
+  ClaimMappingJson nvarchar(max) NOT NULL
+  ClientAuthMethod nvarchar(40) NOT NULL
+  UseUserInfo bit NOT NULL
+  AppleTeamId nvarchar(100) NULL
+  AppleKeyId nvarchar(100) NULL
+  ApplePrivateKeyEncrypted nvarchar(max) NULL
+  IsEnabled bit NOT NULL
+  CreatedAt datetime2(7) NOT NULL
+  UpdatedAt datetime2(7) NOT NULL
+  LogoDataUrl nvarchar(max) NULL
+  Protocol nvarchar(40) NOT NULL DEFAULT ('Oidc') [DF_SqlOSAuthOidcConnections_Protocol]
+  TrustUpstreamMfa bit NOT NULL DEFAULT ((0)) [DF_SqlOSAuthOidcConnections_TrustUpstreamMfa]
+  AcceptedAmrValuesJson nvarchar(max) NOT NULL DEFAULT (N'[]') [DF_SqlOSAuthOidcConnections_AcceptedAmrValuesJson]
+  AcceptedAcrValuesJson nvarchar(max) NOT NULL DEFAULT (N'[]') [DF_SqlOSAuthOidcConnections_AcceptedAcrValuesJson]
+  ConfigurationOwner nvarchar(40) NOT NULL DEFAULT (N'dashboard') [DF_SqlOSAuthOidcConnections_ConfigurationOwner]
+  ConfigurationSourceKey nvarchar(160) NULL
+  ConfigurationFingerprint nvarchar(64) NULL
+  LastReconciledAt datetime2(7) NULL
+  ConfigurationOrphanedAt datetime2(7) NULL
+  PRIMARY KEY {system-named} (Id)
+  INDEX IX_SqlOSAuthOidcConnections_DisplayName_Id NONCLUSTERED (DisplayName, Id)
+  INDEX UX_SqlOSAuthOidcConnections_ConfigurationOwner_SourceKey UNIQUE NONCLUSTERED (ConfigurationOwner, ConfigurationSourceKey) WHERE ([ConfigurationSourceKey] IS NOT NULL)
+
+### SqlOSAuthorizationCodes
+  Id nvarchar(64) NOT NULL
+  AuthorizationRequestId nvarchar(64) NOT NULL
+  UserId nvarchar(64) NOT NULL
+  ClientApplicationId nvarchar(64) NOT NULL
+  OrganizationId nvarchar(64) NULL
+  RedirectUri nvarchar(2048) NOT NULL
+  State nvarchar(2048) NOT NULL
+  CodeHash nvarchar(128) NOT NULL
+  CodeChallenge nvarchar(256) NOT NULL
+  CodeChallengeMethod nvarchar(32) NOT NULL
+  AuthenticationMethod nvarchar(50) NOT NULL
+  CreatedAt datetime2(7) NOT NULL
+  ExpiresAt datetime2(7) NOT NULL
+  ConsumedAt datetime2(7) NULL
+  Scope nvarchar(1000) NOT NULL DEFAULT ('') [DF_SqlOSAuthorizationCodes_Scope]
+  Resource nvarchar(2048) NULL
+  Nonce nvarchar(256) NULL
+  AuthTime datetime2(7) NULL
+  PRIMARY KEY {system-named} (Id)
+  UNIQUE {system-named} (CodeHash)
+  FOREIGN KEY FK_SqlOSAuthorizationCodes_Clients (ClientApplicationId) REFERENCES SqlOSClientApplications (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSAuthorizationCodes_Organizations (OrganizationId) REFERENCES SqlOSOrganizations (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSAuthorizationCodes_Requests (AuthorizationRequestId) REFERENCES SqlOSAuthorizationRequests (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSAuthorizationCodes_Users (UserId) REFERENCES SqlOSUsers (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSAuthorizationCodes_AuthorizationRequestId UNIQUE NONCLUSTERED (AuthorizationRequestId)
+
+### SqlOSAuthorizationRequests
+  Id nvarchar(64) NOT NULL
+  ClientApplicationId nvarchar(64) NOT NULL
+  OrganizationId nvarchar(64) NULL
+  ConnectionId nvarchar(64) NULL
+  LoginHintEmail nvarchar(320) NULL
+  RedirectUri nvarchar(2048) NOT NULL
+  State nvarchar(2048) NOT NULL
+  CodeChallenge nvarchar(256) NOT NULL
+  CodeChallengeMethod nvarchar(32) NOT NULL
+  CreatedAt datetime2(7) NOT NULL
+  ExpiresAt datetime2(7) NOT NULL
+  CompletedAt datetime2(7) NULL
+  CancelledAt datetime2(7) NULL
+  Scope nvarchar(1000) NOT NULL DEFAULT ('') [DF_SqlOSAuthorizationRequests_Scope]
+  Resource nvarchar(2048) NULL
+  Nonce nvarchar(256) NULL
+  Prompt nvarchar(256) NULL
+  ResolvedAuthMethod nvarchar(50) NULL
+  ResolvedOrganizationId nvarchar(64) NULL
+  ResolvedConnectionId nvarchar(64) NULL
+  PresentationMode nvarchar(32) NOT NULL DEFAULT ('hosted') [DF_SqlOSAuthorizationRequests_PresentationMode]
+  UiContextJson nvarchar(max) NULL
+  InvitationId nvarchar(64) NULL
+  DeviceAuthorizationId nvarchar(64) NULL
+  MaxAgeSeconds bigint NULL
+  PendingConsentUserId nvarchar(64) NULL
+  PRIMARY KEY {system-named} (Id)
+  FOREIGN KEY FK_SqlOSAuthorizationRequests_Clients (ClientApplicationId) REFERENCES SqlOSClientApplications (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSAuthorizationRequests_DeviceAuthorization (DeviceAuthorizationId) REFERENCES SqlOSDeviceAuthorizations (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSAuthorizationRequests_Invitations_InvitationId (InvitationId) REFERENCES SqlOSInvitations (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSAuthorizationRequests_Organizations (OrganizationId) REFERENCES SqlOSOrganizations (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSAuthorizationRequests_SsoConnections (ConnectionId) REFERENCES SqlOSSsoConnections (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSAuthorizationRequests_DeviceAuthorizationId UNIQUE NONCLUSTERED (DeviceAuthorizationId) WHERE ([DeviceAuthorizationId] IS NOT NULL)
+
+### SqlOSAuthPageSessionFamilies
+  Id nvarchar(64) NOT NULL
+  UserId nvarchar(64) NOT NULL
+  OrganizationId nvarchar(64) NULL
+  CreatedAt datetime2(7) NOT NULL
+  RevokedAt datetime2(7) NULL
+  RevocationReason nvarchar(200) NULL
+  PRIMARY KEY PK_SqlOSAuthPageSessionFamilies (Id)
+  FOREIGN KEY FK_SqlOSAuthPageSessionFamilies_Organization (OrganizationId) REFERENCES SqlOSOrganizations (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSAuthPageSessionFamilies_User (UserId) REFERENCES SqlOSUsers (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSAuthPageSessionFamilies_OrganizationId_RevokedAt NONCLUSTERED (OrganizationId, RevokedAt)
+  INDEX IX_SqlOSAuthPageSessionFamilies_UserId_RevokedAt NONCLUSTERED (UserId, RevokedAt)
+
+### SqlOSAuthPageSettings
+  Id nvarchar(64) NOT NULL
+  LogoBase64 nvarchar(max) NULL
+  PrimaryColor nvarchar(32) NOT NULL
+  AccentColor nvarchar(32) NOT NULL
+  BackgroundColor nvarchar(32) NOT NULL
+  Layout nvarchar(32) NOT NULL
+  PageTitle nvarchar(200) NOT NULL
+  PageSubtitle nvarchar(500) NOT NULL
+  EnablePasswordSignup bit NOT NULL
+  EnabledCredentialTypesJson nvarchar(max) NOT NULL
+  UpdatedAt datetime2(7) NOT NULL
+  EmailApplicationName nvarchar(200) NULL
+  EmailLogoBase64 nvarchar(max) NULL
+  EmailPrimaryColor nvarchar(32) NOT NULL DEFAULT (N'#2563eb') [DF_SqlOSAuthPageSettings_EmailPrimaryColor]
+  EmailAccentColor nvarchar(32) NOT NULL DEFAULT (N'#0f172a') [DF_SqlOSAuthPageSettings_EmailAccentColor]
+  EmailBackgroundColor nvarchar(32) NOT NULL DEFAULT (N'#f8fafc') [DF_SqlOSAuthPageSettings_EmailBackgroundColor]
+  AuthPageConfigurationOwner nvarchar(40) NOT NULL DEFAULT (N'system') [DF_SqlOSAuthPageSettings_AuthPageConfigurationOwner]
+  AuthPageConfigurationSourceKey nvarchar(160) NULL
+  AuthPageConfigurationFingerprint nvarchar(64) NULL
+  AuthPageLastReconciledAt datetime2(7) NULL
+  AuthPageConfigurationOrphanedAt datetime2(7) NULL
+  EmailConfigurationOwner nvarchar(40) NOT NULL DEFAULT (N'system') [DF_SqlOSAuthPageSettings_EmailConfigurationOwner]
+  EmailConfigurationSourceKey nvarchar(160) NULL
+  EmailConfigurationFingerprint nvarchar(64) NULL
+  EmailLastReconciledAt datetime2(7) NULL
+  EmailConfigurationOrphanedAt datetime2(7) NULL
+  PRIMARY KEY {system-named} (Id)
+
+### SqlOSAuthSocialConnections
+  Id nvarchar(64) NOT NULL
+  ProviderType nvarchar(40) NOT NULL
+  DisplayName nvarchar(200) NOT NULL
+  ClientId nvarchar(300) NOT NULL
+  ClientSecretEncrypted nvarchar(max) NOT NULL
+  AllowedCallbackUrisJson nvarchar(max) NOT NULL
+  MicrosoftTenant nvarchar(200) NULL
+  ScopesJson nvarchar(max) NOT NULL
+  IsEnabled bit NOT NULL
+  CreatedAt datetime2(7) NOT NULL
+  UpdatedAt datetime2(7) NOT NULL
+  PRIMARY KEY {system-named} (Id)
+
+### SqlOSCalendarConnections
+  Id nvarchar(64) NOT NULL
+  ProviderType nvarchar(40) NOT NULL
+  Mode nvarchar(40) NOT NULL
+  Status nvarchar(40) NOT NULL
+  OidcConnectionId nvarchar(64) NOT NULL
+  UserId nvarchar(64) NULL
+  OrganizationId nvarchar(64) NULL
+  DisplayName nvarchar(200) NOT NULL
+  ProviderAccountEmail nvarchar(320) NULL
+  ProviderAccountSubject nvarchar(256) NULL
+  ScopesJson nvarchar(max) NOT NULL
+  AccessTokenEncrypted nvarchar(max) NULL
+  RefreshTokenEncrypted nvarchar(max) NULL
+  AccessTokenExpiresAt datetime2(7) NULL
+  LastSyncAt datetime2(7) NULL
+  LastError nvarchar(1000) NULL
+  LastErrorAt datetime2(7) NULL
+  CreatedAt datetime2(7) NOT NULL
+  UpdatedAt datetime2(7) NOT NULL
+  RevokedAt datetime2(7) NULL
+  RevokedReason nvarchar(160) NULL
+  PRIMARY KEY {system-named} (Id)
+  FOREIGN KEY FK_SqlOSCalendarConnections_OidcConnections (OidcConnectionId) REFERENCES SqlOSAuthOidcConnections (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSCalendarConnections_Organizations (OrganizationId) REFERENCES SqlOSOrganizations (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSCalendarConnections_Users (UserId) REFERENCES SqlOSUsers (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSCalendarConnections_CreatedAt_Id NONCLUSTERED (CreatedAt DESC, Id DESC)
+  INDEX IX_SqlOSCalendarConnections_Mode_Status NONCLUSTERED (Mode, Status)
+  INDEX IX_SqlOSCalendarConnections_OrganizationId_RevokedAt NONCLUSTERED (OrganizationId, RevokedAt)
+  INDEX IX_SqlOSCalendarConnections_UserId_RevokedAt NONCLUSTERED (UserId, RevokedAt)
+
+### SqlOSCalendarEvents
+  Id nvarchar(64) NOT NULL
+  CalendarConnectionId nvarchar(64) NOT NULL
+  ProviderCalendarId nvarchar(256) NOT NULL
+  ProviderEventId nvarchar(512) NOT NULL
+  Subject nvarchar(500) NULL
+  StartsAtUtc datetime2(7) NOT NULL
+  EndsAtUtc datetime2(7) NOT NULL
+  IsAllDay bit NOT NULL
+  ShowAs nvarchar(20) NOT NULL
+  Status nvarchar(20) NOT NULL
+  Location nvarchar(500) NULL
+  Origin nvarchar(20) NOT NULL
+  CreatedAt datetime2(7) NOT NULL
+  UpdatedAt datetime2(7) NOT NULL
+  PRIMARY KEY {system-named} (Id)
+  FOREIGN KEY FK_SqlOSCalendarEvents_Connections (CalendarConnectionId) REFERENCES SqlOSCalendarConnections (Id) ON DELETE CASCADE ON UPDATE NO_ACTION
+  INDEX IX_SqlOSCalendarEvents_Connection_StartsAtUtc NONCLUSTERED (CalendarConnectionId, StartsAtUtc)
+  INDEX IX_SqlOSCalendarEvents_ProviderEvent UNIQUE NONCLUSTERED (CalendarConnectionId, ProviderCalendarId, ProviderEventId)
+
+### SqlOSCalendarSyncStates
+  Id nvarchar(64) NOT NULL
+  CalendarConnectionId nvarchar(64) NOT NULL
+  ProviderCalendarId nvarchar(256) NOT NULL
+  DisplayName nvarchar(200) NULL
+  IsSyncEnabled bit NOT NULL
+  SyncCursor nvarchar(max) NULL
+  LastSyncStartedAt datetime2(7) NULL
+  LastSyncCompletedAt datetime2(7) NULL
+  LastSyncStatus nvarchar(40) NULL
+  LastSyncError nvarchar(1000) NULL
+  EventCount int NOT NULL DEFAULT ((0)) [DF_SqlOSCalendarSyncStates_EventCount]
+  CreatedAt datetime2(7) NOT NULL
+  UpdatedAt datetime2(7) NOT NULL
+  PRIMARY KEY {system-named} (Id)
+  FOREIGN KEY FK_SqlOSCalendarSyncStates_Connections (CalendarConnectionId) REFERENCES SqlOSCalendarConnections (Id) ON DELETE CASCADE ON UPDATE NO_ACTION
+  INDEX IX_SqlOSCalendarSyncStates_Connection_Calendar UNIQUE NONCLUSTERED (CalendarConnectionId, ProviderCalendarId)
+
+### SqlOSClientApplications
+  Id nvarchar(64) NOT NULL
+  ClientId nvarchar(850) NOT NULL
+  Name nvarchar(200) NOT NULL
+  Audience nvarchar(850) NOT NULL
+  RedirectUrisJson nvarchar(max) NOT NULL
+  IsActive bit NOT NULL
+  CreatedAt datetime2(7) NOT NULL
+  Description nvarchar(500) NULL
+  ClientType nvarchar(40) NOT NULL DEFAULT ('public_pkce') [DF_SqlOSClientApplications_ClientType]
+  RequirePkce bit NOT NULL DEFAULT ((1)) [DF_SqlOSClientApplications_RequirePkce]
+  AllowedScopesJson nvarchar(max) NOT NULL DEFAULT ('[]') [DF_SqlOSClientApplications_AllowedScopesJson]
+  IsFirstParty bit NOT NULL DEFAULT ((0)) [DF_SqlOSClientApplications_IsFirstParty]
+  AllowNativeHeadlessAuth bit NOT NULL DEFAULT ((0)) [DF_SqlOSClientApplications_AllowNativeHeadlessAuth]
+  RegistrationSource nvarchar(20) NOT NULL DEFAULT ('manual') [DF_SqlOSClientApplications_RegistrationSource]
+  TokenEndpointAuthMethod nvarchar(60) NOT NULL DEFAULT ('none') [DF_SqlOSClientApplications_TokenEndpointAuthMethod]
+  GrantTypesJson nvarchar(max) NOT NULL DEFAULT (N'["authorization_code","refresh_token"]') [DF_SqlOSClientApplications_GrantTypesJson]
+  ResponseTypesJson nvarchar(max) NOT NULL DEFAULT (N'["code"]') [DF_SqlOSClientApplications_ResponseTypesJson]
+  MetadataDocumentUrl nvarchar(850) NULL
+  ClientUri nvarchar(850) NULL
+  LogoUri nvarchar(850) NULL
+  SoftwareId nvarchar(200) NULL
+  SoftwareVersion nvarchar(120) NULL
+  MetadataJson nvarchar(max) NULL
+  MetadataFetchedAt datetime2(7) NULL
+  MetadataExpiresAt datetime2(7) NULL
+  MetadataEtag nvarchar(256) NULL
+  MetadataLastModifiedAt datetime2(7) NULL
+  LastSeenAt datetime2(7) NULL
+  DisabledAt datetime2(7) NULL
+  DisabledReason nvarchar(500) NULL
+  AllowDeviceAuthorization bit NOT NULL DEFAULT ((0)) [DF_SqlOSClientApplications_AllowDeviceAuthorization]
+  AccessMode nvarchar(40) NOT NULL DEFAULT ('all_organizations') [DF_SqlOSClientApplications_AccessMode]
+  ConfigurationOwner nvarchar(40) NOT NULL DEFAULT (N'dashboard') [DF_SqlOSClientApplications_ConfigurationOwner]
+  ConfigurationSourceKey nvarchar(160) NULL
+  ConfigurationFingerprint nvarchar(64) NULL
+  LastReconciledAt datetime2(7) NULL
+  ConfigurationOrphanedAt datetime2(7) NULL
+  PRIMARY KEY {system-named} (Id)
+  UNIQUE {system-named} (ClientId)
+  INDEX IX_SqlOSClientApplications_AccessMode NONCLUSTERED (AccessMode)
+  INDEX IX_SqlOSClientApplications_IsActive_RegistrationSource NONCLUSTERED (IsActive, RegistrationSource)
+  INDEX IX_SqlOSClientApplications_LastSeenAt NONCLUSTERED (LastSeenAt)
+  INDEX IX_SqlOSClientApplications_MetadataDocumentUrl NONCLUSTERED (MetadataDocumentUrl)
+  INDEX IX_SqlOSClientApplications_Name_Id NONCLUSTERED (Name, Id)
+  INDEX IX_SqlOSClientApplications_RegistrationSource NONCLUSTERED (RegistrationSource)
+  INDEX UX_SqlOSClientApplications_ConfigurationOwner_SourceKey UNIQUE NONCLUSTERED (ConfigurationOwner, ConfigurationSourceKey) WHERE ([ConfigurationSourceKey] IS NOT NULL)
+
+### SqlOSClientCredentials
+  Id nvarchar(64) NOT NULL
+  ClientApplicationId nvarchar(64) NOT NULL
+  SecretHash nvarchar(max) NOT NULL
+  DisplayName nvarchar(200) NULL
+  CreatedAt datetime2(7) NOT NULL
+  ExpiresAt datetime2(7) NULL
+  RevokedAt datetime2(7) NULL
+  LastUsedAt datetime2(7) NULL
+  ConfigurationOwner nvarchar(40) NOT NULL DEFAULT ('dashboard') [DF_SqlOSClientCredentials_ConfigurationOwner]
+  ConfigurationSourceKey nvarchar(160) NULL
+  LastReconciledAt datetime2(7) NULL
+  PRIMARY KEY PK_SqlOSClientCredentials (Id)
+  FOREIGN KEY FK_SqlOSClientCredentials_ClientApplications (ClientApplicationId) REFERENCES SqlOSClientApplications (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSClientCredentials_Active NONCLUSTERED (ClientApplicationId, RevokedAt, ExpiresAt)
+  INDEX IX_SqlOSClientCredentials_Client_CreatedAt_Id NONCLUSTERED (ClientApplicationId, CreatedAt DESC, Id DESC)
+  INDEX UX_SqlOSClientCredentials_Client_Owner_SourceKey UNIQUE NONCLUSTERED (ClientApplicationId, ConfigurationOwner, ConfigurationSourceKey) WHERE ([ConfigurationSourceKey] IS NOT NULL)
+
+### SqlOSConsentGrants
+  Id nvarchar(64) NOT NULL
+  UserId nvarchar(64) NOT NULL
+  ClientApplicationId nvarchar(64) NOT NULL
+  Scope nvarchar(4000) NOT NULL DEFAULT ('') [DF_SqlOSConsentGrants_Scope]
+  GrantedAt datetime2(7) NOT NULL
+  UpdatedAt datetime2(7) NOT NULL
+  RevokedAt datetime2(7) NULL
+  RevocationReason nvarchar(200) NULL
+  ClientMetadataFingerprint nvarchar(64) NULL
+  PRIMARY KEY PK_SqlOSConsentGrants (Id)
+  FOREIGN KEY FK_SqlOSConsentGrants_ClientApplication (ClientApplicationId) REFERENCES SqlOSClientApplications (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSConsentGrants_User (UserId) REFERENCES SqlOSUsers (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSConsentGrants_ClientApplicationId NONCLUSTERED (ClientApplicationId)
+  INDEX UX_SqlOSConsentGrants_ActiveUserClient UNIQUE NONCLUSTERED (UserId, ClientApplicationId) WHERE ([RevokedAt] IS NULL)
+
+### SqlOSCredentials
+  Id nvarchar(64) NOT NULL
+  UserId nvarchar(64) NOT NULL
+  Type nvarchar(50) NOT NULL
+  SecretHash nvarchar(max) NOT NULL
+  SecretVersion int NOT NULL
+  LastUsedAt datetime2(7) NULL
+  CreatedAt datetime2(7) NOT NULL
+  RevokedAt datetime2(7) NULL
+  PRIMARY KEY {system-named} (Id)
+  FOREIGN KEY FK_SqlOSCredentials_Users (UserId) REFERENCES SqlOSUsers (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+
+### SqlOSDeviceAuthorizations
+  Id nvarchar(64) NOT NULL
+  DeviceCodeHash nvarchar(512) NOT NULL
+  UserCodeHash nvarchar(512) NOT NULL
+  UserCode nvarchar(32) NOT NULL
+  ClientApplicationId nvarchar(64) NOT NULL
+  Scope nvarchar(1000) NOT NULL
+  Resource nvarchar(2048) NULL
+  Status nvarchar(32) NOT NULL
+  PollingIntervalSeconds int NOT NULL
+  CreatedAt datetime2(7) NOT NULL
+  ExpiresAt datetime2(7) NOT NULL
+  LastPolledAt datetime2(7) NULL
+  PollCount int NOT NULL
+  SlowDownCount int NOT NULL
+  ApprovedUserId nvarchar(64) NULL
+  ApprovedOrganizationId nvarchar(64) NULL
+  AuthenticationMethod nvarchar(50) NULL
+  ApprovedAt datetime2(7) NULL
+  DeniedAt datetime2(7) NULL
+  ConsumedAt datetime2(7) NULL
+  IpAddress nvarchar(64) NULL
+  UserAgent nvarchar(500) NULL
+  AuthTime datetime2(7) NULL
+  PRIMARY KEY PK_SqlOSDeviceAuthorizations (Id)
+  FOREIGN KEY FK_SqlOSDeviceAuthorizations_ClientApplication (ClientApplicationId) REFERENCES SqlOSClientApplications (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSDeviceAuthorizations_Organization (ApprovedOrganizationId) REFERENCES SqlOSOrganizations (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSDeviceAuthorizations_User (ApprovedUserId) REFERENCES SqlOSUsers (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSDeviceAuthorizations_ClientCreatedAt NONCLUSTERED (ClientApplicationId, CreatedAt)
+  INDEX IX_SqlOSDeviceAuthorizations_ClientStatusExpiresAt NONCLUSTERED (ClientApplicationId, Status, ExpiresAt)
+  INDEX IX_SqlOSDeviceAuthorizations_DeviceCodeHash UNIQUE NONCLUSTERED (DeviceCodeHash)
+  INDEX IX_SqlOSDeviceAuthorizations_ExpiresAt NONCLUSTERED (ExpiresAt)
+  INDEX IX_SqlOSDeviceAuthorizations_IpCreatedAt NONCLUSTERED (IpAddress, CreatedAt)
+  INDEX IX_SqlOSDeviceAuthorizations_UserCodeHash UNIQUE NONCLUSTERED (UserCodeHash)
+
+### SqlOSEmailDeliveries
+  Id nvarchar(64) NOT NULL
+  TemplateId nvarchar(64) NULL
+  TemplateKey nvarchar(120) NOT NULL
+  TemplateVersion int NOT NULL
+  To nvarchar(320) NOT NULL
+  Status nvarchar(32) NOT NULL
+  ProviderMessageId nvarchar(200) NULL
+  SanitizedError nvarchar(500) NULL
+  RenderedSubject nvarchar(500) NOT NULL
+  RenderedTextPreview nvarchar(max) NOT NULL
+  RenderedHtmlPreview nvarchar(max) NULL
+  IdempotencyKey nvarchar(200) NULL
+  CreatedAt datetime2(7) NOT NULL
+  UpdatedAt datetime2(7) NOT NULL
+  SentAt datetime2(7) NULL
+  FailedAt datetime2(7) NULL
+  PRIMARY KEY {system-named} (Id)
+  FOREIGN KEY FK_SqlOSEmailDeliveries_SqlOSEmailTemplates_TemplateId (TemplateId) REFERENCES SqlOSEmailTemplates (Id) ON DELETE SET_NULL ON UPDATE NO_ACTION
+  INDEX IX_SqlOSEmailDeliveries_CreatedAt NONCLUSTERED (CreatedAt)
+  INDEX IX_SqlOSEmailDeliveries_CreatedAt_Id NONCLUSTERED (CreatedAt DESC, Id DESC)
+  INDEX IX_SqlOSEmailDeliveries_IdempotencyKey UNIQUE NONCLUSTERED (IdempotencyKey) WHERE ([IdempotencyKey] IS NOT NULL)
+  INDEX IX_SqlOSEmailDeliveries_StatusCreatedAt NONCLUSTERED (Status, CreatedAt)
+  INDEX IX_SqlOSEmailDeliveries_TemplateKeyCreatedAt NONCLUSTERED (TemplateKey, CreatedAt)
+  INDEX IX_SqlOSEmailDeliveries_ToCreatedAt NONCLUSTERED (To, CreatedAt)
+
+### SqlOSEmailOtpChallenges
+  Id nvarchar(64) NOT NULL
+  ChallengeTokenHash nvarchar(128) NOT NULL
+  CodeHash nvarchar(128) NOT NULL
+  Email nvarchar(320) NOT NULL
+  NormalizedEmail nvarchar(320) NOT NULL
+  UserId nvarchar(64) NULL
+  UserEmailId nvarchar(64) NULL
+  AuthorizationRequestId nvarchar(64) NULL
+  ClientApplicationId nvarchar(64) NULL
+  RequestedOrganizationId nvarchar(64) NULL
+  AttemptCount int NOT NULL DEFAULT ((0)) [DF_SqlOSEmailOtpChallenges_AttemptCount]
+  MaxAttempts int NOT NULL DEFAULT ((5)) [DF_SqlOSEmailOtpChallenges_MaxAttempts]
+  CreatedAt datetime2(7) NOT NULL
+  ExpiresAt datetime2(7) NOT NULL
+  LastSentAt datetime2(7) NOT NULL
+  ConsumedAt datetime2(7) NULL
+  InvalidatedAt datetime2(7) NULL
+  InvalidatedReason nvarchar(120) NULL
+  IpAddress nvarchar(128) NULL
+  UserAgent nvarchar(512) NULL
+  PRIMARY KEY {system-named} (Id)
+  FOREIGN KEY FK_SqlOSEmailOtpChallenges_AuthorizationRequests_AuthorizationRequestId (AuthorizationRequestId) REFERENCES SqlOSAuthorizationRequests (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSEmailOtpChallenges_ClientApplications_ClientApplicationId (ClientApplicationId) REFERENCES SqlOSClientApplications (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSEmailOtpChallenges_UserEmails_UserEmailId (UserEmailId) REFERENCES SqlOSUserEmails (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSEmailOtpChallenges_Users_UserId (UserId) REFERENCES SqlOSUsers (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSEmailOtpChallenges_ChallengeTokenHash UNIQUE NONCLUSTERED (ChallengeTokenHash)
+  INDEX IX_SqlOSEmailOtpChallenges_ClientApplicationId_CreatedAt NONCLUSTERED (ClientApplicationId, CreatedAt)
+  INDEX IX_SqlOSEmailOtpChallenges_IpAddress_CreatedAt NONCLUSTERED (IpAddress, CreatedAt)
+  INDEX IX_SqlOSEmailOtpChallenges_NormalizedEmail_CreatedAt NONCLUSTERED (NormalizedEmail, CreatedAt)
+
+### SqlOSEmailTemplates
+  Id nvarchar(64) NOT NULL
+  Key nvarchar(120) NOT NULL
+  DisplayName nvarchar(200) NOT NULL
+  SubjectTemplate nvarchar(500) NOT NULL
+  HtmlBodyTemplate nvarchar(max) NOT NULL
+  TextBodyTemplate nvarchar(max) NOT NULL
+  VariablesJson nvarchar(max) NOT NULL DEFAULT ('{}') [DF_SqlOSEmailTemplates_VariablesJson]
+  IsActive bit NOT NULL DEFAULT ((1)) [DF_SqlOSEmailTemplates_IsActive]
+  Version int NOT NULL DEFAULT ((1)) [DF_SqlOSEmailTemplates_Version]
+  CreatedAt datetime2(7) NOT NULL
+  UpdatedAt datetime2(7) NOT NULL
+  PRIMARY KEY {system-named} (Id)
+  INDEX IX_SqlOSEmailTemplates_Key UNIQUE NONCLUSTERED (Key)
+  INDEX IX_SqlOSEmailTemplates_Key_Id NONCLUSTERED (Key, Id)
+
+### SqlOSExternalIdentities
+  Id nvarchar(64) NOT NULL
+  UserId nvarchar(64) NOT NULL
+  ConnectionId nvarchar(64) NULL
+  Issuer nvarchar(400) NOT NULL
+  Subject nvarchar(400) NOT NULL
+  Email nvarchar(320) NULL
+  CreatedAt datetime2(7) NOT NULL
+  SocialConnectionId nvarchar(64) NULL
+  OidcConnectionId nvarchar(64) NULL
+  PRIMARY KEY {system-named} (Id)
+  FOREIGN KEY FK_SqlOSExternalIdentities_OidcConnections (OidcConnectionId) REFERENCES SqlOSAuthOidcConnections (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSExternalIdentities_SsoConnections (ConnectionId) REFERENCES SqlOSSsoConnections (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSExternalIdentities_Users (UserId) REFERENCES SqlOSUsers (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSExternalIdentities_OidcConnectionId_Subject UNIQUE NONCLUSTERED (OidcConnectionId, Subject) WHERE ([OidcConnectionId] IS NOT NULL)
+  INDEX IX_SqlOSExternalIdentities_SsoConnectionId_Subject UNIQUE NONCLUSTERED (ConnectionId, Subject) WHERE ([ConnectionId] IS NOT NULL)
+  INDEX IX_SqlOSExternalIdentities_SsoConnectionId_UserId UNIQUE NONCLUSTERED (ConnectionId, UserId) WHERE ([ConnectionId] IS NOT NULL)
+
+### SqlOSFgaAgents
+  Id nvarchar(450) NOT NULL
+  SubjectId nvarchar(450) NOT NULL
+  AgentType nvarchar(450) NULL
+  Description nvarchar(max) NULL
+  LastRunAt datetime2(7) NULL
+  CreatedAt datetime2(7) NOT NULL
+  UpdatedAt datetime2(7) NOT NULL
+  PRIMARY KEY PK_SqlOSFgaAgents (Id)
+  UNIQUE UQ_SqlOSFgaAgents_SubjectId (SubjectId)
+  FOREIGN KEY FK_SqlOSFgaAgents_SqlOSFgaSubjects_SubjectId (SubjectId) REFERENCES SqlOSFgaSubjects (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+
+### SqlOSFgaGrants
+  Id nvarchar(450) NOT NULL
+  SubjectId nvarchar(450) NOT NULL
+  ResourceId nvarchar(450) NOT NULL
+  RoleId nvarchar(450) NOT NULL
+  EffectiveFrom datetime2(7) NULL
+  EffectiveTo datetime2(7) NULL
+  CreatedAt datetime2(7) NOT NULL
+  UpdatedAt datetime2(7) NOT NULL
+  Description nvarchar(max) NULL
+  PRIMARY KEY PK_SqlOSFgaGrants (Id)
+  FOREIGN KEY FK_SqlOSFgaGrants_SqlOSFgaResources_ResourceId (ResourceId) REFERENCES SqlOSFgaResources (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSFgaGrants_SqlOSFgaRoles_RoleId (RoleId) REFERENCES SqlOSFgaRoles (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSFgaGrants_SqlOSFgaSubjects_SubjectId (SubjectId) REFERENCES SqlOSFgaSubjects (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSFgaGrants_CreatedAt_Id NONCLUSTERED (CreatedAt DESC, Id DESC)
+  INDEX IX_SqlOSFgaGrants_ResourceId_CreatedAt_Id NONCLUSTERED (ResourceId, CreatedAt DESC) INCLUDE (Id)
+  INDEX IX_SqlOSFgaGrants_ResourceId_SubjectId NONCLUSTERED (ResourceId) INCLUDE (EffectiveFrom, EffectiveTo, RoleId, SubjectId)
+  INDEX IX_SqlOSFgaGrants_SubjectId NONCLUSTERED (SubjectId)
+  INDEX IX_SqlOSFgaGrants_SubjectId_CreatedAt_Id NONCLUSTERED (SubjectId, CreatedAt DESC) INCLUDE (Id)
+
+### SqlOSFgaPermissions
+  Id nvarchar(450) NOT NULL
+  ResourceTypeId nvarchar(450) NULL
+  Key nvarchar(450) NOT NULL
+  Name nvarchar(max) NOT NULL
+  Description nvarchar(max) NULL
+  PRIMARY KEY PK_SqlOSFgaPermissions (Id)
+  FOREIGN KEY FK_SqlOSFgaPermissions_SqlOSFgaResourceTypes_ResourceTypeId (ResourceTypeId) REFERENCES SqlOSFgaResourceTypes (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX UX_SqlOSFgaPermissions_Key UNIQUE NONCLUSTERED (Key)
+
+### SqlOSFgaResources
+  Id nvarchar(450) NOT NULL
+  ParentId nvarchar(450) NULL
+  Name nvarchar(max) NOT NULL
+  Description nvarchar(max) NULL
+  ResourceTypeId nvarchar(450) NOT NULL
+  IsActive bit NOT NULL DEFAULT ((1))
+  CreatedAt datetime2(7) NOT NULL
+  UpdatedAt datetime2(7) NOT NULL
+  PRIMARY KEY PK_SqlOSFgaResources (Id)
+  FOREIGN KEY FK_SqlOSFgaResources_SqlOSFgaResources_ParentId (ParentId) REFERENCES SqlOSFgaResources (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSFgaResources_SqlOSFgaResourceTypes_ResourceTypeId (ResourceTypeId) REFERENCES SqlOSFgaResourceTypes (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSFgaResources_ParentId NONCLUSTERED (ParentId)
+  INDEX IX_SqlOSFgaResources_ParentId_Id NONCLUSTERED (ParentId) INCLUDE (Id)
+
+### SqlOSFgaResourceTypes
+  Id nvarchar(450) NOT NULL
+  Name nvarchar(max) NOT NULL
+  Description nvarchar(max) NULL
+  PRIMARY KEY PK_SqlOSFgaResourceTypes (Id)
+
+### SqlOSFgaRolePermissions
+  RoleId nvarchar(450) NOT NULL
+  PermissionId nvarchar(450) NOT NULL
+  PRIMARY KEY PK_SqlOSFgaRolePermissions (RoleId, PermissionId)
+  FOREIGN KEY FK_SqlOSFgaRolePermissions_SqlOSFgaPermissions_PermissionId (PermissionId) REFERENCES SqlOSFgaPermissions (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSFgaRolePermissions_SqlOSFgaRoles_RoleId (RoleId) REFERENCES SqlOSFgaRoles (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSFgaRolePermissions_PermissionId_RoleId NONCLUSTERED (PermissionId) INCLUDE (RoleId)
+
+### SqlOSFgaRoles
+  Id nvarchar(450) NOT NULL
+  Key nvarchar(max) NOT NULL
+  Name nvarchar(max) NOT NULL
+  Description nvarchar(max) NULL
+  IsVirtual bit NOT NULL DEFAULT ((0))
+  PRIMARY KEY PK_SqlOSFgaRoles (Id)
+
+### SqlOSFgaSchema
+  Version int NOT NULL
+
+### SqlOSFgaServiceAccounts
+  Id nvarchar(450) NOT NULL
+  SubjectId nvarchar(450) NOT NULL
+  ClientId nvarchar(450) NOT NULL
+  ClientSecretHash nvarchar(max) NOT NULL
+  Description nvarchar(max) NULL
+  LastUsedAt datetime2(7) NULL
+  ExpiresAt datetime2(7) NULL
+  CreatedAt datetime2(7) NOT NULL
+  UpdatedAt datetime2(7) NOT NULL
+  ConfigurationOwner nvarchar(32) NOT NULL DEFAULT (N'dashboard') [DF_SqlOSFgaServiceAccounts_ConfigurationOwner]
+  ConfigurationSourceKey nvarchar(200) NULL
+  ConfigurationFingerprint nvarchar(128) NULL
+  LastReconciledAt datetime2(7) NULL
+  ConfigurationOrphanedAt datetime2(7) NULL
+  PRIMARY KEY PK_SqlOSFgaServiceAccounts (Id)
+  UNIQUE UQ_SqlOSFgaServiceAccounts_SubjectId (SubjectId)
+  FOREIGN KEY FK_SqlOSFgaServiceAccounts_SqlOSFgaSubjects_SubjectId (SubjectId) REFERENCES SqlOSFgaSubjects (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX UX_SqlOSFgaServiceAccounts_ClientId UNIQUE NONCLUSTERED (ClientId)
+  INDEX UX_SqlOSFgaServiceAccounts_ConfigurationSource UNIQUE NONCLUSTERED (ConfigurationOwner, ConfigurationSourceKey) WHERE ([ConfigurationSourceKey] IS NOT NULL)
+
+### SqlOSFgaSubjects
+  Id nvarchar(450) NOT NULL
+  SubjectTypeId nvarchar(450) NOT NULL
+  OrganizationId nvarchar(450) NULL
+  ExternalRef nvarchar(450) NULL
+  DisplayName nvarchar(max) NOT NULL
+  CreatedAt datetime2(7) NOT NULL
+  UpdatedAt datetime2(7) NOT NULL
+  PRIMARY KEY PK_SqlOSFgaSubjects (Id)
+  FOREIGN KEY FK_SqlOSFgaSubjects_SqlOSFgaSubjectTypes_SubjectTypeId (SubjectTypeId) REFERENCES SqlOSFgaSubjectTypes (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+
+### SqlOSFgaSubjectTypes
+  Id nvarchar(450) NOT NULL
+  Name nvarchar(max) NOT NULL
+  Description nvarchar(max) NULL
+  PRIMARY KEY PK_SqlOSFgaSubjectTypes (Id)
+
+### SqlOSFgaUserGroupMemberships
+  SubjectId nvarchar(450) NOT NULL
+  UserGroupId nvarchar(450) NOT NULL
+  CreatedAt datetime2(7) NOT NULL
+  PRIMARY KEY PK_SqlOSFgaUserGroupMemberships (SubjectId, UserGroupId)
+  FOREIGN KEY FK_SqlOSFgaUserGroupMemberships_SqlOSFgaSubjects_SubjectId (SubjectId) REFERENCES SqlOSFgaSubjects (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSFgaUserGroupMemberships_SqlOSFgaUserGroups_UserGroupId (UserGroupId) REFERENCES SqlOSFgaUserGroups (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+
+### SqlOSFgaUserGroups
+  Id nvarchar(450) NOT NULL
+  Name nvarchar(max) NOT NULL
+  Description nvarchar(max) NULL
+  GroupType nvarchar(max) NULL
+  SubjectId nvarchar(450) NOT NULL
+  IsActive bit NOT NULL DEFAULT ((1))
+  CreatedAt datetime2(7) NOT NULL
+  UpdatedAt datetime2(7) NOT NULL
+  PRIMARY KEY PK_SqlOSFgaUserGroups (Id)
+  UNIQUE UQ_SqlOSFgaUserGroups_SubjectId (SubjectId)
+  FOREIGN KEY FK_SqlOSFgaUserGroups_SqlOSFgaSubjects_SubjectId (SubjectId) REFERENCES SqlOSFgaSubjects (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+
+### SqlOSFgaUsers
+  Id nvarchar(450) NOT NULL
+  SubjectId nvarchar(450) NOT NULL
+  Email nvarchar(450) NULL
+  LastLoginAt datetime2(7) NULL
+  IsActive bit NOT NULL DEFAULT ((1))
+  CreatedAt datetime2(7) NOT NULL
+  UpdatedAt datetime2(7) NOT NULL
+  PRIMARY KEY PK_SqlOSFgaUsers (Id)
+  UNIQUE UQ_SqlOSFgaUsers_SubjectId (SubjectId)
+  FOREIGN KEY FK_SqlOSFgaUsers_SqlOSFgaSubjects_SubjectId (SubjectId) REFERENCES SqlOSFgaSubjects (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+
+### SqlOSInvitations
+  Id nvarchar(64) NOT NULL
+  OrganizationId nvarchar(64) NOT NULL
+  InvitedEmail nvarchar(320) NOT NULL
+  NormalizedEmail nvarchar(320) NOT NULL
+  Role nvarchar(50) NOT NULL
+  TokenHash nvarchar(128) NOT NULL
+  InvitedByUserId nvarchar(64) NULL
+  ClientApplicationId nvarchar(64) NULL
+  RedirectUri nvarchar(2048) NULL
+  Scope nvarchar(1000) NULL
+  Resource nvarchar(2048) NULL
+  CustomFieldsJson nvarchar(max) NULL
+  CreatedAt datetime2(7) NOT NULL
+  ExpiresAt datetime2(7) NOT NULL
+  LastSentAt datetime2(7) NULL
+  LastSendError nvarchar(500) NULL
+  AcceptedAt datetime2(7) NULL
+  AcceptedByUserId nvarchar(64) NULL
+  RevokedAt datetime2(7) NULL
+  RevokedReason nvarchar(120) NULL
+  IpAddress nvarchar(128) NULL
+  UserAgent nvarchar(512) NULL
+  PRIMARY KEY {system-named} (Id)
+  FOREIGN KEY FK_SqlOSInvitations_ClientApplications_ClientApplicationId (ClientApplicationId) REFERENCES SqlOSClientApplications (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSInvitations_Organizations_OrganizationId (OrganizationId) REFERENCES SqlOSOrganizations (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSInvitations_Users_AcceptedByUserId (AcceptedByUserId) REFERENCES SqlOSUsers (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSInvitations_Users_InvitedByUserId (InvitedByUserId) REFERENCES SqlOSUsers (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSInvitations_ExpiresAt NONCLUSTERED (ExpiresAt)
+  INDEX IX_SqlOSInvitations_InvitedByUserId_CreatedAt NONCLUSTERED (InvitedByUserId, CreatedAt)
+  INDEX IX_SqlOSInvitations_IpAddress_CreatedAt NONCLUSTERED (IpAddress, CreatedAt)
+  INDEX IX_SqlOSInvitations_NormalizedEmail_CreatedAt NONCLUSTERED (NormalizedEmail, CreatedAt)
+  INDEX IX_SqlOSInvitations_Organization_NormalizedEmail_CreatedAt NONCLUSTERED (OrganizationId, NormalizedEmail, CreatedAt)
+  INDEX IX_SqlOSInvitations_OrganizationId_CreatedAt_Id NONCLUSTERED (OrganizationId, CreatedAt DESC, Id DESC)
+  INDEX IX_SqlOSInvitations_TokenHash UNIQUE NONCLUSTERED (TokenHash)
+
+### SqlOSMemberships
+  OrganizationId nvarchar(64) NOT NULL
+  UserId nvarchar(64) NOT NULL
+  Role nvarchar(50) NOT NULL
+  IsActive bit NOT NULL
+  CreatedAt datetime2(7) NOT NULL
+  PRIMARY KEY PK_SqlOSMemberships (OrganizationId, UserId)
+  FOREIGN KEY FK_SqlOSMemberships_Organizations (OrganizationId) REFERENCES SqlOSOrganizations (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSMemberships_Users (UserId) REFERENCES SqlOSUsers (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSMemberships_UserId NONCLUSTERED (UserId, OrganizationId)
+
+### SqlOSMfaAttemptBuckets
+  Id nvarchar(64) NOT NULL
+  Scope nvarchar(40) NOT NULL
+  BucketKey nvarchar(512) NOT NULL
+  AttemptCount int NOT NULL DEFAULT ((0)) [DF_SqlOSMfaAttemptBuckets_AttemptCount]
+  WindowStartedAt datetime2(7) NULL
+  CreatedAt datetime2(7) NOT NULL
+  UpdatedAt datetime2(7) NOT NULL
+  PRIMARY KEY {system-named} (Id)
+  INDEX IX_SqlOSMfaAttemptBuckets_Scope_BucketKey UNIQUE NONCLUSTERED (Scope, BucketKey)
+
+### SqlOSMfaAttemptReservationBuckets
+  ReservationId nvarchar(64) NOT NULL
+  BucketId nvarchar(64) NOT NULL
+  PRIMARY KEY PK_SqlOSMfaAttemptReservationBuckets (ReservationId, BucketId)
+  FOREIGN KEY FK_SqlOSMfaAttemptReservationBuckets_Buckets_BucketId (BucketId) REFERENCES SqlOSMfaAttemptBuckets (Id) ON DELETE CASCADE ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSMfaAttemptReservationBuckets_Reservations_ReservationId (ReservationId) REFERENCES SqlOSMfaAttemptReservations (Id) ON DELETE CASCADE ON UPDATE NO_ACTION
+  INDEX IX_SqlOSMfaAttemptReservationBuckets_BucketId NONCLUSTERED (BucketId)
+
+### SqlOSMfaAttemptReservations
+  Id nvarchar(64) NOT NULL
+  CreatedAt datetime2(7) NOT NULL
+  ExpiresAt datetime2(7) NOT NULL
+  PRIMARY KEY {system-named} (Id)
+  INDEX IX_SqlOSMfaAttemptReservations_ExpiresAt NONCLUSTERED (ExpiresAt)
+
+### SqlOSMfaSettings
+  Id nvarchar(64) NOT NULL
+  Enabled bit NOT NULL
+  TotpEnabled bit NOT NULL
+  UserSelfEnrollmentEnabled bit NOT NULL
+  RecoveryCodesEnabled bit NOT NULL
+  RequireForAllUsers bit NOT NULL
+  RequireForOwnersAndAdmins bit NOT NULL
+  RequiredRolesJson nvarchar(max) NOT NULL
+  AvailableFactorsJson nvarchar(max) NOT NULL
+  UpdatedAt datetime2(7) NOT NULL
+  ConfigurationOwner nvarchar(40) NOT NULL DEFAULT (N'system') [DF_SqlOSMfaSettings_ConfigurationOwner]
+  ConfigurationSourceKey nvarchar(160) NULL
+  ConfigurationFingerprint nvarchar(64) NULL
+  LastReconciledAt datetime2(7) NULL
+  ConfigurationOrphanedAt datetime2(7) NULL
+  PRIMARY KEY PK_SqlOSMfaSettings (Id)
+
+### SqlOSOrganizationDomains
+  Id nvarchar(64) NOT NULL
+  OrganizationId nvarchar(64) NOT NULL
+  Domain nvarchar(320) NOT NULL
+  Status nvarchar(50) NOT NULL
+  VerificationToken nvarchar(160) NULL
+  CreatedByUserId nvarchar(64) NULL
+  CreatedAt datetime2(7) NOT NULL
+  UpdatedAt datetime2(7) NOT NULL
+  VerifiedAt datetime2(7) NULL
+  LastCheckedAt datetime2(7) NULL
+  RevokedAt datetime2(7) NULL
+  LastError nvarchar(1000) NULL
+  PRIMARY KEY {system-named} (Id)
+  FOREIGN KEY FK_SqlOSOrganizationDomains_Organizations_OrganizationId (OrganizationId) REFERENCES SqlOSOrganizations (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSOrganizationDomains_Domain_Status NONCLUSTERED (Domain, Status)
+  INDEX IX_SqlOSOrganizationDomains_OrganizationId_Domain UNIQUE NONCLUSTERED (OrganizationId, Domain) WHERE ([RevokedAt] IS NULL)
+  INDEX IX_SqlOSOrganizationDomains_OrganizationId_Status NONCLUSTERED (OrganizationId, Status)
+
+### SqlOSOrganizationMfaPolicies
+  OrganizationId nvarchar(64) NOT NULL
+  IsEnabled bit NOT NULL
+  RequireMfaForAllUsers bit NOT NULL
+  RequireMfaForOwnersAndAdmins bit NOT NULL
+  UserSelfEnrollmentEnabled bit NOT NULL
+  RecoveryCodesEnabled bit NOT NULL
+  RequiredRolesJson nvarchar(max) NOT NULL
+  AvailableFactorsJson nvarchar(max) NOT NULL
+  UpdatedAt datetime2(7) NOT NULL
+  PRIMARY KEY PK_SqlOSOrganizationMfaPolicies (OrganizationId)
+  FOREIGN KEY FK_SqlOSOrganizationMfaPolicies_Organizations_OrganizationId (OrganizationId) REFERENCES SqlOSOrganizations (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+
+### SqlOSOrganizations
+  Id nvarchar(64) NOT NULL
+  Slug nvarchar(120) NOT NULL
+  Name nvarchar(200) NOT NULL
+  IsActive bit NOT NULL
+  CreatedAt datetime2(7) NOT NULL
+  PrimaryDomain nvarchar(320) NULL
+  PRIMARY KEY {system-named} (Id)
+  UNIQUE {system-named} (Slug)
+  INDEX IX_SqlOSOrganizations_Name_Id NONCLUSTERED (Name, Id)
+  INDEX IX_SqlOSOrganizations_PrimaryDomain UNIQUE NONCLUSTERED (PrimaryDomain) WHERE ([PrimaryDomain] IS NOT NULL)
+
+### SqlOSPasswordLoginBuckets
+  Id nvarchar(64) NOT NULL
+  Scope nvarchar(40) NOT NULL
+  BucketKey nvarchar(512) NOT NULL
+  NormalizedEmail nvarchar(320) NULL
+  UserId nvarchar(64) NULL
+  ClientKey nvarchar(850) NULL
+  IpAddress nvarchar(128) NULL
+  UserAgentHash nvarchar(128) NULL
+  FailureCount int NOT NULL DEFAULT ((0)) [DF_SqlOSPasswordLoginBuckets_FailureCount]
+  WindowStartedAt datetime2(7) NULL
+  LastFailureAt datetime2(7) NULL
+  LastSuccessAt datetime2(7) NULL
+  LockedUntil datetime2(7) NULL
+  LockoutReason nvarchar(120) NULL
+  CreatedAt datetime2(7) NOT NULL
+  UpdatedAt datetime2(7) NOT NULL
+  PRIMARY KEY {system-named} (Id)
+  FOREIGN KEY FK_SqlOSPasswordLoginBuckets_Users_UserId (UserId) REFERENCES SqlOSUsers (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSPasswordLoginBuckets_IpAddress_UpdatedAt NONCLUSTERED (IpAddress, UpdatedAt)
+  INDEX IX_SqlOSPasswordLoginBuckets_LockedUntil NONCLUSTERED (LockedUntil)
+  INDEX IX_SqlOSPasswordLoginBuckets_NormalizedEmail_UpdatedAt NONCLUSTERED (NormalizedEmail, UpdatedAt)
+  INDEX IX_SqlOSPasswordLoginBuckets_Scope_BucketKey UNIQUE NONCLUSTERED (Scope, BucketKey)
+  INDEX IX_SqlOSPasswordLoginBuckets_UserId_UpdatedAt NONCLUSTERED (UserId, UpdatedAt)
+
+### SqlOSPasswordLoginReservationBuckets
+  ReservationId nvarchar(64) NOT NULL
+  BucketId nvarchar(64) NOT NULL
+  PRIMARY KEY PK_SqlOSPasswordLoginReservationBuckets (ReservationId, BucketId)
+  FOREIGN KEY FK_SqlOSPasswordLoginReservationBuckets_Buckets_BucketId (BucketId) REFERENCES SqlOSPasswordLoginBuckets (Id) ON DELETE CASCADE ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSPasswordLoginReservationBuckets_Reservations_ReservationId (ReservationId) REFERENCES SqlOSPasswordLoginReservations (Id) ON DELETE CASCADE ON UPDATE NO_ACTION
+  INDEX IX_SqlOSPasswordLoginReservationBuckets_BucketId NONCLUSTERED (BucketId)
+
+### SqlOSPasswordLoginReservations
+  Id nvarchar(64) NOT NULL
+  CreatedAt datetime2(7) NOT NULL
+  ExpiresAt datetime2(7) NOT NULL
+  PRIMARY KEY {system-named} (Id)
+  INDEX IX_SqlOSPasswordLoginReservations_ExpiresAt NONCLUSTERED (ExpiresAt)
+
+### SqlOSPhoneOtpChallenges
+  Id nvarchar(64) NOT NULL
+  ChallengeTokenHash nvarchar(128) NOT NULL
+  PhoneNumberHash nvarchar(128) NOT NULL
+  PhoneNumberEncrypted nvarchar(2048) NOT NULL
+  MaskedPhoneNumber nvarchar(32) NOT NULL
+  Purpose nvarchar(32) NOT NULL
+  UserId nvarchar(64) NULL
+  UserPhoneNumberId nvarchar(64) NULL
+  AuthorizationRequestId nvarchar(64) NULL
+  ClientApplicationId nvarchar(64) NULL
+  RequestedOrganizationId nvarchar(64) NULL
+  ProviderStarted bit NOT NULL DEFAULT ((0)) [DF_SqlOSPhoneOtpChallenges_ProviderStarted]
+  Provider nvarchar(40) NOT NULL
+  ProviderChallengeId nvarchar(128) NULL
+  ProviderStatus nvarchar(80) NULL
+  AttemptCount int NOT NULL DEFAULT ((0)) [DF_SqlOSPhoneOtpChallenges_AttemptCount]
+  CreatedAt datetime2(7) NOT NULL
+  ExpiresAt datetime2(7) NOT NULL
+  LastSentAt datetime2(7) NOT NULL
+  ConsumedAt datetime2(7) NULL
+  InvalidatedAt datetime2(7) NULL
+  InvalidatedReason nvarchar(120) NULL
+  IpAddress nvarchar(128) NULL
+  UserAgent nvarchar(512) NULL
+  PRIMARY KEY {system-named} (Id)
+  FOREIGN KEY FK_SqlOSPhoneOtpChallenges_AuthorizationRequests_AuthorizationRequestId (AuthorizationRequestId) REFERENCES SqlOSAuthorizationRequests (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSPhoneOtpChallenges_ClientApplications_ClientApplicationId (ClientApplicationId) REFERENCES SqlOSClientApplications (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSPhoneOtpChallenges_UserPhoneNumbers_UserPhoneNumberId (UserPhoneNumberId) REFERENCES SqlOSUserPhoneNumbers (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSPhoneOtpChallenges_Users_UserId (UserId) REFERENCES SqlOSUsers (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSPhoneOtpChallenges_ChallengeTokenHash UNIQUE NONCLUSTERED (ChallengeTokenHash)
+  INDEX IX_SqlOSPhoneOtpChallenges_ClientApplicationId_CreatedAt NONCLUSTERED (ClientApplicationId, CreatedAt)
+  INDEX IX_SqlOSPhoneOtpChallenges_IpAddress_CreatedAt NONCLUSTERED (IpAddress, CreatedAt)
+  INDEX IX_SqlOSPhoneOtpChallenges_PhoneNumberHash_CreatedAt NONCLUSTERED (PhoneNumberHash, CreatedAt)
+  INDEX IX_SqlOSPhoneOtpChallenges_UserId_CreatedAt NONCLUSTERED (UserId, CreatedAt)
+
+### SqlOSRateLimitBuckets
+  Scope nvarchar(64) NOT NULL
+  BucketKey nvarchar(384) NOT NULL
+  WindowStartedAt datetime2(7) NOT NULL
+  Count int NOT NULL
+  LockedUntil datetime2(7) NULL
+  UpdatedAt datetime2(7) NOT NULL
+  PRIMARY KEY PK_SqlOSRateLimitBuckets (Scope, BucketKey)
+  CHECK CK_SqlOSRateLimitBuckets_Count ([Count]>=(0))
+  INDEX IX_SqlOSRateLimitBuckets_UpdatedAt NONCLUSTERED (UpdatedAt)
+
+### SqlOSRecoveryCodes
+  Id nvarchar(64) NOT NULL
+  UserId nvarchar(64) NOT NULL
+  CodeHash nvarchar(128) NOT NULL
+  CreatedAt datetime2(7) NOT NULL
+  ConsumedAt datetime2(7) NULL
+  RevokedAt datetime2(7) NULL
+  PRIMARY KEY PK_SqlOSRecoveryCodes (Id)
+  FOREIGN KEY FK_SqlOSRecoveryCodes_Users_UserId (UserId) REFERENCES SqlOSUsers (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSRecoveryCodes_CodeHash UNIQUE NONCLUSTERED (CodeHash)
+  INDEX IX_SqlOSRecoveryCodes_User_Consumed_Revoked NONCLUSTERED (UserId, ConsumedAt, RevokedAt)
+
+### SqlOSRefreshTokens
+  Id nvarchar(64) NOT NULL
+  SessionId nvarchar(64) NOT NULL
+  TokenHash nvarchar(128) NOT NULL
+  FamilyId nvarchar(64) NOT NULL
+  CreatedAt datetime2(7) NOT NULL
+  ExpiresAt datetime2(7) NOT NULL
+  ConsumedAt datetime2(7) NULL
+  RevokedAt datetime2(7) NULL
+  ReplacedByTokenId nvarchar(64) NULL
+  ReplacementAccessToken nvarchar(max) NULL
+  ReplacementOrganizationId nvarchar(64) NULL
+  ReplacementAccessTokenExpiresAt datetime2(7) NULL
+  PRIMARY KEY {system-named} (Id)
+  UNIQUE {system-named} (TokenHash)
+  FOREIGN KEY FK_SqlOSRefreshTokens_Sessions (SessionId) REFERENCES SqlOSSessions (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+
+### SqlOSSamlReplays
+  Id nvarchar(64) NOT NULL
+  ConnectionId nvarchar(64) NOT NULL
+  ResponseId nvarchar(450) NOT NULL
+  AssertionId nvarchar(450) NOT NULL
+  ConsumedAt datetime2(7) NOT NULL
+  ExpiresAt datetime2(7) NOT NULL
+  PRIMARY KEY PK_SqlOSSamlReplays (Id)
+  INDEX IX_SqlOSSamlReplays_ExpiresAt NONCLUSTERED (ExpiresAt)
+  INDEX UX_SqlOSSamlReplays_Connection_Assertion UNIQUE NONCLUSTERED (ConnectionId, AssertionId)
+  INDEX UX_SqlOSSamlReplays_Connection_Response UNIQUE NONCLUSTERED (ConnectionId, ResponseId)
+
+### SqlOSSchema
+  Version int NOT NULL
+
+### SqlOSScimConnections
+  Id nvarchar(64) NOT NULL
+  OrganizationId nvarchar(64) NOT NULL
+  SeedKey nvarchar(160) NULL
+  DisplayName nvarchar(200) NOT NULL
+  IsEnabled bit NOT NULL
+  TokenHash nvarchar(128) NULL
+  TokenPrefix nvarchar(24) NULL
+  TokenRotatedAt datetime2(7) NULL
+  TokenLastUsedAt datetime2(7) NULL
+  LastSyncAt datetime2(7) NULL
+  Source nvarchar(40) NOT NULL
+  CreatedAt datetime2(7) NOT NULL
+  UpdatedAt datetime2(7) NOT NULL
+  ConfigurationOwner nvarchar(40) NOT NULL DEFAULT (N'dashboard') [DF_SqlOSScimConnections_ConfigurationOwner]
+  ConfigurationSourceKey nvarchar(160) NULL
+  ConfigurationFingerprint nvarchar(64) NULL
+  LastReconciledAt datetime2(7) NULL
+  ConfigurationOrphanedAt datetime2(7) NULL
+  GrantBoundaryResourceId nvarchar(256) NULL
+  PRIMARY KEY {system-named} (Id)
+  FOREIGN KEY FK_SqlOSScimConnections_Organizations_OrganizationId (OrganizationId) REFERENCES SqlOSOrganizations (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSScimConnections_OrganizationId_DisplayName_Id NONCLUSTERED (OrganizationId, DisplayName, Id)
+  INDEX IX_SqlOSScimConnections_OrganizationId_IsEnabled NONCLUSTERED (OrganizationId, IsEnabled)
+  INDEX IX_SqlOSScimConnections_OrganizationId_SeedKey UNIQUE NONCLUSTERED (OrganizationId, SeedKey) WHERE ([SeedKey] IS NOT NULL)
+  INDEX IX_SqlOSScimConnections_TokenHash UNIQUE NONCLUSTERED (TokenHash) WHERE ([TokenHash] IS NOT NULL)
+  INDEX UX_SqlOSScimConnections_OneEnabledPerOrganization UNIQUE NONCLUSTERED (OrganizationId) WHERE ([IsEnabled]=(1))
+  INDEX UX_SqlOSScimConnections_Organization_Owner_SourceKey UNIQUE NONCLUSTERED (OrganizationId, ConfigurationOwner, ConfigurationSourceKey) WHERE ([ConfigurationSourceKey] IS NOT NULL)
+
+### SqlOSScimExternalIds
+  Id nvarchar(64) NOT NULL
+  ConnectionId nvarchar(64) NOT NULL
+  ResourceType nvarchar(20) NOT NULL
+  ExternalId nvarchar(450) NULL COLLATE Latin1_General_100_BIN2
+  EntityId nvarchar(128) NOT NULL
+  FgaSubjectId nvarchar(128) NULL
+  DisplayName nvarchar(300) NULL COLLATE Latin1_General_100_CI_AS
+  IsActive bit NOT NULL
+  CreatedAt datetime2(7) NOT NULL
+  UpdatedAt datetime2(7) NOT NULL
+  LastSyncedAt datetime2(7) NOT NULL
+  UserName nvarchar(450) NULL COLLATE Latin1_General_100_CI_AS
+  PrimaryEmail nvarchar(320) NULL COLLATE Latin1_General_100_CI_AS
+  GivenName nvarchar(150) NULL
+  FormattedName nvarchar(300) NULL
+  FamilyName nvarchar(150) NULL
+  DeletedAt datetime2(7) NULL
+  OwnsUserLifecycle bit NOT NULL DEFAULT ((0)) [DF_SqlOSScimExternalIds_OwnsUserLifecycle]
+  PRIMARY KEY {system-named} (Id)
+  FOREIGN KEY FK_SqlOSScimExternalIds_Connections_ConnectionId (ConnectionId) REFERENCES SqlOSScimConnections (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSScimExternalIds_Connection_Resource_Entity UNIQUE NONCLUSTERED (ConnectionId, ResourceType, EntityId)
+  INDEX IX_SqlOSScimExternalIds_Connection_Resource_External UNIQUE NONCLUSTERED (ConnectionId, ResourceType, ExternalId) WHERE ([ExternalId] IS NOT NULL)
+  INDEX IX_SqlOSScimExternalIds_Connection_Resource_UserName UNIQUE NONCLUSTERED (ConnectionId, ResourceType, UserName) WHERE ([UserName] IS NOT NULL)
+
+### SqlOSScimGroupMappings
+  Id nvarchar(64) NOT NULL
+  ConnectionId nvarchar(64) NOT NULL
+  SourceKey nvarchar(300) NULL
+  Source nvarchar(40) NOT NULL
+  MatchType nvarchar(40) NOT NULL
+  GroupDisplayName nvarchar(300) NULL
+  GroupExternalId nvarchar(450) NULL
+  GroupPattern nvarchar(500) NULL
+  RoleKey nvarchar(120) NOT NULL
+  ResourceId nvarchar(256) NULL
+  ResourceIdTemplate nvarchar(500) NULL
+  Description nvarchar(500) NULL
+  IsEnabled bit NOT NULL
+  CreatedAt datetime2(7) NOT NULL
+  UpdatedAt datetime2(7) NOT NULL
+  PRIMARY KEY {system-named} (Id)
+  FOREIGN KEY FK_SqlOSScimGroupMappings_Connections_ConnectionId (ConnectionId) REFERENCES SqlOSScimConnections (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSScimGroupMappings_ConnectionId_CreatedAt_Id NONCLUSTERED (ConnectionId, CreatedAt DESC, Id DESC)
+  INDEX IX_SqlOSScimGroupMappings_ConnectionId_IsEnabled NONCLUSTERED (ConnectionId, IsEnabled)
+  INDEX IX_SqlOSScimGroupMappings_ConnectionId_SourceKey UNIQUE NONCLUSTERED (ConnectionId, SourceKey) WHERE ([SourceKey] IS NOT NULL)
+
+### SqlOSScimManagedGrants
+  Id nvarchar(64) NOT NULL
+  ConnectionId nvarchar(64) NOT NULL
+  MappingId nvarchar(64) NOT NULL
+  GroupExternalId nvarchar(450) NOT NULL
+  FgaGroupId nvarchar(128) NOT NULL
+  FgaGroupSubjectId nvarchar(128) NOT NULL
+  GrantId nvarchar(128) NOT NULL
+  RoleId nvarchar(128) NOT NULL
+  ResourceId nvarchar(256) NOT NULL
+  CreatedAt datetime2(7) NOT NULL
+  RevokedAt datetime2(7) NULL
+  PRIMARY KEY {system-named} (Id)
+  FOREIGN KEY FK_SqlOSScimManagedGrants_Connections_ConnectionId (ConnectionId) REFERENCES SqlOSScimConnections (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSScimManagedGrants_Mappings_MappingId (MappingId) REFERENCES SqlOSScimGroupMappings (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSScimManagedGrants_GrantId NONCLUSTERED (GrantId)
+  INDEX IX_SqlOSScimManagedGrants_Reconcile NONCLUSTERED (ConnectionId, MappingId, GroupExternalId, ResourceId, RoleId)
+
+### SqlOSScimOperationCommits
+  Id nvarchar(64) NOT NULL
+  OccurredAt datetime2(7) NOT NULL
+  PRIMARY KEY PK_SqlOSScimOperationCommits (Id)
+  INDEX IX_SqlOSScimOperationCommits_OccurredAt NONCLUSTERED (OccurredAt)
+
+### SqlOSScimSyncEvents
+  Id nvarchar(64) NOT NULL
+  ConnectionId nvarchar(64) NOT NULL
+  OrganizationId nvarchar(64) NOT NULL
+  ResourceType nvarchar(20) NOT NULL
+  ResourceId nvarchar(128) NULL
+  ExternalId nvarchar(450) NULL
+  Action nvarchar(80) NOT NULL
+  Result nvarchar(40) NOT NULL
+  Error nvarchar(1000) NULL
+  DataJson nvarchar(max) NULL
+  RequestId nvarchar(128) NULL
+  OccurredAt datetime2(7) NOT NULL
+  PRIMARY KEY {system-named} (Id)
+  FOREIGN KEY FK_SqlOSScimSyncEvents_Connections_ConnectionId (ConnectionId) REFERENCES SqlOSScimConnections (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSScimSyncEvents_Organizations_OrganizationId (OrganizationId) REFERENCES SqlOSOrganizations (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSScimSyncEvents_ConnectionId_OccurredAt NONCLUSTERED (ConnectionId, OccurredAt DESC)
+  INDEX IX_SqlOSScimSyncEvents_ConnectionId_OccurredAt_Id NONCLUSTERED (ConnectionId, OccurredAt DESC, Id DESC)
+  INDEX IX_SqlOSScimSyncEvents_OrganizationId_OccurredAt NONCLUSTERED (OrganizationId, OccurredAt DESC)
+
+### SqlOSScopeDisplayNames
+  Id nvarchar(64) NOT NULL
+  Scope nvarchar(200) NOT NULL COLLATE Latin1_General_100_BIN2
+  DisplayName nvarchar(200) NOT NULL
+  Description nvarchar(1000) NULL
+  ConfigurationOwner nvarchar(40) NOT NULL DEFAULT ('dashboard') [DF_SqlOSScopeDisplayNames_ConfigurationOwner]
+  ConfigurationSourceKey nvarchar(200) NULL COLLATE Latin1_General_100_BIN2
+  ConfigurationFingerprint nvarchar(64) NULL
+  LastReconciledAt datetime2(7) NULL
+  ConfigurationOrphanedAt datetime2(7) NULL
+  CreatedAt datetime2(7) NOT NULL
+  UpdatedAt datetime2(7) NOT NULL
+  PRIMARY KEY PK_SqlOSScopeDisplayNames (Id)
+  INDEX UX_SqlOSScopeDisplayNames_Scope UNIQUE NONCLUSTERED (Scope)
+
+### SqlOSSessions
+  Id nvarchar(64) NOT NULL
+  UserId nvarchar(64) NOT NULL
+  AuthenticationMethod nvarchar(50) NULL
+  ClientApplicationId nvarchar(64) NULL
+  CreatedAt datetime2(7) NOT NULL
+  LastSeenAt datetime2(7) NOT NULL
+  IdleExpiresAt datetime2(7) NOT NULL
+  AbsoluteExpiresAt datetime2(7) NOT NULL
+  RevokedAt datetime2(7) NULL
+  RevocationReason nvarchar(200) NULL
+  UserAgent nvarchar(1024) NULL
+  IpAddress nvarchar(128) NULL
+  Resource nvarchar(2048) NULL
+  EffectiveAudience nvarchar(2048) NULL
+  OrganizationId nvarchar(64) NULL
+  Scope nvarchar(1000) NULL
+  AuthenticatedAt datetime2(7) NULL
+  PRIMARY KEY {system-named} (Id)
+  FOREIGN KEY FK_SqlOSSessions_Clients (ClientApplicationId) REFERENCES SqlOSClientApplications (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSSessions_Organizations (OrganizationId) REFERENCES SqlOSOrganizations (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSSessions_Users (UserId) REFERENCES SqlOSUsers (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSSessions_CreatedAt_Id NONCLUSTERED (CreatedAt DESC, Id DESC)
+  INDEX IX_SqlOSSessions_UserId_CreatedAt_Id NONCLUSTERED (UserId, CreatedAt DESC, Id DESC)
+
+### SqlOSSettings
+  Id nvarchar(64) NOT NULL
+  RefreshTokenLifetimeMinutes int NOT NULL
+  SessionIdleTimeoutMinutes int NOT NULL
+  SessionAbsoluteLifetimeMinutes int NOT NULL
+  UpdatedAt datetime2(7) NOT NULL
+  SigningKeyRotationIntervalDays int NOT NULL DEFAULT ((90)) [DF_SqlOSSettings_RotationInterval]
+  SigningKeyGraceWindowDays int NOT NULL DEFAULT ((7)) [DF_SqlOSSettings_GraceWindow]
+  SigningKeyRetiredCleanupDays int NOT NULL DEFAULT ((30)) [DF_SqlOSSettings_RetiredCleanup]
+  RefreshTokenGraceWindowSeconds int NOT NULL DEFAULT ((30)) [DF_SqlOSSettings_RefreshTokenGraceWindowSeconds]
+  PRIMARY KEY {system-named} (Id)
+
+### SqlOSSigningKeys
+  Id nvarchar(64) NOT NULL
+  Kid nvarchar(120) NOT NULL
+  Algorithm nvarchar(20) NOT NULL
+  PublicKeyPem nvarchar(max) NOT NULL
+  CustodyProvider nvarchar(120) NOT NULL
+  KeyReference nvarchar(max) NOT NULL
+  IsActive bit NOT NULL
+  ActivatedAt datetime2(7) NOT NULL
+  RetiredAt datetime2(7) NULL
+  PRIMARY KEY {system-named} (Id)
+  UNIQUE {system-named} (Kid)
+  CHECK CK_SqlOSSigningKeys_Lifecycle ([IsActive]=(1) AND [RetiredAt] IS NULL OR [IsActive]=(0) AND [RetiredAt] IS NOT NULL)
+  INDEX UX_SqlOSSigningKeys_OneActive UNIQUE NONCLUSTERED (IsActive) WHERE ([IsActive]=(1))
+
+### SqlOSSsoConnections
+  Id nvarchar(64) NOT NULL
+  OrganizationId nvarchar(64) NOT NULL
+  DisplayName nvarchar(200) NOT NULL
+  IsEnabled bit NOT NULL
+  IdentityProviderEntityId nvarchar(400) NOT NULL
+  SingleSignOnUrl nvarchar(1024) NOT NULL
+  X509CertificatePem nvarchar(max) NOT NULL
+  NameIdFormat nvarchar(256) NULL
+  EmailAttributeName nvarchar(128) NOT NULL
+  FirstNameAttributeName nvarchar(128) NOT NULL
+  LastNameAttributeName nvarchar(128) NOT NULL
+  AutoProvisionUsers bit NOT NULL
+  AutoLinkByEmail bit NOT NULL
+  CreatedAt datetime2(7) NOT NULL
+  UpdatedAt datetime2(7) NOT NULL
+  TrustUpstreamMfa bit NOT NULL DEFAULT ((0)) [DF_SqlOSSsoConnections_TrustUpstreamMfa]
+  AcceptedAuthnContextClassRefsJson nvarchar(max) NOT NULL DEFAULT (N'[]') [DF_SqlOSSsoConnections_AcceptedAuthnContextClassRefsJson]
+  ConfigurationOwner nvarchar(40) NOT NULL DEFAULT (N'dashboard') [DF_SqlOSSsoConnections_ConfigurationOwner]
+  ConfigurationSourceKey nvarchar(160) NULL
+  ConfigurationFingerprint nvarchar(64) NULL
+  LastReconciledAt datetime2(7) NULL
+  ConfigurationOrphanedAt datetime2(7) NULL
+  PRIMARY KEY {system-named} (Id)
+  FOREIGN KEY FK_SqlOSSsoConnections_Organizations (OrganizationId) REFERENCES SqlOSOrganizations (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSSsoConnections_DisplayName_Id NONCLUSTERED (DisplayName, Id)
+  INDEX IX_SqlOSSsoConnections_OrganizationId_DisplayName_Id NONCLUSTERED (OrganizationId, DisplayName, Id)
+  INDEX UX_SqlOSSsoConnections_ConfigurationOwner_SourceKey UNIQUE NONCLUSTERED (ConfigurationOwner, ConfigurationSourceKey) WHERE ([ConfigurationSourceKey] IS NOT NULL)
+
+### SqlOSSsoPortalSessions
+  Id nvarchar(64) NOT NULL
+  OrganizationId nvarchar(64) NOT NULL
+  ConnectionId nvarchar(64) NULL
+  LinkTokenHash nvarchar(128) NOT NULL
+  SessionTokenHash nvarchar(128) NULL
+  Provider nvarchar(40) NULL
+  ReturnUrl nvarchar(1000) NULL
+  ActorType nvarchar(80) NOT NULL
+  CreatedByUserId nvarchar(64) NULL
+  CreatedAt datetime2(7) NOT NULL
+  ExpiresAt datetime2(7) NOT NULL
+  OpenedAt datetime2(7) NULL
+  LastSeenAt datetime2(7) NULL
+  RevokedAt datetime2(7) NULL
+  RevokedReason nvarchar(160) NULL
+  IpAddress nvarchar(128) NULL
+  UserAgent nvarchar(512) NULL
+  LastTestedAt datetime2(7) NULL
+  LastTestStatus nvarchar(40) NULL
+  LastTestMessage nvarchar(500) NULL
+  PRIMARY KEY {system-named} (Id)
+  FOREIGN KEY FK_SqlOSSsoPortalSessions_Organizations_OrganizationId (OrganizationId) REFERENCES SqlOSOrganizations (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  FOREIGN KEY FK_SqlOSSsoPortalSessions_SsoConnections_ConnectionId (ConnectionId) REFERENCES SqlOSSsoConnections (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSSsoPortalSessions_LinkTokenHash UNIQUE NONCLUSTERED (LinkTokenHash)
+  INDEX IX_SqlOSSsoPortalSessions_OrganizationId_CreatedAt NONCLUSTERED (OrganizationId, CreatedAt)
+  INDEX IX_SqlOSSsoPortalSessions_OrganizationId_CreatedAt_Id NONCLUSTERED (OrganizationId, CreatedAt DESC, Id DESC)
+  INDEX IX_SqlOSSsoPortalSessions_OrganizationId_RevokedAt_ExpiresAt NONCLUSTERED (OrganizationId, RevokedAt, ExpiresAt)
+  INDEX IX_SqlOSSsoPortalSessions_SessionTokenHash UNIQUE NONCLUSTERED (SessionTokenHash) WHERE ([SessionTokenHash] IS NOT NULL)
+
+### SqlOSTemporaryTokens
+  Id nvarchar(64) NOT NULL
+  Purpose nvarchar(80) NOT NULL
+  TokenHash nvarchar(128) NOT NULL
+  UserId nvarchar(64) NULL
+  ClientApplicationId nvarchar(64) NULL
+  OrganizationId nvarchar(64) NULL
+  PayloadJson nvarchar(max) NULL
+  CreatedAt datetime2(7) NOT NULL
+  ExpiresAt datetime2(7) NOT NULL
+  ConsumedAt datetime2(7) NULL
+  AuthPageSessionFamilyId nvarchar(64) NULL
+  PRIMARY KEY {system-named} (Id)
+  UNIQUE {system-named} (TokenHash)
+  FOREIGN KEY FK_SqlOSTemporaryTokens_AuthPageSessionFamily (AuthPageSessionFamilyId) REFERENCES SqlOSAuthPageSessionFamilies (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSTemporaryTokens_AuthPageSessionFamilyId NONCLUSTERED (AuthPageSessionFamilyId)
+
+### SqlOSUserAuthenticators
+  Id nvarchar(64) NOT NULL
+  UserId nvarchar(64) NOT NULL
+  Type nvarchar(40) NOT NULL
+  DisplayName nvarchar(120) NOT NULL
+  SecretProtected nvarchar(2048) NOT NULL
+  SecretVersion int NOT NULL
+  Algorithm nvarchar(20) NOT NULL
+  Digits int NOT NULL
+  PeriodSeconds int NOT NULL
+  IsConfirmed bit NOT NULL
+  CreatedAt datetime2(7) NOT NULL
+  ConfirmedAt datetime2(7) NULL
+  LastUsedAt datetime2(7) NULL
+  RevokedAt datetime2(7) NULL
+  RevocationReason nvarchar(120) NULL
+  LastAcceptedTimeStep bigint NULL
+  PRIMARY KEY PK_SqlOSUserAuthenticators (Id)
+  FOREIGN KEY FK_SqlOSUserAuthenticators_Users_UserId (UserId) REFERENCES SqlOSUsers (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSUserAuthenticators_User_Confirmed_Revoked NONCLUSTERED (UserId, IsConfirmed, RevokedAt)
+  INDEX IX_SqlOSUserAuthenticators_User_Type_Revoked NONCLUSTERED (UserId, Type, RevokedAt)
+
+### SqlOSUserEmails
+  Id nvarchar(64) NOT NULL
+  UserId nvarchar(64) NOT NULL
+  Email nvarchar(320) NOT NULL
+  NormalizedEmail nvarchar(320) NOT NULL
+  IsPrimary bit NOT NULL
+  IsVerified bit NOT NULL
+  VerifiedAt datetime2(7) NULL
+  CreatedAt datetime2(7) NOT NULL
+  PRIMARY KEY {system-named} (Id)
+  UNIQUE {system-named} (NormalizedEmail)
+  FOREIGN KEY FK_SqlOSUserEmails_Users (UserId) REFERENCES SqlOSUsers (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+
+### SqlOSUserMfaPolicyOverrides
+  UserId nvarchar(64) NOT NULL
+  RequireMfa bit NULL
+  UserSelfEnrollmentEnabled bit NULL
+  UpdatedAt datetime2(7) NOT NULL
+  PRIMARY KEY PK_SqlOSUserMfaPolicyOverrides (UserId)
+  FOREIGN KEY FK_SqlOSUserMfaPolicyOverrides_Users_UserId (UserId) REFERENCES SqlOSUsers (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+
+### SqlOSUserPhoneNumbers
+  Id nvarchar(64) NOT NULL
+  UserId nvarchar(64) NOT NULL
+  PhoneNumber nvarchar(32) NOT NULL
+  PhoneNumberHash nvarchar(128) NOT NULL
+  DisplayValueEncrypted nvarchar(2048) NULL
+  IsPrimary bit NOT NULL DEFAULT ((0)) [DF_SqlOSUserPhoneNumbers_IsPrimary]
+  IsVerified bit NOT NULL DEFAULT ((0)) [DF_SqlOSUserPhoneNumbers_IsVerified]
+  VerifiedAt datetime2(7) NULL
+  CreatedAt datetime2(7) NOT NULL
+  UpdatedAt datetime2(7) NOT NULL
+  LastUsedAt datetime2(7) NULL
+  RemovedAt datetime2(7) NULL
+  RemovalReason nvarchar(120) NULL
+  PRIMARY KEY {system-named} (Id)
+  FOREIGN KEY FK_SqlOSUserPhoneNumbers_Users_UserId (UserId) REFERENCES SqlOSUsers (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSUserPhoneNumbers_PhoneNumberHash UNIQUE NONCLUSTERED (PhoneNumberHash) WHERE ([RemovedAt] IS NULL)
+  INDEX IX_SqlOSUserPhoneNumbers_UserId_RemovedAt NONCLUSTERED (UserId, RemovedAt)
+
+### SqlOSUsers
+  Id nvarchar(64) NOT NULL
+  DisplayName nvarchar(200) NOT NULL
+  DefaultEmail nvarchar(320) NULL
+  IsActive bit NOT NULL
+  CreatedAt datetime2(7) NOT NULL
+  UpdatedAt datetime2(7) NOT NULL
+  PRIMARY KEY {system-named} (Id)
+  INDEX IX_SqlOSUsers_DisplayName_Id NONCLUSTERED (DisplayName, Id)
+
+## Routines
+
+### fn_IsResourceAccessible (SQL_INLINE_TABLE_VALUED_FUNCTION)
+    CREATE   FUNCTION [dbo].fn_IsResourceAccessible(
+        @ResourceId NVARCHAR(128),
+        @SubjectIds NVARCHAR(MAX),
+        @PermissionId NVARCHAR(128)
+    )
+    RETURNS TABLE
+    AS
+    RETURN
+    (
+        WITH ancestors AS (
+            SELECT
+                Id,
+                ParentId,
+                0 AS Depth,
+                CAST(N'|' + Id + N'|' AS NVARCHAR(MAX)) AS VisitedPath,
+                CAST(0 AS BIT) AS CycleDetected
+            FROM [dbo].[SqlOSFgaResources]
+            WHERE Id = @ResourceId AND IsActive = 1
+
+            UNION ALL
+
+            SELECT
+                r.Id,
+                r.ParentId,
+                a.Depth + 1,
+                CAST(a.VisitedPath + r.Id + N'|' AS NVARCHAR(MAX)),
+                CAST(CASE
+                    WHEN CHARINDEX(N'|' + r.Id + N'|', a.VisitedPath) > 0 THEN 1
+                    ELSE 0
+                END AS BIT)
+            FROM [dbo].[SqlOSFgaResources] r
+            INNER JOIN ancestors a ON r.Id = a.ParentId
+            WHERE a.Depth < 10
+              AND a.CycleDetected = 0
+              AND r.IsActive = 1
+        )
+        SELECT TOP 1 a.Id
+        FROM ancestors a
+        INNER JOIN [dbo].[SqlOSFgaGrants] g ON a.Id = g.ResourceId
+        INNER JOIN [dbo].[SqlOSFgaRolePermissions] rp ON g.RoleId = rp.RoleId
+        INNER JOIN [dbo].[SqlOSFgaSubjects] s ON g.SubjectId = s.Id
+        LEFT JOIN [dbo].[SqlOSFgaUsers] u ON s.Id = u.SubjectId
+        LEFT JOIN [dbo].[SqlOSFgaServiceAccounts] sa ON s.Id = sa.SubjectId
+        LEFT JOIN [dbo].[SqlOSFgaUserGroups] ug ON s.Id = ug.SubjectId
+        LEFT JOIN [dbo].[SqlOSFgaAgents] ag ON s.Id = ag.SubjectId
+        WHERE g.SubjectId IN (SELECT CONVERT(NVARCHAR(450), [value]) FROM OPENJSON(@SubjectIds))
+          AND rp.PermissionId = @PermissionId
+          AND NOT EXISTS (SELECT 1 FROM ancestors malformed WHERE malformed.CycleDetected = 1)
+          AND NOT EXISTS (
+              SELECT 1
+              FROM ancestors truncated
+              WHERE truncated.Depth = 10
+                AND truncated.ParentId IS NOT NULL
+          )
+          AND EXISTS (
+              SELECT 1
+              FROM [dbo].[SqlOSFgaResources] target
+              INNER JOIN [dbo].[SqlOSFgaPermissions] permission ON permission.Id = @PermissionId
+              WHERE target.Id = @ResourceId
+                AND (permission.ResourceTypeId IS NULL OR permission.ResourceTypeId = target.ResourceTypeId)
+          )
+          AND (s.SubjectTypeId <> 'user' OR u.IsActive = 1)
+          AND (s.SubjectTypeId <> 'service_account' OR (sa.SubjectId IS NOT NULL AND (sa.ExpiresAt IS NULL OR sa.ExpiresAt > GETUTCDATE())))
+          AND (s.SubjectTypeId <> 'group' OR ug.IsActive = 1)
+          AND (s.SubjectTypeId <> 'agent' OR ag.SubjectId IS NOT NULL)
+          AND EXISTS (
+              SELECT 1
+              FROM [dbo].[SqlOSFgaSubjects] caller
+              LEFT JOIN [dbo].[SqlOSFgaUsers] callerUser ON caller.Id = callerUser.SubjectId
+              LEFT JOIN [dbo].[SqlOSFgaServiceAccounts] callerSa ON caller.Id = callerSa.SubjectId
+              LEFT JOIN [dbo].[SqlOSFgaUserGroups] callerGroup ON caller.Id = callerGroup.SubjectId
+              LEFT JOIN [dbo].[SqlOSFgaAgents] callerAgent ON caller.Id = callerAgent.SubjectId
+              WHERE caller.Id = JSON_VALUE(@SubjectIds, '$[0]')
+                AND (caller.SubjectTypeId <> 'user' OR callerUser.IsActive = 1)
+                AND (caller.SubjectTypeId <> 'service_account' OR (callerSa.SubjectId IS NOT NULL AND (callerSa.ExpiresAt IS NULL OR callerSa.ExpiresAt > GETUTCDATE())))
+                AND (caller.SubjectTypeId <> 'group' OR callerGroup.IsActive = 1)
+                AND (caller.SubjectTypeId <> 'agent' OR callerAgent.SubjectId IS NOT NULL)
+          )
+          AND (g.EffectiveFrom IS NULL OR g.EffectiveFrom <= GETUTCDATE())
+          AND (g.EffectiveTo IS NULL OR g.EffectiveTo >= GETUTCDATE())
+    )

@@ -1,0 +1,179 @@
+# SqlOS behavior lock transcript
+scenario: AdminIdentityOrganizationScenarios.Identity_lifecycle_changes_through_the_admin_api_write_no_audit_CurrentBehavior_KnownDefect_415
+profile: dashboard-callback
+
+# Known defect #415, recorded as it behaves today: creating a user (with a password), an organization, or a membership, renaming or deactivating an organization, and re-adding a member write no lifecycle audit event, and re-adding a member silently changes the role and reactivates the membership.
+
+## 1. operator: create a user with a password
+> POST /sqlos/admin/auth/api/users
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Alice",
+>     "email": "{email:alice}",
+>     "password": "{password:alice}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "defaultEmail": "{email:alice}",
+      "displayName": "Alice",
+      "id": "{usr#1}",
+      "isActive": true,
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 2. operator: create an organization
+> POST /sqlos/admin/auth/api/organizations
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "name": "Acme"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "id": "{org#1}",
+      "isActive": true,
+      "name": "Acme",
+      "primaryDomain": null,
+      "slug": "acme"
+    }
+
+## 3. operator: rename it
+> PUT /sqlos/admin/auth/api/organizations/{org#1}
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "name": "Acme Renamed"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "id": "{org#1}",
+      "isActive": true,
+      "name": "Acme Renamed",
+      "primaryDomain": null,
+      "slug": "acme-renamed"
+    }
+
+## 4. operator: add alice as an admin
+> POST /sqlos/admin/auth/api/organizations/{org#1}/memberships
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "role": "admin",
+>     "userId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "isActive": true,
+      "organizationId": "{org#1}",
+      "role": "admin",
+      "userId": "{usr#1}"
+    }
+
+## 5. operator: adding her again as a member overwrites the role
+> POST /sqlos/admin/auth/api/memberships
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "organizationId": "{org#1}",
+>     "role": "member",
+>     "userId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "isActive": true,
+      "organizationId": "{org#1}",
+      "role": "member",
+      "userId": "{usr#1}"
+    }
+
+## 6. operator: alice is now a member, not an admin
+> GET /sqlos/admin/auth/api/organizations/{org#1}/memberships
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "isActive": true,
+          "organization": "Acme Renamed",
+          "organizationId": "{org#1}",
+          "role": "member",
+          "user": "Alice",
+          "userEmail": "{email:alice}",
+          "userId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## audit: none of these changes is audited
+  (no new events)
+
+## 7. operator: deactivate the organization
+> PUT /sqlos/admin/auth/api/organizations/{org#1}
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "isActive": false,
+>     "name": "Acme Renamed"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "id": "{org#1}",
+      "isActive": false,
+      "name": "Acme Renamed",
+      "primaryDomain": null,
+      "slug": "acme-renamed"
+    }
+
+## audit: deactivation records only the SSO-portal session revocation, not the deactivation
+  - {
+      "action": "sso.portal.sessions.revoked",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "sso.portal.sessions.revoked",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "reason": "organization_deactivated",
+        "revokedSessions": 0
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

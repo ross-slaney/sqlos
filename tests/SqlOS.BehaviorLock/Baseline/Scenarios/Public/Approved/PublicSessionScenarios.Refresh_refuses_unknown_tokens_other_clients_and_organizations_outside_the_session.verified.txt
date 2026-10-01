@@ -1,0 +1,141 @@
+# SqlOS behavior lock transcript
+scenario: PublicSessionScenarios.Refresh_refuses_unknown_tokens_other_clients_and_organizations_outside_the_session
+profile: hosted
+
+## 1. client: an unknown refresh token escapes the endpoint
+> POST /sqlos/auth/token/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshToken": "not-a-refresh-token"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Refresh token is invalid.
+
+## 2. client: a client id other than the session's escapes the endpoint
+> POST /sqlos/auth/token/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "another-client",
+>     "refreshToken": "{refresh-token#1}"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Refresh token was not issued for this client.
+
+## 3. client: refreshing into an organization Alice does not belong to is a lifecycle denial
+> POST /sqlos/auth/token/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "organizationId": "{org#1}",
+>     "refreshToken": "{refresh-token#1}"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Session is no longer active.
+
+## 4. client: none of those consumed the token: it still refreshes
+> POST /sqlos/auth/token/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshToken": "{refresh-token#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessToken": "{access-token#1}",
+      "accessTokenExpiresAt": "{datetime:utc-z}",
+      "clientId": "behavior-lock-app",
+      "idToken": null,
+      "organizationId": "{org#2}",
+      "refreshToken": "{refresh-token#2}",
+      "refreshTokenExpiresAt": "{datetime:utc-z}",
+      "sessionId": "{ses#1}"
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "org_id": "{org#2}",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+
+## 5. client: this host declares no MCP resource, so resource indicators are off: a requested resource is ignored
+> POST /sqlos/auth/token/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshToken": "{refresh-token#2}",
+>     "resource": "https://other.example.test"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessToken": "{access-token#1}",
+      "accessTokenExpiresAt": "{datetime:utc-z}",
+      "clientId": "behavior-lock-app",
+      "idToken": null,
+      "organizationId": "{org#2}",
+      "refreshToken": "{refresh-token#3}",
+      "refreshTokenExpiresAt": "{datetime:utc-z}",
+      "sessionId": "{ses#1}"
+    }
+
+## audit: only the lifecycle denial is audited
+  - {
+      "action": "auth.lifecycle.denied",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": "{ses#1}",
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.lifecycle.denied",
+      "id": "{aud#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "boundary": "refresh",
+        "reason": "membership_inactive"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": "{ses#1}",
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+
+## 6. client: after the operator requires MFA for Acme, a password-only session cannot refresh into it
+> POST /sqlos/auth/token/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshToken": "{refresh-token#3}"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Current MFA policy is not satisfied.
+
+## audit: the MFA step-up refusal is not audited
+  (no new events)

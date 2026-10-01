@@ -1,0 +1,142 @@
+# SqlOS behavior lock transcript
+scenario: SettingsAdminScenarios.Code_seeded_mfa_settings_accept_only_the_emergency_enabled_switch
+profile: dashboard-callback
+
+## 1. operator: the MFA seed owns the settings
+> GET /sqlos/admin/auth/api/settings/mfa
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "availableFactors": [
+        "totp",
+        "recovery_code"
+      ],
+      "enabled": true,
+      "managedByStartupSeed": true,
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": "{hex#1}",
+        "isEditable": false,
+        "isOrphaned": false,
+        "lastReconciledAt": "{datetime:unspecified}",
+        "owner": "code",
+        "sourceKey": "mfa:default"
+      },
+      "recoveryCodesEnabled": true,
+      "requireForAllUsers": false,
+      "requireForOwnersAndAdmins": true,
+      "requiredRoles": [
+        "owner",
+        "admin"
+      ],
+      "totpEnabled": true,
+      "updatedAt": "{datetime:unspecified}",
+      "userSelfEnrollmentEnabled": true
+    }
+
+## 2. operator: switching MFA off changes only the enabled flag, which a code-owned policy allows
+> PUT /sqlos/admin/auth/api/settings/mfa
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "availableFactors": [
+>       "totp",
+>       "recovery_code"
+>     ],
+>     "enabled": false,
+>     "recoveryCodesEnabled": true,
+>     "requireForAllUsers": false,
+>     "requireForOwnersAndAdmins": true,
+>     "requiredRoles": [
+>       "owner",
+>       "admin"
+>     ],
+>     "totpEnabled": true,
+>     "userSelfEnrollmentEnabled": true
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "availableFactors": [
+        "totp",
+        "recovery_code"
+      ],
+      "enabled": false,
+      "managedByStartupSeed": true,
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": "{hex#1}",
+        "isEditable": false,
+        "isOrphaned": false,
+        "lastReconciledAt": "{datetime:unspecified}",
+        "owner": "code",
+        "sourceKey": "mfa:default"
+      },
+      "recoveryCodesEnabled": true,
+      "requireForAllUsers": false,
+      "requireForOwnersAndAdmins": true,
+      "requiredRoles": [
+        "owner",
+        "admin"
+      ],
+      "totpEnabled": true,
+      "updatedAt": "{datetime:utc-z}",
+      "userSelfEnrollmentEnabled": true
+    }
+
+## 3. operator: any other change to the code-owned policy escapes as a server error that names its owner
+> PUT /sqlos/admin/auth/api/settings/mfa
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "availableFactors": [
+>       "totp",
+>       "recovery_code"
+>     ],
+>     "enabled": false,
+>     "recoveryCodesEnabled": true,
+>     "requireForAllUsers": true,
+>     "requireForOwnersAndAdmins": true,
+>     "requiredRoles": [
+>       "owner",
+>       "admin"
+>     ],
+>     "totpEnabled": true,
+>     "userSelfEnrollmentEnabled": true
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Global MFA settings is owned by the 'code' configuration source. Change its source configuration instead.
+
+## 4. operator: MFA stays switched off and otherwise as seeded
+> GET /sqlos/admin/auth/api/settings/mfa
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "availableFactors": [
+        "totp",
+        "recovery_code"
+      ],
+      "enabled": false,
+      "managedByStartupSeed": true,
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": "{hex#1}",
+        "isEditable": false,
+        "isOrphaned": false,
+        "lastReconciledAt": "{datetime:unspecified}",
+        "owner": "code",
+        "sourceKey": "mfa:default"
+      },
+      "recoveryCodesEnabled": true,
+      "requireForAllUsers": false,
+      "requireForOwnersAndAdmins": true,
+      "requiredRoles": [
+        "owner",
+        "admin"
+      ],
+      "totpEnabled": true,
+      "updatedAt": "{datetime:unspecified}",
+      "userSelfEnrollmentEnabled": true
+    }

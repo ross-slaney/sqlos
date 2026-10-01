@@ -1,0 +1,125 @@
+# SqlOS behavior lock transcript
+scenario: DeviceFlowScenarios.Device_authorization_start_admits_only_device_clients_and_their_own_audience
+profile: multi-app
+
+## 1. cli: a browser client is not allowed to use device authorization
+> POST /sqlos/auth/device_authorization
+> Content-Type: application/x-www-form-urlencoded
+>   client_id=atlas-portal
+>   scope=openid profile email offline_access
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "unauthorized_client",
+      "error_description": "This client is not allowed to use device authorization."
+    }
+
+## audit
+  (no new events)
+
+## 2. cli: a resource other than the client's audience is invalid_target
+> POST /sqlos/auth/device_authorization
+> Content-Type: application/x-www-form-urlencoded
+>   client_id=atlas-cli
+>   scope=openid profile email offline_access
+>   resource=https://sqlos.example.test/api
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_target",
+      "error_description": "Requested resource is not allowed for this client."
+    }
+
+## audit
+  (no new events)
+
+## 3. cli: the client's own audience is accepted, and an unknown scope is dropped without an error
+> POST /sqlos/auth/device_authorization
+> Content-Type: application/x-www-form-urlencoded
+>   client_id=atlas-cli
+>   scope=openid admin
+>   resource=https://api.example.test
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "device_code": "{device-code#1}",
+      "expires_in": ~900,
+      "interval": 5,
+      "user_code": "{user-code#1}",
+      "verification_uri": "https://sqlos.example.test/sqlos/auth/device",
+      "verification_uri_complete": "https://sqlos.example.test/sqlos/auth/device?user_code={user-code#1}"
+    }
+
+## audit
+  - {
+      "action": "oauth.device.started",
+      "actor": {
+        "displayName": null,
+        "id": "{cli#1}",
+        "type": "client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.device.started",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 4. cli: polling without the resource the device authorization named
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=urn:ietf:params:oauth:grant-type:device_code
+>   device_code={device-code#1}
+>   client_id=atlas-cli
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "error": "invalid_grant",
+      "error_description": "Resource does not match the device authorization request."
+    }
+
+## 5. cli: polling with it: still pending
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=urn:ietf:params:oauth:grant-type:device_code
+>   device_code={device-code#1}
+>   client_id=atlas-cli
+>   resource=https://api.example.test
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "error": "authorization_pending",
+      "error_description": "The device authorization request is still pending.",
+      "interval": 5
+    }
+
+# no client_id: SqlOS throws System.InvalidOperationException "Client application is required." and writes no response (Kestrel answers 500).
+
+# an unknown client: SqlOS throws System.InvalidOperationException "Unknown client 'atlas-unknown'." and writes no response (Kestrel answers 500).
+
+# a JSON body instead of a form: SqlOS throws System.InvalidOperationException "Incorrect Content-Type: application/json; charset=utf-8" and writes no response (Kestrel answers 500).
+
+## audit: remaining events
+  (no new events)

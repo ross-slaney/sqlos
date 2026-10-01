@@ -1,0 +1,132 @@
+# SqlOS behavior lock transcript
+scenario: SettingsAdminScenarios.Code_owned_branding_is_read_only_in_the_dashboard
+profile: hosted
+
+## 1. operator: the application description and app.Brand own the AuthPage branding
+> GET /sqlos/admin/auth/api/settings/auth-page
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accentColor": "#0f172a",
+      "backgroundColor": "#f8fafc",
+      "emailOtpRuntimeConfigured": true,
+      "enablePasswordSignup": true,
+      "enabledCredentialTypes": [
+        "password",
+        "email_otp",
+        "magic_link",
+        "phone_otp"
+      ],
+      "headlessCapabilityRegistered": false,
+      "layout": "split",
+      "localPasswordRuntimeEnabled": true,
+      "logoBase64": null,
+      "magicLinkRuntimeConfigured": true,
+      "managedByStartupSeed": true,
+      "ownership": {
+        "canEmergencyDisable": false,
+        "configurationFingerprint": "{hex#1}",
+        "isEditable": false,
+        "isOrphaned": false,
+        "lastReconciledAt": "{datetime:unspecified}",
+        "owner": "code",
+        "sourceKey": "auth-page:default"
+      },
+      "pageSubtitle": "Behavior lock hosted sign-in.",
+      "pageTitle": "Sign in to Behavior Lock",
+      "phoneOtpRuntimeConfigured": true,
+      "primaryColor": "#1d4ed8",
+      "updatedAt": "{datetime:unspecified}"
+    }
+
+## 2. operator: an unknown layout is rejected before ownership is checked
+> PUT /sqlos/admin/auth/api/settings/auth-page
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "accentColor": "rgb(15, 23, 42)",
+>     "backgroundColor": "transparent",
+>     "enablePasswordSignup": false,
+>     "enabledCredentialTypes": [
+>       "password",
+>       "Password",
+>       " "
+>     ],
+>     "layout": "grid",
+>     "logoBase64": "{data-uri:image/png}",
+>     "pageSubtitle": "Sign in to continue",
+>     "pageTitle": " Welcome back ",
+>     "primaryColor": "#0EA5E9"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Auth page layout must be either 'split' or 'stacked'."
+    }
+
+## 3. operator: a valid edit is rejected because code owns the branding
+> PUT /sqlos/admin/auth/api/settings/auth-page
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "accentColor": "rgb(15, 23, 42)",
+>     "backgroundColor": "transparent",
+>     "enablePasswordSignup": false,
+>     "enabledCredentialTypes": [
+>       "password",
+>       "Password",
+>       " "
+>     ],
+>     "layout": "stacked",
+>     "logoBase64": "{data-uri:image/png}",
+>     "pageSubtitle": "Sign in to continue",
+>     "pageTitle": " Welcome back ",
+>     "primaryColor": "#0EA5E9"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "AuthPage branding settings is owned by the 'code' configuration source. Change its source configuration instead."
+    }
+
+## 4. operator: the application description owns the auth email branding
+> GET /sqlos/admin/auth/api/settings/email
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accentColor": "#0f172a",
+      "applicationName": "Behavior Lock",
+      "backgroundColor": "#f8fafc",
+      "logoBase64": null,
+      "managedByStartupSeed": true,
+      "ownership": {
+        "canEmergencyDisable": false,
+        "configurationFingerprint": "{hex#2}",
+        "isEditable": false,
+        "isOrphaned": false,
+        "lastReconciledAt": "{datetime:unspecified}",
+        "owner": "code",
+        "sourceKey": "auth-email:default"
+      },
+      "primaryColor": "#2563eb",
+      "updatedAt": "{datetime:unspecified}"
+    }
+
+## 5. operator: an edit is rejected because code owns the email branding
+> PUT /sqlos/admin/auth/api/settings/email
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "accentColor": "hsl(222, 47%, 11%)",
+>     "applicationName": " Behavior Lock Mail ",
+>     "backgroundColor": "#F8FAFC",
+>     "logoBase64": " data:image/png;base64,iVBORw0KGgo= ",
+>     "primaryColor": "#16A34A"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "auth email branding settings is owned by the 'code' configuration source. Change its source configuration instead."
+    }

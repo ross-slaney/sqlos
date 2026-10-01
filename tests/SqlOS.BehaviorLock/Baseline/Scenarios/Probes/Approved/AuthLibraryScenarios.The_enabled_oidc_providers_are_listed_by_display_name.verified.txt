@@ -1,0 +1,42 @@
+# SqlOS behavior lock transcript
+scenario: AuthLibraryScenarios.The_enabled_oidc_providers_are_listed_by_display_name
+profile: hosted
+
+## 1. probe: ListEnabledProvidersAsync
+> GET /__probe/auth/providers
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    [
+      {
+        "connectionId": "{oidc#1}",
+        "displayName": "Example OIDC",
+        "isEnabled": true,
+        "logoDataUrl": null,
+        "protocol": "Oidc",
+        "providerType": "Custom"
+      },
+      {
+        "connectionId": "{oidc#2}",
+        "displayName": "GitHub",
+        "isEnabled": true,
+        "logoDataUrl": "{data-uri:image/svg+xml}",
+        "protocol": "OAuthProfile",
+        "providerType": "GitHub"
+      },
+      {
+        "connectionId": "{oidc#3}",
+        "displayName": "Google",
+        "isEnabled": true,
+        "logoDataUrl": "{data-uri:image/svg+xml}",
+        "protocol": "Oidc",
+        "providerType": "Google"
+      },
+      {
+        "connectionId": "{oidc#4}",
+        "displayName": "Microsoft",
+        "isEnabled": true,
+        "logoDataUrl": "{data-uri:image/svg+xml}",
+        "protocol": "Oidc",
+        "providerType": "Microsoft"
+      }
+    ]

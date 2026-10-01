@@ -1,0 +1,132 @@
+# SqlOS behavior lock transcript
+scenario: AdminIdentityInvitationScenarios.Invitations_to_one_address_are_limited_per_hour
+profile: dashboard-callback
+
+# Ten invitations to the same address were created in setup, the default hourly limit per address.
+
+## 1. operator: the eleventh is refused
+> POST /sqlos/admin/auth/api/organizations/{org#1}/invitations
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "email": "{email:dana}",
+>     "sendEmail": false
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Too many invitation emails have been requested for this address. Try again later."
+    }
+
+## 2. operator: the limit is per mailbox, not per spelling
+> POST /sqlos/admin/auth/api/organizations/{org#1}/invitations
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "email": "{email:DANA}",
+>     "sendEmail": false
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Too many invitation emails have been requested for this address. Try again later."
+    }
+
+## audit: the rejections are audited with the normalized address
+  - {
+      "action": "invitation.rate_limit_rejected",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "invitation.rate_limit_rejected",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "limit": "email",
+        "normalizedEmail": "{email:DANA}"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "invitation.rate_limit_rejected",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "invitation.rate_limit_rejected",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "limit": "email",
+        "normalizedEmail": "{email:DANA}"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 3. operator: another address is still accepted
+> POST /sqlos/admin/auth/api/organizations/{org#1}/invitations
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "email": "{email:erin}",
+>     "sendEmail": false
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "acceptedAt": null,
+      "acceptedByUserId": null,
+      "createdAt": "{datetime:utc-z}",
+      "customFields": null,
+      "email": "{email:erin}",
+      "expiresAt": "{datetime:utc-z}",
+      "id": "{inv#1}",
+      "inviteUrl": "https://sqlos.example.test/sqlos/auth/invitations/accept?token={link-token#1}",
+      "lastSendError": null,
+      "lastSentAt": null,
+      "organizationId": "{org#1}",
+      "organizationName": "Acme",
+      "revokedAt": null,
+      "revokedReason": null,
+      "role": "member",
+      "status": "pending"
+    }

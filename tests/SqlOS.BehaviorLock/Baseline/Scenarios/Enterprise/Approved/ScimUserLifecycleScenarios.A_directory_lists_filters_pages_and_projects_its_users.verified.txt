@@ -1,0 +1,933 @@
+# SqlOS behavior lock transcript
+scenario: ScimUserLifecycleScenarios.A_directory_lists_filters_pages_and_projects_its_users
+profile: enterprise-scim-path
+
+## 1. directory: provision Ann
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "emails": [
+>       {
+>         "primary": true,
+>         "type": "work",
+>         "value": "{email:ann}"
+>       }
+>     ],
+>     "externalId": "directory-ann",
+>     "name": {
+>       "familyName": "Archer",
+>       "givenName": "Ann"
+>     },
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:ann}"
+>   }
+< 201 Created
+< Content-Location: /scim/v2/Users/{usr:ann}
+< Content-Type: application/scim+json
+< Location: /scim/v2/Users/{usr:ann}
+    {
+      "active": true,
+      "displayName": "Ann Archer",
+      "emails": [
+        {
+          "primary": true,
+          "type": "work",
+          "value": "{email:ann}"
+        }
+      ],
+      "externalId": "directory-ann",
+      "groups": [],
+      "id": "{usr:ann}",
+      "meta": {
+        "created": "{datetime:utc-z}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Users/{usr:ann}",
+        "resourceType": "User"
+      },
+      "name": {
+        "familyName": "Archer",
+        "formatted": "Ann Archer",
+        "givenName": "Ann"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:ann}"
+    }
+
+# Bob and Cy were provisioned the same way; Cy arrived inactive.
+
+## 2. directory: list every user, ordered by userName
+> GET /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "Resources": [
+        {
+          "active": true,
+          "displayName": "Ann Archer",
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:ann}"
+            }
+          ],
+          "externalId": "directory-ann",
+          "groups": [],
+          "id": "{usr:ann}",
+          "meta": {
+            "created": "{datetime:unspecified}",
+            "lastModified": "{datetime:unspecified}",
+            "location": "/scim/v2/Users/{usr:ann}",
+            "resourceType": "User"
+          },
+          "name": {
+            "familyName": "Archer",
+            "formatted": "Ann Archer",
+            "givenName": "Ann"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:ann}"
+        },
+        {
+          "active": true,
+          "displayName": "Bob Baker",
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:bob}"
+            }
+          ],
+          "externalId": "directory-bob",
+          "groups": [],
+          "id": "{usr:bob}",
+          "meta": {
+            "created": "{datetime:unspecified}",
+            "lastModified": "{datetime:unspecified}",
+            "location": "/scim/v2/Users/{usr:bob}",
+            "resourceType": "User"
+          },
+          "name": {
+            "familyName": "Baker",
+            "formatted": "Bob Baker",
+            "givenName": "Bob"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:bob}"
+        },
+        {
+          "active": false,
+          "displayName": "Cy Cole",
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:cy}"
+            }
+          ],
+          "externalId": "directory-cy",
+          "groups": [],
+          "id": "{usr#1}",
+          "meta": {
+            "created": "{datetime:unspecified}",
+            "lastModified": "{datetime:unspecified}",
+            "location": "/scim/v2/Users/{usr#1}",
+            "resourceType": "User"
+          },
+          "name": {
+            "familyName": "Cole",
+            "formatted": "Cy Cole",
+            "givenName": "Cy"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:cy}"
+        }
+      ],
+      "itemsPerPage": 3,
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+      ],
+      "startIndex": 1,
+      "totalResults": 3
+    }
+
+## 3. directory: filter by userName
+> GET /scim/v2/Users?filter=userName%20eq%20%22bob@{domain:acme}%22
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "Resources": [
+        {
+          "active": true,
+          "displayName": "Bob Baker",
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:bob}"
+            }
+          ],
+          "externalId": "directory-bob",
+          "groups": [],
+          "id": "{usr:bob}",
+          "meta": {
+            "created": "{datetime:unspecified}",
+            "lastModified": "{datetime:unspecified}",
+            "location": "/scim/v2/Users/{usr:bob}",
+            "resourceType": "User"
+          },
+          "name": {
+            "familyName": "Baker",
+            "formatted": "Bob Baker",
+            "givenName": "Bob"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:bob}"
+        }
+      ],
+      "itemsPerPage": 1,
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+      ],
+      "startIndex": 1,
+      "totalResults": 1
+    }
+
+## 4. directory: filter by externalId
+> GET /scim/v2/Users?filter=externalId%20eq%20%22directory-ann%22
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "Resources": [
+        {
+          "active": true,
+          "displayName": "Ann Archer",
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:ann}"
+            }
+          ],
+          "externalId": "directory-ann",
+          "groups": [],
+          "id": "{usr:ann}",
+          "meta": {
+            "created": "{datetime:unspecified}",
+            "lastModified": "{datetime:unspecified}",
+            "location": "/scim/v2/Users/{usr:ann}",
+            "resourceType": "User"
+          },
+          "name": {
+            "familyName": "Archer",
+            "formatted": "Ann Archer",
+            "givenName": "Ann"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:ann}"
+        }
+      ],
+      "itemsPerPage": 1,
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+      ],
+      "startIndex": 1,
+      "totalResults": 1
+    }
+
+## 5. directory: filter by work email, as Entra sends it
+> GET /scim/v2/Users?filter=emails[type%20eq%20%22work%22].value%20eq%20%22ann@{domain:acme}%22
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "Resources": [
+        {
+          "active": true,
+          "displayName": "Ann Archer",
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:ann}"
+            }
+          ],
+          "externalId": "directory-ann",
+          "groups": [],
+          "id": "{usr:ann}",
+          "meta": {
+            "created": "{datetime:unspecified}",
+            "lastModified": "{datetime:unspecified}",
+            "location": "/scim/v2/Users/{usr:ann}",
+            "resourceType": "User"
+          },
+          "name": {
+            "familyName": "Archer",
+            "formatted": "Ann Archer",
+            "givenName": "Ann"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:ann}"
+        }
+      ],
+      "itemsPerPage": 1,
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+      ],
+      "startIndex": 1,
+      "totalResults": 1
+    }
+
+## 6. directory: filter by emails.value
+> GET /scim/v2/Users?filter=emails.value%20eq%20%22bob@{domain:acme}%22
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "Resources": [
+        {
+          "active": true,
+          "displayName": "Bob Baker",
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:bob}"
+            }
+          ],
+          "externalId": "directory-bob",
+          "groups": [],
+          "id": "{usr:bob}",
+          "meta": {
+            "created": "{datetime:unspecified}",
+            "lastModified": "{datetime:unspecified}",
+            "location": "/scim/v2/Users/{usr:bob}",
+            "resourceType": "User"
+          },
+          "name": {
+            "familyName": "Baker",
+            "formatted": "Bob Baker",
+            "givenName": "Bob"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:bob}"
+        }
+      ],
+      "itemsPerPage": 1,
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+      ],
+      "startIndex": 1,
+      "totalResults": 1
+    }
+
+## 7. directory: filter by id
+> GET /scim/v2/Users?filter=id%20eq%20%{token#1}%22
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "Resources": [
+        {
+          "active": true,
+          "displayName": "Ann Archer",
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:ann}"
+            }
+          ],
+          "externalId": "directory-ann",
+          "groups": [],
+          "id": "{usr:ann}",
+          "meta": {
+            "created": "{datetime:unspecified}",
+            "lastModified": "{datetime:unspecified}",
+            "location": "/scim/v2/Users/{usr:ann}",
+            "resourceType": "User"
+          },
+          "name": {
+            "familyName": "Archer",
+            "formatted": "Ann Archer",
+            "givenName": "Ann"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:ann}"
+        }
+      ],
+      "itemsPerPage": 1,
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+      ],
+      "startIndex": 1,
+      "totalResults": 1
+    }
+
+## 8. directory: a filter that matches nobody
+> GET /scim/v2/Users?filter=userName%20eq%20%22nobody@example.test%22
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "Resources": [],
+      "itemsPerPage": 0,
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+      ],
+      "startIndex": 1,
+      "totalResults": 0
+    }
+
+## 9. directory: the second page of one
+> GET /scim/v2/Users?startIndex=2&count=1
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "Resources": [
+        {
+          "active": true,
+          "displayName": "Bob Baker",
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:bob}"
+            }
+          ],
+          "externalId": "directory-bob",
+          "groups": [],
+          "id": "{usr:bob}",
+          "meta": {
+            "created": "{datetime:unspecified}",
+            "lastModified": "{datetime:unspecified}",
+            "location": "/scim/v2/Users/{usr:bob}",
+            "resourceType": "User"
+          },
+          "name": {
+            "familyName": "Baker",
+            "formatted": "Bob Baker",
+            "givenName": "Bob"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:bob}"
+        }
+      ],
+      "itemsPerPage": 1,
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+      ],
+      "startIndex": 2,
+      "totalResults": 3
+    }
+
+## 10. directory: count=0 returns only the total
+> GET /scim/v2/Users?count=0
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "Resources": [],
+      "itemsPerPage": 0,
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+      ],
+      "startIndex": 1,
+      "totalResults": 3
+    }
+
+## 11. directory: out-of-range paging is clamped
+> GET /scim/v2/Users?startIndex=0&count=500
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "Resources": [
+        {
+          "active": true,
+          "displayName": "Ann Archer",
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:ann}"
+            }
+          ],
+          "externalId": "directory-ann",
+          "groups": [],
+          "id": "{usr:ann}",
+          "meta": {
+            "created": "{datetime:unspecified}",
+            "lastModified": "{datetime:unspecified}",
+            "location": "/scim/v2/Users/{usr:ann}",
+            "resourceType": "User"
+          },
+          "name": {
+            "familyName": "Archer",
+            "formatted": "Ann Archer",
+            "givenName": "Ann"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:ann}"
+        },
+        {
+          "active": true,
+          "displayName": "Bob Baker",
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:bob}"
+            }
+          ],
+          "externalId": "directory-bob",
+          "groups": [],
+          "id": "{usr:bob}",
+          "meta": {
+            "created": "{datetime:unspecified}",
+            "lastModified": "{datetime:unspecified}",
+            "location": "/scim/v2/Users/{usr:bob}",
+            "resourceType": "User"
+          },
+          "name": {
+            "familyName": "Baker",
+            "formatted": "Bob Baker",
+            "givenName": "Bob"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:bob}"
+        },
+        {
+          "active": false,
+          "displayName": "Cy Cole",
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:cy}"
+            }
+          ],
+          "externalId": "directory-cy",
+          "groups": [],
+          "id": "{usr#1}",
+          "meta": {
+            "created": "{datetime:unspecified}",
+            "lastModified": "{datetime:unspecified}",
+            "location": "/scim/v2/Users/{usr#1}",
+            "resourceType": "User"
+          },
+          "name": {
+            "familyName": "Cole",
+            "formatted": "Cy Cole",
+            "givenName": "Cy"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:cy}"
+        }
+      ],
+      "itemsPerPage": 3,
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+      ],
+      "startIndex": 1,
+      "totalResults": 3
+    }
+
+## 12. directory: project userName and email values
+> GET /scim/v2/Users?attributes=userName,emails.value
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "Resources": [
+        {
+          "emails": [
+            {
+              "value": "{email:ann}"
+            }
+          ],
+          "id": "{usr:ann}",
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:ann}"
+        },
+        {
+          "emails": [
+            {
+              "value": "{email:bob}"
+            }
+          ],
+          "id": "{usr:bob}",
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:bob}"
+        },
+        {
+          "emails": [
+            {
+              "value": "{email:cy}"
+            }
+          ],
+          "id": "{usr#1}",
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:cy}"
+        }
+      ],
+      "itemsPerPage": 3,
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+      ],
+      "startIndex": 1,
+      "totalResults": 3
+    }
+
+## 13. directory: exclude meta, groups, and name
+> GET /scim/v2/Users?excludedAttributes=meta,groups,name
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "Resources": [
+        {
+          "active": true,
+          "displayName": "Ann Archer",
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:ann}"
+            }
+          ],
+          "externalId": "directory-ann",
+          "id": "{usr:ann}",
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:ann}"
+        },
+        {
+          "active": true,
+          "displayName": "Bob Baker",
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:bob}"
+            }
+          ],
+          "externalId": "directory-bob",
+          "id": "{usr:bob}",
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:bob}"
+        },
+        {
+          "active": false,
+          "displayName": "Cy Cole",
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:cy}"
+            }
+          ],
+          "externalId": "directory-cy",
+          "id": "{usr#1}",
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:cy}"
+        }
+      ],
+      "itemsPerPage": 3,
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+      ],
+      "startIndex": 1,
+      "totalResults": 3
+    }
+
+## 14. directory: read one user with a schema-qualified projection
+> GET /scim/v2/Users/{usr:ann}?attributes=urn%3Aietf%3Aparams%3Ascim%3Aschemas%3Acore%3A2.0%3AUser%3AdisplayName
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "displayName": "Ann Archer",
+      "id": "{usr:ann}",
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ]
+    }
+
+## 15. directory: filtering on an unsupported attribute
+> GET /scim/v2/Users?filter=displayName%20eq%20%22Ann%20Archer%22
+> Authorization: Bearer {scim-token#1}
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "Unsupported SCIM filter attribute.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidFilter",
+      "status": "400"
+    }
+
+## 16. directory: an operator other than eq
+> GET /scim/v2/Users?filter=userName%20co%20%22ann%22
+> Authorization: Bearer {scim-token#1}
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "Unsupported SCIM filter.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidFilter",
+      "status": "400"
+    }
+
+## 17. directory: a filter longer than 512 characters
+> GET /scim/v2/Users?filter=userName%20eq%20%{hex#1}%22
+> Authorization: Bearer {scim-token#1}
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM filter is too long.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidFilter",
+      "status": "400"
+    }
+
+## 18. directory: attributes and excludedAttributes together
+> GET /scim/v2/Users?attributes=userName&excludedAttributes=emails
+> Authorization: Bearer {scim-token#1}
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM attributes and excludedAttributes cannot be used together.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidSyntax",
+      "status": "400"
+    }
+
+## 19. directory: a user ID this connection never provisioned
+> GET /scim/v2/Users/{usr#2}
+> Authorization: Bearer {scim-token#1}
+< 404 Not Found
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM user not found.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "status": "404"
+    }
+
+## audit: provisioning events
+  - {
+      "action": "scim.user.created",
+      "actor": {
+        "displayName": null,
+        "id": "directory-ann",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.created",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-ann",
+        "payload": {
+          "active": true,
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:ann}"
+            }
+          ],
+          "externalId": "directory-ann",
+          "name": {
+            "familyName": "Archer",
+            "givenName": "Ann"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:ann}"
+        },
+        "resourceId": "{usr:ann}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:ann}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.user.created",
+      "actor": {
+        "displayName": null,
+        "id": "directory-bob",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.created",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-bob",
+        "payload": {
+          "active": true,
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:bob}"
+            }
+          ],
+          "externalId": "directory-bob",
+          "name": {
+            "familyName": "Baker",
+            "givenName": "Bob"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:bob}"
+        },
+        "resourceId": "{usr:bob}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:bob}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.user.created",
+      "actor": {
+        "displayName": null,
+        "id": "directory-cy",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.created",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-cy",
+        "payload": {
+          "active": false,
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:cy}"
+            }
+          ],
+          "externalId": "directory-cy",
+          "name": {
+            "familyName": "Cole",
+            "givenName": "Cy"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:cy}"
+        },
+        "resourceId": "{usr#1}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr#1}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }

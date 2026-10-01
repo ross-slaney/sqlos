@@ -1,0 +1,191 @@
+# SqlOS behavior lock transcript
+scenario: PublicRefreshScenarios.Revoking_an_organization_misses_sessions_refreshed_into_it_CurrentBehavior_KnownDefect_427
+profile: hosted
+
+# Alice (member of Acme, admin of Globex) signed in on the hosted page and chose Acme.
+
+## 1. app-backend: Alice's session, started in Acme, refreshes into Globex
+> POST /sqlos/auth/token/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "organizationId": "{org#1}",
+>     "refreshToken": "{refresh-token#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessToken": "{access-token#1}",
+      "accessTokenExpiresAt": "{datetime:utc-z}",
+      "clientId": "behavior-lock-app",
+      "idToken": "{id-token#1}",
+      "organizationId": "{org#1}",
+      "refreshToken": "{refresh-token#2}",
+      "refreshTokenExpiresAt": "{datetime:utc-z}",
+      "sessionId": "{ses#1}"
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "org_id": "{org#1}",
+      "scope": "openid profile email offline_access",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+  jwt {id-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "JWT"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "at_hash": "{hash:at_hash}",
+      "aud": "behavior-lock-app",
+      "auth_time": {epoch},
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "org_id": "{org#1}",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=5m
+
+## 2. operator: known defect #427: revoking Globex's sessions matches none
+> POST /sqlos/admin/auth/api/sessions/revocation/preview
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "organizationId": "{org#1}",
+>     "reason": "tenant incident"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "activeRefreshTokens": 0,
+      "alreadyRevokedSessions": 0,
+      "auditEventId": null,
+      "matchedSessions": 0,
+      "newlyRevokedRefreshTokens": 0,
+      "newlyRevokedSessions": 0,
+      "operationId": "session-revocation-{hex#1}",
+      "preview": true,
+      "revokedAt": null
+    }
+
+## 3. operator: confirming it finds nothing to revoke
+> POST /sqlos/admin/auth/api/sessions/revocation
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "confirm": true,
+>     "expectedMatchedSessions": 0,
+>     "organizationId": "{org#1}",
+>     "reason": "tenant incident"
+>   }
+< 404 Not Found
+
+## 4. app-backend: known defect #427: the Globex access token still opens the API
+> GET /api/me
+> Authorization: Bearer {access-token#1}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "audience": "https://sqlos.example.test/api",
+      "claims": [
+        {
+          "type": "amr",
+          "value": "password"
+        },
+        {
+          "type": "aud",
+          "value": "https://sqlos.example.test/api"
+        },
+        {
+          "type": "client_id",
+          "value": "behavior-lock-app"
+        },
+        {
+          "type": "email",
+          "value": "{email:alice}"
+        },
+        {
+          "type": "exp",
+          "value": "{epoch}"
+        },
+        {
+          "type": "iat",
+          "value": "{epoch}"
+        },
+        {
+          "type": "iss",
+          "value": "https://sqlos.example.test/sqlos/auth"
+        },
+        {
+          "type": "nbf",
+          "value": "{epoch}"
+        },
+        {
+          "type": "org_id",
+          "value": "{org#1}"
+        },
+        {
+          "type": "scope",
+          "value": "openid profile email offline_access"
+        },
+        {
+          "type": "sid",
+          "value": "{ses#1}"
+        },
+        {
+          "type": "sub",
+          "value": "{usr#1}"
+        }
+      ],
+      "clientId": "behavior-lock-app",
+      "organizationId": "{org#1}",
+      "scope": "openid profile email offline_access",
+      "sessionId": "{ses#1}",
+      "userId": "{usr#1}"
+    }
+  claim lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+
+## 5. app-backend: known defect #427: and the session keeps refreshing into Globex
+> POST /sqlos/auth/token/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "organizationId": "{org#1}",
+>     "refreshToken": "{refresh-token#2}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessToken": "{access-token#1}",
+      "accessTokenExpiresAt": "{datetime:utc-z}",
+      "clientId": "behavior-lock-app",
+      "idToken": "{id-token#1}",
+      "organizationId": "{org#1}",
+      "refreshToken": "{refresh-token#3}",
+      "refreshTokenExpiresAt": "{datetime:utc-z}",
+      "sessionId": "{ses#1}"
+    }
+
+## audit: events
+  (no new events)

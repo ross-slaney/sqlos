@@ -1,0 +1,399 @@
+# SqlOS behavior lock transcript
+scenario: OidcConnectionAdminScenarios.Invalid_oidc_connection_changes_are_rejected
+profile: dashboard-callback
+
+## 1. operator: an unknown provider type is a bad request
+> POST /sqlos/admin/auth/api/oidc-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "acceptedAmrValues": null,
+>     "allowedCallbackUris": [
+>       "https://sqlos.example.test/sqlos/auth/oidc/callback"
+>     ],
+>     "appleKeyId": null,
+>     "appleTeamId": null,
+>     "authorizationEndpoint": null,
+>     "clientAuthMethod": null,
+>     "clientId": "okta-client",
+>     "clientSecret": "connection-secret",
+>     "discoveryUrl": null,
+>     "displayName": "Okta connection",
+>     "issuer": null,
+>     "jwksUri": null,
+>     "providerType": "Okta",
+>     "tokenEndpoint": null,
+>     "useDiscovery": true
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Unsupported OIDC provider 'Okta'."
+    }
+
+## 2. operator: an unsupported client authentication method is a bad request
+> POST /sqlos/admin/auth/api/oidc-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "acceptedAmrValues": null,
+>     "allowedCallbackUris": [
+>       "https://sqlos.example.test/sqlos/auth/oidc/callback"
+>     ],
+>     "appleKeyId": null,
+>     "appleTeamId": null,
+>     "authorizationEndpoint": null,
+>     "clientAuthMethod": "private_key_jwt",
+>     "clientId": "custom-client",
+>     "clientSecret": "connection-secret",
+>     "discoveryUrl": "https://sso.example.test/.well-known/openid-configuration",
+>     "displayName": "Custom connection",
+>     "issuer": null,
+>     "jwksUri": null,
+>     "providerType": "Custom",
+>     "tokenEndpoint": null,
+>     "useDiscovery": true
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Unsupported OIDC client auth method 'private_key_jwt'."
+    }
+
+## 3. operator: a malformed body is rejected by request binding
+> POST /sqlos/admin/auth/api/oidc-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {"providerType":
+< 400 Bad Request
+
+## 4. operator: a second Google connection escapes the endpoint as a server error
+> POST /sqlos/admin/auth/api/oidc-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "acceptedAmrValues": null,
+>     "allowedCallbackUris": [
+>       "https://sqlos.example.test/sqlos/auth/oidc/callback"
+>     ],
+>     "appleKeyId": null,
+>     "appleTeamId": null,
+>     "authorizationEndpoint": null,
+>     "clientAuthMethod": null,
+>     "clientId": "google-client",
+>     "clientSecret": "connection-secret",
+>     "discoveryUrl": null,
+>     "displayName": "Google connection",
+>     "issuer": null,
+>     "jwksUri": null,
+>     "providerType": "Google",
+>     "tokenEndpoint": null,
+>     "useDiscovery": true
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: An OIDC connection for provider 'Google' already exists.
+
+## 5. operator: blank callback URIs escape as a server error
+> POST /sqlos/admin/auth/api/oidc-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "acceptedAmrValues": null,
+>     "allowedCallbackUris": [
+>       " ",
+>       ""
+>     ],
+>     "appleKeyId": null,
+>     "appleTeamId": null,
+>     "authorizationEndpoint": null,
+>     "clientAuthMethod": null,
+>     "clientId": "microsoft-client",
+>     "clientSecret": "connection-secret",
+>     "discoveryUrl": null,
+>     "displayName": "Microsoft connection",
+>     "issuer": null,
+>     "jwksUri": null,
+>     "providerType": "Microsoft",
+>     "tokenEndpoint": null,
+>     "useDiscovery": true
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: At least one callback URI is required.
+
+## 6. operator: a social connection without a client secret escapes as a server error
+> POST /sqlos/admin/auth/api/oidc-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "acceptedAmrValues": null,
+>     "allowedCallbackUris": [
+>       "https://sqlos.example.test/sqlos/auth/oidc/callback"
+>     ],
+>     "appleKeyId": null,
+>     "appleTeamId": null,
+>     "authorizationEndpoint": null,
+>     "clientAuthMethod": null,
+>     "clientId": "microsoft-client",
+>     "clientSecret": " ",
+>     "discoveryUrl": null,
+>     "displayName": "Microsoft connection",
+>     "issuer": null,
+>     "jwksUri": null,
+>     "providerType": "Microsoft",
+>     "tokenEndpoint": null,
+>     "useDiscovery": true
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: This social login connection requires a client secret.
+
+## 7. operator: Apple without a private key escapes as a server error
+> POST /sqlos/admin/auth/api/oidc-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "acceptedAmrValues": null,
+>     "allowedCallbackUris": [
+>       "https://sqlos.example.test/sqlos/auth/oidc/callback"
+>     ],
+>     "appleKeyId": "KEY1234567",
+>     "appleTeamId": "TEAM123456",
+>     "authorizationEndpoint": null,
+>     "clientAuthMethod": null,
+>     "clientId": "apple-client",
+>     "clientSecret": null,
+>     "discoveryUrl": null,
+>     "displayName": "Apple connection",
+>     "issuer": null,
+>     "jwksUri": null,
+>     "providerType": "Apple",
+>     "tokenEndpoint": null,
+>     "useDiscovery": true
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Apple OIDC connections require team ID, key ID, and a private key.
+
+## 8. operator: custom discovery without a discovery URL escapes as a server error
+> POST /sqlos/admin/auth/api/oidc-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "acceptedAmrValues": null,
+>     "allowedCallbackUris": [
+>       "https://sqlos.example.test/sqlos/auth/oidc/callback"
+>     ],
+>     "appleKeyId": null,
+>     "appleTeamId": null,
+>     "authorizationEndpoint": null,
+>     "clientAuthMethod": null,
+>     "clientId": "custom-client",
+>     "clientSecret": "connection-secret",
+>     "discoveryUrl": null,
+>     "displayName": "Custom connection",
+>     "issuer": null,
+>     "jwksUri": null,
+>     "providerType": "Custom",
+>     "tokenEndpoint": null,
+>     "useDiscovery": true
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: A discovery URL is required for custom OIDC connections when discovery mode is enabled.
+
+## 9. operator: manual endpoints without a token endpoint escape as a server error
+> POST /sqlos/admin/auth/api/oidc-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "acceptedAmrValues": null,
+>     "allowedCallbackUris": [
+>       "https://sqlos.example.test/sqlos/auth/oidc/callback"
+>     ],
+>     "appleKeyId": null,
+>     "appleTeamId": null,
+>     "authorizationEndpoint": "https://manual.example.test/authorize",
+>     "clientAuthMethod": null,
+>     "clientId": "custom-client",
+>     "clientSecret": "connection-secret",
+>     "discoveryUrl": null,
+>     "displayName": "Custom connection",
+>     "issuer": "https://manual.example.test",
+>     "jwksUri": "https://manual.example.test/jwks",
+>     "providerType": "Custom",
+>     "tokenEndpoint": null,
+>     "useDiscovery": false
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: A token endpoint is required for manual OIDC connections.
+
+## 10. operator: more than 32 trusted upstream MFA values escape as a server error
+> POST /sqlos/admin/auth/api/oidc-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "acceptedAmrValues": [
+>       "amr-1",
+>       "amr-2",
+>       "amr-3",
+>       "amr-4",
+>       "amr-5",
+>       "amr-6",
+>       "amr-7",
+>       "amr-8",
+>       "amr-9",
+>       "amr-10",
+>       "amr-11",
+>       "amr-12",
+>       "amr-13",
+>       "amr-14",
+>       "amr-15",
+>       "amr-16",
+>       "amr-17",
+>       "amr-18",
+>       "amr-19",
+>       "amr-20",
+>       "amr-21",
+>       "amr-22",
+>       "amr-23",
+>       "amr-24",
+>       "amr-25",
+>       "amr-26",
+>       "amr-27",
+>       "amr-28",
+>       "amr-29",
+>       "amr-30",
+>       "amr-31",
+>       "amr-32",
+>       "amr-33"
+>     ],
+>     "allowedCallbackUris": [
+>       "https://sqlos.example.test/sqlos/auth/oidc/callback"
+>     ],
+>     "appleKeyId": null,
+>     "appleTeamId": null,
+>     "authorizationEndpoint": null,
+>     "clientAuthMethod": null,
+>     "clientId": "custom-client",
+>     "clientSecret": "connection-secret",
+>     "discoveryUrl": "https://sso.example.test/.well-known/openid-configuration",
+>     "displayName": "Custom connection",
+>     "issuer": null,
+>     "jwksUri": null,
+>     "providerType": "Custom",
+>     "tokenEndpoint": null,
+>     "useDiscovery": true
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Upstream MFA trust policies support at most 32 accepted values.
+
+## 11. operator: an edit with an unsupported client authentication method is a bad request
+> PUT /sqlos/admin/auth/api/oidc-connections/{oidc#1}
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "allowedCallbackUris": [
+>       "https://sqlos.example.test/sqlos/auth/oidc/callback"
+>     ],
+>     "clientAuthMethod": "tls_client_auth",
+>     "clientId": "google-client",
+>     "displayName": "Google",
+>     "useDiscovery": true
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Unsupported OIDC client auth method 'tls_client_auth'."
+    }
+
+## 12. operator: editing an unknown connection escapes as a server error
+> PUT /sqlos/admin/auth/api/oidc-connections/{oidc#2}
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "allowedCallbackUris": [
+>       "https://sqlos.example.test/sqlos/auth/oidc/callback"
+>     ],
+>     "clientAuthMethod": null,
+>     "clientId": "google-client",
+>     "displayName": "Google",
+>     "useDiscovery": true
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: OIDC connection not found.
+
+## 13. operator: an edit that removes every callback URI escapes as a server error
+> PUT /sqlos/admin/auth/api/oidc-connections/{oidc#1}
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "allowedCallbackUris": [],
+>     "clientAuthMethod": null,
+>     "clientId": "google-client",
+>     "displayName": "Google",
+>     "useDiscovery": true
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: At least one callback URI is required.
+
+## 14. operator: enabling an unknown connection escapes as a server error
+> POST /sqlos/admin/auth/api/oidc-connections/{oidc#2}/enable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: OIDC connection not found.
+
+## 15. operator: disabling an unknown connection escapes as a server error
+> POST /sqlos/admin/auth/api/oidc-connections/{oidc#2}/disable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: OIDC connection not found.
+
+## 16. operator: only the original Google connection exists, unchanged
+> GET /sqlos/admin/auth/api/oidc-connections
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "allowedCallbackUris": "[\"https://sqlos.example.test/sqlos/auth/oidc/callback\"]",
+          "appleKeyId": null,
+          "appleTeamId": null,
+          "authorizationEndpoint": null,
+          "claimMapping": "{\"SubjectClaim\":\"sub\",\"EmailClaim\":\"email\",\"EmailVerifiedClaim\":\"email_verified\",\"DisplayNameClaim\":\"name\",\"FirstNameClaim\":\"given_name\",\"LastNameClaim\":\"family_name\",\"PreferredUsernameClaim\":\"preferred_username\"}",
+          "clientAuthMethod": "ClientSecretPost",
+          "clientId": "google-client",
+          "createdAt": "{datetime:unspecified}",
+          "discoveryUrl": "https://accounts.google.com/.well-known/openid-configuration",
+          "displayName": "Google",
+          "effectiveLogoDataUrl": "{data-uri:image/svg+xml}",
+          "id": "{oidc#1}",
+          "isEnabled": true,
+          "issuer": null,
+          "jwksUri": null,
+          "logoDataUrl": null,
+          "microsoftTenant": null,
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "protocol": "Oidc",
+          "providerType": "Google",
+          "scopes": "[]",
+          "tokenEndpoint": null,
+          "updatedAt": "{datetime:unspecified}",
+          "useDiscovery": true,
+          "useUserInfo": true,
+          "userInfoEndpoint": null
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }

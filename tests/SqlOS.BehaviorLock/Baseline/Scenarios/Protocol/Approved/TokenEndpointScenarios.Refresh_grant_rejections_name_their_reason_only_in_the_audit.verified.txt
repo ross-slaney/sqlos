@@ -1,0 +1,416 @@
+# SqlOS behavior lock transcript
+scenario: TokenEndpointScenarios.Refresh_grant_rejections_name_their_reason_only_in_the_audit
+profile: hosted
+
+## 1. client: an unknown refresh token without client_id falls through to client authentication
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=refresh_token
+>   refresh_token=not-a-refresh-token
+< 401 Unauthorized
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+< WWW-Authenticate: Basic
+    {
+      "error": "invalid_client",
+      "error_description": "Client authentication failed."
+    }
+
+## audit
+  - {
+      "action": "oauth.client_authentication.failed",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "oauth_client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.client_authentication.failed",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "clientId": null
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 2. client: with the public client's client_id it is invalid_grant
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=refresh_token
+>   refresh_token=not-a-refresh-token
+>   client_id=behavior-lock-app
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "error": "invalid_grant",
+      "error_description": "The authorization grant is invalid or expired."
+    }
+
+## audit
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "Refresh token is invalid.",
+        "error": "invalid_grant",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The authorization grant is invalid or expired.",
+        "surface": "OAuthToken"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 3. client: an empty refresh token
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=refresh_token
+>   refresh_token=
+>   client_id=behavior-lock-app
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "error": "invalid_grant",
+      "error_description": "The authorization grant is invalid or expired."
+    }
+
+## audit
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "A refresh token is required.",
+        "error": "invalid_grant",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The authorization grant is invalid or expired.",
+        "surface": "OAuthToken"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 4. client: a client_id that did not receive the token
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=refresh_token
+>   refresh_token={refresh-token#1}
+>   client_id=another-client
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "error": "invalid_grant",
+      "error_description": "The authorization grant is invalid or expired."
+    }
+
+## audit
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "Refresh token was not issued for this client.",
+        "error": "invalid_grant",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The authorization grant is invalid or expired.",
+        "surface": "OAuthToken"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 5. client: a public client that presents a secret
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=refresh_token
+>   refresh_token={refresh-token#1}
+>   client_id=behavior-lock-app
+>   client_secret=a-secret-the-public-client-never-had
+< 401 Unauthorized
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+< WWW-Authenticate: Basic
+    {
+      "error": "invalid_client",
+      "error_description": "Client authentication failed."
+    }
+
+## audit
+  - {
+      "action": "oauth.client_authentication.failed",
+      "actor": {
+        "displayName": null,
+        "id": "behavior-lock-app",
+        "type": "oauth_client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.client_authentication.failed",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "clientId": "behavior-lock-app"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 6. client: with resource indicators off (no app.Mcp) a resource parameter is ignored and the token rotates
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=refresh_token
+>   refresh_token={refresh-token#1}
+>   client_id=behavior-lock-app
+>   resource=https://sqlos.example.test/mcp
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "access_token": "{access-token#1}",
+      "expires_in": ~600,
+      "id_token": "{id-token#1}",
+      "refresh_token": "{refresh-token#2}",
+      "scope": "openid profile email offline_access",
+      "token_type": "Bearer"
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "scope": "openid profile email offline_access",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+  jwt {id-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "JWT"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "at_hash": "{hash:at_hash}",
+      "aud": "behavior-lock-app",
+      "auth_time": {epoch},
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=5m
+
+## audit
+  (no new events)
+
+## 7. client: scope and organization_id are ignored on this route: the full grant rotates again
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=refresh_token
+>   refresh_token={refresh-token#2}
+>   client_id=behavior-lock-app
+>   scope=openid
+>   organization_id={org#1}
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "access_token": "{access-token#1}",
+      "expires_in": ~600,
+      "id_token": "{id-token#1}",
+      "refresh_token": "{refresh-token#3}",
+      "scope": "openid profile email offline_access",
+      "token_type": "Bearer"
+    }
+
+## audit
+  (no new events)
+
+# Alice signs out with the rotated refresh token (the public logout API).
+
+## 8. client: a refresh token of a signed-out session
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=refresh_token
+>   refresh_token={refresh-token#3}
+>   client_id=behavior-lock-app
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "error": "invalid_grant",
+      "error_description": "The authorization grant is invalid or expired."
+    }
+
+## audit
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#6}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "Refresh token is no longer valid.",
+        "error": "invalid_grant",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The authorization grant is invalid or expired.",
+        "surface": "OAuthToken"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

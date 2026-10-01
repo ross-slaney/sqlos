@@ -1,0 +1,384 @@
+# SqlOS behavior lock transcript
+scenario: HeadlessMfaScenarios.With_mfa_required_an_organization_pick_continues_to_the_challenge_and_completes
+profile: headless
+
+## 1. browser: sign in: the organization is asked before MFA
+> POST /sqlos/auth/headless/password/login
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "email": "{email:frank}",
+>     "password": "{password:frank}",
+>     "requestId": "{req#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "redirectUrl": null,
+      "type": "view",
+      "viewModel": {
+        "authBasePath": "/sqlos/auth",
+        "challengeToken": null,
+        "clientId": "behavior-lock-app",
+        "clientName": "Behavior Lock",
+        "consentScopes": null,
+        "consentToken": null,
+        "deviceAuthorization": null,
+        "displayName": null,
+        "email": "{email:frank}",
+        "error": null,
+        "fieldErrors": {},
+        "headlessApiBasePath": "/sqlos/auth/headless",
+        "info": null,
+        "invitation": null,
+        "mfaMethods": [],
+        "mfaToken": null,
+        "omittedOpenId": false,
+        "organizationSelection": [
+          {
+            "id": "{org#1}",
+            "name": "Acme",
+            "role": "member",
+            "slug": "{slug:acme}"
+          },
+          {
+            "id": "{org#2}",
+            "name": "Globex",
+            "role": "member",
+            "slug": "{slug:globex}"
+          }
+        ],
+        "pendingToken": "{pending-token#1}",
+        "phoneNumber": null,
+        "providers": [
+          {
+            "connectionId": "{oidc#1}",
+            "displayName": "Example OIDC",
+            "logoDataUrl": null,
+            "providerType": "Custom"
+          },
+          {
+            "connectionId": "{oidc#2}",
+            "displayName": "Google",
+            "logoDataUrl": "{data-uri:image/svg+xml}",
+            "providerType": "Google"
+          }
+        ],
+        "requestId": "{req#1}",
+        "requiresMfaEnrollment": false,
+        "scope": "openid profile email offline_access",
+        "settings": {
+          "accentColor": "#0f172a",
+          "backgroundColor": "#f8fafc",
+          "emailOtpRuntimeConfigured": true,
+          "enablePasswordSignup": true,
+          "enabledCredentialTypes": [
+            "password",
+            "email_otp",
+            "magic_link",
+            "phone_otp"
+          ],
+          "headlessCapabilityRegistered": true,
+          "layout": "split",
+          "localPasswordRuntimeEnabled": true,
+          "logoBase64": null,
+          "magicLinkRuntimeConfigured": true,
+          "managedByStartupSeed": true,
+          "ownership": {
+            "canEmergencyDisable": false,
+            "configurationFingerprint": "{hex#1}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "auth-page:default"
+          },
+          "pageSubtitle": "Secure your app-owned AI and MCP experiences with SqlOS.",
+          "pageTitle": "Sign in to Behavior Lock",
+          "phoneOtpRuntimeConfigured": true,
+          "primaryColor": "#2563eb",
+          "updatedAt": "{datetime:unspecified}"
+        },
+        "signupToken": null,
+        "totpEnrollment": null,
+        "uiContext": null,
+        "view": "organization"
+      }
+    }
+
+## 2. browser: pick globex: MFA enrollment is required, so the pick answers with the enrollment view
+> POST /sqlos/auth/headless/organization/select
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "organizationId": "{org#2}",
+>     "pendingToken": "{pending-token#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "redirectUrl": null,
+      "type": "view",
+      "viewModel": {
+        "authBasePath": "/sqlos/auth",
+        "challengeToken": null,
+        "clientId": "behavior-lock-app",
+        "clientName": "Behavior Lock",
+        "consentScopes": null,
+        "consentToken": null,
+        "deviceAuthorization": null,
+        "displayName": null,
+        "email": "{email:frank}",
+        "error": null,
+        "fieldErrors": {},
+        "headlessApiBasePath": "/sqlos/auth/headless",
+        "info": null,
+        "invitation": null,
+        "mfaMethods": [
+          "totp",
+          "recovery_code"
+        ],
+        "mfaToken": "{mfa-token#1}",
+        "omittedOpenId": false,
+        "organizationSelection": [
+          {
+            "id": "{org#1}",
+            "name": "Acme",
+            "role": "member",
+            "slug": "{slug:acme}"
+          },
+          {
+            "id": "{org#2}",
+            "name": "Globex",
+            "role": "member",
+            "slug": "{slug:globex}"
+          }
+        ],
+        "pendingToken": null,
+        "phoneNumber": null,
+        "providers": [
+          {
+            "connectionId": "{oidc#1}",
+            "displayName": "Example OIDC",
+            "logoDataUrl": null,
+            "providerType": "Custom"
+          },
+          {
+            "connectionId": "{oidc#2}",
+            "displayName": "Google",
+            "logoDataUrl": "{data-uri:image/svg+xml}",
+            "providerType": "Google"
+          }
+        ],
+        "requestId": "{req#1}",
+        "requiresMfaEnrollment": true,
+        "scope": "openid profile email offline_access",
+        "settings": {
+          "accentColor": "#0f172a",
+          "backgroundColor": "#f8fafc",
+          "emailOtpRuntimeConfigured": true,
+          "enablePasswordSignup": true,
+          "enabledCredentialTypes": [
+            "password",
+            "email_otp",
+            "magic_link",
+            "phone_otp"
+          ],
+          "headlessCapabilityRegistered": true,
+          "layout": "split",
+          "localPasswordRuntimeEnabled": true,
+          "logoBase64": null,
+          "magicLinkRuntimeConfigured": true,
+          "managedByStartupSeed": true,
+          "ownership": {
+            "canEmergencyDisable": false,
+            "configurationFingerprint": "{hex#1}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "auth-page:default"
+          },
+          "pageSubtitle": "Secure your app-owned AI and MCP experiences with SqlOS.",
+          "pageTitle": "Sign in to Behavior Lock",
+          "phoneOtpRuntimeConfigured": true,
+          "primaryColor": "#2563eb",
+          "updatedAt": "{datetime:unspecified}"
+        },
+        "signupToken": null,
+        "totpEnrollment": {
+          "authenticatorId": "{mfa#1}",
+          "enrollmentToken": "{enrollment-token#1}",
+          "expiresAt": "{datetime:utc-z}",
+          "provisioningUri": "otpauth://totp/SqlOS:{email:frank}?secret={totp-secret#1}&issuer=SqlOS&algorithm=SHA1&digits=6&period=30",
+          "qrCodeDataUrl": "{data-uri:image/svg+xml}",
+          "secret": "{totp-secret#1}"
+        },
+        "uiContext": null,
+        "view": "mfa-enroll"
+      }
+    }
+
+## 3. browser: confirm the authenticator: a redirect with a code
+> POST /sqlos/auth/headless/mfa/totp/enroll/verify
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "code": "{code#1}",
+>     "enrollmentToken": "{enrollment-token#1}",
+>     "mfaToken": "{mfa-token#1}",
+>     "requestId": "{req#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+< Set-Cookie: sqlos_auth_page={cookie#1}; expires=+7d; path=/; secure; samesite=lax; httponly
+    {
+      "redirectUrl": "https://sqlos.example.test/auth/callback?code={code#2}&state={state#1}&scope=openid%20profile%20email%20offline_access",
+      "type": "redirect",
+      "viewModel": null
+    }
+
+## 4. client: redeem the authorization code: bound to the picked organization
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=authorization_code
+>   code={code#2}
+>   client_id=behavior-lock-app
+>   redirect_uri=https://sqlos.example.test/auth/callback
+>   code_verifier={pkce-verifier#1}
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "access_token": "{access-token#1}",
+      "expires_in": ~600,
+      "id_token": "{id-token#1}",
+      "refresh_token": "{refresh-token#1}",
+      "scope": "openid profile email offline_access",
+      "token_type": "Bearer"
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password",
+        "totp"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:frank}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "org_id": "{org#2}",
+      "scope": "openid profile email offline_access",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+  jwt {id-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "JWT"
+    }
+    claims: {
+      "amr": [
+        "password",
+        "totp"
+      ],
+      "at_hash": "{hash#1}",
+      "aud": "behavior-lock-app",
+      "auth_time": {epoch},
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nonce": "{nonce#1}",
+      "org_id": "{org#2}",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=5m
+
+## audit: organization and MFA events
+  - {
+      "action": "password.login.succeeded",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "password.login.succeeded",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "AuthorizationRequestId": "[redacted]",
+        "ClientKey": "behavior-lock-app",
+        "NormalizedEmail": "{email:FRANK}",
+        "Surface": "headless",
+        "UserAgentHash": null,
+        "details": {
+          "resetScopes": [
+            "email",
+            "user"
+          ]
+        },
+        "maskedEmail": "FR***@EXAMPLE.TEST"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "user.login.mfa",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.mfa",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#2}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }

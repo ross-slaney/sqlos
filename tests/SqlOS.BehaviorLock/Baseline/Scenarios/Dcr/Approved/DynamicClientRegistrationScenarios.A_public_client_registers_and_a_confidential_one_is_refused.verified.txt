@@ -1,0 +1,218 @@
+# SqlOS behavior lock transcript
+scenario: DynamicClientRegistrationScenarios.A_public_client_registers_and_a_confidential_one_is_refused
+profile: dcr
+
+## 1. mcp-client: discover the registration endpoint
+> GET /sqlos/auth/.well-known/oauth-authorization-server
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "authorization_endpoint": "https://sqlos.example.test/sqlos/auth/authorize",
+      "claims_supported": [
+        "sub",
+        "name",
+        "preferred_username",
+        "email",
+        "email_verified",
+        "auth_time",
+        "amr",
+        "org_id"
+      ],
+      "client_id_metadata_document_supported": true,
+      "code_challenge_methods_supported": [
+        "S256"
+      ],
+      "device_authorization_endpoint": "https://sqlos.example.test/sqlos/auth/device_authorization",
+      "grant_types_supported": [
+        "authorization_code",
+        "refresh_token",
+        "urn:ietf:params:oauth:grant-type:device_code"
+      ],
+      "id_token_signing_alg_values_supported": [
+        "RS256"
+      ],
+      "issuer": "https://sqlos.example.test/sqlos/auth",
+      "jwks_uri": "https://sqlos.example.test/sqlos/auth/.well-known/jwks.json",
+      "registration_endpoint": "https://sqlos.example.test/sqlos/auth/register",
+      "request_parameter_supported": false,
+      "request_uri_parameter_supported": false,
+      "resource_parameter_supported": true,
+      "response_modes_supported": [
+        "query"
+      ],
+      "response_types_supported": [
+        "code"
+      ],
+      "scopes_supported": [
+        "email",
+        "openid",
+        "profile"
+      ],
+      "subject_types_supported": [
+        "public"
+      ],
+      "token_endpoint": "https://sqlos.example.test/sqlos/auth/token",
+      "token_endpoint_auth_methods_supported": [
+        "none"
+      ],
+      "userinfo_endpoint": "https://sqlos.example.test/sqlos/auth/userinfo"
+    }
+
+## 2. mcp-client: register a public PKCE client
+> POST /sqlos/auth/register
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "client_name": "Taskrail Desktop",
+>     "grant_types": [
+>       "authorization_code",
+>       "refresh_token"
+>     ],
+>     "redirect_uris": [
+>       "http://127.0.0.1/callback/taskrail"
+>     ],
+>     "response_types": [
+>       "code"
+>     ],
+>     "scope": "openid profile offline_access",
+>     "token_endpoint_auth_method": "none"
+>   }
+< 201 Created
+< Content-Type: application/json; charset=utf-8
+    {
+      "client_id": "{dcrcli#1}",
+      "client_id_issued_at": {epoch},
+      "client_name": "Taskrail Desktop",
+      "grant_types": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "redirect_uris": [
+        "http://127.0.0.1/callback/taskrail"
+      ],
+      "response_types": [
+        "code"
+      ],
+      "scope": "openid profile offline_access",
+      "token_endpoint_auth_method": "none"
+    }
+
+## 3. mcp-client: a confidential client is refused while PublicClientsOnly is on
+> POST /sqlos/auth/register
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "client_name": "Taskrail Server",
+>     "grant_types": [
+>       "authorization_code"
+>     ],
+>     "redirect_uris": [
+>       "https://taskrail.example.test/callback"
+>     ],
+>     "response_types": [
+>       "code"
+>     ],
+>     "token_endpoint_auth_method": "client_secret_basic"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_client_metadata",
+      "error_description": "token_endpoint_auth_method must be 'none' for dynamic client registration in this SqlOS version."
+    }
+
+## audit: registration events
+  - {
+      "action": "client.dcr.registered",
+      "actor": {
+        "displayName": null,
+        "id": "{dcrcli#1}",
+        "type": "client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "client.dcr.registered",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "client_id": "{dcrcli#1}",
+        "client_name": "Taskrail Desktop",
+        "grant_types": [
+          "authorization_code",
+          "refresh_token"
+        ],
+        "redirect_uris": [
+          "http://127.0.0.1/callback/taskrail"
+        ],
+        "response_types": [
+          "code"
+        ],
+        "scope": "openid profile offline_access",
+        "software_id": null,
+        "software_version": null,
+        "token_endpoint_auth_method": "[redacted]"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "client.dcr.rejected",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "client.dcr.rejected",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "client_name": "Taskrail Server",
+        "error": "invalid_client_metadata",
+        "error_description": "token_endpoint_auth_method must be 'none' for dynamic client registration in this SqlOS version.",
+        "grant_types": [
+          "authorization_code"
+        ],
+        "redirect_uris": [
+          "https://taskrail.example.test/callback"
+        ],
+        "response_types": [
+          "code"
+        ],
+        "scope": null,
+        "software_id": null,
+        "software_version": null,
+        "token_endpoint_auth_method": "[redacted]"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

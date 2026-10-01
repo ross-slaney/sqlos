@@ -1,0 +1,387 @@
+# SqlOS behavior lock transcript
+scenario: ScimAdminScenarios.Scim_connection_administration_refuses_invalid_requests
+profile: enterprise-scim-path
+
+## 1. operator: an unknown organization
+> POST /sqlos/admin/auth/api/organizations/{org#1}/scim-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Nowhere",
+>     "enabled": false
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Organization not found."
+    }
+
+## 2. operator: a blank display name
+> POST /sqlos/admin/auth/api/organizations/{org#2}/scim-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": " ",
+>     "enabled": false
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "SCIM display name is required."
+    }
+
+## 3. operator: a second enabled connection for the same organization
+> POST /sqlos/admin/auth/api/organizations/{org#2}/scim-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Second directory",
+>     "enabled": true
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Only one SCIM directory connection can be enabled for an organization at a time."
+    }
+
+## 4. operator: a grant boundary resource that does not exist
+> POST /sqlos/admin/auth/api/organizations/{org#2}/scim-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Bounded",
+>     "enabled": false,
+>     "grantBoundaryResourceId": "workspace::nowhere"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "grant_boundary_not_found",
+      "grantBoundaryResourceId": "workspace::nowhere",
+      "message": "SCIM grant boundary resource 'workspace::nowhere' was not found. Create the organization's root FGA resource first, then set it as the boundary.",
+      "resourceId": null
+    }
+
+## 5. operator: a grant boundary ID longer than 256 characters
+> POST /sqlos/admin/auth/api/organizations/{org#2}/scim-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Bounded",
+>     "enabled": false,
+>     "grantBoundaryResourceId": "workspace::xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "grant_boundary_invalid",
+      "grantBoundaryResourceId": null,
+      "message": "A SCIM grant boundary resource ID cannot exceed 256 characters.",
+      "resourceId": null
+    }
+
+## 6. operator: a disabled second connection is allowed
+> POST /sqlos/admin/auth/api/organizations/{org#2}/scim-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Staged directory",
+>     "enabled": false
+>   }
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "baseUrl": "/scim/v2",
+      "connectionId": "{scim#1}",
+      "displayName": "Staged directory",
+      "groupsUrl": "/scim/v2/Groups",
+      "isEnabled": false,
+      "organizationId": "{org#2}",
+      "token": "{scim-token#1}",
+      "tokenPrefix": "{token-prefix#1}",
+      "tokenRotatedAt": "{datetime:utc-z}",
+      "usersUrl": "/scim/v2/Users"
+    }
+
+## 7. operator: enabling it while the first is enabled
+> POST /sqlos/admin/auth/api/scim-connections/{scim#1}/enable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Only one SCIM directory connection can be enabled for an organization at a time."
+    }
+
+## 8. operator: enabling it through the edit form
+> PUT /sqlos/admin/auth/api/scim-connections/{scim#1}
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Staged directory",
+>     "enabled": true
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Only one SCIM directory connection can be enabled for an organization at a time."
+    }
+
+## 9. operator: renaming to a blank display name
+> PUT /sqlos/admin/auth/api/scim-connections/{scim#2}
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "",
+>     "enabled": true
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "SCIM display name is required."
+    }
+
+## 10. operator: moving the boundary to a resource that does not exist
+> PUT /sqlos/admin/auth/api/scim-connections/{scim#2}
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Live directory",
+>     "enabled": true,
+>     "grantBoundaryResourceId": "workspace::nowhere"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "grant_boundary_not_found",
+      "grantBoundaryResourceId": "workspace::nowhere",
+      "message": "SCIM grant boundary resource 'workspace::nowhere' was not found. Create the organization's root FGA resource first, then set it as the boundary.",
+      "resourceId": null
+    }
+
+## 11. operator: reading an unknown connection
+> GET /sqlos/admin/auth/api/scim-connections/{scim#3}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "SCIM connection not found."
+    }
+
+## 12. operator: editing an unknown connection
+> PUT /sqlos/admin/auth/api/scim-connections/{scim#3}
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Nobody",
+>     "enabled": true
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "SCIM connection not found."
+    }
+
+## 13. operator: rotating an unknown connection's token
+> POST /sqlos/admin/auth/api/scim-connections/{scim#3}/token/rotate
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "SCIM connection not found."
+    }
+
+## 14. operator: enabling an unknown connection
+> POST /sqlos/admin/auth/api/scim-connections/{scim#3}/enable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "SCIM connection not found."
+    }
+
+## 15. operator: disabling an unknown connection
+> POST /sqlos/admin/auth/api/scim-connections/{scim#3}/disable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "SCIM connection not found."
+    }
+
+## 16. operator: an unknown connection has an empty mapping list
+> GET /sqlos/admin/auth/api/scim-connections/{scim#3}/mappings
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 17. operator: and an empty sync-event list
+> GET /sqlos/admin/auth/api/scim-connections/{scim#3}/sync-events
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 18. operator: a one-connection page with a next cursor
+> GET /sqlos/admin/auth/api/organizations/{org#2}/scim-connections?pageSize=1
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "displayName": "Live directory",
+          "grantBoundary": {
+            "resourceId": null,
+            "resourceName": null,
+            "resourceTypeId": null,
+            "status": "missing"
+          },
+          "grantBoundaryResourceId": null,
+          "id": "{scim#2}",
+          "isEnabled": true,
+          "lastSyncAt": null,
+          "mappingCount": 0,
+          "organizationId": "{org#2}",
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "seedKey": null,
+          "source": "dashboard",
+          "syncEventCount": 0,
+          "tokenLastUsedAt": null,
+          "tokenPrefix": "{token-prefix#2}",
+          "tokenRotatedAt": "{datetime:unspecified}",
+          "updatedAt": "{datetime:unspecified}"
+        }
+      ],
+      "hasNextPage": true,
+      "nextCursor": "{cursor#1}",
+      "pageSize": 1
+    }
+
+## 19. operator: offset pagination is refused
+> GET /sqlos/admin/auth/api/organizations/{org#2}/scim-connections?page=2
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_cursor",
+      "message": "Offset pagination is no longer supported. Omit page or pass page=1 for the first window, then follow nextCursor."
+    }
+
+## 20. operator: a cursor SqlOS did not issue
+> GET /sqlos/admin/auth/api/organizations/{org#2}/scim-connections?cursor=not-a-cursor
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_cursor",
+      "message": "The cursor is invalid."
+    }
+
+## 21. operator: without the operator credential the API does not exist
+> GET /sqlos/admin/auth/api/organizations/{org#2}/scim-connections
+< 404 Not Found
+
+## 22. operator: rotation without the operator credential
+> POST /sqlos/admin/auth/api/scim-connections/{scim#2}/token/rotate
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 404 Not Found
+
+## audit: only the staged connection was created
+  - {
+      "action": "scim.connection.created",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "scim.connection.created",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "DisplayName": "Staged directory",
+        "GrantBoundaryResourceId": null
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#2}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.token.rotated",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "scim.token.rotated",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "TokenPrefix": "[redacted]"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#2}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

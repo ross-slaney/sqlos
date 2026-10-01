@@ -1,0 +1,103 @@
+# SqlOS behavior lock transcript
+scenario: HostedEmailOtpScenarios.Concurrent_code_requests_exceed_the_per_address_limit_CurrentBehavior_KnownDefect_424
+profile: hosted
+
+## 1. browser: seven code requests at once for one address, one per tab (one shown)
+> POST /sqlos/auth/login/email-otp/start
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#1}
+>   email={email:alice}
+< 200 OK
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#1}'; style-src 'self' 'nonce-{csp-nonce#1}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Behavior Lock</title>
+        <style nonce="{csp-nonce#1}">{style-sha256:4961352b3f23eca1}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Behavior Lock</h1>
+                <p class="brand-subtitle">Behavior lock hosted sign-in.</p>
+              </div>
+              <div class="messages">
+                <div class="callout info">
+                  <span class="callout-icon">i</span>
+                  <span>If an account exists for al***@example.test, check your email for a sign-in code.</span>
+                </div>
+              </div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <div class="panel-intro">
+                    <span class="panel-kicker">Enter Code</span>
+                    <p>Use the one-time code we sent to your email address.</p>
+                  </div>
+                  <form class="auth-form" method="post" action="/sqlos/auth/login/email-otp/verify">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#2}" />
+                    <input type="hidden" name="requestId" value="{req#1}" />
+                    <input type="hidden" name="challengeToken" value="{challenge-token#1}" />
+                    <input type="hidden" name="email" value="{email:alice}" />
+                    <label class="field">
+                      <span>Code</span>
+                      <input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" required="" autofocus="" />
+                    </label>
+                    <button class="primary-action" type="submit" data-loading-label="Verifying code">
+                      <span class="button-label">Verify code</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                  </form>
+                  <div class="footer-links">
+                    <a class="secondary-link" href="/sqlos/auth/login/email-otp?request={req#1}&amp;email={email:alice}">Send a new code</a>
+                    <a class="secondary-link" href="/sqlos/auth/login?request={req#1}&amp;email={email:alice}">Use password instead</a>
+                    <a class="secondary-link" href="/sqlos/auth/login/magic-link?request={req#1}&amp;email={email:alice}">Email me a sign-in link</a>
+                    <a class="secondary-link" href="/sqlos/auth/login/phone-otp?request={req#1}">Use a phone code instead</a>
+                  </div>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#1}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+  ~ email (transactional) to {email:alice}
+      subject: Your Behavior Lock sign-in code
+      text:
+        Your Behavior Lock sign-in code is {otp#1}. It expires in 10 minute(s).
+      html:
+        <!DOCTYPE html>
+        <html lang="en">
+          <head></head>
+          <body style="margin:0;padding:24px;background:#f8fafc;font-family:Segoe UI,Arial,sans-serif;color:#0f172a;">
+            <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:20px;padding:32px;">
+              <img src="" alt="Behavior Lock" style="max-height:42px;max-width:180px;display:none;margin:0 0 16px;" />
+              <p style="display:block;margin:0 0 12px;font-size:14px;color:#475569;font-weight:600;">Behavior Lock</p>
+              <h1 style="margin:0 0 12px;font-size:28px;line-height:1.1;color:#0f172a;">Your sign-in code</h1>
+              <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">Use this one-time code to finish signing in as al***@example.test. It expires in 10 minute(s).</p>
+              <div style="margin:0 0 20px;padding:18px 20px;border-radius:16px;background:#eff6ff;border:1px solid #bfdbfe;font-size:34px;letter-spacing:0.24em;font-weight:700;text-align:center;color:#2563eb;">{otp#1}</div>
+              <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">If you did not request this code, you can ignore this email.</p>
+            </div>
+          </body>
+        </html>
+
+# The other six tabs were answered 200, 200, 200, 200, 200, 200.
+
+# 7 start requests were held at their insert until all had counted the recent challenges.
+
+# 7 sign-in codes were emailed to the address; the limit is 5 per hour.

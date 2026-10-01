@@ -1,0 +1,662 @@
+# SqlOS behavior lock transcript
+scenario: CalendarAdminScenarios.A_user_connects_a_google_calendar_and_an_operator_syncs_refreshes_and_disconnects_it
+profile: modules
+
+## 1. host: the host starts a read-pull calendar connection for Alice
+> POST /__probe/calendar/connect
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "displayName": "Alice's calendar",
+>     "loginHintEmail": "{email:alice}",
+>     "mode": "ReadPull",
+>     "oidcConnectionId": "{oidc#1}",
+>     "returnUri": "https://sqlos.example.test/calendar/connected",
+>     "userId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth?client_id=google-client-id&redirect_uri=https%3A%2F%2Fsqlos.example.test%2Fsqlos%2Fauth%2Fcalendar%2Fcallback&response_type=code&scope=openid%20email%20https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcalendar.readonly&state={state#1}&code_challenge={pkce-challenge#1}&code_challenge_method=S256&login_hint={email:alice}&access_type=offline&prompt=consent",
+      "mode": "ReadPull",
+      "oidcConnectionId": "{oidc#1}",
+      "providerType": "Google"
+    }
+  ~ http SqlOSCalendarService: GET https://accounts.google.com/.well-known/openid-configuration -> 200
+
+## 2. browser: Google returns to the SqlOS callback, which stores the connection and returns to the app
+> GET /sqlos/auth/calendar/callback?state={state#1}&code=success%3Aalice@calendar.example.test
+< 302 Found
+< Location: https://sqlos.example.test/calendar/connected?calendarConnectionId={cal#1}
+  ~ http SqlOSGoogleCalendarAdapter: POST https://oauth2.googleapis.com/token -> 200
+      grant_type=authorization_code
+      client_id=google-client-id
+      client_secret=google-client-secret
+      code=success:alice@calendar.example.test
+      redirect_uri=https://sqlos.example.test/sqlos/auth/calendar/callback
+      code_verifier={pkce-verifier#1}
+
+## 3. operator: without operator credentials the calendar admin API is not found
+> GET /sqlos/admin/calendar/api/connections/{cal#1}
+< 404 Not Found
+
+## 4. operator: the summary counts one active connection
+> GET /sqlos/admin/calendar/api/summary
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "active": 1,
+      "connections": 1,
+      "errored": 0,
+      "events": 0
+    }
+
+## 5. operator: the connection list
+> GET /sqlos/admin/calendar/api/connections
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "accessTokenExpiresAt": "{datetime:unspecified}",
+          "createdAt": "{datetime:unspecified}",
+          "displayName": "Alice's calendar",
+          "hasRefreshToken": true,
+          "id": "{cal#1}",
+          "lastError": null,
+          "lastErrorAt": null,
+          "lastSyncAt": null,
+          "mode": "ReadPull",
+          "organizationId": null,
+          "providerAccountEmail": "alice@calendar.example.test",
+          "providerType": "Google",
+          "revokedAt": null,
+          "scopes": [
+            "openid",
+            "email",
+            "https://www.googleapis.com/auth/calendar.readonly"
+          ],
+          "status": "Active",
+          "userId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 6. operator: no calendar is enrolled before the first sync
+> GET /sqlos/admin/calendar/api/connections/{cal#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "calendars": [],
+      "connection": {
+        "accessTokenExpiresAt": "{datetime:unspecified}",
+        "createdAt": "{datetime:unspecified}",
+        "displayName": "Alice's calendar",
+        "hasRefreshToken": true,
+        "id": "{cal#1}",
+        "lastError": null,
+        "lastErrorAt": null,
+        "lastSyncAt": null,
+        "mode": "ReadPull",
+        "organizationId": null,
+        "providerAccountEmail": "alice@calendar.example.test",
+        "providerType": "Google",
+        "revokedAt": null,
+        "scopes": [
+          "openid",
+          "email",
+          "https://www.googleapis.com/auth/calendar.readonly"
+        ],
+        "status": "Active",
+        "userId": "{usr#1}"
+      },
+      "eventCount": 0
+    }
+
+## 7. operator: the first sync enrolls the primary calendar and pulls its events
+> POST /sqlos/admin/calendar/api/connections/{cal#1}/sync
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "calendarConnectionId": "{cal#1}",
+      "calendarsSynced": 1,
+      "errors": [],
+      "eventsRemoved": 0,
+      "eventsUpserted": 2
+    }
+  ~ http SqlOSGoogleCalendarAdapter: GET https://www.googleapis.com/calendar/v3/users/me/calendarList -> 200
+  ~ http SqlOSGoogleCalendarAdapter: GET https://www.googleapis.com/calendar/v3/calendars/google-primary/events?singleEvents=true&timeMin={datetime:utc-z,url-encoded}&timeMax={datetime:utc-z,url-encoded} -> 200
+
+## 8. operator: the next sync is incremental, from the provider's sync token
+> POST /sqlos/admin/calendar/api/connections/{cal#1}/sync
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "calendarConnectionId": "{cal#1}",
+      "calendarsSynced": 1,
+      "errors": [],
+      "eventsRemoved": 1,
+      "eventsUpserted": 3
+    }
+  ~ http SqlOSGoogleCalendarAdapter: GET https://www.googleapis.com/calendar/v3/calendars/google-primary/events?singleEvents=true&syncToken=google-sync-1 -> 200
+
+## 9. operator: the detail shows per-calendar sync health
+> GET /sqlos/admin/calendar/api/connections/{cal#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "calendars": [
+        {
+          "displayName": "Primary",
+          "eventCount": 3,
+          "hasSyncCursor": true,
+          "isSyncEnabled": true,
+          "lastSyncCompletedAt": "{datetime:unspecified}",
+          "lastSyncError": null,
+          "lastSyncStartedAt": "{datetime:unspecified}",
+          "lastSyncStatus": "ok",
+          "providerCalendarId": "google-primary"
+        }
+      ],
+      "connection": {
+        "accessTokenExpiresAt": "{datetime:unspecified}",
+        "createdAt": "{datetime:unspecified}",
+        "displayName": "Alice's calendar",
+        "hasRefreshToken": true,
+        "id": "{cal#1}",
+        "lastError": null,
+        "lastErrorAt": null,
+        "lastSyncAt": "{datetime:unspecified}",
+        "mode": "ReadPull",
+        "organizationId": null,
+        "providerAccountEmail": "alice@calendar.example.test",
+        "providerType": "Google",
+        "revokedAt": null,
+        "scopes": [
+          "openid",
+          "email",
+          "https://www.googleapis.com/auth/calendar.readonly"
+        ],
+        "status": "Active",
+        "userId": "{usr#1}"
+      },
+      "eventCount": 3
+    }
+
+## 10. operator: force a token refresh
+> POST /sqlos/admin/calendar/api/connections/{cal#1}/refresh
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessTokenExpiresAt": "{datetime:utc-z}",
+      "createdAt": "{datetime:unspecified}",
+      "displayName": "Alice's calendar",
+      "hasRefreshToken": true,
+      "id": "{cal#1}",
+      "lastError": null,
+      "lastErrorAt": null,
+      "lastSyncAt": "{datetime:unspecified}",
+      "mode": "ReadPull",
+      "organizationId": null,
+      "providerAccountEmail": "alice@calendar.example.test",
+      "providerType": "Google",
+      "revokedAt": null,
+      "scopes": [
+        "openid",
+        "email",
+        "https://www.googleapis.com/auth/calendar.readonly"
+      ],
+      "status": "Active",
+      "userId": "{usr#1}"
+    }
+  ~ http SqlOSCalendarService: GET https://accounts.google.com/.well-known/openid-configuration -> 200
+  ~ http SqlOSGoogleCalendarAdapter: POST https://oauth2.googleapis.com/token -> 200
+      grant_type=refresh_token
+      client_id=google-client-id
+      client_secret=google-client-secret
+      refresh_token=google-refresh|alice@calendar.example.test
+
+## 11. operator: disconnect: the stored tokens are cleared
+> POST /sqlos/admin/calendar/api/connections/{cal#1}/disconnect
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessTokenExpiresAt": null,
+      "createdAt": "{datetime:unspecified}",
+      "displayName": "Alice's calendar",
+      "hasRefreshToken": false,
+      "id": "{cal#1}",
+      "lastError": null,
+      "lastErrorAt": null,
+      "lastSyncAt": "{datetime:unspecified}",
+      "mode": "ReadPull",
+      "organizationId": null,
+      "providerAccountEmail": "alice@calendar.example.test",
+      "providerType": "Google",
+      "revokedAt": "{datetime:utc-z}",
+      "scopes": [
+        "openid",
+        "email",
+        "https://www.googleapis.com/auth/calendar.readonly"
+      ],
+      "status": "Revoked",
+      "userId": "{usr#1}"
+    }
+
+## 12. operator: disconnecting again changes nothing
+> POST /sqlos/admin/calendar/api/connections/{cal#1}/disconnect
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessTokenExpiresAt": null,
+      "createdAt": "{datetime:unspecified}",
+      "displayName": "Alice's calendar",
+      "hasRefreshToken": false,
+      "id": "{cal#1}",
+      "lastError": null,
+      "lastErrorAt": null,
+      "lastSyncAt": "{datetime:unspecified}",
+      "mode": "ReadPull",
+      "organizationId": null,
+      "providerAccountEmail": "alice@calendar.example.test",
+      "providerType": "Google",
+      "revokedAt": "{datetime:unspecified}",
+      "scopes": [
+        "openid",
+        "email",
+        "https://www.googleapis.com/auth/calendar.readonly"
+      ],
+      "status": "Revoked",
+      "userId": "{usr#1}"
+    }
+
+## 13. operator: a disconnected connection cannot be refreshed
+> POST /sqlos/admin/calendar/api/connections/{cal#1}/refresh
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "This calendar connection has been disconnected."
+    }
+
+## 14. operator: or synchronized
+> POST /sqlos/admin/calendar/api/connections/{cal#1}/sync
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "This calendar connection has been disconnected."
+    }
+
+## 15. operator: the active-only list excludes it
+> GET /sqlos/admin/calendar/api/connections?includeRevoked=false
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 16. operator: a search still finds it
+> GET /sqlos/admin/calendar/api/connections?search=Alice
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "accessTokenExpiresAt": null,
+          "createdAt": "{datetime:unspecified}",
+          "displayName": "Alice's calendar",
+          "hasRefreshToken": false,
+          "id": "{cal#1}",
+          "lastError": null,
+          "lastErrorAt": null,
+          "lastSyncAt": "{datetime:unspecified}",
+          "mode": "ReadPull",
+          "organizationId": null,
+          "providerAccountEmail": "alice@calendar.example.test",
+          "providerType": "Google",
+          "revokedAt": "{datetime:unspecified}",
+          "scopes": [
+            "openid",
+            "email",
+            "https://www.googleapis.com/auth/calendar.readonly"
+          ],
+          "status": "Revoked",
+          "userId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 17. operator: the summary after the disconnect
+> GET /sqlos/admin/calendar/api/summary
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "active": 0,
+      "connections": 1,
+      "errored": 0,
+      "events": 3
+    }
+
+## 18. operator: the dashboard's calendar page is the dashboard shell
+> GET /sqlos/admin/calendar/connections
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#1}'; style-src 'self' 'nonce-{csp-nonce#1}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>SqlOS Dashboard</title>
+        <link rel="stylesheet" href="/sqlos/style.css" />
+      </head>
+      <body>
+        <script nonce="{csp-nonce#1}">{script-sha256:e2e7315636187e83}</script>
+        <div class="layout">
+          <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+              <div class="sidebar-logo">So</div>
+              <span class="sidebar-title">SqlOS</span>
+              <button class="sidebar-close" id="sidebar-close">×</button>
+            </div>
+            <nav>
+              <div class="nav-group">
+                <div class="nav-label">Dashboard</div>
+                <a href="#" data-route="home" class="active">Home</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Governance</div>
+                <a href="#" data-route="audit-logs">Audit Logs</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Auth Server</div>
+                <a href="#" data-route="auth-overview">Overview</a>
+                <a href="#" data-route="auth-organizations">Organizations</a>
+                <a href="#" data-route="auth-users">Users</a>
+                <a href="#" data-route="auth-memberships">Memberships</a>
+                <a href="#" data-route="auth-clients">Applications</a>
+                <a href="#" data-route="auth-machine-clients">Machine Clients</a>
+                <a href="#" data-route="auth-oidc">OIDC</a>
+                <a href="#" data-route="auth-scopes">Scope Display Names</a>
+                <a href="#" data-route="auth-security">Security</a>
+                <a href="#" data-route="auth-mfa">MFA</a>
+                <a href="#" data-route="auth-authpage">Auth Page</a>
+                <a href="#" data-route="auth-sessions">Sessions</a>
+                <a href="#" data-route="auth-audit">Audit Events</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Fine-Grained Auth</div>
+                <a href="#" data-route="fga-resources">Resources</a>
+                <a href="#" data-route="fga-grants">Grants</a>
+                <a href="#" data-route="fga-roles">Roles</a>
+                <a href="#" data-route="fga-permissions">Permissions</a>
+                <a href="#" data-route="fga-users">Users</a>
+                <a href="#" data-route="fga-agents">Agents</a>
+                <a href="#" data-route="fga-service-accounts">Service Accounts</a>
+                <a href="#" data-route="fga-user-groups">User Groups</a>
+                <a href="#" data-route="fga-access-tester">Access Tester</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Communications</div>
+                <a href="#" data-route="email-templates">Templates</a>
+                <a href="#" data-route="email-messages">Messages</a>
+              </div>
+              <div class="nav-group">
+                <div class="nav-label">Integrations</div>
+                <a href="#" data-route="calendar-connections">Calendar</a>
+              </div>
+            </nav>
+            <div class="sidebar-footer">
+              <button class="sidebar-action" id="dashboard-logout" type="button">Log out</button>
+            </div>
+          </aside>
+          <div class="main-wrapper">
+            <div class="topbar">
+              <button class="hamburger" id="hamburger">☰</button>
+              <span class="topbar-title" id="topbar-title">SqlOS Dashboard</span>
+            </div>
+            <main>
+              <header class="page-header">
+                <div>
+                  <div class="page-eyebrow" id="page-eyebrow">Dashboard</div>
+                  <h1 id="page-title">SqlOS Dashboard</h1>
+                  <p id="page-description">Authentication, organizations, sessions, and authorization in one embedded control plane.</p>
+                </div>
+              </header>
+              <div id="content" class="content-area"></div>
+            </main>
+          </div>
+        </div>
+        <div class="modal-overlay" id="dashboard-modal" hidden="">
+          <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dashboard-modal-title">
+            <div class="modal-header">
+              <h3 id="dashboard-modal-title"></h3>
+              <button type="button" class="modal-close" id="dashboard-modal-close" aria-label="Close">×</button>
+            </div>
+            <div class="modal-body" id="dashboard-modal-body"></div>
+          </div>
+        </div>
+        <script nonce="{csp-nonce#1}" src="/sqlos/admin/fga/app.js"></script>
+        <script nonce="{csp-nonce#1}" src="/sqlos/app.js"></script>
+      </body>
+    </html>
+
+## audit: the connection lifecycle
+  - {
+      "action": "calendar.connect.start",
+      "actor": {
+        "displayName": null,
+        "id": "{oidc#1}",
+        "type": "oidc_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "calendar.connect.start",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "mode": "ReadPull",
+        "provider": "Google",
+        "scopes": [
+          "openid",
+          "email",
+          "https://www.googleapis.com/auth/calendar.readonly"
+        ]
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "calendar.connection.created",
+      "actor": {
+        "displayName": null,
+        "id": "{cal#1}",
+        "type": "calendar_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "calendar.connection.created",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "mode": "ReadPull",
+        "provider": "Google",
+        "providerAccountEmail": "alice@calendar.example.test"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "calendar.connection.synced",
+      "actor": {
+        "displayName": null,
+        "id": "{cal#1}",
+        "type": "calendar_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "calendar.connection.synced",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "calendarsSynced": 1,
+        "errors": [],
+        "eventsRemoved": 0,
+        "eventsUpserted": 2
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "calendar.connection.synced",
+      "actor": {
+        "displayName": null,
+        "id": "{cal#1}",
+        "type": "calendar_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "calendar.connection.synced",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "calendarsSynced": 1,
+        "errors": [],
+        "eventsRemoved": 1,
+        "eventsUpserted": 3
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "calendar.connection.disconnected",
+      "actor": {
+        "displayName": null,
+        "id": "{cal#1}",
+        "type": "calendar_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "calendar.connection.disconnected",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "reason": "admin_disconnected"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }

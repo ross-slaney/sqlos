@@ -1,0 +1,286 @@
+# SqlOS behavior lock transcript
+scenario: PublicMfaChallengeScenarios.An_enrollment_only_completes_with_the_challenge_that_started_it
+profile: hosted
+
+## 1. client: sign in: an enrollment challenge
+> POST /sqlos/auth/password/login
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "email": "{email:alice}",
+>     "password": "{password:alice}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "mfaMethods": [
+        "totp",
+        "recovery_code"
+      ],
+      "mfaToken": "{mfa-token#1}",
+      "organizations": [
+        {
+          "id": "{org#1}",
+          "name": "Acme",
+          "role": "member",
+          "slug": "{slug:acme}"
+        }
+      ],
+      "pendingAuthToken": null,
+      "requiresMfa": true,
+      "requiresMfaEnrollment": true,
+      "requiresOrganizationSelection": false,
+      "tokens": null
+    }
+
+## 2. client: start enrolling under the first challenge
+> POST /sqlos/auth/mfa/challenge/totp/enroll/start
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "mfaToken": "{mfa-token#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "authenticatorId": "{mfa#1}",
+      "enrollmentToken": "{enrollment-token#1}",
+      "expiresAt": "{datetime:utc-z}",
+      "provisioningUri": "otpauth://totp/SqlOS:{email:alice}?secret={totp-secret#1}&issuer=SqlOS&algorithm=SHA1&digits=6&period=30",
+      "qrCodeDataUrl": "{data-uri:image/svg+xml}",
+      "secret": "{totp-secret#1}"
+    }
+
+## 3. client: sign in again: a second enrollment challenge
+> POST /sqlos/auth/password/login
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "email": "{email:alice}",
+>     "password": "{password:alice}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "mfaMethods": [
+        "totp",
+        "recovery_code"
+      ],
+      "mfaToken": "{mfa-token#2}",
+      "organizations": [
+        {
+          "id": "{org#1}",
+          "name": "Acme",
+          "role": "member",
+          "slug": "{slug:acme}"
+        }
+      ],
+      "pendingAuthToken": null,
+      "requiresMfa": true,
+      "requiresMfaEnrollment": true,
+      "requiresOrganizationSelection": false,
+      "tokens": null
+    }
+
+## 4. client: the first enrollment with the second challenge is refused, even with the right code
+> POST /sqlos/auth/mfa/challenge/totp/enroll/verify
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "code": "{code#1}",
+>     "enrollmentToken": "{enrollment-token#1}",
+>     "mfaToken": "{mfa-token#2}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    "MFA enrollment is not authorized for this challenge."
+
+## 5. client: without its challenge, a challenge-bound enrollment is refused too
+> POST /sqlos/auth/mfa/challenge/totp/enroll/verify
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "code": "{code#1}",
+>     "enrollmentToken": "{enrollment-token#1}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    "Challenge-bound enrollment must be verified with its original MFA challenge."
+
+## 6. client: with the challenge that started it, the enrollment completes and tokens are issued
+> POST /sqlos/auth/mfa/challenge/totp/enroll/verify
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "code": "{code#1}",
+>     "enrollmentToken": "{enrollment-token#1}",
+>     "mfaToken": "{mfa-token#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "authenticatorId": "{mfa#1}",
+      "recoveryCodes": [
+        "{recovery-code#1}",
+        "{recovery-code#2}",
+        "{recovery-code#3}",
+        "{recovery-code#4}",
+        "{recovery-code#5}",
+        "{recovery-code#6}",
+        "{recovery-code#7}",
+        "{recovery-code#8}",
+        "{recovery-code#9}",
+        "{recovery-code#10}"
+      ],
+      "redirectUrl": null,
+      "tokens": {
+        "accessToken": "{access-token#1}",
+        "accessTokenExpiresAt": "{datetime:utc-z}",
+        "clientId": "behavior-lock-app",
+        "idToken": null,
+        "organizationId": "{org#1}",
+        "refreshToken": "{refresh-token#1}",
+        "refreshTokenExpiresAt": "{datetime:utc-z}",
+        "sessionId": "{ses#1}"
+      }
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password",
+        "totp"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "org_id": "{org#1}",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+
+## audit: enrollment events
+  - {
+      "action": "password.login.succeeded",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "password.login.succeeded",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "AuthorizationRequestId": "[redacted]",
+        "ClientKey": "behavior-lock-app",
+        "NormalizedEmail": "{email:ALICE}",
+        "Surface": "api",
+        "UserAgentHash": null,
+        "details": {
+          "resetScopes": [
+            "email",
+            "user"
+          ]
+        },
+        "maskedEmail": "AL***@EXAMPLE.TEST"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "password.login.succeeded",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "password.login.succeeded",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "AuthorizationRequestId": "[redacted]",
+        "ClientKey": "behavior-lock-app",
+        "NormalizedEmail": "{email:ALICE}",
+        "Surface": "api",
+        "UserAgentHash": null,
+        "details": {
+          "resetScopes": [
+            "email",
+            "user"
+          ]
+        },
+        "maskedEmail": "AL***@EXAMPLE.TEST"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "user.login.mfa",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.mfa",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }

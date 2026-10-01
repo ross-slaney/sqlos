@@ -1,0 +1,240 @@
+# SqlOS behavior lock transcript
+scenario: HeadlessMagicLinkScenarios.A_link_opened_without_the_request_id_still_completes_the_request_it_was_sent_for
+profile: headless
+
+## 1. mail-app: the link is opened in another browser that knows no request: the link's own request completes there
+> POST /sqlos/auth/headless/magic-link/complete
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "token": "{link-token#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+< Set-Cookie: sqlos_auth_page={cookie#1}; expires=+7d; path=/; secure; samesite=lax; httponly
+    {
+      "redirectUrl": "https://sqlos.example.test/auth/callback?code={code#1}&state={state#1}&scope=openid%20profile%20email%20offline_access",
+      "type": "redirect",
+      "viewModel": null
+    }
+
+## 2. client: the original app redeems the code with its PKCE verifier
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=authorization_code
+>   code={code#1}
+>   client_id=behavior-lock-app
+>   redirect_uri=https://sqlos.example.test/auth/callback
+>   code_verifier={pkce-verifier#1}
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "access_token": "{access-token#1}",
+      "expires_in": ~600,
+      "id_token": "{id-token#1}",
+      "refresh_token": "{refresh-token#1}",
+      "scope": "openid profile email offline_access",
+      "token_type": "Bearer"
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "magic_link"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:dana}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "scope": "openid profile email offline_access",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+  jwt {id-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "JWT"
+    }
+    claims: {
+      "amr": [
+        "magic_link"
+      ],
+      "at_hash": "{hash#1}",
+      "aud": "behavior-lock-app",
+      "auth_time": {epoch},
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nonce": "{nonce#1}",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=5m
+
+## audit: cross-browser magic-link events
+  - {
+      "action": "email.send.queued",
+      "actor": {
+        "displayName": null,
+        "id": "{edl#1}",
+        "type": "email_delivery"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "email.send.queued",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "deliveryId": "{edl#1}",
+        "providerMessageId": "behavior-lock-email-1",
+        "templateKey": "auth.magic-link",
+        "templateVersion": 1
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "magic_link.requested",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "magic_link.requested",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "details": {
+          "authorizationRequestId": "[redacted]",
+          "clientApplicationId": "{cli#1}",
+          "requestedOrganizationId": null,
+          "sent": true
+        },
+        "maskedEmail": "da***@example.test",
+        "phase": "start"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "user.email.claimed",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "user.email.claimed",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "emailId": "{eml#1}",
+        "proof": "magic_link",
+        "revoked": {
+          "authenticatorIds": [],
+          "calendarConnectionIds": [],
+          "consentGrantIds": [],
+          "externalIdentities": [],
+          "passwordCredentialIds": [
+            "{cred#1}"
+          ],
+          "phoneNumberIds": [],
+          "recoveryCodes": 0
+        }
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr#1}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "magic_link.completed",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "magic_link.completed",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "details": {
+          "AuthorizationRequestId": "[redacted]",
+          "ClientApplicationId": "{cli#1}",
+          "Id": "{usr#1}",
+          "RequestedOrganizationId": null
+        },
+        "maskedEmail": "da***@example.test",
+        "phase": "complete"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

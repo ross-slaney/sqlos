@@ -1,0 +1,292 @@
+# SqlOS behavior lock transcript
+scenario: OidcConnectionAdminScenarios.Oidc_connection_lists_page_with_opaque_cursors
+profile: hosted
+
+## 1. operator: the first page of two, in display-name order
+> GET /sqlos/admin/auth/api/oidc-connections?pageSize=2&page=1
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "allowedCallbackUris": "[\"https://sqlos.example.test/sqlos/auth/oidc/callback\"]",
+          "appleKeyId": null,
+          "appleTeamId": null,
+          "authorizationEndpoint": null,
+          "claimMapping": "{\"SubjectClaim\":\"custom_sub\",\"EmailClaim\":\"email_address\",\"EmailVerifiedClaim\":\"email_verified_flag\",\"DisplayNameClaim\":\"full_name\",\"FirstNameClaim\":\"given_name\",\"LastNameClaim\":\"family_name\",\"PreferredUsernameClaim\":\"preferred_username\"}",
+          "clientAuthMethod": "ClientSecretPost",
+          "clientId": "custom-client-id",
+          "createdAt": "{datetime:unspecified}",
+          "discoveryUrl": "https://oidc.example.local/.well-known/openid-configuration",
+          "displayName": "Example OIDC",
+          "effectiveLogoDataUrl": null,
+          "id": "{oidc#1}",
+          "isEnabled": true,
+          "issuer": null,
+          "jwksUri": null,
+          "logoDataUrl": null,
+          "microsoftTenant": null,
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": "{hex#1}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "custom"
+          },
+          "protocol": "Oidc",
+          "providerType": "Custom",
+          "scopes": "[]",
+          "tokenEndpoint": null,
+          "updatedAt": "{datetime:unspecified}",
+          "useDiscovery": true,
+          "useUserInfo": true,
+          "userInfoEndpoint": null
+        },
+        {
+          "allowedCallbackUris": "[\"https://sqlos.example.test/sqlos/auth/oidc/callback\"]",
+          "appleKeyId": null,
+          "appleTeamId": null,
+          "authorizationEndpoint": "https://github.com/login/oauth/authorize",
+          "claimMapping": "{\"SubjectClaim\":\"id\",\"EmailClaim\":\"email\",\"EmailVerifiedClaim\":\"email_verified\",\"DisplayNameClaim\":\"name\",\"FirstNameClaim\":null,\"LastNameClaim\":null,\"PreferredUsernameClaim\":\"login\"}",
+          "clientAuthMethod": "ClientSecretPost",
+          "clientId": "github-client-id",
+          "createdAt": "{datetime:unspecified}",
+          "discoveryUrl": null,
+          "displayName": "GitHub",
+          "effectiveLogoDataUrl": "{data-uri:image/svg+xml}",
+          "id": "{oidc#2}",
+          "isEnabled": true,
+          "issuer": "https://github.com",
+          "jwksUri": null,
+          "logoDataUrl": null,
+          "microsoftTenant": null,
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": "{hex#2}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "github"
+          },
+          "protocol": "OAuthProfile",
+          "providerType": "GitHub",
+          "scopes": "[\"read:user\",\"user:email\"]",
+          "tokenEndpoint": "https://github.com/login/oauth/access_token",
+          "updatedAt": "{datetime:unspecified}",
+          "useDiscovery": false,
+          "useUserInfo": true,
+          "userInfoEndpoint": "https://api.github.com/user"
+        }
+      ],
+      "hasNextPage": true,
+      "nextCursor": "{cursor#1}",
+      "pageSize": 2
+    }
+
+## 2. operator: the cursor continues after the last row
+> GET /sqlos/admin/auth/api/oidc-connections?pageSize=2&cursor={cursor#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "allowedCallbackUris": "[\"https://sqlos.example.test/sqlos/auth/oidc/callback\"]",
+          "appleKeyId": null,
+          "appleTeamId": null,
+          "authorizationEndpoint": null,
+          "claimMapping": "{\"SubjectClaim\":\"sub\",\"EmailClaim\":\"email\",\"EmailVerifiedClaim\":\"email_verified\",\"DisplayNameClaim\":\"name\",\"FirstNameClaim\":\"given_name\",\"LastNameClaim\":\"family_name\",\"PreferredUsernameClaim\":\"preferred_username\"}",
+          "clientAuthMethod": "ClientSecretPost",
+          "clientId": "google-client-id",
+          "createdAt": "{datetime:unspecified}",
+          "discoveryUrl": "https://accounts.google.com/.well-known/openid-configuration",
+          "displayName": "Google",
+          "effectiveLogoDataUrl": "{data-uri:image/svg+xml}",
+          "id": "{oidc#3}",
+          "isEnabled": true,
+          "issuer": null,
+          "jwksUri": null,
+          "logoDataUrl": null,
+          "microsoftTenant": null,
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": "{hex#3}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "google"
+          },
+          "protocol": "Oidc",
+          "providerType": "Google",
+          "scopes": "[]",
+          "tokenEndpoint": null,
+          "updatedAt": "{datetime:unspecified}",
+          "useDiscovery": true,
+          "useUserInfo": true,
+          "userInfoEndpoint": null
+        },
+        {
+          "allowedCallbackUris": "[\"https://sqlos.example.test/sqlos/auth/oidc/callback\"]",
+          "appleKeyId": null,
+          "appleTeamId": null,
+          "authorizationEndpoint": null,
+          "claimMapping": "{\"SubjectClaim\":\"sub\",\"EmailClaim\":\"email\",\"EmailVerifiedClaim\":\"email_verified\",\"DisplayNameClaim\":\"name\",\"FirstNameClaim\":\"given_name\",\"LastNameClaim\":\"family_name\",\"PreferredUsernameClaim\":\"preferred_username\"}",
+          "clientAuthMethod": "ClientSecretPost",
+          "clientId": "microsoft-client-id",
+          "createdAt": "{datetime:unspecified}",
+          "discoveryUrl": "https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration",
+          "displayName": "Microsoft",
+          "effectiveLogoDataUrl": "{data-uri:image/svg+xml}",
+          "id": "{oidc#4}",
+          "isEnabled": true,
+          "issuer": null,
+          "jwksUri": null,
+          "logoDataUrl": null,
+          "microsoftTenant": "common",
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": "{hex#4}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "microsoft"
+          },
+          "protocol": "Oidc",
+          "providerType": "Microsoft",
+          "scopes": "[]",
+          "tokenEndpoint": null,
+          "updatedAt": "{datetime:unspecified}",
+          "useDiscovery": true,
+          "useUserInfo": true,
+          "userInfoEndpoint": null
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 2
+    }
+
+## 3. operator: a page size below one is raised to one
+> GET /sqlos/admin/auth/api/oidc-connections?pageSize=0
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "allowedCallbackUris": "[\"https://sqlos.example.test/sqlos/auth/oidc/callback\"]",
+          "appleKeyId": null,
+          "appleTeamId": null,
+          "authorizationEndpoint": null,
+          "claimMapping": "{\"SubjectClaim\":\"custom_sub\",\"EmailClaim\":\"email_address\",\"EmailVerifiedClaim\":\"email_verified_flag\",\"DisplayNameClaim\":\"full_name\",\"FirstNameClaim\":\"given_name\",\"LastNameClaim\":\"family_name\",\"PreferredUsernameClaim\":\"preferred_username\"}",
+          "clientAuthMethod": "ClientSecretPost",
+          "clientId": "custom-client-id",
+          "createdAt": "{datetime:unspecified}",
+          "discoveryUrl": "https://oidc.example.local/.well-known/openid-configuration",
+          "displayName": "Example OIDC",
+          "effectiveLogoDataUrl": null,
+          "id": "{oidc#1}",
+          "isEnabled": true,
+          "issuer": null,
+          "jwksUri": null,
+          "logoDataUrl": null,
+          "microsoftTenant": null,
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": "{hex#1}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "custom"
+          },
+          "protocol": "Oidc",
+          "providerType": "Custom",
+          "scopes": "[]",
+          "tokenEndpoint": null,
+          "updatedAt": "{datetime:unspecified}",
+          "useDiscovery": true,
+          "useUserInfo": true,
+          "userInfoEndpoint": null
+        }
+      ],
+      "hasNextPage": true,
+      "nextCursor": "{cursor#2}",
+      "pageSize": 1
+    }
+
+## 4. operator: offset paging beyond the first page is refused
+> GET /sqlos/admin/auth/api/oidc-connections?page=2
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_cursor",
+      "message": "Offset pagination is no longer supported. Omit page or pass page=1 for the first window, then follow nextCursor."
+    }
+
+## 5. operator: a malformed cursor is refused
+> GET /sqlos/admin/auth/api/oidc-connections?cursor=not-a-cursor
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_cursor",
+      "message": "The cursor is invalid."
+    }
+
+## 6. operator: a cursor from another admin list
+> GET /sqlos/admin/email/api/templates?pageSize=1
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "displayName": "Auth email OTP",
+          "htmlBodyTemplate": "<!DOCTYPE html>\n<html lang=\"en\">\n<body style=\"margin:0;padding:24px;background:{backgroundColor};font-family:Segoe UI,Arial,sans-serif;color:{accentColor};\">\n  <div style=\"max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:20px;padding:32px;\">\n    <img src=\"{logoBase64}\" alt=\"{applicationName}\" style=\"max-height:42px;max-width:180px;display:{logoImageDisplay};margin:0 0 16px;\" />\n    <p style=\"display:{logoTextDisplay};margin:0 0 12px;font-size:14px;color:#475569;font-weight:600;\">{applicationName}</p>\n    <h1 style=\"margin:0 0 12px;font-size:28px;line-height:1.1;color:{accentColor};\">{heading}</h1>\n    <p style=\"margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;\">Use this one-time code to finish {action} as {maskedEmail}. It expires in {expiresInMinutes} minute(s).</p>\n    <div style=\"margin:0 0 20px;padding:18px 20px;border-radius:16px;background:#eff6ff;border:1px solid #bfdbfe;font-size:34px;letter-spacing:0.24em;font-weight:700;text-align:center;color:{primaryColor};\">{code}</div>\n    <p style=\"margin:0;font-size:13px;line-height:1.6;color:#64748b;\">If you did not request this code, you can ignore this email.</p>\n  </div>\n</body>\n</html>",
+          "id": "{emt#1}",
+          "isActive": true,
+          "key": "auth.email-otp",
+          "subjectTemplate": "Your {applicationName} {purposeLabel} code",
+          "textBodyTemplate": "Your {applicationName} {purposeLabel} code is {code}. It expires in {expiresInMinutes} minute(s).",
+          "updatedAt": "{datetime:unspecified}",
+          "variables": {
+            "accentColor": "#0f172a",
+            "action": "signing in",
+            "applicationName": "SqlOS",
+            "backgroundColor": "#f8fafc",
+            "code": "{code#1}",
+            "expiresInMinutes": "10",
+            "heading": "Your sign-in code",
+            "logoBase64": "",
+            "logoImageDisplay": "none",
+            "logoTextDisplay": "block",
+            "maskedEmail": "us***@example.com",
+            "primaryColor": "#2563eb",
+            "purposeLabel": "sign-in"
+          },
+          "version": 1
+        }
+      ],
+      "hasNextPage": true,
+      "nextCursor": "{cursor#3}",
+      "pageSize": 1
+    }
+
+## 7. operator: is refused by the connection list
+> GET /sqlos/admin/auth/api/oidc-connections?cursor={cursor#3}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_cursor",
+      "message": "The cursor does not match this list."
+    }

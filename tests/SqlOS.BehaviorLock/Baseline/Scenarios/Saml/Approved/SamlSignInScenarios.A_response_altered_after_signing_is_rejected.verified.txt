@@ -1,0 +1,57 @@
+# SqlOS behavior lock transcript
+scenario: SamlSignInScenarios.A_response_altered_after_signing_is_rejected
+profile: enterprise
+
+## 1. browser: the email attribute was rewritten after the IdP signed the response
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#1}
+>   RelayState={relay-state#1}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "access_denied",
+      "message": "The external sign-in request could not be completed."
+    }
+
+## audit: rejection events
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "SAML response signature is invalid.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "SamlAcs"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

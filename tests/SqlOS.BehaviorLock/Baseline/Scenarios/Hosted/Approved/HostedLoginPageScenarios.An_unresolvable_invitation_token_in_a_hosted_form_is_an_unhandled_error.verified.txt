@@ -1,0 +1,72 @@
+# SqlOS behavior lock transcript
+scenario: HostedLoginPageScenarios.An_unresolvable_invitation_token_in_a_hosted_form_is_an_unhandled_error
+profile: hosted
+
+## 1. browser: identify with the bad invitation inside an authorization request
+> POST /sqlos/auth/login/identify
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#1}
+>   email={email:alice}
+>   password=
+>   invitationToken=not-an-invitation
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Invitation is invalid or expired.
+
+## 2. browser: the password form: the error page itself fails to render
+> POST /sqlos/auth/login/password
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#1}
+>   email={email:alice}
+>   password={password:alice}
+>   invitationToken=not-an-invitation
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Invitation is invalid or expired.
+
+## 3. browser: the email-code form
+> POST /sqlos/auth/login/email-otp/start
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#1}
+>   email={email:alice}
+>   password=
+>   invitationToken=not-an-invitation
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Invitation is invalid or expired.
+
+## 4. browser: the magic-link form
+> POST /sqlos/auth/login/magic-link/start
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#1}
+>   email={email:alice}
+>   password=
+>   invitationToken=not-an-invitation
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Invitation is invalid or expired.
+
+## 5. browser: the sign-up form
+> POST /sqlos/auth/signup/submit
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#1}
+>   email={email:dana}
+>   password={password:dana}
+>   invitationToken=not-an-invitation
+>   displayName=Dana
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Invitation is invalid or expired.
+
+## audit: nothing is audited
+  (no new events)

@@ -1,0 +1,405 @@
+# SqlOS behavior lock transcript
+scenario: HostedFormProtectionScenarios.The_antiforgery_check_follows_the_browser_source_and_the_cookie_binding
+profile: hosted
+
+## 1. browser: a cross-site Origin
+> POST /sqlos/auth/login/password
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://evil.example.test
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#1}
+>   email={email:alice}
+>   password={password#1}
+< 400 Bad Request
+< Content-Type: text/plain
+    The hosted form could not be validated. Reload the page and try again.
+
+## 2. browser: an opaque Origin: null
+> POST /sqlos/auth/login/password
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: null
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#1}
+>   email={email:alice}
+>   password={password#1}
+< 400 Bad Request
+< Content-Type: text/plain
+    The hosted form could not be validated. Reload the page and try again.
+
+## 3. browser: no Origin or Referer, and Sec-Fetch-Site says cross-site
+> POST /sqlos/auth/login/password
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Sec-Fetch-Site: cross-site
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#1}
+>   email={email:alice}
+>   password={password#1}
+< 400 Bad Request
+< Content-Type: text/plain
+    The hosted form could not be validated. Reload the page and try again.
+
+## 4. browser: no Origin, and a cross-site Referer
+> POST /sqlos/auth/login/password
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Referer: https://evil.example.test/page
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#1}
+>   email={email:alice}
+>   password={password#1}
+< 400 Bad Request
+< Content-Type: text/plain
+    The hosted form could not be validated. Reload the page and try again.
+
+## 5. browser: no Origin, and a same-origin Referer: accepted
+> POST /sqlos/auth/login/password
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Referer: https://sqlos.example.test/sqlos/auth/authorize
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#1}
+>   email={email:alice}
+>   password={password#1}
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#1}'; style-src 'self' 'nonce-{csp-nonce#1}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Behavior Lock</title>
+        <style nonce="{csp-nonce#1}">{style-sha256:4961352b3f23eca1}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Behavior Lock</h1>
+                <p class="brand-subtitle">Behavior lock hosted sign-in.</p>
+              </div>
+              <div class="messages">
+                <div class="callout error">
+                  <span class="callout-icon">!</span>
+                  <span>Invalid email or password.</span>
+                </div>
+              </div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <div class="panel-intro">
+                    <span class="panel-kicker">Password</span>
+                    <p>Continue with your email and password.</p>
+                  </div>
+                  <form class="auth-form" method="post" action="/sqlos/auth/login/password">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#2}" />
+                    <input type="hidden" name="requestId" value="{req#1}" />
+                    <label class="field">
+                      <span>Email</span>
+                      <input name="email" type="email" value="{email:alice}" placeholder="Your email address" autocomplete="email" required="" />
+                    </label>
+                    <label class="field">
+                      <span>Password</span>
+                      <input name="password" type="password" placeholder="Your password" autocomplete="current-password" required="" />
+                    </label>
+                    <button class="primary-action" type="submit" data-loading-label="Signing in">
+                      <span class="button-label">Continue</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                  </form>
+                  <div class="footer-links">
+                    <a class="secondary-link" href="/sqlos/auth/password/forgot?request={req#1}&amp;email={email:alice}">Forgot password?</a>
+                    <a class="secondary-link" href="/sqlos/auth/login/email-otp?request={req#1}&amp;email={email:alice}">Use an email code instead</a>
+                    <a class="secondary-link" href="/sqlos/auth/login/magic-link?request={req#1}&amp;email={email:alice}">Email me a sign-in link</a>
+                    <a class="secondary-link" href="/sqlos/auth/login/phone-otp?request={req#1}">Use a phone code instead</a>
+                  </div>
+                  <div class="section-divider">OR</div>
+                  <div class="providers">
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#1}?request={req#1}&amp;email={email:alice}" data-loading-label="Connecting to Example OIDC">
+                      <span class="provider-badge">
+                        <span class="provider-generic">EO</span>
+                      </span>
+                      <span class="provider-label">Continue with Example OIDC</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#2}?request={req#1}&amp;email={email:alice}" data-loading-label="Connecting to GitHub">
+                      <span class="provider-badge">
+                        <img class="provider-logo" src="{data-uri:image/svg+xml}" alt="" aria-hidden="true" />
+                      </span>
+                      <span class="provider-label">Continue with GitHub</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#3}?request={req#1}&amp;email={email:alice}" data-loading-label="Connecting to Google">
+                      <span class="provider-badge">
+                        <img class="provider-logo" src="{data-uri:image/svg+xml}" alt="" aria-hidden="true" />
+                      </span>
+                      <span class="provider-label">Continue with Google</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#4}?request={req#1}&amp;email={email:alice}" data-loading-label="Connecting to Microsoft">
+                      <span class="provider-badge">
+                        <img class="provider-logo" src="{data-uri:image/svg+xml}" alt="" aria-hidden="true" />
+                      </span>
+                      <span class="provider-label">Continue with Microsoft</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                  </div>
+                  <p class="footer-prompt">
+                    Don't have an account?
+                    <a class="secondary-link" href="/sqlos/auth/signup?request={req#1}">Get started</a>
+                  </p>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#1}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+
+## 6. browser: no source headers at all, as a non-browser client sends: accepted
+> POST /sqlos/auth/login/password
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#1}
+>   email={email:alice}
+>   password={password#1}
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#2}'; style-src 'self' 'nonce-{csp-nonce#2}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Behavior Lock</title>
+        <style nonce="{csp-nonce#2}">{style-sha256:4961352b3f23eca1}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Behavior Lock</h1>
+                <p class="brand-subtitle">Behavior lock hosted sign-in.</p>
+              </div>
+              <div class="messages">
+                <div class="callout error">
+                  <span class="callout-icon">!</span>
+                  <span>Invalid email or password.</span>
+                </div>
+              </div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <div class="panel-intro">
+                    <span class="panel-kicker">Password</span>
+                    <p>Continue with your email and password.</p>
+                  </div>
+                  <form class="auth-form" method="post" action="/sqlos/auth/login/password">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#3}" />
+                    <input type="hidden" name="requestId" value="{req#1}" />
+                    <label class="field">
+                      <span>Email</span>
+                      <input name="email" type="email" value="{email:alice}" placeholder="Your email address" autocomplete="email" required="" />
+                    </label>
+                    <label class="field">
+                      <span>Password</span>
+                      <input name="password" type="password" placeholder="Your password" autocomplete="current-password" required="" />
+                    </label>
+                    <button class="primary-action" type="submit" data-loading-label="Signing in">
+                      <span class="button-label">Continue</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                  </form>
+                  <div class="footer-links">
+                    <a class="secondary-link" href="/sqlos/auth/password/forgot?request={req#1}&amp;email={email:alice}">Forgot password?</a>
+                    <a class="secondary-link" href="/sqlos/auth/login/email-otp?request={req#1}&amp;email={email:alice}">Use an email code instead</a>
+                    <a class="secondary-link" href="/sqlos/auth/login/magic-link?request={req#1}&amp;email={email:alice}">Email me a sign-in link</a>
+                    <a class="secondary-link" href="/sqlos/auth/login/phone-otp?request={req#1}">Use a phone code instead</a>
+                  </div>
+                  <div class="section-divider">OR</div>
+                  <div class="providers">
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#1}?request={req#1}&amp;email={email:alice}" data-loading-label="Connecting to Example OIDC">
+                      <span class="provider-badge">
+                        <span class="provider-generic">EO</span>
+                      </span>
+                      <span class="provider-label">Continue with Example OIDC</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#2}?request={req#1}&amp;email={email:alice}" data-loading-label="Connecting to GitHub">
+                      <span class="provider-badge">
+                        <img class="provider-logo" src="{data-uri:image/svg+xml}" alt="" aria-hidden="true" />
+                      </span>
+                      <span class="provider-label">Continue with GitHub</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#3}?request={req#1}&amp;email={email:alice}" data-loading-label="Connecting to Google">
+                      <span class="provider-badge">
+                        <img class="provider-logo" src="{data-uri:image/svg+xml}" alt="" aria-hidden="true" />
+                      </span>
+                      <span class="provider-label">Continue with Google</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#4}?request={req#1}&amp;email={email:alice}" data-loading-label="Connecting to Microsoft">
+                      <span class="provider-badge">
+                        <img class="provider-logo" src="{data-uri:image/svg+xml}" alt="" aria-hidden="true" />
+                      </span>
+                      <span class="provider-label">Continue with Microsoft</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                  </div>
+                  <p class="footer-prompt">
+                    Don't have an account?
+                    <a class="secondary-link" href="/sqlos/auth/signup?request={req#1}">Get started</a>
+                  </p>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#2}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+
+## 7. browser: a token issued for another browser's cookie
+> POST /sqlos/auth/login/password
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#4}
+>   requestId={req#1}
+>   email={email:alice}
+>   password={password#1}
+< 400 Bad Request
+< Content-Type: text/plain
+    The hosted form could not be validated. Reload the page and try again.
+
+## 8. browser: the token without its cookie
+> POST /sqlos/auth/login/password
+> Content-Type: application/x-www-form-urlencoded
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#1}
+>   email={email:alice}
+>   password={password#1}
+< 400 Bad Request
+< Content-Type: text/plain
+    The hosted form could not be validated. Reload the page and try again.
+
+## 9. browser: JSON instead of a form
+> POST /sqlos/auth/login/password
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "__RequestVerificationToken": "{csrf#1}",
+>     "email": "{email:alice}",
+>     "password": "{password:alice}"
+>   }
+< 400 Bad Request
+< Content-Type: text/plain
+    The hosted form could not be validated. Reload the page and try again.
+
+## audit: only the two accepted posts reach the password check
+  - {
+      "action": "password.login.failed",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "password.login.failed",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "AuthorizationRequestId": "[redacted]",
+        "ClientKey": "behavior-lock-app",
+        "NormalizedEmail": "{email:ALICE}",
+        "Surface": "hosted",
+        "UserAgentHash": null,
+        "details": {
+          "failureReason": "invalid_password",
+          "lockedScopes": []
+        },
+        "maskedEmail": "AL***@EXAMPLE.TEST"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "password.login.failed",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "password.login.failed",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "AuthorizationRequestId": "[redacted]",
+        "ClientKey": "behavior-lock-app",
+        "NormalizedEmail": "{email:ALICE}",
+        "Surface": "hosted",
+        "UserAgentHash": null,
+        "details": {
+          "failureReason": "invalid_password",
+          "lockedScopes": []
+        },
+        "maskedEmail": "AL***@EXAMPLE.TEST"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }

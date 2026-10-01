@@ -164,6 +164,19 @@ jobs:
         env:
           GITHUB_BASE_REF: ${{ github.base_ref }}
 
+  # The frozen 7.2.1 baseline (tests/SqlOS.BehaviorLock/Baseline) never changes, and the ledger
+  # names exactly the approved files that differ from it.
+  behavior-baseline:
+    name: Behavior Baseline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: chmod +x scripts/*.sh && ./scripts/check-behavior-baseline.sh
+        env:
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+
   # Each behavior-lock suite runs as three shards split by scenario area
   # (scripts/behavior-lock.sh --shard), so every job stays well under 20 minutes. The last
   # shard takes every area the others do not name, so a new area is never left out.
@@ -248,8 +261,8 @@ jobs:
           name: behavior-lock-received-postgres-${{ matrix.shard }}
           path: "**/*.received.*"
 
-  # The same approvals against the released package: proves they describe 7.2.1, except files
-  # the behavior ledger lists as intended 8.0.0 changes. Builds its own package-mode output.
+  # Every scenario against the released package, compared with the frozen baseline: proves the
+  # baseline is what 7.2.1 does. Skips nothing. Builds its own package-mode output.
   behavior-lock-baseline:
     name: Behavior Lock Baseline (SqlOS 7.2.1 package, SQL Server, ${{ matrix.shard }})
     runs-on: ubuntu-latest
@@ -284,6 +297,43 @@ jobs:
         if: failure()
         with:
           name: behavior-lock-received-baseline-${{ matrix.shard }}
+          path: "**/*.received.*"
+
+  behavior-lock-baseline-postgres:
+    name: Behavior Lock Baseline (SqlOS 7.2.1 package, PostgreSQL, ${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [auth-pages, protocol-enterprise, admin-and-rest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+      - run: docker pull postgres:16
+        continue-on-error: true
+      - run: chmod +x scripts/*.sh && ./scripts/behavior-lock.sh --mode package --shard ${{ matrix.shard }}
+        env:
+          ASPIRE_ALLOW_UNSECURED_TRANSPORT: "true"
+          SQLOS_TEST_PROVIDER: postgresql
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: behavior-lock-results-baseline-postgres-${{ matrix.shard }}
+          path: TestResults/BehaviorLock/**
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: behavior-lock-received-baseline-postgres-${{ matrix.shard }}
           path: "**/*.received.*"
 
   merge-coverage:

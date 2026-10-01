@@ -1,0 +1,531 @@
+# SqlOS behavior lock transcript
+scenario: AdminLibraryScenarios.Application_access_follows_the_access_mode_and_assignments
+profile: multi-app
+
+## 1. probe: selected users only: no assignment, no access
+> GET /__probe/admin/applications/atlas-ops-console/access-check?userId={usr#1}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "selected_users_groups_roles",
+      "allowed": false,
+      "assignmentId": null,
+      "clientApplicationId": "{cli#1}",
+      "clientId": "atlas-ops-console",
+      "decision": "denied",
+      "organizationId": null,
+      "reason": "No user, group, role, or service assignment matched.",
+      "source": "no_principal_assignment",
+      "userId": "{usr#1}"
+    }
+
+## 2. probe: AssignApplicationAsync allows one user
+> POST /__probe/admin/applications/atlas-ops-console/assignments
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "principalId": "{usr#1}",
+>     "principalType": "user",
+>     "reason": "On call"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "access": "allowed",
+      "id": "{asa#1}",
+      "organizationId": null,
+      "principalId": "{usr#1}",
+      "principalType": "user",
+      "reason": "On call",
+      "roleKey": null
+    }
+
+## 3. probe: the assignment allows her
+> GET /__probe/admin/applications/atlas-ops-console/access-check?userId={usr#1}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "selected_users_groups_roles",
+      "allowed": true,
+      "assignmentId": "{asa#1}",
+      "clientApplicationId": "{cli#1}",
+      "clientId": "atlas-ops-console",
+      "decision": "allowed",
+      "organizationId": null,
+      "reason": "On call",
+      "source": "user_assignment",
+      "userId": "{usr#1}"
+    }
+
+## 4. probe: but nobody else
+> GET /__probe/admin/applications/atlas-ops-console/access-check?userId={usr#2}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "selected_users_groups_roles",
+      "allowed": false,
+      "assignmentId": null,
+      "clientApplicationId": "{cli#1}",
+      "clientId": "atlas-ops-console",
+      "decision": "denied",
+      "organizationId": null,
+      "reason": "No user, group, role, or service assignment matched.",
+      "source": "no_principal_assignment",
+      "userId": "{usr#2}"
+    }
+
+## 5. probe: an explicit deny assignment
+> POST /__probe/admin/applications/atlas-ops-console/assignments
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "access": "denied",
+>     "principalId": "{usr#2}",
+>     "principalType": "user",
+>     "reason": "Contractor"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "access": "denied",
+      "id": "{asa#2}",
+      "organizationId": null,
+      "principalId": "{usr#2}",
+      "principalType": "user",
+      "reason": "Contractor",
+      "roleKey": null
+    }
+
+## 6. probe: SetApplicationAccessModeAsync opens the application to everyone
+> POST /__probe/admin/applications/atlas-ops-console/access-mode
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "accessMode": "all_organizations"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "all_organizations",
+      "clientId": "atlas-ops-console",
+      "isActive": true
+    }
+
+## 7. probe: everyone is allowed by the mode
+> GET /__probe/admin/applications/atlas-ops-console/access-check?userId={usr#1}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "all_organizations",
+      "allowed": true,
+      "assignmentId": null,
+      "clientApplicationId": "{cli#1}",
+      "clientId": "atlas-ops-console",
+      "decision": "allowed",
+      "organizationId": null,
+      "reason": "Application is open to all organizations.",
+      "source": "all_organizations",
+      "userId": "{usr#1}"
+    }
+
+## 8. probe: except a denied principal
+> GET /__probe/admin/applications/atlas-ops-console/access-check?userId={usr#2}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "all_organizations",
+      "allowed": false,
+      "assignmentId": "{asa#2}",
+      "clientApplicationId": "{cli#1}",
+      "clientId": "atlas-ops-console",
+      "decision": "denied",
+      "organizationId": null,
+      "reason": "Contractor",
+      "source": "assignment_denied",
+      "userId": "{usr#2}"
+    }
+
+## 9. probe: restrict it to selected organizations
+> POST /__probe/admin/applications/atlas-ops-console/access-mode
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "accessMode": "selected_organizations"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "selected_organizations",
+      "clientId": "atlas-ops-console",
+      "isActive": true
+    }
+
+## 10. probe: Acme is not selected
+> GET /__probe/admin/applications/atlas-ops-console/access-check?userId={usr#1}&organizationId={org#1}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "selected_organizations",
+      "allowed": false,
+      "assignmentId": null,
+      "clientApplicationId": "{cli#1}",
+      "clientId": "atlas-ops-console",
+      "decision": "denied",
+      "organizationId": "{org#1}",
+      "reason": "Organization is not assigned to this application.",
+      "source": "no_organization_assignment",
+      "userId": "{usr#1}"
+    }
+
+## 11. probe: select Acme
+> POST /__probe/admin/applications/atlas-ops-console/assignments
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "organizationId": "{org#1}",
+>     "principalType": "organization"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "access": "allowed",
+      "id": "{asa#3}",
+      "organizationId": "{org#1}",
+      "principalId": null,
+      "principalType": "organization",
+      "reason": null,
+      "roleKey": null
+    }
+
+## 12. probe: now Acme is allowed
+> GET /__probe/admin/applications/atlas-ops-console/access-check?userId={usr#1}&organizationId={org#1}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "selected_organizations",
+      "allowed": true,
+      "assignmentId": "{asa#3}",
+      "clientApplicationId": "{cli#1}",
+      "clientId": "atlas-ops-console",
+      "decision": "allowed",
+      "organizationId": "{org#1}",
+      "reason": null,
+      "source": "organization_assignment",
+      "userId": "{usr#1}"
+    }
+
+## 13. probe: a user that does not exist cannot be assigned
+> POST /__probe/admin/applications/atlas-ops-console/assignments
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "principalId": "{usr#3}",
+>     "principalType": "user"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "Application assignment user '{usr#3}' was not found or is inactive."
+    }
+
+## 14. probe: an organization assignment needs the organization
+> POST /__probe/admin/applications/atlas-ops-console/assignments
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "principalType": "organization"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "Organization assignments require organizationId or principalId."
+    }
+
+## 15. probe: an unknown principal type is refused
+> POST /__probe/admin/applications/atlas-ops-console/assignments
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "principalId": "{usr#1}",
+>     "principalType": "robot"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "Unsupported application assignment principal type."
+    }
+
+## 16. probe: an unknown access mode is refused
+> POST /__probe/admin/applications/atlas-ops-console/access-mode
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "accessMode": "everyone"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "Unsupported application access mode."
+    }
+
+## 17. probe: disabling the application
+> POST /__probe/admin/applications/atlas-ops-console/access-mode
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "accessMode": "disabled"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "disabled",
+      "clientId": "atlas-ops-console",
+      "isActive": false
+    }
+
+## 18. probe: denies everyone
+> GET /__probe/admin/applications/atlas-ops-console/access-check?userId={usr#1}&organizationId={org#1}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "disabled",
+      "allowed": false,
+      "assignmentId": null,
+      "clientApplicationId": "{cli#1}",
+      "clientId": "atlas-ops-console",
+      "decision": "denied",
+      "organizationId": "{org#1}",
+      "reason": "Application is disabled.",
+      "source": "application_disabled",
+      "userId": "{usr#1}"
+    }
+
+## 19. probe: an unknown client is refused
+> GET /__probe/admin/applications/no-such-client/access-check?userId={usr#1}
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "Client application was not found."
+    }
+
+## audit: access mode and assignment events
+  - {
+      "action": "application.assignment.created",
+      "actor": {
+        "displayName": null,
+        "id": "behavior-lock",
+        "type": "deployment"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "application.assignment.created",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "Access": "[redacted]",
+        "PrincipalId": "{usr#1}",
+        "PrincipalType": "user",
+        "RoleKey": null,
+        "assignment_id": "{asa#1}",
+        "client_application_id": "{cli#1}",
+        "client_id": "atlas-ops-console"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "application.assignment.created",
+      "actor": {
+        "displayName": null,
+        "id": "behavior-lock",
+        "type": "deployment"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "application.assignment.created",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "Access": "[redacted]",
+        "PrincipalId": "{usr#2}",
+        "PrincipalType": "user",
+        "RoleKey": null,
+        "assignment_id": "{asa#2}",
+        "client_application_id": "{cli#1}",
+        "client_id": "atlas-ops-console"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "application.access_mode.changed",
+      "actor": {
+        "displayName": null,
+        "id": "behavior-lock",
+        "type": "deployment"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "application.access_mode.changed",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "access_mode": "all_organizations",
+        "client_application_id": "{cli#1}",
+        "client_id": "atlas-ops-console",
+        "previous_access_mode": "selected_users_groups_roles"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "application.access_mode.changed",
+      "actor": {
+        "displayName": null,
+        "id": "behavior-lock",
+        "type": "deployment"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "application.access_mode.changed",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "access_mode": "selected_organizations",
+        "client_application_id": "{cli#1}",
+        "client_id": "atlas-ops-console",
+        "previous_access_mode": "all_organizations"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "application.assignment.created",
+      "actor": {
+        "displayName": null,
+        "id": "behavior-lock",
+        "type": "deployment"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "application.assignment.created",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "Access": "[redacted]",
+        "PrincipalId": null,
+        "PrincipalType": "organization",
+        "RoleKey": null,
+        "assignment_id": "{asa#3}",
+        "client_application_id": "{cli#1}",
+        "client_id": "atlas-ops-console"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "application.access_mode.changed",
+      "actor": {
+        "displayName": null,
+        "id": "behavior-lock",
+        "type": "deployment"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "application.access_mode.changed",
+      "id": "{evt#6}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "access_mode": "disabled",
+        "client_application_id": "{cli#1}",
+        "client_id": "atlas-ops-console",
+        "previous_access_mode": "selected_organizations"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

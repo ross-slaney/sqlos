@@ -1,0 +1,154 @@
+# SqlOS behavior lock transcript
+scenario: AuthLibraryScenarios.Third_party_clients_cannot_sign_users_in_directly
+profile: hosted
+
+## 1. probe: password sign-in for a third-party client is refused
+> POST /__probe/auth/password-login
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "partner-app",
+>     "email": "{email:alice}",
+>     "password": "{password:alice}"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "SqlOSPublicAuthException",
+      "message": "This client must use the authorization endpoint to sign users in."
+    }
+
+## 2. probe: before the password is checked: a wrong one gets the same refusal
+> POST /__probe/auth/password-login
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "partner-app",
+>     "email": "{email:alice}",
+>     "password": "{password#1}"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "SqlOSPublicAuthException",
+      "message": "This client must use the authorization endpoint to sign users in."
+    }
+
+## 3. probe: an email code for a third-party client is refused and no email is sent
+> POST /__probe/auth/email-otp
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "partner-app",
+>     "email": "{email:alice}"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "SqlOSPublicAuthException",
+      "message": "This client must use the authorization endpoint to sign users in."
+    }
+
+## audit: each refusal is audited
+  - {
+      "action": "oauth.direct_login.rejected",
+      "actor": {
+        "displayName": null,
+        "id": "{cli#1}",
+        "type": "client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.direct_login.rejected",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "client_application_id": "{cli#1}",
+        "client_id": "partner-app",
+        "route": "/__probe/auth/password-login"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "oauth.direct_login.rejected",
+      "actor": {
+        "displayName": null,
+        "id": "{cli#1}",
+        "type": "client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.direct_login.rejected",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "client_application_id": "{cli#1}",
+        "client_id": "partner-app",
+        "route": "/__probe/auth/password-login"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "oauth.direct_login.rejected",
+      "actor": {
+        "displayName": null,
+        "id": "{cli#1}",
+        "type": "client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.direct_login.rejected",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "client_application_id": "{cli#1}",
+        "client_id": "partner-app",
+        "route": "/__probe/auth/email-otp"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

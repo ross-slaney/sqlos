@@ -1,0 +1,7 @@
+# The release this baseline records and the commit its files were copied from: every approved file
+# of the source commit, byte for byte (the end of layer 1 of the 8.0.0 refactor, when package mode
+# matched every approval), plus baselines recorded later for new coverage. Package mode checks the
+# release against the package under test. Changing this file re-baselines to a new release, which
+# the 8.0.0 refactor never does.
+release 7.2.1
+source 4473d68f42c6f7a46bbb499b9cbd08fd59beeb7b

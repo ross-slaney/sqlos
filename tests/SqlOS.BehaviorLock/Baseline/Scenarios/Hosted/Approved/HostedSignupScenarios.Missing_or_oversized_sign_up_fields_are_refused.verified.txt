@@ -1,0 +1,526 @@
+# SqlOS behavior lock transcript
+scenario: HostedSignupScenarios.Missing_or_oversized_sign_up_fields_are_refused
+profile: hosted
+
+## 1. browser: no display name
+> POST /sqlos/auth/signup/submit
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#1}
+>   mode=signup
+>   displayName=
+>   email={email:dana}
+>   password={password:dana}
+>   organizationName=
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#1}'; style-src 'self' 'nonce-{csp-nonce#1}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Behavior Lock</title>
+        <style nonce="{csp-nonce#1}">{style-sha256:4961352b3f23eca1}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Behavior Lock</h1>
+                <p class="brand-subtitle">Behavior lock hosted sign-in.</p>
+              </div>
+              <div class="messages">
+                <div class="callout error">
+                  <span class="callout-icon">!</span>
+                  <span>Display name is required.</span>
+                </div>
+              </div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <div class="panel-intro">
+                    <span class="panel-kicker">Create account</span>
+                    <p>Use email and password to set up your account.</p>
+                  </div>
+                  <form class="auth-form" method="post" action="/sqlos/auth/signup/submit">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#2}" />
+                    <input type="hidden" name="requestId" value="{req#1}" />
+                    <input type="hidden" name="mode" value="signup" />
+                    <label class="field">
+                      <span>Display name</span>
+                      <input name="displayName" value=" " placeholder="Jane Doe" autocomplete="name" required="" />
+                    </label>
+                    <label class="field">
+                      <span>Email</span>
+                      <input name="email" type="email" value="{email:dana}" placeholder="Your email address" autocomplete="email" required="" />
+                    </label>
+                    <label class="field">
+                      <span>Password</span>
+                      <input name="password" type="password" placeholder="Create a password" autocomplete="new-password" required="" />
+                    </label>
+                    <label class="field">
+                      <span>Organization name</span>
+                      <input name="organizationName" placeholder="Optional" autocomplete="organization" />
+                    </label>
+                    <button class="primary-action" type="submit" data-loading-label="Creating account">
+                      <span class="button-label">Create account</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                  </form>
+                  <div class="section-divider">OR</div>
+                  <div class="providers">
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#1}?request={req#1}&amp;email={email:dana}" data-loading-label="Connecting to Example OIDC">
+                      <span class="provider-badge">
+                        <span class="provider-generic">EO</span>
+                      </span>
+                      <span class="provider-label">Continue with Example OIDC</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#2}?request={req#1}&amp;email={email:dana}" data-loading-label="Connecting to GitHub">
+                      <span class="provider-badge">
+                        <img class="provider-logo" src="{data-uri:image/svg+xml}" alt="" aria-hidden="true" />
+                      </span>
+                      <span class="provider-label">Continue with GitHub</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#3}?request={req#1}&amp;email={email:dana}" data-loading-label="Connecting to Google">
+                      <span class="provider-badge">
+                        <img class="provider-logo" src="{data-uri:image/svg+xml}" alt="" aria-hidden="true" />
+                      </span>
+                      <span class="provider-label">Continue with Google</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#4}?request={req#1}&amp;email={email:dana}" data-loading-label="Connecting to Microsoft">
+                      <span class="provider-badge">
+                        <img class="provider-logo" src="{data-uri:image/svg+xml}" alt="" aria-hidden="true" />
+                      </span>
+                      <span class="provider-label">Continue with Microsoft</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                  </div>
+                  <div class="footer-links">
+                    <a class="secondary-link" href="/sqlos/auth/signup/phone-otp?request={req#1}">Create account with phone code</a>
+                  </div>
+                  <p class="footer-prompt">
+                    Already have an account?
+                    <a class="secondary-link" href="/sqlos/auth/login?request={req#1}">Sign in</a>
+                  </p>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#1}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+
+## 2. browser: no email address
+> POST /sqlos/auth/signup/submit
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#1}
+>   mode=signup
+>   displayName=Dana
+>   email=
+>   password={password:dana}
+>   organizationName=
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#2}'; style-src 'self' 'nonce-{csp-nonce#2}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Behavior Lock</title>
+        <style nonce="{csp-nonce#2}">{style-sha256:4961352b3f23eca1}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Behavior Lock</h1>
+                <p class="brand-subtitle">Behavior lock hosted sign-in.</p>
+              </div>
+              <div class="messages">
+                <div class="callout error">
+                  <span class="callout-icon">!</span>
+                  <span>Email address is required.</span>
+                </div>
+              </div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <div class="panel-intro">
+                    <span class="panel-kicker">Create account</span>
+                    <p>Use email and password to set up your account.</p>
+                  </div>
+                  <form class="auth-form" method="post" action="/sqlos/auth/signup/submit">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#3}" />
+                    <input type="hidden" name="requestId" value="{req#1}" />
+                    <input type="hidden" name="mode" value="signup" />
+                    <label class="field">
+                      <span>Display name</span>
+                      <input name="displayName" value="Dana" placeholder="Jane Doe" autocomplete="name" required="" />
+                    </label>
+                    <label class="field">
+                      <span>Email</span>
+                      <input name="email" type="email" value="" placeholder="Your email address" autocomplete="email" required="" />
+                    </label>
+                    <label class="field">
+                      <span>Password</span>
+                      <input name="password" type="password" placeholder="Create a password" autocomplete="new-password" required="" />
+                    </label>
+                    <label class="field">
+                      <span>Organization name</span>
+                      <input name="organizationName" placeholder="Optional" autocomplete="organization" />
+                    </label>
+                    <button class="primary-action" type="submit" data-loading-label="Creating account">
+                      <span class="button-label">Create account</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                  </form>
+                  <div class="section-divider">OR</div>
+                  <div class="providers">
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#1}?request={req#1}&amp;email=" data-loading-label="Connecting to Example OIDC">
+                      <span class="provider-badge">
+                        <span class="provider-generic">EO</span>
+                      </span>
+                      <span class="provider-label">Continue with Example OIDC</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#2}?request={req#1}&amp;email=" data-loading-label="Connecting to GitHub">
+                      <span class="provider-badge">
+                        <img class="provider-logo" src="{data-uri:image/svg+xml}" alt="" aria-hidden="true" />
+                      </span>
+                      <span class="provider-label">Continue with GitHub</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#3}?request={req#1}&amp;email=" data-loading-label="Connecting to Google">
+                      <span class="provider-badge">
+                        <img class="provider-logo" src="{data-uri:image/svg+xml}" alt="" aria-hidden="true" />
+                      </span>
+                      <span class="provider-label">Continue with Google</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#4}?request={req#1}&amp;email=" data-loading-label="Connecting to Microsoft">
+                      <span class="provider-badge">
+                        <img class="provider-logo" src="{data-uri:image/svg+xml}" alt="" aria-hidden="true" />
+                      </span>
+                      <span class="provider-label">Continue with Microsoft</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                  </div>
+                  <div class="footer-links">
+                    <a class="secondary-link" href="/sqlos/auth/signup/phone-otp?request={req#1}">Create account with phone code</a>
+                  </div>
+                  <p class="footer-prompt">
+                    Already have an account?
+                    <a class="secondary-link" href="/sqlos/auth/login?request={req#1}">Sign in</a>
+                  </p>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#2}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+
+## 3. browser: no password
+> POST /sqlos/auth/signup/submit
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#1}
+>   mode=signup
+>   displayName=Dana
+>   email={email:dana}
+>   password=
+>   organizationName=
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#3}'; style-src 'self' 'nonce-{csp-nonce#3}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Behavior Lock</title>
+        <style nonce="{csp-nonce#3}">{style-sha256:4961352b3f23eca1}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Behavior Lock</h1>
+                <p class="brand-subtitle">Behavior lock hosted sign-in.</p>
+              </div>
+              <div class="messages">
+                <div class="callout error">
+                  <span class="callout-icon">!</span>
+                  <span>Password is required.</span>
+                </div>
+              </div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <div class="panel-intro">
+                    <span class="panel-kicker">Create account</span>
+                    <p>Use email and password to set up your account.</p>
+                  </div>
+                  <form class="auth-form" method="post" action="/sqlos/auth/signup/submit">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#4}" />
+                    <input type="hidden" name="requestId" value="{req#1}" />
+                    <input type="hidden" name="mode" value="signup" />
+                    <label class="field">
+                      <span>Display name</span>
+                      <input name="displayName" value="Dana" placeholder="Jane Doe" autocomplete="name" required="" />
+                    </label>
+                    <label class="field">
+                      <span>Email</span>
+                      <input name="email" type="email" value="{email:dana}" placeholder="Your email address" autocomplete="email" required="" />
+                    </label>
+                    <label class="field">
+                      <span>Password</span>
+                      <input name="password" type="password" placeholder="Create a password" autocomplete="new-password" required="" />
+                    </label>
+                    <label class="field">
+                      <span>Organization name</span>
+                      <input name="organizationName" placeholder="Optional" autocomplete="organization" />
+                    </label>
+                    <button class="primary-action" type="submit" data-loading-label="Creating account">
+                      <span class="button-label">Create account</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                  </form>
+                  <div class="section-divider">OR</div>
+                  <div class="providers">
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#1}?request={req#1}&amp;email={email:dana}" data-loading-label="Connecting to Example OIDC">
+                      <span class="provider-badge">
+                        <span class="provider-generic">EO</span>
+                      </span>
+                      <span class="provider-label">Continue with Example OIDC</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#2}?request={req#1}&amp;email={email:dana}" data-loading-label="Connecting to GitHub">
+                      <span class="provider-badge">
+                        <img class="provider-logo" src="{data-uri:image/svg+xml}" alt="" aria-hidden="true" />
+                      </span>
+                      <span class="provider-label">Continue with GitHub</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#3}?request={req#1}&amp;email={email:dana}" data-loading-label="Connecting to Google">
+                      <span class="provider-badge">
+                        <img class="provider-logo" src="{data-uri:image/svg+xml}" alt="" aria-hidden="true" />
+                      </span>
+                      <span class="provider-label">Continue with Google</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#4}?request={req#1}&amp;email={email:dana}" data-loading-label="Connecting to Microsoft">
+                      <span class="provider-badge">
+                        <img class="provider-logo" src="{data-uri:image/svg+xml}" alt="" aria-hidden="true" />
+                      </span>
+                      <span class="provider-label">Continue with Microsoft</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                  </div>
+                  <div class="footer-links">
+                    <a class="secondary-link" href="/sqlos/auth/signup/phone-otp?request={req#1}">Create account with phone code</a>
+                  </div>
+                  <p class="footer-prompt">
+                    Already have an account?
+                    <a class="secondary-link" href="/sqlos/auth/login?request={req#1}">Sign in</a>
+                  </p>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#3}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+
+## 4. browser: a 201-character display name
+> POST /sqlos/auth/signup/submit
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#1}
+>   mode=signup
+>   displayName=DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD
+>   email={email:dana}
+>   password={password:dana}
+>   organizationName=
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#4}'; style-src 'self' 'nonce-{csp-nonce#4}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Behavior Lock</title>
+        <style nonce="{csp-nonce#4}">{style-sha256:4961352b3f23eca1}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Behavior Lock</h1>
+                <p class="brand-subtitle">Behavior lock hosted sign-in.</p>
+              </div>
+              <div class="messages">
+                <div class="callout error">
+                  <span class="callout-icon">!</span>
+                  <span>Display name cannot exceed 200 characters.</span>
+                </div>
+              </div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <div class="panel-intro">
+                    <span class="panel-kicker">Create account</span>
+                    <p>Use email and password to set up your account.</p>
+                  </div>
+                  <form class="auth-form" method="post" action="/sqlos/auth/signup/submit">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#5}" />
+                    <input type="hidden" name="requestId" value="{req#1}" />
+                    <input type="hidden" name="mode" value="signup" />
+                    <label class="field">
+                      <span>Display name</span>
+                      <input name="displayName" value="DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD" placeholder="Jane Doe" autocomplete="name" required="" />
+                    </label>
+                    <label class="field">
+                      <span>Email</span>
+                      <input name="email" type="email" value="{email:dana}" placeholder="Your email address" autocomplete="email" required="" />
+                    </label>
+                    <label class="field">
+                      <span>Password</span>
+                      <input name="password" type="password" placeholder="Create a password" autocomplete="new-password" required="" />
+                    </label>
+                    <label class="field">
+                      <span>Organization name</span>
+                      <input name="organizationName" placeholder="Optional" autocomplete="organization" />
+                    </label>
+                    <button class="primary-action" type="submit" data-loading-label="Creating account">
+                      <span class="button-label">Create account</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                  </form>
+                  <div class="section-divider">OR</div>
+                  <div class="providers">
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#1}?request={req#1}&amp;email={email:dana}" data-loading-label="Connecting to Example OIDC">
+                      <span class="provider-badge">
+                        <span class="provider-generic">EO</span>
+                      </span>
+                      <span class="provider-label">Continue with Example OIDC</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#2}?request={req#1}&amp;email={email:dana}" data-loading-label="Connecting to GitHub">
+                      <span class="provider-badge">
+                        <img class="provider-logo" src="{data-uri:image/svg+xml}" alt="" aria-hidden="true" />
+                      </span>
+                      <span class="provider-label">Continue with GitHub</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#3}?request={req#1}&amp;email={email:dana}" data-loading-label="Connecting to Google">
+                      <span class="provider-badge">
+                        <img class="provider-logo" src="{data-uri:image/svg+xml}" alt="" aria-hidden="true" />
+                      </span>
+                      <span class="provider-label">Continue with Google</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                    <a class="provider-link js-loading-link" href="/sqlos/auth/login/oidc/{oidc#4}?request={req#1}&amp;email={email:dana}" data-loading-label="Connecting to Microsoft">
+                      <span class="provider-badge">
+                        <img class="provider-logo" src="{data-uri:image/svg+xml}" alt="" aria-hidden="true" />
+                      </span>
+                      <span class="provider-label">Continue with Microsoft</span>
+                      <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
+                    </a>
+                  </div>
+                  <div class="footer-links">
+                    <a class="secondary-link" href="/sqlos/auth/signup/phone-otp?request={req#1}">Create account with phone code</a>
+                  </div>
+                  <p class="footer-prompt">
+                    Already have an account?
+                    <a class="secondary-link" href="/sqlos/auth/login?request={req#1}">Sign in</a>
+                  </p>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#4}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+
+## 5. browser: a one-character password is accepted: there is no strength policy
+> POST /sqlos/auth/signup/submit
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#1}
+>   mode=signup
+>   displayName=Dana
+>   email={email:dana}
+>   password=x
+>   organizationName=
+< 200 OK
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#5}'; style-src 'self' 'nonce-{csp-nonce#5}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+< Set-Cookie: sqlos_auth_page={cookie#2}; expires=+7d; path=/; secure; samesite=lax; httponly
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="refresh" content="0;url=https://sqlos.example.test/auth/callback?code={code#1}&amp;state={state#1}&amp;scope=openid%20profile%20email%20offline_access" />
+        <title>Continuing…</title>
+      </head>
+      <body>
+        <p>
+          Returning to the application…
+          <a href="https://sqlos.example.test/auth/callback?code={code#1}&amp;state={state#1}&amp;scope=openid%20profile%20email%20offline_access">Continue</a>
+        </p>
+      </body>
+    </html>

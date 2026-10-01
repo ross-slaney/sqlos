@@ -1,0 +1,239 @@
+# SqlOS behavior lock transcript
+scenario: SessionRevocationAdminScenarios.Session_revocation_guards_reject_unsafe_requests
+profile: dashboard-callback
+
+## 1. operator: Alice's session
+> GET /sqlos/admin/auth/api/sessions
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "absoluteExpiresAt": "{datetime:unspecified}",
+          "authenticationMethod": "password",
+          "clientApplicationId": "{cli#1}",
+          "createdAt": "{datetime:unspecified}",
+          "id": "{ses#1}",
+          "idleExpiresAt": "{datetime:unspecified}",
+          "ipAddress": "203.0.113.10",
+          "lastSeenAt": "{datetime:unspecified}",
+          "revocationReason": null,
+          "revokedAt": null,
+          "user": "Alice",
+          "userAgent": "",
+          "userId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 2. operator: a preview needs a selector
+> POST /sqlos/admin/auth/api/sessions/revocation/preview
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "At least one session, user, organization, or client selector is required."
+    }
+
+## 3. operator: an over-long identifier
+> POST /sqlos/admin/auth/api/sessions/revocation/preview
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "userId": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "UserId is too long."
+    }
+
+## 4. operator: an over-long reason
+> POST /sqlos/admin/auth/api/sessions/revocation/preview
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "reason": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+>     "userId": "{usr#1}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Reason is too long."
+    }
+
+## 5. operator: a negative expected count
+> POST /sqlos/admin/auth/api/sessions/revocation/preview
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "expectedMatchedSessions": -1,
+>     "userId": "{usr#1}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "ExpectedMatchedSessions must be between 0 and 10,000."
+    }
+
+## 6. operator: a revocation without explicit confirmation
+> POST /sqlos/admin/auth/api/sessions/revocation
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "expectedMatchedSessions": 1,
+>     "userId": "{usr#1}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Explicit confirmation is required. (Parameter 'request')"
+    }
+
+## 7. operator: a broad revocation without the previewed count
+> POST /sqlos/admin/auth/api/sessions/revocation
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "confirm": true,
+>     "userId": "{usr#1}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Broad revocation requires the matched-session count returned by preview."
+    }
+
+## 8. operator: a previewed count that no longer matches
+> POST /sqlos/admin/auth/api/sessions/revocation
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "confirm": true,
+>     "expectedMatchedSessions": 2,
+>     "userId": "{usr#1}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "The revocation scope changed after preview. Preview the operation again before confirming."
+    }
+
+## 9. operator: an over-long operation ID
+> POST /sqlos/admin/auth/api/sessions/revocation
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "confirm": true,
+>     "expectedMatchedSessions": 1,
+>     "operationId": "ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo",
+>     "userId": "{usr#1}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "OperationId is too long."
+    }
+
+## 10. operator: a confirmed revocation that matches no session is not found
+> POST /sqlos/admin/auth/api/sessions/revocation
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "confirm": true,
+>     "expectedMatchedSessions": 0,
+>     "userId": "{usr#2}"
+>   }
+< 404 Not Found
+
+## 11. operator: a single-session revocation needs no previewed count
+> POST /sqlos/admin/auth/api/sessions/revocation
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "confirm": true,
+>     "operationId": "incident-7",
+>     "sessionId": "{ses#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "activeRefreshTokens": 1,
+      "alreadyRevokedSessions": 0,
+      "auditEventId": "{evt#1}",
+      "matchedSessions": 1,
+      "newlyRevokedRefreshTokens": 1,
+      "newlyRevokedSessions": 1,
+      "operationId": "incident-7",
+      "preview": false,
+      "revokedAt": "{datetime:utc-z}"
+    }
+
+## 12. operator: an operation ID cannot be reused for a different scope
+> POST /sqlos/admin/auth/api/sessions/revocation
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "confirm": true,
+>     "expectedMatchedSessions": 1,
+>     "operationId": "incident-7",
+>     "userId": "{usr#1}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Operation ID has already been used for a different revocation scope."
+    }
+
+## audit: only the single-session revocation is audited
+  - {
+      "action": "session.admin-revoked",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": "incident-7",
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": "{ses#1}",
+        "userAgent": null
+      },
+      "correlationId": "incident-7",
+      "eventType": "session.admin-revoked",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "already_revoked_sessions": 0,
+        "matched_sessions": 1,
+        "newly_revoked_refresh_credentials": 1,
+        "newly_revoked_sessions": 1,
+        "operation_id": "incident-7",
+        "reason": "admin_revoked",
+        "selector_fingerprint": "{hex#1}"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": "{ses#1}",
+      "source": "authserver",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{ses#1}",
+          "type": "session"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }

@@ -1,0 +1,261 @@
+# SqlOS behavior lock transcript
+scenario: AdminOverviewScenarios.The_overview_counts_every_record_and_the_legacy_feed_lists_raw_audit_rows
+profile: dashboard-callback
+
+## 1. operator: without operator credentials the summary is not found
+> GET /sqlos/admin/auth/api/stats
+< 404 Not Found
+
+## 2. operator: and neither is the legacy audit feed
+> GET /sqlos/admin/auth/api/audit-events
+< 404 Not Found
+
+## 3. operator: a fresh host: the seeded client and startup audit events
+> GET /sqlos/admin/auth/api/stats
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "auditEvents": 8,
+      "clients": 1,
+      "oidcConnections": 0,
+      "organizations": 0,
+      "sessions": 0,
+      "ssoConnections": 0,
+      "users": 0
+    }
+
+## 4. operator: after a user, an organization, and a sign-in
+> GET /sqlos/admin/auth/api/stats
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "auditEvents": 9,
+      "clients": 1,
+      "oidcConnections": 0,
+      "organizations": 1,
+      "sessions": 1,
+      "ssoConnections": 0,
+      "users": 1
+    }
+
+## document: GET /sqlos/admin/auth/api/audit-events answered 200 (application/json; charset=utf-8): the raw audit rows, newest first
+    [
+      {
+        "action": "password.login.succeeded",
+        "actorDisplayName": null,
+        "actorId": "{usr#1}",
+        "actorType": "user",
+        "applicationId": null,
+        "applicationKey": null,
+        "contextJson": "{\"ipAddress\":\"203.0.113.10\",\"userAgent\":null,\"sessionId\":null,\"requestId\":null,\"correlationId\":null}",
+        "correlationId": null,
+        "dataJson": "{\"NormalizedEmail\":\"{email:ALICE}\",\"maskedEmail\":\"AL***@EXAMPLE.TEST\",\"ClientKey\":\"behavior-lock-app\",\"AuthorizationRequestId\":\"[redacted]\",\"Surface\":\"hosted\",\"UserAgentHash\":null,\"details\":{\"resetScopes\":[\"email\",\"user\"]}}",
+        "eventType": "password.login.succeeded",
+        "id": "{evt#1}",
+        "ingestedAt": "{datetime:unspecified}",
+        "ipAddress": "203.0.113.10",
+        "metadataJson": "{\"NormalizedEmail\":\"{email:ALICE}\",\"maskedEmail\":\"AL***@EXAMPLE.TEST\",\"ClientKey\":\"behavior-lock-app\",\"AuthorizationRequestId\":\"[redacted]\",\"Surface\":\"hosted\",\"UserAgentHash\":null,\"details\":{\"resetScopes\":[\"email\",\"user\"]}}",
+        "occurredAt": "{datetime:unspecified}",
+        "organizationId": null,
+        "requestId": null,
+        "sessionId": null,
+        "source": "authserver",
+        "targetsJson": "[]",
+        "userAgent": null,
+        "userId": "{usr#1}"
+      },
+      {
+        "action": "configuration.reconciled",
+        "actorDisplayName": null,
+        "actorId": "startup",
+        "actorType": "system",
+        "applicationId": null,
+        "applicationKey": null,
+        "contextJson": "{\"ipAddress\":null,\"userAgent\":null,\"sessionId\":null,\"requestId\":null,\"correlationId\":null}",
+        "correlationId": null,
+        "dataJson": "{\"resourceType\":\"oauth_client\",\"resourceId\":\"behavior-lock-app\",\"owner\":\"code\",\"sourceKey\":\"behavior-lock-app\",\"outcome\":\"created\",\"fingerprint\":\"{hex#1}\"}",
+        "eventType": "configuration.reconciled",
+        "id": "{evt#2}",
+        "ingestedAt": "{datetime:unspecified}",
+        "ipAddress": null,
+        "metadataJson": "{\"resourceType\":\"oauth_client\",\"resourceId\":\"behavior-lock-app\",\"owner\":\"code\",\"sourceKey\":\"behavior-lock-app\",\"outcome\":\"created\",\"fingerprint\":\"{hex#1}\"}",
+        "occurredAt": "{datetime:unspecified}",
+        "organizationId": null,
+        "requestId": null,
+        "sessionId": null,
+        "source": "authserver",
+        "targetsJson": "[]",
+        "userAgent": null,
+        "userId": null
+      },
+      {
+        "action": "email.template.seeded",
+        "actorDisplayName": null,
+        "actorId": "{emt#1}",
+        "actorType": "email_template",
+        "applicationId": null,
+        "applicationKey": null,
+        "contextJson": null,
+        "correlationId": null,
+        "dataJson": "{\"templateId\":\"{emt#1}\",\"Key\":\"auth.email-verification\",\"Version\":1}",
+        "eventType": "email.template.seeded",
+        "id": "{evt#3}",
+        "ingestedAt": "{datetime:unspecified}",
+        "ipAddress": null,
+        "metadataJson": null,
+        "occurredAt": "{datetime:unspecified}",
+        "organizationId": null,
+        "requestId": null,
+        "sessionId": null,
+        "source": "authserver",
+        "targetsJson": "[]",
+        "userAgent": null,
+        "userId": null
+      },
+      {
+        "action": "email.template.seeded",
+        "actorDisplayName": null,
+        "actorId": "{emt#2}",
+        "actorType": "email_template",
+        "applicationId": null,
+        "applicationKey": null,
+        "contextJson": null,
+        "correlationId": null,
+        "dataJson": "{\"templateId\":\"{emt#2}\",\"Key\":\"auth.password-reset\",\"Version\":1}",
+        "eventType": "email.template.seeded",
+        "id": "{evt#4}",
+        "ingestedAt": "{datetime:unspecified}",
+        "ipAddress": null,
+        "metadataJson": null,
+        "occurredAt": "{datetime:unspecified}",
+        "organizationId": null,
+        "requestId": null,
+        "sessionId": null,
+        "source": "authserver",
+        "targetsJson": "[]",
+        "userAgent": null,
+        "userId": null
+      },
+      {
+        "action": "email.template.seeded",
+        "actorDisplayName": null,
+        "actorId": "{emt#3}",
+        "actorType": "email_template",
+        "applicationId": null,
+        "applicationKey": null,
+        "contextJson": null,
+        "correlationId": null,
+        "dataJson": "{\"templateId\":\"{emt#3}\",\"Key\":\"auth.invitation\",\"Version\":1}",
+        "eventType": "email.template.seeded",
+        "id": "{evt#5}",
+        "ingestedAt": "{datetime:unspecified}",
+        "ipAddress": null,
+        "metadataJson": null,
+        "occurredAt": "{datetime:unspecified}",
+        "organizationId": null,
+        "requestId": null,
+        "sessionId": null,
+        "source": "authserver",
+        "targetsJson": "[]",
+        "userAgent": null,
+        "userId": null
+      },
+      {
+        "action": "email.template.seeded",
+        "actorDisplayName": null,
+        "actorId": "{emt#4}",
+        "actorType": "email_template",
+        "applicationId": null,
+        "applicationKey": null,
+        "contextJson": null,
+        "correlationId": null,
+        "dataJson": "{\"templateId\":\"{emt#4}\",\"Key\":\"auth.magic-link\",\"Version\":1}",
+        "eventType": "email.template.seeded",
+        "id": "{evt#6}",
+        "ingestedAt": "{datetime:unspecified}",
+        "ipAddress": null,
+        "metadataJson": null,
+        "occurredAt": "{datetime:unspecified}",
+        "organizationId": null,
+        "requestId": null,
+        "sessionId": null,
+        "source": "authserver",
+        "targetsJson": "[]",
+        "userAgent": null,
+        "userId": null
+      },
+      {
+        "action": "email.template.seeded",
+        "actorDisplayName": null,
+        "actorId": "{emt#5}",
+        "actorType": "email_template",
+        "applicationId": null,
+        "applicationKey": null,
+        "contextJson": null,
+        "correlationId": null,
+        "dataJson": "{\"templateId\":\"{emt#5}\",\"Key\":\"auth.email-otp\",\"Version\":1}",
+        "eventType": "email.template.seeded",
+        "id": "{evt#7}",
+        "ingestedAt": "{datetime:unspecified}",
+        "ipAddress": null,
+        "metadataJson": null,
+        "occurredAt": "{datetime:unspecified}",
+        "organizationId": null,
+        "requestId": null,
+        "sessionId": null,
+        "source": "authserver",
+        "targetsJson": "[]",
+        "userAgent": null,
+        "userId": null
+      },
+      {
+        "action": "configuration.reconciled",
+        "actorDisplayName": null,
+        "actorId": "startup",
+        "actorType": "system",
+        "applicationId": null,
+        "applicationKey": null,
+        "contextJson": null,
+        "correlationId": null,
+        "dataJson": "{\"resourceType\":\"auth_email_settings\",\"resourceId\":\"default\",\"owner\":\"code\",\"sourceKey\":\"auth-email:default\",\"outcome\":\"created\",\"fingerprint\":\"{hex#2}\"}",
+        "eventType": "configuration.reconciled",
+        "id": "{evt#8}",
+        "ingestedAt": "{datetime:unspecified}",
+        "ipAddress": null,
+        "metadataJson": "{\"resourceType\":\"auth_email_settings\",\"resourceId\":\"default\",\"owner\":\"code\",\"sourceKey\":\"auth-email:default\",\"outcome\":\"created\",\"fingerprint\":\"{hex#2}\"}",
+        "occurredAt": "{datetime:unspecified}",
+        "organizationId": null,
+        "requestId": null,
+        "sessionId": null,
+        "source": "authserver",
+        "targetsJson": "[{\"type\":\"auth_email_settings\",\"id\":\"default\",\"displayName\":null}]",
+        "userAgent": null,
+        "userId": null
+      },
+      {
+        "action": "configuration.reconciled",
+        "actorDisplayName": null,
+        "actorId": "startup",
+        "actorType": "system",
+        "applicationId": null,
+        "applicationKey": null,
+        "contextJson": null,
+        "correlationId": null,
+        "dataJson": "{\"resourceType\":\"auth_page_settings\",\"resourceId\":\"default\",\"owner\":\"code\",\"sourceKey\":\"auth-page:default\",\"outcome\":\"created\",\"fingerprint\":\"{hex#3}\"}",
+        "eventType": "configuration.reconciled",
+        "id": "{evt#9}",
+        "ingestedAt": "{datetime:unspecified}",
+        "ipAddress": null,
+        "metadataJson": "{\"resourceType\":\"auth_page_settings\",\"resourceId\":\"default\",\"owner\":\"code\",\"sourceKey\":\"auth-page:default\",\"outcome\":\"created\",\"fingerprint\":\"{hex#3}\"}",
+        "occurredAt": "{datetime:unspecified}",
+        "organizationId": null,
+        "requestId": null,
+        "sessionId": null,
+        "source": "authserver",
+        "targetsJson": "[{\"type\":\"auth_page_settings\",\"id\":\"default\",\"displayName\":null}]",
+        "userAgent": null,
+        "userId": null
+      }
+    ]

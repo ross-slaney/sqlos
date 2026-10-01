@@ -1,0 +1,117 @@
+# SqlOS behavior lock transcript
+scenario: AdminIdentityClientScenarios.Client_registration_rejects_incomplete_or_conflicting_definitions
+profile: dashboard-callback
+
+## 1. operator: a client ID is required
+> POST /sqlos/admin/auth/api/clients
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "name": "No ID",
+>     "redirectUris": [
+>       "https://portal.example.test/callback"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "clientId is required."
+    }
+
+## 2. operator: a name is required
+> POST /sqlos/admin/auth/api/clients
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "clientId": "nameless",
+>     "redirectUris": [
+>       "https://portal.example.test/callback"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "name is required."
+    }
+
+## 3. operator: an unknown client type is refused
+> POST /sqlos/admin/auth/api/clients
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "clientId": "spa",
+>     "clientType": "spa",
+>     "name": "SPA",
+>     "redirectUris": [
+>       "https://portal.example.test/callback"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Client 'spa' has unsupported client type 'spa'."
+    }
+
+## 4. operator: a client without redirect URIs or device flow is refused
+> POST /sqlos/admin/auth/api/clients
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "clientId": "nowhere",
+>     "name": "Nowhere"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Client 'nowhere' must define at least one redirect URI."
+    }
+
+## 5. operator: a confidential device client is refused
+> POST /sqlos/admin/auth/api/clients
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "allowDeviceAuthorization": true,
+>     "clientId": "tv",
+>     "clientType": "confidential",
+>     "name": "TV"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Client 'tv' cannot combine device authorization with confidential client authentication."
+    }
+
+## 6. operator: a taken client ID is refused
+> POST /sqlos/admin/auth/api/clients
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "clientId": "portal",
+>     "name": "Portal Two",
+>     "redirectUris": [
+>       "https://portal.example.test/callback"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Client 'portal' already exists."
+    }
+
+## 7. operator: so is the seeded application's client ID
+> POST /sqlos/admin/auth/api/clients
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "clientId": "behavior-lock-app",
+>     "name": "Shadow",
+>     "redirectUris": [
+>       "https://portal.example.test/callback"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Client 'behavior-lock-app' already exists."
+    }

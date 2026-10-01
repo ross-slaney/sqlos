@@ -1,0 +1,294 @@
+# SqlOS behavior lock transcript
+scenario: ScimUserLifecycleScenarios.One_organizations_directory_cannot_see_or_change_another_organizations_users
+profile: enterprise-scim-path
+
+## 1. acme-directory: Acme provisions Judy
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "emails": [
+>       {
+>         "primary": true,
+>         "type": "work",
+>         "value": "{email:judy}"
+>       }
+>     ],
+>     "externalId": "directory-judy",
+>     "name": {
+>       "familyName": "Hopps",
+>       "givenName": "Judy"
+>     },
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:judy}"
+>   }
+< 201 Created
+< Content-Location: /scim/v2/Users/{usr:judy}
+< Content-Type: application/scim+json
+< Location: /scim/v2/Users/{usr:judy}
+    {
+      "active": true,
+      "displayName": "Judy Hopps",
+      "emails": [
+        {
+          "primary": true,
+          "type": "work",
+          "value": "{email:judy}"
+        }
+      ],
+      "externalId": "directory-judy",
+      "groups": [],
+      "id": "{usr:judy}",
+      "meta": {
+        "created": "{datetime:utc-z}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Users/{usr:judy}",
+        "resourceType": "User"
+      },
+      "name": {
+        "familyName": "Hopps",
+        "formatted": "Judy Hopps",
+        "givenName": "Judy"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:judy}"
+    }
+
+## 2. globex-directory: Globex lists its users: Judy is not among them
+> GET /scim/v2/Users
+> Authorization: Bearer {scim-token#2}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "Resources": [],
+      "itemsPerPage": 0,
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+      ],
+      "startIndex": 1,
+      "totalResults": 0
+    }
+
+## 3. globex-directory: Globex filters for Judy's userName
+> GET /scim/v2/Users?filter=userName%20eq%20%22judy@{domain:acme}%22
+> Authorization: Bearer {scim-token#2}
+< 200 OK
+< Content-Type: application/scim+json
+    {
+      "Resources": [],
+      "itemsPerPage": 0,
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+      ],
+      "startIndex": 1,
+      "totalResults": 0
+    }
+
+## 4. globex-directory: Globex reads Judy by ID
+> GET /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#2}
+< 404 Not Found
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM user not found.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "status": "404"
+    }
+
+## 5. globex-directory: Globex replaces Judy
+> PUT /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#2}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "emails": [
+>       {
+>         "primary": true,
+>         "type": "work",
+>         "value": "{email:judy}"
+>       }
+>     ],
+>     "externalId": "directory-judy",
+>     "name": {
+>       "familyName": "Hopps",
+>       "givenName": "Mallory"
+>     },
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:judy}"
+>   }
+< 404 Not Found
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM user not found.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "status": "404"
+    }
+
+## 6. globex-directory: Globex deactivates Judy
+> PATCH /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#2}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "active",
+>         "value": false
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 404 Not Found
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM user not found.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "status": "404"
+    }
+
+## 7. globex-directory: Globex deletes Judy
+> DELETE /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#2}
+< 404 Not Found
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM user not found.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "status": "404"
+    }
+
+## 8. globex-directory: Globex puts Judy's ID in one of its groups
+> POST /scim/v2/Groups
+> Authorization: Bearer {scim-token#2}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "displayName": "Globex admins",
+>     "externalId": "globex-admins",
+>     "members": [
+>       {
+>         "value": "{usr:judy}"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:Group"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM group member '{usr:judy}' was not found in this directory connection.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidValue",
+      "status": "400"
+    }
+
+## 9. acme-directory: Judy is unchanged in Acme
+> GET /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+< 200 OK
+< Content-Location: /scim/v2/Users/{usr:judy}
+< Content-Type: application/scim+json
+    {
+      "active": true,
+      "displayName": "Judy Hopps",
+      "emails": [
+        {
+          "primary": true,
+          "type": "work",
+          "value": "{email:judy}"
+        }
+      ],
+      "externalId": "directory-judy",
+      "groups": [],
+      "id": "{usr:judy}",
+      "meta": {
+        "created": "{datetime:unspecified}",
+        "lastModified": "{datetime:unspecified}",
+        "location": "/scim/v2/Users/{usr:judy}",
+        "resourceType": "User"
+      },
+      "name": {
+        "familyName": "Hopps",
+        "formatted": "Judy Hopps",
+        "givenName": "Judy"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:judy}"
+    }
+
+## audit: only Acme's provisioning was recorded
+  - {
+      "action": "scim.user.created",
+      "actor": {
+        "displayName": null,
+        "id": "directory-judy",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.created",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-judy",
+        "payload": {
+          "active": true,
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:judy}"
+            }
+          ],
+          "externalId": "directory-judy",
+          "name": {
+            "familyName": "Hopps",
+            "givenName": "Judy"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:judy}"
+        },
+        "resourceId": "{usr:judy}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:judy}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }

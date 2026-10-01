@@ -7,18 +7,24 @@
 #   scripts/check-behavior-ledger.sh <base-ref>  # any other base, for example origin/release/8.0
 #
 # Only committed changes are checked: the ledger at HEAD against merge-base..HEAD. Approved files are the behavior-lock
-# approvals (tests/SqlOS.BehaviorLock/**/*.verified.txt) and the @sqlos/headless public surface
-# snapshot (packages/headless/tests/__snapshots__). Adding one needs no entry; renaming one
-# without changing its content needs no entry.
+# approvals (tests/SqlOS.BehaviorLock/**/*.verified.txt, outside the frozen Baseline/) and the
+# @sqlos/headless public surface snapshot (packages/headless/tests/__snapshots__). Adding one needs
+# no entry; renaming one without changing its content needs no entry. A rename with changes that
+# the branch appends to Baseline/renames.txt is a modification of the renamed file: an entry names
+# its new path. scripts/check-behavior-baseline.sh checks the whole ledger against the baseline.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root"
+# shellcheck source=lib/behavior-ledger.sh
+. scripts/lib/behavior-ledger.sh
 
 ledger="docs/architecture/8.0-behavior-ledger.md"
+renames="tests/SqlOS.BehaviorLock/Baseline/renames.txt"
 approved=(
     ':(glob)tests/SqlOS.BehaviorLock/**/*.verified.txt'
     ':(glob)packages/headless/tests/__snapshots__/**'
+    ':(exclude)tests/SqlOS.BehaviorLock/Baseline/**'
 )
 heading='^### BL-[0-9]{4}: [^ ]'
 
@@ -48,31 +54,9 @@ if ! head_ledger="$(git show "HEAD:$ledger" 2>/dev/null)"; then
     exit 1
 fi
 
-# Prints "<id>\t<line>" for every non-blank line of every entry (a "### BL-NNNN: summary"
-# section), the heading included. These are the sections the behavior-lock suite reads
-# (BehaviorLedger.cs). Blank lines are skipped so appending an entry does not alter the previous one.
-entry_lines() {
-    awk '
-        /^## / { id = ""; next }
-        /^### / {
-            id = ""
-            if ($0 ~ /^### BL-[0-9][0-9][0-9][0-9]: [^ ]/) {
-                id = substr($0, 5, 7)
-            }
-        }
-        id != "" && $0 !~ /^[ \t]*$/ { print id "\t" $0 }
-    '
-}
-
 # Prints the backticked approved-file paths in "<id>\t<line>" records read from stdin.
 entry_paths() {
-    cut -f2- | awk '{
-        line = $0
-        while (match(line, /`[^` \t]+\.(txt|md|snap|json)`/)) {
-            print substr(line, RSTART + 1, RLENGTH - 2)
-            line = substr(line, RSTART + RLENGTH)
-        }
-    }'
+    ledger_named_paths | cut -f2
 }
 
 # The records of one entry.
@@ -89,8 +73,8 @@ fail() {
 echo "=== Behavior ledger check: $base_ref ($(git rev-parse --short "$merge_base")..HEAD) ==="
 
 base_ledger="$(git show "$merge_base:$ledger" 2>/dev/null || true)"
-head_entries="$(entry_lines <<< "$head_ledger")"
-base_entries="$(entry_lines <<< "$base_ledger")"
+head_entries="$(ledger_entry_lines <<< "$head_ledger")"
+base_entries="$(ledger_entry_lines <<< "$base_ledger")"
 head_ids="$( (grep -E "$heading" <<< "$head_ledger" || true) | cut -c5-11)"
 base_ids="$( (grep -E "$heading" <<< "$base_ledger" || true) | cut -c5-11)"
 
@@ -142,15 +126,44 @@ for id in $head_ids; do
     fi
 done
 
+# Renames this branch appends to the rename log, as "<earlier path> -> <later path>" lines.
+rename_lines() {
+    { git show "$1:$renames" 2>/dev/null || true; } | awk 'NF == 3 && $2 == "->" && $1 !~ /^#/' | sort
+}
+added_renames="$(comm -13 <(rename_lines "$merge_base") <(rename_lines HEAD))"
+later_name_of() {
+    awk -v earlier="$1" '$1 == earlier { print $3 }' <<< "$added_renames"
+}
+is_rename_target() {
+    awk -v later="$1" '$3 == later { found = 1 } END { exit !found }' <<< "$added_renames"
+}
+
 changed=0
 while IFS=$'\t' read -r status path renamed_to; do
     [ -z "$status" ] && continue
+    later="$(later_name_of "$path")"
     case "$status" in
         A)
-            echo "  new:      $path"
+            if ! is_rename_target "$path"; then
+                echo "  new:      $path"
+            fi
             ;;
         R100)
             echo "  renamed:  $path -> $renamed_to"
+            ;;
+        D)
+            changed=$((changed + 1))
+            if [ -n "$later" ]; then
+                if grep -qxF "$later" <<< "$new_paths"; then
+                    echo "  ledgered: $path -> $later (renamed in $renames)"
+                else
+                    fail "$path was renamed to $later with changes, but no ledger entry added on this branch names $later"
+                fi
+            elif grep -qxF "$path" <<< "$new_paths"; then
+                echo "  ledgered: $path (deleted)"
+            else
+                fail "$path changed ($status) but no ledger entry added on this branch names it"
+            fi
             ;;
         *)
             changed=$((changed + 1))

@@ -1,0 +1,335 @@
+# SqlOS behavior lock transcript
+scenario: AdminIdentityOrganizationScenarios.Operator_creates_organizations_with_derived_and_explicit_slugs_and_domains
+profile: dashboard-callback
+
+## 1. operator: the slug is derived from the name
+> POST /sqlos/admin/auth/api/organizations
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "name": "Acme"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "id": "{org#1}",
+      "isActive": true,
+      "name": "Acme",
+      "primaryDomain": null,
+      "slug": "acme"
+    }
+
+## 2. operator: a slug already in use gets a random eight-character suffix
+> POST /sqlos/admin/auth/api/organizations
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "name": "Acme Second",
+>     "slug": "ACME"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "id": "{org#2}",
+      "isActive": true,
+      "name": "Acme Second",
+      "primaryDomain": null,
+      "slug": "acme-{slug-suffix#1}"
+    }
+
+## 3. operator: an explicit slug is slugified and the primary domain trimmed and lower-cased
+> POST /sqlos/admin/auth/api/organizations
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "name": "Globex",
+>     "primaryDomain": "  Globex.EXAMPLE.test. ",
+>     "slug": "  Globex Industries!  "
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "id": "{org#3}",
+      "isActive": true,
+      "name": "Globex",
+      "primaryDomain": "globex.example.test",
+      "slug": "globex-industries"
+    }
+
+## 4. operator: an email address as the primary domain keeps only its domain
+> POST /sqlos/admin/auth/api/organizations
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "name": "Initech",
+>     "primaryDomain": "it-admin@Initech.Example.Test"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "id": "{org#4}",
+      "isActive": true,
+      "name": "Initech",
+      "primaryDomain": "initech.example.test",
+      "slug": "initech"
+    }
+
+## 5. operator: a primary domain another organization already has escapes the unique index as a 500
+> POST /sqlos/admin/auth/api/organizations
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "name": "Hooli",
+>     "primaryDomain": "globex.example.test"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: Microsoft.EntityFrameworkCore.DbUpdateException: An error occurred while saving the entity changes. See the inner exception for details.
+
+## 6. operator: organizations are listed by name
+> GET /sqlos/admin/auth/api/organizations
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "enabledSsoConnections": 0,
+          "id": "{org#1}",
+          "isActive": true,
+          "membershipCount": 0,
+          "name": "Acme",
+          "primaryDomain": null,
+          "slug": "acme"
+        },
+        {
+          "enabledSsoConnections": 0,
+          "id": "{org#2}",
+          "isActive": true,
+          "membershipCount": 0,
+          "name": "Acme Second",
+          "primaryDomain": null,
+          "slug": "acme-{slug-suffix#1}"
+        },
+        {
+          "enabledSsoConnections": 0,
+          "id": "{org#3}",
+          "isActive": true,
+          "membershipCount": 0,
+          "name": "Globex",
+          "primaryDomain": "globex.example.test",
+          "slug": "globex-industries"
+        },
+        {
+          "enabledSsoConnections": 0,
+          "id": "{org#4}",
+          "isActive": true,
+          "membershipCount": 0,
+          "name": "Initech",
+          "primaryDomain": "initech.example.test",
+          "slug": "initech"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 7. operator: search matches the slug
+> GET /sqlos/admin/auth/api/organizations?search=globex-ind
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "enabledSsoConnections": 0,
+          "id": "{org#3}",
+          "isActive": true,
+          "membershipCount": 0,
+          "name": "Globex",
+          "primaryDomain": "globex.example.test",
+          "slug": "globex-industries"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 8. operator: and the primary domain
+> GET /sqlos/admin/auth/api/organizations?search=initech.example
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "enabledSsoConnections": 0,
+          "id": "{org#4}",
+          "isActive": true,
+          "membershipCount": 0,
+          "name": "Initech",
+          "primaryDomain": "initech.example.test",
+          "slug": "initech"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 9. operator: two to a page
+> GET /sqlos/admin/auth/api/organizations?pageSize=2
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "enabledSsoConnections": 0,
+          "id": "{org#1}",
+          "isActive": true,
+          "membershipCount": 0,
+          "name": "Acme",
+          "primaryDomain": null,
+          "slug": "acme"
+        },
+        {
+          "enabledSsoConnections": 0,
+          "id": "{org#2}",
+          "isActive": true,
+          "membershipCount": 0,
+          "name": "Acme Second",
+          "primaryDomain": null,
+          "slug": "acme-{slug-suffix#1}"
+        }
+      ],
+      "hasNextPage": true,
+      "nextCursor": "{cursor#1}",
+      "pageSize": 2
+    }
+
+## 10. operator: the next page
+> GET /sqlos/admin/auth/api/organizations?pageSize=2&cursor={cursor#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "enabledSsoConnections": 0,
+          "id": "{org#3}",
+          "isActive": true,
+          "membershipCount": 0,
+          "name": "Globex",
+          "primaryDomain": "globex.example.test",
+          "slug": "globex-industries"
+        },
+        {
+          "enabledSsoConnections": 0,
+          "id": "{org#4}",
+          "isActive": true,
+          "membershipCount": 0,
+          "name": "Initech",
+          "primaryDomain": "initech.example.test",
+          "slug": "initech"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 2
+    }
+
+## 11. operator: the organization detail with its counts
+> GET /sqlos/admin/auth/api/organizations/{org#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "enabledSsoConnections": 0,
+      "id": "{org#1}",
+      "isActive": true,
+      "membershipCount": 0,
+      "name": "Acme",
+      "primaryDomain": null,
+      "slug": "acme",
+      "ssoConnectionCount": 0
+    }
+
+## 12. operator: a name is stored as sent on create, surrounding spaces included
+> POST /sqlos/admin/auth/api/organizations
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "name": "  Padded Name  "
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "id": "{org#5}",
+      "isActive": true,
+      "name": "  Padded Name  ",
+      "primaryDomain": null,
+      "slug": "padded-name"
+    }
+
+## 13. operator: markup in a name is stored and returned verbatim
+> POST /sqlos/admin/auth/api/organizations
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "name": "<img src=x onerror=alert(1)>"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "id": "{org#6}",
+      "isActive": true,
+      "name": "<img src=x onerror=alert(1)>",
+      "primaryDomain": null,
+      "slug": "img-src-x-onerror-alert-1"
+    }
+
+## 14. operator: non-ASCII letters survive slugification
+> POST /sqlos/admin/auth/api/organizations
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "name": "Ünïcödé Örg"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "id": "{org#7}",
+      "isActive": true,
+      "name": "Ünïcödé Örg",
+      "primaryDomain": null,
+      "slug": "ünïcödé-örg"
+    }
+
+## 15. operator: a missing name escapes as a 500
+> POST /sqlos/admin/auth/api/organizations
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "primaryDomain": "nameless.example.test"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.NullReferenceException: Object reference not set to an instance of an object.
+
+## 16. operator: an unknown organization's detail escapes 'Organization not found.' as a 500
+> GET /sqlos/admin/auth/api/organizations/org_missing
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Organization not found.
+
+## audit: organization creation writes no audit event
+  (no new events)

@@ -1,0 +1,881 @@
+# SqlOS behavior lock transcript
+scenario: AdminIdentityMachineClientScenarios.Operator_changes_grants_and_switches_a_machine_client_off
+profile: multi-app
+
+## 1. operator: grant the admin role on beta
+> POST /sqlos/admin/auth/api/machine-clients/sync-worker/grants
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "description": "Administer beta",
+>     "resourceId": "workspace::beta",
+>     "roleId": "workspace_admin"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "added": true
+    }
+
+## 2. operator: the same grant again is a silent no-op
+> POST /sqlos/admin/auth/api/machine-clients/sync-worker/grants
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "description": "again",
+>     "resourceId": "workspace::beta",
+>     "roleId": "workspace_admin"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "added": true
+    }
+
+## 3. operator: a grant on a resource that does not exist is refused
+> POST /sqlos/admin/auth/api/machine-clients/sync-worker/grants
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "resourceId": "workspace::missing",
+>     "roleId": "workspace_admin"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "One or more grant resources do not exist."
+    }
+
+## 4. operator: a role that does not exist is refused
+> POST /sqlos/admin/auth/api/machine-clients/sync-worker/grants
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "resourceId": "workspace::beta",
+>     "roleId": "workspace_owner"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "One or more grant roles do not exist."
+    }
+
+## 5. operator: the machine client's subject has one grant
+> GET /sqlos/admin/fga/api/subjects/{sub#1}/grants
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "effectiveFrom": null,
+          "effectiveTo": null,
+          "id": "{grant#1}",
+          "resourceId": "workspace::beta",
+          "resourceName": "Beta",
+          "roleId": "workspace_admin",
+          "roleName": "Workspace admin"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 6. operator: remove it
+> DELETE /sqlos/admin/auth/api/machine-clients/sync-worker/grants/{grant#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "removed": true
+    }
+
+## 7. operator: removing it again is refused
+> DELETE /sqlos/admin/auth/api/machine-clients/sync-worker/grants/{grant#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Grant not found."
+    }
+
+## audit: grant changes
+  - {
+      "action": "machine_client.grant_added",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "machine_client.grant_added",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "ResourceId": "workspace::beta",
+        "RoleId": "workspace_admin",
+        "clientId": "sync-worker"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "machine_client.grant_removed",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "machine_client.grant_removed",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "ResourceId": "workspace::beta",
+        "RoleId": "workspace_admin",
+        "clientId": "sync-worker",
+        "grantId": "{grant#1}"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 8. operator: emergency enable of an active client is a no-op
+> POST /sqlos/admin/auth/api/machine-clients/sync-worker/emergency-enable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "audience": "https://api.example.test",
+      "clientId": "sync-worker",
+      "configurationOrphanedAt": null,
+      "configurationOwner": "dashboard",
+      "configurationSourceKey": null,
+      "description": null,
+      "disabledReason": null,
+      "displayName": "Sync Worker",
+      "emergencyDisabled": false,
+      "expiresAt": null,
+      "grantCount": 0,
+      "lastUsedAt": null,
+      "organizationId": null,
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "ready": true,
+      "scopes": [
+        "workspace.read"
+      ]
+    }
+
+## 9. operator: emergency disable
+> POST /sqlos/admin/auth/api/machine-clients/sync-worker/emergency-disable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "audience": "https://api.example.test",
+      "clientId": "sync-worker",
+      "configurationOrphanedAt": null,
+      "configurationOwner": "dashboard",
+      "configurationSourceKey": null,
+      "description": null,
+      "disabledReason": "machine_client_emergency_disabled",
+      "displayName": "Sync Worker",
+      "emergencyDisabled": true,
+      "expiresAt": null,
+      "grantCount": 0,
+      "lastUsedAt": null,
+      "organizationId": null,
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "ready": false,
+      "scopes": [
+        "workspace.read"
+      ]
+    }
+
+## 10. operator: a second emergency disable changes nothing
+> POST /sqlos/admin/auth/api/machine-clients/sync-worker/emergency-disable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "audience": "https://api.example.test",
+      "clientId": "sync-worker",
+      "configurationOrphanedAt": null,
+      "configurationOwner": "dashboard",
+      "configurationSourceKey": null,
+      "description": null,
+      "disabledReason": "machine_client_emergency_disabled",
+      "displayName": "Sync Worker",
+      "emergencyDisabled": true,
+      "expiresAt": null,
+      "grantCount": 0,
+      "lastUsedAt": null,
+      "organizationId": null,
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "ready": false,
+      "scopes": [
+        "workspace.read"
+      ]
+    }
+
+## 11. client: the disabled client gets no token
+> POST /sqlos/auth/token
+> Authorization: Basic {credentials#1}
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=client_credentials
+>   resource=https://api.example.test
+>   scope=workspace.read
+< 401 Unauthorized
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+< WWW-Authenticate: Basic
+    {
+      "error": "invalid_client",
+      "error_description": "Client authentication failed."
+    }
+
+## 12. operator: emergency enable
+> POST /sqlos/admin/auth/api/machine-clients/sync-worker/emergency-enable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "audience": "https://api.example.test",
+      "clientId": "sync-worker",
+      "configurationOrphanedAt": null,
+      "configurationOwner": "dashboard",
+      "configurationSourceKey": null,
+      "description": null,
+      "disabledReason": null,
+      "displayName": "Sync Worker",
+      "emergencyDisabled": false,
+      "expiresAt": null,
+      "grantCount": 0,
+      "lastUsedAt": null,
+      "organizationId": null,
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "ready": true,
+      "scopes": [
+        "workspace.read"
+      ]
+    }
+
+## 13. client: tokens are issued again
+> POST /sqlos/auth/token
+> Authorization: Basic {credentials#1}
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=client_credentials
+>   resource=https://api.example.test
+>   scope=workspace.read
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "access_token": "{access-token#1}",
+      "expires_in": ~600,
+      "scope": "workspace.read",
+      "token_type": "Bearer"
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "aud": "https://api.example.test",
+      "azp": "sync-worker",
+      "client_id": "sync-worker",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "scope": "workspace.read",
+      "sub": "{sub#1}",
+      "token_kind": "service"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+
+## 14. operator: revoke the machine client
+> POST /sqlos/admin/auth/api/machine-clients/sync-worker/revoke
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "revoked": true
+    }
+
+## 15. client: the revoked client gets no token
+> POST /sqlos/auth/token
+> Authorization: Basic {credentials#1}
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=client_credentials
+>   resource=https://api.example.test
+>   scope=workspace.read
+< 401 Unauthorized
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+< WWW-Authenticate: Basic
+    {
+      "error": "invalid_client",
+      "error_description": "Client authentication failed."
+    }
+
+## 16. operator: emergency enable cannot restore a revoked client
+> POST /sqlos/admin/auth/api/machine-clients/sync-worker/emergency-enable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "This machine client was revoked. Emergency enable cannot restore a structurally revoked client."
+    }
+
+## 17. operator: emergency disable leaves the revocation in place
+> POST /sqlos/admin/auth/api/machine-clients/sync-worker/emergency-disable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "audience": "https://api.example.test",
+      "clientId": "sync-worker",
+      "configurationOrphanedAt": null,
+      "configurationOwner": "dashboard",
+      "configurationSourceKey": null,
+      "description": null,
+      "disabledReason": "machine_client_revoked",
+      "displayName": "Sync Worker",
+      "emergencyDisabled": false,
+      "expiresAt": "{datetime:unspecified}",
+      "grantCount": 0,
+      "lastUsedAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "ready": false,
+      "scopes": [
+        "workspace.read"
+      ]
+    }
+
+## 18. operator: a revoked client can still be rotated
+> POST /sqlos/admin/auth/api/machine-clients/sync-worker/rotate
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "client": {
+        "audience": "https://api.example.test",
+        "clientId": "sync-worker",
+        "configurationOrphanedAt": null,
+        "configurationOwner": "dashboard",
+        "configurationSourceKey": null,
+        "description": null,
+        "disabledReason": "machine_client_revoked",
+        "displayName": "Sync Worker",
+        "emergencyDisabled": false,
+        "expiresAt": "{datetime:unspecified}",
+        "grantCount": 0,
+        "lastUsedAt": "{datetime:unspecified}",
+        "organizationId": null,
+        "ownership": {
+          "canEmergencyDisable": true,
+          "configurationFingerprint": null,
+          "isEditable": true,
+          "isOrphaned": false,
+          "lastReconciledAt": null,
+          "owner": "dashboard",
+          "sourceKey": null
+        },
+        "ready": false,
+        "scopes": [
+          "workspace.read"
+        ]
+      },
+      "clientSecret": "{client-secret#1}"
+    }
+
+## 19. client: but its new secret gets no token either
+> POST /sqlos/auth/token
+> Authorization: Basic {credentials#2}
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=client_credentials
+>   resource=https://api.example.test
+>   scope=workspace.read
+< 401 Unauthorized
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+< WWW-Authenticate: Basic
+    {
+      "error": "invalid_client",
+      "error_description": "Client authentication failed."
+    }
+
+## 20. operator: the revoked client in the list
+> GET /sqlos/admin/auth/api/machine-clients
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "audience": "https://api.example.test",
+          "clientId": "atlas-worker",
+          "configurationOrphanedAt": null,
+          "configurationOwner": "code",
+          "configurationSourceKey": "atlas-worker",
+          "description": null,
+          "disabledReason": null,
+          "displayName": "Atlas Worker",
+          "emergencyDisabled": false,
+          "expiresAt": null,
+          "grantCount": 0,
+          "lastUsedAt": null,
+          "organizationId": null,
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": "{hex#1}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "atlas-worker"
+          },
+          "ready": true,
+          "scopes": [
+            "workspace.read"
+          ]
+        },
+        {
+          "audience": "https://api.example.test",
+          "clientId": "sync-worker",
+          "configurationOrphanedAt": null,
+          "configurationOwner": "dashboard",
+          "configurationSourceKey": null,
+          "description": null,
+          "disabledReason": "machine_client_revoked",
+          "displayName": "Sync Worker",
+          "emergencyDisabled": false,
+          "expiresAt": "{datetime:unspecified}",
+          "grantCount": 0,
+          "lastUsedAt": "{datetime:unspecified}",
+          "organizationId": null,
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "ready": false,
+          "scopes": [
+            "workspace.read"
+          ]
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## audit: switches and revocation
+  - {
+      "action": "machine_client.emergency_disabled",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "machine_client.emergency_disabled",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "clientId": "sync-worker",
+        "reason": "machine_client_emergency_disabled",
+        "subjectId": "{sub#1}"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "oauth.client_authentication.failed",
+      "actor": {
+        "displayName": null,
+        "id": "sync-worker",
+        "type": "oauth_client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.client_authentication.failed",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "clientId": "sync-worker"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "machine_client.emergency_enabled",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "machine_client.emergency_enabled",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "clientId": "sync-worker",
+        "subjectId": "{sub#1}"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "oauth.client_authentication.succeeded",
+      "actor": {
+        "displayName": null,
+        "id": "sync-worker",
+        "type": "oauth_client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.client_authentication.succeeded",
+      "id": "{evt#6}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "clientId": "sync-worker"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "oauth.client_credentials.issued",
+      "actor": {
+        "displayName": null,
+        "id": "sync-worker",
+        "type": "oauth_client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.client_credentials.issued",
+      "id": "{evt#7}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "clientId": "sync-worker",
+        "subjectId": "{sub#1}"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "machine_client.revoked",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "machine_client.revoked",
+      "id": "{evt#8}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "clientId": "sync-worker",
+        "subjectId": "{sub#1}"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "oauth.client_authentication.failed",
+      "actor": {
+        "displayName": null,
+        "id": "sync-worker",
+        "type": "oauth_client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.client_authentication.failed",
+      "id": "{evt#9}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "clientId": "sync-worker"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "machine_client.secret_rotated",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "machine_client.secret_rotated",
+      "id": "{evt#10}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "clientId": "sync-worker",
+        "subjectId": "{sub#1}"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "oauth.client_authentication.failed",
+      "actor": {
+        "displayName": null,
+        "id": "sync-worker",
+        "type": "oauth_client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.client_authentication.failed",
+      "id": "{evt#11}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "clientId": "sync-worker"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

@@ -1,0 +1,356 @@
+# SqlOS behavior lock transcript
+scenario: HeadlessDeviceScenarios.A_signed_in_user_approves_a_cli_by_typing_its_user_code
+profile: headless
+
+## 1. browser: the UI resolves the typed user code
+> POST /sqlos/auth/headless/device/resolve
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "userCode": "{user-code#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "authBasePath": "/sqlos/auth",
+      "challengeToken": null,
+      "clientId": "lock-cli",
+      "clientName": "Lock CLI",
+      "consentScopes": null,
+      "consentToken": null,
+      "deviceAuthorization": {
+        "clientId": "lock-cli",
+        "clientName": "Lock CLI",
+        "expiresAt": "{datetime:unspecified}",
+        "resource": null,
+        "scope": "openid profile offline_access",
+        "status": "pending",
+        "userCode": "{user-code#1}"
+      },
+      "displayName": null,
+      "email": null,
+      "error": null,
+      "fieldErrors": {},
+      "headlessApiBasePath": "/sqlos/auth/headless",
+      "info": null,
+      "invitation": null,
+      "mfaMethods": null,
+      "mfaToken": null,
+      "omittedOpenId": false,
+      "organizationSelection": [],
+      "pendingToken": null,
+      "phoneNumber": null,
+      "providers": [
+        {
+          "connectionId": "{oidc#1}",
+          "displayName": "Example OIDC",
+          "logoDataUrl": null,
+          "providerType": "Custom"
+        },
+        {
+          "connectionId": "{oidc#2}",
+          "displayName": "Google",
+          "logoDataUrl": "{data-uri:image/svg+xml}",
+          "providerType": "Google"
+        }
+      ],
+      "requestId": null,
+      "requiresMfaEnrollment": false,
+      "scope": "openid profile offline_access",
+      "settings": {
+        "accentColor": "#0f172a",
+        "backgroundColor": "#f8fafc",
+        "emailOtpRuntimeConfigured": true,
+        "enablePasswordSignup": true,
+        "enabledCredentialTypes": [
+          "password",
+          "email_otp",
+          "magic_link",
+          "phone_otp"
+        ],
+        "headlessCapabilityRegistered": true,
+        "layout": "split",
+        "localPasswordRuntimeEnabled": true,
+        "logoBase64": null,
+        "magicLinkRuntimeConfigured": true,
+        "managedByStartupSeed": true,
+        "ownership": {
+          "canEmergencyDisable": false,
+          "configurationFingerprint": "{hex#1}",
+          "isEditable": false,
+          "isOrphaned": false,
+          "lastReconciledAt": "{datetime:unspecified}",
+          "owner": "code",
+          "sourceKey": "auth-page:default"
+        },
+        "pageSubtitle": "Secure your app-owned AI and MCP experiences with SqlOS.",
+        "pageTitle": "Sign in to Behavior Lock",
+        "phoneOtpRuntimeConfigured": true,
+        "primaryColor": "#2563eb",
+        "updatedAt": "{datetime:unspecified}"
+      },
+      "signupToken": null,
+      "totpEnrollment": null,
+      "uiContext": {
+        "deviceUserCode": "{user-code#1}"
+      },
+      "view": "device"
+    }
+
+## 2. browser: approve with the code typed in lower case with a space: the issuer session cookie is the approver
+> POST /sqlos/auth/headless/device/approve
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "userCode": "{user-code:as-typed}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+< Set-Cookie: sqlos_auth_page={cookie#2}; expires=+7d; path=/; secure; samesite=lax; httponly
+    {
+      "redirectUrl": null,
+      "type": "view",
+      "viewModel": {
+        "authBasePath": "/sqlos/auth",
+        "challengeToken": null,
+        "clientId": "lock-cli",
+        "clientName": "Lock CLI",
+        "consentScopes": null,
+        "consentToken": null,
+        "deviceAuthorization": {
+          "clientId": "lock-cli",
+          "clientName": "Lock CLI",
+          "expiresAt": "{datetime:unspecified}",
+          "resource": null,
+          "scope": "openid profile offline_access",
+          "status": "approved",
+          "userCode": "{user-code#1}"
+        },
+        "displayName": null,
+        "email": null,
+        "error": null,
+        "fieldErrors": {},
+        "headlessApiBasePath": "/sqlos/auth/headless",
+        "info": "Your CLI is signed in. You can return to your terminal.",
+        "invitation": null,
+        "mfaMethods": null,
+        "mfaToken": null,
+        "omittedOpenId": false,
+        "organizationSelection": [],
+        "pendingToken": null,
+        "phoneNumber": null,
+        "providers": [
+          {
+            "connectionId": "{oidc#1}",
+            "displayName": "Example OIDC",
+            "logoDataUrl": null,
+            "providerType": "Custom"
+          },
+          {
+            "connectionId": "{oidc#2}",
+            "displayName": "Google",
+            "logoDataUrl": "{data-uri:image/svg+xml}",
+            "providerType": "Google"
+          }
+        ],
+        "requestId": null,
+        "requiresMfaEnrollment": false,
+        "scope": "openid profile offline_access",
+        "settings": {
+          "accentColor": "#0f172a",
+          "backgroundColor": "#f8fafc",
+          "emailOtpRuntimeConfigured": true,
+          "enablePasswordSignup": true,
+          "enabledCredentialTypes": [
+            "password",
+            "email_otp",
+            "magic_link",
+            "phone_otp"
+          ],
+          "headlessCapabilityRegistered": true,
+          "layout": "split",
+          "localPasswordRuntimeEnabled": true,
+          "logoBase64": null,
+          "magicLinkRuntimeConfigured": true,
+          "managedByStartupSeed": true,
+          "ownership": {
+            "canEmergencyDisable": false,
+            "configurationFingerprint": "{hex#1}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "auth-page:default"
+          },
+          "pageSubtitle": "Secure your app-owned AI and MCP experiences with SqlOS.",
+          "pageTitle": "Sign in to Behavior Lock",
+          "phoneOtpRuntimeConfigured": true,
+          "primaryColor": "#2563eb",
+          "updatedAt": "{datetime:unspecified}"
+        },
+        "signupToken": null,
+        "totpEnrollment": null,
+        "uiContext": {
+          "deviceUserCode": "{user-code#1}"
+        },
+        "view": "device-approved"
+      }
+    }
+
+## 3. cli: the CLI polls and receives tokens
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=urn:ietf:params:oauth:grant-type:device_code
+>   device_code={device-code#1}
+>   client_id=lock-cli
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "access_token": "{access-token#1}",
+      "expires_in": ~600,
+      "id_token": "{id-token#1}",
+      "refresh_token": "{refresh-token#1}",
+      "scope": "openid profile offline_access",
+      "token_type": "Bearer"
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "lock-cli",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "scope": "openid profile offline_access",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+  jwt {id-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "JWT"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "at_hash": "{hash#1}",
+      "aud": "lock-cli",
+      "auth_time": {epoch},
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=5m
+
+## audit: device approval events
+  - {
+      "action": "oauth.device.started",
+      "actor": {
+        "displayName": null,
+        "id": "{cli#1}",
+        "type": "client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.device.started",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "oauth.device.approved",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.device.approved",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "oauth.device.token-issued",
+      "actor": {
+        "displayName": null,
+        "id": "{cli#1}",
+        "type": "client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.device.token-issued",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }

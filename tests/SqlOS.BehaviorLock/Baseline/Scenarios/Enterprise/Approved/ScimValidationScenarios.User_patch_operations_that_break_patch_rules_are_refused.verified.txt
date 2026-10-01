@@ -1,0 +1,1144 @@
+# SqlOS behavior lock transcript
+scenario: ScimValidationScenarios.User_patch_operations_that_break_patch_rules_are_refused
+profile: enterprise-scim-path
+
+# Judy and Ann were provisioned at Acme's verified domain.
+
+## 1. directory: no Operations
+> PATCH /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM PATCH requires at least one operation.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidSyntax",
+      "status": "400"
+    }
+
+## 2. directory: the User schema instead of PatchOp
+> PATCH /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [],
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM payload schemas must contain unique values including 'urn:ietf:params:scim:api:messages:2.0:PatchOp'.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidSyntax",
+      "status": "400"
+    }
+
+## 3. directory: an unknown op
+> PATCH /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "move",
+>         "path": "displayName",
+>         "value": "Judy"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM PATCH op must be add, remove, or replace.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidValue",
+      "status": "400"
+    }
+
+## 4. directory: replace without a value
+> PATCH /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "displayName"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM PATCH 'replace' requires a value.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidValue",
+      "status": "400"
+    }
+
+## 5. directory: remove without a path
+> PATCH /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "remove"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM PATCH remove requires a path.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "noTarget",
+      "status": "400"
+    }
+
+## 6. directory: a pathless operation whose value is not an object
+> PATCH /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "value": "Judy"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "A pathless SCIM user PATCH operation requires an object value.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidValue",
+      "status": "400"
+    }
+
+## 7. directory: changing the resource id
+> PATCH /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "id",
+>         "value": "{usr#1}"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM resource id cannot be changed.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "mutability",
+      "status": "400"
+    }
+
+## 8. directory: re-sending the same id is accepted
+> PATCH /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "id",
+>         "value": "{usr:judy}"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 200 OK
+< Content-Location: /scim/v2/Users/{usr:judy}
+< Content-Type: application/scim+json
+    {
+      "active": true,
+      "displayName": "Judy Hopps",
+      "emails": [
+        {
+          "primary": true,
+          "type": "work",
+          "value": "{email:judy}"
+        }
+      ],
+      "externalId": "directory-judy",
+      "groups": [],
+      "id": "{usr:judy}",
+      "meta": {
+        "created": "{datetime:unspecified}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Users/{usr:judy}",
+        "resourceType": "User"
+      },
+      "name": {
+        "familyName": "Hopps",
+        "formatted": "Judy Hopps",
+        "givenName": "Judy"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:judy}"
+    }
+
+## 9. directory: writing groups on a user
+> PATCH /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "add",
+>         "path": "groups",
+>         "value": [
+>           {
+>             "value": "{grp#1}"
+>           }
+>         ]
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM attribute 'groups' is not writable.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "mutability",
+      "status": "400"
+    }
+
+## 10. directory: writing a password
+> PATCH /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "password",
+>         "value": "Hunter2!"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM attribute 'password' is not writable.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "mutability",
+      "status": "400"
+    }
+
+## 11. directory: removing userName
+> PATCH /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "remove",
+>         "path": "userName"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM userName is required.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "mutability",
+      "status": "400"
+    }
+
+## 12. directory: an attribute SqlOS does not support
+> PATCH /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "nickName",
+>         "value": "J"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "Unsupported SCIM user PATCH path 'nickName'.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidPath",
+      "status": "400"
+    }
+
+## 13. directory: a filtered email path other than work
+> PATCH /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "emails[type eq \"home\"].value",
+>         "value": "{email:judy}"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM email path 'emails[type eq \"home\"].value' did not match the stored work email.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "noTarget",
+      "status": "400"
+    }
+
+## 14. directory: active as a string
+> PATCH /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "active",
+>         "value": "false"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM active must be a boolean.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidValue",
+      "status": "400"
+    }
+
+## 15. directory: name as a string
+> PATCH /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "name",
+>         "value": "Judy Hopps"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM name must be an object.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidValue",
+      "status": "400"
+    }
+
+## 16. directory: a blank displayName
+> PATCH /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": " "
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 400 Bad Request
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM displayName cannot be empty.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "invalidValue",
+      "status": "400"
+    }
+
+## 17. directory: Ann's address, which belongs to another account
+> PATCH /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "emails[type eq \"work\"].value",
+>         "value": "{email:ann}"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 409 Conflict
+< Content-Type: application/scim+json
+    {
+      "detail": "Email '{email:ann}' already belongs to another user.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "uniqueness",
+      "status": "409"
+    }
+
+## 18. directory: more than 100 operations
+> PATCH /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 0"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 1"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 2"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 3"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 4"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 5"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 6"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 7"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 8"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 9"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 10"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 11"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 12"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 13"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 14"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 15"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 16"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 17"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 18"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 19"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 20"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 21"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 22"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 23"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 24"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 25"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 26"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 27"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 28"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 29"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 30"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 31"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 32"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 33"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 34"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 35"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 36"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 37"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 38"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 39"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 40"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 41"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 42"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 43"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 44"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 45"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 46"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 47"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 48"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 49"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 50"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 51"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 52"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 53"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 54"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 55"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 56"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 57"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 58"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 59"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 60"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 61"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 62"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 63"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 64"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 65"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 66"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 67"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 68"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 69"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 70"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 71"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 72"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 73"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 74"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 75"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 76"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 77"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 78"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 79"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 80"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 81"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 82"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 83"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 84"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 85"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 86"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 87"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 88"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 89"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 90"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 91"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 92"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 93"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 94"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 95"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 96"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 97"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 98"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 99"
+>       },
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Judy 100"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 413 Payload Too Large
+< Content-Type: application/scim+json
+    {
+      "detail": "SCIM PATCH contains too many operations.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "scimType": "tooMany",
+      "status": "413"
+    }
+
+## 19. directory: a schema-qualified path is accepted
+> PATCH /scim/v2/Users/{usr:judy}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "urn:ietf:params:scim:schemas:core:2.0:User:name.familyName",
+>         "value": "Hopps-Wilde"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 200 OK
+< Content-Location: /scim/v2/Users/{usr:judy}
+< Content-Type: application/scim+json
+    {
+      "active": true,
+      "displayName": "Judy Hopps",
+      "emails": [
+        {
+          "primary": true,
+          "type": "work",
+          "value": "{email:judy}"
+        }
+      ],
+      "externalId": "directory-judy",
+      "groups": [],
+      "id": "{usr:judy}",
+      "meta": {
+        "created": "{datetime:unspecified}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Users/{usr:judy}",
+        "resourceType": "User"
+      },
+      "name": {
+        "familyName": "Hopps-Wilde",
+        "formatted": "Judy Hopps-Wilde",
+        "givenName": "Judy"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:judy}"
+    }
+
+## audit: only the accepted patches are audited
+  - {
+      "action": "scim.user.updated",
+      "actor": {
+        "displayName": null,
+        "id": "directory-judy",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.updated",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-judy",
+        "payload": {
+          "Operations": [
+            {
+              "op": "replace",
+              "path": "id",
+              "value": "{usr:judy}"
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ]
+        },
+        "resourceId": "{usr:judy}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:judy}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.user.updated",
+      "actor": {
+        "displayName": null,
+        "id": "directory-judy",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.updated",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-judy",
+        "payload": {
+          "Operations": [
+            {
+              "op": "replace",
+              "path": "urn:ietf:params:scim:schemas:core:2.0:User:name.familyName",
+              "value": "Hopps-Wilde"
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ]
+        },
+        "resourceId": "{usr:judy}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:judy}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }

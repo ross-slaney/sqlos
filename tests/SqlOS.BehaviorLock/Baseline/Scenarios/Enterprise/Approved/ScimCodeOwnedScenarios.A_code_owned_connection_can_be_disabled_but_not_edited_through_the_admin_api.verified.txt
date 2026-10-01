@@ -1,0 +1,653 @@
+# SqlOS behavior lock transcript
+scenario: ScimCodeOwnedScenarios.A_code_owned_connection_can_be_disabled_but_not_edited_through_the_admin_api
+profile: enterprise-scim-path
+
+# A first host created Acme, verified its domain, and created its FGA resources; this host declares Acme's SCIM connection in code.
+
+## 1. operator: the code-owned connection, reconciled at startup
+> GET /sqlos/admin/auth/api/organizations/{org#1}/scim-connections
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "displayName": "Acme directory (code)",
+          "grantBoundary": {
+            "resourceId": "workspace::acme",
+            "resourceName": "Acme",
+            "resourceTypeId": "workspace",
+            "status": "configured"
+          },
+          "grantBoundaryResourceId": "workspace::acme",
+          "id": "{scim#1}",
+          "isEnabled": true,
+          "lastSyncAt": null,
+          "mappingCount": 1,
+          "organizationId": "{org#1}",
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": "{hex#1}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "acme-directory"
+          },
+          "seedKey": "acme-directory",
+          "source": "seeded",
+          "syncEventCount": 0,
+          "tokenLastUsedAt": null,
+          "tokenPrefix": "{token-prefix#1}",
+          "tokenRotatedAt": "{datetime:unspecified}",
+          "updatedAt": "{datetime:unspecified}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 2. operator: its detail: owned by code
+> GET /sqlos/admin/auth/api/scim-connections/{scim#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "baseUrl": "/scim/v2",
+      "createdAt": "{datetime:unspecified}",
+      "displayName": "Acme directory (code)",
+      "grantBoundary": {
+        "resourceId": "workspace::acme",
+        "resourceName": "Acme",
+        "resourceTypeId": "workspace",
+        "status": "configured"
+      },
+      "grantBoundaryResourceId": "workspace::acme",
+      "groupsUrl": "/scim/v2/Groups",
+      "id": "{scim#1}",
+      "isEnabled": true,
+      "lastSyncAt": null,
+      "organizationId": "{org#1}",
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": "{hex#1}",
+        "isEditable": false,
+        "isOrphaned": false,
+        "lastReconciledAt": "{datetime:unspecified}",
+        "owner": "code",
+        "sourceKey": "acme-directory"
+      },
+      "seedKey": "acme-directory",
+      "source": "seeded",
+      "tokenLastUsedAt": null,
+      "tokenPrefix": "{token-prefix#1}",
+      "tokenRotatedAt": "{datetime:unspecified}",
+      "updatedAt": "{datetime:unspecified}",
+      "usersUrl": "/scim/v2/Users"
+    }
+
+## 3. operator: rotating its token is refused
+> POST /sqlos/admin/auth/api/scim-connections/{scim#1}/token/rotate
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "This SCIM connection is managed by startup configuration. Update its seed Enabled value or token secret and restart SqlOS."
+    }
+
+## 4. operator: editing it is refused
+> PUT /sqlos/admin/auth/api/scim-connections/{scim#1}
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Renamed",
+>     "enabled": true
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "This SCIM connection is managed by startup configuration. Update its seed Enabled value or token secret and restart SqlOS."
+    }
+
+## 5. operator: its code-owned mapping
+> GET /sqlos/admin/auth/api/scim-connections/{scim#1}/mappings
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "activeGrantCount": 0,
+          "connectionId": "{scim#1}",
+          "createdAt": "{datetime:unspecified}",
+          "description": null,
+          "grantBoundaryStatus": "within",
+          "groupDisplayName": "Engineering",
+          "groupExternalId": null,
+          "groupPattern": null,
+          "id": "{scmap#1}",
+          "isEnabled": true,
+          "matchType": "display_name",
+          "resourceId": "workspace::acme-projects",
+          "resourceIdTemplate": null,
+          "roleKey": "workspace_reader",
+          "source": "seeded",
+          "sourceKey": "name:Engineering",
+          "updatedAt": "{datetime:unspecified}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 6. operator: editing the mapping is refused
+> PUT /sqlos/admin/auth/api/scim-mappings/{scmap#1}
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "enabled": true,
+>     "groupDisplayName": "Engineering",
+>     "matchType": "display_name",
+>     "resourceId": "workspace::acme-projects",
+>     "roleKey": "workspace_admin"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "This SCIM mapping is managed by startup configuration. Update its seed definition and restart SqlOS."
+    }
+
+## 7. operator: so is disabling the mapping
+> POST /sqlos/admin/auth/api/scim-mappings/{scmap#1}/disable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "This SCIM mapping is managed by startup configuration. Update its seed definition and restart SqlOS."
+    }
+
+## 8. directory: the directory authenticates with the token from configuration
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "emails": [
+>       {
+>         "primary": true,
+>         "type": "work",
+>         "value": "{email:ann}"
+>       }
+>     ],
+>     "externalId": "directory-ann",
+>     "name": {
+>       "familyName": "Archer",
+>       "givenName": "Ann"
+>     },
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:ann}"
+>   }
+< 201 Created
+< Content-Location: /scim/v2/Users/{usr:ann}
+< Content-Type: application/scim+json
+< Location: /scim/v2/Users/{usr:ann}
+    {
+      "active": true,
+      "displayName": "Ann Archer",
+      "emails": [
+        {
+          "primary": true,
+          "type": "work",
+          "value": "{email:ann}"
+        }
+      ],
+      "externalId": "directory-ann",
+      "groups": [],
+      "id": "{usr:ann}",
+      "meta": {
+        "created": "{datetime:utc-z}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Users/{usr:ann}",
+        "resourceType": "User"
+      },
+      "name": {
+        "familyName": "Archer",
+        "formatted": "Ann Archer",
+        "givenName": "Ann"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:ann}"
+    }
+
+## 9. directory: the code-owned mapping grants on the pushed group
+> POST /scim/v2/Groups
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "displayName": "Engineering",
+>     "externalId": "directory-engineering",
+>     "members": [
+>       {
+>         "value": "{usr:ann}"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:Group"
+>     ]
+>   }
+< 201 Created
+< Content-Location: /scim/v2/Groups/{grp#1}
+< Content-Type: application/scim+json
+< Location: /scim/v2/Groups/{grp#1}
+    {
+      "displayName": "Engineering",
+      "externalId": "directory-engineering",
+      "id": "{grp#1}",
+      "members": [
+        {
+          "$ref": "/scim/v2/Users/{usr:ann}",
+          "display": "Ann Archer",
+          "value": "{usr:ann}"
+        }
+      ],
+      "meta": {
+        "created": "{datetime:utc-z}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Groups/{grp#1}",
+        "resourceType": "Group"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:Group"
+      ]
+    }
+
+## 10. operator: the emergency disable is allowed and revokes the grant
+> POST /sqlos/admin/auth/api/scim-connections/{scim#1}/disable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "displayName": "Acme directory (code)",
+      "grantBoundaryResourceId": "workspace::acme",
+      "id": "{scim#1}",
+      "isEnabled": false,
+      "lastSyncAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": "{hex#1}",
+        "isEditable": false,
+        "isOrphaned": false,
+        "lastReconciledAt": "{datetime:unspecified}",
+        "owner": "code",
+        "sourceKey": "acme-directory"
+      },
+      "seedKey": "acme-directory",
+      "source": "seeded",
+      "tokenLastUsedAt": "{datetime:unspecified}",
+      "tokenPrefix": "{token-prefix#1}",
+      "tokenRotatedAt": "{datetime:unspecified}",
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 11. directory: the disabled connection refuses its token
+> GET /scim/v2/ServiceProviderConfig
+> Authorization: Bearer {scim-token#1}
+< 401 Unauthorized
+< Content-Type: application/scim+json
+< WWW-Authenticate: Bearer realm="SqlOS SCIM"
+    {
+      "detail": "Invalid SCIM bearer token.",
+      "schemas": [
+        "urn:ietf:params:scim:api:messages:2.0:Error"
+      ],
+      "status": "401"
+    }
+
+## 12. operator: and it can be re-enabled
+> POST /sqlos/admin/auth/api/scim-connections/{scim#1}/enable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "displayName": "Acme directory (code)",
+      "grantBoundaryResourceId": "workspace::acme",
+      "id": "{scim#1}",
+      "isEnabled": true,
+      "lastSyncAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": "{hex#1}",
+        "isEditable": false,
+        "isOrphaned": false,
+        "lastReconciledAt": "{datetime:unspecified}",
+        "owner": "code",
+        "sourceKey": "acme-directory"
+      },
+      "seedKey": "acme-directory",
+      "source": "seeded",
+      "tokenLastUsedAt": "{datetime:unspecified}",
+      "tokenPrefix": "{token-prefix#1}",
+      "tokenRotatedAt": "{datetime:unspecified}",
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## audit: administration and provisioning events
+  - {
+      "action": "scim.user.created",
+      "actor": {
+        "displayName": null,
+        "id": "directory-ann",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.created",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-ann",
+        "payload": {
+          "active": true,
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:ann}"
+            }
+          ],
+          "externalId": "directory-ann",
+          "name": {
+            "familyName": "Archer",
+            "givenName": "Ann"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:ann}"
+        },
+        "resourceId": "{usr:ann}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:ann}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.member_added",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.member_added",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": {
+          "groupId": "{grp#1}",
+          "memberCount": 1,
+          "subjectIds": [
+            "{subj#1}"
+          ],
+          "truncated": false
+        },
+        "resourceId": "{grp#1}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp#1}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.grant.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.grant.mapped",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": {
+          "grantId": "{grant#1}",
+          "mappingId": "{scmap#1}",
+          "resourceId": "workspace::acme-projects",
+          "roleId": "workspace_reader"
+        },
+        "resourceId": "{grp#1}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp#1}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.created",
+      "actor": {
+        "displayName": null,
+        "id": "directory-engineering",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.created",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-engineering",
+        "payload": {
+          "displayName": "Engineering",
+          "externalId": "directory-engineering",
+          "members": [
+            {
+              "value": "{usr:ann}"
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:Group"
+          ]
+        },
+        "resourceId": "{grp#1}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp#1}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.grant.revoked",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.grant.revoked",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "connectionId": "{scim#1}",
+        "deletedGrantCount": 1,
+        "evidence": [
+          {
+            "grantId": "{grant#1}",
+            "groupExternalId": "directory-engineering",
+            "groupId": "{grp#1}",
+            "managedGrantId": "{scgrant#1}",
+            "mappingId": "{scmap#1}",
+            "resourceId": "workspace::acme-projects",
+            "roleId": "workspace_reader"
+          }
+        ],
+        "evidenceTruncated": false,
+        "requestedMappingId": null,
+        "revokedManagedGrantCount": 1
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{scim#1}",
+          "type": "scim_connection"
+        },
+        {
+          "displayName": null,
+          "id": "{scmap#1}",
+          "type": "scim_group_mapping"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.connection.disabled",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "scim.connection.disabled",
+      "id": "{evt#6}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.connection.enabled",
+      "actor": {
+        "displayName": null,
+        "id": "{scim#1}",
+        "type": "scim_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "scim.connection.enabled",
+      "id": "{evt#7}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

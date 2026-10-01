@@ -1,0 +1,46 @@
+# SqlOS behavior lock transcript
+scenario: PublicRequestScenarios.Malformed_requests_are_answered_by_request_binding
+profile: hosted
+
+## 1. client: no body
+> POST /sqlos/auth/password/login
+< 400 Bad Request
+
+## 2. client: truncated JSON
+> POST /sqlos/auth/password/login
+> Content-Type: application/json; charset=utf-8
+>   {"email":
+< 400 Bad Request
+
+## 3. client: JSON of the wrong shape
+> POST /sqlos/auth/password/login
+> Content-Type: application/json; charset=utf-8
+>   []
+< 400 Bad Request
+
+## 4. browser: a cross-site HTML form post is not JSON
+> POST /sqlos/auth/password/login
+> Content-Type: application/x-www-form-urlencoded
+> Origin: https://attacker.example.test
+>   email={email:alice}
+>   password={password:alice}
+>   clientId=behavior-lock-app
+< 415 Unsupported Media Type
+
+## 5. client: a text/plain body (a simple cross-site request) is not JSON either
+> POST /sqlos/auth/signup
+> Content-Type: text/plain; charset=utf-8
+>   {
+>     "displayName": "Mallory"
+>   }
+< 415 Unsupported Media Type
+
+## 6. client: logout reads its body by hand: a form body escapes the endpoint
+> POST /sqlos/auth/logout
+> Content-Type: application/x-www-form-urlencoded; charset=utf-8
+>   refreshToken=x
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Unable to read the request as JSON because the request content type 'application/x-www-form-urlencoded; charset=utf-8' is not a known JSON content type.
+
+## audit: nothing reached SqlOS
+  (no new events)

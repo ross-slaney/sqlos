@@ -1,0 +1,240 @@
+# SqlOS behavior lock transcript
+scenario: LegacyWiringScenarios.The_auth_server_a_host_maps_itself_signs_a_user_in_to_its_seeded_browser_client
+profile: legacy-host
+
+## 1. client: discovery describes the auth server the host mapped
+> GET /sqlos/auth/.well-known/openid-configuration
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "authorization_endpoint": "https://sqlos.example.test/sqlos/auth/authorize",
+      "claims_supported": [
+        "sub",
+        "name",
+        "preferred_username",
+        "email",
+        "email_verified",
+        "auth_time",
+        "amr",
+        "org_id"
+      ],
+      "code_challenge_methods_supported": [
+        "S256"
+      ],
+      "device_authorization_endpoint": "https://sqlos.example.test/sqlos/auth/device_authorization",
+      "grant_types_supported": [
+        "authorization_code",
+        "refresh_token",
+        "urn:ietf:params:oauth:grant-type:device_code"
+      ],
+      "id_token_signing_alg_values_supported": [
+        "RS256"
+      ],
+      "issuer": "https://sqlos.example.test/sqlos/auth",
+      "jwks_uri": "https://sqlos.example.test/sqlos/auth/.well-known/jwks.json",
+      "request_parameter_supported": false,
+      "request_uri_parameter_supported": false,
+      "resource_parameter_supported": true,
+      "response_modes_supported": [
+        "query"
+      ],
+      "response_types_supported": [
+        "code"
+      ],
+      "scopes_supported": [
+        "email",
+        "openid",
+        "profile"
+      ],
+      "subject_types_supported": [
+        "public"
+      ],
+      "token_endpoint": "https://sqlos.example.test/sqlos/auth/token",
+      "token_endpoint_auth_methods_supported": [
+        "none"
+      ],
+      "userinfo_endpoint": "https://sqlos.example.test/sqlos/auth/userinfo"
+    }
+
+## 2. browser: the seeded browser client opens the hosted password page
+> GET /sqlos/auth/authorize?response_type=code&client_id=legacy-web&redirect_uri=https%3A%2F%2Flegacy.example.test%2Fcallback&scope=openid%20profile%20email%20offline_access&state={state#1}&nonce={nonce#1}&code_challenge={pkce-challenge#1}&code_challenge_method=S256&view=password
+< 200 OK
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#1}'; style-src 'self' 'nonce-{csp-nonce#1}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+< Set-Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}; expires=+15m; max-age=900; path=/sqlos/auth; secure; samesite=strict; httponly
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in</title>
+        <style nonce="{csp-nonce#1}">{style-sha256:80d77a550f3a606a}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in</h1>
+                <p class="brand-subtitle">Secure your app-owned AI and MCP experiences with SqlOS.</p>
+              </div>
+              <div class="messages"></div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <div class="panel-intro">
+                    <span class="panel-kicker">Password</span>
+                    <p>Continue with your email and password.</p>
+                  </div>
+                  <form class="auth-form" method="post" action="/sqlos/auth/login/password">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#1}" />
+                    <input type="hidden" name="requestId" value="{req#1}" />
+                    <label class="field">
+                      <span>Email</span>
+                      <input name="email" type="email" value="" placeholder="Your email address" autocomplete="email" required="" />
+                    </label>
+                    <label class="field">
+                      <span>Password</span>
+                      <input name="password" type="password" placeholder="Your password" autocomplete="current-password" required="" />
+                    </label>
+                    <button class="primary-action" type="submit" data-loading-label="Signing in">
+                      <span class="button-label">Continue</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                  </form>
+                  <div class="footer-links">
+                    <a class="secondary-link" href="/sqlos/auth/password/forgot?request={req#1}">Forgot password?</a>
+                  </div>
+                  <p class="footer-prompt">
+                    Don't have an account?
+                    <a class="secondary-link" href="/sqlos/auth/signup?request={req#1}">Get started</a>
+                  </p>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#1}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+
+## 3. browser: the password signs Alice in and returns her to the client with a code
+> POST /sqlos/auth/login/password
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#1}
+>   email={email:alice}
+>   password={password:alice}
+< 200 OK
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#2}'; style-src 'self' 'nonce-{csp-nonce#2}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+< Set-Cookie: sqlos_auth_page={cookie#2}; expires=+7d; path=/; secure; samesite=lax; httponly
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="refresh" content="0;url=https://legacy.example.test/callback?code={code#1}&amp;state={state#1}" />
+        <title>Continuing…</title>
+      </head>
+      <body>
+        <p>
+          Returning to the application…
+          <a href="https://legacy.example.test/callback?code={code#1}&amp;state={state#1}">Continue</a>
+        </p>
+      </body>
+    </html>
+
+## 4. client: the client redeems the code: the seeded client allows no scopes, so the grant drops them and issues no ID token
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=authorization_code
+>   code={code#1}
+>   client_id=legacy-web
+>   redirect_uri=https://legacy.example.test/callback
+>   code_verifier={pkce-verifier#1}
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "access_token": "{access-token#1}",
+      "expires_in": ~600,
+      "refresh_token": "{refresh-token#1}",
+      "scope": "",
+      "token_type": "Bearer"
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "sqlos",
+      "client_id": "legacy-web",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "scope": "",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+
+## 5. client: UserInfo refuses the access token, which was not granted openid
+> GET /sqlos/auth/userinfo
+> Authorization: Bearer {access-token#1}
+< 403 Forbidden
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+< WWW-Authenticate: Bearer error="insufficient_scope", error_description="The access token was not granted the openid scope."
+    {
+      "error": "insufficient_scope",
+      "error_description": "The access token was not granted the openid scope."
+    }
+
+## 6. operator: the session the sign-in created
+> GET /sqlos/admin/auth/api/users/{usr#1}/sessions
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "absoluteExpiresAt": "{datetime:unspecified}",
+          "authenticationMethod": "password",
+          "clientApplicationId": "{cli#1}",
+          "createdAt": "{datetime:unspecified}",
+          "id": "{ses#1}",
+          "idleExpiresAt": "{datetime:unspecified}",
+          "ipAddress": "203.0.113.10",
+          "lastSeenAt": "{datetime:unspecified}",
+          "revocationReason": null,
+          "revokedAt": null,
+          "user": "Alice",
+          "userAgent": "",
+          "userId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }

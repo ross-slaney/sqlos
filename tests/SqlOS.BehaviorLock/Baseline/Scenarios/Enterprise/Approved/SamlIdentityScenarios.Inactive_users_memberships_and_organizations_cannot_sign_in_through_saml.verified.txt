@@ -1,0 +1,770 @@
+# SqlOS behavior lock transcript
+scenario: SamlIdentityScenarios.Inactive_users_memberships_and_organizations_cannot_sign_in_through_saml
+profile: enterprise-scim-path
+
+## 1. directory: the directory provisions Ann
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "emails": [
+>       {
+>         "primary": true,
+>         "type": "work",
+>         "value": "{email:ann}"
+>       }
+>     ],
+>     "externalId": "directory-ann",
+>     "name": {
+>       "familyName": "Archer",
+>       "givenName": "Ann"
+>     },
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:ann}"
+>   }
+< 201 Created
+< Content-Location: /scim/v2/Users/{usr:ann}
+< Content-Type: application/scim+json
+< Location: /scim/v2/Users/{usr:ann}
+    {
+      "active": true,
+      "displayName": "Ann Archer",
+      "emails": [
+        {
+          "primary": true,
+          "type": "work",
+          "value": "{email:ann}"
+        }
+      ],
+      "externalId": "directory-ann",
+      "groups": [],
+      "id": "{usr:ann}",
+      "meta": {
+        "created": "{datetime:utc-z}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Users/{usr:ann}",
+        "resourceType": "User"
+      },
+      "name": {
+        "familyName": "Archer",
+        "formatted": "Ann Archer",
+        "givenName": "Ann"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:ann}"
+    }
+
+## 2. directory: and Bob
+> POST /scim/v2/Users
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "active": true,
+>     "emails": [
+>       {
+>         "primary": true,
+>         "type": "work",
+>         "value": "{email:bob}"
+>       }
+>     ],
+>     "externalId": "directory-bob",
+>     "name": {
+>       "familyName": "Baker",
+>       "givenName": "Bob"
+>     },
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:User"
+>     ],
+>     "userName": "{email:bob}"
+>   }
+< 201 Created
+< Content-Location: /scim/v2/Users/{usr:bob}
+< Content-Type: application/scim+json
+< Location: /scim/v2/Users/{usr:bob}
+    {
+      "active": true,
+      "displayName": "Bob Baker",
+      "emails": [
+        {
+          "primary": true,
+          "type": "work",
+          "value": "{email:bob}"
+        }
+      ],
+      "externalId": "directory-bob",
+      "groups": [],
+      "id": "{usr:bob}",
+      "meta": {
+        "created": "{datetime:utc-z}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Users/{usr:bob}",
+        "resourceType": "User"
+      },
+      "name": {
+        "familyName": "Baker",
+        "formatted": "Bob Baker",
+        "givenName": "Bob"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:bob}"
+    }
+
+## 3. operator: Bob also belongs to Globex
+> POST /sqlos/admin/auth/api/organizations/{org#1}/memberships
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "role": "member",
+>     "userId": "{usr:bob}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "isActive": true,
+      "organizationId": "{org#1}",
+      "role": "member",
+      "userId": "{usr:bob}"
+    }
+
+## 4. directory: the directory deactivates Ann: her account is deactivated
+> PATCH /scim/v2/Users/{usr:ann}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "active",
+>         "value": false
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 200 OK
+< Content-Location: /scim/v2/Users/{usr:ann}
+< Content-Type: application/scim+json
+    {
+      "active": false,
+      "displayName": "Ann Archer",
+      "emails": [
+        {
+          "primary": true,
+          "type": "work",
+          "value": "{email:ann}"
+        }
+      ],
+      "externalId": "directory-ann",
+      "groups": [],
+      "id": "{usr:ann}",
+      "meta": {
+        "created": "{datetime:unspecified}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Users/{usr:ann}",
+        "resourceType": "User"
+      },
+      "name": {
+        "familyName": "Archer",
+        "formatted": "Ann Archer",
+        "givenName": "Ann"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:ann}"
+    }
+
+## 5. directory: and Bob: only his Acme membership ends
+> PATCH /scim/v2/Users/{usr:bob}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "active",
+>         "value": false
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 200 OK
+< Content-Location: /scim/v2/Users/{usr:bob}
+< Content-Type: application/scim+json
+    {
+      "active": false,
+      "displayName": "Bob Baker",
+      "emails": [
+        {
+          "primary": true,
+          "type": "work",
+          "value": "{email:bob}"
+        }
+      ],
+      "externalId": "directory-bob",
+      "groups": [],
+      "id": "{usr:bob}",
+      "meta": {
+        "created": "{datetime:unspecified}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Users/{usr:bob}",
+        "resourceType": "User"
+      },
+      "name": {
+        "familyName": "Baker",
+        "formatted": "Bob Baker",
+        "givenName": "Bob"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "userName": "{email:bob}"
+    }
+
+## 6. browser: Ann's assertion: her account is inactive
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#1}
+>   RelayState={relay-state#1}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "access_denied",
+      "message": "The external sign-in request could not be completed."
+    }
+
+## 7. browser: Bob's assertion: his Acme membership is inactive
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#2}
+>   RelayState={relay-state#2}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "access_denied",
+      "message": "The external sign-in request could not be completed."
+    }
+
+## 8. operator: while Ivan is at the IdP, the operator deactivates Acme
+> PUT /sqlos/admin/auth/api/organizations/{org#2}
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "isActive": false,
+>     "name": "Acme",
+>     "slug": "{slug:acme}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "id": "{org#2}",
+      "isActive": false,
+      "name": "Acme",
+      "primaryDomain": null,
+      "slug": "{slug:acme}"
+    }
+
+## 9. ivan: Ivan's assertion: the organization is inactive
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#3}
+>   RelayState={relay-state#3}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "access_denied",
+      "message": "The external sign-in request could not be completed."
+    }
+
+## audit: lifecycle denials
+  - {
+      "action": "scim.user.created",
+      "actor": {
+        "displayName": null,
+        "id": "directory-ann",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.created",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-ann",
+        "payload": {
+          "active": true,
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:ann}"
+            }
+          ],
+          "externalId": "directory-ann",
+          "name": {
+            "familyName": "Archer",
+            "givenName": "Ann"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:ann}"
+        },
+        "resourceId": "{usr:ann}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#2}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:ann}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.user.created",
+      "actor": {
+        "displayName": null,
+        "id": "directory-bob",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.created",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-bob",
+        "payload": {
+          "active": true,
+          "emails": [
+            {
+              "primary": true,
+              "type": "work",
+              "value": "{email:bob}"
+            }
+          ],
+          "externalId": "directory-bob",
+          "name": {
+            "familyName": "Baker",
+            "givenName": "Bob"
+          },
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "{email:bob}"
+        },
+        "resourceId": "{usr:bob}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#2}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:bob}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.user.deactivated",
+      "actor": {
+        "displayName": null,
+        "id": "directory-ann",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.deactivated",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-ann",
+        "payload": {
+          "Operations": [
+            {
+              "op": "replace",
+              "path": "active",
+              "value": false
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ]
+        },
+        "resourceId": "{usr:ann}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#2}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:ann}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.user.lifecycle_released",
+      "actor": {
+        "displayName": null,
+        "id": "directory-bob",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.lifecycle_released",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-bob",
+        "payload": {
+          "anchors": [
+            "organization_membership"
+          ],
+          "reason": "independent_anchor"
+        },
+        "resourceId": "{usr:bob}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#2}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:bob}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.user.deactivated",
+      "actor": {
+        "displayName": null,
+        "id": "directory-bob",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.user.deactivated",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "directory-bob",
+        "payload": {
+          "Operations": [
+            {
+              "op": "replace",
+              "path": "active",
+              "value": false
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ]
+        },
+        "resourceId": "{usr:bob}",
+        "resourceType": "User"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#2}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{usr:bob}",
+          "type": "user"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.lifecycle.denied",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "auth.lifecycle.denied",
+      "id": "{aud#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "boundary": "saml_callback",
+        "reason": "user_inactive"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#2}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr:ann}"
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#6}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "No user could be resolved from the SAML assertion.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "SamlAcs"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.lifecycle.denied",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "auth.lifecycle.denied",
+      "id": "{aud#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "boundary": "saml_callback",
+        "reason": "membership_inactive"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#2}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr:bob}"
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#7}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "No user could be resolved from the SAML assertion.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "SamlAcs"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "sso.portal.sessions.revoked",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "sso.portal.sessions.revoked",
+      "id": "{evt#8}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "reason": "organization_deactivated",
+        "revokedSessions": 1
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#2}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.lifecycle.denied",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "auth.lifecycle.denied",
+      "id": "{aud#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "boundary": "saml_callback",
+        "reason": "organization_inactive"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#2}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#9}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "No user could be resolved from the SAML assertion.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "SamlAcs"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

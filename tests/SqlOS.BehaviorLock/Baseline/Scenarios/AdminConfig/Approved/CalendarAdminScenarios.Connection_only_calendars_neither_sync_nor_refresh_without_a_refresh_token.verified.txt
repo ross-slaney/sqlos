@@ -1,0 +1,197 @@
+# SqlOS behavior lock transcript
+scenario: CalendarAdminScenarios.Connection_only_calendars_neither_sync_nor_refresh_without_a_refresh_token
+profile: modules
+
+## 1. browser: a connection-only calendar connects without a refresh token
+> GET /sqlos/auth/calendar/callback?state={state#1}&code=norefresh%3Aalice@calendar.example.test
+< 302 Found
+< Location: https://sqlos.example.test/calendar/connected?calendarConnectionId={cal#1}
+  ~ http SqlOSGoogleCalendarAdapter: POST https://oauth2.googleapis.com/token -> 200
+      grant_type=authorization_code
+      client_id=google-client-id
+      client_secret=google-client-secret
+      code=norefresh:alice@calendar.example.test
+      redirect_uri=https://sqlos.example.test/sqlos/auth/calendar/callback
+      code_verifier={pkce-verifier#1}
+
+## 2. operator: it holds only an access token
+> GET /sqlos/admin/calendar/api/connections/{cal#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "calendars": [],
+      "connection": {
+        "accessTokenExpiresAt": "{datetime:unspecified}",
+        "createdAt": "{datetime:unspecified}",
+        "displayName": "Google Calendar",
+        "hasRefreshToken": false,
+        "id": "{cal#1}",
+        "lastError": null,
+        "lastErrorAt": null,
+        "lastSyncAt": null,
+        "mode": "ConnectionOnly",
+        "organizationId": null,
+        "providerAccountEmail": "alice@calendar.example.test",
+        "providerType": "Google",
+        "revokedAt": null,
+        "scopes": [
+          "openid",
+          "email",
+          "https://www.googleapis.com/auth/calendar.readonly"
+        ],
+        "status": "Active",
+        "userId": "{usr#1}"
+      },
+      "eventCount": 0
+    }
+
+## 3. operator: connection-only calendars do not synchronize events
+> POST /sqlos/admin/calendar/api/connections/{cal#1}/sync
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Connection-only calendar connections do not synchronize events."
+    }
+
+## 4. operator: and cannot be refreshed without a refresh token
+> POST /sqlos/admin/calendar/api/connections/{cal#1}/refresh
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "The calendar access token expired and no refresh token is stored for this connection."
+    }
+
+## 5. operator: an unknown connection
+> GET /sqlos/admin/calendar/api/connections/{cal#2}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "The calendar connection was not found."
+    }
+
+## 6. operator: syncing an unknown connection
+> POST /sqlos/admin/calendar/api/connections/{cal#2}/sync
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "The calendar connection was not found."
+    }
+
+## 7. operator: refreshing an unknown connection
+> POST /sqlos/admin/calendar/api/connections/{cal#2}/refresh
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "The calendar connection was not found."
+    }
+
+## 8. operator: disconnecting an unknown connection
+> POST /sqlos/admin/calendar/api/connections/{cal#2}/disconnect
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "The calendar connection was not found."
+    }
+
+## 9. operator: offset paging is refused
+> GET /sqlos/admin/calendar/api/connections?page=2
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_cursor",
+      "message": "Offset pagination is no longer supported. Omit page or pass page=1 for the first window, then follow nextCursor."
+    }
+
+## audit: the connection, and no events for refused operations
+  - {
+      "action": "calendar.connect.start",
+      "actor": {
+        "displayName": null,
+        "id": "{oidc#1}",
+        "type": "oidc_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "calendar.connect.start",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "mode": "ConnectionOnly",
+        "provider": "Google",
+        "scopes": [
+          "openid",
+          "email",
+          "https://www.googleapis.com/auth/calendar.readonly"
+        ]
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "calendar.connection.created",
+      "actor": {
+        "displayName": null,
+        "id": "{cal#1}",
+        "type": "calendar_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "calendar.connection.created",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "mode": "ConnectionOnly",
+        "provider": "Google",
+        "providerAccountEmail": "alice@calendar.example.test"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }

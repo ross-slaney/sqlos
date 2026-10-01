@@ -1,0 +1,105 @@
+# SqlOS behavior lock transcript
+scenario: PublicSessionScenarios.A_replay_outside_the_grace_window_revokes_the_whole_session
+profile: hosted
+
+## 1. client: refresh with no grace window configured
+> POST /sqlos/auth/token/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshToken": "{refresh-token#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessToken": "{access-token#1}",
+      "accessTokenExpiresAt": "{datetime:utc-z}",
+      "clientId": "behavior-lock-app",
+      "idToken": null,
+      "organizationId": null,
+      "refreshToken": "{refresh-token#2}",
+      "refreshTokenExpiresAt": "{datetime:utc-z}",
+      "sessionId": "{ses#1}"
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+
+## 2. client: replaying the consumed token is treated as theft: the family is revoked
+> POST /sqlos/auth/token/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshToken": "{refresh-token#1}"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Refresh token has already been used.
+
+## 3. client: the legitimate rotated token now fails too
+> POST /sqlos/auth/token/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshToken": "{refresh-token#2}"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Refresh token is no longer valid.
+
+## 4. client: and its access token no longer validates (the session is revoked)
+> POST /__probe/auth/validate
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "audience": "https://sqlos.example.test/api",
+>     "token": "{access-token#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "valid": false
+    }
+
+## audit: reuse revocation writes no audit event
+  (no new events)
+
+## 5. operator: the session is revoked for token reuse
+> GET /sqlos/admin/auth/api/users/{usr#1}/sessions
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "absoluteExpiresAt": "{datetime:unspecified}",
+          "authenticationMethod": "password",
+          "clientApplicationId": "{cli#1}",
+          "createdAt": "{datetime:unspecified}",
+          "id": "{ses#1}",
+          "idleExpiresAt": "{datetime:unspecified}",
+          "ipAddress": "203.0.113.10",
+          "lastSeenAt": "{datetime:unspecified}",
+          "revocationReason": "refresh_token_reuse",
+          "revokedAt": "{datetime:unspecified}",
+          "user": "Alice",
+          "userAgent": "",
+          "userId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }

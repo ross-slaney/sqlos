@@ -1,0 +1,772 @@
+# SqlOS behavior lock transcript
+scenario: ClientRegistrationScenarios.A_client_metadata_document_must_exist_match_its_url_and_list_the_redirect
+profile: mcp
+
+## 1. browser: no document at the client_id URL
+> GET /sqlos/auth/authorize?response_type=code&client_id=https%3A%2F%2Fclient.example.test%2Fmissing.json&redirect_uri=https%3A%2F%2Fclient.example.test%2Ftool%2Fcallback&scope=openid%20profile%20email%20offline_access&state={state#1}&nonce={nonce#1}&code_challenge={pkce-challenge#1}&code_challenge_method=S256
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#1}'; style-src 'self' 'nonce-{csp-nonce#1}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+< Set-Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}; expires=+15m; max-age=900; path=/sqlos/auth; secure; samesite=strict; httponly
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Behavior Lock</title>
+        <style nonce="{csp-nonce#1}">{style-sha256:80d77a550f3a606a}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Behavior Lock</h1>
+                <p class="brand-subtitle">Secure your app-owned AI and MCP experiences with SqlOS.</p>
+              </div>
+              <div class="messages">
+                <div class="callout error">
+                  <span class="callout-icon">!</span>
+                  <span>The authorization request is invalid.</span>
+                </div>
+              </div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <form class="auth-form" method="post" action="/sqlos/auth/login/identify" data-flow-kind="hrd">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#1}" />
+                    <label class="field">
+                      <span>Email</span>
+                      <input name="email" type="email" value="" placeholder="Your email address" autocomplete="email" required="" />
+                    </label>
+                    <button class="primary-action" type="submit" data-loading-label="Checking email">
+                      <span class="button-label">Continue</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                    <div class="flow-status" hidden="">
+                      <span class="loader loader-sm" aria-hidden="true"></span>
+                      <span>Checking your sign-in method...</span>
+                    </div>
+                  </form>
+                  <p class="footer-prompt">
+                    Don't have an account?
+                    <a class="secondary-link" href="/sqlos/auth/signup">Get started</a>
+                  </p>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#1}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+  ~ http SqlOSCimdClientService: GET https://client.example.test/missing.json -> 404
+
+## audit
+  - {
+      "action": "client.cimd.fetch-failed",
+      "actor": {
+        "displayName": null,
+        "id": "https://client.example.test/missing.json",
+        "type": "client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "client.cimd.fetch-failed",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "status_code": 404
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "Client metadata document fetch failed.",
+        "error": "invalid_request",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The authorization request is invalid.",
+        "surface": "OAuthAuthorize"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 2. browser: a document that declares another client_id
+> GET /sqlos/auth/authorize?response_type=code&client_id=https%3A%2F%2Fclient.example.test%2Fmismatched.json&redirect_uri=https%3A%2F%2Fclient.example.test%2Ftool%2Fcallback&scope=openid%20profile%20email%20offline_access&state={state#2}&nonce={nonce#2}&code_challenge={pkce-challenge#2}&code_challenge_method=S256
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#2}'; style-src 'self' 'nonce-{csp-nonce#2}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Behavior Lock</title>
+        <style nonce="{csp-nonce#2}">{style-sha256:80d77a550f3a606a}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Behavior Lock</h1>
+                <p class="brand-subtitle">Secure your app-owned AI and MCP experiences with SqlOS.</p>
+              </div>
+              <div class="messages">
+                <div class="callout error">
+                  <span class="callout-icon">!</span>
+                  <span>The authorization request is invalid.</span>
+                </div>
+              </div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <form class="auth-form" method="post" action="/sqlos/auth/login/identify" data-flow-kind="hrd">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#2}" />
+                    <label class="field">
+                      <span>Email</span>
+                      <input name="email" type="email" value="" placeholder="Your email address" autocomplete="email" required="" />
+                    </label>
+                    <button class="primary-action" type="submit" data-loading-label="Checking email">
+                      <span class="button-label">Continue</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                    <div class="flow-status" hidden="">
+                      <span class="loader loader-sm" aria-hidden="true"></span>
+                      <span>Checking your sign-in method...</span>
+                    </div>
+                  </form>
+                  <p class="footer-prompt">
+                    Don't have an account?
+                    <a class="secondary-link" href="/sqlos/auth/signup">Get started</a>
+                  </p>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#2}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+  ~ http SqlOSCimdClientService: GET https://client.example.test/mismatched.json -> 200
+
+## audit
+  - {
+      "action": "client.cimd.validation-failed",
+      "actor": {
+        "displayName": null,
+        "id": "https://client.example.test/mismatched.json",
+        "type": "client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "client.cimd.validation-failed",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "error": "Client metadata document for 'https://client.example.test/mismatched.json' must declare the exact same client_id."
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "Client metadata document validation failed.",
+        "error": "invalid_request",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The authorization request is invalid.",
+        "surface": "OAuthAuthorize"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 3. browser: a redirect_uri the document does not list
+> GET /sqlos/auth/authorize?response_type=code&client_id=https%3A%2F%2Fclient.example.test%2Fother-redirect.json&redirect_uri=https%3A%2F%2Fclient.example.test%2Ftool%2Fcallback&scope=openid%20profile%20email%20offline_access&state={state#3}&nonce={nonce#3}&code_challenge={pkce-challenge#3}&code_challenge_method=S256
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#3}'; style-src 'self' 'nonce-{csp-nonce#3}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Behavior Lock</title>
+        <style nonce="{csp-nonce#3}">{style-sha256:80d77a550f3a606a}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Behavior Lock</h1>
+                <p class="brand-subtitle">Secure your app-owned AI and MCP experiences with SqlOS.</p>
+              </div>
+              <div class="messages">
+                <div class="callout error">
+                  <span class="callout-icon">!</span>
+                  <span>The authorization request is invalid.</span>
+                </div>
+              </div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <form class="auth-form" method="post" action="/sqlos/auth/login/identify" data-flow-kind="hrd">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#3}" />
+                    <label class="field">
+                      <span>Email</span>
+                      <input name="email" type="email" value="" placeholder="Your email address" autocomplete="email" required="" />
+                    </label>
+                    <button class="primary-action" type="submit" data-loading-label="Checking email">
+                      <span class="button-label">Continue</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                    <div class="flow-status" hidden="">
+                      <span class="loader loader-sm" aria-hidden="true"></span>
+                      <span>Checking your sign-in method...</span>
+                    </div>
+                  </form>
+                  <p class="footer-prompt">
+                    Don't have an account?
+                    <a class="secondary-link" href="/sqlos/auth/signup">Get started</a>
+                  </p>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#3}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+  ~ http SqlOSCimdClientService: GET https://client.example.test/other-redirect.json -> 200
+
+## audit
+  - {
+      "action": "client.cimd.validation-failed",
+      "actor": {
+        "displayName": null,
+        "id": "https://client.example.test/other-redirect.json",
+        "type": "client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "client.cimd.validation-failed",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "error": "Redirect URI 'https://client.example.test/tool/callback' is not allowed for client 'https://client.example.test/other-redirect.json'."
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#6}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "Client metadata document validation failed.",
+        "error": "invalid_request",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The authorization request is invalid.",
+        "surface": "OAuthAuthorize"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 4. browser: a document that asks for a client secret
+> GET /sqlos/auth/authorize?response_type=code&client_id=https%3A%2F%2Fclient.example.test%2Fconfidential.json&redirect_uri=https%3A%2F%2Fclient.example.test%2Ftool%2Fcallback&scope=openid%20profile%20email%20offline_access&state={state#4}&nonce={nonce#4}&code_challenge={pkce-challenge#4}&code_challenge_method=S256
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#4}'; style-src 'self' 'nonce-{csp-nonce#4}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Behavior Lock</title>
+        <style nonce="{csp-nonce#4}">{style-sha256:80d77a550f3a606a}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Behavior Lock</h1>
+                <p class="brand-subtitle">Secure your app-owned AI and MCP experiences with SqlOS.</p>
+              </div>
+              <div class="messages">
+                <div class="callout error">
+                  <span class="callout-icon">!</span>
+                  <span>The authorization request is invalid.</span>
+                </div>
+              </div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <form class="auth-form" method="post" action="/sqlos/auth/login/identify" data-flow-kind="hrd">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#4}" />
+                    <label class="field">
+                      <span>Email</span>
+                      <input name="email" type="email" value="" placeholder="Your email address" autocomplete="email" required="" />
+                    </label>
+                    <button class="primary-action" type="submit" data-loading-label="Checking email">
+                      <span class="button-label">Continue</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                    <div class="flow-status" hidden="">
+                      <span class="loader loader-sm" aria-hidden="true"></span>
+                      <span>Checking your sign-in method...</span>
+                    </div>
+                  </form>
+                  <p class="footer-prompt">
+                    Don't have an account?
+                    <a class="secondary-link" href="/sqlos/auth/signup">Get started</a>
+                  </p>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#4}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+  ~ http SqlOSCimdClientService: GET https://client.example.test/confidential.json -> 200
+
+## audit
+  - {
+      "action": "client.cimd.validation-failed",
+      "actor": {
+        "displayName": null,
+        "id": "https://client.example.test/confidential.json",
+        "type": "client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "client.cimd.validation-failed",
+      "id": "{evt#7}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "error": "Client metadata document for 'https://client.example.test/confidential.json' must use token_endpoint_auth_method 'none' in this SqlOS version."
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#8}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "Client metadata document validation failed.",
+        "error": "invalid_request",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The authorization request is invalid.",
+        "surface": "OAuthAuthorize"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 5. browser: a metadata document on localhost is never fetched
+> GET /sqlos/auth/authorize?response_type=code&client_id=https%3A%2F%2Flocalhost%2Fclient.json&redirect_uri=https%3A%2F%2Flocalhost%2Fcallback&scope=openid%20profile%20email%20offline_access&state={state#5}&nonce={nonce#5}&code_challenge={pkce-challenge#5}&code_challenge_method=S256
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#5}'; style-src 'self' 'nonce-{csp-nonce#5}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Behavior Lock</title>
+        <style nonce="{csp-nonce#5}">{style-sha256:80d77a550f3a606a}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Behavior Lock</h1>
+                <p class="brand-subtitle">Secure your app-owned AI and MCP experiences with SqlOS.</p>
+              </div>
+              <div class="messages">
+                <div class="callout error">
+                  <span class="callout-icon">!</span>
+                  <span>The authorization request is invalid.</span>
+                </div>
+              </div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <form class="auth-form" method="post" action="/sqlos/auth/login/identify" data-flow-kind="hrd">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#5}" />
+                    <label class="field">
+                      <span>Email</span>
+                      <input name="email" type="email" value="" placeholder="Your email address" autocomplete="email" required="" />
+                    </label>
+                    <button class="primary-action" type="submit" data-loading-label="Checking email">
+                      <span class="button-label">Continue</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                    <div class="flow-status" hidden="">
+                      <span class="loader loader-sm" aria-hidden="true"></span>
+                      <span>Checking your sign-in method...</span>
+                    </div>
+                  </form>
+                  <p class="footer-prompt">
+                    Don't have an account?
+                    <a class="secondary-link" href="/sqlos/auth/signup">Get started</a>
+                  </p>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#5}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+
+## audit
+  - {
+      "action": "client.cimd.validation-failed",
+      "actor": {
+        "displayName": null,
+        "id": "https://localhost/client.json",
+        "type": "client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "client.cimd.validation-failed",
+      "id": "{evt#9}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "error": "Client metadata host is not allowed."
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#10}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "Client metadata document validation failed.",
+        "error": "invalid_request",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The authorization request is invalid.",
+        "surface": "OAuthAuthorize"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 6. browser: an http client_id is not a metadata document: it is an unknown client
+> GET /sqlos/auth/authorize?response_type=code&client_id=http%3A%2F%2Fclient.example.test%2Fplain.json&redirect_uri=https%3A%2F%2Fclient.example.test%2Ftool%2Fcallback&scope=openid%20profile%20email%20offline_access&state={state#6}&nonce={nonce#6}&code_challenge={pkce-challenge#6}&code_challenge_method=S256
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#6}'; style-src 'self' 'nonce-{csp-nonce#6}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Behavior Lock</title>
+        <style nonce="{csp-nonce#6}">{style-sha256:80d77a550f3a606a}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Behavior Lock</h1>
+                <p class="brand-subtitle">Secure your app-owned AI and MCP experiences with SqlOS.</p>
+              </div>
+              <div class="messages">
+                <div class="callout error">
+                  <span class="callout-icon">!</span>
+                  <span>The authorization request is invalid.</span>
+                </div>
+              </div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <form class="auth-form" method="post" action="/sqlos/auth/login/identify" data-flow-kind="hrd">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#6}" />
+                    <label class="field">
+                      <span>Email</span>
+                      <input name="email" type="email" value="" placeholder="Your email address" autocomplete="email" required="" />
+                    </label>
+                    <button class="primary-action" type="submit" data-loading-label="Checking email">
+                      <span class="button-label">Continue</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                    <div class="flow-status" hidden="">
+                      <span class="loader loader-sm" aria-hidden="true"></span>
+                      <span>Checking your sign-in method...</span>
+                    </div>
+                  </form>
+                  <p class="footer-prompt">
+                    Don't have an account?
+                    <a class="secondary-link" href="/sqlos/auth/signup">Get started</a>
+                  </p>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#6}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+
+## audit
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#11}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "Unknown client 'http://client.example.test/plain.json'.",
+        "error": "invalid_request",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The authorization request is invalid.",
+        "surface": "OAuthAuthorize"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

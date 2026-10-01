@@ -1,0 +1,112 @@
+# SqlOS behavior lock transcript
+scenario: PublicSessionScenarios.Logout_all_revokes_every_session_of_the_user
+profile: hosted
+
+## 1. client: an unknown token is unauthorized
+> POST /sqlos/auth/logout-all
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshToken": "not-a-refresh-token"
+>   }
+< 401 Unauthorized
+
+## 2. client: sign out everywhere with the laptop's refresh token
+> POST /sqlos/auth/logout-all
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshToken": "{refresh-token#1}"
+>   }
+< 204 No Content
+
+## 3. client: the phone's refresh token is revoked too
+> POST /sqlos/auth/token/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshToken": "{refresh-token#2}"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Refresh token is no longer valid.
+
+## 4. client: a revoked token can no longer sign out everywhere
+> POST /sqlos/auth/logout-all
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshToken": "{refresh-token#1}"
+>   }
+< 401 Unauthorized
+
+## audit: one logout-all event
+  - {
+      "action": "user.logout-all",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.logout-all",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+
+## 5. operator: every session is revoked
+> GET /sqlos/admin/auth/api/users/{usr#1}/sessions
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "absoluteExpiresAt": "{datetime:unspecified}",
+          "authenticationMethod": "password",
+          "clientApplicationId": "{cli#1}",
+          "createdAt": "{datetime:unspecified}",
+          "id": "{ses#1}",
+          "idleExpiresAt": "{datetime:unspecified}",
+          "ipAddress": "203.0.113.10",
+          "lastSeenAt": "{datetime:unspecified}",
+          "revocationReason": "logout_all",
+          "revokedAt": "{datetime:unspecified}",
+          "user": "Alice",
+          "userAgent": "",
+          "userId": "{usr#1}"
+        },
+        {
+          "absoluteExpiresAt": "{datetime:unspecified}",
+          "authenticationMethod": "password",
+          "clientApplicationId": "{cli#1}",
+          "createdAt": "{datetime:unspecified}",
+          "id": "{ses#2}",
+          "idleExpiresAt": "{datetime:unspecified}",
+          "ipAddress": "203.0.113.10",
+          "lastSeenAt": "{datetime:unspecified}",
+          "revocationReason": "logout_all",
+          "revokedAt": "{datetime:unspecified}",
+          "user": "Alice",
+          "userAgent": "",
+          "userId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }

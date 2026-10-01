@@ -1,0 +1,192 @@
+# SqlOS behavior lock transcript
+scenario: SamlHeadlessScenarios.An_acs_refusal_for_a_headless_request_returns_the_browser_to_the_application_ui
+profile: headless
+
+## 1. browser: authorize sends the browser to the application's sign-in UI
+> GET /sqlos/auth/authorize?response_type=code&client_id=behavior-lock-app&redirect_uri=https%3A%2F%2Fsqlos.example.test%2Fauth%2Fcallback&scope=openid%20profile%20email%20offline_access&state={state#1}&nonce={nonce#1}&code_challenge={pkce-challenge#1}&code_challenge_method=S256
+< 302 Found
+< Location: https://sqlos.example.test/auth/authorize?request={relay-state#1}&view=login&email=
+
+## 2. browser: the UI identifies Ivan: his organization signs in with SAML
+> POST /sqlos/auth/headless/identify
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "email": "{email:ivan}",
+>     "requestId": "{relay-state#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "redirectUrl": "https://idp.example.test/sso?SAMLRequest={saml-request#1}&RelayState={relay-state#1}",
+      "type": "redirect",
+      "viewModel": null
+    }
+
+## 3. browser: a response signed by the wrong key: back to the application's UI with the public error
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#1}
+>   RelayState={relay-state#1}
+< 302 Found
+< Location: https://sqlos.example.test/auth/authorize?request={relay-state#1}&view=login&error=The%20external%20sign-in%20request%20could%20not%20be%20completed.&email={email:ivan}&ui_context={ui-context:saml-request-state}
+
+## document: the ui_context in that redirect, decoded
+    {"__sqlosSaml":{"RequestId":"{token#1}","AssertionConsumerServiceUrl":"https://sqlos.example.test/sqlos/auth/saml/acs/{sso#1}"}}
+
+## 4. browser: a valid response completes the same request
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#2}
+>   RelayState={relay-state#1}
+< 302 Found
+< Location: https://sqlos.example.test/auth/callback?code={code#1}&state={state#1}&scope=openid%20profile%20email%20offline_access
+< Set-Cookie: sqlos_auth_page={cookie#1}; expires=+7d; path=/; secure; samesite=lax; httponly
+
+## 5. client: redeem the code
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=authorization_code
+>   code={code#1}
+>   client_id=behavior-lock-app
+>   redirect_uri=https://sqlos.example.test/auth/callback
+>   code_verifier={pkce-verifier#1}
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "access_token": "{access-token#1}",
+      "expires_in": ~600,
+      "id_token": "{id-token#1}",
+      "refresh_token": "{refresh-token#1}",
+      "scope": "openid profile email offline_access",
+      "token_type": "Bearer"
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "saml"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:ivan}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "org_id": "{org#1}",
+      "scope": "openid profile email offline_access",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+  jwt {id-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "JWT"
+    }
+    claims: {
+      "amr": [
+        "saml"
+      ],
+      "at_hash": "{hash#1}",
+      "aud": "behavior-lock-app",
+      "auth_time": {epoch},
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nonce": "{nonce#1}",
+      "org_id": "{org#1}",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=5m
+
+## audit: the refusal and the sign-in
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "SAML response signature is invalid.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "SamlAcs"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "user.login.saml.assurance",
+      "actor": {
+        "displayName": null,
+        "id": "{sso#1}",
+        "type": "sso_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.saml.assurance",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "Accepted": false,
+        "AcceptedClaim": null,
+        "AcceptedValue": null,
+        "EvidencePresent": false,
+        "Reason": "evidence_missing",
+        "SamlAuthnContextClassRefs": [],
+        "assertionIssuer": "urn:behavior-lock:idp",
+        "connectionId": "{sso#1}"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }

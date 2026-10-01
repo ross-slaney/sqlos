@@ -1,0 +1,295 @@
+# SqlOS behavior lock transcript
+scenario: HeadlessNativeStartScenarios.Native_start_is_limited_to_opted_in_first_party_public_clients
+profile: headless
+
+## 1. client: a third-party client opted in to native headless auth is still refused: it would collect credentials without consent (#419)
+> POST /sqlos/auth/headless/start
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "partner-native",
+>     "codeChallenge": "{pkce-challenge#1}",
+>     "codeChallengeMethod": "S256",
+>     "nonce": "{nonce#1}",
+>     "redirectUri": "https://partner.example.test/native",
+>     "responseType": "code",
+>     "scope": "openid profile email offline_access",
+>     "state": "{state#1}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "message": "The request could not be completed."
+    }
+
+## 2. client: a first-party client that did not opt in
+> POST /sqlos/auth/headless/start
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "ops-console",
+>     "codeChallenge": "{pkce-challenge#2}",
+>     "codeChallengeMethod": "S256",
+>     "nonce": "{nonce#2}",
+>     "redirectUri": "https://ops.example.test/callback",
+>     "responseType": "code",
+>     "scope": "openid profile email offline_access",
+>     "state": "{state#2}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "message": "The request could not be completed."
+    }
+
+## 3. client: a first-party confidential client
+> POST /sqlos/auth/headless/start
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "server-web",
+>     "codeChallenge": "{pkce-challenge#3}",
+>     "codeChallengeMethod": "S256",
+>     "nonce": "{nonce#3}",
+>     "redirectUri": "https://web.example.test/callback",
+>     "responseType": "code",
+>     "scope": "openid profile email offline_access",
+>     "state": "{state#3}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "message": "The request could not be completed."
+    }
+
+## 4. client: an unknown client
+> POST /sqlos/auth/headless/start
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "unknown-app",
+>     "codeChallenge": "{pkce-challenge#4}",
+>     "codeChallengeMethod": "S256",
+>     "nonce": "{nonce#4}",
+>     "redirectUri": "https://unknown.example.test/callback",
+>     "responseType": "code",
+>     "scope": "openid profile email offline_access",
+>     "state": "{state#4}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "message": "The request could not be completed."
+    }
+
+## 5. client: the opted-in app with a redirect URI it never registered
+> POST /sqlos/auth/headless/start
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "codeChallenge": "{pkce-challenge#5}",
+>     "codeChallengeMethod": "S256",
+>     "nonce": "{nonce#5}",
+>     "redirectUri": "https://attacker.example.test/callback",
+>     "responseType": "code",
+>     "scope": "openid profile email offline_access",
+>     "state": "{state#5}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "message": "The request could not be completed."
+    }
+
+## audit: refused native starts
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "Native headless auth is only available to first-party clients.",
+        "error": "invalid_request",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The request could not be completed.",
+        "surface": "HeadlessApi"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "This client is not allowed to start native headless auth.",
+        "error": "invalid_request",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The request could not be completed.",
+        "surface": "HeadlessApi"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "Native headless auth requires a PKCE public client.",
+        "error": "invalid_request",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The request could not be completed.",
+        "surface": "HeadlessApi"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "Unknown client 'unknown-app'.",
+        "error": "invalid_request",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The request could not be completed.",
+        "surface": "HeadlessApi"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "Redirect URI 'https://attacker.example.test/callback' is not allowed for client 'behavior-lock-app'.",
+        "error": "invalid_request",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The request could not be completed.",
+        "surface": "HeadlessApi"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

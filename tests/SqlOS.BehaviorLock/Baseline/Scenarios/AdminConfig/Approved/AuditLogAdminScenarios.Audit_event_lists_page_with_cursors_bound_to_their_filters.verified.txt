@@ -1,0 +1,224 @@
+# SqlOS behavior lock transcript
+scenario: AuditLogAdminScenarios.Audit_event_lists_page_with_cursors_bound_to_their_filters
+profile: modules
+
+# The host recorded job.started, job.progressed, and job.finished one minute apart (source scheduler).
+
+## 1. operator: the first page of two
+> GET /sqlos/admin/audit/api/events?source=scheduler&pageSize=2&page=1
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "action": "job.finished",
+          "actor": {
+            "displayName": null,
+            "id": "nightly",
+            "type": "service"
+          },
+          "applicationId": null,
+          "applicationKey": null,
+          "context": null,
+          "correlationId": null,
+          "eventType": "job.finished",
+          "id": "{evt#1}",
+          "ingestedAt": "{datetime:unspecified}",
+          "ipAddress": null,
+          "metadata": null,
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": null,
+          "requestId": null,
+          "sessionId": null,
+          "source": "scheduler",
+          "targets": [],
+          "userAgent": null,
+          "userId": null
+        },
+        {
+          "action": "job.progressed",
+          "actor": {
+            "displayName": null,
+            "id": "nightly",
+            "type": "service"
+          },
+          "applicationId": null,
+          "applicationKey": null,
+          "context": null,
+          "correlationId": null,
+          "eventType": "job.progressed",
+          "id": "{evt#2}",
+          "ingestedAt": "{datetime:unspecified}",
+          "ipAddress": null,
+          "metadata": null,
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": null,
+          "requestId": null,
+          "sessionId": null,
+          "source": "scheduler",
+          "targets": [],
+          "userAgent": null,
+          "userId": null
+        }
+      ],
+      "hasNextPage": true,
+      "nextCursor": "{cursor#1}",
+      "pageSize": 2
+    }
+
+## 2. operator: the cursor continues
+> GET /sqlos/admin/audit/api/events?source=scheduler&pageSize=2&cursor={cursor#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "action": "job.started",
+          "actor": {
+            "displayName": null,
+            "id": "nightly",
+            "type": "service"
+          },
+          "applicationId": null,
+          "applicationKey": null,
+          "context": null,
+          "correlationId": null,
+          "eventType": "job.started",
+          "id": "{evt#3}",
+          "ingestedAt": "{datetime:unspecified}",
+          "ipAddress": null,
+          "metadata": null,
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": null,
+          "requestId": null,
+          "sessionId": null,
+          "source": "scheduler",
+          "targets": [],
+          "userAgent": null,
+          "userId": null
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 2
+    }
+
+## 3. operator: a cursor is bound to the filters it was issued for
+> GET /sqlos/admin/audit/api/events?source=billing&pageSize=2&cursor={cursor#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_cursor",
+      "message": "The cursor does not match the current filters."
+    }
+
+## 4. operator: offset paging is refused
+> GET /sqlos/admin/audit/api/events?source=scheduler&page=2
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_cursor",
+      "message": "Offset pagination is no longer supported. Omit page or pass page=1 for the first window, then follow nextCursor."
+    }
+
+## 5. operator: a malformed cursor is refused
+> GET /sqlos/admin/audit/api/events?source=scheduler&cursor=%24%24%24
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_cursor",
+      "message": "The cursor is invalid."
+    }
+
+## 6. operator: the page size is capped at 100
+> GET /sqlos/admin/audit/api/events?source=scheduler&pageSize=1000
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "action": "job.finished",
+          "actor": {
+            "displayName": null,
+            "id": "nightly",
+            "type": "service"
+          },
+          "applicationId": null,
+          "applicationKey": null,
+          "context": null,
+          "correlationId": null,
+          "eventType": "job.finished",
+          "id": "{evt#1}",
+          "ingestedAt": "{datetime:unspecified}",
+          "ipAddress": null,
+          "metadata": null,
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": null,
+          "requestId": null,
+          "sessionId": null,
+          "source": "scheduler",
+          "targets": [],
+          "userAgent": null,
+          "userId": null
+        },
+        {
+          "action": "job.progressed",
+          "actor": {
+            "displayName": null,
+            "id": "nightly",
+            "type": "service"
+          },
+          "applicationId": null,
+          "applicationKey": null,
+          "context": null,
+          "correlationId": null,
+          "eventType": "job.progressed",
+          "id": "{evt#2}",
+          "ingestedAt": "{datetime:unspecified}",
+          "ipAddress": null,
+          "metadata": null,
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": null,
+          "requestId": null,
+          "sessionId": null,
+          "source": "scheduler",
+          "targets": [],
+          "userAgent": null,
+          "userId": null
+        },
+        {
+          "action": "job.started",
+          "actor": {
+            "displayName": null,
+            "id": "nightly",
+            "type": "service"
+          },
+          "applicationId": null,
+          "applicationKey": null,
+          "context": null,
+          "correlationId": null,
+          "eventType": "job.started",
+          "id": "{evt#3}",
+          "ingestedAt": "{datetime:unspecified}",
+          "ipAddress": null,
+          "metadata": null,
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": null,
+          "requestId": null,
+          "sessionId": null,
+          "source": "scheduler",
+          "targets": [],
+          "userAgent": null,
+          "userId": null
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 100
+    }

@@ -1,0 +1,33 @@
+# SqlOS behavior lock transcript
+scenario: HostedLoginPageScenarios.An_unresolvable_invitation_token_on_a_hosted_page_is_an_unhandled_error
+profile: hosted
+
+## 1. browser: the sign-in page
+> GET /sqlos/auth/login?invitationToken=not-an-invitation
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Invitation is invalid or expired.
+
+## 2. browser: any 'token' query value is read as an invitation token too
+> GET /sqlos/auth/login?token=not-an-invitation
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Invitation is invalid or expired.
+
+## 3. browser: the sign-up page
+> GET /sqlos/auth/signup?invitation_token=not-an-invitation
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Invitation is invalid or expired.
+
+## 4. browser: the phone sign-up page
+> GET /sqlos/auth/signup/phone-otp?invitationToken=not-an-invitation
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Invitation is invalid or expired.
+
+## 5. browser: the email-code page
+> GET /sqlos/auth/login/email-otp?invitationToken=not-an-invitation
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Invitation is invalid or expired.
+
+## 6. browser: the magic-link page
+> GET /sqlos/auth/login/magic-link?invitationToken=not-an-invitation
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Invitation is invalid or expired.

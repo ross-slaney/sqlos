@@ -1,0 +1,84 @@
+# SqlOS behavior lock transcript
+scenario: AdminIdentityInvitationScenarios.An_accepted_invitation_can_be_neither_revoked_nor_resent
+profile: dashboard-callback
+
+# Setup: dana, an existing user, accepted the invitation by signing in on the hosted invitation page.
+
+## 1. operator: the invitation is accepted by dana
+> GET /sqlos/admin/auth/api/organizations/{org#1}/invitations
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "acceptedAt": "{datetime:unspecified}",
+          "acceptedByUserId": "{usr#1}",
+          "createdAt": "{datetime:unspecified}",
+          "customFields": null,
+          "email": "{email:dana}",
+          "expiresAt": "{datetime:unspecified}",
+          "id": "{inv#1}",
+          "inviteUrl": null,
+          "lastSendError": null,
+          "lastSentAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "organizationName": "Acme",
+          "revokedAt": null,
+          "revokedReason": null,
+          "role": "admin",
+          "status": "accepted"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 50
+    }
+
+## 2. operator: who is an admin of acme
+> GET /sqlos/admin/auth/api/organizations/{org#1}/memberships
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "isActive": true,
+          "organization": "Acme",
+          "organizationId": "{org#1}",
+          "role": "admin",
+          "user": "Dana",
+          "userEmail": "{email:dana}",
+          "userId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 3. operator: an accepted invitation cannot be revoked
+> POST /sqlos/admin/auth/api/invitations/{inv#1}/revoke
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Accepted invitations cannot be revoked."
+    }
+
+## 4. operator: or resent
+> POST /sqlos/admin/auth/api/invitations/{inv#1}/resend
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Invitation is invalid or expired."
+    }
+
+## audit: the refusals are not audited
+  (no new events)

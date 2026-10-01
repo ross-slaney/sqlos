@@ -1,0 +1,1250 @@
+# SqlOS behavior lock transcript
+scenario: AdminIdentityClientScenarios.Operator_registers_public_confidential_and_device_clients_and_reads_them_back
+profile: dashboard-callback
+
+## 1. operator: register a first-party public PKCE client
+> POST /sqlos/admin/auth/api/clients
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "allowedScopes": [
+>       "openid",
+>       "profile",
+>       "email",
+>       "offline_access"
+>     ],
+>     "audience": "https://portal.example.test/api",
+>     "clientId": "portal",
+>     "isFirstParty": true,
+>     "name": "Portal",
+>     "redirectUris": [
+>       "https://portal.example.test/callback"
+>     ]
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "all_organizations",
+      "allowDeviceAuthorization": false,
+      "allowNativeHeadlessAuth": false,
+      "audience": "https://portal.example.test/api",
+      "clientId": "portal",
+      "clientType": "public_pkce",
+      "createdAt": "{datetime:utc-z}",
+      "id": "{cli#1}",
+      "isActive": true,
+      "name": "Portal",
+      "redirectUris": [
+        "https://portal.example.test/callback"
+      ],
+      "tokenEndpointAuthMethod": "none"
+    }
+
+## 2. operator: a confidential client authenticates with client_secret_basic
+> POST /sqlos/admin/auth/api/clients
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "allowedScopes": [
+>       "openid",
+>       "profile"
+>     ],
+>     "audience": "https://web.example.test/api",
+>     "clientId": "web",
+>     "clientType": "confidential",
+>     "description": "  Server-rendered web app  ",
+>     "name": "Web",
+>     "redirectUris": [
+>       "https://web.example.test/signin"
+>     ],
+>     "requirePkce": false
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "all_organizations",
+      "allowDeviceAuthorization": false,
+      "allowNativeHeadlessAuth": false,
+      "audience": "https://web.example.test/api",
+      "clientId": "web",
+      "clientType": "confidential",
+      "createdAt": "{datetime:utc-z}",
+      "id": "{cli#2}",
+      "isActive": true,
+      "name": "Web",
+      "redirectUris": [
+        "https://web.example.test/signin"
+      ],
+      "tokenEndpointAuthMethod": "client_secret_basic"
+    }
+
+## 3. operator: a device-flow client needs no redirect URI
+> POST /sqlos/admin/auth/api/clients
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "allowDeviceAuthorization": true,
+>     "audience": "https://cli.example.test/api",
+>     "clientId": "cli",
+>     "clientType": "public_cli",
+>     "name": "CLI",
+>     "redirectUris": []
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "all_organizations",
+      "allowDeviceAuthorization": true,
+      "allowNativeHeadlessAuth": false,
+      "audience": "https://cli.example.test/api",
+      "clientId": "cli",
+      "clientType": "public_cli",
+      "createdAt": "{datetime:utc-z}",
+      "id": "{cli#3}",
+      "isActive": true,
+      "name": "CLI",
+      "redirectUris": [],
+      "tokenEndpointAuthMethod": "none"
+    }
+
+## 4. operator: identifiers are trimmed, blank and duplicate redirect URIs dropped, and the audience defaults
+> POST /sqlos/admin/auth/api/clients
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "clientId": "  minimal  ",
+>     "name": "  Minimal  ",
+>     "redirectUris": [
+>       "https://minimal.example.test/cb",
+>       "https://minimal.example.test/cb",
+>       "  "
+>     ]
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "all_organizations",
+      "allowDeviceAuthorization": false,
+      "allowNativeHeadlessAuth": false,
+      "audience": "sqlos",
+      "clientId": "minimal",
+      "clientType": "public_pkce",
+      "createdAt": "{datetime:utc-z}",
+      "id": "{cli#4}",
+      "isActive": true,
+      "name": "Minimal",
+      "redirectUris": [
+        "https://minimal.example.test/cb"
+      ],
+      "tokenEndpointAuthMethod": "none"
+    }
+
+## 5. operator: redirect URIs are not validated beyond being present
+> POST /sqlos/admin/auth/api/clients
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "allowNativeHeadlessAuth": true,
+>     "clientId": "loose",
+>     "name": "Loose",
+>     "redirectUris": [
+>       "javascript:alert(1)",
+>       "http://insecure.example.test/callback"
+>     ]
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "all_organizations",
+      "allowDeviceAuthorization": false,
+      "allowNativeHeadlessAuth": true,
+      "audience": "sqlos",
+      "clientId": "loose",
+      "clientType": "public_pkce",
+      "createdAt": "{datetime:utc-z}",
+      "id": "{cli#5}",
+      "isActive": true,
+      "name": "Loose",
+      "redirectUris": [
+        "javascript:alert(1)",
+        "http://insecure.example.test/callback"
+      ],
+      "tokenEndpointAuthMethod": "none"
+    }
+
+## audit: client registration writes no audit event
+  (no new events)
+
+## 6. operator: clients by name, with the first-page summary counts
+> GET /sqlos/admin/auth/api/clients
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "accessMode": "all_organizations",
+          "allowDeviceAuthorization": false,
+          "allowNativeHeadlessAuth": false,
+          "allowedScopes": [
+            "openid",
+            "profile",
+            "email",
+            "offline_access"
+          ],
+          "audience": "https://sqlos.example.test/api",
+          "clientId": "behavior-lock-app",
+          "clientType": "public_pkce",
+          "clientUri": null,
+          "coreMetadataEditable": true,
+          "description": null,
+          "disabledAt": null,
+          "disabledReason": null,
+          "duplicateCount": 0,
+          "duplicateFingerprint": null,
+          "emptyAllowlistWarning": null,
+          "grantTypes": [
+            "authorization_code",
+            "refresh_token"
+          ],
+          "id": "{cli#6}",
+          "isActive": true,
+          "isFirstParty": true,
+          "lastSeenAt": null,
+          "lifecycleState": "active",
+          "logoUri": null,
+          "managedByStartupSeed": true,
+          "metadataCacheState": null,
+          "metadataDocumentUrl": null,
+          "metadataExpiresAt": null,
+          "metadataFetchedAt": null,
+          "name": "Behavior Lock",
+          "oidcCapable": true,
+          "omittedOpenIdWarning": null,
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": "{hex#1}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "behavior-lock-app"
+          },
+          "redirectUris": [
+            "https://sqlos.example.test/auth/callback"
+          ],
+          "registrationSource": "seeded",
+          "requirePkce": true,
+          "responseTypes": [
+            "code"
+          ],
+          "softwareId": null,
+          "softwareVersion": null,
+          "sourceLabel": "Seeded",
+          "tokenEndpointAuthMethod": "none"
+        },
+        {
+          "accessMode": "all_organizations",
+          "allowDeviceAuthorization": true,
+          "allowNativeHeadlessAuth": false,
+          "allowedScopes": [],
+          "audience": "https://cli.example.test/api",
+          "clientId": "cli",
+          "clientType": "public_cli",
+          "clientUri": null,
+          "coreMetadataEditable": true,
+          "description": null,
+          "disabledAt": null,
+          "disabledReason": null,
+          "duplicateCount": 0,
+          "duplicateFingerprint": null,
+          "emptyAllowlistWarning": {
+            "code": "empty_allowlist",
+            "message": "An empty AllowedScopes list grants no scopes. First-party and headless apps that send scope on /authorize need those values on this client. Change a code-owned seed in source control."
+          },
+          "grantTypes": [
+            "urn:ietf:params:oauth:grant-type:device_code",
+            "refresh_token"
+          ],
+          "id": "{cli#3}",
+          "isActive": true,
+          "isFirstParty": false,
+          "lastSeenAt": null,
+          "lifecycleState": "active",
+          "logoUri": null,
+          "managedByStartupSeed": false,
+          "metadataCacheState": null,
+          "metadataDocumentUrl": null,
+          "metadataExpiresAt": null,
+          "metadataFetchedAt": null,
+          "name": "CLI",
+          "oidcCapable": false,
+          "omittedOpenIdWarning": {
+            "code": "missing_allowlisted_openid",
+            "message": "This allowlist omits openid. This client cannot receive an ID token until openid is on its allowlist. openid is never granted unless it is both requested and allowlisted."
+          },
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "redirectUris": [],
+          "registrationSource": "manual",
+          "requirePkce": true,
+          "responseTypes": [
+            "code"
+          ],
+          "softwareId": null,
+          "softwareVersion": null,
+          "sourceLabel": "Manual",
+          "tokenEndpointAuthMethod": "none"
+        },
+        {
+          "accessMode": "all_organizations",
+          "allowDeviceAuthorization": false,
+          "allowNativeHeadlessAuth": true,
+          "allowedScopes": [],
+          "audience": "sqlos",
+          "clientId": "loose",
+          "clientType": "public_pkce",
+          "clientUri": null,
+          "coreMetadataEditable": true,
+          "description": null,
+          "disabledAt": null,
+          "disabledReason": null,
+          "duplicateCount": 0,
+          "duplicateFingerprint": null,
+          "emptyAllowlistWarning": {
+            "code": "empty_allowlist",
+            "message": "An empty AllowedScopes list grants no scopes. First-party and headless apps that send scope on /authorize need those values on this client. Change a code-owned seed in source control."
+          },
+          "grantTypes": [
+            "authorization_code",
+            "refresh_token"
+          ],
+          "id": "{cli#5}",
+          "isActive": true,
+          "isFirstParty": false,
+          "lastSeenAt": null,
+          "lifecycleState": "active",
+          "logoUri": null,
+          "managedByStartupSeed": false,
+          "metadataCacheState": null,
+          "metadataDocumentUrl": null,
+          "metadataExpiresAt": null,
+          "metadataFetchedAt": null,
+          "name": "Loose",
+          "oidcCapable": false,
+          "omittedOpenIdWarning": {
+            "code": "missing_allowlisted_openid",
+            "message": "This allowlist omits openid. This client cannot receive an ID token until openid is on its allowlist. openid is never granted unless it is both requested and allowlisted."
+          },
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "redirectUris": [
+            "javascript:alert(1)",
+            "http://insecure.example.test/callback"
+          ],
+          "registrationSource": "manual",
+          "requirePkce": true,
+          "responseTypes": [
+            "code"
+          ],
+          "softwareId": null,
+          "softwareVersion": null,
+          "sourceLabel": "Manual",
+          "tokenEndpointAuthMethod": "none"
+        },
+        {
+          "accessMode": "all_organizations",
+          "allowDeviceAuthorization": false,
+          "allowNativeHeadlessAuth": false,
+          "allowedScopes": [],
+          "audience": "sqlos",
+          "clientId": "minimal",
+          "clientType": "public_pkce",
+          "clientUri": null,
+          "coreMetadataEditable": true,
+          "description": null,
+          "disabledAt": null,
+          "disabledReason": null,
+          "duplicateCount": 0,
+          "duplicateFingerprint": null,
+          "emptyAllowlistWarning": {
+            "code": "empty_allowlist",
+            "message": "An empty AllowedScopes list grants no scopes. First-party and headless apps that send scope on /authorize need those values on this client. Change a code-owned seed in source control."
+          },
+          "grantTypes": [
+            "authorization_code",
+            "refresh_token"
+          ],
+          "id": "{cli#4}",
+          "isActive": true,
+          "isFirstParty": false,
+          "lastSeenAt": null,
+          "lifecycleState": "active",
+          "logoUri": null,
+          "managedByStartupSeed": false,
+          "metadataCacheState": null,
+          "metadataDocumentUrl": null,
+          "metadataExpiresAt": null,
+          "metadataFetchedAt": null,
+          "name": "Minimal",
+          "oidcCapable": false,
+          "omittedOpenIdWarning": {
+            "code": "missing_allowlisted_openid",
+            "message": "This allowlist omits openid. This client cannot receive an ID token until openid is on its allowlist. openid is never granted unless it is both requested and allowlisted."
+          },
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "redirectUris": [
+            "https://minimal.example.test/cb"
+          ],
+          "registrationSource": "manual",
+          "requirePkce": true,
+          "responseTypes": [
+            "code"
+          ],
+          "softwareId": null,
+          "softwareVersion": null,
+          "sourceLabel": "Manual",
+          "tokenEndpointAuthMethod": "none"
+        },
+        {
+          "accessMode": "all_organizations",
+          "allowDeviceAuthorization": false,
+          "allowNativeHeadlessAuth": false,
+          "allowedScopes": [
+            "openid",
+            "profile",
+            "email",
+            "offline_access"
+          ],
+          "audience": "https://portal.example.test/api",
+          "clientId": "portal",
+          "clientType": "public_pkce",
+          "clientUri": null,
+          "coreMetadataEditable": true,
+          "description": null,
+          "disabledAt": null,
+          "disabledReason": null,
+          "duplicateCount": 0,
+          "duplicateFingerprint": null,
+          "emptyAllowlistWarning": null,
+          "grantTypes": [
+            "authorization_code",
+            "refresh_token"
+          ],
+          "id": "{cli#1}",
+          "isActive": true,
+          "isFirstParty": true,
+          "lastSeenAt": null,
+          "lifecycleState": "active",
+          "logoUri": null,
+          "managedByStartupSeed": false,
+          "metadataCacheState": null,
+          "metadataDocumentUrl": null,
+          "metadataExpiresAt": null,
+          "metadataFetchedAt": null,
+          "name": "Portal",
+          "oidcCapable": true,
+          "omittedOpenIdWarning": null,
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "redirectUris": [
+            "https://portal.example.test/callback"
+          ],
+          "registrationSource": "manual",
+          "requirePkce": true,
+          "responseTypes": [
+            "code"
+          ],
+          "softwareId": null,
+          "softwareVersion": null,
+          "sourceLabel": "Manual",
+          "tokenEndpointAuthMethod": "none"
+        },
+        {
+          "accessMode": "all_organizations",
+          "allowDeviceAuthorization": false,
+          "allowNativeHeadlessAuth": false,
+          "allowedScopes": [
+            "openid",
+            "profile"
+          ],
+          "audience": "https://web.example.test/api",
+          "clientId": "web",
+          "clientType": "confidential",
+          "clientUri": null,
+          "coreMetadataEditable": true,
+          "description": "Server-rendered web app",
+          "disabledAt": null,
+          "disabledReason": null,
+          "duplicateCount": 0,
+          "duplicateFingerprint": null,
+          "emptyAllowlistWarning": null,
+          "grantTypes": [
+            "authorization_code",
+            "refresh_token"
+          ],
+          "id": "{cli#2}",
+          "isActive": true,
+          "isFirstParty": false,
+          "lastSeenAt": null,
+          "lifecycleState": "active",
+          "logoUri": null,
+          "managedByStartupSeed": false,
+          "metadataCacheState": null,
+          "metadataDocumentUrl": null,
+          "metadataExpiresAt": null,
+          "metadataFetchedAt": null,
+          "name": "Web",
+          "oidcCapable": true,
+          "omittedOpenIdWarning": null,
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "redirectUris": [
+            "https://web.example.test/signin"
+          ],
+          "registrationSource": "manual",
+          "requirePkce": false,
+          "responseTypes": [
+            "code"
+          ],
+          "softwareId": null,
+          "softwareVersion": null,
+          "sourceLabel": "Manual",
+          "tokenEndpointAuthMethod": "client_secret_basic"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10,
+      "summary": {
+        "activeCount": 6,
+        "disabledCount": 0,
+        "discoveredCount": 0,
+        "registeredCount": 0
+      }
+    }
+
+## 7. operator: the code-seeded application client
+> GET /sqlos/admin/auth/api/clients?source=seeded
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "accessMode": "all_organizations",
+          "allowDeviceAuthorization": false,
+          "allowNativeHeadlessAuth": false,
+          "allowedScopes": [
+            "openid",
+            "profile",
+            "email",
+            "offline_access"
+          ],
+          "audience": "https://sqlos.example.test/api",
+          "clientId": "behavior-lock-app",
+          "clientType": "public_pkce",
+          "clientUri": null,
+          "coreMetadataEditable": true,
+          "description": null,
+          "disabledAt": null,
+          "disabledReason": null,
+          "duplicateCount": 0,
+          "duplicateFingerprint": null,
+          "emptyAllowlistWarning": null,
+          "grantTypes": [
+            "authorization_code",
+            "refresh_token"
+          ],
+          "id": "{cli#6}",
+          "isActive": true,
+          "isFirstParty": true,
+          "lastSeenAt": null,
+          "lifecycleState": "active",
+          "logoUri": null,
+          "managedByStartupSeed": true,
+          "metadataCacheState": null,
+          "metadataDocumentUrl": null,
+          "metadataExpiresAt": null,
+          "metadataFetchedAt": null,
+          "name": "Behavior Lock",
+          "oidcCapable": true,
+          "omittedOpenIdWarning": null,
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": "{hex#1}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "behavior-lock-app"
+          },
+          "redirectUris": [
+            "https://sqlos.example.test/auth/callback"
+          ],
+          "registrationSource": "seeded",
+          "requirePkce": true,
+          "responseTypes": [
+            "code"
+          ],
+          "softwareId": null,
+          "softwareVersion": null,
+          "sourceLabel": "Seeded",
+          "tokenEndpointAuthMethod": "none"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10,
+      "summary": {
+        "activeCount": 1,
+        "disabledCount": 0,
+        "discoveredCount": 0,
+        "registeredCount": 0
+      }
+    }
+
+## 8. operator: operator-registered clients matching a search
+> GET /sqlos/admin/auth/api/clients?source=manual&search=CLI
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "accessMode": "all_organizations",
+          "allowDeviceAuthorization": true,
+          "allowNativeHeadlessAuth": false,
+          "allowedScopes": [],
+          "audience": "https://cli.example.test/api",
+          "clientId": "cli",
+          "clientType": "public_cli",
+          "clientUri": null,
+          "coreMetadataEditable": true,
+          "description": null,
+          "disabledAt": null,
+          "disabledReason": null,
+          "duplicateCount": 0,
+          "duplicateFingerprint": null,
+          "emptyAllowlistWarning": {
+            "code": "empty_allowlist",
+            "message": "An empty AllowedScopes list grants no scopes. First-party and headless apps that send scope on /authorize need those values on this client. Change a code-owned seed in source control."
+          },
+          "grantTypes": [
+            "urn:ietf:params:oauth:grant-type:device_code",
+            "refresh_token"
+          ],
+          "id": "{cli#3}",
+          "isActive": true,
+          "isFirstParty": false,
+          "lastSeenAt": null,
+          "lifecycleState": "active",
+          "logoUri": null,
+          "managedByStartupSeed": false,
+          "metadataCacheState": null,
+          "metadataDocumentUrl": null,
+          "metadataExpiresAt": null,
+          "metadataFetchedAt": null,
+          "name": "CLI",
+          "oidcCapable": false,
+          "omittedOpenIdWarning": {
+            "code": "missing_allowlisted_openid",
+            "message": "This allowlist omits openid. This client cannot receive an ID token until openid is on its allowlist. openid is never granted unless it is both requested and allowlisted."
+          },
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "redirectUris": [],
+          "registrationSource": "manual",
+          "requirePkce": true,
+          "responseTypes": [
+            "code"
+          ],
+          "softwareId": null,
+          "softwareVersion": null,
+          "sourceLabel": "Manual",
+          "tokenEndpointAuthMethod": "none"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10,
+      "summary": {
+        "activeCount": 1,
+        "disabledCount": 0,
+        "discoveredCount": 0,
+        "registeredCount": 0
+      }
+    }
+
+## 9. operator: the source label is searchable as a keyword
+> GET /sqlos/admin/auth/api/clients?search=seeded
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "accessMode": "all_organizations",
+          "allowDeviceAuthorization": false,
+          "allowNativeHeadlessAuth": false,
+          "allowedScopes": [
+            "openid",
+            "profile",
+            "email",
+            "offline_access"
+          ],
+          "audience": "https://sqlos.example.test/api",
+          "clientId": "behavior-lock-app",
+          "clientType": "public_pkce",
+          "clientUri": null,
+          "coreMetadataEditable": true,
+          "description": null,
+          "disabledAt": null,
+          "disabledReason": null,
+          "duplicateCount": 0,
+          "duplicateFingerprint": null,
+          "emptyAllowlistWarning": null,
+          "grantTypes": [
+            "authorization_code",
+            "refresh_token"
+          ],
+          "id": "{cli#6}",
+          "isActive": true,
+          "isFirstParty": true,
+          "lastSeenAt": null,
+          "lifecycleState": "active",
+          "logoUri": null,
+          "managedByStartupSeed": true,
+          "metadataCacheState": null,
+          "metadataDocumentUrl": null,
+          "metadataExpiresAt": null,
+          "metadataFetchedAt": null,
+          "name": "Behavior Lock",
+          "oidcCapable": true,
+          "omittedOpenIdWarning": null,
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": "{hex#1}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "behavior-lock-app"
+          },
+          "redirectUris": [
+            "https://sqlos.example.test/auth/callback"
+          ],
+          "registrationSource": "seeded",
+          "requirePkce": true,
+          "responseTypes": [
+            "code"
+          ],
+          "softwareId": null,
+          "softwareVersion": null,
+          "sourceLabel": "Seeded",
+          "tokenEndpointAuthMethod": "none"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10,
+      "summary": {
+        "activeCount": 1,
+        "disabledCount": 0,
+        "discoveredCount": 0,
+        "registeredCount": 0
+      }
+    }
+
+## 10. operator: no client is disabled
+> GET /sqlos/admin/auth/api/clients?status=disabled
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10,
+      "summary": null
+    }
+
+## 11. operator: two to a page
+> GET /sqlos/admin/auth/api/clients?pageSize=2
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "accessMode": "all_organizations",
+          "allowDeviceAuthorization": false,
+          "allowNativeHeadlessAuth": false,
+          "allowedScopes": [
+            "openid",
+            "profile",
+            "email",
+            "offline_access"
+          ],
+          "audience": "https://sqlos.example.test/api",
+          "clientId": "behavior-lock-app",
+          "clientType": "public_pkce",
+          "clientUri": null,
+          "coreMetadataEditable": true,
+          "description": null,
+          "disabledAt": null,
+          "disabledReason": null,
+          "duplicateCount": 0,
+          "duplicateFingerprint": null,
+          "emptyAllowlistWarning": null,
+          "grantTypes": [
+            "authorization_code",
+            "refresh_token"
+          ],
+          "id": "{cli#6}",
+          "isActive": true,
+          "isFirstParty": true,
+          "lastSeenAt": null,
+          "lifecycleState": "active",
+          "logoUri": null,
+          "managedByStartupSeed": true,
+          "metadataCacheState": null,
+          "metadataDocumentUrl": null,
+          "metadataExpiresAt": null,
+          "metadataFetchedAt": null,
+          "name": "Behavior Lock",
+          "oidcCapable": true,
+          "omittedOpenIdWarning": null,
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": "{hex#1}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "behavior-lock-app"
+          },
+          "redirectUris": [
+            "https://sqlos.example.test/auth/callback"
+          ],
+          "registrationSource": "seeded",
+          "requirePkce": true,
+          "responseTypes": [
+            "code"
+          ],
+          "softwareId": null,
+          "softwareVersion": null,
+          "sourceLabel": "Seeded",
+          "tokenEndpointAuthMethod": "none"
+        },
+        {
+          "accessMode": "all_organizations",
+          "allowDeviceAuthorization": true,
+          "allowNativeHeadlessAuth": false,
+          "allowedScopes": [],
+          "audience": "https://cli.example.test/api",
+          "clientId": "cli",
+          "clientType": "public_cli",
+          "clientUri": null,
+          "coreMetadataEditable": true,
+          "description": null,
+          "disabledAt": null,
+          "disabledReason": null,
+          "duplicateCount": 0,
+          "duplicateFingerprint": null,
+          "emptyAllowlistWarning": {
+            "code": "empty_allowlist",
+            "message": "An empty AllowedScopes list grants no scopes. First-party and headless apps that send scope on /authorize need those values on this client. Change a code-owned seed in source control."
+          },
+          "grantTypes": [
+            "urn:ietf:params:oauth:grant-type:device_code",
+            "refresh_token"
+          ],
+          "id": "{cli#3}",
+          "isActive": true,
+          "isFirstParty": false,
+          "lastSeenAt": null,
+          "lifecycleState": "active",
+          "logoUri": null,
+          "managedByStartupSeed": false,
+          "metadataCacheState": null,
+          "metadataDocumentUrl": null,
+          "metadataExpiresAt": null,
+          "metadataFetchedAt": null,
+          "name": "CLI",
+          "oidcCapable": false,
+          "omittedOpenIdWarning": {
+            "code": "missing_allowlisted_openid",
+            "message": "This allowlist omits openid. This client cannot receive an ID token until openid is on its allowlist. openid is never granted unless it is both requested and allowlisted."
+          },
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "redirectUris": [],
+          "registrationSource": "manual",
+          "requirePkce": true,
+          "responseTypes": [
+            "code"
+          ],
+          "softwareId": null,
+          "softwareVersion": null,
+          "sourceLabel": "Manual",
+          "tokenEndpointAuthMethod": "none"
+        }
+      ],
+      "hasNextPage": true,
+      "nextCursor": "{cursor#1}",
+      "pageSize": 2,
+      "summary": {
+        "activeCount": 6,
+        "disabledCount": 0,
+        "discoveredCount": 0,
+        "registeredCount": 0
+      }
+    }
+
+## 12. operator: a later page carries no summary
+> GET /sqlos/admin/auth/api/clients?pageSize=2&cursor={cursor#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "accessMode": "all_organizations",
+          "allowDeviceAuthorization": false,
+          "allowNativeHeadlessAuth": true,
+          "allowedScopes": [],
+          "audience": "sqlos",
+          "clientId": "loose",
+          "clientType": "public_pkce",
+          "clientUri": null,
+          "coreMetadataEditable": true,
+          "description": null,
+          "disabledAt": null,
+          "disabledReason": null,
+          "duplicateCount": 0,
+          "duplicateFingerprint": null,
+          "emptyAllowlistWarning": {
+            "code": "empty_allowlist",
+            "message": "An empty AllowedScopes list grants no scopes. First-party and headless apps that send scope on /authorize need those values on this client. Change a code-owned seed in source control."
+          },
+          "grantTypes": [
+            "authorization_code",
+            "refresh_token"
+          ],
+          "id": "{cli#5}",
+          "isActive": true,
+          "isFirstParty": false,
+          "lastSeenAt": null,
+          "lifecycleState": "active",
+          "logoUri": null,
+          "managedByStartupSeed": false,
+          "metadataCacheState": null,
+          "metadataDocumentUrl": null,
+          "metadataExpiresAt": null,
+          "metadataFetchedAt": null,
+          "name": "Loose",
+          "oidcCapable": false,
+          "omittedOpenIdWarning": {
+            "code": "missing_allowlisted_openid",
+            "message": "This allowlist omits openid. This client cannot receive an ID token until openid is on its allowlist. openid is never granted unless it is both requested and allowlisted."
+          },
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "redirectUris": [
+            "javascript:alert(1)",
+            "http://insecure.example.test/callback"
+          ],
+          "registrationSource": "manual",
+          "requirePkce": true,
+          "responseTypes": [
+            "code"
+          ],
+          "softwareId": null,
+          "softwareVersion": null,
+          "sourceLabel": "Manual",
+          "tokenEndpointAuthMethod": "none"
+        },
+        {
+          "accessMode": "all_organizations",
+          "allowDeviceAuthorization": false,
+          "allowNativeHeadlessAuth": false,
+          "allowedScopes": [],
+          "audience": "sqlos",
+          "clientId": "minimal",
+          "clientType": "public_pkce",
+          "clientUri": null,
+          "coreMetadataEditable": true,
+          "description": null,
+          "disabledAt": null,
+          "disabledReason": null,
+          "duplicateCount": 0,
+          "duplicateFingerprint": null,
+          "emptyAllowlistWarning": {
+            "code": "empty_allowlist",
+            "message": "An empty AllowedScopes list grants no scopes. First-party and headless apps that send scope on /authorize need those values on this client. Change a code-owned seed in source control."
+          },
+          "grantTypes": [
+            "authorization_code",
+            "refresh_token"
+          ],
+          "id": "{cli#4}",
+          "isActive": true,
+          "isFirstParty": false,
+          "lastSeenAt": null,
+          "lifecycleState": "active",
+          "logoUri": null,
+          "managedByStartupSeed": false,
+          "metadataCacheState": null,
+          "metadataDocumentUrl": null,
+          "metadataExpiresAt": null,
+          "metadataFetchedAt": null,
+          "name": "Minimal",
+          "oidcCapable": false,
+          "omittedOpenIdWarning": {
+            "code": "missing_allowlisted_openid",
+            "message": "This allowlist omits openid. This client cannot receive an ID token until openid is on its allowlist. openid is never granted unless it is both requested and allowlisted."
+          },
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "redirectUris": [
+            "https://minimal.example.test/cb"
+          ],
+          "registrationSource": "manual",
+          "requirePkce": true,
+          "responseTypes": [
+            "code"
+          ],
+          "softwareId": null,
+          "softwareVersion": null,
+          "sourceLabel": "Manual",
+          "tokenEndpointAuthMethod": "none"
+        }
+      ],
+      "hasNextPage": true,
+      "nextCursor": "{cursor#2}",
+      "pageSize": 2,
+      "summary": null
+    }
+
+## 13. operator: a client read by its internal ID
+> GET /sqlos/admin/auth/api/clients/{cli#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "all_organizations",
+      "allowDeviceAuthorization": false,
+      "allowNativeHeadlessAuth": false,
+      "allowedScopes": [
+        "openid",
+        "profile",
+        "email",
+        "offline_access"
+      ],
+      "audience": "https://portal.example.test/api",
+      "clientId": "portal",
+      "clientType": "public_pkce",
+      "clientUri": null,
+      "coreMetadataEditable": true,
+      "description": null,
+      "disabledAt": null,
+      "disabledReason": null,
+      "duplicateCount": 0,
+      "duplicateFingerprint": null,
+      "emptyAllowlistWarning": null,
+      "grantTypes": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "id": "{cli#1}",
+      "isActive": true,
+      "isFirstParty": true,
+      "lastSeenAt": null,
+      "lifecycleState": "active",
+      "logoUri": null,
+      "managedByStartupSeed": false,
+      "metadataCacheState": null,
+      "metadataDocumentUrl": null,
+      "metadataExpiresAt": null,
+      "metadataFetchedAt": null,
+      "metadataJson": null,
+      "name": "Portal",
+      "oidcCapable": true,
+      "oidcDiscoveryUrl": "https://sqlos.example.test/sqlos/auth/.well-known/openid-configuration",
+      "omittedOpenIdWarning": null,
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "recentAuditEvents": [],
+      "redirectUris": [
+        "https://portal.example.test/callback"
+      ],
+      "registrationSource": "manual",
+      "requirePkce": true,
+      "responseTypes": [
+        "code"
+      ],
+      "softwareId": null,
+      "softwareVersion": null,
+      "sourceLabel": "Manual",
+      "tokenEndpointAuthMethod": "none"
+    }
+
+## 14. operator: the seeded client read by its client ID
+> GET /sqlos/admin/auth/api/clients/behavior-lock-app
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "all_organizations",
+      "allowDeviceAuthorization": false,
+      "allowNativeHeadlessAuth": false,
+      "allowedScopes": [
+        "openid",
+        "profile",
+        "email",
+        "offline_access"
+      ],
+      "audience": "https://sqlos.example.test/api",
+      "clientId": "behavior-lock-app",
+      "clientType": "public_pkce",
+      "clientUri": null,
+      "coreMetadataEditable": true,
+      "description": null,
+      "disabledAt": null,
+      "disabledReason": null,
+      "duplicateCount": 0,
+      "duplicateFingerprint": null,
+      "emptyAllowlistWarning": null,
+      "grantTypes": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "id": "{cli#6}",
+      "isActive": true,
+      "isFirstParty": true,
+      "lastSeenAt": null,
+      "lifecycleState": "active",
+      "logoUri": null,
+      "managedByStartupSeed": true,
+      "metadataCacheState": null,
+      "metadataDocumentUrl": null,
+      "metadataExpiresAt": null,
+      "metadataFetchedAt": null,
+      "metadataJson": null,
+      "name": "Behavior Lock",
+      "oidcCapable": true,
+      "oidcDiscoveryUrl": "https://sqlos.example.test/sqlos/auth/.well-known/openid-configuration",
+      "omittedOpenIdWarning": null,
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": "{hex#1}",
+        "isEditable": false,
+        "isOrphaned": false,
+        "lastReconciledAt": "{datetime:unspecified}",
+        "owner": "code",
+        "sourceKey": "behavior-lock-app"
+      },
+      "recentAuditEvents": [
+        {
+          "actorId": "startup",
+          "actorType": "system",
+          "dataJson": "{\"resourceType\":\"oauth_client\",\"resourceId\":\"behavior-lock-app\",\"owner\":\"code\",\"sourceKey\":\"behavior-lock-app\",\"outcome\":\"created\",\"fingerprint\":\"{hex#1}\"}",
+          "eventType": "configuration.reconciled",
+          "id": "{evt#1}",
+          "occurredAt": "{datetime:unspecified}"
+        }
+      ],
+      "redirectUris": [
+        "https://sqlos.example.test/auth/callback"
+      ],
+      "registrationSource": "seeded",
+      "requirePkce": true,
+      "responseTypes": [
+        "code"
+      ],
+      "softwareId": null,
+      "softwareVersion": null,
+      "sourceLabel": "Seeded",
+      "tokenEndpointAuthMethod": "none"
+    }
+
+## 15. operator: an unknown client is not found
+> GET /sqlos/admin/auth/api/clients/cli_missing
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Client application was not found."
+    }

@@ -1,0 +1,105 @@
+# SqlOS behavior lock transcript
+scenario: PublicRefreshScenarios.The_public_refresh_api_rotates_tokens_in_its_own_json_shape
+profile: hosted
+
+## 1. app-backend: camelCase tokens with the session, client, and expiry times, and no cache headers
+> POST /sqlos/auth/token/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshToken": "{refresh-token#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessToken": "{access-token#1}",
+      "accessTokenExpiresAt": "{datetime:utc-z}",
+      "clientId": "behavior-lock-app",
+      "idToken": "{id-token#1}",
+      "organizationId": null,
+      "refreshToken": "{refresh-token#2}",
+      "refreshTokenExpiresAt": "{datetime:utc-z}",
+      "sessionId": "{ses#1}"
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "scope": "openid profile email offline_access",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+  jwt {id-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "JWT"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "at_hash": "{hash:at_hash}",
+      "aud": "behavior-lock-app",
+      "auth_time": {epoch},
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=5m
+
+## 2. app-backend: clientId may name the token's client
+> POST /sqlos/auth/token/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "refreshToken": "{refresh-token#2}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessToken": "{access-token#1}",
+      "accessTokenExpiresAt": "{datetime:utc-z}",
+      "clientId": "behavior-lock-app",
+      "idToken": "{id-token#1}",
+      "organizationId": null,
+      "refreshToken": "{refresh-token#3}",
+      "refreshTokenExpiresAt": "{datetime:utc-z}",
+      "sessionId": "{ses#1}"
+    }
+
+# an unknown refresh token: SqlOS throws System.InvalidOperationException "Refresh token is invalid." and writes no response (Kestrel answers 500).
+
+# no refresh token: SqlOS throws System.ArgumentNullException "Value cannot be null. (Parameter 's')" and writes no response (Kestrel answers 500).
+
+# a clientId that did not receive the token: SqlOS throws System.InvalidOperationException "Refresh token was not issued for this client." and writes no response (Kestrel answers 500).
+
+## 3. app-backend: malformed JSON is refused by the framework
+> POST /sqlos/auth/token/refresh
+> Content-Type: application/json; charset=utf-8
+>   {"refreshToken":
+< 400 Bad Request
+
+## 4. app-backend: a form body is not JSON
+> POST /sqlos/auth/token/refresh
+> Content-Type: application/x-www-form-urlencoded; charset=utf-8
+>   refreshToken=abc
+< 415 Unsupported Media Type
+
+## audit: events
+  (no new events)

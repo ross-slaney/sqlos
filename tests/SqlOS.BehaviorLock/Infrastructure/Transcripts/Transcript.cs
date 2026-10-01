@@ -165,6 +165,14 @@ public sealed class Transcript : IAsyncDisposable
     public void Note(string text) => Add(TranscriptEntry.ForNote(text));
 
     /// <summary>
+    /// Adds a note about behavior the refactor changed on purpose: the build under test records
+    /// <paramref name="text"/>, and the released package records <paramref name="baselineText"/>,
+    /// which must be the note its frozen baseline holds. Package mode compares notes exactly, since
+    /// many record observed values, so a note that described 7.2.1 behavior keeps its 7.2.1 text there.
+    /// </summary>
+    public void Note(string text, string baselineText) => Note(SqlOSUnderTest.IsPackage ? baselineText : text);
+
+    /// <summary>
     /// Records a document the journey decoded, such as the SAML AuthnRequest SqlOS sent to an
     /// identity provider. XML is pretty-printed; everything is scrubbed like the rest of the transcript.
     /// </summary>

@@ -1,0 +1,168 @@
+# SqlOS behavior lock transcript
+scenario: TokenEndpointScenarios.Unsupported_grant_types_and_bodies
+profile: hosted
+
+## 1. client: no grant_type
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   client_id=behavior-lock-app
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "error": "invalid_grant",
+      "error_description": "The authorization grant is invalid or expired."
+    }
+
+## audit
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "Unsupported grant type.",
+        "error": "invalid_grant",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The authorization grant is invalid or expired.",
+        "surface": "OAuthToken"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 2. client: the resource owner password grant
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=password
+>   client_id=behavior-lock-app
+>   username=alice
+>   password={password#1}
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "error": "invalid_grant",
+      "error_description": "The authorization grant is invalid or expired."
+    }
+
+## audit
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "Unsupported grant type.",
+        "error": "invalid_grant",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The authorization grant is invalid or expired.",
+        "surface": "OAuthToken"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 3. client: grant_type is case-sensitive
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=AUTHORIZATION_CODE
+>   client_id=behavior-lock-app
+< 400 Bad Request
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "error": "invalid_grant",
+      "error_description": "The authorization grant is invalid or expired."
+    }
+
+## audit
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "Unsupported grant type.",
+        "error": "invalid_grant",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The authorization grant is invalid or expired.",
+        "surface": "OAuthToken"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+# a JSON body instead of a form: SqlOS throws System.InvalidOperationException "Incorrect Content-Type: application/json; charset=utf-8" and writes no response (Kestrel answers 500).

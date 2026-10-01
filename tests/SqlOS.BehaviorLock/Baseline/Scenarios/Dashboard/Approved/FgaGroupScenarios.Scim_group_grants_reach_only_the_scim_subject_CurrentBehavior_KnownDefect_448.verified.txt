@@ -1,0 +1,400 @@
+# SqlOS behavior lock transcript
+scenario: FgaGroupScenarios.Scim_group_grants_reach_only_the_scim_subject_CurrentBehavior_KnownDefect_448
+profile: enterprise-scim-path
+
+# Setup: a SCIM directory provisioned Judy and a Support group with Judy as its member (not recorded).
+
+## 1. operator: the SCIM group is an FGA user group with one member
+> GET /sqlos/admin/fga/api/user-groups
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "description": "SCIM mirrored group",
+          "groupType": "scim",
+          "id": "{grp#1}",
+          "memberCount": 1,
+          "name": "Support",
+          "subjectId": "{subj#1}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 2. operator: SCIM created a user subject of its own, with the SqlOS user ID as its external reference
+> GET /sqlos/admin/fga/api/subjects?type=user
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "displayName": "Judy Hopps",
+          "externalRef": "{usr#1}",
+          "id": "{subj#2}",
+          "organizationId": "{org#1}",
+          "subjectType": "User",
+          "subjectTypeId": "user"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 3. operator: the group subject lists its member
+> GET /sqlos/admin/fga/api/subjects/{subj#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "groups": [],
+      "members": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "displayName": "Judy Hopps",
+          "id": "{subj#2}",
+          "subjectTypeId": "user"
+        }
+      ],
+      "subject": {
+        "createdAt": "{datetime:unspecified}",
+        "displayName": "Support",
+        "externalRef": "directory-support",
+        "id": "{subj#1}",
+        "organizationId": "{org#1}",
+        "subjectType": "Group",
+        "subjectTypeId": "group",
+        "updatedAt": "{datetime:unspecified}"
+      }
+    }
+
+## 4. operator: the member subject lists its group
+> GET /sqlos/admin/fga/api/subjects/{subj#2}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "groups": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "groupType": "scim",
+          "id": "{grp#1}",
+          "name": "Support",
+          "subjectId": "{subj#1}"
+        }
+      ],
+      "members": [],
+      "subject": {
+        "createdAt": "{datetime:unspecified}",
+        "displayName": "Judy Hopps",
+        "externalRef": "{usr#1}",
+        "id": "{subj#2}",
+        "organizationId": "{org#1}",
+        "subjectType": "User",
+        "subjectTypeId": "user",
+        "updatedAt": "{datetime:unspecified}"
+      }
+    }
+
+## 5. operator: grant the group read on Alpha
+> POST /sqlos/admin/fga/api/grants
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "resourceId": "workspace::alpha",
+>     "roleId": "workspace_reader",
+>     "subjectId": "{subj#1}"
+>   }
+< 201 Created
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "createdAt": "{datetime:unspecified}",
+      "effectiveFrom": null,
+      "effectiveTo": null,
+      "id": "{grant#1}",
+      "resourceId": "workspace::alpha",
+      "resourceName": "Alpha",
+      "roleId": "workspace_reader",
+      "roleName": "Workspace reader",
+      "subjectId": "{subj#1}",
+      "subjectName": "Support"
+    }
+
+## 6. probe: the SCIM subject reads Alpha through the group
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::alpha",
+>     "subjectId": "{subj#2}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": true,
+      "error": null,
+      "trace": [
+        {
+          "detail": "Checking access to Alpha (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Read workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"Judy Hopps\" + 1 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": "Judy Hopps"
+        },
+        {
+          "detail": "Checking 1 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Alpha",
+          "grantId": null,
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Role \"Workspace reader\" provides permission \"Read workspace\" via grant at Alpha",
+          "grantId": "{grant#1}",
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleName": "Workspace reader",
+          "step": "Access Granted",
+          "subjectName": "Support"
+        }
+      ]
+    }
+
+## 7. operator: the trace names the group that granted it
+> POST /sqlos/admin/fga/api/trace
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::alpha",
+>     "subjectId": "{subj#2}"
+>   }
+< 200 OK
+< Content-Type: application/json
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    {
+      "accessGranted": true,
+      "allRolesUsed": [
+        {
+          "contributedToDecision": true,
+          "isFromGrant": true,
+          "isVirtualRole": false,
+          "permissions": [
+            {
+              "permissionKey": "workspace.read",
+              "permissionName": "Read workspace",
+              "usedForDecision": true
+            }
+          ],
+          "roleKey": "workspace_reader",
+          "roleName": "Workspace reader",
+          "sourceResourceId": "workspace::alpha",
+          "sourceResourceName": "Alpha",
+          "sourceResourceType": "Workspace"
+        }
+      ],
+      "decisionSummary": "Access granted via group 'Support' which has role 'Workspace reader' on 'Alpha'. The role 'Workspace reader' includes permission 'workspace.read' which is inherited by child resources.",
+      "denialReason": null,
+      "grantsUsed": [
+        {
+          "appliesToSubject": true,
+          "contributedToDecision": true,
+          "grantId": "{grant#1}",
+          "isDirectGrant": false,
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "resourceType": "Workspace",
+          "roleKey": "workspace_reader",
+          "roleName": "Workspace reader",
+          "subjectDisplayName": "Support",
+          "subjectId": "{subj#1}",
+          "viaGroupName": "Support"
+        }
+      ],
+      "pathNodes": [
+        {
+          "depth": 0,
+          "effectivePermissions": [
+            "workspace.read"
+          ],
+          "grantsOnThisNode": [
+            {
+              "appliesToSubject": true,
+              "contributedToDecision": true,
+              "grantId": "{grant#1}",
+              "isDirectGrant": false,
+              "resourceId": "workspace::alpha",
+              "resourceName": "Alpha",
+              "resourceType": "Workspace",
+              "roleKey": "workspace_reader",
+              "roleName": "Workspace reader",
+              "subjectDisplayName": "Support",
+              "subjectId": "{subj#1}",
+              "viaGroupName": "Support"
+            }
+          ],
+          "isTarget": true,
+          "name": "Alpha",
+          "permissionFoundHere": true,
+          "resourceId": "workspace::alpha",
+          "resourceType": "Workspace"
+        }
+      ],
+      "permissionKey": "workspace.read",
+      "permissionName": "Read workspace",
+      "subjectDisplayName": "Judy Hopps",
+      "subjectId": "{subj#2}",
+      "subjectsChecked": [
+        {
+          "displayName": "Judy Hopps",
+          "isDirect": true,
+          "subjectId": "{subj#2}",
+          "type": "user"
+        },
+        {
+          "displayName": "Support",
+          "isDirect": false,
+          "subjectId": "{subj#1}",
+          "type": "usergroup"
+        }
+      ],
+      "suggestion": null,
+      "targetResourceId": "workspace::alpha",
+      "targetResourceName": "Alpha",
+      "targetResourceType": "Workspace"
+    }
+
+## 8. probe: a check by the SqlOS user ID finds no subject
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::alpha",
+>     "subjectId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": false,
+      "error": "No subjects found",
+      "trace": [
+        {
+          "detail": "Checking access to Alpha (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Read workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"\" + -1 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": null
+        }
+      ]
+    }
+
+## 9. probe: so the list filter by user ID is empty
+> POST /__probe/fga/filter
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "subjectId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "count": 0,
+      "workspaces": []
+    }
+
+## 10. probe: while the SCIM subject's list includes Alpha
+> POST /__probe/fga/filter
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "subjectId": "{subj#2}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "count": 1,
+      "workspaces": [
+        {
+          "name": "Alpha",
+          "resourceId": "workspace::alpha"
+        }
+      ]
+    }
+
+## audit: the dashboard grant is not audited
+  (no new events)

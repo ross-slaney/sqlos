@@ -1,0 +1,80 @@
+# SqlOS behavior lock transcript
+scenario: AdminIdentityOrganizationScenarios.Organization_views_count_its_saml_connections
+profile: enterprise
+
+## 1. operator: an organization with one enabled SAML connection
+> GET /sqlos/admin/auth/api/organizations/{org#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "enabledSsoConnections": 1,
+      "id": "{org#1}",
+      "isActive": true,
+      "membershipCount": 0,
+      "name": "Acme",
+      "primaryDomain": null,
+      "slug": "{slug:acme}",
+      "ssoConnectionCount": 1
+    }
+
+## 2. operator: the list counts enabled connections
+> GET /sqlos/admin/auth/api/organizations
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "enabledSsoConnections": 1,
+          "id": "{org#1}",
+          "isActive": true,
+          "membershipCount": 0,
+          "name": "Acme",
+          "primaryDomain": null,
+          "slug": "{slug:acme}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 3. operator: a disabled connection still counts, but not as enabled
+> GET /sqlos/admin/auth/api/organizations/{org#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "enabledSsoConnections": 0,
+      "id": "{org#1}",
+      "isActive": true,
+      "membershipCount": 0,
+      "name": "Acme",
+      "primaryDomain": null,
+      "slug": "{slug:acme}",
+      "ssoConnectionCount": 1
+    }
+
+## 4. operator: the organization's applications
+> GET /sqlos/admin/auth/api/organizations/{org#1}/applications
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "applications": [
+        {
+          "accessMode": "all_organizations",
+          "assignmentId": null,
+          "audience": "https://sqlos.example.test/api",
+          "clientId": "behavior-lock-app",
+          "id": "{cli#1}",
+          "name": "Behavior Lock",
+          "source": "all_organizations"
+        }
+      ],
+      "id": "{org#1}",
+      "name": "Acme"
+    }

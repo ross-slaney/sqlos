@@ -1,0 +1,995 @@
+# SqlOS behavior lock transcript
+scenario: SamlAcsScenarios.Responses_that_fail_signature_or_condition_checks_are_refused_and_the_reason_is_audited
+profile: enterprise
+
+# Ivan's authorization request stays live through every refusal; each response below answers it.
+
+## 1. browser: an unsigned response
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#1}
+>   RelayState={relay-state#1}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "access_denied",
+      "message": "The external sign-in request could not be completed."
+    }
+
+## 2. browser: a response signed by a key the connection does not trust
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#2}
+>   RelayState={relay-state#1}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "access_denied",
+      "message": "The external sign-in request could not be completed."
+    }
+
+## 3. browser: an unsigned assertion for Mallory wrapped ahead of the signed one
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#3}
+>   RelayState={relay-state#1}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "access_denied",
+      "message": "The external sign-in request could not be completed."
+    }
+
+## 4. browser: an assertion for another service provider
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#4}
+>   RelayState={relay-state#1}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "access_denied",
+      "message": "The external sign-in request could not be completed."
+    }
+
+## 5. browser: a response addressed to another ACS URL
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#5}
+>   RelayState={relay-state#1}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "access_denied",
+      "message": "The external sign-in request could not be completed."
+    }
+
+## 6. browser: a response to another AuthnRequest
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#6}
+>   RelayState={relay-state#1}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "access_denied",
+      "message": "The external sign-in request could not be completed."
+    }
+
+## 7. browser: an assertion that expired
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#7}
+>   RelayState={relay-state#1}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "access_denied",
+      "message": "The external sign-in request could not be completed."
+    }
+
+## 8. browser: a response from another issuer
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#8}
+>   RelayState={relay-state#1}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "access_denied",
+      "message": "The external sign-in request could not be completed."
+    }
+
+## 9. browser: an assertion without an issuer
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#9}
+>   RelayState={relay-state#1}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "access_denied",
+      "message": "The external sign-in request could not be completed."
+    }
+
+## 10. browser: an assertion that is not valid yet
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#10}
+>   RelayState={relay-state#1}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "access_denied",
+      "message": "The external sign-in request could not be completed."
+    }
+
+## 11. browser: an assertion without conditions
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#11}
+>   RelayState={relay-state#1}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "access_denied",
+      "message": "The external sign-in request could not be completed."
+    }
+
+## 12. browser: conditions without an expiry
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#12}
+>   RelayState={relay-state#1}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "access_denied",
+      "message": "The external sign-in request could not be completed."
+    }
+
+## 13. browser: a holder-of-key subject confirmation
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#13}
+>   RelayState={relay-state#1}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "access_denied",
+      "message": "The external sign-in request could not be completed."
+    }
+
+## 14. browser: an assertion without a NameID
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#14}
+>   RelayState={relay-state#1}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "access_denied",
+      "message": "The external sign-in request could not be completed."
+    }
+
+## 15. browser: an RSA-SHA1 signature
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#15}
+>   RelayState={relay-state#1}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "access_denied",
+      "message": "The external sign-in request could not be completed."
+    }
+
+## 16. browser: a SHA-1 digest
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#16}
+>   RelayState={relay-state#1}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "access_denied",
+      "message": "The external sign-in request could not be completed."
+    }
+
+## 17. browser: an extra signature transform
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#17}
+>   RelayState={relay-state#1}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "access_denied",
+      "message": "The external sign-in request could not be completed."
+    }
+
+## 18. browser: a response without an ID
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#18}
+>   RelayState={relay-state#1}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "access_denied",
+      "message": "The external sign-in request could not be completed."
+    }
+
+## 19. browser: a LogoutResponse instead of a Response
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#19}
+>   RelayState={relay-state#1}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "access_denied",
+      "message": "The external sign-in request could not be completed."
+    }
+
+## audit: every refusal records its diagnostic
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "SAML response signature missing.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "SamlAcs"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "SAML response signature is invalid.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "SamlAcs"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "SAML response must contain exactly one assertion.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "SamlAcs"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "SAML assertion audience mismatch.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "SamlAcs"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "SAML response destination mismatch.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "SamlAcs"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#6}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "SAML response InResponseTo mismatch.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "SamlAcs"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#7}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "SAML assertion has expired.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "SamlAcs"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#8}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "SAML response issuer mismatch.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "SamlAcs"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#9}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "SAML assertion issuer missing.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "SamlAcs"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#10}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "SAML assertion is not yet valid.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "SamlAcs"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#11}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "SAML assertion conditions missing.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "SamlAcs"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#12}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "SAML assertion expiration missing.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "SamlAcs"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#13}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "SAML subject confirmation mismatch.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "SamlAcs"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#14}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "SAML assertion NameID missing.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "SamlAcs"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#15}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "SAML signature algorithm is not allowed.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "SamlAcs"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#16}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "SAML signature digest algorithm is not allowed.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "SamlAcs"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#17}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "SAML signature transform is not allowed.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "SamlAcs"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#18}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "SAML response ID is missing or invalid.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "SamlAcs"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#19}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "SAML response is invalid.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "SamlAcs"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

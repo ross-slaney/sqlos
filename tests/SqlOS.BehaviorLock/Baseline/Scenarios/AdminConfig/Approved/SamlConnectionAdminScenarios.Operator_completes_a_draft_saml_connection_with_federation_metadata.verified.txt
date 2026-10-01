@@ -1,0 +1,162 @@
+# SqlOS behavior lock transcript
+scenario: SamlConnectionAdminScenarios.Operator_completes_a_draft_saml_connection_with_federation_metadata
+profile: enterprise
+
+## 1. operator: start a draft: it is disabled and records the organization's primary domain
+> POST /sqlos/admin/auth/api/sso-connections/draft
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "autoLinkByEmail": true,
+>     "autoProvisionUsers": false,
+>     "displayName": "Acme draft",
+>     "organizationId": "{org#1}",
+>     "primaryDomain": " admin@{domain:SSO}. "
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "assertionConsumerServiceUrl": "https://sqlos.example.test/sqlos/auth/saml/acs/{sso#1}",
+      "displayName": "Acme draft",
+      "id": "{sso#1}",
+      "isEnabled": false,
+      "organizationId": "{org#1}",
+      "serviceProviderEntityId": "https://sqlos.example.test/sqlos/auth"
+    }
+
+## 2. operator: the draft has no IdP values yet
+> GET /sqlos/admin/auth/api/organizations/{org#1}/sso-connections
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "assertionConsumerServiceUrl": "https://sqlos.example.test/sqlos/auth/saml/acs/{sso#1}",
+          "autoLinkByEmail": true,
+          "autoProvisionUsers": false,
+          "displayName": "Acme draft",
+          "id": "{sso#1}",
+          "identityProviderEntityId": "",
+          "isEnabled": false,
+          "organization": "Acme",
+          "organizationId": "{org#1}",
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "primaryDomain": "{domain:sso}",
+          "serviceProviderEntityId": "https://sqlos.example.test/sqlos/auth",
+          "setupStatus": "draft",
+          "singleSignOnUrl": ""
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 3. operator: a draft cannot be enabled before metadata is imported
+> POST /sqlos/admin/auth/api/sso-connections/{sso#1}/enable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Import valid SAML metadata before enabling this connection.
+
+## 4. operator: importing federation metadata fills the IdP values and enables the connection
+> POST /sqlos/admin/auth/api/sso-connections/{sso#1}/metadata
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "metadataXml": "<md:EntityDescriptor xmlns:md=\"urn:oasis:names:tc:SAML:2.0:metadata\" entityID=\"urn:behavior-lock:acme-idp\"><md:IDPSSODescriptor protocolSupportEnumeration=\"urn:oasis:names:tc:SAML:2.0:protocol\"><md:KeyDescriptor use=\"signing\"><ds:KeyInfo xmlns:ds=\"http://www.w3.org/2000/09/xmldsig#\"><ds:X509Data><ds:X509Certificate>{saml-certificate:acme}</ds:X509Certificate></ds:X509Data></ds:KeyInfo></md:KeyDescriptor><md:SingleSignOnService Binding=\"urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect\" Location=\"https://idp.acme.example.test/saml/sso\"/></md:IDPSSODescriptor></md:EntityDescriptor>"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "displayName": "Acme draft",
+      "id": "{sso#1}",
+      "identityProviderEntityId": "urn:behavior-lock:acme-idp",
+      "isEnabled": true,
+      "organizationId": "{org#1}",
+      "singleSignOnUrl": "https://idp.acme.example.test/saml/sso",
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 5. operator: the connection is active
+> GET /sqlos/admin/auth/api/sso-connections
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "assertionConsumerServiceUrl": "https://sqlos.example.test/sqlos/auth/saml/acs/{sso#1}",
+          "autoLinkByEmail": true,
+          "autoProvisionUsers": false,
+          "displayName": "Acme draft",
+          "id": "{sso#1}",
+          "identityProviderEntityId": "urn:behavior-lock:acme-idp",
+          "isEnabled": true,
+          "organization": "Acme",
+          "organizationId": "{org#1}",
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "primaryDomain": "{domain:sso}",
+          "serviceProviderEntityId": "https://sqlos.example.test/sqlos/auth",
+          "setupStatus": "active",
+          "singleSignOnUrl": "https://idp.acme.example.test/saml/sso"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## audit: draft creation is not audited; the metadata import is
+  - {
+      "action": "saml.connection.metadata-imported",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "saml.connection.metadata-imported",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "Id": "{sso#1}",
+        "IdentityProviderEntityId": "urn:behavior-lock:acme-idp"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

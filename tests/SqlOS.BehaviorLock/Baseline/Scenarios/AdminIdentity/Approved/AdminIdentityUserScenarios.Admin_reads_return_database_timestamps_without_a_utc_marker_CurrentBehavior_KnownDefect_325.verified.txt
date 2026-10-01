@@ -1,0 +1,138 @@
+# SqlOS behavior lock transcript
+scenario: AdminIdentityUserScenarios.Admin_reads_return_database_timestamps_without_a_utc_marker_CurrentBehavior_KnownDefect_325
+profile: dashboard-callback
+
+# Known defect #325, recorded as it behaves today: create responses serialize the in-memory UTC value with Z, while every value read back from the database has no zone ({datetime:unspecified}).
+
+## 1. operator: the create response carries Z
+> POST /sqlos/admin/auth/api/users
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "Alice",
+>     "email": "{email:alice}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "defaultEmail": "{email:alice}",
+      "displayName": "Alice",
+      "id": "{usr#1}",
+      "isActive": true,
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 2. operator: the same user read back has no zone
+> GET /sqlos/admin/auth/api/users/{usr#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "defaultEmail": "{email:alice}",
+      "displayName": "Alice",
+      "externalIdentityCount": 0,
+      "id": "{usr#1}",
+      "isActive": true,
+      "membershipCount": 0,
+      "sessionCount": 0,
+      "updatedAt": "{datetime:unspecified}"
+    }
+
+## 3. operator: nor does the list
+> GET /sqlos/admin/auth/api/users
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "defaultEmail": "{email:alice}",
+          "displayName": "Alice",
+          "id": "{usr#1}",
+          "isActive": true,
+          "membershipCount": 0
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 4. operator: an organization's create response carries Z
+> POST /sqlos/admin/auth/api/organizations
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "name": "Acme"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "id": "{org#1}",
+      "isActive": true,
+      "name": "Acme",
+      "primaryDomain": null,
+      "slug": "acme"
+    }
+
+## 5. operator: read back, it has no zone
+> GET /sqlos/admin/auth/api/organizations/{org#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "enabledSsoConnections": 0,
+      "id": "{org#1}",
+      "isActive": true,
+      "membershipCount": 0,
+      "name": "Acme",
+      "primaryDomain": null,
+      "slug": "acme",
+      "ssoConnectionCount": 0
+    }
+
+## 6. operator: a membership's create response carries Z
+> POST /sqlos/admin/auth/api/organizations/{org#1}/memberships
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "role": "member",
+>     "userId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "isActive": true,
+      "organizationId": "{org#1}",
+      "role": "member",
+      "userId": "{usr#1}"
+    }
+
+## 7. operator: read back, it has no zone
+> GET /sqlos/admin/auth/api/users/{usr#1}/memberships
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "isActive": true,
+          "organization": "Acme",
+          "organizationId": "{org#1}",
+          "role": "member",
+          "user": "Alice",
+          "userEmail": "{email:alice}",
+          "userId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }

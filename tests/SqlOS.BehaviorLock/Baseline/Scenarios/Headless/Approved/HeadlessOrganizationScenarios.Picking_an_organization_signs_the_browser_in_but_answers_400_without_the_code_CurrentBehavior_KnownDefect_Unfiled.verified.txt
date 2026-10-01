@@ -1,0 +1,193 @@
+# SqlOS behavior lock transcript
+scenario: HeadlessOrganizationScenarios.Picking_an_organization_signs_the_browser_in_but_answers_400_without_the_code_CurrentBehavior_KnownDefect_Unfiled
+profile: headless
+
+## 1. browser: sign in: two memberships, so the UI must ask which organization
+> POST /sqlos/auth/headless/password/login
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "email": "{email:frank}",
+>     "password": "{password:frank}",
+>     "requestId": "{req#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "redirectUrl": null,
+      "type": "view",
+      "viewModel": {
+        "authBasePath": "/sqlos/auth",
+        "challengeToken": null,
+        "clientId": "behavior-lock-app",
+        "clientName": "Behavior Lock",
+        "consentScopes": null,
+        "consentToken": null,
+        "deviceAuthorization": null,
+        "displayName": null,
+        "email": "{email:frank}",
+        "error": null,
+        "fieldErrors": {},
+        "headlessApiBasePath": "/sqlos/auth/headless",
+        "info": null,
+        "invitation": null,
+        "mfaMethods": [],
+        "mfaToken": null,
+        "omittedOpenId": false,
+        "organizationSelection": [
+          {
+            "id": "{org#1}",
+            "name": "Acme",
+            "role": "admin",
+            "slug": "{slug:acme}"
+          },
+          {
+            "id": "{org#2}",
+            "name": "Globex",
+            "role": "member",
+            "slug": "{slug:globex}"
+          }
+        ],
+        "pendingToken": "{pending-token#1}",
+        "phoneNumber": null,
+        "providers": [
+          {
+            "connectionId": "{oidc#1}",
+            "displayName": "Example OIDC",
+            "logoDataUrl": null,
+            "providerType": "Custom"
+          },
+          {
+            "connectionId": "{oidc#2}",
+            "displayName": "Google",
+            "logoDataUrl": "{data-uri:image/svg+xml}",
+            "providerType": "Google"
+          }
+        ],
+        "requestId": "{req#1}",
+        "requiresMfaEnrollment": false,
+        "scope": "openid profile email offline_access",
+        "settings": {
+          "accentColor": "#0f172a",
+          "backgroundColor": "#f8fafc",
+          "emailOtpRuntimeConfigured": true,
+          "enablePasswordSignup": true,
+          "enabledCredentialTypes": [
+            "password",
+            "email_otp",
+            "magic_link",
+            "phone_otp"
+          ],
+          "headlessCapabilityRegistered": true,
+          "layout": "split",
+          "localPasswordRuntimeEnabled": true,
+          "logoBase64": null,
+          "magicLinkRuntimeConfigured": true,
+          "managedByStartupSeed": true,
+          "ownership": {
+            "canEmergencyDisable": false,
+            "configurationFingerprint": "{hex#1}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "auth-page:default"
+          },
+          "pageSubtitle": "Secure your app-owned AI and MCP experiences with SqlOS.",
+          "pageTitle": "Sign in to Behavior Lock",
+          "phoneOtpRuntimeConfigured": true,
+          "primaryColor": "#2563eb",
+          "updatedAt": "{datetime:unspecified}"
+        },
+        "signupToken": null,
+        "totpEnrollment": null,
+        "uiContext": null,
+        "view": "organization"
+      }
+    }
+
+# Known defect (found by this catalog, not yet filed): after the pick, SqlOS issues the code and signs the browser in, then re-reads the now-completed authorization request and answers 400, so the code is never delivered. With an MFA policy the pick continues to the challenge instead (HeadlessMfaScenarios).
+
+## 2. browser: pick the second organization: 400 invalid_request, yet the issuer session cookie is set
+> POST /sqlos/auth/headless/organization/select
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "organizationId": "{org#2}",
+>     "pendingToken": "{pending-token#1}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+< Set-Cookie: sqlos_auth_page={cookie#1}; expires=+7d; path=/; secure; samesite=lax; httponly
+    {
+      "error": "invalid_request",
+      "message": "Authorization request is invalid or expired."
+    }
+
+## 3. browser: the selection token was consumed, so the pick cannot be retried
+> POST /sqlos/auth/headless/organization/select
+> Content-Type: application/json; charset=utf-8
+> Cookie: sqlos_auth_page={cookie#1}
+> Origin: https://sqlos.example.test
+>   {
+>     "organizationId": "{org#1}",
+>     "pendingToken": "{pending-token#1}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_request",
+      "message": "The organization selection session is invalid or expired."
+    }
+
+## 4. browser: the app starts over: the signed-in browser is sent straight back to the organization view
+> GET /sqlos/auth/authorize?response_type=code&client_id=behavior-lock-app&redirect_uri=https%3A%2F%2Fsqlos.example.test%2Fauth%2Fcallback&scope=openid%20profile%20email%20offline_access&state={state#1}&nonce={nonce#1}&code_challenge={pkce-challenge#1}&code_challenge_method=S256
+> Cookie: sqlos_auth_page={cookie#1}
+< 302 Found
+< Location: https://sqlos.example.test/auth/authorize?request={req#2}&view=organization&email={email:frank}&pendingToken={pending-token#2}
+
+## audit: organization selection events
+  - {
+      "action": "password.login.succeeded",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "password.login.succeeded",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "AuthorizationRequestId": "[redacted]",
+        "ClientKey": "behavior-lock-app",
+        "NormalizedEmail": "{email:FRANK}",
+        "Surface": "headless",
+        "UserAgentHash": null,
+        "details": {
+          "resetScopes": [
+            "email",
+            "user"
+          ]
+        },
+        "maskedEmail": "FR***@EXAMPLE.TEST"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }

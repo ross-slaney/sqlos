@@ -1,6 +1,6 @@
 # SqlOS behavior lock
 
-The behavior lock records what SqlOS 7.2.1 does, as seen from outside, so the 8.0.0 refactor ([#435](https://github.com/ross-slaney/sqlos/issues/435)) can rebuild the internals and prove nothing observable changed. Every scenario drives a real host over HTTP and approves a scrubbed, deterministic transcript. A pure refactor never changes an approved file. When one changes, the change is either a regression to fix or an intended change that needs an entry in the [behavior ledger](../../docs/architecture/8.0-behavior-ledger.md).
+The behavior lock records what SqlOS 7.2.1 does, as seen from outside, so the 8.0.0 refactor ([#435](https://github.com/ross-slaney/sqlos/issues/435)) can rebuild the internals and prove nothing observable changed. Every scenario drives a real host over HTTP and approves a scrubbed, deterministic transcript. A frozen baseline keeps what 7.2.1 does, the approved files keep what the build does, and the [behavior ledger](../../docs/architecture/8.0-behavior-ledger.md) names and justifies every difference (see [Baseline, current, and the ledger](#baseline-current-and-the-ledger)). A pure refactor never changes an approved file. When one changes, the change is either a regression to fix or an intended change that needs a ledger entry.
 
 ## What it locks
 
@@ -27,7 +27,8 @@ The behavior lock records what SqlOS 7.2.1 does, as seen from outside, so the 8.
 | `tests/SqlOS.BehaviorLock.UpgradeSeed` | A console app pinned to the released package that seeds the upgrade gate's database. |
 | `Scenarios/<Area>/<Area>Scenarios.cs` | Scenarios, one class per area. |
 | `Scenarios/<Area>/Approved/<Class>.<Method>.verified.txt` | Approved transcripts. A mismatch writes `.received.txt` beside them. |
-| `Gates/` | Whole-surface gates: public API, schema, route coverage, dashboard script scan, ledger parsing, scrubber unit tests. |
+| `Baseline/` | The frozen baseline: every approved file as the released 7.2.1 package produces it, at the same path relative to this suite, with `release.txt` (the release and the commit the files came from) and `renames.txt` (approved files renamed since). |
+| `Gates/` | Whole-surface gates: public API, schema, route coverage, dashboard script scan, the baseline's release and rename log, scrubber unit tests. |
 | `Coverage/dashboard-routes.manifest` | Dashboard API routes that are string-routed by middleware, so endpoint enumeration cannot see them. |
 | `Infrastructure/` | The harness: transcripts, scrubbing, approvals, databases, fakes, coverage. |
 
@@ -44,19 +45,19 @@ scripts/behavior-lock.sh --shard auth-pages                # one CI shard (see b
 scripts/behavior-lock.sh --no-build                        # reuse ./scripts/build.sh output (source mode only)
 ```
 
-CI (`.github/workflows/pull-request.yml`) runs the suite on SQL Server, on PostgreSQL, and against the released package, each as three shards split by scenario area so every job stays well under 20 minutes: `auth-pages` (`Hosted`, `Headless`), `protocol-enterprise` (`Protocol`, `Enterprise`, and the small `Saml`, `Scim`, `Social`, `Tokens`, `Dcr`, and `Upgrade` areas), and `admin-and-rest` (everything else, including the gates and any new area).
+CI (`.github/workflows/pull-request.yml`) runs the suite on SQL Server and on PostgreSQL, and against the released package on both, each as three shards split by scenario area so every job stays well under 20 minutes: `auth-pages` (`Hosted`, `Headless`), `protocol-enterprise` (`Protocol`, `Enterprise`, and the small `Saml`, `Scim`, `Social`, `Tokens`, `Dcr`, and `Upgrade` areas), and `admin-and-rest` (everything else, including the gates and any new area). The `Behavior Ledger` and `Behavior Baseline` jobs run `scripts/check-behavior-ledger.sh` and `scripts/check-behavior-baseline.sh`.
 
 Or directly: `dotnet test tests/SqlOS.BehaviorLock -p:SqlOSUnderTest=package`. `-p:SqlOSBaselineVersion=7.2.1` picks the package version, and the upgrade seed takes `-p:SqlOSUpgradeFromVersion`.
 
 | Variable | Effect |
 | --- | --- |
 | `SQLOS_TEST_PROVIDER` | `sqlserver` (default) or `postgresql`. |
-| `BEHAVIOR_LOCK_ACCEPT=1` | Accepts every mismatch by writing the `.verified.txt` file. Ignored on build servers. |
+| `BEHAVIOR_LOCK_ACCEPT=1` | Accepts every mismatch by writing the `.verified.txt` file. In package mode it only records missing baselines and never rewrites one. Ignored on build servers. |
 | `BEHAVIOR_LOCK_REPEAT=N` | Runs each scenario N times on fresh hosts and fails unless every run renders the identical transcript. Use 2 before you approve a new scenario. |
 | `BEHAVIOR_LOCK_DIFF=1` | Opens your configured diff tool on a mismatch. |
 | `ASPIRE_ALLOW_UNSECURED_TRANSPORT=true` | Required on CI runners, as for the integration tests. |
 
-Package mode guards itself: it fails unless the loaded `SqlOS.dll` is byte for byte the NuGet package's, and source mode fails if it loaded the package. Switch modes with a build, not with `--no-build`.
+Package mode guards itself: it fails unless the loaded `SqlOS.dll` is byte for byte the NuGet package's and `Baseline/release.txt` names that release, and source mode fails if it loaded the package. Switch modes with a build, not with `--no-build`.
 
 ## Writing a scenario
 
@@ -95,7 +96,8 @@ public sealed class HostedPasswordScenarios
 5. **Record every exchange.** Each request returns an `HttpExchange`; pass it to `t.Observe(exchange, "caption")` to lock it or `t.Discard(exchange)` when it is only a precondition. `ApproveAsync` fails if one is neither. Read responses with `JsonString("data.0.id")`, `Location`, `NextUrl` and `NextUrlParameter("code")` (they follow the meta-refresh interstitial too), `Form("/action")` with `.With(...)` and `.Without(...)`, `SetCookieValue(name)`, and `Header(name)`.
 6. **Observe side effects and state.** `t.ObserveAuditAsync("caption")` records the audit events written since the last audit observation, oldest first. When SqlOS writes them in no defined order (a lockout writes one event per locked bucket in database order; parallel requests write in thread order), use `t.ObserveAuditAsync("caption", AuditOrder.Content)`, which sorts them by action and then by content with every per-run value masked. `t.ObserveStateAsync(route, "caption")` records a dashboard or admin read. `t.ObserveDocument(caption, text)` records a document; `t.Note(text)` adds a line for the reader. Effects (email, SMS, HTTP, DNS) attach to the exchange that caused them automatically; `t.ObserveUnattributedEffects(caption)` records ones no exchange caused. `t.LatestEmailTo(email)` and `t.LatestSmsCodeTo(phone)` read what the fakes captured.
 7. **Call library APIs through probes.** Scenarios only talk HTTP. For an API hosts call in-process, use or add a route in `tests/SqlOS.BehaviorLock.Host/Probes/ProbeEndpoints.cs` that calls one documented member and returns its result as JSON. Probes compile against both the package and the source, which makes them, with `SourceCompatibilityCanary.cs`, the source-compatibility canary.
-8. **Approve.** End with `await t.ApproveAsync()`. Run the scenario with `BEHAVIOR_LOCK_REPEAT=2 BEHAVIOR_LOCK_ACCEPT=1`, then read the whole `.verified.txt`: it is the behavior you are locking, so check it says what the product should do, and say so in the caption when it does not (see known defects below).
+8. **Approve.** End with `await t.ApproveAsync()`. Run the scenario with `BEHAVIOR_LOCK_REPEAT=2 BEHAVIOR_LOCK_ACCEPT=1`, then read the whole `.verified.txt`: it is the behavior you are locking, so check it says what the product should do, and say so in the caption when it does not (see known defects below). Then record its baseline: run it again with `scripts/behavior-lock.sh --mode package --filter ...` and `BEHAVIOR_LOCK_ACCEPT=1`, and commit `Baseline/Scenarios/<Area>/Approved/<Class>.<Method>.verified.txt` with it (see [Baseline, current, and the ledger](#baseline-current-and-the-ledger)).
+9. **Never change what an existing scenario does.** Its 7.2.1 transcript is frozen in the baseline, so a changed step fails package mode for good. To lock something new, add a scenario. Names and captions may change: package mode ignores them.
 
 ### Fakes
 
@@ -152,15 +154,27 @@ Transcripts must be byte-identical across runs, machines, providers, and the pac
 
 Never scrub behavior away. Before adding a rule, find where the nondeterminism comes from; if SqlOS itself is nondeterministic (an unordered query, a clock read twice), lock it with the narrowest rule and a comment naming the source.
 
-## Approvals and the ledger
+## Baseline, current, and the ledger
 
-1. A mismatch fails the scenario with a compact diff and writes `<name>.received.txt` beside `<name>.verified.txt`.
+The suite keeps two records of every scenario and gate:
+
+- **Current** approvals, beside the scenarios (`Scenarios/<Area>/Approved`, `PublicApi`, `Schema`) and the headless snapshot: what the build under test does. Source mode compares with them.
+- **The baseline** (`Baseline/`): every approved file exactly as it was when the lock matched the released SqlOS 7.2.1 package, at the end of layer 1 (`release.txt` names the release and the commit), plus the baselines of coverage added since. It is what 7.2.1 does, and it never changes. Package mode compares every scenario and gate with it and skips nothing.
+- **The ledger** (`docs/architecture/8.0-behavior-ledger.md`): the difference, justified. `scripts/check-behavior-baseline.sh` fails unless its entries name exactly the approved files that differ from their baseline, or are gone.
+
+1. A mismatch fails with a compact diff and writes `<name>.received.txt` beside the file it was compared with.
 2. Read the diff. If the change is a regression, fix the code, not the approval.
 3. If the change is intended, accept it locally with `BEHAVIOR_LOCK_ACCEPT=1` (CI never accepts) and commit the updated `.verified.txt`.
-4. **Modifying or deleting an approved file needs a ledger entry in the same pull request** (`docs/architecture/8.0-behavior-ledger.md`): its ID, the approved files it justifies, the category (defect fixed, DX improvement, or maintainability improvement), the justification, and the issue. Adding a new approved file (new coverage) needs no entry, and neither does renaming one without changing its content. `scripts/check-behavior-ledger.sh` enforces this on every pull request; run it locally against `origin/main` before you push.
-5. The baseline job runs the suite against the released package. It skips approved files the ledger lists, because they describe intended 8.0.0 behavior, and checks everything else.
+4. **Modifying or deleting an approved file needs a ledger entry in the same pull request**: its ID, the approved files it justifies, the category (defect fixed, DX improvement, or maintainability improvement), the justification, and the issue. Adding a new approved file (new coverage) needs no entry unless its baseline differs, and renaming one without changing its content needs none. `scripts/check-behavior-ledger.sh` checks each pull request's own changes and `scripts/check-behavior-baseline.sh` the whole ledger; run both locally against your base before you push.
+5. **The baseline never changes.** `scripts/check-behavior-baseline.sh` fails when a baseline file is modified, deleted, or renamed, or when it no longer matches the approved file it was copied from, unless `release.txt` changes: a re-baseline to a new release, which the 8.0.0 refactor never does. Package mode never rewrites a baseline, even when accepting.
 
-The same rules cover `PublicApi/SqlOS.verified.txt` (regenerate with `BEHAVIOR_LOCK_ACCEPT=1` and a filter on `PublicApiGateTests`), the schema approvals (`SchemaGateTests`, one pair per provider), and the headless snapshot (`npx vitest run -u` in `packages/headless`).
+**Labels.** Package mode compares transcripts without their labels: the `scenario:` line and the captions of `## n. actor: caption`, `## audit`, `## effects`, and `## document` sections, so a scenario can be renamed or recaptioned when its meaning changes. Notes are compared exactly, because many record observed values (tallies, unhandled exceptions). A note that describes 7.2.1 behavior the refactor changed takes both texts, `t.Note(text, baselineText: ...)`, so the package run still records the note its baseline holds.
+
+**New coverage** needs a baseline: run the new scenario (or gate) in package mode with `BEHAVIOR_LOCK_ACCEPT=1`, which records only missing baselines, and commit the file under `Baseline/` with the approval. When the two match, 7.2.1 already behaved this way; when they differ, the difference needs a ledger entry like any other.
+
+**Renaming a scenario** changes the `scenario:` line of its transcript, so it needs a ledger entry naming the new path, and a line appended to `Baseline/renames.txt` (`<earlier path> -> <later path>`) through which package mode and the gate find the baseline under its earlier name. The log only grows: a second rename is a second line.
+
+The same rules cover `PublicApi/SqlOS.verified.txt` (regenerate with `BEHAVIOR_LOCK_ACCEPT=1` and a filter on `PublicApiGateTests`), the schema approvals (`SchemaGateTests`, one pair per provider), and the headless snapshot (`npx vitest run -u` in `packages/headless`; package mode does not render it, but the gate holds it to its baseline).
 
 ## The upgrade gate
 

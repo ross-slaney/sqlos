@@ -1,0 +1,42 @@
+# SqlOS behavior lock transcript
+scenario: AuthorizeScenarios.Requests_rejected_after_the_client_is_trusted_redirect_back_with_an_error
+profile: hosted
+
+## 1. browser: a request object (OIDC Core 6.1)
+> GET /sqlos/auth/authorize?response_type=code&client_id=behavior-lock-app&redirect_uri=https%3A%2F%2Fsqlos.example.test%2Fauth%2Fcallback&scope=openid%20profile%20email%20offline_access&state={state#1}&nonce={nonce#1}&code_challenge={pkce-challenge#1}&code_challenge_method=S256&request=eyJhbGciOiJub25lIn0.e30.
+< 302 Found
+< Location: https://sqlos.example.test/auth/callback?error=request_not_supported&state={state#1}&error_description=The%20request%20parameter%20is%20not%20supported.
+
+## 2. browser: request wins over request_uri
+> GET /sqlos/auth/authorize?response_type=code&client_id=behavior-lock-app&redirect_uri=https%3A%2F%2Fsqlos.example.test%2Fauth%2Fcallback&scope=openid%20profile%20email%20offline_access&state={state#2}&nonce={nonce#2}&code_challenge={pkce-challenge#2}&code_challenge_method=S256&request=a-request-object&request_uri=https%3A%2F%2Fclient.example.test%2Frequest.jwt
+< 302 Found
+< Location: https://sqlos.example.test/auth/callback?error=request_not_supported&state={state#2}&error_description=The%20request%20parameter%20is%20not%20supported.
+
+## 3. browser: a request_uri
+> GET /sqlos/auth/authorize?response_type=code&client_id=behavior-lock-app&redirect_uri=https%3A%2F%2Fsqlos.example.test%2Fauth%2Fcallback&scope=openid%20profile%20email%20offline_access&state={state#3}&nonce={nonce#3}&code_challenge={pkce-challenge#3}&code_challenge_method=S256&request_uri=https%3A%2F%2Fclient.example.test%2Frequest.jwt
+< 302 Found
+< Location: https://sqlos.example.test/auth/callback?error=request_uri_not_supported&state={state#3}&error_description=The%20request_uri%20parameter%20is%20not%20supported.
+
+## 4. browser: prompt=none without a session
+> GET /sqlos/auth/authorize?response_type=code&client_id=behavior-lock-app&redirect_uri=https%3A%2F%2Fsqlos.example.test%2Fauth%2Fcallback&scope=openid%20profile%20email%20offline_access&state={state#4}&nonce={nonce#4}&code_challenge={pkce-challenge#4}&code_challenge_method=S256&prompt=none
+< 302 Found
+< Location: https://sqlos.example.test/auth/callback?error=login_required&state={state#4}&error_description=The%20user%20is%20not%20signed%20in.
+
+## 5. browser: the same request form-posted (OIDC Core 3.1.2.1)
+> POST /sqlos/auth/authorize
+> Content-Type: application/x-www-form-urlencoded
+> Origin: https://sqlos.example.test
+>   response_type=code
+>   client_id=behavior-lock-app
+>   redirect_uri=https://sqlos.example.test/auth/callback
+>   scope=openid profile email offline_access
+>   state={state#5}
+>   nonce={nonce#5}
+>   code_challenge={pkce-challenge#5}
+>   code_challenge_method=S256
+>   prompt=none
+< 302 Found
+< Location: https://sqlos.example.test/auth/callback?error=login_required&state={state#5}&error_description=The%20user%20is%20not%20signed%20in.
+
+## audit: error redirects write no audit events
+  (no new events)

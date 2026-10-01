@@ -1,0 +1,434 @@
+# SqlOS behavior lock transcript
+scenario: AdminIdentityClientScenarios.A_code_owned_client_takes_only_the_emergency_switches
+profile: dashboard-callback
+
+## 1. operator: the seeded client's detail: code-owned, managed by the startup seed, with its reconciliation event
+> GET /sqlos/admin/auth/api/clients/behavior-lock-app
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "all_organizations",
+      "allowDeviceAuthorization": false,
+      "allowNativeHeadlessAuth": false,
+      "allowedScopes": [
+        "openid",
+        "profile",
+        "email",
+        "offline_access"
+      ],
+      "audience": "https://sqlos.example.test/api",
+      "clientId": "behavior-lock-app",
+      "clientType": "public_pkce",
+      "clientUri": null,
+      "coreMetadataEditable": true,
+      "description": null,
+      "disabledAt": null,
+      "disabledReason": null,
+      "duplicateCount": 0,
+      "duplicateFingerprint": null,
+      "emptyAllowlistWarning": null,
+      "grantTypes": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "id": "{cli#1}",
+      "isActive": true,
+      "isFirstParty": true,
+      "lastSeenAt": null,
+      "lifecycleState": "active",
+      "logoUri": null,
+      "managedByStartupSeed": true,
+      "metadataCacheState": null,
+      "metadataDocumentUrl": null,
+      "metadataExpiresAt": null,
+      "metadataFetchedAt": null,
+      "metadataJson": null,
+      "name": "Behavior Lock",
+      "oidcCapable": true,
+      "oidcDiscoveryUrl": "https://sqlos.example.test/sqlos/auth/.well-known/openid-configuration",
+      "omittedOpenIdWarning": null,
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": "{hex#1}",
+        "isEditable": false,
+        "isOrphaned": false,
+        "lastReconciledAt": "{datetime:unspecified}",
+        "owner": "code",
+        "sourceKey": "behavior-lock-app"
+      },
+      "recentAuditEvents": [
+        {
+          "actorId": "startup",
+          "actorType": "system",
+          "dataJson": "{\"resourceType\":\"oauth_client\",\"resourceId\":\"behavior-lock-app\",\"owner\":\"code\",\"sourceKey\":\"behavior-lock-app\",\"outcome\":\"created\",\"fingerprint\":\"{hex#1}\"}",
+          "eventType": "configuration.reconciled",
+          "id": "{evt#1}",
+          "occurredAt": "{datetime:unspecified}"
+        }
+      ],
+      "redirectUris": [
+        "https://sqlos.example.test/auth/callback"
+      ],
+      "registrationSource": "seeded",
+      "requirePkce": true,
+      "responseTypes": [
+        "code"
+      ],
+      "softwareId": null,
+      "softwareVersion": null,
+      "sourceLabel": "Seeded",
+      "tokenEndpointAuthMethod": "none"
+    }
+
+## 2. operator: the seeded client refuses the ordinary disable
+> POST /sqlos/admin/auth/api/clients/behavior-lock-app/disable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "reason": "no"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "OAuth client 'behavior-lock-app' is owned by the 'code' configuration source. Use emergency disable for incidents, or change its seed."
+    }
+
+## 3. operator: and the ordinary enable
+> POST /sqlos/admin/auth/api/clients/behavior-lock-app/enable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "OAuth client 'behavior-lock-app' is owned by the 'code' configuration source. Use emergency enable for incidents, or change its seed."
+    }
+
+## 4. operator: emergency enable of an active client is a no-op
+> POST /sqlos/admin/auth/api/clients/behavior-lock-app/emergency-enable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "clientId": "behavior-lock-app",
+      "disabledAt": null,
+      "disabledReason": null,
+      "id": "{cli#1}",
+      "isActive": true
+    }
+
+## 5. operator: emergency disable takes it down
+> POST /sqlos/admin/auth/api/clients/behavior-lock-app/emergency-disable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "clientId": "behavior-lock-app",
+      "disabledAt": "{datetime:utc-z}",
+      "disabledReason": "oauth_client_emergency_disabled",
+      "id": "{cli#1}",
+      "isActive": false
+    }
+
+## 6. operator: a second emergency disable changes nothing
+> POST /sqlos/admin/auth/api/clients/behavior-lock-app/emergency-disable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "clientId": "behavior-lock-app",
+      "disabledAt": "{datetime:unspecified}",
+      "disabledReason": "oauth_client_emergency_disabled",
+      "id": "{cli#1}",
+      "isActive": false
+    }
+
+## 7. client: its sessions were revoked
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=refresh_token
+>   refresh_token={refresh-token#1}
+>   client_id=behavior-lock-app
+< 401 Unauthorized
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+< WWW-Authenticate: Basic
+    {
+      "error": "invalid_client",
+      "error_description": "Client authentication failed."
+    }
+
+## 8. client: and nobody can sign in through it
+> POST /sqlos/auth/password/login
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "email": "{email:alice}",
+>     "password": "{password:alice}"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Client 'behavior-lock-app' is inactive.
+
+## 9. operator: the ordinary enable still refuses
+> POST /sqlos/admin/auth/api/clients/behavior-lock-app/enable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "OAuth client 'behavior-lock-app' is owned by the 'code' configuration source. Use emergency enable for incidents, or change its seed."
+    }
+
+## 10. operator: emergency enable restores it
+> POST /sqlos/admin/auth/api/clients/behavior-lock-app/emergency-enable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "clientId": "behavior-lock-app",
+      "disabledAt": null,
+      "disabledReason": null,
+      "id": "{cli#1}",
+      "isActive": true
+    }
+
+## 11. client: sign-in works again
+> POST /sqlos/auth/password/login
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "email": "{email:alice}",
+>     "password": "{password:alice}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "mfaMethods": null,
+      "mfaToken": null,
+      "organizations": [],
+      "pendingAuthToken": null,
+      "requiresMfa": false,
+      "requiresMfaEnrollment": false,
+      "requiresOrganizationSelection": false,
+      "tokens": {
+        "accessToken": "{access-token#1}",
+        "accessTokenExpiresAt": "{datetime:utc-z}",
+        "clientId": "behavior-lock-app",
+        "idToken": null,
+        "organizationId": null,
+        "refreshToken": "{refresh-token#2}",
+        "refreshTokenExpiresAt": "{datetime:utc-z}",
+        "sessionId": "{ses#1}"
+      }
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+
+## audit: the emergency switches are audited
+  - {
+      "action": "client.emergency_disabled",
+      "actor": {
+        "displayName": null,
+        "id": "{cli#1}",
+        "type": "client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "client.emergency_disabled",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "client_id": "behavior-lock-app",
+        "reason": "oauth_client_emergency_disabled",
+        "source": "seeded"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "oauth.client_authentication.failed",
+      "actor": {
+        "displayName": null,
+        "id": "behavior-lock-app",
+        "type": "oauth_client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.client_authentication.failed",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "clientId": "behavior-lock-app"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "client.emergency_enabled",
+      "actor": {
+        "displayName": null,
+        "id": "{cli#1}",
+        "type": "client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "client.emergency_enabled",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "client_id": "behavior-lock-app",
+        "source": "seeded"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "password.login.succeeded",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "password.login.succeeded",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "AuthorizationRequestId": "[redacted]",
+        "ClientKey": "behavior-lock-app",
+        "NormalizedEmail": "{email:ALICE}",
+        "Surface": "api",
+        "UserAgentHash": null,
+        "details": {
+          "resetScopes": [
+            "email",
+            "user"
+          ]
+        },
+        "maskedEmail": "AL***@EXAMPLE.TEST"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "user.login.password",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.password",
+      "id": "{evt#6}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }

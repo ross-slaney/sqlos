@@ -1,0 +1,265 @@
+# SqlOS behavior lock transcript
+scenario: PublicDirectLoginGateScenarios.Dynamically_registered_and_metadata_document_clients_are_refused_direct_login
+profile: dcr
+
+## 1. client: anyone can register a client
+> POST /sqlos/auth/register
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "client_name": "Registered Client",
+>     "grant_types": [
+>       "authorization_code",
+>       "refresh_token"
+>     ],
+>     "redirect_uris": [
+>       "http://127.0.0.1/callback/registered"
+>     ],
+>     "response_types": [
+>       "code"
+>     ],
+>     "scope": "openid profile offline_access",
+>     "token_endpoint_auth_method": "none"
+>   }
+< 201 Created
+< Content-Type: application/json; charset=utf-8
+    {
+      "client_id": "{dcrcli#1}",
+      "client_id_issued_at": {epoch},
+      "client_name": "Registered Client",
+      "grant_types": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "redirect_uris": [
+        "http://127.0.0.1/callback/registered"
+      ],
+      "response_types": [
+        "code"
+      ],
+      "scope": "openid profile offline_access",
+      "token_endpoint_auth_method": "none"
+    }
+
+## 2. client: the registered client collects Alice's password: refused
+> POST /sqlos/auth/password/login
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "{dcrcli#1}",
+>     "email": "{email:alice}",
+>     "password": "{password:alice}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_client",
+      "message": "This client must use the authorization endpoint to sign users in."
+    }
+
+## 3. client: signup through the registered client: refused
+> POST /sqlos/auth/signup
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "{dcrcli#1}",
+>     "displayName": "Newcomer",
+>     "email": "{email:newcomer}",
+>     "password": "{password:newcomer}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_client",
+      "message": "This client must use the authorization endpoint to sign users in."
+    }
+
+## 4. client: a metadata-document client: SqlOS fetches its document, then refuses it
+> POST /sqlos/auth/password/login
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "https://client.example.test/direct-login-client.json",
+>     "email": "{email:alice}",
+>     "password": "{password:alice}"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_client",
+      "message": "This client must use the authorization endpoint to sign users in."
+    }
+  ~ http SqlOSCimdClientService: GET https://client.example.test/direct-login-client.json -> 200
+
+## 5. client: with email codes off in this deployment, the factor check answers before the client check
+> POST /sqlos/auth/email-otp/start
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "{dcrcli#1}",
+>     "email": "{email:alice}"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Email sign-in is unavailable.
+
+## audit: registration and rejection events
+  - {
+      "action": "client.dcr.registered",
+      "actor": {
+        "displayName": null,
+        "id": "{dcrcli#1}",
+        "type": "client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "client.dcr.registered",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "client_id": "{dcrcli#1}",
+        "client_name": "Registered Client",
+        "grant_types": [
+          "authorization_code",
+          "refresh_token"
+        ],
+        "redirect_uris": [
+          "http://127.0.0.1/callback/registered"
+        ],
+        "response_types": [
+          "code"
+        ],
+        "scope": "openid profile offline_access",
+        "software_id": null,
+        "software_version": null,
+        "token_endpoint_auth_method": "[redacted]"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "oauth.direct_login.rejected",
+      "actor": {
+        "displayName": null,
+        "id": "{cli#1}",
+        "type": "client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.direct_login.rejected",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "client_application_id": "{cli#1}",
+        "client_id": "{dcrcli#1}",
+        "route": "/sqlos/auth/password/login"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "oauth.direct_login.rejected",
+      "actor": {
+        "displayName": null,
+        "id": "{cli#1}",
+        "type": "client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.direct_login.rejected",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "client_application_id": "{cli#1}",
+        "client_id": "{dcrcli#1}",
+        "route": "/sqlos/auth/signup"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "oauth.direct_login.rejected",
+      "actor": {
+        "displayName": null,
+        "id": "{cli#2}",
+        "type": "client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.direct_login.rejected",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "client_application_id": "{cli#2}",
+        "client_id": "https://client.example.test/direct-login-client.json",
+        "route": "/sqlos/auth/password/login"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 6. operator: no session exists
+> GET /sqlos/admin/auth/api/users/{usr#1}/sessions
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }

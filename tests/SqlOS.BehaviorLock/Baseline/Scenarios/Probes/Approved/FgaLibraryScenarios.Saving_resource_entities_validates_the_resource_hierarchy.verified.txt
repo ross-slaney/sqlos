@@ -1,0 +1,253 @@
+# SqlOS behavior lock transcript
+scenario: FgaLibraryScenarios.Saving_resource_entities_validates_the_resource_hierarchy
+profile: dashboard-callback
+
+## 1. probe: a workspace whose parent resource does not exist is not saved
+> POST /__probe/fga/workspaces
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "id": "orphan",
+>     "name": "Orphan",
+>     "parentResourceId": "workspace::missing"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "FGA resource 'workspace::missing' was not found."
+    }
+
+## 2. probe: nor one that is its own parent
+> POST /__probe/fga/workspaces
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "id": "loop",
+>     "name": "Loop",
+>     "parentResourceId": "workspace::loop"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "FGA resource parent cannot be the resource itself."
+    }
+
+## 3. probe: nor a new workspace whose resource already exists
+> POST /__probe/fga/workspaces
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "id": "taken",
+>     "name": "Taken"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "FGA resource 'workspace::taken' already exists for a new resource-backed entity."
+    }
+
+## 4. probe: nor one without a resource name
+> POST /__probe/fga/workspaces
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "id": "blank",
+>     "name": " "
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "ResourceName is required."
+    }
+
+# Workspaces level-0 through level-10 form a chain eleven resources deep (not recorded).
+
+## 5. probe: a twelfth level exceeds the default maximum hierarchy depth of 10
+> POST /__probe/fga/workspaces
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "id": "level-11",
+>     "name": "Level 11",
+>     "parentResourceId": "workspace::level-10"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "FGA resource hierarchy exceeds the configured maximum depth of 10."
+    }
+
+## 6. probe: a grant at the top of the deepest allowed chain reaches its bottom
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::level-10",
+>     "subjectId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": true,
+      "error": null,
+      "trace": [
+        {
+          "detail": "Checking access to Level 10 (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::level-10",
+          "resourceName": "Level 10",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Read workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"Alice\" + 0 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": "Alice"
+        },
+        {
+          "detail": "Checking 11 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Level 10",
+          "grantId": null,
+          "resourceId": "workspace::level-10",
+          "resourceName": "Level 10",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Level 9",
+          "grantId": null,
+          "resourceId": "workspace::level-9",
+          "resourceName": "Level 9",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Level 8",
+          "grantId": null,
+          "resourceId": "workspace::level-8",
+          "resourceName": "Level 8",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Level 7",
+          "grantId": null,
+          "resourceId": "workspace::level-7",
+          "resourceName": "Level 7",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Level 6",
+          "grantId": null,
+          "resourceId": "workspace::level-6",
+          "resourceName": "Level 6",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Level 5",
+          "grantId": null,
+          "resourceId": "workspace::level-5",
+          "resourceName": "Level 5",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Level 4",
+          "grantId": null,
+          "resourceId": "workspace::level-4",
+          "resourceName": "Level 4",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Level 3",
+          "grantId": null,
+          "resourceId": "workspace::level-3",
+          "resourceName": "Level 3",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Level 2",
+          "grantId": null,
+          "resourceId": "workspace::level-2",
+          "resourceName": "Level 2",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Level 1",
+          "grantId": null,
+          "resourceId": "workspace::level-1",
+          "resourceName": "Level 1",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Level 0",
+          "grantId": null,
+          "resourceId": "workspace::level-0",
+          "resourceName": "Level 0",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Role \"Workspace reader\" provides permission \"Read workspace\" via grant at Level 0",
+          "grantId": "grant::{hex#1}",
+          "resourceId": "workspace::level-0",
+          "resourceName": "Level 0",
+          "roleName": "Workspace reader",
+          "step": "Access Granted",
+          "subjectName": "Alice"
+        }
+      ]
+    }
+
+## 7. probe: moving the top of the chain under its own descendant is a cycle
+> PUT /__probe/fga/workspaces/level-0
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "name": "Level 0",
+>     "parentResourceId": "workspace::level-10"
+>   }
+< 422 Unprocessable Entity
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "InvalidOperationException",
+      "message": "FGA resource hierarchy contains a cycle."
+    }

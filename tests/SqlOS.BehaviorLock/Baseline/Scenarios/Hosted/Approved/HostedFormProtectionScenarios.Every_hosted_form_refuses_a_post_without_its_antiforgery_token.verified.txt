@@ -1,0 +1,196 @@
+# SqlOS behavior lock transcript
+scenario: HostedFormProtectionScenarios.Every_hosted_form_refuses_a_post_without_its_antiforgery_token
+profile: hosted
+
+## 1. browser: /sqlos/auth/login/identify
+> POST /sqlos/auth/login/identify
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   email=someone@example.test
+< 400 Bad Request
+< Content-Type: text/plain
+    The hosted form could not be validated. Reload the page and try again.
+
+## 2. browser: /sqlos/auth/login/password
+> POST /sqlos/auth/login/password
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   email=someone@example.test
+< 400 Bad Request
+< Content-Type: text/plain
+    The hosted form could not be validated. Reload the page and try again.
+
+## 3. browser: /sqlos/auth/login/email-otp/start
+> POST /sqlos/auth/login/email-otp/start
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   email=someone@example.test
+< 400 Bad Request
+< Content-Type: text/plain
+    The hosted form could not be validated. Reload the page and try again.
+
+## 4. browser: /sqlos/auth/login/email-otp/verify
+> POST /sqlos/auth/login/email-otp/verify
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   email=someone@example.test
+< 400 Bad Request
+< Content-Type: text/plain
+    The hosted form could not be validated. Reload the page and try again.
+
+## 5. browser: /sqlos/auth/login/magic-link/start
+> POST /sqlos/auth/login/magic-link/start
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   email=someone@example.test
+< 400 Bad Request
+< Content-Type: text/plain
+    The hosted form could not be validated. Reload the page and try again.
+
+## 6. browser: /sqlos/auth/login/magic-link/complete
+> POST /sqlos/auth/login/magic-link/complete
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   email=someone@example.test
+< 400 Bad Request
+< Content-Type: text/plain
+    The hosted form could not be validated. Reload the page and try again.
+
+## 7. browser: /sqlos/auth/login/phone-otp/start
+> POST /sqlos/auth/login/phone-otp/start
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   email=someone@example.test
+< 400 Bad Request
+< Content-Type: text/plain
+    The hosted form could not be validated. Reload the page and try again.
+
+## 8. browser: /sqlos/auth/login/phone-otp/verify
+> POST /sqlos/auth/login/phone-otp/verify
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   email=someone@example.test
+< 400 Bad Request
+< Content-Type: text/plain
+    The hosted form could not be validated. Reload the page and try again.
+
+## 9. browser: /sqlos/auth/login/select-organization
+> POST /sqlos/auth/login/select-organization
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   email=someone@example.test
+< 400 Bad Request
+< Content-Type: text/plain
+    The hosted form could not be validated. Reload the page and try again.
+
+## 10. browser: /sqlos/auth/mfa/verify
+> POST /sqlos/auth/mfa/verify
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   email=someone@example.test
+< 400 Bad Request
+< Content-Type: text/plain
+    The hosted form could not be validated. Reload the page and try again.
+
+## 11. browser: /sqlos/auth/mfa/totp/enroll/verify
+> POST /sqlos/auth/mfa/totp/enroll/verify
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   email=someone@example.test
+< 400 Bad Request
+< Content-Type: text/plain
+    The hosted form could not be validated. Reload the page and try again.
+
+## 12. browser: /sqlos/auth/password/forgot/submit
+> POST /sqlos/auth/password/forgot/submit
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   email=someone@example.test
+< 400 Bad Request
+< Content-Type: text/plain
+    The hosted form could not be validated. Reload the page and try again.
+
+## 13. browser: /sqlos/auth/password/reset/submit
+> POST /sqlos/auth/password/reset/submit
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   email=someone@example.test
+< 400 Bad Request
+< Content-Type: text/plain
+    The hosted form could not be validated. Reload the page and try again.
+
+## 14. browser: /sqlos/auth/signup/submit
+> POST /sqlos/auth/signup/submit
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   email=someone@example.test
+< 400 Bad Request
+< Content-Type: text/plain
+    The hosted form could not be validated. Reload the page and try again.
+
+## 15. browser: /sqlos/auth/signup/invitation/submit
+> POST /sqlos/auth/signup/invitation/submit
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   email=someone@example.test
+< 400 Bad Request
+< Content-Type: text/plain
+    The hosted form could not be validated. Reload the page and try again.
+
+## 16. browser: /sqlos/auth/signup/email-otp/start
+> POST /sqlos/auth/signup/email-otp/start
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   email=someone@example.test
+< 400 Bad Request
+< Content-Type: text/plain
+    The hosted form could not be validated. Reload the page and try again.
+
+## 17. browser: /sqlos/auth/signup/email-otp/verify
+> POST /sqlos/auth/signup/email-otp/verify
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   email=someone@example.test
+< 400 Bad Request
+< Content-Type: text/plain
+    The hosted form could not be validated. Reload the page and try again.
+
+## 18. browser: /sqlos/auth/signup/phone-otp/start
+> POST /sqlos/auth/signup/phone-otp/start
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   email=someone@example.test
+< 400 Bad Request
+< Content-Type: text/plain
+    The hosted form could not be validated. Reload the page and try again.
+
+## 19. browser: /sqlos/auth/signup/phone-otp/verify
+> POST /sqlos/auth/signup/phone-otp/verify
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   email=someone@example.test
+< 400 Bad Request
+< Content-Type: text/plain
+    The hosted form could not be validated. Reload the page and try again.
+
+## audit: refusals are not audited
+  (no new events)

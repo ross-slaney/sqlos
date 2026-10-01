@@ -1,0 +1,251 @@
+# SqlOS behavior lock transcript
+scenario: OidcConnectionAdminScenarios.Operator_creates_edits_and_toggles_a_dashboard_owned_google_connection
+profile: dashboard-callback
+
+## 1. operator: without operator credentials the connection list is not found
+> GET /sqlos/admin/auth/api/oidc-connections
+< 404 Not Found
+
+## 2. operator: no connections are configured yet
+> GET /sqlos/admin/auth/api/oidc-connections
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 3. operator: create a Google connection: the client secret is stored but never returned
+> POST /sqlos/admin/auth/api/oidc-connections
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "acceptedAmrValues": [
+>       "mfa",
+>       " hwk ",
+>       "mfa"
+>     ],
+>     "allowedCallbackUris": [
+>       "https://sqlos.example.test/sqlos/auth/oidc/callback"
+>     ],
+>     "clientId": "  google-admin-client  ",
+>     "clientSecret": "google-admin-secret",
+>     "displayName": "Google Workspace",
+>     "providerType": "google",
+>     "scopes": [
+>       "profile",
+>       "openid",
+>       "email",
+>       "PROFILE"
+>     ],
+>     "trustUpstreamMfa": true,
+>     "useDiscovery": false
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "acceptedAcrValues": [],
+      "acceptedAmrValues": [
+        "mfa",
+        "hwk"
+      ],
+      "allowedCallbackUris": "[\"https://sqlos.example.test/sqlos/auth/oidc/callback\"]",
+      "appleKeyId": null,
+      "appleTeamId": null,
+      "authorizationEndpoint": null,
+      "claimMapping": "{\"SubjectClaim\":\"sub\",\"EmailClaim\":\"email\",\"EmailVerifiedClaim\":\"email_verified\",\"DisplayNameClaim\":\"name\",\"FirstNameClaim\":\"given_name\",\"LastNameClaim\":\"family_name\",\"PreferredUsernameClaim\":\"preferred_username\"}",
+      "clientAuthMethod": "ClientSecretPost",
+      "clientId": "google-admin-client",
+      "createdAt": "{datetime:utc-z}",
+      "discoveryUrl": "https://accounts.google.com/.well-known/openid-configuration",
+      "displayName": "Google Workspace",
+      "effectiveLogoDataUrl": "{data-uri:image/svg+xml}",
+      "id": "{oidc#1}",
+      "isEnabled": true,
+      "issuer": null,
+      "jwksUri": null,
+      "logoDataUrl": null,
+      "microsoftTenant": null,
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "protocol": "Oidc",
+      "providerType": "Google",
+      "scopes": "[\"email\",\"openid\",\"profile\"]",
+      "tokenEndpoint": null,
+      "trustUpstreamMfa": true,
+      "updatedAt": "{datetime:utc-z}",
+      "useDiscovery": true,
+      "useUserInfo": true,
+      "userInfoEndpoint": null
+    }
+
+## 4. probe: the sign-in surfaces now offer Google
+> GET /__probe/auth/providers
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    [
+      {
+        "connectionId": "{oidc#1}",
+        "displayName": "Google Workspace",
+        "isEnabled": true,
+        "logoDataUrl": "{data-uri:image/svg+xml}",
+        "protocol": "Oidc",
+        "providerType": "Google"
+      }
+    ]
+
+## 5. operator: edit it without resending the secret: callbacks are deduplicated, sorted, and {connectionId} is expanded
+> PUT /sqlos/admin/auth/api/oidc-connections/{oidc#1}
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "allowedCallbackUris": [
+>       "https://sqlos.example.test/sqlos/auth/oidc/callback/{connectionId}",
+>       "https://sqlos.example.test/sqlos/auth/oidc/callback",
+>       "https://sqlos.example.test/sqlos/auth/oidc/callback"
+>     ],
+>     "clientAuthMethod": "clientsecretbasic",
+>     "clientId": "google-admin-client",
+>     "displayName": "Google (staff)",
+>     "scopes": [
+>       "openid",
+>       "email"
+>     ],
+>     "trustUpstreamMfa": false,
+>     "useDiscovery": false
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "acceptedAcrValues": [],
+      "acceptedAmrValues": [],
+      "allowedCallbackUris": "[\"https://sqlos.example.test/sqlos/auth/oidc/callback\",\"https://sqlos.example.test/sqlos/auth/oidc/callback/{oidc#1}\"]",
+      "appleKeyId": null,
+      "appleTeamId": null,
+      "authorizationEndpoint": null,
+      "claimMapping": "{\"SubjectClaim\":\"sub\",\"EmailClaim\":\"email\",\"EmailVerifiedClaim\":\"email_verified\",\"DisplayNameClaim\":\"name\",\"FirstNameClaim\":\"given_name\",\"LastNameClaim\":\"family_name\",\"PreferredUsernameClaim\":\"preferred_username\"}",
+      "clientAuthMethod": "ClientSecretBasic",
+      "clientId": "google-admin-client",
+      "createdAt": "{datetime:unspecified}",
+      "discoveryUrl": "https://accounts.google.com/.well-known/openid-configuration",
+      "displayName": "Google (staff)",
+      "effectiveLogoDataUrl": "{data-uri:image/svg+xml}",
+      "id": "{oidc#1}",
+      "isEnabled": true,
+      "issuer": null,
+      "jwksUri": null,
+      "logoDataUrl": null,
+      "microsoftTenant": null,
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": null,
+        "isEditable": true,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dashboard",
+        "sourceKey": null
+      },
+      "protocol": "Oidc",
+      "providerType": "Google",
+      "scopes": "[\"email\",\"openid\"]",
+      "tokenEndpoint": null,
+      "trustUpstreamMfa": false,
+      "updatedAt": "{datetime:utc-z}",
+      "useDiscovery": true,
+      "useUserInfo": true,
+      "userInfoEndpoint": null
+    }
+
+## 6. operator: disable the connection
+> POST /sqlos/admin/auth/api/oidc-connections/{oidc#1}/disable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "id": "{oidc#1}",
+      "isEnabled": false,
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 7. probe: a disabled connection is not offered for sign-in
+> GET /__probe/auth/providers
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    []
+
+## 8. operator: enable it again
+> POST /sqlos/admin/auth/api/oidc-connections/{oidc#1}/enable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "id": "{oidc#1}",
+      "isEnabled": true,
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 9. operator: the dashboard-owned connection as the list reads it
+> GET /sqlos/admin/auth/api/oidc-connections
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "allowedCallbackUris": "[\"https://sqlos.example.test/sqlos/auth/oidc/callback\",\"https://sqlos.example.test/sqlos/auth/oidc/callback/{oidc#1}\"]",
+          "appleKeyId": null,
+          "appleTeamId": null,
+          "authorizationEndpoint": null,
+          "claimMapping": "{\"SubjectClaim\":\"sub\",\"EmailClaim\":\"email\",\"EmailVerifiedClaim\":\"email_verified\",\"DisplayNameClaim\":\"name\",\"FirstNameClaim\":\"given_name\",\"LastNameClaim\":\"family_name\",\"PreferredUsernameClaim\":\"preferred_username\"}",
+          "clientAuthMethod": "ClientSecretBasic",
+          "clientId": "google-admin-client",
+          "createdAt": "{datetime:unspecified}",
+          "discoveryUrl": "https://accounts.google.com/.well-known/openid-configuration",
+          "displayName": "Google (staff)",
+          "effectiveLogoDataUrl": "{data-uri:image/svg+xml}",
+          "id": "{oidc#1}",
+          "isEnabled": true,
+          "issuer": null,
+          "jwksUri": null,
+          "logoDataUrl": null,
+          "microsoftTenant": null,
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "protocol": "Oidc",
+          "providerType": "Google",
+          "scopes": "[\"email\",\"openid\"]",
+          "tokenEndpoint": null,
+          "updatedAt": "{datetime:unspecified}",
+          "useDiscovery": true,
+          "useUserInfo": true,
+          "userInfoEndpoint": null
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## audit: OIDC connection changes write no audit events
+  (no new events)

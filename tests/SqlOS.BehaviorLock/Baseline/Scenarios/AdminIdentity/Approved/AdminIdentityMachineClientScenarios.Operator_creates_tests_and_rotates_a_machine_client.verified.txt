@@ -1,0 +1,799 @@
+# SqlOS behavior lock transcript
+scenario: AdminIdentityMachineClientScenarios.Operator_creates_tests_and_rotates_a_machine_client
+profile: multi-app
+
+## 1. operator: create a machine client with a grant; the secret is shown once
+> POST /sqlos/admin/auth/api/machine-clients
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "audience": "https://api.example.test",
+>     "clientId": "  reporting-worker  ",
+>     "description": "  Nightly reports  ",
+>     "displayName": "Reporting Worker",
+>     "grants": [
+>       {
+>         "description": "Read alpha",
+>         "resourceId": "workspace::alpha",
+>         "roleId": "workspace_reader"
+>       }
+>     ],
+>     "organizationId": "{org#1}",
+>     "scopes": [
+>       "workspace.read",
+>       "workspace.read",
+>       " "
+>     ]
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "client": {
+        "audience": "https://api.example.test",
+        "clientId": "reporting-worker",
+        "configurationOrphanedAt": null,
+        "configurationOwner": "dashboard",
+        "configurationSourceKey": null,
+        "description": "Nightly reports",
+        "disabledReason": null,
+        "displayName": "Reporting Worker",
+        "emergencyDisabled": false,
+        "expiresAt": null,
+        "grantCount": 1,
+        "lastUsedAt": null,
+        "organizationId": "{org#1}",
+        "ownership": {
+          "canEmergencyDisable": true,
+          "configurationFingerprint": null,
+          "isEditable": true,
+          "isOrphaned": false,
+          "lastReconciledAt": null,
+          "owner": "dashboard",
+          "sourceKey": null
+        },
+        "ready": true,
+        "scopes": [
+          "workspace.read"
+        ]
+      },
+      "clientSecret": "{client-secret#1}"
+    }
+
+## audit: creation is audited
+  - {
+      "action": "machine_client.created",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "machine_client.created",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "ClientId": "reporting-worker",
+        "grantCount": 1,
+        "subjectId": "{sub#1}"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 2. operator: machine clients by client ID, the code-owned seed included
+> GET /sqlos/admin/auth/api/machine-clients
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "audience": "https://api.example.test",
+          "clientId": "atlas-worker",
+          "configurationOrphanedAt": null,
+          "configurationOwner": "code",
+          "configurationSourceKey": "atlas-worker",
+          "description": null,
+          "disabledReason": null,
+          "displayName": "Atlas Worker",
+          "emergencyDisabled": false,
+          "expiresAt": null,
+          "grantCount": 0,
+          "lastUsedAt": null,
+          "organizationId": null,
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": "{hex#1}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "atlas-worker"
+          },
+          "ready": true,
+          "scopes": [
+            "workspace.read"
+          ]
+        },
+        {
+          "audience": "https://api.example.test",
+          "clientId": "reporting-worker",
+          "configurationOrphanedAt": null,
+          "configurationOwner": "dashboard",
+          "configurationSourceKey": null,
+          "description": "Nightly reports",
+          "disabledReason": null,
+          "displayName": "Reporting Worker",
+          "emergencyDisabled": false,
+          "expiresAt": null,
+          "grantCount": 1,
+          "lastUsedAt": null,
+          "organizationId": "{org#1}",
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": true,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dashboard",
+            "sourceKey": null
+          },
+          "ready": true,
+          "scopes": [
+            "workspace.read"
+          ]
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 25
+    }
+
+## 3. operator: the secret, audience, and scope test as ready
+> POST /sqlos/admin/auth/api/machine-clients/reporting-worker/validate
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "clientSecret": "{client-secret#1}",
+>     "resource": "https://api.example.test",
+>     "scopes": [
+>       "workspace.read"
+>     ]
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "status": "ready",
+      "valid": true
+    }
+
+## 4. operator: a wrong secret tests as invalid
+> POST /sqlos/admin/auth/api/machine-clients/reporting-worker/validate
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "clientSecret": "{client-secret#2}",
+>     "resource": "https://api.example.test",
+>     "scopes": []
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "status": "credential_or_binding_invalid",
+      "valid": false
+    }
+
+## 5. operator: so does another audience
+> POST /sqlos/admin/auth/api/machine-clients/reporting-worker/validate
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "clientSecret": "{client-secret#1}",
+>     "resource": "https://other.example.test",
+>     "scopes": []
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "status": "credential_or_binding_invalid",
+      "valid": false
+    }
+
+## 6. operator: and a scope the client was not given
+> POST /sqlos/admin/auth/api/machine-clients/reporting-worker/validate
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "clientSecret": "{client-secret#1}",
+>     "resource": "https://api.example.test",
+>     "scopes": [
+>       "workspace.write"
+>     ]
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "status": "credential_or_binding_invalid",
+      "valid": false
+    }
+
+## audit: each test is audited without the secret
+  - {
+      "action": "machine_client.credential_test_succeeded",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "machine_client.credential_test_succeeded",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "clientId": "reporting-worker",
+        "resource": "https://api.example.test",
+        "scopes": [
+          "workspace.read"
+        ]
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "machine_client.credential_test_failed",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "machine_client.credential_test_failed",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "clientId": "reporting-worker",
+        "resource": "https://api.example.test",
+        "scopes": []
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "machine_client.credential_test_failed",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "machine_client.credential_test_failed",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "clientId": "reporting-worker",
+        "resource": "https://other.example.test",
+        "scopes": []
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "machine_client.credential_test_failed",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "machine_client.credential_test_failed",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "clientId": "reporting-worker",
+        "resource": "https://api.example.test",
+        "scopes": [
+          "workspace.write"
+        ]
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 7. client: the client-credentials grant issues a token for the audience
+> POST /sqlos/auth/token
+> Authorization: Basic {credentials#1}
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=client_credentials
+>   resource=https://api.example.test
+>   scope=workspace.read
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "access_token": "{access-token#1}",
+      "expires_in": ~600,
+      "scope": "workspace.read",
+      "token_type": "Bearer"
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "aud": "https://api.example.test",
+      "azp": "reporting-worker",
+      "client_id": "reporting-worker",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "org_id": "{org#1}",
+      "scope": "workspace.read",
+      "sub": "{sub#1}",
+      "token_kind": "service"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+
+## 8. probe: the grant lets the machine client's subject read alpha
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.read",
+>     "resourceId": "workspace::alpha",
+>     "subjectId": "{sub#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": true,
+      "error": null,
+      "trace": [
+        {
+          "detail": "Checking access to Alpha (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Read workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"Reporting Worker\" + 0 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": "Reporting Worker"
+        },
+        {
+          "detail": "Checking 1 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Alpha",
+          "grantId": null,
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Role \"Workspace reader\" provides permission \"Read workspace\" via grant at Alpha",
+          "grantId": "{grant#1}",
+          "resourceId": "workspace::alpha",
+          "resourceName": "Alpha",
+          "roleName": "Workspace reader",
+          "step": "Access Granted",
+          "subjectName": "Reporting Worker"
+        }
+      ]
+    }
+
+## 9. operator: rotate the secret
+> POST /sqlos/admin/auth/api/machine-clients/reporting-worker/rotate
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "client": {
+        "audience": "https://api.example.test",
+        "clientId": "reporting-worker",
+        "configurationOrphanedAt": null,
+        "configurationOwner": "dashboard",
+        "configurationSourceKey": null,
+        "description": "Nightly reports",
+        "disabledReason": null,
+        "displayName": "Reporting Worker",
+        "emergencyDisabled": false,
+        "expiresAt": null,
+        "grantCount": 1,
+        "lastUsedAt": "{datetime:unspecified}",
+        "organizationId": "{org#1}",
+        "ownership": {
+          "canEmergencyDisable": true,
+          "configurationFingerprint": null,
+          "isEditable": true,
+          "isOrphaned": false,
+          "lastReconciledAt": null,
+          "owner": "dashboard",
+          "sourceKey": null
+        },
+        "ready": true,
+        "scopes": [
+          "workspace.read"
+        ]
+      },
+      "clientSecret": "{client-secret#3}"
+    }
+
+## 10. client: the old secret is refused
+> POST /sqlos/auth/token
+> Authorization: Basic {credentials#1}
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=client_credentials
+>   resource=https://api.example.test
+>   scope=workspace.read
+< 401 Unauthorized
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+< WWW-Authenticate: Basic
+    {
+      "error": "invalid_client",
+      "error_description": "Client authentication failed."
+    }
+
+## 11. client: the new secret is accepted
+> POST /sqlos/auth/token
+> Authorization: Basic {credentials#2}
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=client_credentials
+>   resource=https://api.example.test
+>   scope=workspace.read
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "access_token": "{access-token#1}",
+      "expires_in": ~600,
+      "scope": "workspace.read",
+      "token_type": "Bearer"
+    }
+
+## 12. operator: rotation revoked the old credential and issued a new one
+> GET /sqlos/admin/auth/api/clients/reporting-worker/credentials
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "configurationOwner": "dashboard",
+          "configurationSourceKey": null,
+          "createdAt": "{datetime:unspecified}",
+          "displayName": "Machine client credential",
+          "expiresAt": null,
+          "id": "{clcred#1}",
+          "lastUsedAt": "{datetime:unspecified}",
+          "revokedAt": null
+        },
+        {
+          "configurationOwner": "dashboard",
+          "configurationSourceKey": null,
+          "createdAt": "{datetime:unspecified}",
+          "displayName": "Machine client credential",
+          "expiresAt": null,
+          "id": "{clcred#2}",
+          "lastUsedAt": "{datetime:unspecified}",
+          "revokedAt": "{datetime:unspecified}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## audit: token issuance and rotation
+  - {
+      "action": "oauth.client_authentication.succeeded",
+      "actor": {
+        "displayName": null,
+        "id": "reporting-worker",
+        "type": "oauth_client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.client_authentication.succeeded",
+      "id": "{evt#6}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "clientId": "reporting-worker"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "oauth.client_credentials.issued",
+      "actor": {
+        "displayName": null,
+        "id": "reporting-worker",
+        "type": "oauth_client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.client_credentials.issued",
+      "id": "{evt#7}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "clientId": "reporting-worker",
+        "subjectId": "{sub#1}"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "machine_client.secret_rotated",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "admin"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "machine_client.secret_rotated",
+      "id": "{evt#8}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "clientId": "reporting-worker",
+        "subjectId": "{sub#1}"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "oauth.client_authentication.failed",
+      "actor": {
+        "displayName": null,
+        "id": "reporting-worker",
+        "type": "oauth_client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.client_authentication.failed",
+      "id": "{evt#9}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "clientId": "reporting-worker"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "oauth.client_authentication.succeeded",
+      "actor": {
+        "displayName": null,
+        "id": "reporting-worker",
+        "type": "oauth_client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.client_authentication.succeeded",
+      "id": "{evt#10}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "clientId": "reporting-worker"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "oauth.client_credentials.issued",
+      "actor": {
+        "displayName": null,
+        "id": "reporting-worker",
+        "type": "oauth_client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.client_credentials.issued",
+      "id": "{evt#11}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "clientId": "reporting-worker",
+        "subjectId": "{sub#1}"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

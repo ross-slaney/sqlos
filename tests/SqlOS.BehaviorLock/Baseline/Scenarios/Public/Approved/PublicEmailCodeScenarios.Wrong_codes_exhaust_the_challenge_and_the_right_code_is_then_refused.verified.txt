@@ -1,0 +1,387 @@
+# SqlOS behavior lock transcript
+scenario: PublicEmailCodeScenarios.Wrong_codes_exhaust_the_challenge_and_the_right_code_is_then_refused
+profile: hosted
+
+## 1. client: request a sign-in code
+> POST /sqlos/auth/email-otp/start
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "clientId": "behavior-lock-app",
+>     "email": "{email:alice}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "challengeToken": "{challenge-token#1}",
+      "email": "{email:alice}",
+      "expiresAt": "{datetime:utc-z}",
+      "maskedEmail": "al***@example.test",
+      "message": "If an account exists for al***@example.test, check your email for a sign-in code.",
+      "nextAllowedSendAt": "{datetime:utc-z}"
+    }
+  ~ email (transactional) to {email:alice}
+      subject: Your Behavior Lock sign-in code
+      text:
+        Your Behavior Lock sign-in code is {otp#1}. It expires in 10 minute(s).
+      html:
+        <!DOCTYPE html>
+        <html lang="en">
+          <head></head>
+          <body style="margin:0;padding:24px;background:#f8fafc;font-family:Segoe UI,Arial,sans-serif;color:#0f172a;">
+            <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:20px;padding:32px;">
+              <img src="" alt="Behavior Lock" style="max-height:42px;max-width:180px;display:none;margin:0 0 16px;" />
+              <p style="display:block;margin:0 0 12px;font-size:14px;color:#475569;font-weight:600;">Behavior Lock</p>
+              <h1 style="margin:0 0 12px;font-size:28px;line-height:1.1;color:#0f172a;">Your sign-in code</h1>
+              <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">Use this one-time code to finish signing in as al***@example.test. It expires in 10 minute(s).</p>
+              <div style="margin:0 0 20px;padding:18px 20px;border-radius:16px;background:#eff6ff;border:1px solid #bfdbfe;font-size:34px;letter-spacing:0.24em;font-weight:700;text-align:center;color:#2563eb;">{otp#1}</div>
+              <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">If you did not request this code, you can ignore this email.</p>
+            </div>
+          </body>
+        </html>
+
+## 2. client: an unknown challenge token fails without touching the challenge
+> POST /sqlos/auth/email-otp/verify
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "challengeToken": "not-a-challenge-token",
+>     "code": "{otp#1}"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: The sign-in code is invalid or expired.
+
+## 3. client: a code without digits fails before the challenge is read
+> POST /sqlos/auth/email-otp/verify
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "challengeToken": "{challenge-token#1}",
+>     "code": "no digits"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: The sign-in code is invalid or expired.
+
+## 4. client: wrong code, attempt 1
+> POST /sqlos/auth/email-otp/verify
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "challengeToken": "{challenge-token#1}",
+>     "code": "{code#1}"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: The sign-in code is invalid or expired.
+
+## 5. client: wrong code, attempt 2
+> POST /sqlos/auth/email-otp/verify
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "challengeToken": "{challenge-token#1}",
+>     "code": "{code#2}"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: The sign-in code is invalid or expired.
+
+## 6. client: wrong code, attempt 3
+> POST /sqlos/auth/email-otp/verify
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "challengeToken": "{challenge-token#1}",
+>     "code": "{code#3}"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: The sign-in code is invalid or expired.
+
+## 7. client: wrong code, attempt 4
+> POST /sqlos/auth/email-otp/verify
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "challengeToken": "{challenge-token#1}",
+>     "code": "{code#4}"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: The sign-in code is invalid or expired.
+
+## 8. client: wrong code, attempt 5
+> POST /sqlos/auth/email-otp/verify
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "challengeToken": "{challenge-token#1}",
+>     "code": "{code#5}"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: The sign-in code is invalid or expired.
+
+## 9. client: five wrong codes invalidated the challenge: the right code is refused
+> POST /sqlos/auth/email-otp/verify
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "challengeToken": "{challenge-token#1}",
+>     "code": "{otp#1}"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: The sign-in code is invalid or expired.
+
+## audit: failed attempts, the last one invalidating the challenge
+  - {
+      "action": "email.send.queued",
+      "actor": {
+        "displayName": null,
+        "id": "{edl#1}",
+        "type": "email_delivery"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "email.send.queued",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "deliveryId": "{edl#1}",
+        "providerMessageId": "behavior-lock-email-1",
+        "templateKey": "auth.email-otp",
+        "templateVersion": 1
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "email_otp.challenge_started",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "email_otp.challenge_started",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "details": {
+          "authorizationRequestId": "[redacted]",
+          "clientApplicationId": "{cli#1}",
+          "requestedOrganizationId": null,
+          "sent": true
+        },
+        "maskedEmail": "al***@example.test",
+        "purpose": "login"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "email_otp.verify_failed",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "email_otp.verify_failed",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "details": {
+          "AuthorizationRequestId": "[redacted]",
+          "ClientApplicationId": "{cli#1}",
+          "reason": "wrong_code"
+        },
+        "maskedEmail": "al***@example.test",
+        "purpose": "login"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "email_otp.verify_failed",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "email_otp.verify_failed",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "details": {
+          "AuthorizationRequestId": "[redacted]",
+          "ClientApplicationId": "{cli#1}",
+          "reason": "wrong_code"
+        },
+        "maskedEmail": "al***@example.test",
+        "purpose": "login"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "email_otp.verify_failed",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "email_otp.verify_failed",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "details": {
+          "AuthorizationRequestId": "[redacted]",
+          "ClientApplicationId": "{cli#1}",
+          "reason": "wrong_code"
+        },
+        "maskedEmail": "al***@example.test",
+        "purpose": "login"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "email_otp.verify_failed",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "email_otp.verify_failed",
+      "id": "{evt#6}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "details": {
+          "AuthorizationRequestId": "[redacted]",
+          "ClientApplicationId": "{cli#1}",
+          "reason": "wrong_code"
+        },
+        "maskedEmail": "al***@example.test",
+        "purpose": "login"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "email_otp.verify_failed",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "email_otp.verify_failed",
+      "id": "{evt#7}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "details": {
+          "AuthorizationRequestId": "[redacted]",
+          "ClientApplicationId": "{cli#1}",
+          "reason": "max_attempts"
+        },
+        "maskedEmail": "al***@example.test",
+        "purpose": "login"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

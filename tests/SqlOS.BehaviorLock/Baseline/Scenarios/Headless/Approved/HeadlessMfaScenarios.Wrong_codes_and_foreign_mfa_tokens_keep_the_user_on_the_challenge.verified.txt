@@ -1,0 +1,724 @@
+# SqlOS behavior lock transcript
+scenario: HeadlessMfaScenarios.Wrong_codes_and_foreign_mfa_tokens_keep_the_user_on_the_challenge
+profile: headless
+
+## 1. browser: confirm the authenticator with a wrong code: the enrollment view with an error
+> POST /sqlos/auth/headless/mfa/totp/enroll/verify
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "code": "{code#1}",
+>     "enrollmentToken": "{enrollment-token#1}",
+>     "mfaToken": "{mfa-token#1}",
+>     "requestId": "{req#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "redirectUrl": null,
+      "type": "view",
+      "viewModel": {
+        "authBasePath": "/sqlos/auth",
+        "challengeToken": null,
+        "clientId": "behavior-lock-app",
+        "clientName": "Behavior Lock",
+        "consentScopes": null,
+        "consentToken": null,
+        "deviceAuthorization": null,
+        "displayName": null,
+        "email": "{email:grace}",
+        "error": "The request could not be completed.",
+        "fieldErrors": {},
+        "headlessApiBasePath": "/sqlos/auth/headless",
+        "info": null,
+        "invitation": null,
+        "mfaMethods": [
+          "totp"
+        ],
+        "mfaToken": "{mfa-token#1}",
+        "omittedOpenId": false,
+        "organizationSelection": [],
+        "pendingToken": null,
+        "phoneNumber": null,
+        "providers": [
+          {
+            "connectionId": "{oidc#1}",
+            "displayName": "Example OIDC",
+            "logoDataUrl": null,
+            "providerType": "Custom"
+          },
+          {
+            "connectionId": "{oidc#2}",
+            "displayName": "Google",
+            "logoDataUrl": "{data-uri:image/svg+xml}",
+            "providerType": "Google"
+          }
+        ],
+        "requestId": "{req#1}",
+        "requiresMfaEnrollment": true,
+        "scope": "openid profile email offline_access",
+        "settings": {
+          "accentColor": "#0f172a",
+          "backgroundColor": "#f8fafc",
+          "emailOtpRuntimeConfigured": true,
+          "enablePasswordSignup": true,
+          "enabledCredentialTypes": [
+            "password",
+            "email_otp",
+            "magic_link",
+            "phone_otp"
+          ],
+          "headlessCapabilityRegistered": true,
+          "layout": "split",
+          "localPasswordRuntimeEnabled": true,
+          "logoBase64": null,
+          "magicLinkRuntimeConfigured": true,
+          "managedByStartupSeed": true,
+          "ownership": {
+            "canEmergencyDisable": false,
+            "configurationFingerprint": "{hex#1}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "auth-page:default"
+          },
+          "pageSubtitle": "Secure your app-owned AI and MCP experiences with SqlOS.",
+          "pageTitle": "Sign in to Behavior Lock",
+          "phoneOtpRuntimeConfigured": true,
+          "primaryColor": "#2563eb",
+          "updatedAt": "{datetime:unspecified}"
+        },
+        "signupToken": null,
+        "totpEnrollment": null,
+        "uiContext": null,
+        "view": "mfa-enroll"
+      }
+    }
+
+## 2. browser: restart enrollment with an MFA token that does not exist
+> POST /sqlos/auth/headless/mfa/totp/enroll/start
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "mfaToken": "not-an-mfa-token",
+>     "requestId": "{req#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "redirectUrl": null,
+      "type": "view",
+      "viewModel": {
+        "authBasePath": "/sqlos/auth",
+        "challengeToken": null,
+        "clientId": "behavior-lock-app",
+        "clientName": "Behavior Lock",
+        "consentScopes": null,
+        "consentToken": null,
+        "deviceAuthorization": null,
+        "displayName": null,
+        "email": "{email:grace}",
+        "error": "MFA challenge is invalid or expired.",
+        "fieldErrors": {},
+        "headlessApiBasePath": "/sqlos/auth/headless",
+        "info": null,
+        "invitation": null,
+        "mfaMethods": [
+          "totp"
+        ],
+        "mfaToken": "not-an-mfa-token",
+        "omittedOpenId": false,
+        "organizationSelection": [],
+        "pendingToken": null,
+        "phoneNumber": null,
+        "providers": [
+          {
+            "connectionId": "{oidc#1}",
+            "displayName": "Example OIDC",
+            "logoDataUrl": null,
+            "providerType": "Custom"
+          },
+          {
+            "connectionId": "{oidc#2}",
+            "displayName": "Google",
+            "logoDataUrl": "{data-uri:image/svg+xml}",
+            "providerType": "Google"
+          }
+        ],
+        "requestId": "{req#1}",
+        "requiresMfaEnrollment": true,
+        "scope": "openid profile email offline_access",
+        "settings": {
+          "accentColor": "#0f172a",
+          "backgroundColor": "#f8fafc",
+          "emailOtpRuntimeConfigured": true,
+          "enablePasswordSignup": true,
+          "enabledCredentialTypes": [
+            "password",
+            "email_otp",
+            "magic_link",
+            "phone_otp"
+          ],
+          "headlessCapabilityRegistered": true,
+          "layout": "split",
+          "localPasswordRuntimeEnabled": true,
+          "logoBase64": null,
+          "magicLinkRuntimeConfigured": true,
+          "managedByStartupSeed": true,
+          "ownership": {
+            "canEmergencyDisable": false,
+            "configurationFingerprint": "{hex#1}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "auth-page:default"
+          },
+          "pageSubtitle": "Secure your app-owned AI and MCP experiences with SqlOS.",
+          "pageTitle": "Sign in to Behavior Lock",
+          "phoneOtpRuntimeConfigured": true,
+          "primaryColor": "#2563eb",
+          "updatedAt": "{datetime:unspecified}"
+        },
+        "signupToken": null,
+        "totpEnrollment": null,
+        "uiContext": null,
+        "view": "mfa-enroll"
+      }
+    }
+
+## 3. browser: reload the request with the MFA token: the enrollment view with a new authenticator
+> GET /sqlos/auth/headless/requests/{req#1}?mfaToken={mfa-token#1}
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "authBasePath": "/sqlos/auth",
+      "challengeToken": null,
+      "clientId": "behavior-lock-app",
+      "clientName": "Behavior Lock",
+      "consentScopes": null,
+      "consentToken": null,
+      "deviceAuthorization": null,
+      "displayName": null,
+      "email": "{email:grace}",
+      "error": null,
+      "fieldErrors": {},
+      "headlessApiBasePath": "/sqlos/auth/headless",
+      "info": null,
+      "invitation": null,
+      "mfaMethods": [
+        "totp",
+        "recovery_code"
+      ],
+      "mfaToken": "{mfa-token#1}",
+      "omittedOpenId": false,
+      "organizationSelection": [],
+      "pendingToken": null,
+      "phoneNumber": null,
+      "providers": [
+        {
+          "connectionId": "{oidc#1}",
+          "displayName": "Example OIDC",
+          "logoDataUrl": null,
+          "providerType": "Custom"
+        },
+        {
+          "connectionId": "{oidc#2}",
+          "displayName": "Google",
+          "logoDataUrl": "{data-uri:image/svg+xml}",
+          "providerType": "Google"
+        }
+      ],
+      "requestId": "{req#1}",
+      "requiresMfaEnrollment": true,
+      "scope": "openid profile email offline_access",
+      "settings": {
+        "accentColor": "#0f172a",
+        "backgroundColor": "#f8fafc",
+        "emailOtpRuntimeConfigured": true,
+        "enablePasswordSignup": true,
+        "enabledCredentialTypes": [
+          "password",
+          "email_otp",
+          "magic_link",
+          "phone_otp"
+        ],
+        "headlessCapabilityRegistered": true,
+        "layout": "split",
+        "localPasswordRuntimeEnabled": true,
+        "logoBase64": null,
+        "magicLinkRuntimeConfigured": true,
+        "managedByStartupSeed": true,
+        "ownership": {
+          "canEmergencyDisable": false,
+          "configurationFingerprint": "{hex#1}",
+          "isEditable": false,
+          "isOrphaned": false,
+          "lastReconciledAt": "{datetime:unspecified}",
+          "owner": "code",
+          "sourceKey": "auth-page:default"
+        },
+        "pageSubtitle": "Secure your app-owned AI and MCP experiences with SqlOS.",
+        "pageTitle": "Sign in to Behavior Lock",
+        "phoneOtpRuntimeConfigured": true,
+        "primaryColor": "#2563eb",
+        "updatedAt": "{datetime:unspecified}"
+      },
+      "signupToken": null,
+      "totpEnrollment": {
+        "authenticatorId": "{mfa#1}",
+        "enrollmentToken": "{enrollment-token#2}",
+        "expiresAt": "{datetime:utc-z}",
+        "provisioningUri": "otpauth://totp/SqlOS:{email:grace}?secret={totp-secret#1}&issuer=SqlOS&algorithm=SHA1&digits=6&period=30",
+        "qrCodeDataUrl": "{data-uri:image/svg+xml}",
+        "secret": "{totp-secret#1}"
+      },
+      "uiContext": null,
+      "view": "mfa-enroll"
+    }
+
+## 4. browser: confirm the reloaded authenticator: a redirect with a code
+> POST /sqlos/auth/headless/mfa/totp/enroll/verify
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "code": "{code#2}",
+>     "enrollmentToken": "{enrollment-token#2}",
+>     "mfaToken": "{mfa-token#1}",
+>     "requestId": "{req#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+< Set-Cookie: sqlos_auth_page={cookie#1}; expires=+7d; path=/; secure; samesite=lax; httponly
+    {
+      "redirectUrl": "https://sqlos.example.test/auth/callback?code={code#3}&state={state#1}&scope=openid%20profile%20email%20offline_access",
+      "type": "redirect",
+      "viewModel": null
+    }
+
+## 5. laptop: answer the challenge with a wrong code: the MFA view with an error
+> POST /sqlos/auth/headless/mfa/verify
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "code": "{code#1}",
+>     "mfaToken": "{mfa-token#2}",
+>     "requestId": "{req#2}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "redirectUrl": null,
+      "type": "view",
+      "viewModel": {
+        "authBasePath": "/sqlos/auth",
+        "challengeToken": null,
+        "clientId": "behavior-lock-app",
+        "clientName": "Behavior Lock",
+        "consentScopes": null,
+        "consentToken": null,
+        "deviceAuthorization": null,
+        "displayName": null,
+        "email": "{email:grace}",
+        "error": "MFA code is invalid.",
+        "fieldErrors": {},
+        "headlessApiBasePath": "/sqlos/auth/headless",
+        "info": null,
+        "invitation": null,
+        "mfaMethods": [
+          "totp",
+          "recovery_code"
+        ],
+        "mfaToken": "{mfa-token#2}",
+        "omittedOpenId": false,
+        "organizationSelection": [],
+        "pendingToken": null,
+        "phoneNumber": null,
+        "providers": [
+          {
+            "connectionId": "{oidc#1}",
+            "displayName": "Example OIDC",
+            "logoDataUrl": null,
+            "providerType": "Custom"
+          },
+          {
+            "connectionId": "{oidc#2}",
+            "displayName": "Google",
+            "logoDataUrl": "{data-uri:image/svg+xml}",
+            "providerType": "Google"
+          }
+        ],
+        "requestId": "{req#2}",
+        "requiresMfaEnrollment": false,
+        "scope": "openid profile email offline_access",
+        "settings": {
+          "accentColor": "#0f172a",
+          "backgroundColor": "#f8fafc",
+          "emailOtpRuntimeConfigured": true,
+          "enablePasswordSignup": true,
+          "enabledCredentialTypes": [
+            "password",
+            "email_otp",
+            "magic_link",
+            "phone_otp"
+          ],
+          "headlessCapabilityRegistered": true,
+          "layout": "split",
+          "localPasswordRuntimeEnabled": true,
+          "logoBase64": null,
+          "magicLinkRuntimeConfigured": true,
+          "managedByStartupSeed": true,
+          "ownership": {
+            "canEmergencyDisable": false,
+            "configurationFingerprint": "{hex#1}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "auth-page:default"
+          },
+          "pageSubtitle": "Secure your app-owned AI and MCP experiences with SqlOS.",
+          "pageTitle": "Sign in to Behavior Lock",
+          "phoneOtpRuntimeConfigured": true,
+          "primaryColor": "#2563eb",
+          "updatedAt": "{datetime:unspecified}"
+        },
+        "signupToken": null,
+        "totpEnrollment": null,
+        "uiContext": null,
+        "view": "mfa"
+      }
+    }
+
+## 6. laptop: reload the request with the MFA token: the challenge view
+> GET /sqlos/auth/headless/requests/{req#2}?mfaToken={mfa-token#2}
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "authBasePath": "/sqlos/auth",
+      "challengeToken": null,
+      "clientId": "behavior-lock-app",
+      "clientName": "Behavior Lock",
+      "consentScopes": null,
+      "consentToken": null,
+      "deviceAuthorization": null,
+      "displayName": null,
+      "email": "{email:grace}",
+      "error": null,
+      "fieldErrors": {},
+      "headlessApiBasePath": "/sqlos/auth/headless",
+      "info": null,
+      "invitation": null,
+      "mfaMethods": [
+        "totp",
+        "recovery_code"
+      ],
+      "mfaToken": "{mfa-token#2}",
+      "omittedOpenId": false,
+      "organizationSelection": [],
+      "pendingToken": null,
+      "phoneNumber": null,
+      "providers": [
+        {
+          "connectionId": "{oidc#1}",
+          "displayName": "Example OIDC",
+          "logoDataUrl": null,
+          "providerType": "Custom"
+        },
+        {
+          "connectionId": "{oidc#2}",
+          "displayName": "Google",
+          "logoDataUrl": "{data-uri:image/svg+xml}",
+          "providerType": "Google"
+        }
+      ],
+      "requestId": "{req#2}",
+      "requiresMfaEnrollment": false,
+      "scope": "openid profile email offline_access",
+      "settings": {
+        "accentColor": "#0f172a",
+        "backgroundColor": "#f8fafc",
+        "emailOtpRuntimeConfigured": true,
+        "enablePasswordSignup": true,
+        "enabledCredentialTypes": [
+          "password",
+          "email_otp",
+          "magic_link",
+          "phone_otp"
+        ],
+        "headlessCapabilityRegistered": true,
+        "layout": "split",
+        "localPasswordRuntimeEnabled": true,
+        "logoBase64": null,
+        "magicLinkRuntimeConfigured": true,
+        "managedByStartupSeed": true,
+        "ownership": {
+          "canEmergencyDisable": false,
+          "configurationFingerprint": "{hex#1}",
+          "isEditable": false,
+          "isOrphaned": false,
+          "lastReconciledAt": "{datetime:unspecified}",
+          "owner": "code",
+          "sourceKey": "auth-page:default"
+        },
+        "pageSubtitle": "Secure your app-owned AI and MCP experiences with SqlOS.",
+        "pageTitle": "Sign in to Behavior Lock",
+        "phoneOtpRuntimeConfigured": true,
+        "primaryColor": "#2563eb",
+        "updatedAt": "{datetime:unspecified}"
+      },
+      "signupToken": null,
+      "totpEnrollment": null,
+      "uiContext": null,
+      "view": "mfa"
+    }
+
+## 7. laptop: the right code still completes the challenge
+> POST /sqlos/auth/headless/mfa/verify
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "code": "{code#4}",
+>     "mfaToken": "{mfa-token#2}",
+>     "requestId": "{req#2}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+< Set-Cookie: sqlos_auth_page={cookie#2}; expires=+7d; path=/; secure; samesite=lax; httponly
+    {
+      "redirectUrl": "https://sqlos.example.test/auth/callback?code={code#5}&state={state#2}&scope=openid%20profile%20email%20offline_access",
+      "type": "redirect",
+      "viewModel": null
+    }
+
+## audit: MFA failure events
+  - {
+      "action": "password.login.succeeded",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "password.login.succeeded",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "AuthorizationRequestId": "[redacted]",
+        "ClientKey": "behavior-lock-app",
+        "NormalizedEmail": "{email:GRACE}",
+        "Surface": "headless",
+        "UserAgentHash": null,
+        "details": {
+          "resetScopes": [
+            "email",
+            "user"
+          ]
+        },
+        "maskedEmail": "GR***@EXAMPLE.TEST"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "Authenticator code is invalid.",
+        "error": "invalid_request",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The request could not be completed.",
+        "surface": "HeadlessView"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "user.login.mfa",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.mfa",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "password.login.succeeded",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "password.login.succeeded",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "AuthorizationRequestId": "[redacted]",
+        "ClientKey": "behavior-lock-app",
+        "NormalizedEmail": "{email:GRACE}",
+        "Surface": "headless",
+        "UserAgentHash": null,
+        "details": {
+          "resetScopes": [
+            "email",
+            "user"
+          ]
+        },
+        "maskedEmail": "GR***@EXAMPLE.TEST"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "user.mfa.challenge_failed",
+      "actor": {
+        "displayName": null,
+        "id": null,
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.mfa.challenge_failed",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "challengeId": "{tmp#1}",
+        "details": {
+          "attemptCount": 1,
+          "challengeLocked": false
+        }
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "user.login.mfa",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.mfa",
+      "id": "{evt#6}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }

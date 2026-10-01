@@ -1,0 +1,192 @@
+# SqlOS behavior lock transcript
+scenario: SamlIdentityScenarios.A_returning_subject_signs_in_by_binding_and_a_new_subject_cannot_take_over_the_account
+profile: enterprise
+
+## 1. browser: first sign-in: subject idp-subject-1 is provisioned and bound
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#1}
+>   RelayState={relay-state#1}
+< 302 Found
+< Location: https://sqlos.example.test/auth/callback?code={code#1}&state={state#1}&scope=openid%20profile%20email%20offline_access
+< Set-Cookie: sqlos_auth_page={cookie#1}; expires=+7d; path=/; secure; samesite=lax; httponly
+
+## 2. browser: the same subject with a new email attribute still signs in as Ivan; the binding decides, not the email
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page={cookie#1}
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#2}
+>   RelayState={relay-state#2}
+< 302 Found
+< Location: https://sqlos.example.test/auth/callback?code={code#2}&state={state#2}&scope=openid%20profile%20email%20offline_access
+< Set-Cookie: sqlos_auth_page={cookie#2}; expires=+7d; path=/; secure; samesite=lax; httponly
+
+## 3. browser: a different subject asserting Ivan's address is refused: the connection already has Ivan's binding
+> POST /sqlos/auth/saml/acs/{sso#1}
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page={cookie#2}
+> Origin: https://sqlos.example.test
+>   SAMLResponse={saml-response#3}
+>   RelayState={relay-state#3}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "access_denied",
+      "message": "The external sign-in request could not be completed."
+    }
+
+## audit: sign-ins and the link denial
+  - {
+      "action": "user.login.saml.assurance",
+      "actor": {
+        "displayName": null,
+        "id": "{sso#1}",
+        "type": "sso_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.saml.assurance",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "Accepted": false,
+        "AcceptedClaim": null,
+        "AcceptedValue": null,
+        "EvidencePresent": false,
+        "Reason": "evidence_missing",
+        "SamlAuthnContextClassRefs": [],
+        "assertionIssuer": "urn:behavior-lock:idp",
+        "connectionId": "{sso#1}"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "user.login.saml.assurance",
+      "actor": {
+        "displayName": null,
+        "id": "{sso#1}",
+        "type": "sso_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.saml.assurance",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "Accepted": false,
+        "AcceptedClaim": null,
+        "AcceptedValue": null,
+        "EvidencePresent": false,
+        "Reason": "evidence_missing",
+        "SamlAuthnContextClassRefs": [],
+        "assertionIssuer": "urn:behavior-lock:idp",
+        "connectionId": "{sso#1}"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "user.login.saml.link_denied",
+      "actor": {
+        "displayName": null,
+        "id": "{sso#1}",
+        "type": "sso_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.saml.link_denied",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "connectionId": "{sso#1}",
+        "reason": "connection_already_linked"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "No user could be resolved from the SAML assertion.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "SamlAcs"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

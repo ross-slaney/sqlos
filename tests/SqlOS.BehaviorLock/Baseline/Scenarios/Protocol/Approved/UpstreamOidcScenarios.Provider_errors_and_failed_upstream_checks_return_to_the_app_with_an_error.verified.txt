@@ -1,0 +1,705 @@
+# SqlOS behavior lock transcript
+scenario: UpstreamOidcScenarios.Provider_errors_and_failed_upstream_checks_return_to_the_app_with_an_error
+profile: hosted
+
+## 1. browser: the provider reports an error
+> GET /sqlos/auth/oidc/callback?error=access_denied&error_description=User%20cancelled&state={state#1}
+< 302 Found
+< Location: https://sqlos.example.test/auth/callback?state={state#2}&error=The%20external%20identity%20provider%20returned%20an%20error.
+
+## audit
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "oidc_provider_error",
+        "diagnosticMessage": "provider_error=access_denied; provider_description=User cancelled",
+        "error": "access_denied",
+        "failureType": "SqlOS.AuthServer.Errors.SqlOSPublicAuthException",
+        "publicMessage": "The external identity provider returned an error.",
+        "surface": "OidcCallback"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 2. browser: no code
+> GET /sqlos/auth/oidc/callback?state={state#3}
+< 302 Found
+< Location: https://sqlos.example.test/auth/callback?state={state#4}&error=The%20OIDC%20callback%20was%20missing%20the%20provider%20code.
+
+## audit
+  (no new events)
+
+## 3. browser: the provider's token endpoint refuses the code
+> GET /sqlos/auth/oidc/callback?code=bad-code&state={state#5}
+< 302 Found
+< Location: https://sqlos.example.test/auth/callback?state={state#6}&error=The%20external%20sign-in%20request%20could%20not%20be%20completed.
+  ~ http SqlOSOidcAuthService: GET https://accounts.google.com/.well-known/openid-configuration -> 200
+  ~ http SqlOSOidcAuthService: POST https://oauth2.googleapis.com/token -> 400
+      grant_type=authorization_code
+      client_id=google-client-id
+      code=bad-code
+      redirect_uri=https://sqlos.example.test/sqlos/auth/oidc/callback
+      code_verifier={pkce-verifier#1}
+      client_secret=google-client-secret
+
+## audit
+  - {
+      "action": "user.login.oidc.error",
+      "actor": {
+        "displayName": null,
+        "id": "{oidc#1}",
+        "type": "oidc_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.oidc.error",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "error": "The authorization code is invalid."
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "The authorization code is invalid.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "OidcCallback"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 4. browser: the ID token carries another nonce
+> GET /sqlos/auth/oidc/callback?code={code#1}&state={state#7}
+< 302 Found
+< Location: https://sqlos.example.test/auth/callback?state={state#8}&error=The%20external%20sign-in%20request%20could%20not%20be%20completed.
+  ~ http SqlOSOidcAuthService: GET https://accounts.google.com/.well-known/openid-configuration -> 200
+  ~ http SqlOSOidcAuthService: POST https://oauth2.googleapis.com/token -> 200
+      grant_type=authorization_code
+      client_id=google-client-id
+      code={code#1}
+      redirect_uri=https://sqlos.example.test/sqlos/auth/oidc/callback
+      code_verifier={pkce-verifier#2}
+      client_secret=google-client-secret
+  ~ http SqlOSOidcAuthService: GET https://www.googleapis.com/oauth2/v3/certs -> 200
+
+## audit
+  - {
+      "action": "user.login.oidc.error",
+      "actor": {
+        "displayName": null,
+        "id": "{oidc#1}",
+        "type": "oidc_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.oidc.error",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "error": "OIDC nonce validation failed."
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "OIDC nonce validation failed.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "OidcCallback"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 5. browser: UserInfo names another subject than the ID token
+> GET /sqlos/auth/oidc/callback?code={code#2}&state={state#9}
+< 302 Found
+< Location: https://sqlos.example.test/auth/callback?state={state#10}&error=The%20external%20sign-in%20request%20could%20not%20be%20completed.
+  ~ http SqlOSOidcAuthService: GET https://accounts.google.com/.well-known/openid-configuration -> 200
+  ~ http SqlOSOidcAuthService: POST https://oauth2.googleapis.com/token -> 200
+      grant_type=authorization_code
+      client_id=google-client-id
+      code={code#2}
+      redirect_uri=https://sqlos.example.test/sqlos/auth/oidc/callback
+      code_verifier={pkce-verifier#3}
+      client_secret=google-client-secret
+  ~ http SqlOSOidcAuthService: GET https://www.googleapis.com/oauth2/v3/certs -> 200
+  ~ http SqlOSOidcAuthService: GET https://openidconnect.googleapis.com/v1/userinfo -> 200
+
+## audit
+  - {
+      "action": "user.login.oidc.claim_mismatch",
+      "actor": {
+        "displayName": null,
+        "id": "{oidc#1}",
+        "type": "oidc_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.oidc.claim_mismatch",
+      "id": "{evt#6}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "anchorSubject": "google-{email:grace}",
+        "oidcConnectionId": "{oidc#1}",
+        "provider": "Google",
+        "reason": "userinfo_subject_mismatch",
+        "userInfoSubject": "mismatched-google-{email:grace}"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "user.login.oidc.error",
+      "actor": {
+        "displayName": null,
+        "id": "{oidc#1}",
+        "type": "oidc_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.oidc.error",
+      "id": "{evt#7}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "error": "The social login could not be completed."
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#8}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "The social login could not be completed.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "OidcCallback"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 6. browser: Google says the email is not verified
+> GET /sqlos/auth/oidc/callback?code={code#3}&state={state#11}
+< 302 Found
+< Location: https://sqlos.example.test/auth/callback?state={state#12}&error=The%20external%20sign-in%20request%20could%20not%20be%20completed.
+  ~ http SqlOSOidcAuthService: GET https://accounts.google.com/.well-known/openid-configuration -> 200
+  ~ http SqlOSOidcAuthService: POST https://oauth2.googleapis.com/token -> 200
+      grant_type=authorization_code
+      client_id=google-client-id
+      code={code#3}
+      redirect_uri=https://sqlos.example.test/sqlos/auth/oidc/callback
+      code_verifier={pkce-verifier#4}
+      client_secret=google-client-secret
+  ~ http SqlOSOidcAuthService: GET https://www.googleapis.com/oauth2/v3/certs -> 200
+  ~ http SqlOSOidcAuthService: GET https://openidconnect.googleapis.com/v1/userinfo -> 200
+
+## audit
+  - {
+      "action": "user.login.oidc.claim_mismatch",
+      "actor": {
+        "displayName": null,
+        "id": "{oidc#1}",
+        "type": "oidc_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.oidc.claim_mismatch",
+      "id": "{evt#9}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "claimSource": "userinfo",
+        "oidcConnectionId": "{oidc#1}",
+        "provider": "Google",
+        "reason": "verified_email_missing_from_source"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "user.login.oidc.error",
+      "actor": {
+        "displayName": null,
+        "id": "{oidc#1}",
+        "type": "oidc_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.oidc.error",
+      "id": "{evt#10}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "error": "The social login could not be completed."
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#11}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "The social login could not be completed.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "OidcCallback"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 7. browser: no email address
+> GET /sqlos/auth/oidc/callback?code={code#4}&state={state#13}
+< 302 Found
+< Location: https://sqlos.example.test/auth/callback?state={state#14}&error=The%20external%20sign-in%20request%20could%20not%20be%20completed.
+  ~ http SqlOSOidcAuthService: GET https://accounts.google.com/.well-known/openid-configuration -> 200
+  ~ http SqlOSOidcAuthService: POST https://oauth2.googleapis.com/token -> 200
+      grant_type=authorization_code
+      client_id=google-client-id
+      code={code#4}
+      redirect_uri=https://sqlos.example.test/sqlos/auth/oidc/callback
+      code_verifier={pkce-verifier#5}
+      client_secret=google-client-secret
+  ~ http SqlOSOidcAuthService: GET https://www.googleapis.com/oauth2/v3/certs -> 200
+  ~ http SqlOSOidcAuthService: GET https://openidconnect.googleapis.com/v1/userinfo -> 200
+
+## audit
+  - {
+      "action": "user.login.oidc.error",
+      "actor": {
+        "displayName": null,
+        "id": "{oidc#1}",
+        "type": "oidc_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.oidc.error",
+      "id": "{evt#12}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "error": "The social login provider did not return a usable email address."
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "auth.public_error.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "authserver",
+        "type": "system"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "auth.public_error.mapped",
+      "id": "{evt#13}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "auditReason": "opaque_auth_error",
+        "diagnosticMessage": "The social login provider did not return a usable email address.",
+        "error": "access_denied",
+        "failureType": "System.InvalidOperationException",
+        "publicMessage": "The external sign-in request could not be completed.",
+        "surface": "OidcCallback"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }
+
+## 8. browser: a successful custom-provider callback for comparison
+> GET /sqlos/auth/oidc/callback?code={code#5}&state={state#15}
+< 302 Found
+< Location: https://sqlos.example.test/auth/callback?code={code#6}&state={state#16}
+  ~ http SqlOSOidcAuthService: GET https://oidc.example.local/.well-known/openid-configuration -> 200
+  ~ http SqlOSOidcAuthService: POST https://oidc.example.local/token -> 200
+      grant_type=authorization_code
+      client_id=custom-client-id
+      code={code#5}
+      redirect_uri=https://sqlos.example.test/sqlos/auth/oidc/callback
+      code_verifier={pkce-verifier#6}
+      client_secret=custom-client-secret
+  ~ http SqlOSOidcAuthService: GET https://oidc.example.local/jwks -> 200
+  ~ http SqlOSOidcAuthService: GET https://oidc.example.local/userinfo -> 200
+
+## audit
+  - {
+      "action": "user.login.oidc.provisioned",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.oidc.provisioned",
+      "id": "{evt#14}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "oidcConnectionId": "{oidc#2}",
+        "provider": "Custom"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "user.login.oidc.success",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.oidc.success",
+      "id": "{evt#15}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "oidcConnectionId": "{oidc#2}",
+        "protocol": "Oidc",
+        "provider": "Custom",
+        "upstreamMfa": {
+          "Accepted": false,
+          "AcceptedClaim": null,
+          "AcceptedValue": null,
+          "AcrValues": [],
+          "AmrValues": [],
+          "EvidencePresent": false,
+          "Reason": "evidence_missing"
+        }
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+
+# an ID token whose payload was changed after signing: SqlOS throws Microsoft.IdentityModel.Tokens.SecurityTokenInvalidSignatureException "IDX10511: Signature validation failed. Keys tried: 'Microsoft.IdentityModel.Tokens.RsaSecurityKey, KeyId: 'fake-oidc-key', InternalId: '{token#1}'.'.
+Number of keys in TokenValidationParameters: '1'.
+Number of keys in Configuration: '0'.
+Matched key was in 'TokenValidationParameters'.
+kid: 'fake-oidc-key'.
+Exceptions caught:
+ '[PII of type 'System.String' is hidden. For more details, see https://aka.ms/IdentityModel/PII.]'.
+token: '[PII of type 'System.IdentityModel.Tokens.Jwt.JwtSecurityToken' is hidden. For more details, see https://aka.ms/IdentityModel/PII.]'. See https://aka.ms/IDX10511 for details." and writes no response (Kestrel answers 500).
+
+## audit: the failed signature check
+  - {
+      "action": "user.login.oidc.error",
+      "actor": {
+        "displayName": null,
+        "id": "{oidc#1}",
+        "type": "oidc_connection"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.login.oidc.error",
+      "id": "{evt#16}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "error": "IDX10511: Signature validation failed. Keys tried: 'Microsoft.IdentityModel.Tokens.RsaSecurityKey, KeyId: 'fake-oidc-key', InternalId: '{token#1}'.'. \nNumber of keys in TokenValidationParameters: '1'. \nNumber of keys in Configuration: '0'. \nMatched key was in 'TokenValidationParameters'. \nkid: 'fake-oidc-key'. \nExceptions caught:\n '[PII of type 'System.String' is hidden. For more details, see https://aka.ms/IdentityModel/PII.]'.\ntoken: '[PII of type 'System.IdentityModel.Tokens.Jwt.JwtSecurityToken' is hidden. For more details, see https://aka.ms/IdentityModel/PII.]'. See https://aka.ms/IDX10511 for details."
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

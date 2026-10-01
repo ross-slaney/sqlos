@@ -1,0 +1,513 @@
+# SqlOS behavior lock transcript
+scenario: AdminIdentityClientScenarios.Dynamically_registered_clients_are_listed_as_registered_with_duplicate_counts
+profile: dcr
+
+## 1. operator: two identical registrations are flagged as duplicates
+> GET /sqlos/admin/auth/api/clients?source=registered
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "accessMode": "all_organizations",
+          "allowDeviceAuthorization": false,
+          "allowNativeHeadlessAuth": false,
+          "allowedScopes": [],
+          "audience": "sqlos",
+          "clientId": "{dcrcli#1}",
+          "clientType": "public_pkce",
+          "clientUri": null,
+          "coreMetadataEditable": false,
+          "description": null,
+          "disabledAt": null,
+          "disabledReason": null,
+          "duplicateCount": 2,
+          "duplicateFingerprint": "http://127.0.0.1/callback/taskrail|taskrail-desktop|4.2.0|",
+          "emptyAllowlistWarning": {
+            "code": "empty_allowlist",
+            "message": "An empty AllowedScopes list grants no scopes. First-party and headless apps that send scope on /authorize need those values on this client. Change a code-owned seed in source control."
+          },
+          "grantTypes": [
+            "authorization_code",
+            "refresh_token"
+          ],
+          "id": "{cli#1}",
+          "isActive": true,
+          "isFirstParty": false,
+          "lastSeenAt": null,
+          "lifecycleState": "active",
+          "logoUri": null,
+          "managedByStartupSeed": false,
+          "metadataCacheState": null,
+          "metadataDocumentUrl": null,
+          "metadataExpiresAt": null,
+          "metadataFetchedAt": null,
+          "name": "Taskrail Desktop (laptop)",
+          "oidcCapable": false,
+          "omittedOpenIdWarning": {
+            "code": "missing_allowlisted_openid",
+            "message": "This allowlist omits openid. This client cannot receive an ID token until openid is on its allowlist. openid is never granted unless it is both requested and allowlisted."
+          },
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dynamic",
+            "sourceKey": null
+          },
+          "redirectUris": [
+            "http://127.0.0.1/callback/taskrail"
+          ],
+          "registrationSource": "dcr",
+          "requirePkce": true,
+          "responseTypes": [
+            "code"
+          ],
+          "softwareId": "taskrail-desktop",
+          "softwareVersion": "4.2.0",
+          "sourceLabel": "Registered",
+          "tokenEndpointAuthMethod": "none"
+        },
+        {
+          "accessMode": "all_organizations",
+          "allowDeviceAuthorization": false,
+          "allowNativeHeadlessAuth": false,
+          "allowedScopes": [],
+          "audience": "sqlos",
+          "clientId": "{dcrcli#2}",
+          "clientType": "public_pkce",
+          "clientUri": null,
+          "coreMetadataEditable": false,
+          "description": null,
+          "disabledAt": null,
+          "disabledReason": null,
+          "duplicateCount": 2,
+          "duplicateFingerprint": "http://127.0.0.1/callback/taskrail|taskrail-desktop|4.2.0|",
+          "emptyAllowlistWarning": {
+            "code": "empty_allowlist",
+            "message": "An empty AllowedScopes list grants no scopes. First-party and headless apps that send scope on /authorize need those values on this client. Change a code-owned seed in source control."
+          },
+          "grantTypes": [
+            "authorization_code",
+            "refresh_token"
+          ],
+          "id": "{cli#2}",
+          "isActive": true,
+          "isFirstParty": false,
+          "lastSeenAt": null,
+          "lifecycleState": "active",
+          "logoUri": null,
+          "managedByStartupSeed": false,
+          "metadataCacheState": null,
+          "metadataDocumentUrl": null,
+          "metadataExpiresAt": null,
+          "metadataFetchedAt": null,
+          "name": "Taskrail Desktop (workstation)",
+          "oidcCapable": false,
+          "omittedOpenIdWarning": {
+            "code": "missing_allowlisted_openid",
+            "message": "This allowlist omits openid. This client cannot receive an ID token until openid is on its allowlist. openid is never granted unless it is both requested and allowlisted."
+          },
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dynamic",
+            "sourceKey": null
+          },
+          "redirectUris": [
+            "http://127.0.0.1/callback/taskrail"
+          ],
+          "registrationSource": "dcr",
+          "requirePkce": true,
+          "responseTypes": [
+            "code"
+          ],
+          "softwareId": "taskrail-desktop",
+          "softwareVersion": "4.2.0",
+          "sourceLabel": "Registered",
+          "tokenEndpointAuthMethod": "none"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10,
+      "summary": {
+        "activeCount": 2,
+        "disabledCount": 0,
+        "discoveredCount": 0,
+        "registeredCount": 2
+      }
+    }
+
+## 2. operator: the registered keyword finds them too
+> GET /sqlos/admin/auth/api/clients?search=registered
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "accessMode": "all_organizations",
+          "allowDeviceAuthorization": false,
+          "allowNativeHeadlessAuth": false,
+          "allowedScopes": [],
+          "audience": "sqlos",
+          "clientId": "{dcrcli#1}",
+          "clientType": "public_pkce",
+          "clientUri": null,
+          "coreMetadataEditable": false,
+          "description": null,
+          "disabledAt": null,
+          "disabledReason": null,
+          "duplicateCount": 2,
+          "duplicateFingerprint": "http://127.0.0.1/callback/taskrail|taskrail-desktop|4.2.0|",
+          "emptyAllowlistWarning": {
+            "code": "empty_allowlist",
+            "message": "An empty AllowedScopes list grants no scopes. First-party and headless apps that send scope on /authorize need those values on this client. Change a code-owned seed in source control."
+          },
+          "grantTypes": [
+            "authorization_code",
+            "refresh_token"
+          ],
+          "id": "{cli#1}",
+          "isActive": true,
+          "isFirstParty": false,
+          "lastSeenAt": null,
+          "lifecycleState": "active",
+          "logoUri": null,
+          "managedByStartupSeed": false,
+          "metadataCacheState": null,
+          "metadataDocumentUrl": null,
+          "metadataExpiresAt": null,
+          "metadataFetchedAt": null,
+          "name": "Taskrail Desktop (laptop)",
+          "oidcCapable": false,
+          "omittedOpenIdWarning": {
+            "code": "missing_allowlisted_openid",
+            "message": "This allowlist omits openid. This client cannot receive an ID token until openid is on its allowlist. openid is never granted unless it is both requested and allowlisted."
+          },
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dynamic",
+            "sourceKey": null
+          },
+          "redirectUris": [
+            "http://127.0.0.1/callback/taskrail"
+          ],
+          "registrationSource": "dcr",
+          "requirePkce": true,
+          "responseTypes": [
+            "code"
+          ],
+          "softwareId": "taskrail-desktop",
+          "softwareVersion": "4.2.0",
+          "sourceLabel": "Registered",
+          "tokenEndpointAuthMethod": "none"
+        },
+        {
+          "accessMode": "all_organizations",
+          "allowDeviceAuthorization": false,
+          "allowNativeHeadlessAuth": false,
+          "allowedScopes": [],
+          "audience": "sqlos",
+          "clientId": "{dcrcli#2}",
+          "clientType": "public_pkce",
+          "clientUri": null,
+          "coreMetadataEditable": false,
+          "description": null,
+          "disabledAt": null,
+          "disabledReason": null,
+          "duplicateCount": 2,
+          "duplicateFingerprint": "http://127.0.0.1/callback/taskrail|taskrail-desktop|4.2.0|",
+          "emptyAllowlistWarning": {
+            "code": "empty_allowlist",
+            "message": "An empty AllowedScopes list grants no scopes. First-party and headless apps that send scope on /authorize need those values on this client. Change a code-owned seed in source control."
+          },
+          "grantTypes": [
+            "authorization_code",
+            "refresh_token"
+          ],
+          "id": "{cli#2}",
+          "isActive": true,
+          "isFirstParty": false,
+          "lastSeenAt": null,
+          "lifecycleState": "active",
+          "logoUri": null,
+          "managedByStartupSeed": false,
+          "metadataCacheState": null,
+          "metadataDocumentUrl": null,
+          "metadataExpiresAt": null,
+          "metadataFetchedAt": null,
+          "name": "Taskrail Desktop (workstation)",
+          "oidcCapable": false,
+          "omittedOpenIdWarning": {
+            "code": "missing_allowlisted_openid",
+            "message": "This allowlist omits openid. This client cannot receive an ID token until openid is on its allowlist. openid is never granted unless it is both requested and allowlisted."
+          },
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dynamic",
+            "sourceKey": null
+          },
+          "redirectUris": [
+            "http://127.0.0.1/callback/taskrail"
+          ],
+          "registrationSource": "dcr",
+          "requirePkce": true,
+          "responseTypes": [
+            "code"
+          ],
+          "softwareId": "taskrail-desktop",
+          "softwareVersion": "4.2.0",
+          "sourceLabel": "Registered",
+          "tokenEndpointAuthMethod": "none"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10,
+      "summary": {
+        "activeCount": 2,
+        "disabledCount": 0,
+        "discoveredCount": 0,
+        "registeredCount": 2
+      }
+    }
+
+## 3. operator: a registered client's detail keeps its metadata
+> GET /sqlos/admin/auth/api/clients/{dcrcli#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "accessMode": "all_organizations",
+      "allowDeviceAuthorization": false,
+      "allowNativeHeadlessAuth": false,
+      "allowedScopes": [],
+      "audience": "sqlos",
+      "clientId": "{dcrcli#1}",
+      "clientType": "public_pkce",
+      "clientUri": null,
+      "coreMetadataEditable": false,
+      "description": null,
+      "disabledAt": null,
+      "disabledReason": null,
+      "duplicateCount": 2,
+      "duplicateFingerprint": "http://127.0.0.1/callback/taskrail|taskrail-desktop|4.2.0|",
+      "emptyAllowlistWarning": {
+        "code": "empty_allowlist",
+        "message": "An empty AllowedScopes list grants no scopes. First-party and headless apps that send scope on /authorize need those values on this client. Change a code-owned seed in source control."
+      },
+      "grantTypes": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "id": "{cli#1}",
+      "isActive": true,
+      "isFirstParty": false,
+      "lastSeenAt": null,
+      "lifecycleState": "active",
+      "logoUri": null,
+      "managedByStartupSeed": false,
+      "metadataCacheState": null,
+      "metadataDocumentUrl": null,
+      "metadataExpiresAt": null,
+      "metadataFetchedAt": null,
+      "metadataJson": "{\"client_id\":null,\"client_name\":\"Taskrail Desktop (laptop)\",\"redirect_uris\":[\"http://127.0.0.1/callback/taskrail\"],\"grant_types\":[\"authorization_code\",\"refresh_token\"],\"response_types\":[\"code\"],\"token_endpoint_auth_method\":\"none\",\"client_secret\":null,\"client_secret_expires_at\":null,\"client_uri\":null,\"logo_uri\":null,\"software_id\":\"taskrail-desktop\",\"software_version\":\"4.2.0\",\"scope\":null}",
+      "name": "Taskrail Desktop (laptop)",
+      "oidcCapable": false,
+      "oidcDiscoveryUrl": null,
+      "omittedOpenIdWarning": {
+        "code": "missing_allowlisted_openid",
+        "message": "This allowlist omits openid. This client cannot receive an ID token until openid is on its allowlist. openid is never granted unless it is both requested and allowlisted."
+      },
+      "ownership": {
+        "canEmergencyDisable": true,
+        "configurationFingerprint": null,
+        "isEditable": false,
+        "isOrphaned": false,
+        "lastReconciledAt": null,
+        "owner": "dynamic",
+        "sourceKey": null
+      },
+      "recentAuditEvents": [
+        {
+          "actorId": "{dcrcli#1}",
+          "actorType": "client",
+          "dataJson": "{\"client_id\":\"{dcrcli#1}\",\"client_name\":\"Taskrail Desktop (laptop)\",\"redirect_uris\":[\"http://127.0.0.1/callback/taskrail\"],\"grant_types\":[\"authorization_code\",\"refresh_token\"],\"response_types\":[\"code\"],\"scope\":\"\",\"token_endpoint_auth_method\":\"[redacted]\",\"software_id\":\"taskrail-desktop\",\"software_version\":\"4.2.0\"}",
+          "eventType": "client.dcr.registered",
+          "id": "{evt#1}",
+          "occurredAt": "{datetime:unspecified}"
+        }
+      ],
+      "redirectUris": [
+        "http://127.0.0.1/callback/taskrail"
+      ],
+      "registrationSource": "dcr",
+      "requirePkce": true,
+      "responseTypes": [
+        "code"
+      ],
+      "softwareId": "taskrail-desktop",
+      "softwareVersion": "4.2.0",
+      "sourceLabel": "Registered",
+      "tokenEndpointAuthMethod": "none"
+    }
+
+## 4. operator: a dynamic client is not code-owned
+> POST /sqlos/admin/auth/api/clients/{dcrcli#1}/emergency-disable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "OAuth client '{dcrcli#1}' is not code-owned. Use ordinary emergency disable instead."
+    }
+
+## 5. operator: the ordinary disable applies to it
+> POST /sqlos/admin/auth/api/clients/{dcrcli#1}/disable
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "clientId": "{dcrcli#1}",
+      "disabledAt": "{datetime:utc-z}",
+      "disabledReason": "disabled_by_operator",
+      "id": "{cli#1}",
+      "isActive": false
+    }
+
+## 6. operator: one active registration remains
+> GET /sqlos/admin/auth/api/clients?source=registered&status=active
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "accessMode": "all_organizations",
+          "allowDeviceAuthorization": false,
+          "allowNativeHeadlessAuth": false,
+          "allowedScopes": [],
+          "audience": "sqlos",
+          "clientId": "{dcrcli#2}",
+          "clientType": "public_pkce",
+          "clientUri": null,
+          "coreMetadataEditable": false,
+          "description": null,
+          "disabledAt": null,
+          "disabledReason": null,
+          "duplicateCount": 2,
+          "duplicateFingerprint": "http://127.0.0.1/callback/taskrail|taskrail-desktop|4.2.0|",
+          "emptyAllowlistWarning": {
+            "code": "empty_allowlist",
+            "message": "An empty AllowedScopes list grants no scopes. First-party and headless apps that send scope on /authorize need those values on this client. Change a code-owned seed in source control."
+          },
+          "grantTypes": [
+            "authorization_code",
+            "refresh_token"
+          ],
+          "id": "{cli#2}",
+          "isActive": true,
+          "isFirstParty": false,
+          "lastSeenAt": null,
+          "lifecycleState": "active",
+          "logoUri": null,
+          "managedByStartupSeed": false,
+          "metadataCacheState": null,
+          "metadataDocumentUrl": null,
+          "metadataExpiresAt": null,
+          "metadataFetchedAt": null,
+          "name": "Taskrail Desktop (workstation)",
+          "oidcCapable": false,
+          "omittedOpenIdWarning": {
+            "code": "missing_allowlisted_openid",
+            "message": "This allowlist omits openid. This client cannot receive an ID token until openid is on its allowlist. openid is never granted unless it is both requested and allowlisted."
+          },
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dynamic",
+            "sourceKey": null
+          },
+          "redirectUris": [
+            "http://127.0.0.1/callback/taskrail"
+          ],
+          "registrationSource": "dcr",
+          "requirePkce": true,
+          "responseTypes": [
+            "code"
+          ],
+          "softwareId": "taskrail-desktop",
+          "softwareVersion": "4.2.0",
+          "sourceLabel": "Registered",
+          "tokenEndpointAuthMethod": "none"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10,
+      "summary": {
+        "activeCount": 1,
+        "disabledCount": 0,
+        "discoveredCount": 0,
+        "registeredCount": 1
+      }
+    }
+
+## audit: the disable is audited
+  - {
+      "action": "client.disabled",
+      "actor": {
+        "displayName": null,
+        "id": "{cli#1}",
+        "type": "client"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "client.disabled",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "client_id": "{dcrcli#1}",
+        "reason": "disabled_by_operator",
+        "source": "dcr"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": null
+    }

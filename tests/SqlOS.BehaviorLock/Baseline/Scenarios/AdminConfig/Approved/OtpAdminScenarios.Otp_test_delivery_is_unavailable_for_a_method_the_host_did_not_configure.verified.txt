@@ -1,0 +1,89 @@
+# SqlOS behavior lock transcript
+scenario: OtpAdminScenarios.Otp_test_delivery_is_unavailable_for_a_method_the_host_did_not_configure
+profile: dashboard-callback
+
+## 1. operator: the readiness report explains what is missing for each method
+> GET /sqlos/admin/auth/api/otp/readiness
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "email": {
+        "configurationKeys": [
+          "SqlOS:EmailOtp:AzureCommunicationServicesConnectionString",
+          "SqlOS:EmailOtp:FromAddress"
+        ],
+        "enabled": false,
+        "locallyConfigured": false,
+        "method": "email",
+        "policy": {
+          "challengeLifetimeMinutes": 10,
+          "codeLength": 6,
+          "fromAddress": null,
+          "maxAttempts": 5,
+          "maxChallengesPerHour": 5
+        },
+        "provider": "azure_communication_services",
+        "reasonCodes": [
+          "missing_from_address"
+        ]
+      },
+      "phone": {
+        "configurationKeys": [
+          "SqlOS:PhoneOtp:Enabled",
+          "SqlOS:PhoneOtp:TwilioAccountSid",
+          "SqlOS:PhoneOtp:TwilioAuthToken",
+          "SqlOS:PhoneOtp:TwilioVerifyServiceSid"
+        ],
+        "enabled": false,
+        "locallyConfigured": false,
+        "method": "phone",
+        "policy": {
+          "challengeLifetimeMinutes": 10,
+          "countryAllowList": [],
+          "countryDenyList": [],
+          "defaultRegion": "US",
+          "maxSendsPerPhone": 5,
+          "serviceSidSuffix": null
+        },
+        "provider": "twilio_verify",
+        "reasonCodes": [
+          "method_disabled_in_host_configuration",
+          "missing_account_sid",
+          "missing_auth_token",
+          "missing_verify_service_sid"
+        ]
+      },
+      "recentDiagnostics": []
+    }
+
+## 2. operator: an SMS test is unavailable: SMS codes are not configured
+> POST /sqlos/admin/auth/api/otp/test-delivery
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "destination": "+12025550149",
+>     "method": "phone"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "phone OTP test delivery is unavailable: method_disabled_in_host_configuration, missing_account_sid, missing_auth_token, missing_verify_service_sid."
+    }
+
+## 3. operator: an email test is unavailable: no sender address is configured
+> POST /sqlos/admin/auth/api/otp/test-delivery
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "destination": "ops@example.test",
+>     "method": "email"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "email OTP test delivery is unavailable: missing_from_address."
+    }
+
+## audit: unavailable methods are not audited
+  (no new events)

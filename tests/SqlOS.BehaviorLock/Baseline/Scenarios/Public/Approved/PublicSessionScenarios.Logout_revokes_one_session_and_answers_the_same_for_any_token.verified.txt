@@ -1,0 +1,197 @@
+# SqlOS behavior lock transcript
+scenario: PublicSessionScenarios.Logout_revokes_one_session_and_answers_the_same_for_any_token
+profile: hosted
+
+## 1. client: sign the laptop out by its refresh token
+> POST /sqlos/auth/logout
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshToken": "{refresh-token#1}"
+>   }
+< 204 No Content
+
+## 2. client: the laptop's refresh token no longer works
+> POST /sqlos/auth/token/refresh
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshToken": "{refresh-token#1}"
+>   }
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Refresh token is no longer valid.
+
+## 3. client: nor does its access token
+> POST /__probe/auth/validate
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "audience": "https://sqlos.example.test/api",
+>     "token": "{access-token#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "valid": false
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+
+## 4. client: the phone's session is untouched
+> POST /__probe/auth/validate
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "audience": "https://sqlos.example.test/api",
+>     "token": "{access-token#2}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "audience": "https://sqlos.example.test/api",
+      "clientId": "behavior-lock-app",
+      "organizationId": null,
+      "scope": null,
+      "sessionId": "{ses#2}",
+      "userId": "{usr#1}",
+      "valid": true
+    }
+  jwt {access-token#2}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "https://sqlos.example.test/api",
+      "client_id": "behavior-lock-app",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "sid": "{ses#2}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+
+## 5. client: signing out again answers the same
+> POST /sqlos/auth/logout
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshToken": "{refresh-token#1}"
+>   }
+< 204 No Content
+
+## 6. client: an unknown token answers the same
+> POST /sqlos/auth/logout
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "refreshToken": "not-a-refresh-token"
+>   }
+< 204 No Content
+
+## 7. client: no token answers the same
+> POST /sqlos/auth/logout
+> Content-Type: application/json; charset=utf-8
+>   {}
+< 204 No Content
+
+## 8. client: no body at all escapes the endpoint
+> POST /sqlos/auth/logout
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: Unable to read the request as JSON because the request content type '' is not a known JSON content type.
+
+## audit: one logout event
+  - {
+      "action": "user.logout",
+      "actor": {
+        "displayName": null,
+        "id": "{ses#1}",
+        "type": "session"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": null,
+        "requestId": null,
+        "sessionId": "{ses#1}",
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "user.logout",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": null,
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": "{ses#1}",
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+
+## 9. operator: one session revoked, one active
+> GET /sqlos/admin/auth/api/users/{usr#1}/sessions
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "absoluteExpiresAt": "{datetime:unspecified}",
+          "authenticationMethod": "password",
+          "clientApplicationId": "{cli#1}",
+          "createdAt": "{datetime:unspecified}",
+          "id": "{ses#2}",
+          "idleExpiresAt": "{datetime:unspecified}",
+          "ipAddress": "203.0.113.10",
+          "lastSeenAt": "{datetime:unspecified}",
+          "revocationReason": null,
+          "revokedAt": null,
+          "user": "Alice",
+          "userAgent": "",
+          "userId": "{usr#1}"
+        },
+        {
+          "absoluteExpiresAt": "{datetime:unspecified}",
+          "authenticationMethod": "password",
+          "clientApplicationId": "{cli#1}",
+          "createdAt": "{datetime:unspecified}",
+          "id": "{ses#1}",
+          "idleExpiresAt": "{datetime:unspecified}",
+          "ipAddress": "203.0.113.10",
+          "lastSeenAt": "{datetime:unspecified}",
+          "revocationReason": "logout",
+          "revokedAt": "{datetime:unspecified}",
+          "user": "Alice",
+          "userAgent": "",
+          "userId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }

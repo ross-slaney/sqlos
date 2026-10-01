@@ -1,0 +1,114 @@
+# SqlOS behavior lock transcript
+scenario: HeadlessEmailOtpScenarios.An_invitation_for_an_address_without_an_account_asks_for_signup_instead_of_a_code
+profile: headless
+
+## 1. browser: an email code with the invitation for an address that has no account: the signup view, no code
+> POST /sqlos/auth/headless/email-otp/start
+> Content-Type: application/json; charset=utf-8
+> Origin: https://sqlos.example.test
+>   {
+>     "email": "{email:erin}",
+>     "invitationToken": "{invitation-token#1}",
+>     "requestId": "{req#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "redirectUrl": null,
+      "type": "view",
+      "viewModel": {
+        "authBasePath": "/sqlos/auth",
+        "challengeToken": null,
+        "clientId": "behavior-lock-app",
+        "clientName": "Behavior Lock",
+        "consentScopes": null,
+        "consentToken": null,
+        "deviceAuthorization": null,
+        "displayName": null,
+        "email": "{email:erin}",
+        "error": "Create an account to accept this invitation.",
+        "fieldErrors": {},
+        "headlessApiBasePath": "/sqlos/auth/headless",
+        "info": null,
+        "invitation": {
+          "acceptedAt": null,
+          "acceptedByUserId": null,
+          "createdAt": "{datetime:unspecified}",
+          "customFields": null,
+          "email": "{email:erin}",
+          "expiresAt": "{datetime:unspecified}",
+          "id": "{inv#1}",
+          "inviteUrl": null,
+          "lastSendError": null,
+          "lastSentAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "organizationName": "Acme",
+          "revokedAt": null,
+          "revokedReason": null,
+          "role": "member",
+          "status": "pending"
+        },
+        "mfaMethods": [],
+        "mfaToken": null,
+        "omittedOpenId": false,
+        "organizationSelection": [],
+        "pendingToken": null,
+        "phoneNumber": null,
+        "providers": [
+          {
+            "connectionId": "{oidc#1}",
+            "displayName": "Example OIDC",
+            "logoDataUrl": null,
+            "providerType": "Custom"
+          },
+          {
+            "connectionId": "{oidc#2}",
+            "displayName": "Google",
+            "logoDataUrl": "{data-uri:image/svg+xml}",
+            "providerType": "Google"
+          }
+        ],
+        "requestId": "{req#1}",
+        "requiresMfaEnrollment": false,
+        "scope": "openid profile email offline_access",
+        "settings": {
+          "accentColor": "#0f172a",
+          "backgroundColor": "#f8fafc",
+          "emailOtpRuntimeConfigured": true,
+          "enablePasswordSignup": true,
+          "enabledCredentialTypes": [
+            "password",
+            "email_otp",
+            "magic_link",
+            "phone_otp"
+          ],
+          "headlessCapabilityRegistered": true,
+          "layout": "split",
+          "localPasswordRuntimeEnabled": true,
+          "logoBase64": null,
+          "magicLinkRuntimeConfigured": true,
+          "managedByStartupSeed": true,
+          "ownership": {
+            "canEmergencyDisable": false,
+            "configurationFingerprint": "{hex#1}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "auth-page:default"
+          },
+          "pageSubtitle": "Secure your app-owned AI and MCP experiences with SqlOS.",
+          "pageTitle": "Sign in to Behavior Lock",
+          "phoneOtpRuntimeConfigured": true,
+          "primaryColor": "#2563eb",
+          "updatedAt": "{datetime:unspecified}"
+        },
+        "signupToken": null,
+        "totpEnrollment": null,
+        "uiContext": null,
+        "view": "signup"
+      }
+    }
+
+## audit: no challenge events
+  (no new events)

@@ -1,0 +1,530 @@
+# SqlOS behavior lock transcript
+scenario: ClientRegistrationScenarios.A_client_metadata_document_client_connects_to_the_mcp_resource_through_consent
+profile: mcp
+
+## 1. browser: SqlOS fetches the client's metadata document and opens the password page
+> GET /sqlos/auth/authorize?response_type=code&client_id=https%3A%2F%2Fclient.example.test%2Finspector.json&redirect_uri=https%3A%2F%2Fclient.example.test%2Finspector%2Fcallback&scope=openid%20profile%20email%20offline_access&state={state#1}&nonce={nonce#1}&code_challenge={pkce-challenge#1}&code_challenge_method=S256&view=password&resource=https%3A%2F%2Fsqlos.example.test%2Fmcp
+< 200 OK
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#1}'; style-src 'self' 'nonce-{csp-nonce#1}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+< Set-Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}; expires=+15m; max-age=900; path=/sqlos/auth; secure; samesite=strict; httponly
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Behavior Lock</title>
+        <style nonce="{csp-nonce#1}">{style-sha256:80d77a550f3a606a}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Behavior Lock</h1>
+                <p class="brand-subtitle">Secure your app-owned AI and MCP experiences with SqlOS.</p>
+              </div>
+              <div class="messages"></div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <div class="panel-intro">
+                    <span class="panel-kicker">Password</span>
+                    <p>Continue with your email and password.</p>
+                  </div>
+                  <form class="auth-form" method="post" action="/sqlos/auth/login/password">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#1}" />
+                    <input type="hidden" name="requestId" value="{req#1}" />
+                    <label class="field">
+                      <span>Email</span>
+                      <input name="email" type="email" value="" placeholder="Your email address" autocomplete="email" required="" />
+                    </label>
+                    <label class="field">
+                      <span>Password</span>
+                      <input name="password" type="password" placeholder="Your password" autocomplete="current-password" required="" />
+                    </label>
+                    <button class="primary-action" type="submit" data-loading-label="Signing in">
+                      <span class="button-label">Continue</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                  </form>
+                  <div class="footer-links">
+                    <a class="secondary-link" href="/sqlos/auth/password/forgot?request={req#1}">Forgot password?</a>
+                  </div>
+                  <p class="footer-prompt">
+                    Don't have an account?
+                    <a class="secondary-link" href="/sqlos/auth/signup?request={req#1}">Get started</a>
+                  </p>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#1}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+  ~ http SqlOSCimdClientService: GET https://client.example.test/inspector.json -> 200
+
+## 2. browser: a metadata-document client is always third-party: the consent page
+> POST /sqlos/auth/login/password
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#1}
+>   requestId={req#1}
+>   email={email:alice}
+>   password={password:alice}
+< 200 OK
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#2}'; style-src 'self' 'nonce-{csp-nonce#2}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sign in to Behavior Lock</title>
+        <style nonce="{csp-nonce#2}">{style-sha256:80d77a550f3a606a}</style>
+      </head>
+      <body>
+        <div class="page-shell">
+          <main class="auth-shell split">
+            <section class="auth-frame">
+              <div class="brand-header">
+                <div class="logo-shell">
+                  <div class="logo-fallback">SqlOS</div>
+                </div>
+                <h1>Sign in to Behavior Lock</h1>
+                <p class="brand-subtitle">Secure your app-owned AI and MCP experiences with SqlOS.</p>
+              </div>
+              <div class="messages"></div>
+              <section class="form-panel">
+                <div class="panel-stack">
+                  <div class="panel-intro">
+                    <span class="panel-kicker">Authorize Access</span>
+                    <p>MCP Inspector is asking to access your account.</p>
+                  </div>
+                  <div class="invite-summary">
+                    <strong>MCP Inspector</strong>
+                    <span>This application will be able to:</span>
+                    <span class="consent-scope">openid</span>
+                    <span class="consent-scope">profile</span>
+                    <span class="consent-scope">email</span>
+                    <span class="consent-scope">offline_access</span>
+                  </div>
+                  <form class="auth-form" method="post" action="/sqlos/auth/consent/approve">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#2}" />
+                    <input type="hidden" name="requestId" value="{req#1}" />
+                    <input type="hidden" name="consentToken" value="{consent-token#1}" />
+                    <button class="primary-action" type="submit" data-loading-label="Approving">
+                      <span class="button-label">Allow access</span>
+                      <span class="loader loader-sm button-loader" aria-hidden="true"></span>
+                    </button>
+                  </form>
+                  <form class="auth-form" method="post" action="/sqlos/auth/consent/deny">
+                    <input type="hidden" name="__RequestVerificationToken" value="{csrf#2}" />
+                    <input type="hidden" name="requestId" value="{req#1}" />
+                    <input type="hidden" name="consentToken" value="{consent-token#1}" />
+                    <button class="secondary-action" type="submit">Deny request</button>
+                  </form>
+                </div>
+              </section>
+            </section>
+          </main>
+        </div>
+        <script nonce="{csp-nonce#2}">{script-sha256:255b6e4b1e8783c7}</script>
+      </body>
+    </html>
+
+## 3. browser: Alice approves
+> POST /sqlos/auth/consent/approve
+> Content-Type: application/x-www-form-urlencoded
+> Cookie: sqlos_auth_page_csrf_{hex#1}={cookie#1}
+> Origin: https://sqlos.example.test
+>   __RequestVerificationToken={csrf#2}
+>   requestId={req#1}
+>   consentToken={consent-token#1}
+< 200 OK
+< Cache-Control: no-store
+< Content-Security-Policy: default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'nonce-{csp-nonce#3}'; style-src 'self' 'nonce-{csp-nonce#3}'; frame-ancestors 'none'
+< Content-Type: text/html; charset=utf-8
+< Referrer-Policy: same-origin
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: DENY
+< Set-Cookie: sqlos_auth_page={cookie#2}; expires=+7d; path=/; secure; samesite=lax; httponly
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="refresh" content="0;url=https://client.example.test/inspector/callback?code={code#1}&amp;state={state#1}&amp;scope=openid%20profile%20email%20offline_access" />
+        <title>Continuing…</title>
+      </head>
+      <body>
+        <p>
+          Returning to the application…
+          <a href="https://client.example.test/inspector/callback?code={code#1}&amp;state={state#1}&amp;scope=openid%20profile%20email%20offline_access">Continue</a>
+        </p>
+      </body>
+    </html>
+
+## audit
+  - {
+      "action": "password.login.succeeded",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "password.login.succeeded",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "AuthorizationRequestId": "[redacted]",
+        "ClientKey": "https://client.example.test/inspector.json",
+        "NormalizedEmail": "{email:ALICE}",
+        "Surface": "hosted",
+        "UserAgentHash": null,
+        "details": {
+          "resetScopes": [
+            "email",
+            "user"
+          ]
+        },
+        "maskedEmail": "AL***@EXAMPLE.TEST"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+  - {
+      "action": "oauth.consent.granted",
+      "actor": {
+        "displayName": null,
+        "id": "{usr#1}",
+        "type": "user"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": {
+        "correlationId": null,
+        "ipAddress": "203.0.113.10",
+        "requestId": null,
+        "sessionId": null,
+        "userAgent": null
+      },
+      "correlationId": null,
+      "eventType": "oauth.consent.granted",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": "203.0.113.10",
+      "metadata": {
+        "client_id": "https://client.example.test/inspector.json",
+        "scope": "openid profile email offline_access"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": null,
+      "requestId": null,
+      "sessionId": null,
+      "source": "authserver",
+      "targets": [],
+      "userAgent": null,
+      "userId": "{usr#1}"
+    }
+
+## 4. mcp-client: the client redeems the code for the MCP resource
+> POST /sqlos/auth/token
+> Content-Type: application/x-www-form-urlencoded
+>   grant_type=authorization_code
+>   code={code#1}
+>   client_id=https://client.example.test/inspector.json
+>   redirect_uri=https://client.example.test/inspector/callback
+>   code_verifier={pkce-verifier#1}
+>   resource=https://sqlos.example.test/mcp
+< 200 OK
+< Cache-Control: no-store
+< Content-Type: application/json; charset=utf-8
+< Pragma: no-cache
+    {
+      "access_token": "{access-token#1}",
+      "expires_in": ~600,
+      "id_token": "{id-token#1}",
+      "refresh_token": "{refresh-token#1}",
+      "scope": "openid profile email offline_access",
+      "token_type": "Bearer"
+    }
+  jwt {access-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "at+jwt"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "aud": "https://sqlos.example.test/mcp",
+      "client_id": "https://client.example.test/inspector.json",
+      "email": "{email:alice}",
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nbf": {epoch},
+      "scope": "openid profile email offline_access",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+  jwt {id-token#1}
+    header: {
+      "alg": "RS256",
+      "kid": "{kid#1}",
+      "typ": "JWT"
+    }
+    claims: {
+      "amr": [
+        "password"
+      ],
+      "at_hash": "{hash:at_hash}",
+      "aud": "https://client.example.test/inspector.json",
+      "auth_time": {epoch},
+      "exp": {epoch},
+      "iat": {epoch},
+      "iss": "https://sqlos.example.test/sqlos/auth",
+      "nonce": "{nonce#1}",
+      "sid": "{ses#1}",
+      "sub": "{usr#1}"
+    }
+    lifetimes: exp-iat=5m
+
+## 5. mcp-client: and calls the MCP endpoint
+> POST /mcp
+> Authorization: Bearer {access-token#1}
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "id": 1,
+>     "jsonrpc": "2.0",
+>     "method": "tools/list"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "audience": "https://sqlos.example.test/mcp",
+      "claims": [
+        {
+          "type": "amr",
+          "value": "password"
+        },
+        {
+          "type": "aud",
+          "value": "https://sqlos.example.test/mcp"
+        },
+        {
+          "type": "client_id",
+          "value": "https://client.example.test/inspector.json"
+        },
+        {
+          "type": "email",
+          "value": "{email:alice}"
+        },
+        {
+          "type": "exp",
+          "value": "{epoch}"
+        },
+        {
+          "type": "iat",
+          "value": "{epoch}"
+        },
+        {
+          "type": "iss",
+          "value": "https://sqlos.example.test/sqlos/auth"
+        },
+        {
+          "type": "nbf",
+          "value": "{epoch}"
+        },
+        {
+          "type": "scope",
+          "value": "openid profile email offline_access"
+        },
+        {
+          "type": "sid",
+          "value": "{ses#1}"
+        },
+        {
+          "type": "sub",
+          "value": "{usr#1}"
+        }
+      ],
+      "clientId": "https://client.example.test/inspector.json",
+      "organizationId": null,
+      "scope": "openid profile email offline_access",
+      "sessionId": "{ses#1}",
+      "userId": "{usr#1}"
+    }
+  claim lifetimes: exp-iat=10m exp-nbf=10m nbf-iat=0s
+
+## 6. operator: the operator's client list includes the metadata-document client
+> GET /sqlos/admin/auth/api/clients
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "accessMode": "all_organizations",
+          "allowDeviceAuthorization": false,
+          "allowNativeHeadlessAuth": false,
+          "allowedScopes": [
+            "openid",
+            "profile",
+            "email",
+            "offline_access"
+          ],
+          "audience": "https://sqlos.example.test/api",
+          "clientId": "behavior-lock-app",
+          "clientType": "public_pkce",
+          "clientUri": null,
+          "coreMetadataEditable": true,
+          "description": null,
+          "disabledAt": null,
+          "disabledReason": null,
+          "duplicateCount": 0,
+          "duplicateFingerprint": null,
+          "emptyAllowlistWarning": null,
+          "grantTypes": [
+            "authorization_code",
+            "refresh_token"
+          ],
+          "id": "{cli#1}",
+          "isActive": true,
+          "isFirstParty": true,
+          "lastSeenAt": null,
+          "lifecycleState": "active",
+          "logoUri": null,
+          "managedByStartupSeed": true,
+          "metadataCacheState": null,
+          "metadataDocumentUrl": null,
+          "metadataExpiresAt": null,
+          "metadataFetchedAt": null,
+          "name": "Behavior Lock",
+          "oidcCapable": true,
+          "omittedOpenIdWarning": null,
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": "{hex#2}",
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": "{datetime:unspecified}",
+            "owner": "code",
+            "sourceKey": "behavior-lock-app"
+          },
+          "redirectUris": [
+            "https://sqlos.example.test/auth/callback"
+          ],
+          "registrationSource": "seeded",
+          "requirePkce": true,
+          "responseTypes": [
+            "code"
+          ],
+          "softwareId": null,
+          "softwareVersion": null,
+          "sourceLabel": "Seeded",
+          "tokenEndpointAuthMethod": "none"
+        },
+        {
+          "accessMode": "all_organizations",
+          "allowDeviceAuthorization": false,
+          "allowNativeHeadlessAuth": false,
+          "allowedScopes": [
+            "openid",
+            "profile",
+            "email",
+            "offline_access"
+          ],
+          "audience": "sqlos",
+          "clientId": "https://client.example.test/inspector.json",
+          "clientType": "public_pkce",
+          "clientUri": null,
+          "coreMetadataEditable": false,
+          "description": null,
+          "disabledAt": null,
+          "disabledReason": null,
+          "duplicateCount": 0,
+          "duplicateFingerprint": null,
+          "emptyAllowlistWarning": null,
+          "grantTypes": [
+            "authorization_code",
+            "refresh_token"
+          ],
+          "id": "{cli#2}",
+          "isActive": true,
+          "isFirstParty": false,
+          "lastSeenAt": "{datetime:unspecified}",
+          "lifecycleState": "active",
+          "logoUri": null,
+          "managedByStartupSeed": false,
+          "metadataCacheState": "fresh",
+          "metadataDocumentUrl": "https://client.example.test/inspector.json",
+          "metadataExpiresAt": "{datetime:unspecified}",
+          "metadataFetchedAt": "{datetime:unspecified}",
+          "name": "MCP Inspector",
+          "oidcCapable": true,
+          "omittedOpenIdWarning": null,
+          "ownership": {
+            "canEmergencyDisable": true,
+            "configurationFingerprint": null,
+            "isEditable": false,
+            "isOrphaned": false,
+            "lastReconciledAt": null,
+            "owner": "dynamic",
+            "sourceKey": null
+          },
+          "redirectUris": [
+            "https://client.example.test/inspector/callback"
+          ],
+          "registrationSource": "cimd",
+          "requirePkce": true,
+          "responseTypes": [
+            "code"
+          ],
+          "softwareId": null,
+          "softwareVersion": null,
+          "sourceLabel": "Discovered",
+          "tokenEndpointAuthMethod": "none"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10,
+      "summary": {
+        "activeCount": 2,
+        "disabledCount": 0,
+        "discoveredCount": 1,
+        "registeredCount": 0
+      }
+    }

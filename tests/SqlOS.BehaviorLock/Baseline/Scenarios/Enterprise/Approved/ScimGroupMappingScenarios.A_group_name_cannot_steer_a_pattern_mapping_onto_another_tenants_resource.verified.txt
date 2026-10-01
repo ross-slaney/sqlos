@@ -1,0 +1,1021 @@
+# SqlOS behavior lock transcript
+scenario: ScimGroupMappingScenarios.A_group_name_cannot_steer_a_pattern_mapping_onto_another_tenants_resource
+profile: enterprise-scim-path
+
+# Acme's boundary is workspace::acme. The documented pattern mapping turns Store-{storeId}-Managers into workspace_admin on workspace::store-{storeId}; store 9001 belongs to Globex, under workspace::globex.
+
+## 1. directory: a store inside Acme's boundary: the grant is created
+> POST /scim/v2/Groups
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "displayName": "Store-42-Managers",
+>     "externalId": "store-42-managers",
+>     "members": [
+>       {
+>         "value": "{usr:ann}"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:Group"
+>     ]
+>   }
+< 201 Created
+< Content-Location: /scim/v2/Groups/{grp:store-42}
+< Content-Type: application/scim+json
+< Location: /scim/v2/Groups/{grp:store-42}
+    {
+      "displayName": "Store-42-Managers",
+      "externalId": "store-42-managers",
+      "id": "{grp:store-42}",
+      "members": [
+        {
+          "$ref": "/scim/v2/Users/{usr:ann}",
+          "display": "Ann Archer",
+          "value": "{usr:ann}"
+        }
+      ],
+      "meta": {
+        "created": "{datetime:utc-z}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Groups/{grp:store-42}",
+        "resourceType": "Group"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:Group"
+      ]
+    }
+
+## 2. directory: a group named for Globex's store: no grant, the group itself still syncs
+> POST /scim/v2/Groups
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "displayName": "Store-9001-Managers",
+>     "externalId": "store-9001-managers",
+>     "members": [
+>       {
+>         "value": "{usr:ann}"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:schemas:core:2.0:Group"
+>     ]
+>   }
+< 201 Created
+< Content-Location: /scim/v2/Groups/{grp:store-9001}
+< Content-Type: application/scim+json
+< Location: /scim/v2/Groups/{grp:store-9001}
+    {
+      "displayName": "Store-9001-Managers",
+      "externalId": "store-9001-managers",
+      "id": "{grp:store-9001}",
+      "members": [
+        {
+          "$ref": "/scim/v2/Users/{usr:ann}",
+          "display": "Ann Archer",
+          "value": "{usr:ann}"
+        }
+      ],
+      "meta": {
+        "created": "{datetime:utc-z}",
+        "lastModified": "{datetime:utc-z}",
+        "location": "/scim/v2/Groups/{grp:store-9001}",
+        "resourceType": "Group"
+      },
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:Group"
+      ]
+    }
+
+## 3. probe: Ann manages Acme's store
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.write",
+>     "resourceId": "workspace::store-42",
+>     "subjectId": "{subj:ann}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": true,
+      "error": null,
+      "trace": [
+        {
+          "detail": "Checking access to Acme store 42 (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::store-42",
+          "resourceName": "Acme store 42",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Write workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"Ann Archer\" + 2 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": "Ann Archer"
+        },
+        {
+          "detail": "Checking 2 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Acme store 42",
+          "grantId": null,
+          "resourceId": "workspace::store-42",
+          "resourceName": "Acme store 42",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Role \"Workspace admin\" provides permission \"Write workspace\" via grant at Acme store 42",
+          "grantId": "{grant#1}",
+          "resourceId": "workspace::store-42",
+          "resourceName": "Acme store 42",
+          "roleName": "Workspace admin",
+          "step": "Access Granted",
+          "subjectName": "Store-42-Managers"
+        }
+      ]
+    }
+
+## 4. probe: Ann cannot manage Globex's store
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.write",
+>     "resourceId": "workspace::store-9001",
+>     "subjectId": "{subj:ann}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": false,
+      "error": null,
+      "trace": [
+        {
+          "detail": "Checking access to Globex store 9001 (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::store-9001",
+          "resourceName": "Globex store 9001",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Write workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"Ann Archer\" + 2 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": "Ann Archer"
+        },
+        {
+          "detail": "Checking 2 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Globex store 9001",
+          "grantId": null,
+          "resourceId": "workspace::store-9001",
+          "resourceName": "Globex store 9001",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Globex",
+          "grantId": null,
+          "resourceId": "workspace::globex",
+          "resourceName": "Globex",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "No matching grants found that provide permission \"Write workspace\"",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Access Denied",
+          "subjectName": null
+        }
+      ]
+    }
+
+## 5. directory: the directory deletes the foreign-named group
+> DELETE /scim/v2/Groups/{grp:store-9001}
+> Authorization: Bearer {scim-token#1}
+< 204 No Content
+
+## 6. directory: renaming the granted group toward Globex's store revokes the old grant and creates none
+> PATCH /scim/v2/Groups/{grp:store-42}
+> Authorization: Bearer {scim-token#1}
+> Content-Type: application/scim+json; charset=utf-8
+>   {
+>     "Operations": [
+>       {
+>         "op": "replace",
+>         "path": "displayName",
+>         "value": "Store-9001-Managers"
+>       }
+>     ],
+>     "schemas": [
+>       "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+>     ]
+>   }
+< 204 No Content
+
+## 7. probe: Ann lost the Acme grant
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.write",
+>     "resourceId": "workspace::store-42",
+>     "subjectId": "{subj:ann}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": false,
+      "error": null,
+      "trace": [
+        {
+          "detail": "Checking access to Acme store 42 (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::store-42",
+          "resourceName": "Acme store 42",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Write workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"Ann Archer\" + 1 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": "Ann Archer"
+        },
+        {
+          "detail": "Checking 2 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Acme store 42",
+          "grantId": null,
+          "resourceId": "workspace::store-42",
+          "resourceName": "Acme store 42",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Acme",
+          "grantId": null,
+          "resourceId": "workspace::acme",
+          "resourceName": "Acme",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "No matching grants found that provide permission \"Write workspace\"",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Access Denied",
+          "subjectName": null
+        }
+      ]
+    }
+
+## 8. probe: and gained nothing at Globex
+> POST /__probe/fga/check
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "permissionKey": "workspace.write",
+>     "resourceId": "workspace::store-9001",
+>     "subjectId": "{subj:ann}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "allowed": false,
+      "error": null,
+      "trace": [
+        {
+          "detail": "Checking access to Globex store 9001 (workspace)",
+          "grantId": null,
+          "resourceId": "workspace::store-9001",
+          "resourceName": "Globex store 9001",
+          "roleName": null,
+          "step": "Target Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "Looking for permission: Write workspace",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Permission",
+          "subjectName": null
+        },
+        {
+          "detail": "Subject \"Ann Archer\" + 1 group membership(s)",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Subject Resolution",
+          "subjectName": "Ann Archer"
+        },
+        {
+          "detail": "Checking 2 resource(s) in hierarchy",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Resource Path",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Globex store 9001",
+          "grantId": null,
+          "resourceId": "workspace::store-9001",
+          "resourceName": "Globex store 9001",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "[Workspace] Globex",
+          "grantId": null,
+          "resourceId": "workspace::globex",
+          "resourceName": "Globex",
+          "roleName": null,
+          "step": "Checking Resource",
+          "subjectName": null
+        },
+        {
+          "detail": "No matching grants found that provide permission \"Write workspace\"",
+          "grantId": null,
+          "resourceId": null,
+          "resourceName": null,
+          "roleName": null,
+          "step": "Access Denied",
+          "subjectName": null
+        }
+      ]
+    }
+
+## 9. operator: dashboard: outside_boundary is recorded as a failed sync event
+> GET /sqlos/admin/auth/api/scim-connections/{scim#1}/sync-events?pageSize=50
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "action": "scim.group.updated",
+          "connectionId": "{scim#1}",
+          "dataJson": "{\"attributeNames\":[\"Operations\",\"schemas\"],\"operationCount\":1,\"sensitiveAttributesRedacted\":false}",
+          "error": null,
+          "externalId": "store-42-managers",
+          "id": "{scevt#1}",
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "resourceId": "{grp:store-42}",
+          "resourceType": "Group",
+          "result": "success"
+        },
+        {
+          "action": "scim.grant.outside_boundary",
+          "connectionId": "{scim#1}",
+          "dataJson": "{\"mappingId\":\"{scmap:stores}\",\"roleKey\":\"workspace_admin\",\"resourceId\":\"workspace::store-9001\",\"grantBoundaryResourceId\":\"workspace::acme\",\"reason\":\"outside_boundary\"}",
+          "error": "The mapped resource is not the connection's grant boundary or one of its descendants; no grant was created and any previous managed grant was revoked.",
+          "externalId": "store-42-managers",
+          "id": "{scevt#2}",
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "resourceId": "{grp:store-42}",
+          "resourceType": "Group",
+          "result": "failed"
+        },
+        {
+          "action": "scim.grant.revoked",
+          "connectionId": "{scim#1}",
+          "dataJson": "{\"mappingId\":\"{scmap:stores}\",\"grantId\":\"{grant#1}\",\"roleId\":\"workspace_admin\",\"resourceId\":\"workspace::store-42\"}",
+          "error": null,
+          "externalId": "store-42-managers",
+          "id": "{scevt#3}",
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "resourceId": "{grp:store-42}",
+          "resourceType": "Group",
+          "result": "success"
+        },
+        {
+          "action": "scim.group.deleted",
+          "connectionId": "{scim#1}",
+          "dataJson": null,
+          "error": null,
+          "externalId": "store-9001-managers",
+          "id": "{scevt#4}",
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "resourceId": "{grp:store-9001}",
+          "resourceType": "Group",
+          "result": "success"
+        },
+        {
+          "action": "scim.group.created",
+          "connectionId": "{scim#1}",
+          "dataJson": "{\"attributeNames\":[\"displayName\",\"externalId\",\"members\",\"schemas\"],\"operationCount\":null,\"sensitiveAttributesRedacted\":false}",
+          "error": null,
+          "externalId": "store-9001-managers",
+          "id": "{scevt#5}",
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "resourceId": "{grp:store-9001}",
+          "resourceType": "Group",
+          "result": "success"
+        },
+        {
+          "action": "scim.grant.outside_boundary",
+          "connectionId": "{scim#1}",
+          "dataJson": "{\"mappingId\":\"{scmap:stores}\",\"roleKey\":\"workspace_admin\",\"resourceId\":\"workspace::store-9001\",\"grantBoundaryResourceId\":\"workspace::acme\",\"reason\":\"outside_boundary\"}",
+          "error": "The mapped resource is not the connection's grant boundary or one of its descendants; no grant was created and any previous managed grant was revoked.",
+          "externalId": "store-9001-managers",
+          "id": "{scevt#6}",
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "resourceId": "{grp:store-9001}",
+          "resourceType": "Group",
+          "result": "failed"
+        },
+        {
+          "action": "scim.group.member_added",
+          "connectionId": "{scim#1}",
+          "dataJson": "{\"groupId\":\"{grp:store-9001}\",\"memberCount\":1,\"subjectIds\":[\"{subj:ann}\"],\"truncated\":false}",
+          "error": null,
+          "externalId": "store-9001-managers",
+          "id": "{scevt#7}",
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "resourceId": "{grp:store-9001}",
+          "resourceType": "Group",
+          "result": "success"
+        },
+        {
+          "action": "scim.group.created",
+          "connectionId": "{scim#1}",
+          "dataJson": "{\"attributeNames\":[\"displayName\",\"externalId\",\"members\",\"schemas\"],\"operationCount\":null,\"sensitiveAttributesRedacted\":false}",
+          "error": null,
+          "externalId": "store-42-managers",
+          "id": "{scevt#8}",
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "resourceId": "{grp:store-42}",
+          "resourceType": "Group",
+          "result": "success"
+        },
+        {
+          "action": "scim.grant.mapped",
+          "connectionId": "{scim#1}",
+          "dataJson": "{\"mappingId\":\"{scmap:stores}\",\"grantId\":\"{grant#1}\",\"roleId\":\"workspace_admin\",\"resourceId\":\"workspace::store-42\"}",
+          "error": null,
+          "externalId": "store-42-managers",
+          "id": "{scevt#9}",
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "resourceId": "{grp:store-42}",
+          "resourceType": "Group",
+          "result": "success"
+        },
+        {
+          "action": "scim.group.member_added",
+          "connectionId": "{scim#1}",
+          "dataJson": "{\"groupId\":\"{grp:store-42}\",\"memberCount\":1,\"subjectIds\":[\"{subj:ann}\"],\"truncated\":false}",
+          "error": null,
+          "externalId": "store-42-managers",
+          "id": "{scevt#10}",
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "resourceId": "{grp:store-42}",
+          "resourceType": "Group",
+          "result": "success"
+        },
+        {
+          "action": "scim.user.created",
+          "connectionId": "{scim#1}",
+          "dataJson": "{\"attributeNames\":[\"active\",\"emails\",\"externalId\",\"name\",\"schemas\",\"userName\"],\"operationCount\":null,\"sensitiveAttributesRedacted\":false}",
+          "error": null,
+          "externalId": "directory-ann",
+          "id": "{scevt#11}",
+          "occurredAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "requestId": null,
+          "resourceId": "{usr:ann}",
+          "resourceType": "User",
+          "result": "success"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 50
+    }
+
+## audit: boundary decisions are audited
+  - {
+      "action": "scim.group.member_added",
+      "actor": {
+        "displayName": null,
+        "id": "store-42-managers",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.member_added",
+      "id": "{evt#1}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "store-42-managers",
+        "payload": {
+          "groupId": "{grp:store-42}",
+          "memberCount": 1,
+          "subjectIds": [
+            "{subj:ann}"
+          ],
+          "truncated": false
+        },
+        "resourceId": "{grp:store-42}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:store-42}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.grant.mapped",
+      "actor": {
+        "displayName": null,
+        "id": "store-42-managers",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.grant.mapped",
+      "id": "{evt#2}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "store-42-managers",
+        "payload": {
+          "grantId": "{grant#1}",
+          "mappingId": "{scmap:stores}",
+          "resourceId": "workspace::store-42",
+          "roleId": "workspace_admin"
+        },
+        "resourceId": "{grp:store-42}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:store-42}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.created",
+      "actor": {
+        "displayName": null,
+        "id": "store-42-managers",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.created",
+      "id": "{evt#3}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "store-42-managers",
+        "payload": {
+          "displayName": "Store-42-Managers",
+          "externalId": "store-42-managers",
+          "members": [
+            {
+              "value": "{usr:ann}"
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:Group"
+          ]
+        },
+        "resourceId": "{grp:store-42}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:store-42}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.member_added",
+      "actor": {
+        "displayName": null,
+        "id": "store-9001-managers",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.member_added",
+      "id": "{evt#4}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "store-9001-managers",
+        "payload": {
+          "groupId": "{grp:store-9001}",
+          "memberCount": 1,
+          "subjectIds": [
+            "{subj:ann}"
+          ],
+          "truncated": false
+        },
+        "resourceId": "{grp:store-9001}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:store-9001}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.grant.outside_boundary",
+      "actor": {
+        "displayName": null,
+        "id": "store-9001-managers",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.grant.outside_boundary",
+      "id": "{evt#5}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "store-9001-managers",
+        "payload": {
+          "grantBoundaryResourceId": "workspace::acme",
+          "mappingId": "{scmap:stores}",
+          "reason": "outside_boundary",
+          "resourceId": "workspace::store-9001",
+          "roleKey": "workspace_admin"
+        },
+        "resourceId": "{grp:store-9001}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:store-9001}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.created",
+      "actor": {
+        "displayName": null,
+        "id": "store-9001-managers",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.created",
+      "id": "{evt#6}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "store-9001-managers",
+        "payload": {
+          "displayName": "Store-9001-Managers",
+          "externalId": "store-9001-managers",
+          "members": [
+            {
+              "value": "{usr:ann}"
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:Group"
+          ]
+        },
+        "resourceId": "{grp:store-9001}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:store-9001}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.deleted",
+      "actor": {
+        "displayName": null,
+        "id": "store-9001-managers",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.deleted",
+      "id": "{evt#7}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "store-9001-managers",
+        "payload": null,
+        "resourceId": "{grp:store-9001}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:store-9001}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.grant.revoked",
+      "actor": {
+        "displayName": null,
+        "id": "store-42-managers",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.grant.revoked",
+      "id": "{evt#8}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "store-42-managers",
+        "payload": {
+          "grantId": "{grant#1}",
+          "mappingId": "{scmap:stores}",
+          "resourceId": "workspace::store-42",
+          "roleId": "workspace_admin"
+        },
+        "resourceId": "{grp:store-42}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:store-42}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.grant.outside_boundary",
+      "actor": {
+        "displayName": null,
+        "id": "store-42-managers",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.grant.outside_boundary",
+      "id": "{evt#9}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "store-42-managers",
+        "payload": {
+          "grantBoundaryResourceId": "workspace::acme",
+          "mappingId": "{scmap:stores}",
+          "reason": "outside_boundary",
+          "resourceId": "workspace::store-9001",
+          "roleKey": "workspace_admin"
+        },
+        "resourceId": "{grp:store-42}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:store-42}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }
+  - {
+      "action": "scim.group.updated",
+      "actor": {
+        "displayName": null,
+        "id": "store-42-managers",
+        "type": "scim"
+      },
+      "applicationId": null,
+      "applicationKey": null,
+      "context": null,
+      "correlationId": null,
+      "eventType": "scim.group.updated",
+      "id": "{evt#10}",
+      "ingestedAt": "{datetime:unspecified}",
+      "ipAddress": null,
+      "metadata": {
+        "externalId": "store-42-managers",
+        "payload": {
+          "Operations": [
+            {
+              "op": "replace",
+              "path": "displayName",
+              "value": "Store-9001-Managers"
+            }
+          ],
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ]
+        },
+        "resourceId": "{grp:store-42}",
+        "resourceType": "Group"
+      },
+      "occurredAt": "{datetime:unspecified}",
+      "organizationId": "{org#1}",
+      "requestId": null,
+      "sessionId": null,
+      "source": "scim",
+      "targets": [
+        {
+          "displayName": null,
+          "id": "{grp:store-42}",
+          "type": "group"
+        }
+      ],
+      "userAgent": null,
+      "userId": null
+    }

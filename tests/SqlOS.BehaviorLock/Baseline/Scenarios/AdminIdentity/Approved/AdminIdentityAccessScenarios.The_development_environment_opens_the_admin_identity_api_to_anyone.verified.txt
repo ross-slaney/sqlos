@@ -1,0 +1,94 @@
+# SqlOS behavior lock transcript
+scenario: AdminIdentityAccessScenarios.The_development_environment_opens_the_admin_identity_api_to_anyone
+profile: dashboard-dev
+
+## 1. anyone: list users with no credentials
+> GET /sqlos/admin/auth/api/users
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 2. anyone: create a user with no credentials and no same-origin proof
+> POST /sqlos/admin/auth/api/users
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "displayName": "Dana",
+>     "email": "{email:dana}",
+>     "password": "{password:dana}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "defaultEmail": "{email:dana}",
+      "displayName": "Dana",
+      "id": "{usr#1}",
+      "isActive": true,
+      "updatedAt": "{datetime:utc-z}"
+    }
+
+## 3. anyone: read the user back
+> GET /sqlos/admin/auth/api/users/{usr#1}
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "defaultEmail": "{email:dana}",
+      "displayName": "Dana",
+      "externalIdentityCount": 0,
+      "id": "{usr#1}",
+      "isActive": true,
+      "membershipCount": 0,
+      "sessionCount": 0,
+      "updatedAt": "{datetime:unspecified}"
+    }
+
+## 4. anyone: create an organization
+> POST /sqlos/admin/auth/api/organizations
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "name": "Open Org"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "id": "{org#1}",
+      "isActive": true,
+      "name": "Open Org",
+      "primaryDomain": null,
+      "slug": "open-org"
+    }
+
+## 5. anyone: add the user to it
+> POST /sqlos/admin/auth/api/organizations/{org#1}/memberships
+> Content-Type: application/json; charset=utf-8
+>   {
+>     "role": "admin",
+>     "userId": "{usr#1}"
+>   }
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:utc-z}",
+      "isActive": true,
+      "organizationId": "{org#1}",
+      "role": "admin",
+      "userId": "{usr#1}"
+    }
+
+## 6. anyone: a DELETE is admitted too and fails only on the missing assignment
+> DELETE /sqlos/admin/auth/api/applications/behavior-lock-app/assignments/asa_missing
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Application assignment was not found."
+    }
+
+## audit: audit events
+  (no new events)

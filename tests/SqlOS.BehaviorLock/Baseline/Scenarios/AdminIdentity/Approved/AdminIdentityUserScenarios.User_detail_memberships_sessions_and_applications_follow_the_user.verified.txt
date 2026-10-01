@@ -1,0 +1,209 @@
+# SqlOS behavior lock transcript
+scenario: AdminIdentityUserScenarios.User_detail_memberships_sessions_and_applications_follow_the_user
+profile: dashboard-callback
+
+## 1. operator: the user with active membership and session counts
+> GET /sqlos/admin/auth/api/users/{usr#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "createdAt": "{datetime:unspecified}",
+      "defaultEmail": "{email:alice}",
+      "displayName": "Alice",
+      "externalIdentityCount": 0,
+      "id": "{usr#1}",
+      "isActive": true,
+      "membershipCount": 1,
+      "sessionCount": 2,
+      "updatedAt": "{datetime:unspecified}"
+    }
+
+## 2. operator: the user's memberships
+> GET /sqlos/admin/auth/api/users/{usr#1}/memberships
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "createdAt": "{datetime:unspecified}",
+          "isActive": true,
+          "organization": "Acme",
+          "organizationId": "{org#1}",
+          "role": "admin",
+          "user": "Alice",
+          "userEmail": "{email:alice}",
+          "userId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 3. operator: the newest session first, one to a page
+> GET /sqlos/admin/auth/api/users/{usr#1}/sessions?pageSize=1
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "absoluteExpiresAt": "{datetime:unspecified}",
+          "authenticationMethod": "password",
+          "clientApplicationId": "{cli#1}",
+          "createdAt": "{datetime:unspecified}",
+          "id": "{ses#1}",
+          "idleExpiresAt": "{datetime:unspecified}",
+          "ipAddress": "203.0.113.10",
+          "lastSeenAt": "{datetime:unspecified}",
+          "revocationReason": null,
+          "revokedAt": null,
+          "user": "Alice",
+          "userAgent": "",
+          "userId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": true,
+      "nextCursor": "{cursor#1}",
+      "pageSize": 1
+    }
+
+## 4. operator: the older session on the next page
+> GET /sqlos/admin/auth/api/users/{usr#1}/sessions?pageSize=1&cursor={cursor#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [
+        {
+          "absoluteExpiresAt": "{datetime:unspecified}",
+          "authenticationMethod": "password",
+          "clientApplicationId": "{cli#1}",
+          "createdAt": "{datetime:unspecified}",
+          "id": "{ses#2}",
+          "idleExpiresAt": "{datetime:unspecified}",
+          "ipAddress": "203.0.113.10",
+          "lastSeenAt": "{datetime:unspecified}",
+          "revocationReason": null,
+          "revokedAt": null,
+          "user": "Alice",
+          "userAgent": "",
+          "userId": "{usr#1}"
+        }
+      ],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 1
+    }
+
+## 5. operator: applications the user can reach in each organization, and recent sessions
+> GET /sqlos/admin/auth/api/users/{usr#1}/applications
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "applications": [
+        {
+          "accessMode": "all_organizations",
+          "assignmentId": null,
+          "audience": "https://sqlos.example.test/api",
+          "clientId": "behavior-lock-app",
+          "id": "{cli#1}",
+          "name": "Behavior Lock",
+          "organization": "Acme",
+          "organizationId": "{org#1}",
+          "source": "all_organizations"
+        }
+      ],
+      "defaultEmail": "{email:alice}",
+      "displayName": "Alice",
+      "id": "{usr#1}",
+      "recentSessions": [
+        {
+          "clientApplicationId": "{cli#1}",
+          "clientId": "behavior-lock-app",
+          "clientName": "Behavior Lock",
+          "createdAt": "{datetime:unspecified}",
+          "id": "{ses#1}",
+          "lastSeenAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "revokedAt": null
+        },
+        {
+          "clientApplicationId": "{cli#1}",
+          "clientId": "behavior-lock-app",
+          "clientName": "Behavior Lock",
+          "createdAt": "{datetime:unspecified}",
+          "id": "{ses#2}",
+          "lastSeenAt": "{datetime:unspecified}",
+          "organizationId": "{org#1}",
+          "revokedAt": null
+        }
+      ]
+    }
+
+## 6. operator: a user without memberships is evaluated without an organization
+> GET /sqlos/admin/auth/api/users/{usr#2}/applications
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "applications": [
+        {
+          "accessMode": "all_organizations",
+          "assignmentId": null,
+          "audience": "https://sqlos.example.test/api",
+          "clientId": "behavior-lock-app",
+          "id": "{cli#1}",
+          "name": "Behavior Lock",
+          "organization": null,
+          "organizationId": null,
+          "source": "all_organizations"
+        }
+      ],
+      "defaultEmail": "{email:bob}",
+      "displayName": "Bob",
+      "id": "{usr#2}",
+      "recentSessions": []
+    }
+
+## 7. operator: an unknown user has no memberships
+> GET /sqlos/admin/auth/api/users/usr_missing/memberships
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 8. operator: and no sessions
+> GET /sqlos/admin/auth/api/users/usr_missing/sessions
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 200 OK
+< Content-Type: application/json; charset=utf-8
+    {
+      "data": [],
+      "hasNextPage": false,
+      "nextCursor": null,
+      "pageSize": 10
+    }
+
+## 9. operator: but the applications view reports it as not found
+> GET /sqlos/admin/auth/api/users/usr_missing/applications
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "User not found."
+    }
+
+## 10. operator: and the user detail lets 'User not found.' escape as a 500
+> GET /sqlos/admin/auth/api/users/usr_missing
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 500 Internal Server Error
+< X-BehaviorLock-Unhandled-Exception: System.InvalidOperationException: User not found.

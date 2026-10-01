@@ -1,0 +1,198 @@
+# SqlOS behavior lock transcript
+scenario: EmailTemplateAdminScenarios.Invalid_email_template_requests_are_rejected
+profile: modules
+
+## 1. operator: a key with a space and punctuation
+> POST /sqlos/admin/email/api/templates
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "bad key!",
+>     "htmlBodyTemplate": "<p>Body</p>",
+>     "key": "bad key!",
+>     "subjectTemplate": "Subject",
+>     "textBodyTemplate": "Body"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Email template key must be 1-120 characters and contain only letters, numbers, dots, underscores, and dashes."
+    }
+
+## 2. operator: a key that does not start with a letter or digit
+> POST /sqlos/admin/email/api/templates
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": ".hidden",
+>     "htmlBodyTemplate": "<p>Body</p>",
+>     "key": ".hidden",
+>     "subjectTemplate": "Subject",
+>     "textBodyTemplate": "Body"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Email template key must be 1-120 characters and contain only letters, numbers, dots, underscores, and dashes."
+    }
+
+## 3. operator: a blank subject
+> POST /sqlos/admin/email/api/templates
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "no.subject",
+>     "htmlBodyTemplate": "<p>Body</p>",
+>     "key": "no.subject",
+>     "subjectTemplate": " ",
+>     "textBodyTemplate": "Body"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Subject template is required."
+    }
+
+## 4. operator: a blank HTML body
+> POST /sqlos/admin/email/api/templates
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "no.html",
+>     "htmlBodyTemplate": "",
+>     "key": "no.html",
+>     "subjectTemplate": "Subject",
+>     "textBodyTemplate": "Body"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "HTML body template is required."
+    }
+
+## 5. operator: a blank text body
+> POST /sqlos/admin/email/api/templates
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "no.text",
+>     "htmlBodyTemplate": "<p>Body</p>",
+>     "key": "no.text",
+>     "subjectTemplate": "Subject",
+>     "textBodyTemplate": " "
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Text body template is required."
+    }
+
+## 6. operator: a key a built-in template already uses
+> POST /sqlos/admin/email/api/templates
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "auth.email-otp",
+>     "htmlBodyTemplate": "<p>Body</p>",
+>     "key": "auth.email-otp",
+>     "subjectTemplate": "Subject",
+>     "textBodyTemplate": "Body"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Email template 'auth.email-otp' already exists."
+    }
+
+## 7. operator: a malformed body is rejected by request binding
+> POST /sqlos/admin/email/api/templates
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {"key":
+< 400 Bad Request
+
+## 8. operator: renaming a template to another template's key
+> PUT /sqlos/admin/email/api/templates/billing.receipt
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "auth.magic-link",
+>     "htmlBodyTemplate": "<p>Body</p>",
+>     "key": "auth.magic-link",
+>     "subjectTemplate": "Subject",
+>     "textBodyTemplate": "Body"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Email template 'auth.magic-link' already exists."
+    }
+
+## 9. operator: editing an unknown template
+> PUT /sqlos/admin/email/api/templates/missing.template
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {
+>     "displayName": "missing.template",
+>     "htmlBodyTemplate": "<p>Body</p>",
+>     "key": "missing.template",
+>     "subjectTemplate": "Subject",
+>     "textBodyTemplate": "Body"
+>   }
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Email template not found."
+    }
+
+## 10. operator: deleting an unknown template
+> DELETE /sqlos/admin/email/api/templates/missing.template
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Email template not found."
+    }
+
+## 11. operator: reading an unknown template
+> GET /sqlos/admin/email/api/templates/missing.template
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Email template not found."
+    }
+
+## 12. operator: previewing an unknown template
+> POST /sqlos/admin/email/api/templates/missing.template/preview
+> Content-Type: application/json; charset=utf-8
+> X-BehaviorLock-Operator: behavior-lock-operator
+>   {}
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "message": "Email template not found."
+    }
+
+## 13. operator: offset paging of templates
+> GET /sqlos/admin/email/api/templates?page=2
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_cursor",
+      "message": "Offset pagination is no longer supported. Omit page or pass page=1 for the first window, then follow nextCursor."
+    }
+
+## 14. operator: a cursor that is not a SqlOS cursor
+> GET /sqlos/admin/email/api/messages?cursor={cursor#1}
+> X-BehaviorLock-Operator: behavior-lock-operator
+< 400 Bad Request
+< Content-Type: application/json; charset=utf-8
+    {
+      "error": "invalid_cursor",
+      "message": "The cursor is invalid."
+    }
+
+## audit: rejected changes write no audit events
+  (no new events)

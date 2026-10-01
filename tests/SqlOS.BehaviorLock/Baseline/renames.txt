@@ -1,0 +1,4 @@
+# Approved files renamed since the baseline, one rename per line: "<earlier path> -> <later path>",
+# both relative to the repository. Append a line for every rename and never edit or remove one:
+# package mode and scripts/check-behavior-baseline.sh follow the chain from a baseline file to the
+# approved file that carries its scenario today.
