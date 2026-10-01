@@ -17,11 +17,9 @@ internal static class AuthServerAuditRows
         SqlOSAuditProjectionContext context,
         string? userId = null,
         string? ipAddress = null,
-        object? data = null)
-        => SqlOSAuditRows.Create(
-            SqlOSAuditRows.AuthServerRequest(eventType, "system", null, userId: userId, ipAddress: ipAddress, data: data),
-            SqlOSIds.New("evt"),
-            context.Now);
+        object? data = null,
+        string? organizationId = null)
+        => Row(eventType, "system", null, context, userId, organizationId, ipAddress, data);
 
     /// <summary>A row whose actor is the user it is about (actor <c>user</c>, the user's ID).</summary>
     public static SqlOSAuditEvent User(
@@ -31,8 +29,23 @@ internal static class AuthServerAuditRows
         string? ipAddress = null,
         object? data = null,
         string? organizationId = null)
+        => Row(eventType, "user", userId, context, userId, organizationId, ipAddress, data);
+
+    /// <summary>
+    /// A row with any actor: <c>RecordAuditAsync(eventType, actorType, actorId, userId,
+    /// organizationId, ipAddress: ipAddress, data: data)</c>.
+    /// </summary>
+    public static SqlOSAuditEvent Row(
+        string eventType,
+        string actorType,
+        string? actorId,
+        SqlOSAuditProjectionContext context,
+        string? userId = null,
+        string? organizationId = null,
+        string? ipAddress = null,
+        object? data = null)
         => SqlOSAuditRows.Create(
-            SqlOSAuditRows.AuthServerRequest(eventType, "user", userId, userId: userId, organizationId: organizationId, ipAddress: ipAddress, data: data),
+            SqlOSAuditRows.AuthServerRequest(eventType, actorType, actorId, userId: userId, organizationId: organizationId, ipAddress: ipAddress, data: data),
             SqlOSIds.New("evt"),
             context.Now);
 }
