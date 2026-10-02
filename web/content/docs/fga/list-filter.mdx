@@ -36,7 +36,7 @@ Every entity of yours that implements `IHasResourceId` declares one more column,
 
 When you build a filter, SqlOS reads the caller's **access roots** once: the resources on which the caller, or one of their active groups, holds a current grant whose role includes the permission. The filter then says, for each row: at the level of one of those roots, the row's scope column holds that root. It is the same predicate for every caller and every table, it joins nothing, and for a caller whose access comes from one grant the database answers a page with one index seek plus the rows of the page, whatever the table's size, in any order you declared an index for.
 
-There is one filter, whatever the number of grants. A caller with several roots at a level, up to thousands of grants on single resources, gets the same test: the row's scope at that level is one of the roots, sent as one list parameter. The database reads that list for every query, so a page costs more as the caller's grants grow. On PostgreSQL that is about 1 ms per 1,000 grants, most of it spent planning the query.
+There is one filter, whatever the number of grants. A caller with several roots at a level, up to thousands of grants on single resources, gets the same test: the row's scope at that level is one of the roots, sent as one list parameter. The database reads that list for every query, so a page costs more as the caller's grants grow.
 
 ## The scope column
 
