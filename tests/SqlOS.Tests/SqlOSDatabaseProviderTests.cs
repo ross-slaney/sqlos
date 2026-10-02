@@ -136,7 +136,21 @@ public class SqlOSDatabaseProviderTests
         all.Should().NotContain("JOIN old_rows", "a join of the transition tables has nothing to plan by");
         all.Should().Contain("IF NOT EXISTS (", "the update function must leave before updating, or its own update fires it forever");
         all.Should().Contain("AFTER UPDATE ON \"app\".\"Items\"");
-        all.Should().Contain("\"SqlOSFgaAncestor4\" = r.\"Ancestor4\", \"SqlOSFgaReach\" = r.\"Reach\", \"SqlOSFgaTypeSeq\" = rt.\"Seq\"");
+        all.Should().Contain("\"SqlOSFgaScope\" = CASE WHEN r.\"Id\" IS NULL THEN NULL ELSE ARRAY[rt.\"Seq\"::bigint, CASE WHEN r.\"Reach\" <= 0 THEN r.\"Ancestor0\" END");
+        all.Should().Contain("CASE WHEN r.\"Reach\" <= 4 THEN r.\"Ancestor4\" END]::bigint[] END");
+        all.Should().Contain("\"SqlOSFgaScope\" = NULL");
+
+        // Per level: an expression index on the level's element of the array, over the key and over each
+        // declared order, filtered to the rows that have an ancestor at that level; stale mirrors dropped.
+        var indexes = PostgreSqlDatabaseProvider.Instance.BuildEnsureScopeIndexesSql(options, [scope with { Orders = [new SqlOSFgaScopeOrder("Price", ["Price", "Id"])] }]).Single();
+        indexes.Should().Contain("RAISE EXCEPTION 'SqlOS FGA: \"app\".\"Items\" has no SqlOSFgaScope column.");
+        indexes.Should().Contain("CREATE INDEX IF NOT EXISTS \"IX_Items_SqlOSFgaScope4\" ON \"app\".\"Items\" ((\"SqlOSFgaScope\"[6]), \"Id\") WHERE \"SqlOSFgaScope\"[6] IS NOT NULL;");
+        indexes.Should().Contain("CREATE INDEX IF NOT EXISTS \"IX_Items_SqlOSFgaScope0_Price\" ON \"app\".\"Items\" ((\"SqlOSFgaScope\"[2]), \"Price\", \"Id\") WHERE \"SqlOSFgaScope\"[2] IS NOT NULL;");
+        indexes.Should().NotContain("SqlOSFgaScope5\"");
+        indexes.Should().Contain("CREATE STATISTICS IF NOT EXISTS \"ST_Items_SqlOSFgaScopeType\" ON ((\"SqlOSFgaScope\"[1])) FROM \"app\".\"Items\";");
+        indexes.Should().Contain("ANALYZE \"app\".\"Items\";");
+        indexes.Should().Contain("indexname LIKE 'IX\\_Items\\_SqlOSFgaScope%'");
+        indexes.Should().Contain("EXECUTE format('DROP INDEX %I.%I', stale.schemaname, stale.indexname);");
 
         var hash = PostgreSqlDatabaseProvider.Instance.BuildSelectRoutinesHashSql(options, [scope]);
         hash.Should().Contain("p.proname = 'fn_ActiveSubjects'");

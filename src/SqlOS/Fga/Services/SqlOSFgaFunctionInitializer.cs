@@ -16,11 +16,12 @@ namespace SqlOS.Fga.Services;
 /// <summary>
 /// Creates the SHRBAC enforcement routines in the database: the ancestor columns of the configured depth,
 /// <c>fn_ActiveSubjects</c>, <c>fn_AccessRoots</c>, <c>fn_IsResourceAccessible</c>, and the routines and
-/// triggers that keep the resource lineage (and the scope columns of application tables) exact. The
+/// triggers that keep the resource lineage (and the scope column of application tables) exact, and the
+/// per-level indexes of those tables. The
 /// definitions' hash is stored with the schema version, so a startup that finds the same hash and every
 /// routine present changes nothing; a new definition (a new SqlOS version, a changed option, a newly
 /// registered application table) is applied under an exclusive lock, one batch per transaction. Builds the
-/// lineage once when it is empty but the resource tree is not, and fills newly added scope columns once.
+/// lineage once when it is empty but the resource tree is not, and fills a newly added table's scope column once.
 /// </summary>
 public class SqlOSFgaFunctionInitializer
 {
@@ -56,6 +57,7 @@ public class SqlOSFgaFunctionInitializer
         batches.Add(provider.BuildAccessRootsFunctionSql(_options));
         batches.Add(provider.BuildIsResourceAccessibleFunctionSql(_options));
         batches.AddRange(provider.BuildLineageMaintenanceSql(_options, scopeTables));
+        batches.AddRange(provider.BuildEnsureScopeIndexesSql(_options, scopeTables));
         var hash = Hash(batches);
 
         try
@@ -125,7 +127,7 @@ public class SqlOSFgaFunctionInitializer
         }
     }
 
-    /// <summary>The application tables of the context's model that carry the scope columns.</summary>
+    /// <summary>The application tables of the context's model that carry the scope column.</summary>
     private IReadOnlyList<SqlOSFgaScopeTable> ScopeTables()
         => _context is DbContext db ? SqlOSFgaScopeColumns.Tables(db.Model) : [];
 
@@ -165,7 +167,7 @@ public class SqlOSFgaFunctionInitializer
         {
             foreach (var table in scopeTables)
             {
-                _logger.LogInformation("Filling the FGA scope columns of {Schema}.{Table} from the resource lineage...", table.Schema ?? "(default)", table.Table);
+                _logger.LogInformation("Filling the FGA scope column of {Schema}.{Table} from the resource lineage...", table.Schema ?? "(default)", table.Table);
                 await ExecuteNonQueryAsync(provider.BuildScopeFillSql(_options, table), cancellationToken);
             }
         }

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using SqlOS.Fga;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
 
@@ -239,6 +240,9 @@ public static class SqlOSFgaModelConfiguration
                     .HasName("fn_IsResourceAccessible")
                     .HasSchema(schema);
             }
+
+            // How a query reads a row's scope value on SQL Server (PostgreSQL indexes the array directly).
+            SqlOSFgaScope.Register(modelBuilder);
         }
     }
 

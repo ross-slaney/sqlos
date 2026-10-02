@@ -96,6 +96,39 @@ public class SqlOSFgaFunctionInitializerTests
     }
 
     [TestMethod]
+    public void ScopeIndexesSql_AddsComputedColumnsAndFilteredIndexesPerLevel_AndDropsStaleOnes()
+    {
+        var options = new SqlOSFgaOptions { MaxResourceHierarchyDepth = 2 };
+        var scope = new SqlOSFgaScopeTable("app", "Items", "ResourceId", ["Id"], [new SqlOSFgaScopeOrder("Price", ["Price", "Id"])]);
+        var sql = SqlServerDatabaseProvider.Instance.BuildEnsureScopeIndexesSql(options, [scope]).Single();
+
+        // Guarded: the column comes from the application's migration.
+        sql.Should().Contain("IF COL_LENGTH('[app].[Items]', 'SqlOSFgaScope') IS NULL");
+        sql.Should().Contain("THROW 51013");
+
+        // Per level 0..2: a computed column over the level's eight bytes, the key index and the Price mirror on
+        // it, filtered on the depth byte so a level no row reaches costs nothing.
+        for (var level = 0; level <= 2; level++)
+        {
+            var offset = SqlOSFgaLineage.ScopeAncestorOffset(level);
+            sql.Should().Contain($"ALTER TABLE [app].[Items] ADD [SqlOSFgaScope{level}] AS SUBSTRING([SqlOSFgaScope], {offset}, 8);");
+            sql.Should().Contain($"CREATE NONCLUSTERED INDEX [IX_Items_SqlOSFgaScope{level}] ON [app].[Items] ([SqlOSFgaScope{level}], [Id]) WHERE [SqlOSFgaScope] >= 0x0{level};");
+            sql.Should().Contain($"CREATE NONCLUSTERED INDEX [IX_Items_SqlOSFgaScope{level}_Price] ON [app].[Items] ([SqlOSFgaScope{level}], [Price], [Id]) WHERE [SqlOSFgaScope] >= 0x0{level};");
+        }
+
+        sql.Should().NotContain("SqlOSFgaScope3");
+
+        // The type, as a computed column with statistics and no index: the optimizer estimates the type test
+        // from data instead of guessing it is selective.
+        sql.Should().Contain("ALTER TABLE [app].[Items] ADD [SqlOSFgaScopeType] AS SUBSTRING([SqlOSFgaScope], 2, 4);");
+        sql.Should().Contain("CREATE STATISTICS [ST_Items_SqlOSFgaScopeType] ON [app].[Items] ([SqlOSFgaScopeType]);");
+        sql.Should().NotContain("INDEX [IX_Items_SqlOSFgaScopeType");
+        sql.Should().Contain("name LIKE 'IX[_]Items[_]SqlOSFgaScope%'");
+        sql.Should().Contain("'IX_Items_SqlOSFgaScope2_Price')");
+        sql.Should().Contain("EXEC (@stale);");
+    }
+
+    [TestMethod]
     public void LineageMaintenanceSql_CreatesTheRoutinesTriggersAndGuards()
     {
         var options = new SqlOSFgaOptions { MaxResourceHierarchyDepth = 4 };
@@ -133,10 +166,12 @@ public class SqlOSFgaFunctionInitializerTests
         all.Should().Contain("Ancestor4 = CASE WHEN nd.Depth = 4 THEN r.Seq WHEN nd.Depth > 4 THEN p.Ancestor4 ELSE NULL END");
         all.Should().NotContain("Ancestor5");
 
-        // The scope columns of the affected rows follow, and are cleared when the resource goes.
-        all.Should().Contain("[SqlOSFgaAncestor4] = r.Ancestor4, [SqlOSFgaReach] = r.Reach, [SqlOSFgaTypeSeq] = rt.Seq");
+        // The scope value of the affected rows follows (depth, type, then each level's ancestor where access
+        // flows down from it), and is cleared when the resource goes.
+        all.Should().Contain("[SqlOSFgaScope] = CASE WHEN r.Id IS NULL THEN NULL ELSE CAST(ISNULL(r.Depth, 0) AS BINARY(1)) + CAST(rt.Seq AS BINARY(4)) + CAST(ISNULL(CASE WHEN r.Reach <= 0 THEN r.Ancestor0 END, 0) AS BINARY(8))");
+        all.Should().Contain("CAST(ISNULL(CASE WHEN r.Reach <= 4 THEN r.Ancestor4 END, 0) AS BINARY(8)) END");
         all.Should().Contain("INNER JOIN #SqlOSLineageAffected s ON s.Id = t.[ResourceId]");
-        all.Should().Contain("[SqlOSFgaReach] = NULL, [SqlOSFgaTypeSeq] = NULL");
+        all.Should().Contain("[SqlOSFgaScope] = NULL");
         all.Should().Contain("IF NOT UPDATE([ResourceId]) RETURN;");
         all.Should().Contain("SELECT Id FROM (SELECT Id, ParentId, IsActive FROM inserted EXCEPT SELECT Id, ParentId, IsActive FROM deleted) changed");
         all.Should().NotContain("INNER JOIN deleted d ON d.Id = i.Id", "a join of inserted and deleted has nothing to plan by");

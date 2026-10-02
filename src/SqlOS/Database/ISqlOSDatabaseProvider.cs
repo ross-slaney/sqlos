@@ -49,7 +49,7 @@ internal interface ISqlOSDatabaseProvider
 
     /// <summary>
     /// Idempotent batches creating the lineage refresh and rebuild routines, the triggers on the resources
-    /// table, and the triggers on each application table that carries the scope columns.
+    /// table, and the triggers on each application table that carries the scope column.
     /// </summary>
     IReadOnlyList<string> BuildLineageMaintenanceSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables);
 
@@ -58,8 +58,14 @@ internal interface ISqlOSDatabaseProvider
 
     string BuildLineageRebuildSql(SqlOSFgaOptions options);
 
-    /// <summary>Fills the scope columns of every row of one application table from the lineage.</summary>
+    /// <summary>Fills the scope column of every row of one application table from the lineage.</summary>
     string BuildScopeFillSql(SqlOSFgaOptions options, SqlOSFgaScopeTable table);
+
+    /// <summary>
+    /// Idempotent batches creating, per application table, the per-level indexes on the scope column (and on
+    /// SQL Server the computed columns they are built on), and dropping those of orders no longer declared.
+    /// </summary>
+    IReadOnlyList<string> BuildEnsureScopeIndexesSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables);
 
     /// <summary>
     /// A scalar query: the hash of the enforcement routines last applied, or NULL when none is stored or any

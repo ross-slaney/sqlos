@@ -1,6 +1,5 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.Database;
@@ -12,110 +11,83 @@ using SqlOS.Fga.Interfaces;
 namespace SqlOS.Tests.Fga;
 
 /// <summary>
-/// The scope columns pass: with the option on, every application entity with a ResourceId gets the lineage
-/// as database-owned shadow columns, one filtered index per level over its key and over each order it
-/// declared, the triggers declared, and the table listed for the database routines.
+/// The scope column pass: every application entity with a ResourceId gets the one database-owned shadow
+/// column (an array on PostgreSQL, a byte string on SQL Server), the triggers declared, and the table listed
+/// for the database routines with the orders it declared indexes for. The per-level indexes are not part of
+/// the model: SqlOS creates them at startup, outside the application's migrations.
 /// </summary>
 [TestClass]
 public class SqlOSFgaScopeColumnsTests
 {
     [TestMethod]
-    public void ScopeColumnsOn_AddsColumnsIndexesAndTriggersToEveryResourceBackedEntity()
+    public void SqlServer_AddsTheByteColumnAndTriggersToEveryResourceBackedEntity()
     {
-        using var context = Create(scopeColumns: true, SqlOSDatabase.SqlServerProviderName);
-        var model = DesignTimeModel(context);
-        var orders = model.FindEntityType(typeof(Order))!;
+        using var context = Create<OnSqlServer>(SqlOSDatabase.SqlServerProviderName);
+        var orders = context.Model.FindEntityType(typeof(Order))!;
 
         SqlOSFgaScopeColumns.Has(orders).Should().BeTrue();
-        foreach (var name in new[] { "SqlOSFgaAncestor0", "SqlOSFgaAncestor1", "SqlOSFgaAncestor2", "SqlOSFgaReach", "SqlOSFgaTypeSeq" })
-        {
-            var property = orders.FindProperty(name);
-            property.Should().NotBeNull(name);
-            property!.IsShadowProperty().Should().BeTrue(name);
-            property.GetBeforeSaveBehavior().Should().Be(PropertySaveBehavior.Ignore, name);
-        }
-
-        orders.FindProperty("SqlOSFgaAncestor3").Should().BeNull("depth 2 means levels 0..2");
+        var scope = orders.FindProperty(SqlOSFgaLineage.ScopeColumn);
+        scope.Should().NotBeNull();
+        scope!.IsShadowProperty().Should().BeTrue();
+        scope.ClrType.Should().Be(typeof(byte[]));
+        scope.GetColumnType().Should().Be("varbinary(512)");
+        scope.GetBeforeSaveBehavior().Should().Be(PropertySaveBehavior.Ignore);
+        scope.GetAfterSaveBehavior().Should().Be(PropertySaveBehavior.Ignore);
         orders.GetDeclaredTriggers().Select(t => t.GetDatabaseName())
             .Should().BeEquivalentTo(SqlOSFgaLineage.ScopeTriggerNames("Orders"));
 
-        // Per level: the key index, and a mirror of the declared (PlacedAt) order; not of the ResourceId lookup,
-        // the unique Number, or the StoreId foreign key's index.
-        var indexes = orders.GetIndexes().ToDictionary(i => i.GetDatabaseName(), i => i);
-        for (var level = 0; level <= 2; level++)
-        {
-            var key = indexes.Should().ContainKey($"IX_Orders_SqlOSFgaAncestor{level}").WhoseValue;
-            key.Properties.Select(p => p.Name).Should().Equal($"SqlOSFgaAncestor{level}", "Id");
-            key.GetFilter().Should().Be($"[SqlOSFgaAncestor{level}] IS NOT NULL");
-            SqlServerIndexExtensions.GetIncludeProperties(key).Should().BeEquivalentTo(["SqlOSFgaReach", "SqlOSFgaTypeSeq"]);
+        // Nothing else lands in the model: no ancestor columns, no per-level indexes.
+        orders.GetProperties().Select(p => p.Name).Where(n => n.StartsWith(SqlOSFgaLineage.ScopePrefix, StringComparison.Ordinal))
+            .Should().Equal(SqlOSFgaLineage.ScopeColumn);
+        orders.GetIndexes().Select(i => i.GetDatabaseName()).Should().NotContain(n => n.Contains(SqlOSFgaLineage.ScopeColumn, StringComparison.Ordinal));
 
-            var mirrored = indexes.Should().ContainKey($"IX_Orders_SqlOSFgaAncestor{level}_PlacedAt").WhoseValue;
-            mirrored.Properties.Select(p => p.Name).Should().Equal($"SqlOSFgaAncestor{level}", "PlacedAt", "Id");
-            mirrored.GetFilter().Should().Be($"[SqlOSFgaAncestor{level}] IS NOT NULL");
-        }
-
-        indexes.Keys.Should().NotContain(k => k.Contains("Number", StringComparison.Ordinal) && k.Contains("SqlOSFga", StringComparison.Ordinal));
-        indexes.Keys.Should().NotContain(k => k.Contains("StoreId", StringComparison.Ordinal) && k.Contains("SqlOSFga", StringComparison.Ordinal));
-        indexes.Keys.Should().NotContain(k => k.Contains("ResourceId", StringComparison.Ordinal) && k.Contains("SqlOSFgaAncestor", StringComparison.Ordinal));
-
-        // The resource id is indexed for the triggers, and a SqlOS entity is never touched.
+        // The resource id is indexed for the triggers (Orders declared its own; Notes gets SqlOS's), and a SqlOS
+        // entity is never touched.
         orders.GetIndexes().Should().Contain(i => i.Properties.Count == 1 && i.Properties[0].Name == "ResourceId");
-        model.FindEntityType(typeof(Note))!.GetIndexes().Should().Contain(i => i.Name == "IX_Notes_SqlOSFgaResourceId");
+        context.Model.FindEntityType(typeof(Note))!.GetIndexes().Should().Contain(i => i.Name == "IX_Notes_SqlOSFgaResourceId");
+        SqlOSFgaScopeColumns.Has(context.Model.FindEntityType(typeof(Store))!).Should().BeFalse("no ResourceId");
 
+        // The tables for the database routines, with the orders to mirror per level: the declared PlacedAt
+        // index (then the key); not the ResourceId lookup, the unique Number, or the StoreId foreign key's index.
         SqlOSFgaScopeColumns.Tables(context.Model).Should().BeEquivalentTo(
         [
-            new SqlOSFgaScopeTable(null, "Notes", "ResourceId", ["Id"]),
-            new SqlOSFgaScopeTable("sales", "Orders", "ResourceId", ["Id"]),
+            new SqlOSFgaScopeTable(null, "Notes", "ResourceId", ["Id"], []),
+            new SqlOSFgaScopeTable("sales", "Orders", "ResourceId", ["Id"], [new SqlOSFgaScopeOrder("PlacedAt", ["PlacedAt", "Id"])]),
         ]);
     }
 
     [TestMethod]
-    public void ScopeColumnsOff_LeavesApplicationEntitiesAlone()
+    public void PostgreSql_AddsTheArrayColumn()
     {
-        using var context = Create(scopeColumns: false, SqlOSDatabase.SqlServerProviderName);
-        var orders = context.Model.FindEntityType(typeof(Order))!;
+        using var context = Create<OnPostgreSql>(SqlOSDatabase.PostgreSqlProviderName);
+        var scope = context.Model.FindEntityType(typeof(Order))!.FindProperty(SqlOSFgaLineage.ScopeColumn);
 
-        SqlOSFgaScopeColumns.Has(orders).Should().BeFalse();
-        orders.FindProperty("SqlOSFgaAncestor0").Should().BeNull();
-        orders.GetDeclaredTriggers().Should().BeEmpty();
-        SqlOSFgaScopeColumns.Tables(context.Model).Should().BeEmpty();
+        scope.Should().NotBeNull();
+        scope!.ClrType.Should().Be(typeof(long?[]));
+        scope.GetColumnType().Should().Be("bigint[]");
+        scope.GetBeforeSaveBehavior().Should().Be(PropertySaveBehavior.Ignore);
     }
 
     [TestMethod]
-    public void ScopeColumnsOn_PostgreSql_QuotesTheFilterAndIncludesThroughNpgsql()
+    public void WithoutAProvider_StillAddsTheColumn()
     {
-        using var context = Create(scopeColumns: true, SqlOSDatabase.PostgreSqlProviderName);
-        var index = DesignTimeModel(context).FindEntityType(typeof(Order))!.GetIndexes().Single(i => i.Name == "IX_Orders_SqlOSFgaAncestor1");
+        // In-memory and SQLite test contexts: the column exists so the model is the same shape everywhere.
+        using var context = Create<OnNoProvider>(providerName: null);
+        var scope = context.Model.FindEntityType(typeof(Order))!.FindProperty(SqlOSFgaLineage.ScopeColumn);
 
-        index.GetFilter().Should().Be("\"SqlOSFgaAncestor1\" IS NOT NULL");
-        NpgsqlIndexExtensions.GetIncludeProperties(index).Should().BeEquivalentTo(
-            ["SqlOSFgaReach", "SqlOSFgaTypeSeq"],
-            "the index carries {0}",
-            string.Join(", ", index.GetAnnotations().Select(a => a.Name + "=" + a.Value)));
+        scope.Should().NotBeNull();
+        scope!.ClrType.Should().Be(typeof(byte[]));
     }
 
     [TestMethod]
-    public void ScopeColumnsOn_WithoutAProvider_FailsWithGuidance()
+    public void ADepthBeyondTheColumnsRoom_Fails()
     {
-        var act = () => Create(scopeColumns: true, providerName: null).Model;
-        act.Should().Throw<InvalidOperationException>().WithMessage("*Database.ProviderName*");
+        var act = () => new ScopeModelDbContext<TooDeep>(Options<ScopeModelDbContext<TooDeep>>(SqlOSDatabase.SqlServerProviderName), SqlOSDatabase.SqlServerProviderName, depth: 70).Model;
+        act.Should().Throw<InvalidOperationException>().WithMessage("*MaxResourceHierarchyDepth*");
     }
 
-    /// <summary>The model with its configuration, which the read-optimized runtime model leaves out (index includes, for one).</summary>
-    private static IModel DesignTimeModel(DbContext context)
-        => context.GetService<IDesignTimeModel>().Model;
-
-    private static DbContext Create(bool scopeColumns, string? providerName)
-    {
-        // One context type per configuration: EF Core caches the model by context type.
-        return (scopeColumns, providerName) switch
-        {
-            (true, SqlOSDatabase.SqlServerProviderName) => new ScopeModelDbContext<OnSqlServer>(Options<ScopeModelDbContext<OnSqlServer>>(providerName), true, providerName),
-            (false, SqlOSDatabase.SqlServerProviderName) => new ScopeModelDbContext<Off>(Options<ScopeModelDbContext<Off>>(providerName), false, providerName),
-            (true, SqlOSDatabase.PostgreSqlProviderName) => new ScopeModelDbContext<OnPostgreSql>(Options<ScopeModelDbContext<OnPostgreSql>>(providerName), true, providerName),
-            _ => new ScopeModelDbContext<OnNoProvider>(Options<ScopeModelDbContext<OnNoProvider>>(providerName), true, providerName),
-        };
-    }
+    private static DbContext Create<TMarker>(string? providerName)
+        => new ScopeModelDbContext<TMarker>(Options<ScopeModelDbContext<TMarker>>(providerName), providerName, depth: 2);
 
     private static DbContextOptions<TContext> Options<TContext>(string? providerName) where TContext : DbContext
     {
@@ -134,13 +106,14 @@ public class SqlOSFgaScopeColumnsTests
 
     private sealed class OnSqlServer;
 
-    private sealed class Off;
-
     private sealed class OnPostgreSql;
 
     private sealed class OnNoProvider;
 
-    private sealed class ScopeModelDbContext<TMarker>(DbContextOptions<ScopeModelDbContext<TMarker>> options, bool scopeColumns, string? providerName) : DbContext(options)
+    private sealed class TooDeep;
+
+    // One context type per configuration: EF Core caches the model by context type.
+    private sealed class ScopeModelDbContext<TMarker>(DbContextOptions<ScopeModelDbContext<TMarker>> options, string? providerName, int depth) : DbContext(options)
     {
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -165,7 +138,7 @@ public class SqlOSFgaScopeColumnsTests
             });
 
             // The application configured its entities first; the SqlOS model and the scope pass come last.
-            modelBuilder.UseSqlOS(GetType(), providerName, new SqlOSFgaOptions { MaxResourceHierarchyDepth = 2, ScopeColumns = scopeColumns });
+            modelBuilder.UseSqlOS(GetType(), providerName, new SqlOSFgaOptions { MaxResourceHierarchyDepth = depth });
         }
     }
 

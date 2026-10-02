@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SqlOS.Fga;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Models;
 using SqlOS.IntegrationTests.Fga.Infrastructure;
@@ -27,18 +28,27 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
     }
 
     [TestMethod]
-    public async Task BuildFilterAsync_ComposesIntoASingleSqlQuery_OverTheScopeColumns()
+    public async Task BuildFilterAsync_ComposesIntoASingleSqlQuery_OverTheScopeColumn()
     {
         var filter = await _authService.BuildFilterAsync<LifecycleProtectedEntity>(
-            FgaTestDataSeeder.SystemAdminSubjectId,
+            FgaTestDataSeeder.AgencyAdminSubjectId,
             "TEST_VIEW");
         var sql = Context.Set<LifecycleProtectedEntity>().Where(filter).ToQueryString();
 
-        // The test context carries the scope columns: the predicate reads the row's own ancestor and reach,
-        // with the admin's one root (level 0) as a parameter, joins nothing, and checks the caller's liveness
-        // once per query.
-        StringAssert.Contains(sql, "SqlOSFgaAncestor0");
-        StringAssert.Contains(sql, "SqlOSFgaReach");
+        // The predicate reads the row's own scope column at the agency admin's level (1), with the root as a
+        // parameter, joins nothing, and checks the caller's liveness once per query. On SQL Server the level is
+        // read with the expression of the computed column its index is built on, under the depth-byte filter.
+        StringAssert.Contains(sql, "SqlOSFgaScope");
+        if (TestDatabase.IsPostgreSql)
+        {
+            StringAssert.Contains(sql, $"[{SqlOSFgaLineage.ScopeAncestorElement(1)}]");
+        }
+        else
+        {
+            StringAssert.Contains(sql, $"SUBSTRING([l].[SqlOSFgaScope], {SqlOSFgaLineage.ScopeAncestorOffset(1)}, 8) = @");
+            StringAssert.Contains(sql, "[l].[SqlOSFgaScope] >= 0x01");
+        }
+
         StringAssert.Contains(sql, "fn_ActiveSubjects");
         Assert.IsFalse(sql.Contains("fn_IsResourceAccessible", StringComparison.OrdinalIgnoreCase), sql);
         Assert.IsFalse(sql.Contains("SqlOSFgaResources", StringComparison.OrdinalIgnoreCase), sql);
@@ -46,25 +56,8 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
     }
 
     [TestMethod]
-    public async Task BuildFilterAsync_WithoutScopeColumns_ReadsTheLineageFromTheResourcesTable()
+    public async Task TheFilter_AgreesWithThePointCheck()
     {
-        await using var plain = CreatePlainContext();
-        var service = new SqlOSFgaAuthService(plain, Options.Create(new SqlOSFgaOptions()), LoggerFactory.Create(b => b.AddConsole()).CreateLogger<SqlOSFgaAuthService>());
-        var filter = await service.BuildFilterAsync<LifecycleProtectedEntity>(FgaTestDataSeeder.AgencyAdminSubjectId, "TEST_VIEW");
-        var sql = plain.Set<LifecycleProtectedEntity>().Where(filter).ToQueryString();
-
-        StringAssert.Contains(sql, "SqlOSFgaResources");
-        StringAssert.Contains(sql, "Ancestor1", "the agency admin's root sits at level 1");
-        StringAssert.Contains(sql, "Reach");
-        Assert.IsFalse(sql.Contains("SqlOSFgaAncestor", StringComparison.Ordinal), sql);
-        Assert.IsFalse(sql.Contains("fn_IsResourceAccessible", StringComparison.OrdinalIgnoreCase), sql);
-    }
-
-    [TestMethod]
-    public async Task BothFilterForms_AgreeWithThePointCheck()
-    {
-        await using var plain = CreatePlainContext();
-        var plainService = new SqlOSFgaAuthService(plain, Options.Create(new SqlOSFgaOptions()), LoggerFactory.Create(b => b.AddConsole()).CreateLogger<SqlOSFgaAuthService>());
         var suffix = Guid.NewGuid().ToString("N");
         foreach (var (resource, i) in new[] { FgaTestDataSeeder.TestAgencyResourceId, FgaTestDataSeeder.TestTeamResourceId, FgaTestDataSeeder.TestProjectResourceId, FgaTestDataSeeder.OtherAgencyResourceId, "root" }.Select((r, i) => (r, i)))
         {
@@ -93,21 +86,14 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
                     }
                 }
 
-                var scoped = await Context.Set<LifecycleProtectedEntity>().AsNoTracking()
+                var visible = await Context.Set<LifecycleProtectedEntity>().AsNoTracking()
                     .Where(e => e.Id.EndsWith(suffix))
                     .Where(await _authService.BuildFilterAsync<LifecycleProtectedEntity>(subject, permission))
                     .OrderBy(e => e.Rank)
                     .Select(e => e.Id)
                     .ToListAsync();
-                var lineage = await plain.Set<LifecycleProtectedEntity>().AsNoTracking()
-                    .Where(e => e.Id.EndsWith(suffix))
-                    .Where(await plainService.BuildFilterAsync<LifecycleProtectedEntity>(subject, permission))
-                    .OrderBy(e => e.Rank)
-                    .Select(e => e.Id)
-                    .ToListAsync();
 
-                CollectionAssert.AreEqual(expected.OrderBy(id => id).ToList(), scoped.OrderBy(id => id).ToList(), $"scope columns, {subject} / {permission}");
-                CollectionAssert.AreEqual(expected.OrderBy(id => id).ToList(), lineage.OrderBy(id => id).ToList(), $"resources table, {subject} / {permission}");
+                CollectionAssert.AreEqual(expected.OrderBy(id => id).ToList(), visible.OrderBy(id => id).ToList(), $"{subject} / {permission}");
             }
         }
     }
@@ -146,16 +132,7 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
         StringAssert.Contains(query.ToQueryString(), "fn_IsResourceAccessible");
         var visible = await query.Select(e => e.Id).ToListAsync();
         CollectionAssert.AreEquivalent(new[] { $"manyrow_a_{suffix}", $"manyrow_b_{suffix}" }, visible);
-
-        await using var plain = CreatePlainContext();
-        var plainService = new SqlOSFgaAuthService(plain, Options.Create(new SqlOSFgaOptions()), LoggerFactory.Create(b => b.AddConsole()).CreateLogger<SqlOSFgaAuthService>());
-        var plainFilter = await plainService.BuildFilterAsync<LifecycleProtectedEntity>(user.SubjectId, "TEST_VIEW");
-        var plainVisible = await plain.Set<LifecycleProtectedEntity>().AsNoTracking().Where(e => e.Id.EndsWith(suffix)).Where(plainFilter).Select(e => e.Id).ToListAsync();
-        CollectionAssert.AreEquivalent(visible, plainVisible);
     }
-
-    private static PlainTestSqlOSDbContext CreatePlainContext()
-        => new(new DbContextOptionsBuilder<PlainTestSqlOSDbContext>().UseTestProvider(AspireFixture.SqlConnectionString).Options);
 
     [TestMethod]
     public async Task CheckAccess_SystemAdmin_HasAccessToEverything()

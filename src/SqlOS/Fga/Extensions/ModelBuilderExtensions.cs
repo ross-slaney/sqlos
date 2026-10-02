@@ -21,10 +21,9 @@ public static class ModelBuilderExtensions
         => modelBuilder.ApplySqlOSFgaModel(contextType, providerName: null, configure);
 
     /// <summary>
-    /// Applies the SqlOSFga entity model configuration, registers the TVF, and, when
-    /// <see cref="SqlOSFgaOptions.ScopeColumns"/> is on, adds the scope columns to every entity configured so
-    /// far whose type implements <c>IHasResourceId</c>. With scope columns on, call this after configuring
-    /// the application's entities and pass <c>Database.ProviderName</c>.
+    /// Applies the SqlOSFga entity model configuration, registers the TVF, and adds the scope column to every
+    /// entity configured so far whose type implements <c>IHasResourceId</c>. Call this after configuring the
+    /// application's entities and pass <c>Database.ProviderName</c>, which decides the column's type.
     /// </summary>
     public static ModelBuilder ApplySqlOSFgaModel(
         this ModelBuilder modelBuilder,

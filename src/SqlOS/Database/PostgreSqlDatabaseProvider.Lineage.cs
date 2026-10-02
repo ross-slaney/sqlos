@@ -172,7 +172,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
             foreach (var table in scopeTables)
             {
                 sql.AppendLine(CultureInfo.InvariantCulture, $"""
-                    UPDATE {ScopeTable(table)} t SET {ScopeAssignments(levels, "r", "rt")}
+                    UPDATE {ScopeTable(table)} t SET {ScopeAssignment(levels, "r", "rt")}
                     FROM {source} s
                     INNER JOIN {resources} r ON r."Id" = s."Id"
                     INNER JOIN {resourceTypes} rt ON rt."Id" = r."ResourceTypeId"
@@ -423,9 +423,10 @@ internal sealed partial class PostgreSqlDatabaseProvider
         foreach (var table in scopeTables)
         {
             typeChanges.AppendLine(CultureInfo.InvariantCulture, $"""
-                UPDATE {ScopeTable(table)} t SET {QuoteIdentifier(SqlOSFgaLineage.ScopeTypeSeqColumn)} = rt."Seq"
+                UPDATE {ScopeTable(table)} t SET {ScopeAssignment(levels, "r", "rt")}
                 FROM (SELECT "Id", "ResourceTypeId" FROM new_rows EXCEPT SELECT "Id", "ResourceTypeId" FROM old_rows) n
-                INNER JOIN {resourceTypes} rt ON rt."Id" = n."ResourceTypeId"
+                INNER JOIN {resources} r ON r."Id" = n."Id"
+                INNER JOIN {resourceTypes} rt ON rt."Id" = r."ResourceTypeId"
                 WHERE t.{QuoteIdentifier(table.ResourceIdColumn)} = n."Id";
                 """);
         }
@@ -471,7 +472,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
         foreach (var table in scopeTables)
         {
             clears.AppendLine(CultureInfo.InvariantCulture, $"""
-                UPDATE {ScopeTable(table)} t SET {ScopeNullAssignments(levels)}
+                UPDATE {ScopeTable(table)} t SET {QuoteIdentifier(SqlOSFgaLineage.ScopeColumn)} = NULL
                 FROM old_rows o
                 WHERE t.{QuoteIdentifier(table.ResourceIdColumn)} = o."Id";
                 """);
@@ -534,7 +535,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
             LANGUAGE plpgsql
             AS $sqlos$
             BEGIN
-                UPDATE {ScopeTable(table)} t SET {ScopeAssignments(levels, "r", "rt")}
+                UPDATE {ScopeTable(table)} t SET {ScopeAssignment(levels, "r", "rt")}
                 FROM new_rows n
                 LEFT JOIN {resources} r ON r."Id" = n.{resourceId}
                 LEFT JOIN {resourceTypes} rt ON rt."Id" = r."ResourceTypeId"
@@ -559,7 +560,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
                     RETURN NULL;
                 END IF;
 
-                UPDATE {ScopeTable(table)} t SET {ScopeAssignments(levels, "r", "rt")}
+                UPDATE {ScopeTable(table)} t SET {ScopeAssignment(levels, "r", "rt")}
                 FROM (
                     SELECT {keyList}, {resourceId} FROM new_rows
                     EXCEPT
@@ -604,7 +605,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(table);
         return $"""
-            UPDATE {ScopeTable(table)} t SET {ScopeAssignments(SqlOSFgaLineage.Levels(options), "r", "rt")}
+            UPDATE {ScopeTable(table)} t SET {ScopeAssignment(SqlOSFgaLineage.Levels(options), "r", "rt")}
             FROM {Qualify(options.Schema, options.TableNames.Resources)} r
             INNER JOIN {Qualify(options.Schema, options.TableNames.ResourceTypes)} rt ON rt."Id" = r."ResourceTypeId"
             WHERE t.{QuoteIdentifier(table.ResourceIdColumn)} = r."Id"
@@ -641,6 +642,8 @@ internal sealed partial class PostgreSqlDatabaseProvider
             conditions.Add(Routine(ScopeFunctionName(table, "Insert")));
             conditions.Add(Routine(ScopeFunctionName(table, "Update")));
             conditions.AddRange(SqlOSFgaLineage.ScopeTriggerNames(table.Table).Select(t => Trigger(table.Schema, table.Table, t)));
+            conditions.Add(
+                $"EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = {ScopeSchemaLiteral(table)} AND tablename = '{SqlLiteral(table.Table)}' AND indexname = '{SqlLiteral(SqlOSFgaLineage.ScopeIndexName(table.Table, 0, null))}')");
         }
 
         return $"""
@@ -663,30 +666,99 @@ internal sealed partial class PostgreSqlDatabaseProvider
     private string ScopeTable(SqlOSFgaScopeTable table)
         => table.Schema is null ? QuoteIdentifier(table.Table) : Qualify(table.Schema, table.Table);
 
-    private string ScopeAssignments(int levels, string r, string rt)
+    /// <summary>
+    /// The scope value of a row from its resource row <paramref name="r"/> (which may be NULL: the row then has
+    /// no scope and nobody sees it) and the resource's type row <paramref name="rt"/>: the type's compact key,
+    /// then the ancestor at each level where access flows down from that level, NULL elsewhere.
+    /// </summary>
+    private static string ScopeValue(int levels, string r, string rt)
     {
-        var parts = new List<string>();
+        var elements = new List<string> { $"{rt}.\"{SqlOSFgaLineage.SeqColumn}\"::bigint" };
         for (var level = 0; level < levels; level++)
         {
-            parts.Add($"{QuoteIdentifier(SqlOSFgaLineage.ScopeAncestorColumn(level))} = {r}.{QuoteIdentifier(SqlOSFgaLineage.AncestorColumn(level))}");
+            elements.Add($"CASE WHEN {r}.\"{SqlOSFgaLineage.ReachColumn}\" <= {level} THEN {r}.\"{SqlOSFgaLineage.AncestorColumn(level)}\" END");
         }
 
-        parts.Add($"{QuoteIdentifier(SqlOSFgaLineage.ScopeReachColumn)} = {r}.\"{SqlOSFgaLineage.ReachColumn}\"");
-        parts.Add($"{QuoteIdentifier(SqlOSFgaLineage.ScopeTypeSeqColumn)} = {rt}.\"{SqlOSFgaLineage.SeqColumn}\"");
-        return string.Join(", ", parts);
+        return $"CASE WHEN {r}.\"Id\" IS NULL THEN NULL ELSE ARRAY[{string.Join(", ", elements)}]::bigint[] END";
     }
 
-    private string ScopeNullAssignments(int levels)
+    private string ScopeAssignment(int levels, string r, string rt)
+        => $"{QuoteIdentifier(SqlOSFgaLineage.ScopeColumn)} = {ScopeValue(levels, r, rt)}";
+
+    private static string ScopeSchemaLiteral(SqlOSFgaScopeTable table)
+        => table.Schema is null ? "current_schema()" : $"'{SqlLiteral(table.Schema)}'";
+
+    /// <summary>
+    /// The indexes of one application table, per level: an expression index on the level's element of the
+    /// scope array followed by the primary key, and one more per order the application declared, each
+    /// filtered to the rows that have an ancestor at that level. Indexes of orders no longer declared are
+    /// dropped. Also extended statistics on the type element, analyzed at once. Idempotent.
+    /// </summary>
+    public IReadOnlyList<string> BuildEnsureScopeIndexesSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
     {
-        var parts = new List<string>();
-        for (var level = 0; level < levels; level++)
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(scopeTables);
+        var levels = SqlOSFgaLineage.Levels(options);
+        var batches = new List<string>();
+        foreach (var table in scopeTables)
         {
-            parts.Add($"{QuoteIdentifier(SqlOSFgaLineage.ScopeAncestorColumn(level))} = NULL");
+            var target = ScopeTable(table);
+            var scope = QuoteIdentifier(SqlOSFgaLineage.ScopeColumn);
+            var key = string.Join(", ", table.KeyColumns.Select(QuoteIdentifier));
+            var sql = new StringBuilder();
+            sql.AppendLine(CultureInfo.InvariantCulture, $"""
+                DO $sqlos$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_schema = {ScopeSchemaLiteral(table)} AND table_name = '{SqlLiteral(table.Table)}' AND column_name = '{SqlOSFgaLineage.ScopeColumn}') THEN
+                        RAISE EXCEPTION 'SqlOS FGA: {SqlLiteral(target)} has no {SqlOSFgaLineage.ScopeColumn} column. Add and apply the EF Core migration that carries it before starting SqlOS.';
+                    END IF;
+                END
+                $sqlos$;
+                """);
+            var wanted = new List<string>();
+            for (var level = 0; level < levels; level++)
+            {
+                var element = $"{scope}[{SqlOSFgaLineage.ScopeAncestorElement(level)}]";
+                foreach (var (name, columns) in new[] { (SqlOSFgaLineage.ScopeIndexName(table.Table, level, null), key) }
+                    .Concat(table.Orders.Select(o => (SqlOSFgaLineage.ScopeIndexName(table.Table, level, o.Suffix), string.Join(", ", o.Columns.Select(QuoteIdentifier))))))
+                {
+                    wanted.Add(name);
+                    sql.AppendLine(CultureInfo.InvariantCulture, $"""
+                        CREATE INDEX IF NOT EXISTS {QuoteIdentifier(name)} ON {target} (({element}), {columns}) WHERE {element} IS NOT NULL;
+                        """);
+                }
+            }
+
+            // Statistics on the type element: without them the planner guesses the type test is selective and
+            // sorts the caller's whole scope instead of walking the level's index in order. ANALYZE fills them
+            // (and the expression indexes') at once.
+            sql.AppendLine(CultureInfo.InvariantCulture, $"""
+                CREATE STATISTICS IF NOT EXISTS {QuoteIdentifier(SqlOSFgaLineage.ScopeTypeStatisticsName(table.Table))} ON (({scope}[{SqlOSFgaLineage.ScopeTypeElement}])) FROM {target};
+                ANALYZE {target};
+                """);
+            var wantedList = string.Join(", ", wanted.Select(w => $"'{SqlLiteral(w)}'"));
+            sql.AppendLine(CultureInfo.InvariantCulture, $"""
+                DO $sqlos$
+                DECLARE
+                    stale record;
+                BEGIN
+                    FOR stale IN
+                        SELECT schemaname, indexname FROM pg_indexes
+                        WHERE schemaname = {ScopeSchemaLiteral(table)} AND tablename = '{SqlLiteral(table.Table)}'
+                          AND indexname LIKE '{SqlLiteral(SqlOSFgaLineage.ScopeIndexPrefix(table.Table)).Replace("_", "\\_", StringComparison.Ordinal)}%'
+                          AND indexname NOT IN ({wantedList})
+                    LOOP
+                        EXECUTE format('DROP INDEX %I.%I', stale.schemaname, stale.indexname);
+                    END LOOP;
+                END
+                $sqlos$;
+                """);
+            batches.Add(sql.ToString());
         }
 
-        parts.Add($"{QuoteIdentifier(SqlOSFgaLineage.ScopeReachColumn)} = NULL");
-        parts.Add($"{QuoteIdentifier(SqlOSFgaLineage.ScopeTypeSeqColumn)} = NULL");
-        return string.Join(", ", parts);
+        return batches;
     }
 
     private static string SqlLiteral(string value)

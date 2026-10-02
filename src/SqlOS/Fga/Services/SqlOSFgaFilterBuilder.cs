@@ -1,8 +1,7 @@
 using System.Linq.Expressions;
 using System.Reflection;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Metadata;
-using SqlOS.Fga.Configuration;
+using SqlOS.Database;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
 
@@ -10,15 +9,14 @@ namespace SqlOS.Fga.Services;
 
 /// <summary>
 /// Builds the predicate <c>BuildFilterAsync</c> returns: a row is visible when, at the level of one of the
-/// caller's access roots, the row's resource has that root as its ancestor and the row's reach includes that
-/// level (every resource from the root down to the row is active), and the row's resource type is the
-/// permission's. The predicate is the same for every caller and every table. It reads the row's lineage from
-/// the resources table by the row's resource id, or, on a table that carries the scope columns, from the row
-/// itself. The roots are written into the predicate as parameters, one per level when the caller holds one
-/// root at that level, which is what lets the database turn the page into one index seek. A caller with more
-/// roots than <see cref="SqlOSFgaLineage.MaxListedRoots"/> is checked row by row by <c>fn_IsResourceAccessible</c>
-/// instead, which probes the grants of each row's ancestors: the same rule, at a cost that does not depend on
-/// how many grants the caller holds.
+/// caller's access roots, the row's resource has that root as its ancestor and access flows down to the row
+/// from that level (every resource from the root down to the row is active), and the row's resource type is
+/// the permission's. The predicate is the same for every caller and every table, and reads everything from
+/// the row's own scope column. The roots are written into the predicate as parameters, one per level when
+/// the caller holds one root at that level, which is what lets the database turn the page into one index
+/// seek. A caller with more roots than <see cref="SqlOSFgaLineage.MaxListedRoots"/> is checked row by row by
+/// <c>fn_IsResourceAccessible</c> instead, which probes the grants of each row's ancestors: the same rule, at a
+/// cost that does not depend on how many grants the caller holds.
 /// </summary>
 internal static class SqlOSFgaFilterBuilder
 {
@@ -26,29 +24,25 @@ internal static class SqlOSFgaFilterBuilder
     private static readonly MethodInfo ParameterMethod = typeof(EF).GetMethod(nameof(EF.Parameter))!;
     private static readonly MethodInfo EnumerableContains = typeof(Enumerable).GetMethods()
         .Single(m => m.Name == nameof(Enumerable.Contains) && m.GetParameters().Length == 2);
-    private static readonly MethodInfo QueryableAny = typeof(Queryable).GetMethods()
-        .Single(m => m.Name == nameof(Queryable.Any) && m.GetParameters().Length == 2);
     private static readonly MethodInfo QueryableAnyNoPredicate = typeof(Queryable).GetMethods()
         .Single(m => m.Name == nameof(Queryable.Any) && m.GetParameters().Length == 1);
 
     /// <param name="context">The context the predicate will run in.</param>
+    /// <param name="providerName">The EF Core provider, which decides how the scope column is read.</param>
     /// <param name="roots">The caller's access roots, at most <see cref="SqlOSFgaLineage.MaxListedRoots"/> + 1 of them.</param>
     /// <param name="liveQuery">The composable query over <c>fn_ActiveSubjects</c>: the caller's subjects that are alive now.</param>
     /// <param name="subjectIdsJson">The caller's subject ids as JSON, for the row-by-row function.</param>
     /// <param name="permissionId">The permission's id.</param>
-    /// <param name="resourceTypeId">The permission's resource type, or null when it applies to every type.</param>
-    /// <param name="typeSeq">The compact key of that type, for tables with scope columns.</param>
-    /// <param name="scoped">Whether <typeparamref name="T"/>'s table carries the scope columns.</param>
-    /// <param name="levels">The number of ancestor columns the model declares (depth + 1).</param>
+    /// <param name="typeSeq">The compact key of the permission's resource type, or null when it applies to every type.</param>
+    /// <param name="levels">The number of levels the scope value holds (depth + 1).</param>
     public static Expression<Func<T, bool>> Build<T>(
         ISqlOSFgaDbContext context,
+        string? providerName,
         IReadOnlyList<SqlOSFgaAccessRoot> roots,
         IQueryable<SqlOSFgaActiveSubject> liveQuery,
         string subjectIdsJson,
         string permissionId,
-        string? resourceTypeId,
         int? typeSeq,
-        bool scoped,
         int levels)
         where T : IHasResourceId
     {
@@ -62,46 +56,32 @@ internal static class SqlOSFgaFilterBuilder
         if (deepest >= levels)
         {
             throw new InvalidOperationException(
-                $"A grant sits at level {deepest} of the resource tree, but the EF model declares {levels} levels. "
+                $"A grant sits at level {deepest} of the resource tree, but SqlOS is configured for {levels} levels. "
                 + "Configure the same MaxResourceHierarchyDepth in SqlOSFgaOptions and in ApplySqlOSFgaModel.");
         }
 
-        Expression body;
-        if (scoped)
-        {
-            body = Levels(entity, SqlOSFgaLineage.ScopeAncestorColumn, SqlOSFgaLineage.ScopeReachColumn, roots);
-            if (typeSeq is { } seq)
-            {
-                body = Expression.AndAlso(
-                    Expression.Equal(Property<int?>(entity, SqlOSFgaLineage.ScopeTypeSeqColumn), Parameter<int?>(seq)),
-                    body);
-            }
-        }
-        else
-        {
-            // EXISTS (SELECT 1 FROM resources r WHERE r.Id = entity.ResourceId AND type AND levels)
-            var resource = Expression.Parameter(typeof(SqlOSFgaResource), "r");
-            Expression inner = Expression.Equal(
-                Expression.Property(resource, nameof(SqlOSFgaResource.Id)),
-                Expression.Property(entity, nameof(IHasResourceId.ResourceId)));
-            if (resourceTypeId is not null)
-            {
-                inner = Expression.AndAlso(
-                    inner,
-                    Expression.Equal(Expression.Property(resource, nameof(SqlOSFgaResource.ResourceTypeId)), Parameter<string>(resourceTypeId)));
-            }
+        IScopeReader reader = SqlOSDatabase.IsPostgreSql(providerName)
+            ? new ArrayScope(Property<long?[]>(entity, SqlOSFgaLineage.ScopeColumn))
+            : new BinaryScope(Property<byte[]>(entity, SqlOSFgaLineage.ScopeColumn));
 
-            inner = Expression.AndAlso(inner, Levels(resource, SqlOSFgaLineage.AncestorColumn, SqlOSFgaLineage.ReachColumn, roots));
-            body = Expression.Call(
-                QueryableAny.MakeGenericMethod(typeof(SqlOSFgaResource)),
-                context.Set<SqlOSFgaResource>().AsQueryable().Expression,
-                Expression.Lambda<Func<SqlOSFgaResource, bool>>(inner, resource));
+        // (ancestor at level ℓ matches a root at ℓ) OR ..., one term per level that holds a root. The ancestor
+        // is stored only where access flows down from that level, so matching it is the whole visibility test.
+        Expression? body = null;
+        foreach (var group in roots.GroupBy(r => (int)r.Depth).OrderBy(g => g.Key))
+        {
+            var seqs = group.Select(r => r.ResourceSeq).Distinct().ToArray();
+            body = body is null ? reader.AncestorIs(group.Key, seqs) : Expression.OrElse(body, reader.AncestorIs(group.Key, seqs));
+        }
+
+        if (typeSeq is { } seq)
+        {
+            body = Expression.AndAlso(reader.TypeIs(seq), body!);
         }
 
         // The grants were read when the filter was built; the caller's own liveness is still checked when the
         // query runs, once per query (an uncorrelated EXISTS the engine evaluates as a one-time filter).
         var alive = Expression.Call(QueryableAnyNoPredicate.MakeGenericMethod(typeof(SqlOSFgaActiveSubject)), liveQuery.Expression);
-        return Expression.Lambda<Func<T, bool>>(Expression.AndAlso(alive, body), entity);
+        return Expression.Lambda<Func<T, bool>>(Expression.AndAlso(alive, body!), entity);
     }
 
     /// <summary>
@@ -123,29 +103,51 @@ internal static class SqlOSFgaFilterBuilder
         return Expression.Lambda<Func<T, bool>>(any, entity);
     }
 
-    /// <summary>The disjunction over levels: (ancestor at level ℓ matches a root at ℓ AND reach ≤ ℓ) OR ..., one term per level that holds a root.</summary>
-    private static Expression Levels(Expression row, Func<int, string> ancestorColumn, string reachColumn, IReadOnlyList<SqlOSFgaAccessRoot> roots)
+    /// <summary>How a query reads the pieces of the row's scope value on one engine.</summary>
+    private interface IScopeReader
     {
-        Expression? disjunction = null;
-        var reach = Property<short?>(row, reachColumn);
-        foreach (var group in roots.GroupBy(r => (int)r.Depth).OrderBy(g => g.Key))
-        {
-            var ancestor = Property<long?>(row, ancestorColumn(group.Key));
-            var seqs = group.Select(r => (long?)r.ResourceSeq).Distinct().ToArray();
-            Expression matches = seqs.Length == 1
-                ? Expression.Equal(ancestor, Parameter<long?>(seqs[0]))
-                : Expression.Call(EnumerableContains.MakeGenericMethod(typeof(long?)), Parameter<long?[]>(seqs), ancestor);
-            disjunction = Or(disjunction, Expression.AndAlso(matches, ReachCovers(reach, group.Key)));
-        }
+        /// <summary>The row's ancestor at the level is one of the roots (an equality on a parameter for one root, a membership test for several).</summary>
+        Expression AncestorIs(int level, long[] roots);
 
-        return disjunction ?? Expression.Constant(false);
+        /// <summary>The row's resource type is the permission's.</summary>
+        Expression TypeIs(int typeSeq);
     }
 
-    private static Expression ReachCovers(Expression reach, int level)
-        => Expression.LessThanOrEqual(reach, Expression.Constant((short?)level, typeof(short?)));
+    /// <summary>PostgreSQL: the array's elements, which the per-level expression indexes are built on.</summary>
+    private sealed class ArrayScope(Expression scope) : IScopeReader
+    {
+        public Expression AncestorIs(int level, long[] roots)
+        {
+            var element = Expression.ArrayIndex(scope, Expression.Constant(SqlOSFgaLineage.ScopeAncestorElement(level) - 1));
+            return roots.Length == 1
+                ? Expression.Equal(element, Parameter<long?>(roots[0]))
+                : Expression.Call(EnumerableContains.MakeGenericMethod(typeof(long?)), Parameter<long?[]>(roots.Select(r => (long?)r).ToArray()), element);
+        }
 
-    private static Expression Or(Expression? left, Expression right)
-        => left is null ? right : Expression.OrElse(left, right);
+        public Expression TypeIs(int typeSeq)
+            => Expression.Equal(Expression.ArrayIndex(scope, Expression.Constant(SqlOSFgaLineage.ScopeTypeElement - 1)), Parameter<long?>(typeSeq));
+    }
+
+    /// <summary>
+    /// SQL Server: the bytes of a level, read through the expression of the computed column the level's indexes
+    /// are built on, guarded by the comparison on the depth byte that is those indexes' filter.
+    /// </summary>
+    private sealed class BinaryScope(Expression scope) : IScopeReader
+    {
+        public Expression AncestorIs(int level, long[] roots)
+        {
+            var ancestor = Expression.Call(SqlOSFgaScope.AncestorAtMethod, scope, Expression.Constant(level));
+            Expression matches = roots.Length == 1
+                ? Expression.Equal(ancestor, Parameter<byte[]>(SqlOSFgaScope.Bytes(roots[0])))
+                : Expression.Call(EnumerableContains.MakeGenericMethod(typeof(byte[])), Parameter<byte[][]>(roots.Select(SqlOSFgaScope.Bytes).ToArray()), ancestor);
+            return Expression.AndAlso(Expression.Call(SqlOSFgaScope.ReachesMethod, scope, Expression.Constant(level)), matches);
+        }
+
+        public Expression TypeIs(int typeSeq)
+            => Expression.Equal(
+                Expression.Call(SqlOSFgaScope.TypeOfMethod, scope, Expression.Constant(SqlOSFgaLineage.ScopeTypeOffset)),
+                Parameter<byte[]>(SqlOSFgaScope.Bytes(typeSeq)));
+    }
 
     private static Expression Property<TValue>(Expression row, string name)
         => Expression.Call(PropertyMethod.MakeGenericMethod(typeof(TValue)), row, Expression.Constant(name));

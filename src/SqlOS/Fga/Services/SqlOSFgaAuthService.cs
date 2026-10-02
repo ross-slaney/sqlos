@@ -444,30 +444,23 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
             .FromSqlRaw(provider.BuildActiveSubjectsQuerySql(_options), subjectIdsJson)
             .AsNoTracking();
 
-        var model = (_context as DbContext)?.Model;
-        var entityType = model?.FindEntityType(typeof(T));
-        var scoped = entityType is not null && SqlOSFgaScopeColumns.Has(entityType);
-        var levels = scoped
-            ? CountLevels(entityType!, SqlOSFgaLineage.ScopeAncestorColumn)
-            : CountLevels(model?.FindEntityType(typeof(SqlOSFgaResource)), SqlOSFgaLineage.AncestorColumn);
-        return SqlOSFgaFilterBuilder.Build<T>(_context, roots, liveQuery, subjectIdsJson, permission.Id, permission.ResourceTypeId, permission.TypeSeq, scoped, levels);
-    }
-
-    /// <summary>The ancestor columns the model declares for an entity type, or the configured depth's when the model is unavailable.</summary>
-    private int CountLevels(IEntityType? entityType, Func<int, string> ancestorColumn)
-    {
-        if (entityType is null)
+        var entityType = (_context as DbContext)?.Model.FindEntityType(typeof(T));
+        if (entityType is not null && !SqlOSFgaScopeColumns.Has(entityType))
         {
-            return SqlOSFgaLineage.Levels(_options);
+            throw new InvalidOperationException(
+                $"{typeof(T).Name} is not configured for SqlOS list filtering: its table has no {SqlOSFgaLineage.ScopeColumn} column. "
+                + "Derive the context from SqlOSDbContext, or call UseSqlOS / ApplySqlOSFgaModel after configuring the application's entities and pass Database.ProviderName.");
         }
 
-        var levels = 0;
-        while (entityType.FindProperty(ancestorColumn(levels)) is not null)
-        {
-            levels++;
-        }
-
-        return levels > 0 ? levels : SqlOSFgaLineage.Levels(_options);
+        return SqlOSFgaFilterBuilder.Build<T>(
+            _context,
+            _context.Database.ProviderName,
+            roots,
+            liveQuery,
+            subjectIdsJson,
+            permission.Id,
+            permission.TypeSeq,
+            SqlOSFgaLineage.Levels(_options));
     }
 
     private async Task<List<string>> ResolveSubjectsAsync(string subjectId, List<SqlOSFgaAccessTrace> trace)

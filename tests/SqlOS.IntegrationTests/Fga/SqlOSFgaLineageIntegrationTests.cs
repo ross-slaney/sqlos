@@ -2,6 +2,7 @@ using System.Data.Common;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SqlOS.Fga;
 using SqlOS.Fga.Models;
 using SqlOS.IntegrationTests.Fga.Infrastructure;
 using SqlOS.IntegrationTests.Infrastructure;
@@ -11,7 +12,7 @@ namespace SqlOS.IntegrationTests.Fga;
 /// <summary>
 /// The lineage invariant: every resource holds its depth, its ancestor at every level, and its reach (the
 /// highest level from which access flows down to it through active resources only), and every application
-/// row with scope columns holds its resource's lineage and type. The triggers must keep it after every kind
+/// row's scope column holds its resource's type and the ancestors access flows down from. The triggers must keep it after every kind
 /// of write the resources table and the application table receive, and reject a cycle or an over-deep row.
 /// </summary>
 [TestClass]
@@ -407,8 +408,9 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
         {
             if (byId.TryGetValue(row.ResourceId, out var resource))
             {
+                var visibleFrom = resource.Ancestors.Select((a, level) => resource.Reach is { } reach && level >= reach ? a : null).ToArray();
                 new Lineage(null, row.Reach, row.Ancestors).Should().BeEquivalentTo(
-                    new Lineage(null, resource.Reach, resource.Ancestors), "row {0} must carry the lineage of {1}", row.Id, row.ResourceId);
+                    new Lineage(null, resource.Reach, visibleFrom), "row {0} must carry the lineage of {1} from its reach down", row.Id, row.ResourceId);
                 row.TypeSeq.Should().Be(typeSeq[resource.ResourceTypeId]);
             }
             else
@@ -473,15 +475,35 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
     private static async Task<EntityRow> ReadEntityAsync(string id)
         => (await ReadEntitiesAsync()).Single(e => e.Id == id);
 
+    /// <summary>
+    /// The rows with their scope value decoded: the type, the ancestor at each level (NULL where access does not
+    /// flow down from that level), and so the reach: the first level with an ancestor. A row without a value has
+    /// none of them, which is what denies it.
+    /// </summary>
     private static Task<List<EntityRow>> ReadEntitiesAsync()
         => ReadAsync(
-            TestDatabase.Rewrite($"SELECT [Id], [ResourceId], [SqlOSFgaReach], [SqlOSFgaTypeSeq], {AncestorColumns("SqlOSFgaAncestor")} FROM [LifecycleProtectedEntities]"),
-            reader => new EntityRow(
-                reader.GetString(0),
-                reader.GetString(1),
-                ReadAncestors(reader, 4),
-                reader.IsDBNull(2) ? null : reader.GetInt16(2),
-                reader.IsDBNull(3) ? null : reader.GetInt32(3)));
+            TestDatabase.Rewrite("SELECT [Id], [ResourceId], [SqlOSFgaScope] FROM [LifecycleProtectedEntities]"),
+            reader =>
+            {
+                if (reader.IsDBNull(2))
+                {
+                    return new EntityRow(reader.GetString(0), reader.GetString(1), new long?[Levels], null, null);
+                }
+
+                int typeSeq;
+                long?[] ancestors;
+                if (TestDatabase.IsPostgreSql)
+                {
+                    (typeSeq, ancestors) = SqlOSFgaScope.Decode(reader.GetFieldValue<long?[]>(2));
+                }
+                else
+                {
+                    (_, typeSeq, ancestors) = SqlOSFgaScope.Decode(reader.GetFieldValue<byte[]>(2), Levels);
+                }
+
+                var reach = Array.FindIndex(ancestors, a => a is not null);
+                return new EntityRow(reader.GetString(0), reader.GetString(1), ancestors, reach < 0 ? null : (short)reach, typeSeq);
+            });
 
     private static string AncestorColumns(string prefix)
         => string.Join(", ", Enumerable.Range(0, Levels).Select(l => $"[{prefix}{l}]"));

@@ -193,7 +193,7 @@ internal sealed partial class SqlServerDatabaseProvider
             foreach (var table in scopeTables)
             {
                 sql.AppendLine(CultureInfo.InvariantCulture, $"""
-                    UPDATE t SET {ScopeAssignments(levels, "r", "rt")}
+                    UPDATE t SET {ScopeAssignment(levels, "r", "rt")}
                     FROM {ScopeTable(table)} t
                     INNER JOIN {source} s ON s.Id = t.[{Escape(table.ResourceIdColumn)}]
                     INNER JOIN {resources} r ON r.Id = s.Id
@@ -413,10 +413,11 @@ internal sealed partial class SqlServerDatabaseProvider
         foreach (var table in scopeTables)
         {
             typeChanges.AppendLine(CultureInfo.InvariantCulture, $"""
-                UPDATE t SET [{SqlOSFgaLineage.ScopeTypeSeqColumn}] = rt.Seq
+                UPDATE t SET {ScopeAssignment(levels, "r", "rt")}
                 FROM {ScopeTable(table)} t
                 INNER JOIN (SELECT Id, ResourceTypeId FROM inserted EXCEPT SELECT Id, ResourceTypeId FROM deleted) i ON i.Id = t.[{Escape(table.ResourceIdColumn)}]
-                INNER JOIN {resourceTypes} rt ON rt.Id = i.ResourceTypeId;
+                INNER JOIN {resources} r ON r.Id = i.Id
+                INNER JOIN {resourceTypes} rt ON rt.Id = r.ResourceTypeId;
                 """);
         }
 
@@ -443,7 +444,7 @@ internal sealed partial class SqlServerDatabaseProvider
         foreach (var table in scopeTables)
         {
             clears.AppendLine(CultureInfo.InvariantCulture, $"""
-                UPDATE t SET {ScopeNullAssignments(levels)}
+                UPDATE t SET [{SqlOSFgaLineage.ScopeColumn}] = NULL
                 FROM {ScopeTable(table)} t
                 INNER JOIN deleted d ON d.Id = t.[{Escape(table.ResourceIdColumn)}];
                 """);
@@ -470,7 +471,7 @@ internal sealed partial class SqlServerDatabaseProvider
 
     /// <summary>
     /// The two triggers on an application table: an inserted row, or one whose resource id changed, takes
-    /// the lineage of its resource (NULL when there is none, which denies it).
+    /// the scope value of its resource (NULL when there is none, which denies it).
     /// </summary>
     private IReadOnlyList<string> ScopeTriggers(SqlOSFgaOptions options, SqlOSFgaScopeTable table, int levels)
     {
@@ -481,7 +482,7 @@ internal sealed partial class SqlServerDatabaseProvider
         var triggerSchema = table.Schema is null ? "" : $"[{Escape(table.Schema)}].";
         var keys = string.Join(" AND ", table.KeyColumns.Select(k => $"i.[{Escape(k)}] = t.[{Escape(k)}]"));
         var copy = $"""
-            UPDATE t SET {ScopeAssignments(levels, "r", "rt")}
+            UPDATE t SET {ScopeAssignment(levels, "r", "rt")}
             FROM {ScopeTable(table)} t
             INNER JOIN inserted i ON {keys}
             LEFT JOIN {resources} r ON r.Id = t.[{Escape(table.ResourceIdColumn)}]
@@ -530,7 +531,7 @@ internal sealed partial class SqlServerDatabaseProvider
     }
 
     /// <summary>
-    /// Fills the scope columns of every row of one application table from the lineage, once, in ranges of
+    /// Fills the scope column of every row of one application table from the lineage, once, in ranges of
     /// the resources table's key, each its own transaction.
     /// </summary>
     public string BuildScopeFillSql(SqlOSFgaOptions options, SqlOSFgaScopeTable table)
@@ -575,14 +576,14 @@ internal sealed partial class SqlServerDatabaseProvider
             DROP TABLE #SqlOSLineageRanges;
             """;
 
-    /// <summary>The scope columns of one application table's rows whose resource id lies in <c>@from</c>..<c>@to</c>.</summary>
+    /// <summary>The scope column of one application table's rows whose resource id lies in <c>@from</c>..<c>@to</c>.</summary>
     private static string ScopeFillRange(SqlOSFgaOptions options, SqlOSFgaScopeTable table, int levels)
     {
         var schema = Escape(options.Schema);
         var resourceId = $"t.[{Escape(table.ResourceIdColumn)}]";
         return $"""
 
-            UPDATE t SET {ScopeAssignments(levels, "r", "rt")}
+            UPDATE t SET {ScopeAssignment(levels, "r", "rt")}
             FROM {ScopeTable(table)} t
             INNER JOIN [{schema}].[{Escape(options.TableNames.Resources)}] r ON r.Id = {resourceId}
             INNER JOIN [{schema}].[{Escape(options.TableNames.ResourceTypes)}] rt ON rt.Id = r.ResourceTypeId
@@ -613,6 +614,7 @@ internal sealed partial class SqlServerDatabaseProvider
         foreach (var table in scopeTables)
         {
             conditions.AddRange(SqlOSFgaLineage.ScopeTriggerNames(table.Table).Select(t => Exists(table.Schema ?? "dbo", t, "TR")));
+            conditions.Add($"EXISTS (SELECT 1 FROM sys.indexes WHERE name = '{SqlLiteral(SqlOSFgaLineage.ScopeIndexName(table.Table, 0, null))}' AND object_id = OBJECT_ID(N'{SqlLiteral(ScopeTable(table))}'))");
         }
 
         return $"""
@@ -631,31 +633,92 @@ internal sealed partial class SqlServerDatabaseProvider
     private static string ScopeTable(SqlOSFgaScopeTable table)
         => table.Schema is null ? $"[{Escape(table.Table)}]" : $"[{Escape(table.Schema)}].[{Escape(table.Table)}]";
 
-    /// <summary>The scope columns set from a resource row <paramref name="r"/> and its type row <paramref name="rt"/>.</summary>
-    private static string ScopeAssignments(int levels, string r, string rt)
+    /// <summary>
+    /// The scope value of a row from its resource row <paramref name="r"/> (which may be NULL: the row then has
+    /// no scope and nobody sees it) and the resource's type row <paramref name="rt"/>: the depth byte, the four
+    /// type bytes, then eight bytes per level holding the ancestor where access flows down from that level and
+    /// zero elsewhere. <c>CAST(bigint AS BINARY(8))</c> is big-endian, which is how <c>SqlOSFgaScope.Bytes</c>
+    /// encodes a parameter.
+    /// </summary>
+    private static string ScopeValue(int levels, string r, string rt)
     {
-        var parts = new List<string>();
+        var parts = new StringBuilder();
+        parts.Append(CultureInfo.InvariantCulture, $"CAST(ISNULL({r}.{SqlOSFgaLineage.DepthColumn}, 0) AS BINARY(1)) + CAST({rt}.{SqlOSFgaLineage.SeqColumn} AS BINARY(4))");
         for (var level = 0; level < levels; level++)
         {
-            parts.Add($"[{SqlOSFgaLineage.ScopeAncestorColumn(level)}] = {r}.{SqlOSFgaLineage.AncestorColumn(level)}");
+            parts.Append(CultureInfo.InvariantCulture, $" + CAST(ISNULL(CASE WHEN {r}.{SqlOSFgaLineage.ReachColumn} <= {level} THEN {r}.{SqlOSFgaLineage.AncestorColumn(level)} END, 0) AS BINARY(8))");
         }
 
-        parts.Add($"[{SqlOSFgaLineage.ScopeReachColumn}] = {r}.{SqlOSFgaLineage.ReachColumn}");
-        parts.Add($"[{SqlOSFgaLineage.ScopeTypeSeqColumn}] = {rt}.{SqlOSFgaLineage.SeqColumn}");
-        return string.Join(", ", parts);
+        return $"CASE WHEN {r}.Id IS NULL THEN NULL ELSE {parts} END";
     }
 
-    private static string ScopeNullAssignments(int levels)
+    private static string ScopeAssignment(int levels, string r, string rt)
+        => $"[{SqlOSFgaLineage.ScopeColumn}] = {ScopeValue(levels, r, rt)}";
+
+    /// <summary>
+    /// The indexes of one application table, per level: a computed column reading the level's ancestor out of
+    /// the scope column (no storage; the optimizer matches a query that spells out the same expression), then
+    /// an index on it followed by the primary key, and one more per order the application declared, each
+    /// filtered on the depth byte to the rows at or below the level. Indexes of orders no longer declared are
+    /// dropped. Also a computed column over the type with statistics on it, so the type test in every query
+    /// is estimated from data. Idempotent.
+    /// </summary>
+    public IReadOnlyList<string> BuildEnsureScopeIndexesSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
     {
-        var parts = new List<string>();
-        for (var level = 0; level < levels; level++)
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(scopeTables);
+        var levels = SqlOSFgaLineage.Levels(options);
+        var batches = new List<string>();
+        foreach (var table in scopeTables)
         {
-            parts.Add($"[{SqlOSFgaLineage.ScopeAncestorColumn(level)}] = NULL");
+            var target = ScopeTable(table);
+            var literal = SqlLiteral(target);
+            var key = string.Join(", ", table.KeyColumns.Select(k => $"[{Escape(k)}]"));
+            var sql = new StringBuilder();
+            sql.AppendLine(CultureInfo.InvariantCulture, $"""
+                IF COL_LENGTH('{literal}', '{SqlOSFgaLineage.ScopeColumn}') IS NULL
+                    THROW 51013, 'SqlOS FGA: {literal} has no {SqlOSFgaLineage.ScopeColumn} column. Add and apply the EF Core migration that carries it before starting SqlOS.', 1;
+                """);
+            sql.AppendLine(CultureInfo.InvariantCulture, $"""
+                IF COL_LENGTH('{literal}', '{SqlOSFgaLineage.ScopeTypeColumn}') IS NULL
+                    ALTER TABLE {target} ADD [{SqlOSFgaLineage.ScopeTypeColumn}] AS SUBSTRING([{SqlOSFgaLineage.ScopeColumn}], {SqlOSFgaLineage.ScopeTypeOffset}, 4);
+                IF NOT EXISTS (SELECT 1 FROM sys.stats WHERE name = '{SqlLiteral(SqlOSFgaLineage.ScopeTypeStatisticsName(table.Table))}' AND object_id = OBJECT_ID(N'{literal}'))
+                    CREATE STATISTICS [{Escape(SqlOSFgaLineage.ScopeTypeStatisticsName(table.Table))}] ON {target} ([{SqlOSFgaLineage.ScopeTypeColumn}]);
+                """);
+            var wanted = new List<string>();
+            for (var level = 0; level < levels; level++)
+            {
+                var column = SqlOSFgaLineage.ScopeLevelColumn(level);
+                var filter = $"[{SqlOSFgaLineage.ScopeColumn}] >= 0x{level:X2}";
+                sql.AppendLine(CultureInfo.InvariantCulture, $"""
+                    IF COL_LENGTH('{literal}', '{column}') IS NULL
+                        ALTER TABLE {target} ADD [{column}] AS SUBSTRING([{SqlOSFgaLineage.ScopeColumn}], {SqlOSFgaLineage.ScopeAncestorOffset(level)}, 8);
+                    """);
+                foreach (var (name, columns) in new[] { (SqlOSFgaLineage.ScopeIndexName(table.Table, level, null), key) }
+                    .Concat(table.Orders.Select(o => (SqlOSFgaLineage.ScopeIndexName(table.Table, level, o.Suffix), string.Join(", ", o.Columns.Select(c => $"[{Escape(c)}]"))))))
+                {
+                    wanted.Add(name);
+                    sql.AppendLine(CultureInfo.InvariantCulture, $"""
+                        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = '{SqlLiteral(name)}' AND object_id = OBJECT_ID(N'{literal}'))
+                            CREATE NONCLUSTERED INDEX [{Escape(name)}] ON {target} ([{column}], {columns}) WHERE {filter};
+                        """);
+                }
+            }
+
+            var wantedList = string.Join(", ", wanted.Select(w => $"'{SqlLiteral(w)}'"));
+            sql.AppendLine(CultureInfo.InvariantCulture, $"""
+                DECLARE @stale NVARCHAR(MAX) = N'';
+                SELECT @stale += N'DROP INDEX ' + QUOTENAME(name) + N' ON {target};'
+                FROM sys.indexes
+                WHERE object_id = OBJECT_ID(N'{literal}')
+                  AND name LIKE '{SqlLiteral(SqlOSFgaLineage.ScopeIndexPrefix(table.Table)).Replace("_", "[_]", StringComparison.Ordinal)}%'
+                  AND name NOT IN ({wantedList});
+                EXEC (@stale);
+                """);
+            batches.Add(sql.ToString());
         }
 
-        parts.Add($"[{SqlOSFgaLineage.ScopeReachColumn}] = NULL");
-        parts.Add($"[{SqlOSFgaLineage.ScopeTypeSeqColumn}] = NULL");
-        return string.Join(", ", parts);
+        return batches;
     }
 
     private static string SqlLiteral(string value)

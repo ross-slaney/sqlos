@@ -44,7 +44,7 @@ public abstract class SqlOSDbContext<TContext> : DbContext, ISqlOSAuthServerDbCo
         modelBuilder.UseSqlOS(Database.IsRelational() ? typeof(TContext) : null, Database.ProviderName, fga);
         OnApplicationModelCreating(modelBuilder);
 
-        // Last, so every application entity is configured: the scope columns, when the option is on.
+        // Last, so every application entity is configured: the scope column on each table with a resource id.
         SqlOSFgaScopeColumns.Configure(modelBuilder, fga, Database.ProviderName);
     }
 
