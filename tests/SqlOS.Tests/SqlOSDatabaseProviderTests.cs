@@ -150,14 +150,27 @@ public class SqlOSDatabaseProviderTests
         // Per level: an expression index on the level's eight bytes, over the key and over each declared order,
         // filtered on the depth byte to the rows at or below the level; stale mirrors dropped.
         var indexes = PostgreSqlDatabaseProvider.Instance.BuildEnsureScopeIndexesSql(options, [scope with { Orders = [new SqlOSFgaScopeOrder("Price", ["Price", "Id"])] }]).Single();
-        indexes.Should().Contain("RAISE EXCEPTION 'SqlOS FGA: \"app\".\"Items\" has no FgaScope column.");
+        indexes.Should().Contain("CREATE INDEX IF NOT EXISTS \"IX_Items_FgaScopeMissing\" ON \"app\".\"Items\" (\"ResourceId\") WHERE \"FgaScope\" IS NULL;");
         indexes.Should().Contain($"CREATE INDEX IF NOT EXISTS \"IX_Items_FgaScope4\" ON \"app\".\"Items\" ((SUBSTRING(\"FgaScope\", {SqlOSFgaLineage.ScopeAncestorOffset(4)}, 8)), \"Id\") WHERE \"FgaScope\" >= '\\x04'::bytea;");
         indexes.Should().Contain("CREATE INDEX IF NOT EXISTS \"IX_Items_FgaScope0_Price\" ON \"app\".\"Items\" ((SUBSTRING(\"FgaScope\", 6, 8)), \"Price\", \"Id\") WHERE \"FgaScope\" >= '\\x00'::bytea;");
         indexes.Should().NotContain("FgaScope5\"");
         indexes.Should().Contain("CREATE STATISTICS IF NOT EXISTS \"ST_Items_FgaScopeType\" ON ((SUBSTRING(\"FgaScope\", 2, 4))) FROM \"app\".\"Items\";");
         indexes.Should().Contain("ANALYZE \"app\".\"Items\";");
-        indexes.Should().Contain("indexname LIKE 'IX\\_Items\\_FgaScope%'");
-        indexes.Should().Contain("EXECUTE format('DROP INDEX %I.%I', stale.schemaname, stale.indexname);");
+        indexes.Should().NotContain("DROP", "stale objects are the cleanup's");
+
+        // The cleanup finds SqlOS's objects on every table by name and keeps the ones of maintained tables.
+        var cleanup = PostgreSqlDatabaseProvider.Instance.BuildScopeCleanupSql(options, [scope]);
+        cleanup.Should().Contain("t.tgname LIKE 'TR\\_%\\_SqlOSFgaScope\\_%'");
+        cleanup.Should().Contain("n.nspname = 'app' AND c.relname = 'Items' AND t.tgname IN ('TR_Items_SqlOSFgaScope_Insert', 'TR_Items_SqlOSFgaScope_Update')");
+        cleanup.Should().Contain("p.proname LIKE 'fn\\_SqlOSFgaScope\\_%'");
+        cleanup.Should().Contain("p.proname NOT IN ('fn_SqlOSFgaScope_app_Items_Insert', 'fn_SqlOSFgaScope_app_Items_Update')");
+        cleanup.Should().Contain("i.indexname ~ '^IX_.*_FgaScope([0-9]|Missing)'");
+        cleanup.Should().Contain("s.stxname LIKE 'ST\\_%\\_FgaScopeType'");
+        cleanup.Should().Contain("EXECUTE stale.statement;");
+
+        // The fill sets only the rows that have no scope, in batches, under the shared lock.
+        all.Should().Contain("CREATE OR REPLACE FUNCTION \"ten\"\"ant\".\"fn_res\"\"ources_ScopeFill\"()");
+        all.Should().Contain("WHERE m.\"FgaScope\" IS NULL");
 
         var hash = PostgreSqlDatabaseProvider.Instance.BuildSelectRoutinesHashSql(options, [scope]);
         hash.Should().Contain("p.proname = 'fn_ActiveSubjects'");
@@ -166,6 +179,9 @@ public class SqlOSDatabaseProviderTests
         hash.Should().Contain("t.tgname = 'TR_res\"ources_Lineage_Update'");
         hash.Should().Contain("n.nspname = 'app' AND c.relname = 'Items' AND t.tgname = 'TR_Items_SqlOSFgaScope_Insert'");
         hash.Should().Contain("column_name = 'Ancestor4'");
+        hash.Should().Contain("p.proname = 'fn_res\"ources_ScopeFill'");
+        hash.Should().Contain("indexname IN (");
+        hash.Should().Contain("NOT EXISTS (SELECT format('DROP TRIGGER");
     }
 
     [TestMethod]

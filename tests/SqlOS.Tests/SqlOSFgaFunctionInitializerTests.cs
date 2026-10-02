@@ -95,15 +95,14 @@ public class SqlOSFgaFunctionInitializerTests
     }
 
     [TestMethod]
-    public void ScopeIndexesSql_AddsComputedColumnsAndFilteredIndexesPerLevel_AndDropsStaleOnes()
+    public void ScopeIndexesSql_AddsComputedColumnsAndFilteredIndexesPerLevel()
     {
         var options = new SqlOSFgaOptions { MaxResourceHierarchyDepth = 2 };
         var scope = new SqlOSFgaScopeTable("app", "Items", "ResourceId", ["Id"], [new SqlOSFgaScopeOrder("Price", ["Price", "Id"])]);
         var sql = SqlServerDatabaseProvider.Instance.BuildEnsureScopeIndexesSql(options, [scope]).Single();
 
-        // Guarded: the column comes from the application's migration.
-        sql.Should().Contain("IF COL_LENGTH('[app].[Items]', 'FgaScope') IS NULL");
-        sql.Should().Contain("THROW 51013");
+        // The rows that have no scope yet, which keeps the fill an index seek.
+        sql.Should().Contain("CREATE NONCLUSTERED INDEX [IX_Items_FgaScopeMissing] ON [app].[Items] ([ResourceId]) WHERE [FgaScope] IS NULL;");
 
         // Per level 0..2: a computed column over the level's eight bytes, the key index and the Price mirror on
         // it, filtered on the depth byte so a level no row reaches costs nothing.
@@ -122,9 +121,32 @@ public class SqlOSFgaFunctionInitializerTests
         sql.Should().Contain("ALTER TABLE [app].[Items] ADD [FgaScopeType] AS SUBSTRING([FgaScope], 2, 4);");
         sql.Should().Contain("CREATE STATISTICS [ST_Items_FgaScopeType] ON [app].[Items] ([FgaScopeType]);");
         sql.Should().NotContain("INDEX [IX_Items_FgaScopeType");
-        sql.Should().Contain("name LIKE 'IX[_]Items[_]FgaScope%'");
-        sql.Should().Contain("'IX_Items_FgaScope2_Price')");
-        sql.Should().Contain("EXEC (@stale);");
+        sql.Should().NotContain("DROP", "stale objects are the cleanup's");
+    }
+
+    [TestMethod]
+    public void ScopeCleanupSql_DropsSqlOSObjectsOfTablesItNoLongerMaintains()
+    {
+        var options = new SqlOSFgaOptions { MaxResourceHierarchyDepth = 1 };
+        var scope = new SqlOSFgaScopeTable("app", "Items", "ResourceId", ["Id"], [new SqlOSFgaScopeOrder("Price", ["Price", "Id"])]);
+        var sql = SqlServerDatabaseProvider.Instance.BuildScopeCleanupSql(options, [scope]);
+
+        // Found by name on every table, kept when they belong to a maintained table under its current name.
+        sql.Should().Contain("tr.name LIKE N'TR[_]%[_]SqlOSFgaScope[_]%'");
+        sql.Should().Contain("tr.parent_id = ISNULL(OBJECT_ID(N'[app].[Items]'), 0) AND tr.name IN (N'TR_Items_SqlOSFgaScope_Insert', N'TR_Items_SqlOSFgaScope_Update')");
+        sql.Should().Contain("i.name LIKE N'IX[_]%[_]FgaScope[0-9]%' OR i.name LIKE N'IX[_]%[_]FgaScopeMissing'");
+        sql.Should().Contain("i.name IN (N'IX_Items_FgaScope0', N'IX_Items_FgaScope0_Price', N'IX_Items_FgaScope1', N'IX_Items_FgaScope1_Price', N'IX_Items_FgaScopeMissing')");
+        sql.Should().Contain("st.name LIKE N'ST[_]%[_]FgaScopeType'");
+        sql.Should().Contain("c.name LIKE N'FgaScope[0-9]%' OR c.name = N'FgaScopeType'");
+        sql.Should().Contain("DROP COLUMN");
+
+        // Triggers, then indexes, then statistics, then the computed columns they were built on.
+        sql.IndexOf("DROP TRIGGER", StringComparison.Ordinal).Should().BeLessThan(sql.IndexOf("DROP INDEX", StringComparison.Ordinal));
+        sql.IndexOf("DROP INDEX", StringComparison.Ordinal).Should().BeLessThan(sql.IndexOf("DROP STATISTICS", StringComparison.Ordinal));
+        sql.IndexOf("DROP STATISTICS", StringComparison.Ordinal).Should().BeLessThan(sql.IndexOf("DROP COLUMN", StringComparison.Ordinal));
+
+        // With no maintained table, everything SqlOS made on application tables is stale.
+        SqlServerDatabaseProvider.Instance.BuildScopeCleanupSql(options, []).Should().Contain("AND NOT (1 = 0)");
     }
 
     [TestMethod]
@@ -232,7 +254,11 @@ public class SqlOSFgaFunctionInitializerTests
         hash.Should().Contain("OBJECT_ID(N'[ten''ant].[sp_res]]ources_LineageRebuild]', N'P') IS NOT NULL");
         hash.Should().Contain("OBJECT_ID(N'[ten''ant].[TR_res]]ources_Lineage_Insert]', N'TR') IS NOT NULL");
         hash.Should().Contain("OBJECT_ID(N'[ten''ant].[TR_res]]ources_Lineage_Delete]', N'TR') IS NOT NULL");
-        hash.Should().Contain("OBJECT_ID(N'[app].[TR_Items_SqlOSFgaScope_Update]', N'TR') IS NOT NULL");
+        hash.Should().Contain("OBJECT_ID(N'[ten''ant].[sp_res]]ources_ScopeFill]', N'P') IS NOT NULL");
+        hash.Should().Contain("(SELECT COUNT(*) FROM sys.triggers WHERE parent_id = ISNULL(OBJECT_ID(N'[app].[Items]'), 0) AND name IN (N'TR_Items_SqlOSFgaScope_Insert', N'TR_Items_SqlOSFgaScope_Update')) = 2");
+        hash.Should().Contain("(SELECT COUNT(*) FROM sys.indexes WHERE object_id = ISNULL(OBJECT_ID(N'[app].[Items]'), 0) AND name IN (");
+        hash.Should().Contain("N'IX_Items_FgaScopeMissing')) = 5", "levels 0..3 and the missing-rows index");
+        hash.Should().Contain("NOT EXISTS (SELECT N'DROP TRIGGER '", "nothing stale anywhere");
         hash.Should().Contain("COL_LENGTH('[ten''ant].[res]]ources]', 'Ancestor3') IS NOT NULL");
     }
 

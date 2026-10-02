@@ -61,12 +61,18 @@ internal interface ISqlOSDatabaseProvider
 
     string BuildLineageRebuildSql(SqlOSFgaOptions options);
 
-    /// <summary>Fills the scope column of every row of one application table from the lineage.</summary>
-    string BuildScopeFillSql(SqlOSFgaOptions options, SqlOSFgaScopeTable table);
+    /// <summary>Runs the scope fill routine: every application row without a scope gets its resource's.</summary>
+    string BuildScopeFillSql(SqlOSFgaOptions options);
+
+    /// <summary>A scalar query: 1 when the application table exists with its scope column, else 0.</summary>
+    string BuildScopeTableReadySql(SqlOSFgaScopeTable table);
+
+    /// <summary>One idempotent batch dropping SqlOS's stale objects (of renamed or no longer protected tables, or of orders no longer declared) from every table.</summary>
+    string BuildScopeCleanupSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables);
 
     /// <summary>
     /// Idempotent batches creating, per application table, the per-level indexes on the scope column (and on
-    /// SQL Server the computed columns they are built on), and dropping those of orders no longer declared.
+    /// SQL Server the computed columns they are built on), the type statistics, and the index on rows without a scope.
     /// </summary>
     IReadOnlyList<string> BuildEnsureScopeIndexesSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables);
 

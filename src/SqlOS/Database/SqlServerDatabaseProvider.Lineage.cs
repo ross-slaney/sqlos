@@ -450,7 +450,49 @@ internal sealed partial class SqlServerDatabaseProvider
             END
             """;
 
-        var batches = new List<string> { refreshProcedure, rebuildProcedure, insertTrigger, updateTrigger, deleteTrigger };
+        // The rows of every application table that have no scope yet, in batches of rows each committed on its
+        // own. The lineage lock is held shared, as an insert takes it: inserts run beside the fill, and a change
+        // to the tree waits for it. Rows whose resource does not exist stay without one (and stay denied).
+        var fill = $"[{schema}].[sp_{Escape(SqlOSFgaLineage.ScopeFillRoutineName(options.TableNames.Resources))}]";
+        var fillBody = new StringBuilder();
+        foreach (var table in scopeTables)
+        {
+            fillBody.AppendLine(CultureInfo.InvariantCulture, $"""
+                WHILE 1 = 1
+                BEGIN
+                    UPDATE TOP ({SqlOSFgaLineage.ScopeFillBatchRows.ToString(CultureInfo.InvariantCulture)}) t SET {ScopeAssignment(levels, "r", "rt")}
+                    FROM {ScopeTable(table)} t
+                    INNER JOIN {resources} r ON r.Id = t.[{Escape(table.ResourceIdColumn)}]
+                    INNER JOIN {resourceTypes} rt ON rt.Id = r.ResourceTypeId
+                    WHERE t.[{SqlOSFgaLineage.ScopeColumn}] IS NULL AND rt.{SqlOSFgaLineage.SeqColumn} IS NOT NULL;
+                    IF @@ROWCOUNT < {SqlOSFgaLineage.ScopeFillBatchRows.ToString(CultureInfo.InvariantCulture)} BREAK;
+                END
+                """);
+        }
+
+        var lockName = SqlLiteral(SqlOSFgaLineage.LineageLockName(options));
+        var fillProcedure = $"""
+            CREATE OR ALTER PROCEDURE {fill}
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                SET XACT_ABORT ON;
+                DECLARE @sqlosLineageLock INT;
+                EXEC @sqlosLineageLock = sys.sp_getapplock @Resource = N'{lockName}', @LockMode = 'Shared', @LockOwner = 'Session', @LockTimeout = -1;
+                IF @sqlosLineageLock < 0 THROW 51014, 'SqlOS FGA: the resource lineage lock was not granted.', 1;
+                BEGIN TRY
+                    {fillBody}
+                    EXEC sys.sp_releaseapplock @Resource = N'{lockName}', @LockOwner = 'Session';
+                END TRY
+                BEGIN CATCH
+                    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+                    EXEC sys.sp_releaseapplock @Resource = N'{lockName}', @LockOwner = 'Session';
+                    THROW;
+                END CATCH
+            END
+            """;
+
+        var batches = new List<string> { refreshProcedure, rebuildProcedure, fillProcedure, insertTrigger, updateTrigger, deleteTrigger };
         foreach (var table in scopeTables)
         {
             batches.AddRange(ScopeTriggers(options, table, levels));
@@ -523,20 +565,18 @@ internal sealed partial class SqlServerDatabaseProvider
         return $"EXEC [{Escape(options.Schema)}].[sp_{Escape(SqlOSFgaLineage.RebuildRoutineName(options.TableNames.Resources))}];";
     }
 
-    /// <summary>
-    /// Fills the scope column of every row of one application table from the lineage, once, in ranges of
-    /// the resources table's key, each its own transaction.
-    /// </summary>
-    public string BuildScopeFillSql(SqlOSFgaOptions options, SqlOSFgaScopeTable table)
+    /// <summary>Runs the scope fill: every application row that has no scope gets its resource's.</summary>
+    public string BuildScopeFillSql(SqlOSFgaOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
+        return $"EXEC [{Escape(options.Schema)}].[sp_{Escape(SqlOSFgaLineage.ScopeFillRoutineName(options.TableNames.Resources))}];";
+    }
+
+    /// <summary>1 when the application table exists and has its scope column (its migration is applied), else 0.</summary>
+    public string BuildScopeTableReadySql(SqlOSFgaScopeTable table)
+    {
         ArgumentNullException.ThrowIfNull(table);
-        var resources = $"[{Escape(options.Schema)}].[{Escape(options.TableNames.Resources)}]";
-        return $"""
-            SET NOCOUNT ON;
-            SET XACT_ABORT ON;
-            {WithSessionLineageLock(options, RangeLoop(resources, SqlOSFgaLineage.RebuildRangeRows.ToString(CultureInfo.InvariantCulture), ScopeFillRange(options, table, SqlOSFgaLineage.Levels(options))))}
-            """;
+        return $"SELECT CASE WHEN COL_LENGTH(N'{SqlLiteral(ScopeTable(table))}', N'{SqlOSFgaLineage.ScopeColumn}') IS NULL THEN 0 ELSE 1 END";
     }
 
     /// <summary>
@@ -603,12 +643,24 @@ internal sealed partial class SqlServerDatabaseProvider
             Exists(options.Schema, "sp_" + SqlOSFgaLineage.RefreshRoutineName(resourcesTable), "P"),
             Exists(options.Schema, "sp_" + SqlOSFgaLineage.RebuildRoutineName(resourcesTable), "P"),
         };
+        conditions.Add(Exists(options.Schema, "sp_" + SqlOSFgaLineage.ScopeFillRoutineName(resourcesTable), "P"));
         conditions.AddRange(SqlOSFgaLineage.TriggerNames(resourcesTable).Select(t => Exists(options.Schema, t, "TR")));
         conditions.Add($"COL_LENGTH('{SqlLiteral($"[{schema}].[{Escape(resourcesTable)}]")}', '{SqlOSFgaLineage.AncestorColumn(SqlOSFgaLineage.MaxLevel(options))}') IS NOT NULL");
+        var levels = SqlOSFgaLineage.Levels(options);
         foreach (var table in scopeTables)
         {
-            conditions.AddRange(SqlOSFgaLineage.ScopeTriggerNames(table.Table).Select(t => Exists(table.Schema ?? "dbo", t, "TR")));
-            conditions.Add($"EXISTS (SELECT 1 FROM sys.indexes WHERE name = '{SqlLiteral(SqlOSFgaLineage.ScopeIndexName(table.Table, 0, null))}' AND object_id = OBJECT_ID(N'{SqlLiteral(ScopeTable(table))}'))");
+            // Every object of the table exists: an application migration may have dropped some (a column a
+            // mirrored index used, say) without changing anything SqlOS's definitions are hashed from.
+            var indexes = SqlOSFgaLineage.ScopeIndexNames(table, levels);
+            conditions.Add($"(SELECT COUNT(*) FROM sys.triggers WHERE parent_id = {ObjectOf(table)} AND name IN ({NameList(SqlOSFgaLineage.ScopeTriggerNames(table.Table))})) = 2");
+            conditions.Add($"(SELECT COUNT(*) FROM sys.indexes WHERE object_id = {ObjectOf(table)} AND name IN ({NameList(indexes)})) = {indexes.Count.ToString(CultureInfo.InvariantCulture)}");
+            conditions.Add($"EXISTS (SELECT 1 FROM sys.stats WHERE object_id = {ObjectOf(table)} AND name = N'{SqlLiteral(SqlOSFgaLineage.ScopeTypeStatisticsName(table.Table))}')");
+        }
+
+        // And nothing stale anywhere.
+        foreach (var stale in new[] { StaleTriggers(scopeTables), StaleIndexes(scopeTables, levels), StaleStatistics(scopeTables), StaleComputedColumns(scopeTables) })
+        {
+            conditions.Add($"NOT EXISTS ({stale})");
         }
 
         return $"""
@@ -653,9 +705,10 @@ internal sealed partial class SqlServerDatabaseProvider
     /// The indexes of one application table, per level: a computed column reading the level's ancestor out of
     /// the scope column (no storage; the optimizer matches a query that spells out the same expression), then
     /// an index on it followed by the primary key, and one more per order the application declared, each
-    /// filtered on the depth byte to the rows at or below the level. Indexes of orders no longer declared are
-    /// dropped. Also a computed column over the type with statistics on it, so the type test in every query
-    /// is estimated from data. Idempotent.
+    /// filtered on the depth byte to the rows at or below the level. Also a computed column over the type with
+    /// statistics on it, so the type test in every query is estimated from data, and a filtered index on the
+    /// rows that have no scope yet, which keeps the fill an index seek. Idempotent. The table is ready (it has
+    /// its scope column); objects no longer wanted are dropped by <see cref="BuildScopeCleanupSql"/>.
     /// </summary>
     public IReadOnlyList<string> BuildEnsureScopeIndexesSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
     {
@@ -670,16 +723,13 @@ internal sealed partial class SqlServerDatabaseProvider
             var key = string.Join(", ", table.KeyColumns.Select(k => $"[{Escape(k)}]"));
             var sql = new StringBuilder();
             sql.AppendLine(CultureInfo.InvariantCulture, $"""
-                IF COL_LENGTH('{literal}', '{SqlOSFgaLineage.ScopeColumn}') IS NULL
-                    THROW 51013, 'SqlOS FGA: {literal} has no {SqlOSFgaLineage.ScopeColumn} column. Add and apply the EF Core migration that carries it before starting SqlOS.', 1;
-                """);
-            sql.AppendLine(CultureInfo.InvariantCulture, $"""
                 IF COL_LENGTH('{literal}', '{SqlOSFgaLineage.ScopeTypeColumn}') IS NULL
                     ALTER TABLE {target} ADD [{SqlOSFgaLineage.ScopeTypeColumn}] AS SUBSTRING([{SqlOSFgaLineage.ScopeColumn}], {SqlOSFgaLineage.ScopeTypeOffset}, 4);
                 IF NOT EXISTS (SELECT 1 FROM sys.stats WHERE name = '{SqlLiteral(SqlOSFgaLineage.ScopeTypeStatisticsName(table.Table))}' AND object_id = OBJECT_ID(N'{literal}'))
                     CREATE STATISTICS [{Escape(SqlOSFgaLineage.ScopeTypeStatisticsName(table.Table))}] ON {target} ([{SqlOSFgaLineage.ScopeTypeColumn}]);
+                IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = '{SqlLiteral(SqlOSFgaLineage.ScopeMissingIndexName(table.Table))}' AND object_id = OBJECT_ID(N'{literal}'))
+                    CREATE NONCLUSTERED INDEX [{Escape(SqlOSFgaLineage.ScopeMissingIndexName(table.Table))}] ON {target} ([{Escape(table.ResourceIdColumn)}]) WHERE [{SqlOSFgaLineage.ScopeColumn}] IS NULL;
                 """);
-            var wanted = new List<string>();
             for (var level = 0; level < levels; level++)
             {
                 var column = SqlOSFgaLineage.ScopeLevelColumn(level);
@@ -691,7 +741,6 @@ internal sealed partial class SqlServerDatabaseProvider
                 foreach (var (name, columns) in new[] { (SqlOSFgaLineage.ScopeIndexName(table.Table, level, null), key) }
                     .Concat(table.Orders.Select(o => (SqlOSFgaLineage.ScopeIndexName(table.Table, level, o.Suffix), string.Join(", ", o.Columns.Select(c => $"[{Escape(c)}]"))))))
                 {
-                    wanted.Add(name);
                     sql.AppendLine(CultureInfo.InvariantCulture, $"""
                         IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = '{SqlLiteral(name)}' AND object_id = OBJECT_ID(N'{literal}'))
                             CREATE NONCLUSTERED INDEX [{Escape(name)}] ON {target} ([{column}], {columns}) WHERE {filter};
@@ -699,28 +748,95 @@ internal sealed partial class SqlServerDatabaseProvider
                 }
             }
 
-            var wantedList = string.Join(", ", wanted.Select(w => $"'{SqlLiteral(w)}'"));
-            sql.AppendLine(CultureInfo.InvariantCulture, $"""
-                DECLARE @stale NVARCHAR(MAX) = N'';
-                SELECT @stale += N'DROP INDEX ' + QUOTENAME(name) + N' ON {target};'
-                FROM sys.indexes
-                WHERE object_id = OBJECT_ID(N'{literal}')
-                  AND name LIKE '{SqlLiteral(SqlOSFgaLineage.ScopeIndexPrefix(table.Table)).Replace("_", "[_]", StringComparison.Ordinal)}%'
-                  AND name NOT IN ({wantedList});
-                EXEC (@stale);
-                """);
             batches.Add(sql.ToString());
         }
 
         return batches;
     }
 
+    // SqlOS's objects on application tables carry names no application object has: triggers TR_{table}_
+    // SqlOSFgaScope_*, indexes IX_{table}_FgaScope{level}[_{order}] and IX_{table}_FgaScopeMissing, statistics
+    // ST_{table}_FgaScopeType, computed columns FgaScope{level} and FgaScopeType. Any of them that does not
+    // belong to a table SqlOS maintains now, under its current name, is stale: left by a table that was renamed,
+    // or whose entity no longer has a resource id, or by an order no longer declared.
+
+    private static string ObjectOf(SqlOSFgaScopeTable table) => $"ISNULL(OBJECT_ID(N'{SqlLiteral(ScopeTable(table))}'), 0)";
+
+    private static string Wanted(IReadOnlyList<SqlOSFgaScopeTable> scopeTables, Func<SqlOSFgaScopeTable, string> condition)
+        => scopeTables.Count == 0 ? "1 = 0" : string.Join(" OR ", scopeTables.Select(t => $"({condition(t)})"));
+
+    private static string NameList(IEnumerable<string> names) => string.Join(", ", names.Select(n => $"N'{SqlLiteral(n)}'"));
+
+    private static string StaleTriggers(IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
+        => $"""
+            SELECT N'DROP TRIGGER ' + QUOTENAME(OBJECT_SCHEMA_NAME(tr.object_id)) + N'.' + QUOTENAME(tr.name) + N';' AS Statement
+            FROM sys.triggers tr
+            WHERE tr.parent_class = 1 AND tr.name LIKE N'TR[_]%[_]{SqlOSFgaLineage.ScopePrefix}Scope[_]%'
+              AND NOT ({Wanted(scopeTables, t => $"tr.parent_id = {ObjectOf(t)} AND tr.name IN ({NameList(SqlOSFgaLineage.ScopeTriggerNames(t.Table))})")})
+            """;
+
+    private static string StaleIndexes(IReadOnlyList<SqlOSFgaScopeTable> scopeTables, int levels)
+        => $"""
+            SELECT N'DROP INDEX ' + QUOTENAME(i.name) + N' ON ' + QUOTENAME(OBJECT_SCHEMA_NAME(i.object_id)) + N'.' + QUOTENAME(OBJECT_NAME(i.object_id)) + N';' AS Statement
+            FROM sys.indexes i
+            WHERE (i.name LIKE N'IX[_]%[_]{SqlOSFgaLineage.ScopeColumn}[0-9]%' OR i.name LIKE N'IX[_]%[_]{SqlOSFgaLineage.ScopeColumn}Missing')
+              AND OBJECTPROPERTY(i.object_id, 'IsUserTable') = 1
+              AND NOT ({Wanted(scopeTables, t => $"i.object_id = {ObjectOf(t)} AND i.name IN ({NameList(SqlOSFgaLineage.ScopeIndexNames(t, levels))})")})
+            """;
+
+    private static string StaleStatistics(IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
+        => $"""
+            SELECT N'DROP STATISTICS ' + QUOTENAME(OBJECT_SCHEMA_NAME(st.object_id)) + N'.' + QUOTENAME(OBJECT_NAME(st.object_id)) + N'.' + QUOTENAME(st.name) + N';' AS Statement
+            FROM sys.stats st
+            WHERE st.user_created = 1 AND st.name LIKE N'ST[_]%[_]{SqlOSFgaLineage.ScopeTypeColumn}'
+              AND NOT ({Wanted(scopeTables, t => $"st.object_id = {ObjectOf(t)} AND st.name = N'{SqlLiteral(SqlOSFgaLineage.ScopeTypeStatisticsName(t.Table))}'")})
+            """;
+
+    private static string StaleComputedColumns(IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
+        => $"""
+            SELECT N'ALTER TABLE ' + QUOTENAME(OBJECT_SCHEMA_NAME(c.object_id)) + N'.' + QUOTENAME(OBJECT_NAME(c.object_id)) + N' DROP COLUMN ' + QUOTENAME(c.name) + N';' AS Statement
+            FROM sys.computed_columns c
+            WHERE (c.name LIKE N'{SqlOSFgaLineage.ScopeColumn}[0-9]%' OR c.name = N'{SqlOSFgaLineage.ScopeTypeColumn}')
+              AND OBJECTPROPERTY(c.object_id, 'IsUserTable') = 1
+              AND NOT ({Wanted(scopeTables, t => $"c.object_id = {ObjectOf(t)}")})
+            """;
+
+    /// <summary>
+    /// Drops SqlOS's stale objects from every table of the database (see the naming above): triggers first,
+    /// then indexes, then statistics, then the computed columns they were built on. Idempotent.
+    /// </summary>
+    public string BuildScopeCleanupSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(scopeTables);
+        var levels = SqlOSFgaLineage.Levels(options);
+        var sql = new StringBuilder("DECLARE @sqlosStale NVARCHAR(MAX);\n");
+        foreach (var stale in new[] { StaleTriggers(scopeTables), StaleIndexes(scopeTables, levels), StaleStatistics(scopeTables), StaleComputedColumns(scopeTables) })
+        {
+            sql.AppendLine(CultureInfo.InvariantCulture, $"""
+                SET @sqlosStale = N'';
+                SELECT @sqlosStale += s.Statement FROM ({stale}) s;
+                EXEC (@sqlosStale);
+                """);
+        }
+
+        return sql.ToString();
+    }
+
     private static string SqlLiteral(string value)
         => value.Replace("'", "''", StringComparison.Ordinal);
 
-    /// <summary>Takes the lineage lock (see <see cref="SqlOSFgaLineage.LineageLockName"/>) for the trigger's transaction.</summary>
+    /// <summary>
+    /// Takes the lineage lock (see <see cref="SqlOSFgaLineage.LineageLockName"/>) for the trigger's transaction,
+    /// after refusing a SNAPSHOT transaction: it keeps reading the state it started with even after waiting for
+    /// the lock, so it could compute from state another transaction has since changed (PostgreSQL refuses
+    /// REPEATABLE READ for the same reason). Read-committed snapshot is READ COMMITTED and is fine. A session sees
+    /// its own row of <c>sys.dm_exec_sessions</c> without any server permission.
+    /// </summary>
     private static string LineageLock(SqlOSFgaOptions options, string mode)
         => $"""
+            IF (SELECT transaction_isolation_level FROM sys.dm_exec_sessions WHERE session_id = @@SPID) = 5
+                THROW 51015, 'SqlOS FGA: change resources and protected rows in a READ COMMITTED or SERIALIZABLE transaction, not SNAPSHOT: a snapshot transaction can miss a concurrent change to the tree.', 1;
             DECLARE @sqlosLineageLock INT;
             EXEC @sqlosLineageLock = sys.sp_getapplock @Resource = N'{SqlLiteral(SqlOSFgaLineage.LineageLockName(options))}', @LockMode = '{mode}', @LockOwner = 'Transaction', @LockTimeout = -1;
             IF @sqlosLineageLock < 0 THROW 51014, 'SqlOS FGA: the resource lineage lock was not granted.', 1;

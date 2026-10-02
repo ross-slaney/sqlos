@@ -507,7 +507,47 @@ internal sealed partial class PostgreSqlDatabaseProvider
                 FOR EACH STATEMENT EXECUTE FUNCTION {onDelete}();
             """;
 
-        var batches = new List<string> { refreshFunction, rebuildFunction, insertFunction, updateFunction, deleteFunction, resourceTriggers };
+        // The rows of every application table that have no scope yet (see the SQL Server provider), in batches
+        // of rows so each statement's transition tables stay small. Shared lock, as an insert takes it.
+        var fill = Qualify(options.Schema, "fn_" + SqlOSFgaLineage.ScopeFillRoutineName(resourcesTable));
+        var fillBody = new StringBuilder();
+        foreach (var table in scopeTables)
+        {
+            var target = ScopeTable(table);
+            var resourceIdColumn = QuoteIdentifier(table.ResourceIdColumn);
+            fillBody.AppendLine(CultureInfo.InvariantCulture, $"""
+                LOOP
+                    UPDATE {target} t SET {ScopeAssignment(levels, "r", "rt")}
+                    FROM {resources} r
+                    INNER JOIN {resourceTypes} rt ON rt."Id" = r."ResourceTypeId"
+                    WHERE t.{resourceIdColumn} = r."Id"
+                      AND t.ctid = ANY (ARRAY(
+                          SELECT m.ctid FROM {target} m
+                          INNER JOIN {resources} mr ON mr."Id" = m.{resourceIdColumn}
+                          INNER JOIN {resourceTypes} mrt ON mrt."Id" = mr."ResourceTypeId"
+                          WHERE m.{QuoteIdentifier(SqlOSFgaLineage.ScopeColumn)} IS NULL AND mrt."{SqlOSFgaLineage.SeqColumn}" IS NOT NULL
+                          LIMIT {SqlOSFgaLineage.ScopeFillBatchRows.ToString(CultureInfo.InvariantCulture)}));
+                    GET DIAGNOSTICS v_rows = ROW_COUNT;
+                    EXIT WHEN v_rows < {SqlOSFgaLineage.ScopeFillBatchRows.ToString(CultureInfo.InvariantCulture)};
+                END LOOP;
+                """);
+        }
+
+        var fillFunction = $"""
+            CREATE OR REPLACE FUNCTION {fill}()
+            RETURNS void
+            LANGUAGE plpgsql
+            AS $sqlos$
+            DECLARE
+                v_rows bigint;
+            BEGIN
+                PERFORM pg_advisory_xact_lock_shared({lockKey});
+                {fillBody}
+            END
+            $sqlos$;
+            """;
+
+        var batches = new List<string> { refreshFunction, rebuildFunction, fillFunction, insertFunction, updateFunction, deleteFunction, resourceTriggers };
         foreach (var table in scopeTables)
         {
             batches.Add(ScopeTriggers(options, table, levels));
@@ -606,21 +646,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
         return $"SELECT {Qualify(options.Schema, "fn_" + SqlOSFgaLineage.RebuildRoutineName(options.TableNames.Resources))}();";
     }
 
-    public string BuildScopeFillSql(SqlOSFgaOptions options, SqlOSFgaScopeTable table)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(table);
-        return $"""
-            DO $sqlos$
-            BEGIN
-                PERFORM pg_advisory_xact_lock({SqlOSFgaLineage.LineageLockKey(options).ToString(CultureInfo.InvariantCulture)});
-                {ScopeFillUpdate(options, table)};
-            END
-            $sqlos$
-            """;
-    }
-
-    /// <summary>The scope column of every row of one application table, set from its resource's lineage.</summary>
+    /// <summary>The scope column of every row of one application table, set from its resource's lineage (the rebuild).</summary>
     private string ScopeFillUpdate(SqlOSFgaOptions options, SqlOSFgaScopeTable table)
         => $"""
             UPDATE {ScopeTable(table)} t SET {ScopeAssignment(SqlOSFgaLineage.Levels(options), "r", "rt")}
@@ -628,6 +654,25 @@ internal sealed partial class PostgreSqlDatabaseProvider
             INNER JOIN {Qualify(options.Schema, options.TableNames.ResourceTypes)} rt ON rt."Id" = r."ResourceTypeId"
             WHERE t.{QuoteIdentifier(table.ResourceIdColumn)} = r."Id"
             """;
+
+    /// <summary>Runs the scope fill: every application row that has no scope gets its resource's.</summary>
+    public string BuildScopeFillSql(SqlOSFgaOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return $"SELECT {Qualify(options.Schema, "fn_" + SqlOSFgaLineage.ScopeFillRoutineName(options.TableNames.Resources))}();";
+    }
+
+    /// <summary>1 when the application table exists and has its scope column (its migration is applied), else 0.</summary>
+    public string BuildScopeTableReadySql(SqlOSFgaScopeTable table)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        return $"""
+            SELECT CASE WHEN EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = {ScopeSchemaLiteral(table)} AND table_name = '{SqlLiteral(table.Table)}' AND column_name = '{SqlOSFgaLineage.ScopeColumn}')
+            THEN 1 ELSE 0 END AS "Value"
+            """;
+    }
 
     public string BuildSelectRoutinesHashSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
     {
@@ -651,16 +696,28 @@ internal sealed partial class PostgreSqlDatabaseProvider
             Routine("fn_IsResourceAccessible"),
             Routine("fn_" + SqlOSFgaLineage.RefreshRoutineName(resourcesTable)),
             Routine("fn_" + SqlOSFgaLineage.RebuildRoutineName(resourcesTable)),
+            Routine("fn_" + SqlOSFgaLineage.ScopeFillRoutineName(resourcesTable)),
             Column(SqlOSFgaLineage.AncestorColumn(SqlOSFgaLineage.MaxLevel(options))),
         };
         conditions.AddRange(SqlOSFgaLineage.TriggerNames(resourcesTable).Select(t => Trigger(options.Schema, resourcesTable, t)));
+        var levels = SqlOSFgaLineage.Levels(options);
         foreach (var table in scopeTables)
         {
+            // Every object of the table exists (see the SQL Server provider).
+            var indexes = SqlOSFgaLineage.ScopeIndexNames(table, levels);
             conditions.Add(Routine(ScopeFunctionName(table, "Insert")));
             conditions.Add(Routine(ScopeFunctionName(table, "Update")));
             conditions.AddRange(SqlOSFgaLineage.ScopeTriggerNames(table.Table).Select(t => Trigger(table.Schema, table.Table, t)));
             conditions.Add(
-                $"EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = {ScopeSchemaLiteral(table)} AND tablename = '{SqlLiteral(table.Table)}' AND indexname = '{SqlLiteral(SqlOSFgaLineage.ScopeIndexName(table.Table, 0, null))}')");
+                $"(SELECT count(*) FROM pg_indexes WHERE schemaname = {ScopeSchemaLiteral(table)} AND tablename = '{SqlLiteral(table.Table)}' AND indexname IN ({NameList(indexes)})) = {indexes.Count.ToString(CultureInfo.InvariantCulture)}");
+            conditions.Add(
+                $"EXISTS (SELECT 1 FROM pg_statistic_ext s INNER JOIN pg_namespace n ON n.oid = s.stxnamespace WHERE n.nspname = {ScopeSchemaLiteral(table)} AND s.stxname = '{SqlLiteral(SqlOSFgaLineage.ScopeTypeStatisticsName(table.Table))}')");
+        }
+
+        // And nothing stale anywhere.
+        foreach (var stale in new[] { StaleTriggers(scopeTables), StaleFunctions(options, scopeTables), StaleIndexes(scopeTables, levels), StaleStatistics(scopeTables) })
+        {
+            conditions.Add($"NOT EXISTS ({stale})");
         }
 
         return $"""
@@ -714,10 +771,11 @@ internal sealed partial class PostgreSqlDatabaseProvider
     /// <summary>
     /// The indexes of one application table, per level: an expression index on the level's eight bytes of the
     /// scope column followed by the primary key, and one more per order the application declared, each
-    /// filtered on the depth byte to the rows at or below the level. Indexes of orders no longer declared are
-    /// dropped. Also extended statistics on the type bytes, analyzed at once: without them the planner guesses
-    /// the type test is selective and sorts the caller's whole scope instead of walking the level's index.
-    /// Idempotent.
+    /// filtered on the depth byte to the rows at or below the level; and a partial index on the rows that have
+    /// no scope yet, which keeps the fill an index scan. Also extended statistics on the type bytes, analyzed at
+    /// once: without them the planner guesses the type test is selective and sorts the caller's whole scope
+    /// instead of walking the level's index. Idempotent. Objects no longer wanted are dropped by
+    /// <see cref="BuildScopeCleanupSql"/>.
     /// </summary>
     public IReadOnlyList<string> BuildEnsureScopeIndexesSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
     {
@@ -732,17 +790,8 @@ internal sealed partial class PostgreSqlDatabaseProvider
             var key = string.Join(", ", table.KeyColumns.Select(QuoteIdentifier));
             var sql = new StringBuilder();
             sql.AppendLine(CultureInfo.InvariantCulture, $"""
-                DO $sqlos$
-                BEGIN
-                    IF NOT EXISTS (
-                        SELECT 1 FROM information_schema.columns
-                        WHERE table_schema = {ScopeSchemaLiteral(table)} AND table_name = '{SqlLiteral(table.Table)}' AND column_name = '{SqlOSFgaLineage.ScopeColumn}') THEN
-                        RAISE EXCEPTION 'SqlOS FGA: {SqlLiteral(target)} has no {SqlOSFgaLineage.ScopeColumn} column. Add and apply the EF Core migration that carries it before starting SqlOS.';
-                    END IF;
-                END
-                $sqlos$;
+                CREATE INDEX IF NOT EXISTS {QuoteIdentifier(SqlOSFgaLineage.ScopeMissingIndexName(table.Table))} ON {target} ({QuoteIdentifier(table.ResourceIdColumn)}) WHERE {scope} IS NULL;
                 """);
-            var wanted = new List<string>();
             for (var level = 0; level < levels; level++)
             {
                 var ancestor = $"SUBSTRING({scope}, {SqlOSFgaLineage.ScopeAncestorOffset(level)}, 8)";
@@ -750,7 +799,6 @@ internal sealed partial class PostgreSqlDatabaseProvider
                 foreach (var (name, columns) in new[] { (SqlOSFgaLineage.ScopeIndexName(table.Table, level, null), key) }
                     .Concat(table.Orders.Select(o => (SqlOSFgaLineage.ScopeIndexName(table.Table, level, o.Suffix), string.Join(", ", o.Columns.Select(QuoteIdentifier))))))
                 {
-                    wanted.Add(name);
                     sql.AppendLine(CultureInfo.InvariantCulture, $"""
                         CREATE INDEX IF NOT EXISTS {QuoteIdentifier(name)} ON {target} (({ancestor}), {columns}) WHERE {filter};
                         """);
@@ -761,27 +809,84 @@ internal sealed partial class PostgreSqlDatabaseProvider
                 CREATE STATISTICS IF NOT EXISTS {QuoteIdentifier(SqlOSFgaLineage.ScopeTypeStatisticsName(table.Table))} ON ((SUBSTRING({scope}, {SqlOSFgaLineage.ScopeTypeOffset}, 4))) FROM {target};
                 ANALYZE {target};
                 """);
-            var wantedList = string.Join(", ", wanted.Select(w => $"'{SqlLiteral(w)}'"));
-            sql.AppendLine(CultureInfo.InvariantCulture, $"""
-                DO $sqlos$
-                DECLARE
-                    stale record;
-                BEGIN
-                    FOR stale IN
-                        SELECT schemaname, indexname FROM pg_indexes
-                        WHERE schemaname = {ScopeSchemaLiteral(table)} AND tablename = '{SqlLiteral(table.Table)}'
-                          AND indexname LIKE '{SqlLiteral(SqlOSFgaLineage.ScopeIndexPrefix(table.Table)).Replace("_", "\\_", StringComparison.Ordinal)}%'
-                          AND indexname NOT IN ({wantedList})
-                    LOOP
-                        EXECUTE format('DROP INDEX %I.%I', stale.schemaname, stale.indexname);
-                    END LOOP;
-                END
-                $sqlos$;
-                """);
             batches.Add(sql.ToString());
         }
 
         return batches;
+    }
+
+    // SqlOS's objects on application tables carry names no application object has (see the SQL Server
+    // provider); on PostgreSQL also the trigger functions fn_SqlOSFgaScope_* in SqlOS's schema. Any of them not
+    // belonging to a table SqlOS maintains now, under its current name, is stale.
+
+    private static string NameList(IEnumerable<string> names) => string.Join(", ", names.Select(n => $"'{SqlLiteral(n)}'"));
+
+    private static string Wanted(IReadOnlyList<SqlOSFgaScopeTable> scopeTables, Func<SqlOSFgaScopeTable, string> condition)
+        => scopeTables.Count == 0 ? "FALSE" : string.Join(" OR ", scopeTables.Select(t => $"({condition(t)})"));
+
+    private static string StaleTriggers(IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
+        => $"""
+            SELECT format('DROP TRIGGER %I ON %I.%I', t.tgname, n.nspname, c.relname) AS statement
+            FROM pg_trigger t
+            INNER JOIN pg_class c ON c.oid = t.tgrelid
+            INNER JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE NOT t.tgisinternal AND t.tgname LIKE 'TR\_%\_{SqlOSFgaLineage.ScopePrefix}Scope\_%'
+              AND NOT ({Wanted(scopeTables, tb => $"n.nspname = {ScopeSchemaLiteral(tb)} AND c.relname = '{SqlLiteral(tb.Table)}' AND t.tgname IN ({NameList(SqlOSFgaLineage.ScopeTriggerNames(tb.Table))})")})
+            """;
+
+    private static string StaleFunctions(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
+        => $"""
+            SELECT format('DROP FUNCTION %I.%I()', n.nspname, p.proname) AS statement
+            FROM pg_proc p
+            INNER JOIN pg_namespace n ON n.oid = p.pronamespace
+            WHERE n.nspname = '{SqlLiteral(options.Schema)}' AND p.proname LIKE 'fn\_{SqlOSFgaLineage.ScopePrefix}Scope\_%'
+              AND p.proname NOT IN ({(scopeTables.Count == 0 ? "''" : NameList(scopeTables.SelectMany(t => new[] { ScopeFunctionName(t, "Insert"), ScopeFunctionName(t, "Update") })))})
+            """;
+
+    private static string StaleIndexes(IReadOnlyList<SqlOSFgaScopeTable> scopeTables, int levels)
+        => $"""
+            SELECT format('DROP INDEX %I.%I', i.schemaname, i.indexname) AS statement
+            FROM pg_indexes i
+            WHERE i.indexname ~ '^IX_.*_{SqlOSFgaLineage.ScopeColumn}([0-9]|Missing)'
+              AND NOT ({Wanted(scopeTables, t => $"i.schemaname = {ScopeSchemaLiteral(t)} AND i.tablename = '{SqlLiteral(t.Table)}' AND i.indexname IN ({NameList(SqlOSFgaLineage.ScopeIndexNames(t, levels))})")})
+            """;
+
+    private static string StaleStatistics(IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
+        => $"""
+            SELECT format('DROP STATISTICS %I.%I', n.nspname, s.stxname) AS statement
+            FROM pg_statistic_ext s
+            INNER JOIN pg_namespace n ON n.oid = s.stxnamespace
+            INNER JOIN pg_class c ON c.oid = s.stxrelid
+            WHERE s.stxname LIKE 'ST\_%\_{SqlOSFgaLineage.ScopeTypeColumn}'
+              AND NOT ({Wanted(scopeTables, t => $"n.nspname = {ScopeSchemaLiteral(t)} AND c.relname = '{SqlLiteral(t.Table)}' AND s.stxname = '{SqlLiteral(SqlOSFgaLineage.ScopeTypeStatisticsName(t.Table))}'")})
+            """;
+
+    /// <summary>Drops SqlOS's stale objects from every table of the database: triggers, their functions, indexes, statistics. Idempotent.</summary>
+    public string BuildScopeCleanupSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(scopeTables);
+        var levels = SqlOSFgaLineage.Levels(options);
+        var loops = new StringBuilder();
+        foreach (var stale in new[] { StaleTriggers(scopeTables), StaleFunctions(options, scopeTables), StaleIndexes(scopeTables, levels), StaleStatistics(scopeTables) })
+        {
+            loops.AppendLine(CultureInfo.InvariantCulture, $"""
+                FOR stale IN {stale}
+                LOOP
+                    EXECUTE stale.statement;
+                END LOOP;
+                """);
+        }
+
+        return $"""
+            DO $sqlos$
+            DECLARE
+                stale record;
+            BEGIN
+                {loops}
+            END
+            $sqlos$;
+            """;
     }
 
     /// <summary>

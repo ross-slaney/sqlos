@@ -64,6 +64,16 @@ internal static class SqlOSFgaLineage
 
     public static string RebuildRoutineName(string resourcesTable) => $"{resourcesTable}_LineageRebuild";
 
+    /// <summary>
+    /// The routine that sets the scope column of every application row that has none (rows written while
+    /// SqlOS's triggers were absent: bulk loads that skip triggers, rows written before a table's triggers
+    /// existed). SqlOS runs it at every start; a bulk-load job can run it right away.
+    /// </summary>
+    public static string ScopeFillRoutineName(string resourcesTable) => $"{resourcesTable}_ScopeFill";
+
+    /// <summary>Rows the scope fill sets per statement on SQL Server, each its own transaction.</summary>
+    public const int ScopeFillBatchRows = 50_000;
+
     // The scope column: the lineage of a row's resource, held on the application table itself. Every entity
     // implementing IHasResourceId declares it (IHasResourceId.FgaScope), so it exists on every table with a
     // resource id, and maps to a byte string on both engines (varbinary(512), bytea): byte 1 the depth,
@@ -112,8 +122,16 @@ internal static class SqlOSFgaLineage
             ? $"IX_{table}_{ScopeLevelColumn(level)}"
             : $"IX_{table}_{ScopeLevelColumn(level)}_{mirrored}";
 
-    /// <summary>The prefix every per-level index on a table shares, by which stale ones are found.</summary>
-    public static string ScopeIndexPrefix(string table) => $"IX_{table}_{ScopeColumn}";
+    /// <summary>The filtered index on the rows that have no scope yet, which keeps the fill an index seek.</summary>
+    public static string ScopeMissingIndexName(string table) => $"IX_{table}_{ScopeColumn}Missing";
+
+    /// <summary>Every index SqlOS creates on a table: the per-level ones and the one on rows missing their scope.</summary>
+    public static IReadOnlyList<string> ScopeIndexNames(SqlOSFgaScopeTable table, int levels)
+        => Enumerable.Range(0, levels)
+            .SelectMany(level => new[] { ScopeIndexName(table.Table, level, null) }
+                .Concat(table.Orders.Select(o => ScopeIndexName(table.Table, level, o.Suffix))))
+            .Append(ScopeMissingIndexName(table.Table))
+            .ToList();
 
     public static string ScopeResourceIdIndexName(string table) => $"IX_{table}_{ScopePrefix}ResourceId";
 
