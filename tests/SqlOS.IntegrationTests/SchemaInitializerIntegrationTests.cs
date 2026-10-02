@@ -13,7 +13,15 @@ namespace SqlOS.IntegrationTests;
 [TestClass]
 public sealed class SchemaInitializerIntegrationTests
 {
-    private const int CurrentSchemaVersion = 47;
+    private const int CurrentSchemaVersion = 48;
+
+    /// <summary>The tables the user aggregate loads a part from by user, with the index each needs (schema v48).</summary>
+    private static readonly (string Table, string Index)[] UserPartIndexes =
+    [
+        ("SqlOSCredentials", "IX_SqlOSCredentials_UserId"),
+        ("SqlOSUserEmails", "IX_SqlOSUserEmails_UserId"),
+        ("SqlOSExternalIdentities", "IX_SqlOSExternalIdentities_UserId")
+    ];
 
     [TestMethod]
     public async Task EnsureSchema_CreatesCoreTables()
@@ -184,6 +192,67 @@ public sealed class SchemaInitializerIntegrationTests
         Assert.IsTrue(
             await IndexExistsAsync(AspireFixture.SharedContext, "SqlOSAuditEvents", "IX_SqlOSAuditEvents_OccurredAt_IngestedAt_Id"),
             "Audit lists need an OccurredAt+IngestedAt+Id keyset index.");
+        foreach (var (table, index) in UserPartIndexes)
+        {
+            Assert.IsTrue(
+                await IndexExistsAsync(AspireFixture.SharedContext, table, index),
+                $"Sign-in loads {table} rows by user; without {index} every load scans the table.");
+        }
+    }
+
+    [TestMethod]
+    public async Task EnsureSchema_IndexesUserPartTablesByUser_WhenUpgradingFromVersion47()
+    {
+        var databaseName = $"SqlOSUserIx_{Guid.NewGuid():N}"[..30];
+        var databaseConnectionString = BuildDatabaseConnectionString(databaseName);
+        await CreateDatabaseAsync(databaseName);
+
+        try
+        {
+            var dbOptions = new DbContextOptionsBuilder<TestSqlOSDbContext>()
+                .UseTestProvider(databaseConnectionString)
+                .Options;
+            await using var context = new TestSqlOSDbContext(dbOptions);
+            var initializer = new SqlOSSchemaInitializer(
+                context,
+                Options.Create(AspireFixture.Options),
+                LoggerFactory.Create(b => b.AddConsole()).CreateLogger<SqlOSSchemaInitializer>());
+            await initializer.EnsureSchemaAsync();
+
+            // Back to version 47: two of the indexes are missing, as on a database 7.2.1 created,
+            // and one is already there, as where an operator added it by hand.
+            await context.Database.ExecuteSqlRawAsync(TestDatabase.IsPostgreSql
+                ? """
+                  DROP INDEX "dbo"."IX_SqlOSUserEmails_UserId";
+                  DROP INDEX "dbo"."IX_SqlOSExternalIdentities_UserId";
+                  """
+                : """
+                  DROP INDEX [IX_SqlOSUserEmails_UserId] ON [dbo].[SqlOSUserEmails];
+                  DROP INDEX [IX_SqlOSExternalIdentities_UserId] ON [dbo].[SqlOSExternalIdentities];
+                  """);
+            await context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite($"""
+                DELETE FROM [dbo].[SqlOSAppliedMigrations] WHERE [ScriptName] = '{AppliedMigrationScriptName("048_UserPartIndexes.sql")}';
+                UPDATE [dbo].[SqlOSSchema] SET [Version] = 47;
+                """));
+            Assert.IsFalse(await IndexExistsAsync(context, "SqlOSUserEmails", "IX_SqlOSUserEmails_UserId"));
+
+            await initializer.EnsureSchemaAsync();
+
+            foreach (var (table, index) in UserPartIndexes)
+            {
+                Assert.IsTrue(await IndexExistsAsync(context, table, index), $"The upgrade should leave {index} on {table}.");
+            }
+
+            Assert.AreEqual(1, await ScalarIntAsync(
+                context,
+                $"SELECT COUNT(*) FROM [dbo].[SqlOSAppliedMigrations] WHERE [ScriptName] = '{AppliedMigrationScriptName("048_UserPartIndexes.sql")}'"));
+            Assert.AreEqual(CurrentSchemaVersion, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
+        }
+        finally
+        {
+            TestDatabase.ClearPools();
+            await DropDatabaseAsync(databaseName);
+        }
     }
 
     [TestMethod]

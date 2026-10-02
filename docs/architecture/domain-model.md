@@ -514,3 +514,9 @@ Every identity flow is one internal process in `SqlOS.AuthServer.Processes.Ident
 | Transactions (§5) | Confirming an authenticator enrolled for an MFA challenge and completing that challenge's login commit together in one database transaction (`IdentityTransactions`), or not at all; parallel confirmations complete one login (on SQL Server the others end as deadlock victims, as in 7.2.1). | 7.2.1's transaction, as an outcome instead of an exception. |
 | Operators | `SqlOSAdminService.CreateUserAsync` and the admin API run `CreateUser`; an operator never proves a mailbox, so the address stays unverified until a later proof claims it. The admin API's reset email and the facade's run `SendPasswordResetEmail`. | One path per operator action, whichever control plane calls it. |
 | Metrics (§11) | `duplicated_flow_*` counts implementations: a method that hands its flow to a process is an entry point, not a copy ([counting rule changes](8.0-baseline-metrics.md#counting-rule-changes)). | Facades keep their 7.x signatures (§3.8), so counting entry points would never fall. |
+
+### Amendment 6: after the sign-in latency slice (layer 2, T2-E)
+
+| Topic | Amendment | Why |
+|---|---|---|
+| Loading (§3.1, §9) | Every table that holds an aggregate part's members has an index that leads with the root's ID, because the root loads a part whole by that ID (Amendment 3). Schema version 48 added the three the user aggregate lacked: credentials, email addresses and external identities (BL-0009). A change that adds a part, or a new aggregate, adds its index in the same change. | Without the index every part load scans the table, so sign-in grows slower with every account. At 100,000 accounts those scans cost layer 2's sign-ins tens of milliseconds each, and its password and email-code sign-ins measured slower than 7.2.1's ([sign-in latency](8.0-baseline-metrics.md#sign-in-latency)). |

@@ -22,6 +22,7 @@ SqlOS is built as a rich domain model. The full design record is `docs/architect
 - **Security decisions are proof types.** `LoginEvidence`, `OwnershipProof`, `LoginDecision`, `GrantAuthority` and `DnsProof` have internal constructors and only their listed producers create them (enforced by architecture tests). Consumers take the proof, never a boolean.
 - **Policies decide, and new rules extend them.** Add a login rule to `LoginPolicy`, a password rule to `PasswordPolicy`, and so on. Don't branch inside a process.
 - **One process per use case, one save per process.** Processes are internal, surface-agnostic classes: load aggregates, call methods, ask policies, save once. The hosted, headless and public-API surfaces of the same flow call the same process.
+- **Index what an aggregate loads by.** A root loads each part whole, by the root's ID, so every table that holds a part's members needs an index that leads with that ID. Add it in the same change as the part, and check the schema approval.
 - **Adapters stay thin.** Endpoints, renderers and middleware parse input, call one process and map its outcome. They never use a `DbContext`.
 - **Time is a parameter.** Domain methods take `now`. Processes read `TimeProvider` once. No `DateTime.UtcNow` in domain or process code.
 - **Audit comes from events.** State changes raise domain events, and the audit projection writes rows in the same transaction. Failure records go through `IAuditRecorder`. Don't call audit writers directly from new code.

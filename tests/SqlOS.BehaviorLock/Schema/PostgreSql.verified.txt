@@ -1,7 +1,7 @@
 # SqlOS schema (PostgreSql) after bootstrap
 
 ## Schema version
-auth: 47
+auth: 48
 fga: 10
 
 ## Applied migrations
@@ -54,6 +54,7 @@ fga: 10
 045 SqlOS.AuthServer.Schema.PostgreSql.045_AuthPageSessionFamilies.sql
 046 SqlOS.AuthServer.Schema.PostgreSql.046_SamlExternalIdentityUserUniqueness.sql
 047 SqlOS.AuthServer.Schema.PostgreSql.047_ScimGrantBoundary.sql
+048 SqlOS.AuthServer.Schema.PostgreSql.048_UserPartIndexes.sql
 
 ## Tables
 
@@ -450,6 +451,7 @@ fga: 10
   RevokedAt timestamp without time zone NULL
   FOREIGN KEY FK_SqlOSCredentials_Users FOREIGN KEY ("UserId") REFERENCES dbo."SqlOSUsers"("Id")
   PRIMARY KEY SqlOSCredentials_pkey PRIMARY KEY ("Id")
+  INDEX IX_SqlOSCredentials_UserId CREATE INDEX "IX_SqlOSCredentials_UserId" ON dbo."SqlOSCredentials" USING btree ("UserId")
 
 ### SqlOSDeviceAuthorizations
   Id character varying(64) NOT NULL
@@ -576,6 +578,7 @@ fga: 10
   INDEX IX_SqlOSExternalIdentities_OidcConnectionId_Subject CREATE UNIQUE INDEX "IX_SqlOSExternalIdentities_OidcConnectionId_Subject" ON dbo."SqlOSExternalIdentities" USING btree ("OidcConnectionId", "Subject") WHERE ("OidcConnectionId" IS NOT NULL)
   INDEX IX_SqlOSExternalIdentities_SsoConnectionId_Subject CREATE UNIQUE INDEX "IX_SqlOSExternalIdentities_SsoConnectionId_Subject" ON dbo."SqlOSExternalIdentities" USING btree ("ConnectionId", "Subject") WHERE ("ConnectionId" IS NOT NULL)
   INDEX IX_SqlOSExternalIdentities_SsoConnectionId_UserId CREATE UNIQUE INDEX "IX_SqlOSExternalIdentities_SsoConnectionId_UserId" ON dbo."SqlOSExternalIdentities" USING btree ("ConnectionId", "UserId") WHERE ("ConnectionId" IS NOT NULL)
+  INDEX IX_SqlOSExternalIdentities_UserId CREATE INDEX "IX_SqlOSExternalIdentities_UserId" ON dbo."SqlOSExternalIdentities" USING btree ("UserId")
 
 ### SqlOSFgaAgents
   Id character varying(450) NOT NULL
@@ -1293,6 +1296,7 @@ fga: 10
   FOREIGN KEY FK_SqlOSUserEmails_Users FOREIGN KEY ("UserId") REFERENCES dbo."SqlOSUsers"("Id")
   PRIMARY KEY SqlOSUserEmails_pkey PRIMARY KEY ("Id")
   UNIQUE SqlOSUserEmails_NormalizedEmail_key UNIQUE ("NormalizedEmail")
+  INDEX IX_SqlOSUserEmails_UserId CREATE INDEX "IX_SqlOSUserEmails_UserId" ON dbo."SqlOSUserEmails" USING btree ("UserId")
 
 ### SqlOSUserMfaPolicyOverrides
   UserId character varying(64) NOT NULL

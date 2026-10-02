@@ -1,7 +1,7 @@
 # SqlOS schema (SqlServer) after bootstrap
 
 ## Schema version
-auth: 47
+auth: 48
 fga: 10
 
 ## Applied migrations
@@ -54,6 +54,7 @@ fga: 10
 045 SqlOS.AuthServer.Schema.045_AuthPageSessionFamilies.sql
 046 SqlOS.AuthServer.Schema.046_SamlExternalIdentityUserUniqueness.sql
 047 SqlOS.AuthServer.Schema.047_ScimGrantBoundary.sql
+048 SqlOS.AuthServer.Schema.048_UserPartIndexes.sql
 
 ## Tables
 
@@ -450,6 +451,7 @@ fga: 10
   RevokedAt datetime2(7) NULL
   PRIMARY KEY {system-named} (Id)
   FOREIGN KEY FK_SqlOSCredentials_Users (UserId) REFERENCES SqlOSUsers (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSCredentials_UserId NONCLUSTERED (UserId)
 
 ### SqlOSDeviceAuthorizations
   Id nvarchar(64) NOT NULL
@@ -576,6 +578,7 @@ fga: 10
   INDEX IX_SqlOSExternalIdentities_OidcConnectionId_Subject UNIQUE NONCLUSTERED (OidcConnectionId, Subject) WHERE ([OidcConnectionId] IS NOT NULL)
   INDEX IX_SqlOSExternalIdentities_SsoConnectionId_Subject UNIQUE NONCLUSTERED (ConnectionId, Subject) WHERE ([ConnectionId] IS NOT NULL)
   INDEX IX_SqlOSExternalIdentities_SsoConnectionId_UserId UNIQUE NONCLUSTERED (ConnectionId, UserId) WHERE ([ConnectionId] IS NOT NULL)
+  INDEX IX_SqlOSExternalIdentities_UserId NONCLUSTERED (UserId)
 
 ### SqlOSFgaAgents
   Id nvarchar(450) NOT NULL
@@ -1293,6 +1296,7 @@ fga: 10
   PRIMARY KEY {system-named} (Id)
   UNIQUE {system-named} (NormalizedEmail)
   FOREIGN KEY FK_SqlOSUserEmails_Users (UserId) REFERENCES SqlOSUsers (Id) ON DELETE NO_ACTION ON UPDATE NO_ACTION
+  INDEX IX_SqlOSUserEmails_UserId NONCLUSTERED (UserId)
 
 ### SqlOSUserMfaPolicyOverrides
   UserId nvarchar(64) NOT NULL
