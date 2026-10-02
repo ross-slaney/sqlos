@@ -3631,6 +3631,10 @@ namespace SqlOS.Example.Api.Migrations
                     b.Property<string>("Description")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<byte[]>("FgaScope")
+                        .HasMaxLength(512)
+                        .HasColumnType("varbinary(512)");
+
                     b.Property<string>("HeadquartersAddress")
                         .HasColumnType("nvarchar(max)");
 
@@ -3643,9 +3647,6 @@ namespace SqlOS.Example.Api.Migrations
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
-
-                    b.Property<byte[]>("SqlOSFgaScope")
-                        .HasColumnType("varbinary(512)");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2");
@@ -3663,9 +3664,7 @@ namespace SqlOS.Example.Api.Migrations
                             t.HasTrigger("TR_Chains_SqlOSFgaScope_Update");
                         });
 
-                    b
-                        .HasAnnotation("SqlOS:Fga:Scope", true)
-                        .HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("SqlOS.Example.Api.FgaRetail.Models.InventoryItem", b =>
@@ -3678,6 +3677,10 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.Property<string>("Description")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<byte[]>("FgaScope")
+                        .HasMaxLength(512)
+                        .HasColumnType("varbinary(512)");
 
                     b.Property<string>("LocationId")
                         .IsRequired()
@@ -3704,9 +3707,6 @@ namespace SqlOS.Example.Api.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
-                    b.Property<byte[]>("SqlOSFgaScope")
-                        .HasColumnType("varbinary(512)");
-
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2");
 
@@ -3725,9 +3725,7 @@ namespace SqlOS.Example.Api.Migrations
                             t.HasTrigger("TR_InventoryItems_SqlOSFgaScope_Update");
                         });
 
-                    b
-                        .HasAnnotation("SqlOS:Fga:Scope", true)
-                        .HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("SqlOS.Example.Api.FgaRetail.Models.Location", b =>
@@ -3748,6 +3746,10 @@ namespace SqlOS.Example.Api.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<byte[]>("FgaScope")
+                        .HasMaxLength(512)
+                        .HasColumnType("varbinary(512)");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -3757,9 +3759,6 @@ namespace SqlOS.Example.Api.Migrations
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
-
-                    b.Property<byte[]>("SqlOSFgaScope")
-                        .HasColumnType("varbinary(512)");
 
                     b.Property<string>("State")
                         .HasColumnType("nvarchar(max)");
@@ -3788,9 +3787,7 @@ namespace SqlOS.Example.Api.Migrations
                             t.HasTrigger("TR_Locations_SqlOSFgaScope_Update");
                         });
 
-                    b
-                        .HasAnnotation("SqlOS:Fga:Scope", true)
-                        .HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("SqlOS.Example.Api.Models.ExampleUserProfile", b =>
@@ -3850,6 +3847,10 @@ namespace SqlOS.Example.Api.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<byte[]>("FgaScope")
+                        .HasMaxLength(512)
+                        .HasColumnType("varbinary(512)");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -3864,9 +3865,6 @@ namespace SqlOS.Example.Api.Migrations
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
-
-                    b.Property<byte[]>("SqlOSFgaScope")
-                        .HasColumnType("varbinary(512)");
 
                     b.HasKey("Id");
 
@@ -3883,9 +3881,7 @@ namespace SqlOS.Example.Api.Migrations
                             t.HasTrigger("TR_Workspaces_SqlOSFgaScope_Update");
                         });
 
-                    b
-                        .HasAnnotation("SqlOS:Fga:Scope", true)
-                        .HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("SqlOS.Fga.Models.SqlOSFgaAccessRoot", b =>

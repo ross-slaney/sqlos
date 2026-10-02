@@ -482,7 +482,7 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
     /// </summary>
     private static Task<List<EntityRow>> ReadEntitiesAsync()
         => ReadAsync(
-            TestDatabase.Rewrite("SELECT [Id], [ResourceId], [SqlOSFgaScope] FROM [LifecycleProtectedEntities]"),
+            TestDatabase.Rewrite("SELECT [Id], [ResourceId], [FgaScope] FROM [LifecycleProtectedEntities]"),
             reader =>
             {
                 if (reader.IsDBNull(2))
@@ -490,16 +490,7 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
                     return new EntityRow(reader.GetString(0), reader.GetString(1), new long?[Levels], null, null);
                 }
 
-                int typeSeq;
-                long?[] ancestors;
-                if (TestDatabase.IsPostgreSql)
-                {
-                    (typeSeq, ancestors) = SqlOSFgaScope.Decode(reader.GetFieldValue<long?[]>(2));
-                }
-                else
-                {
-                    (_, typeSeq, ancestors) = SqlOSFgaScope.Decode(reader.GetFieldValue<byte[]>(2), Levels);
-                }
+                var (_, typeSeq, ancestors) = SqlOSFgaScope.Decode(reader.GetFieldValue<byte[]>(2), Levels);
 
                 var reach = Array.FindIndex(ancestors, a => a is not null);
                 return new EntityRow(reader.GetString(0), reader.GetString(1), ancestors, reach < 0 ? null : (short)reach, typeSeq);

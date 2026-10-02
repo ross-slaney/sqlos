@@ -74,6 +74,8 @@ internal sealed class BenchDbContext(DbContextOptions<BenchDbContext> options) :
 /// <summary>A catalog row. Every product is its own FGA resource, as with <c>ISqlOSResourceEntity</c>.</summary>
 internal sealed class Product : IHasResourceId
 {
+    public byte[]? FgaScope { get; private set; }
+
     public int Id { get; set; }
     public int StoreId { get; set; }
     public string ResourceId { get; set; } = string.Empty;
@@ -83,6 +85,8 @@ internal sealed class Product : IHasResourceId
 
 internal sealed class Store : IHasResourceId
 {
+    public byte[]? FgaScope { get; private set; }
+
     public int Id { get; set; }
     public int Chain { get; set; }
     public string ResourceId { get; set; } = string.Empty;

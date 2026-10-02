@@ -69,7 +69,7 @@ internal sealed class PostgreSqlDatasetLoader(string connectionString, SqlOSFgaO
             var end = Math.Min(start + chunk, to);
             var (s, e) = (start, end);
             copies.Add(Task.Run(() => CopyAsync(Resources, DatasetRows.Columns.Resources, DatasetRows.ProductResources(tree, s, e), cancellationToken), cancellationToken));
-            copies.Add(Task.Run(() => CopyAsync(Products, DatasetRows.Columns.Products(typeof(long?[])), DatasetRows.Products(tree, productType, s, e, (_, type, ancestors) => SqlOSFgaScope.EncodeArray(type, ancestors)), cancellationToken), cancellationToken));
+            copies.Add(Task.Run(() => CopyAsync(Products, DatasetRows.Columns.Products(typeof(byte[])), DatasetRows.Products(tree, productType, s, e, SqlOSFgaScope.Encode), cancellationToken), cancellationToken));
         }
 
         await Task.WhenAll(copies);
@@ -208,7 +208,7 @@ internal sealed class PostgreSqlDatasetLoader(string connectionString, SqlOSFgaO
             ? column == "Name" && table.Contains("SqlOSFga", StringComparison.Ordinal) ? NpgsqlDbType.Text : NpgsqlDbType.Varchar
             : type == typeof(int) ? NpgsqlDbType.Integer
             : type == typeof(long) ? NpgsqlDbType.Bigint
-            : type == typeof(long?[]) ? NpgsqlDbType.Array | NpgsqlDbType.Bigint
+            : type == typeof(byte[]) ? NpgsqlDbType.Bytea
             : type == typeof(short) ? NpgsqlDbType.Smallint
             : type == typeof(bool) ? NpgsqlDbType.Boolean
             : type == typeof(DateTime) ? NpgsqlDbType.Timestamp

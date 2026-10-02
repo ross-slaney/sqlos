@@ -5,33 +5,37 @@
 namespace SqlOS.Example.Api.Migrations
 {
     /// <inheritdoc />
-    public partial class AddSqlOSFgaScopeColumn : Migration
+    public partial class AddFgaScopeColumn : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.AddColumn<byte[]>(
-                name: "SqlOSFgaScope",
+                name: "FgaScope",
                 table: "Workspaces",
                 type: "varbinary(512)",
+                maxLength: 512,
                 nullable: true);
 
             migrationBuilder.AddColumn<byte[]>(
-                name: "SqlOSFgaScope",
+                name: "FgaScope",
                 table: "Locations",
                 type: "varbinary(512)",
+                maxLength: 512,
                 nullable: true);
 
             migrationBuilder.AddColumn<byte[]>(
-                name: "SqlOSFgaScope",
+                name: "FgaScope",
                 table: "InventoryItems",
                 type: "varbinary(512)",
+                maxLength: 512,
                 nullable: true);
 
             migrationBuilder.AddColumn<byte[]>(
-                name: "SqlOSFgaScope",
+                name: "FgaScope",
                 table: "Chains",
                 type: "varbinary(512)",
+                maxLength: 512,
                 nullable: true);
 
             migrationBuilder.CreateIndex(
@@ -75,19 +79,19 @@ namespace SqlOS.Example.Api.Migrations
                 table: "Chains");
 
             migrationBuilder.DropColumn(
-                name: "SqlOSFgaScope",
+                name: "FgaScope",
                 table: "Workspaces");
 
             migrationBuilder.DropColumn(
-                name: "SqlOSFgaScope",
+                name: "FgaScope",
                 table: "Locations");
 
             migrationBuilder.DropColumn(
-                name: "SqlOSFgaScope",
+                name: "FgaScope",
                 table: "InventoryItems");
 
             migrationBuilder.DropColumn(
-                name: "SqlOSFgaScope",
+                name: "FgaScope",
                 table: "Chains");
         }
     }

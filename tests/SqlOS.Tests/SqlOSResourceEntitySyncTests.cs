@@ -833,6 +833,8 @@ public sealed class SqlOSResourceEntitySyncTests
 
     private sealed class ResourceBackedEntity : ISqlOSResourceEntity
     {
+        public byte[]? FgaScope { get; private set; }
+
         public string Id { get; set; } = string.Empty;
         public string? ResourceKey { get; set; }
         public string TypeId { get; set; } = "workspace";

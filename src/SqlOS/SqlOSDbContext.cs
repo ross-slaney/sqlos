@@ -45,7 +45,7 @@ public abstract class SqlOSDbContext<TContext> : DbContext, ISqlOSAuthServerDbCo
         OnApplicationModelCreating(modelBuilder);
 
         // Last, so every application entity is configured: the scope column on each table with a resource id.
-        SqlOSFgaScopeColumns.Configure(modelBuilder, fga, Database.ProviderName);
+        SqlOSFgaScopeColumns.Configure(modelBuilder, fga);
     }
 
     /// <summary>

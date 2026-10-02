@@ -52,42 +52,33 @@ internal static class SqlOSFgaLineage
 
     public static string RebuildRoutineName(string resourcesTable) => $"{resourcesTable}_LineageRebuild";
 
-    // The scope column: the lineage of a row's resource, held on the application table itself. One column,
-    // SqlOSFgaScope, on every table whose entity carries a ResourceId. On PostgreSQL it is a bigint array:
-    // element 1 the resource type's compact key, element l + 2 the ancestor at level l (NULL where access does
-    // not flow from that level). On SQL Server it is a varbinary: byte 1 the depth, bytes 2-5 the type, then
-    // eight bytes per level (zero where access does not flow). SqlOS reads each piece through an expression
-    // the database can index: an element of the array, or a SUBSTRING of the bytes (a computed column on SQL
-    // Server, which the optimizer matches by expression).
+    // The scope column: the lineage of a row's resource, held on the application table itself. Every entity
+    // implementing IHasResourceId declares it (IHasResourceId.FgaScope), so it exists on every table with a
+    // resource id, and maps to a byte string on both engines (varbinary(512), bytea): byte 1 the depth,
+    // bytes 2-5 the resource type's compact key, then eight bytes per level holding the ancestor at that
+    // level where access flows down to the row from it, zero elsewhere; integers big-endian. SqlOS reads each
+    // piece through SUBSTRING, which it indexes per level: an expression index on PostgreSQL, a storage-free
+    // computed column on SQL Server.
 
     public const string ScopePrefix = "SqlOSFga";
 
-    public const string ScopeColumn = ScopePrefix + "Scope";
+    public const string ScopeColumn = nameof(Fga.Interfaces.IHasResourceId.FgaScope);
 
-    /// <summary>The marker annotation on an entity type whose table carries the scope column.</summary>
-    public const string ScopeAnnotation = "SqlOS:Fga:Scope";
-
-    /// <summary>The SQL Server column type: room for 63 levels, so a changed depth never changes the column.</summary>
-    public const string ScopeBinaryType = "varbinary(512)";
+    /// <summary>The column's maximum length: room for 63 levels, so a changed depth never changes the column.</summary>
+    public const int ScopeMaxLength = 512;
 
     public const int ScopeMaxLevels = 63;
 
-    /// <summary>PostgreSQL: the (1-based) element of the array holding the resource type's compact key.</summary>
-    public const int ScopeTypeElement = 1;
-
-    /// <summary>PostgreSQL: the (1-based) element holding the ancestor at a level.</summary>
-    public static int ScopeAncestorElement(int level) => level + 2;
-
-    /// <summary>SQL Server: the (1-based) offset of the depth byte.</summary>
+    /// <summary>The (1-based) offset of the depth byte.</summary>
     public const int ScopeDepthOffset = 1;
 
-    /// <summary>SQL Server: the (1-based) offset of the four type bytes.</summary>
+    /// <summary>The (1-based) offset of the four type bytes.</summary>
     public const int ScopeTypeOffset = 2;
 
-    /// <summary>SQL Server: the (1-based) offset of the eight ancestor bytes of a level.</summary>
+    /// <summary>The (1-based) offset of the eight ancestor bytes of a level.</summary>
     public static int ScopeAncestorOffset(int level) => 6 + 8 * level;
 
-    /// <summary>SQL Server: the bytes a scope value of the given number of levels takes.</summary>
+    /// <summary>The bytes a scope value of the given number of levels takes.</summary>
     public static int ScopeBinaryLength(int levels) => 5 + 8 * levels;
 
     /// <summary>SQL Server: the computed column reading a level's ancestor out of the scope column, which the level's indexes are built on.</summary>

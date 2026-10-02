@@ -41,6 +41,8 @@ public sealed class TestSqlOSDbContext : DbContext, ISqlOSAuthServerDbContext, I
 
 public sealed class LifecycleProtectedEntity : IHasResourceId
 {
+    public byte[]? FgaScope { get; private set; }
+
     public string Id { get; set; } = string.Empty;
     public string ResourceId { get; set; } = string.Empty;
 

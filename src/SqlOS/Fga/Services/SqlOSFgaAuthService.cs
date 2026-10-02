@@ -444,17 +444,8 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
             .FromSqlRaw(provider.BuildActiveSubjectsQuerySql(_options), subjectIdsJson)
             .AsNoTracking();
 
-        var entityType = (_context as DbContext)?.Model.FindEntityType(typeof(T));
-        if (entityType is not null && !SqlOSFgaScopeColumns.Has(entityType))
-        {
-            throw new InvalidOperationException(
-                $"{typeof(T).Name} is not configured for SqlOS list filtering: its table has no {SqlOSFgaLineage.ScopeColumn} column. "
-                + "Derive the context from SqlOSDbContext, or call UseSqlOS / ApplySqlOSFgaModel after configuring the application's entities and pass Database.ProviderName.");
-        }
-
         return SqlOSFgaFilterBuilder.Build<T>(
             _context,
-            _context.Database.ProviderName,
             roots,
             liveQuery,
             subjectIdsJson,

@@ -20,63 +20,51 @@ namespace SqlOS.Tests.Fga;
 public class SqlOSFgaScopeColumnsTests
 {
     [TestMethod]
-    public void SqlServer_AddsTheByteColumnAndTriggersToEveryResourceBackedEntity()
+    public void EveryResourceEntity_DeclaresTheColumn_AndSqlOSConfiguresIt_TheSameOnBothEngines()
     {
-        using var context = Create<OnSqlServer>(SqlOSDatabase.SqlServerProviderName);
-        var orders = context.Model.FindEntityType(typeof(Order))!;
+        foreach (var context in new DbContext[] { Create<OnSqlServer>(SqlOSDatabase.SqlServerProviderName), Create<OnPostgreSql>(SqlOSDatabase.PostgreSqlProviderName) })
+        {
+            using var _ = context;
+            var orders = context.Model.FindEntityType(typeof(Order))!;
 
-        SqlOSFgaScopeColumns.Has(orders).Should().BeTrue();
-        var scope = orders.FindProperty(SqlOSFgaLineage.ScopeColumn);
-        scope.Should().NotBeNull();
-        scope!.IsShadowProperty().Should().BeTrue();
-        scope.ClrType.Should().Be(typeof(byte[]));
-        scope.GetColumnType().Should().Be("varbinary(512)");
-        scope.GetBeforeSaveBehavior().Should().Be(PropertySaveBehavior.Ignore);
-        scope.GetAfterSaveBehavior().Should().Be(PropertySaveBehavior.Ignore);
-        orders.GetDeclaredTriggers().Select(t => t.GetDatabaseName())
-            .Should().BeEquivalentTo(SqlOSFgaLineage.ScopeTriggerNames("Orders"));
+            // The entity's own property (IHasResourceId.FgaScope), not a shadow one; a byte string with room for
+            // any depth, which EF Core never writes.
+            var scope = orders.FindProperty(SqlOSFgaLineage.ScopeColumn)!;
+            scope.IsShadowProperty().Should().BeFalse();
+            scope.ClrType.Should().Be(typeof(byte[]));
+            scope.GetMaxLength().Should().Be(SqlOSFgaLineage.ScopeMaxLength);
+            scope.GetBeforeSaveBehavior().Should().Be(PropertySaveBehavior.Ignore);
+            scope.GetAfterSaveBehavior().Should().Be(PropertySaveBehavior.Ignore);
+            orders.GetDeclaredTriggers().Select(t => t.GetDatabaseName())
+                .Should().BeEquivalentTo(SqlOSFgaLineage.ScopeTriggerNames("Orders"));
 
-        // Nothing else lands in the model: no ancestor columns, no per-level indexes.
-        orders.GetProperties().Select(p => p.Name).Where(n => n.StartsWith(SqlOSFgaLineage.ScopePrefix, StringComparison.Ordinal))
-            .Should().Equal(SqlOSFgaLineage.ScopeColumn);
-        orders.GetIndexes().Select(i => i.GetDatabaseName()).Should().NotContain(n => n.Contains(SqlOSFgaLineage.ScopeColumn, StringComparison.Ordinal));
+            // No per-level indexes in the model: SqlOS creates them at startup, outside the migrations.
+            orders.GetIndexes().Select(i => i.GetDatabaseName()).Should().NotContain(n => n!.Contains(SqlOSFgaLineage.ScopeColumn, StringComparison.Ordinal));
 
-        // The resource id is indexed for the triggers (Orders declared its own; Notes gets SqlOS's), and a SqlOS
-        // entity is never touched.
-        orders.GetIndexes().Should().Contain(i => i.Properties.Count == 1 && i.Properties[0].Name == "ResourceId");
-        context.Model.FindEntityType(typeof(Note))!.GetIndexes().Should().Contain(i => i.Name == "IX_Notes_SqlOSFgaResourceId");
-        SqlOSFgaScopeColumns.Has(context.Model.FindEntityType(typeof(Store))!).Should().BeFalse("no ResourceId");
+            // The resource id is indexed for the triggers (Orders declared its own; Notes gets SqlOS's).
+            orders.GetIndexes().Should().Contain(i => i.Properties.Count == 1 && i.Properties[0].Name == "ResourceId");
+            context.Model.FindEntityType(typeof(Note))!.GetIndexes().Should().Contain(i => i.Name == "IX_Notes_SqlOSFgaResourceId");
 
-        // The tables for the database routines, with the orders to mirror per level: the declared PlacedAt
-        // index (then the key); not the ResourceId lookup, the unique Number, or the StoreId foreign key's index.
-        SqlOSFgaScopeColumns.Tables(context.Model).Should().BeEquivalentTo(
-        [
-            new SqlOSFgaScopeTable(null, "Notes", "ResourceId", ["Id"], []),
-            new SqlOSFgaScopeTable("sales", "Orders", "ResourceId", ["Id"], [new SqlOSFgaScopeOrder("PlacedAt", ["PlacedAt", "Id"])]),
-        ]);
+            // The tables for the database routines, with the orders to mirror per level: the declared PlacedAt
+            // index (then the key); not the ResourceId lookup, the unique Number, or the StoreId foreign key's
+            // index; and not Stores, which has no resource id.
+            SqlOSFgaScopeColumns.Tables(context.Model).Should().BeEquivalentTo(
+            [
+                new SqlOSFgaScopeTable(null, "Notes", "ResourceId", ["Id"], []),
+                new SqlOSFgaScopeTable("sales", "Orders", "ResourceId", ["Id"], [new SqlOSFgaScopeOrder("PlacedAt", ["PlacedAt", "Id"])]),
+            ]);
+        }
     }
 
     [TestMethod]
-    public void PostgreSql_AddsTheArrayColumn()
+    public void WithoutAProvider_TheModelIsTheSame()
     {
-        using var context = Create<OnPostgreSql>(SqlOSDatabase.PostgreSqlProviderName);
-        var scope = context.Model.FindEntityType(typeof(Order))!.FindProperty(SqlOSFgaLineage.ScopeColumn);
-
-        scope.Should().NotBeNull();
-        scope!.ClrType.Should().Be(typeof(long?[]));
-        scope.GetColumnType().Should().Be("bigint[]");
-        scope.GetBeforeSaveBehavior().Should().Be(PropertySaveBehavior.Ignore);
-    }
-
-    [TestMethod]
-    public void WithoutAProvider_StillAddsTheColumn()
-    {
-        // In-memory and SQLite test contexts: the column exists so the model is the same shape everywhere.
+        // ApplySqlOSFgaModel without a provider name, or an in-memory test context: nothing depends on it.
         using var context = Create<OnNoProvider>(providerName: null);
-        var scope = context.Model.FindEntityType(typeof(Order))!.FindProperty(SqlOSFgaLineage.ScopeColumn);
+        var scope = context.Model.FindEntityType(typeof(Order))!.FindProperty(SqlOSFgaLineage.ScopeColumn)!;
 
-        scope.Should().NotBeNull();
-        scope!.ClrType.Should().Be(typeof(byte[]));
+        scope.ClrType.Should().Be(typeof(byte[]));
+        scope.GetMaxLength().Should().Be(SqlOSFgaLineage.ScopeMaxLength);
     }
 
     [TestMethod]
@@ -149,6 +137,8 @@ public class SqlOSFgaScopeColumnsTests
 
     private sealed class Order : IHasResourceId
     {
+        public byte[]? FgaScope { get; private set; }
+
         public int Id { get; set; }
         public int StoreId { get; set; }
         public string ResourceId { get; set; } = string.Empty;
@@ -158,6 +148,8 @@ public class SqlOSFgaScopeColumnsTests
 
     private sealed class Note : IHasResourceId
     {
+        public byte[]? FgaScope { get; private set; }
+
         public int Id { get; set; }
         public string ResourceId { get; set; } = string.Empty;
     }

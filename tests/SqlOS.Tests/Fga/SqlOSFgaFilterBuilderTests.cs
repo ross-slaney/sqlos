@@ -31,11 +31,11 @@ public class SqlOSFgaFilterBuilderTests
         var sql = context.Set<Item>().Where(filter).ToQueryString();
 
         sql.Should().Contain("fn_ActiveSubjects");
-        sql.Should().Contain($"SUBSTRING(\"i\".\"SqlOSFgaScope\", {SqlOSFgaLineage.ScopeAncestorOffset(1)}, 8) = @", "level 1");
-        sql.Should().Contain($"SUBSTRING(\"i\".\"SqlOSFgaScope\", {SqlOSFgaLineage.ScopeAncestorOffset(3)}, 8) = @", "level 3");
-        sql.Should().Contain("\"i\".\"SqlOSFgaScope\" >= X'01'", "the depth byte selects the level's filtered index");
-        sql.Should().Contain("\"i\".\"SqlOSFgaScope\" >= X'03'");
-        sql.Should().Contain($"SUBSTRING(\"i\".\"SqlOSFgaScope\", {SqlOSFgaLineage.ScopeTypeOffset}, 4) = @", "the permission's type");
+        sql.Should().Contain($"SUBSTRING(\"i\".\"FgaScope\", {SqlOSFgaLineage.ScopeAncestorOffset(1)}, 8) = @", "level 1");
+        sql.Should().Contain($"SUBSTRING(\"i\".\"FgaScope\", {SqlOSFgaLineage.ScopeAncestorOffset(3)}, 8) = @", "level 3");
+        sql.Should().Contain("\"i\".\"FgaScope\" >= X'01'", "the depth byte selects the level's filtered index");
+        sql.Should().Contain("\"i\".\"FgaScope\" >= X'03'");
+        sql.Should().Contain($"SUBSTRING(\"i\".\"FgaScope\", {SqlOSFgaLineage.ScopeTypeOffset}, 4) = @", "the permission's type");
         sql.Should().NotContain("SqlOSFgaResources", "no join: the lineage sits on the row");
         sql.Should().NotContain("fn_AccessRoots");
     }
@@ -49,10 +49,10 @@ public class SqlOSFgaFilterBuilderTests
 
         // The roots travel as one collection parameter the level's bytes are tested against (SQLite spells the
         // test with json_each; SQL Server with OPENJSON).
-        sql.Should().Contain($"SUBSTRING(\"i\".\"SqlOSFgaScope\", {SqlOSFgaLineage.ScopeAncestorOffset(2)}, 8)");
+        sql.Should().Contain($"SUBSTRING(\"i\".\"FgaScope\", {SqlOSFgaLineage.ScopeAncestorOffset(2)}, 8)");
         sql.Should().Contain("json_each(@__p_1)");
-        sql.Should().Contain("\"i\".\"SqlOSFgaScope\" >= X'02'");
-        sql.Should().NotContain($"SUBSTRING(\"i\".\"SqlOSFgaScope\", {SqlOSFgaLineage.ScopeTypeOffset}, 4)", "the permission applies to every type");
+        sql.Should().Contain("\"i\".\"FgaScope\" >= X'02'");
+        sql.Should().NotContain($"SUBSTRING(\"i\".\"FgaScope\", {SqlOSFgaLineage.ScopeTypeOffset}, 4)", "the permission applies to every type");
     }
 
     [TestMethod]
@@ -88,9 +88,6 @@ public class SqlOSFgaFilterBuilderTests
         depth.Should().Be(2);
         typeSeq.Should().Be(7);
         ancestors.Should().Equal(1L, 20L, 300L);
-        var (arrayType, arrayAncestors) = SqlOSFgaScope.Decode(SqlOSFgaScope.EncodeArray(7, [1L, null, 300L]));
-        arrayType.Should().Be(7);
-        arrayAncestors.Should().Equal(1L, null, 300L);
     }
 
     private static SqlOSFgaAccessRoot Root(long seq, short depth) => new() { ResourceSeq = seq, Depth = depth };
@@ -98,7 +95,7 @@ public class SqlOSFgaFilterBuilderTests
     private static System.Linq.Expressions.Expression<Func<Item, bool>> Build(FilterDbContext context, IReadOnlyList<SqlOSFgaAccessRoot> roots, int? typeSeq)
     {
         var liveQuery = context.Set<SqlOSFgaActiveSubject>().FromSqlRaw("SELECT SubjectId FROM fn_ActiveSubjects({0})", "[\"u\"]").AsNoTracking();
-        return SqlOSFgaFilterBuilder.Build<Item>(context, SqlOSDatabase.SqlServerProviderName, roots, liveQuery, "[\"u\"]", "perm", typeSeq, levels: 11);
+        return SqlOSFgaFilterBuilder.Build<Item>(context, roots, liveQuery, "[\"u\"]", "perm", typeSeq, levels: 11);
     }
 
     private static FilterDbContext Create()
@@ -128,6 +125,8 @@ public class SqlOSFgaFilterBuilderTests
 
     private sealed class Item : IHasResourceId
     {
+        public byte[]? FgaScope { get; private set; }
+
         public int Id { get; set; }
         public string ResourceId { get; set; } = string.Empty;
     }

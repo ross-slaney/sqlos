@@ -4,6 +4,8 @@ namespace SqlOS.Example.Api.Models;
 
 public sealed class Workspace : ISqlOSResourceEntity
 {
+    public byte[]? FgaScope { get; private set; }
+
     public string Id { get; set; } = string.Empty;
     public string ResourceId { get; set; } = string.Empty;
     public string OrganizationId { get; set; } = string.Empty;

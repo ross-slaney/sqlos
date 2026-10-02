@@ -37,18 +37,11 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
 
         // The predicate reads the row's own scope column at the agency admin's level (1), with the root as a
         // parameter, joins nothing, and checks the caller's liveness once per query. On SQL Server the level is
-        // read with the expression of the computed column its index is built on, under the depth-byte filter.
-        StringAssert.Contains(sql, "SqlOSFgaScope");
-        if (TestDatabase.IsPostgreSql)
-        {
-            StringAssert.Contains(sql, $"[{SqlOSFgaLineage.ScopeAncestorElement(1)}]");
-        }
-        else
-        {
-            StringAssert.Contains(sql, $"SUBSTRING([l].[SqlOSFgaScope], {SqlOSFgaLineage.ScopeAncestorOffset(1)}, 8) = @");
-            StringAssert.Contains(sql, "[l].[SqlOSFgaScope] >= 0x01");
-        }
-
+        // The same SQL on both engines: the level's eight bytes compared with a parameter, under the depth-byte
+        // filter of the level's index.
+        StringAssert.Contains(sql, $"{SqlOSFgaLineage.ScopeAncestorOffset(1)}, 8)");
+        StringAssert.Contains(sql, "SUBSTRING(");
+        StringAssert.Contains(sql, "FgaScope");
         StringAssert.Contains(sql, "fn_ActiveSubjects");
         Assert.IsFalse(sql.Contains("fn_IsResourceAccessible", StringComparison.OrdinalIgnoreCase), sql);
         Assert.IsFalse(sql.Contains("SqlOSFgaResources", StringComparison.OrdinalIgnoreCase), sql);

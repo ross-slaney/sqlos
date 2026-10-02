@@ -5,6 +5,8 @@ namespace SqlOS.Todo.Api.Models;
 
 public sealed class TodoItem : ISqlOSResourceEntity
 {
+    public byte[]? FgaScope { get; private set; }
+
     public Guid Id { get; set; }
     public string ResourceId { get; set; } = string.Empty;
     public string OwnerSubjectId { get; set; } = string.Empty;

@@ -8,10 +8,10 @@ namespace SqlOS.Fga;
 
 /// <summary>
 /// The scope value of a row (see <see cref="SqlOSFgaLineage.ScopeColumn"/>): how it is encoded, and how a
-/// query reads a piece of it. On PostgreSQL the value is an array and a query indexes it directly. On SQL
-/// Server it is a byte string; the methods below stand in a query for the <c>SUBSTRING</c> expressions of
-/// the computed columns SqlOS creates on the table, so the optimizer uses those columns' indexes, and for the
-/// comparison on the depth byte that selects a level's filtered index. They are translated, never run.
+/// query reads a piece of it. The value is the same byte string on both engines; the methods below stand in
+/// a query for the <c>SUBSTRING</c> expressions SqlOS indexes per level (an expression index on PostgreSQL,
+/// a computed column on SQL Server), and for the comparison on the depth byte that selects a level's
+/// filtered index. They are translated, never run.
 /// </summary>
 internal static class SqlOSFgaScope
 {
@@ -19,13 +19,13 @@ internal static class SqlOSFgaScope
     internal static readonly MethodInfo TypeOfMethod = typeof(SqlOSFgaScope).GetMethod(nameof(TypeOf), BindingFlags.Static | BindingFlags.Public)!;
     internal static readonly MethodInfo ReachesMethod = typeof(SqlOSFgaScope).GetMethod(nameof(Reaches), BindingFlags.Static | BindingFlags.Public)!;
 
-    /// <summary>SQL Server: the eight bytes holding the row's ancestor at a level; <c>SUBSTRING(scope, offset, 8)</c>.</summary>
+    /// <summary>The eight bytes holding the row's ancestor at a level; <c>SUBSTRING(scope, offset, 8)</c>.</summary>
     public static byte[]? AncestorAt(byte[]? scope, int level) => throw Translated();
 
-    /// <summary>SQL Server: the four bytes holding the row's resource type; <c>SUBSTRING(scope, offset, 4)</c> (the offset is <see cref="SqlOSFgaLineage.ScopeTypeOffset"/>; an argument so the translation has an integer to type its constants by).</summary>
+    /// <summary>The four bytes holding the row's resource type; <c>SUBSTRING(scope, offset, 4)</c> (the offset is <see cref="SqlOSFgaLineage.ScopeTypeOffset"/>; an argument so the translation has an integer to type its constants by).</summary>
     public static byte[]? TypeOf(byte[]? scope, int offset) => throw Translated();
 
-    /// <summary>SQL Server: whether the row sits at or below a level; <c>scope &gt;= 0x0l</c>, the predicate of the level's filtered index.</summary>
+    /// <summary>Whether the row sits at or below a level; <c>scope &gt;= 0x0l</c>, the predicate of the level's filtered index.</summary>
     public static bool Reaches(byte[]? scope, int level) => throw Translated();
 
     private static InvalidOperationException Translated()
@@ -69,7 +69,7 @@ internal static class SqlOSFgaScope
             scope.TypeMapping);
     }
 
-    /// <summary>The eight bytes of a resource's compact key as the SQL Server value stores them (big-endian, as <c>CAST(bigint AS BINARY(8))</c> does).</summary>
+    /// <summary>The eight bytes of a resource's compact key as the value stores them: big-endian, as SQL Server's <c>CAST(bigint AS BINARY(8))</c> and PostgreSQL's <c>int8send</c> write them.</summary>
     public static byte[] Bytes(long seq)
     {
         var bytes = new byte[8];
@@ -77,7 +77,7 @@ internal static class SqlOSFgaScope
         return bytes;
     }
 
-    /// <summary>The four bytes of a resource type's compact key as the SQL Server value stores them.</summary>
+    /// <summary>The four bytes of a resource type's compact key as the value stores them.</summary>
     public static byte[] Bytes(int typeSeq)
     {
         var bytes = new byte[4];
@@ -86,8 +86,8 @@ internal static class SqlOSFgaScope
     }
 
     /// <summary>
-    /// The SQL Server value: depth, type, then the ancestor at each level, zero where access does not flow
-    /// from that level. Exactly what the database triggers compute, for loaders that write rows themselves.
+    /// The value: depth, type, then the ancestor at each level, zero where access does not flow from that
+    /// level. Exactly what the database triggers compute, for loaders that write rows themselves.
     /// </summary>
     public static byte[] Encode(int depth, int typeSeq, IReadOnlyList<long?> ancestorsByLevel)
     {
@@ -102,20 +102,7 @@ internal static class SqlOSFgaScope
         return bytes;
     }
 
-    /// <summary>The PostgreSQL value: the type, then the ancestor at each level, NULL where access does not flow from that level.</summary>
-    public static long?[] EncodeArray(int typeSeq, IReadOnlyList<long?> ancestorsByLevel)
-    {
-        var elements = new long?[ancestorsByLevel.Count + 1];
-        elements[0] = typeSeq;
-        for (var level = 0; level < ancestorsByLevel.Count; level++)
-        {
-            elements[level + 1] = ancestorsByLevel[level];
-        }
-
-        return elements;
-    }
-
-    /// <summary>Reads a SQL Server value back: depth, type, and the ancestor at each level (NULL where none).</summary>
+    /// <summary>Reads a value back: depth, type, and the ancestor at each level (NULL where none).</summary>
     public static (int Depth, int TypeSeq, long?[] Ancestors) Decode(byte[] value, int levels)
     {
         var ancestors = new long?[levels];
@@ -133,8 +120,4 @@ internal static class SqlOSFgaScope
 
         return (value[0], BinaryPrimitives.ReadInt32BigEndian(value.AsSpan(1, 4)), ancestors);
     }
-
-    /// <summary>Reads a PostgreSQL value back: the type and the ancestor at each level.</summary>
-    public static (int TypeSeq, long?[] Ancestors) Decode(long?[] value)
-        => ((int)value[0]!.Value, value.Skip(1).ToArray());
 }

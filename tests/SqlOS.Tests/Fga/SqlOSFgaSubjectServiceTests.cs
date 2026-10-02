@@ -256,6 +256,8 @@ public class SqlOSFgaSubjectServiceTests
 
     private sealed class TestProtectedEntity : IHasResourceId
     {
+        public byte[]? FgaScope { get; private set; }
+
         public string ResourceId { get; set; } = string.Empty;
     }
 

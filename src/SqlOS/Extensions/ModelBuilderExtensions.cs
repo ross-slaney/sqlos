@@ -27,7 +27,7 @@ public static class ModelBuilderExtensions
         SqlOSEmailModelConfiguration.Configure(modelBuilder, new SqlOSAuthServerOptions().Schema, providerName);
         SqlOSCalendarModelConfiguration.Configure(modelBuilder, new SqlOSAuthServerOptions().Schema);
         SqlOSFgaModelConfiguration.Configure(modelBuilder, fgaOptions, contextType);
-        SqlOSFgaScopeColumns.Configure(modelBuilder, fgaOptions, providerName);
+        SqlOSFgaScopeColumns.Configure(modelBuilder, fgaOptions);
         if (SqlOSDatabase.IsPostgreSql(providerName))
         {
             SqlOSDatabase.EnablePostgreSqlTimestampCompatibility();

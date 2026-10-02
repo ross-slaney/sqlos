@@ -1,33 +1,28 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
-using SqlOS.Database;
 using SqlOS.Fga.Interfaces;
 
 namespace SqlOS.Fga.Configuration;
 
 /// <summary>
-/// The scope column: the resource lineage carried onto every application table whose entity implements
-/// <see cref="IHasResourceId"/>. This pass adds the one column to the EF model as a database-owned shadow
-/// property, so the application's next migration carries it, and indexes the resource id for the triggers.
-/// Everything else on the database side (the per-level indexes, SQL Server's computed columns, the triggers
-/// that keep the values current, and the one-time fill) is created by <c>SqlOSFgaFunctionInitializer</c>
-/// from the tables this pass marks, outside the application's migrations.
+/// The scope column (<see cref="IHasResourceId.FgaScope"/>) of every application entity with a resource id.
+/// The entity declares the column, so it exists by construction; this pass only configures what the
+/// database needs of it: a fixed maximum length (so SQL Server can index pieces of it), that EF Core never
+/// writes it, the SQL Server triggers SqlOS keeps it current with (declared so EF Core's update pipeline
+/// avoids OUTPUT without INTO), and an index on the resource id the triggers find rows by. The per-level
+/// indexes, the triggers themselves, and the one-time fill are created by <c>SqlOSFgaFunctionInitializer</c>
+/// at startup, outside the application's migrations.
 /// </summary>
 internal static class SqlOSFgaScopeColumns
 {
-    /// <summary>
-    /// Marks and configures every eligible entity type in the model. Must run after the application's own
-    /// entity configuration, which is why <c>SqlOSDbContext</c> calls it last and
-    /// <c>ApplySqlOSFgaModel</c> documents its place in <c>OnModelCreating</c>.
-    /// </summary>
-    public static void Configure(ModelBuilder modelBuilder, SqlOSFgaOptions options, string? providerName)
+    /// <summary>Configures every application entity type in the model that implements <see cref="IHasResourceId"/>.</summary>
+    public static void Configure(ModelBuilder modelBuilder, SqlOSFgaOptions options)
     {
         if (SqlOSFgaLineage.Levels(options) > SqlOSFgaLineage.ScopeMaxLevels)
         {
             throw new InvalidOperationException($"SqlOS FGA supports a MaxResourceHierarchyDepth of at most {SqlOSFgaLineage.ScopeMaxLevels - 1}.");
         }
 
-        var postgres = SqlOSDatabase.IsPostgreSql(providerName);
         var sqlosAssembly = typeof(SqlOSFgaScopeColumns).Assembly;
         foreach (var entityType in modelBuilder.Model.GetEntityTypes().ToList())
         {
@@ -38,25 +33,9 @@ internal static class SqlOSFgaScopeColumns
 
             var entity = modelBuilder.Entity(entityType.ClrType);
             var table = entityType.GetTableName()!;
-            entity.HasAnnotation(SqlOSFgaLineage.ScopeAnnotation, true);
+            var scope = entity.Property(SqlOSFgaLineage.ScopeColumn).HasMaxLength(SqlOSFgaLineage.ScopeMaxLength);
+            SqlOSFgaModelConfiguration.DatabaseOwned(scope);
 
-            // The column. Database-owned: EF Core reads it and never writes it.
-            if (postgres)
-            {
-                SqlOSFgaModelConfiguration.DatabaseOwned(entity.Property<long?[]>(SqlOSFgaLineage.ScopeColumn));
-            }
-            else
-            {
-                var scope = entity.Property<byte[]>(SqlOSFgaLineage.ScopeColumn);
-                if (providerName == SqlOSDatabase.SqlServerProviderName)
-                {
-                    scope.HasColumnType(SqlOSFgaLineage.ScopeBinaryType);
-                }
-
-                SqlOSFgaModelConfiguration.DatabaseOwned(scope);
-            }
-
-            // The triggers (declared so EF Core's SQL Server update pipeline avoids OUTPUT without INTO).
             entity.ToTable(t =>
             {
                 foreach (var trigger in SqlOSFgaLineage.ScopeTriggerNames(table))
@@ -65,7 +44,6 @@ internal static class SqlOSFgaScopeColumns
                 }
             });
 
-            // The resource id must be indexed: the triggers find a resource's rows by it.
             var resourceId = entityType.FindProperty(nameof(IHasResourceId.ResourceId))!;
             if (!entityType.GetIndexes().Any(i => i.Properties[0] == resourceId))
             {
@@ -85,9 +63,10 @@ internal static class SqlOSFgaScopeColumns
     {
         var tables = new List<SqlOSFgaScopeTable>();
         var defaultSchema = model.GetDefaultSchema();
+        var sqlosAssembly = typeof(SqlOSFgaScopeColumns).Assembly;
         foreach (var entityType in model.GetEntityTypes())
         {
-            if (!Has(entityType))
+            if (!IsEligible(entityType, sqlosAssembly))
             {
                 continue;
             }
@@ -110,18 +89,19 @@ internal static class SqlOSFgaScopeColumns
         return tables.OrderBy(t => t.Schema, StringComparer.Ordinal).ThenBy(t => t.Table, StringComparer.Ordinal).ToList();
     }
 
-    /// <summary>Whether an entity type's table carries the scope column.</summary>
-    public static bool Has(IReadOnlyEntityType entityType)
-        => entityType.FindAnnotation(SqlOSFgaLineage.ScopeAnnotation)?.Value is true;
-
-    private static bool IsEligible(IMutableEntityType entityType, System.Reflection.Assembly sqlosAssembly)
+    /// <summary>
+    /// An application entity type with a resource id: it implements <see cref="IHasResourceId"/> (and so
+    /// declares the scope column), is mapped to a table of its own, and is not one of SqlOS's.
+    /// </summary>
+    private static bool IsEligible(IReadOnlyEntityType entityType, System.Reflection.Assembly sqlosAssembly)
         => typeof(IHasResourceId).IsAssignableFrom(entityType.ClrType)
            && entityType.ClrType.Assembly != sqlosAssembly
            && !entityType.IsOwned()
            && entityType.FindPrimaryKey() is not null
            && entityType.GetTableName() is not null
            && entityType.BaseType is null
-           && entityType.FindProperty(nameof(IHasResourceId.ResourceId)) is not null;
+           && entityType.FindProperty(nameof(IHasResourceId.ResourceId)) is not null
+           && entityType.FindProperty(SqlOSFgaLineage.ScopeColumn) is not null;
 
     /// <summary>
     /// An index the application declared as an order it pages in: not unique (an identity, not an order),
@@ -130,7 +110,7 @@ internal static class SqlOSFgaScopeColumns
     private static bool IsDeclaredOrder(IReadOnlyEntityType entityType, IReadOnlyIndex index, IReadOnlyProperty resourceId)
         => !index.IsUnique
            && index.Properties[0] != resourceId
-           && !index.Properties.Any(p => p.Name.StartsWith(SqlOSFgaLineage.ScopePrefix, StringComparison.Ordinal))
+           && !index.Properties.Any(p => p.Name == SqlOSFgaLineage.ScopeColumn)
            && !entityType.GetForeignKeys().Any(fk => fk.Properties.SequenceEqual(index.Properties));
 
     /// <summary>What names a mirror of a declared index: the index's name without the conventional <c>IX_{table}_</c> prefix.</summary>

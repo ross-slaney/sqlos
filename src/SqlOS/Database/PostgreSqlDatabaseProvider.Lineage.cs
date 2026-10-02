@@ -666,18 +666,24 @@ internal sealed partial class PostgreSqlDatabaseProvider
 
     /// <summary>
     /// The scope value of a row from its resource row <paramref name="r"/> (which may be NULL: the row then has
-    /// no scope and nobody sees it) and the resource's type row <paramref name="rt"/>: the type's compact key,
-    /// then the ancestor at each level where access flows down from that level, NULL elsewhere.
+    /// no scope and nobody sees it) and the resource's type row <paramref name="rt"/>: the depth byte, the four
+    /// type bytes, then eight bytes per level holding the ancestor where access flows down to the row from that
+    /// level, zero elsewhere. <c>int4send</c> and <c>int8send</c> are big-endian, the same bytes SQL Server
+    /// writes and <c>SqlOSFgaScope.Bytes</c> encodes a parameter as.
     /// </summary>
     private static string ScopeValue(int levels, string r, string rt)
     {
-        var elements = new List<string> { $"{rt}.\"{SqlOSFgaLineage.SeqColumn}\"::bigint" };
+        var parts = new List<string>
+        {
+            $"substring(int2send(COALESCE({r}.\"{SqlOSFgaLineage.DepthColumn}\", 0)::smallint) from 2 for 1)",
+            $"int4send({rt}.\"{SqlOSFgaLineage.SeqColumn}\")",
+        };
         for (var level = 0; level < levels; level++)
         {
-            elements.Add($"CASE WHEN {r}.\"{SqlOSFgaLineage.ReachColumn}\" <= {level} THEN {r}.\"{SqlOSFgaLineage.AncestorColumn(level)}\" END");
+            parts.Add($"int8send(COALESCE(CASE WHEN {r}.\"{SqlOSFgaLineage.ReachColumn}\" <= {level} THEN {r}.\"{SqlOSFgaLineage.AncestorColumn(level)}\" END, 0))");
         }
 
-        return $"CASE WHEN {r}.\"Id\" IS NULL THEN NULL ELSE ARRAY[{string.Join(", ", elements)}]::bigint[] END";
+        return $"CASE WHEN {r}.\"Id\" IS NULL THEN NULL ELSE {string.Join(" || ", parts)} END";
     }
 
     private string ScopeAssignment(int levels, string r, string rt)
@@ -687,10 +693,12 @@ internal sealed partial class PostgreSqlDatabaseProvider
         => table.Schema is null ? "current_schema()" : $"'{SqlLiteral(table.Schema)}'";
 
     /// <summary>
-    /// The indexes of one application table, per level: an expression index on the level's element of the
-    /// scope array followed by the primary key, and one more per order the application declared, each
-    /// filtered to the rows that have an ancestor at that level. Indexes of orders no longer declared are
-    /// dropped. Also extended statistics on the type element, analyzed at once. Idempotent.
+    /// The indexes of one application table, per level: an expression index on the level's eight bytes of the
+    /// scope column followed by the primary key, and one more per order the application declared, each
+    /// filtered on the depth byte to the rows at or below the level. Indexes of orders no longer declared are
+    /// dropped. Also extended statistics on the type bytes, analyzed at once: without them the planner guesses
+    /// the type test is selective and sorts the caller's whole scope instead of walking the level's index.
+    /// Idempotent.
     /// </summary>
     public IReadOnlyList<string> BuildEnsureScopeIndexesSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
     {
@@ -718,22 +726,20 @@ internal sealed partial class PostgreSqlDatabaseProvider
             var wanted = new List<string>();
             for (var level = 0; level < levels; level++)
             {
-                var element = $"{scope}[{SqlOSFgaLineage.ScopeAncestorElement(level)}]";
+                var ancestor = $"SUBSTRING({scope}, {SqlOSFgaLineage.ScopeAncestorOffset(level)}, 8)";
+                var filter = $"{scope} >= '\\x{level:x2}'::bytea";
                 foreach (var (name, columns) in new[] { (SqlOSFgaLineage.ScopeIndexName(table.Table, level, null), key) }
                     .Concat(table.Orders.Select(o => (SqlOSFgaLineage.ScopeIndexName(table.Table, level, o.Suffix), string.Join(", ", o.Columns.Select(QuoteIdentifier))))))
                 {
                     wanted.Add(name);
                     sql.AppendLine(CultureInfo.InvariantCulture, $"""
-                        CREATE INDEX IF NOT EXISTS {QuoteIdentifier(name)} ON {target} (({element}), {columns}) WHERE {element} IS NOT NULL;
+                        CREATE INDEX IF NOT EXISTS {QuoteIdentifier(name)} ON {target} (({ancestor}), {columns}) WHERE {filter};
                         """);
                 }
             }
 
-            // Statistics on the type element: without them the planner guesses the type test is selective and
-            // sorts the caller's whole scope instead of walking the level's index in order. ANALYZE fills them
-            // (and the expression indexes') at once.
             sql.AppendLine(CultureInfo.InvariantCulture, $"""
-                CREATE STATISTICS IF NOT EXISTS {QuoteIdentifier(SqlOSFgaLineage.ScopeTypeStatisticsName(table.Table))} ON (({scope}[{SqlOSFgaLineage.ScopeTypeElement}])) FROM {target};
+                CREATE STATISTICS IF NOT EXISTS {QuoteIdentifier(SqlOSFgaLineage.ScopeTypeStatisticsName(table.Table))} ON ((SUBSTRING({scope}, {SqlOSFgaLineage.ScopeTypeOffset}, 4))) FROM {target};
                 ANALYZE {target};
                 """);
             var wantedList = string.Join(", ", wanted.Select(w => $"'{SqlLiteral(w)}'"));

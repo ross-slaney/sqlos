@@ -30,7 +30,7 @@ internal static class LineageSql
     {
         var scope = postgres ? $"\"{SqlOSFgaLineage.ScopeColumn}\"" : $"[{SqlOSFgaLineage.ScopeColumn}]";
         var hash = postgres
-            ? $"hashtext(\"Id\"::text || ':' || {scope}::text)::bigint"
+            ? $"hashtext(\"Id\"::text || ':' || encode({scope}, 'hex'))::bigint"
             : $"CAST(CHECKSUM([Id], {scope}) AS DECIMAL(38, 0))";
         return $"""
             SELECT COUNT(*) AS Rows, COALESCE(SUM({hash}), 0)
