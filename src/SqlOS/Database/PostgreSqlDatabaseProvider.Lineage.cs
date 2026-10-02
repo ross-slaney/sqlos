@@ -140,6 +140,9 @@ internal sealed partial class PostgreSqlDatabaseProvider
         var maxLevel = (levels - 1).ToString(CultureInfo.InvariantCulture);
         var malformed = $"RAISE EXCEPTION 'SqlOS FGA: the change would create a cycle, or place a resource deeper than the configured maximum hierarchy depth of {maxLevel}.' USING ERRCODE = '{MalformedErrorCode}';";
         var affected = "pg_temp.\"SqlOSLineageAffected\"";
+        var lockKey = SqlOSFgaLineage.LineageLockKey(options).ToString(CultureInfo.InvariantCulture);
+        var lockShared = $"PERFORM pg_advisory_xact_lock_shared({lockKey});\n{IsolationGuard}";
+        var lockExclusive = $"PERFORM pg_advisory_xact_lock({lockKey});\n{IsolationGuard}";
 
         // The lineage of a row (alias `row`, with ParentId, IsActive, Seq) from its parent `p`, where `depth` is
         // the row's new level (NULL when malformed).
@@ -307,6 +310,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
                 v_rows bigint;
                 v_level int;
             BEGIN
+                {lockExclusive}
                 -- 1. The internal nodes, level by level.
                 DROP TABLE IF EXISTS {nodes};
                 CREATE TEMP TABLE "SqlOSLineageNodes" AS
@@ -353,7 +357,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
                   AND NOT EXISTS (SELECT 1 FROM {nodes} n WHERE n."Id" = r."Id");
 
                 -- 3. The scope columns of every application row.
-                {string.Concat(scopeTables.Select(t => BuildScopeFillSql(options, t) + ";\n"))}
+                {string.Concat(scopeTables.Select(t => ScopeFillUpdate(options, t) + ";\n"))}
                 DROP TABLE {nodes};
             END
             $sqlos$;
@@ -371,6 +375,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
                 v_wave varchar[];
                 v_next varchar[];
             BEGIN
+                {lockShared}
                 {WalkCheck("new_rows AS c", "EXISTS (SELECT 1 FROM new_rows x WHERE x.\"Id\" = r.\"ParentId\")")}
 
                 IF EXISTS (
@@ -449,15 +454,19 @@ internal sealed partial class PostgreSqlDatabaseProvider
                     EXCEPT
                     SELECT "Id", "ParentId", "IsActive" FROM old_rows
                 ) changed;
-                IF v_ids IS NOT NULL THEN
-                    PERFORM {refresh}(v_ids, true);
-                END IF;
                 SELECT EXISTS (
                     SELECT 1 FROM (
                         SELECT "Id", "ResourceTypeId" FROM new_rows
                         EXCEPT
                         SELECT "Id", "ResourceTypeId" FROM old_rows
                     ) retyped) INTO v_types;
+                IF v_ids IS NULL AND NOT v_types THEN
+                    RETURN NULL;
+                END IF;
+                {lockExclusive}
+                IF v_ids IS NOT NULL THEN
+                    PERFORM {refresh}(v_ids, true);
+                END IF;
                 IF v_types THEN
                     {(typeChanges.Length == 0 ? "NULL;" : typeChanges.ToString())}
                 END IF;
@@ -482,6 +491,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
             LANGUAGE plpgsql
             AS $sqlos$
             BEGIN
+                {(clears.Length == 0 ? "" : lockExclusive)}
                 {clears}
                 RETURN NULL;
             END
@@ -533,6 +543,8 @@ internal sealed partial class PostgreSqlDatabaseProvider
             LANGUAGE plpgsql
             AS $sqlos$
             BEGIN
+                PERFORM pg_advisory_xact_lock_shared({SqlOSFgaLineage.LineageLockKey(options).ToString(CultureInfo.InvariantCulture)});
+                {IsolationGuard}
                 UPDATE {ScopeTable(table)} t SET {ScopeAssignment(levels, "r", "rt")}
                 FROM new_rows n
                 LEFT JOIN {resources} r ON r."Id" = n.{resourceId}
@@ -558,6 +570,8 @@ internal sealed partial class PostgreSqlDatabaseProvider
                     RETURN NULL;
                 END IF;
 
+                PERFORM pg_advisory_xact_lock_shared({SqlOSFgaLineage.LineageLockKey(options).ToString(CultureInfo.InvariantCulture)});
+                {IsolationGuard}
                 UPDATE {ScopeTable(table)} t SET {ScopeAssignment(levels, "r", "rt")}
                 FROM (
                     SELECT {keyList}, {resourceId} FROM new_rows
@@ -603,12 +617,23 @@ internal sealed partial class PostgreSqlDatabaseProvider
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(table);
         return $"""
+            DO $sqlos$
+            BEGIN
+                PERFORM pg_advisory_xact_lock({SqlOSFgaLineage.LineageLockKey(options).ToString(CultureInfo.InvariantCulture)});
+                {ScopeFillUpdate(options, table)};
+            END
+            $sqlos$
+            """;
+    }
+
+    /// <summary>The scope column of every row of one application table, set from its resource's lineage.</summary>
+    private string ScopeFillUpdate(SqlOSFgaOptions options, SqlOSFgaScopeTable table)
+        => $"""
             UPDATE {ScopeTable(table)} t SET {ScopeAssignment(SqlOSFgaLineage.Levels(options), "r", "rt")}
             FROM {Qualify(options.Schema, options.TableNames.Resources)} r
             INNER JOIN {Qualify(options.Schema, options.TableNames.ResourceTypes)} rt ON rt."Id" = r."ResourceTypeId"
             WHERE t.{QuoteIdentifier(table.ResourceIdColumn)} = r."Id"
             """;
-    }
 
     public string BuildSelectRoutinesHashSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
     {
@@ -764,6 +789,18 @@ internal sealed partial class PostgreSqlDatabaseProvider
 
         return batches;
     }
+
+    /// <summary>
+    /// A transaction in REPEATABLE READ keeps reading the snapshot it started with even after waiting for the
+    /// lineage lock, so it could compute from state another transaction has since changed. READ COMMITTED (the
+    /// default) reads what was committed when each statement starts, and SERIALIZABLE aborts the conflicting
+    /// transaction itself; REPEATABLE READ is refused rather than allowed to write a lineage that may be stale.
+    /// </summary>
+    private const string IsolationGuard = """
+        IF current_setting('transaction_isolation') = 'repeatable read' THEN
+            RAISE EXCEPTION 'SqlOS FGA: change resources and protected rows in a READ COMMITTED or SERIALIZABLE transaction, not REPEATABLE READ: a repeatable read can miss a concurrent change to the tree.' USING ERRCODE = 'SQ014';
+        END IF;
+        """;
 
     private static string SqlLiteral(string value)
         => value.Replace("'", "''", StringComparison.Ordinal);

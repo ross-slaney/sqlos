@@ -312,10 +312,12 @@ internal sealed partial class SqlServerDatabaseProvider
         var copyNode = string.Join(", ", new[] { "Depth", "Reach" }.Concat(Enumerable.Range(0, levels).Select(SqlOSFgaLineage.AncestorColumn)).Select(c => $"{c} = n.{c}"));
         var rebuildProcedure = $"""
             CREATE OR ALTER PROCEDURE {rebuild}
+                @RangeRows INT = {SqlOSFgaLineage.RebuildRangeRows.ToString(CultureInfo.InvariantCulture)}
             AS
             BEGIN
                 SET NOCOUNT ON;
                 SET XACT_ABORT ON;
+                {WithSessionLineageLock(options, $"""
 
                 -- 1. The internal nodes, level by level.
                 CREATE TABLE #SqlOSLineageNodes (
@@ -352,7 +354,7 @@ internal sealed partial class SqlServerDatabaseProvider
                 END
 
                 -- 2. Every range of the table: its nodes, its leaves, its application rows.
-                {RangeLoop(resources, $"""
+                {RangeLoop(resources, "@RangeRows", $"""
                 UPDATE r SET {copyNode}
                 FROM {resources} r
                 INNER JOIN #SqlOSLineageNodes n ON n.Id = r.Id
@@ -377,6 +379,7 @@ internal sealed partial class SqlServerDatabaseProvider
                 {string.Concat(scopeTables.Select(t => ScopeFillRange(options, t, levels)))}
                 """)}
                 DROP TABLE #SqlOSLineageNodes;
+                """)}
             END
             """;
 
@@ -391,6 +394,7 @@ internal sealed partial class SqlServerDatabaseProvider
             BEGIN
                 SET NOCOUNT ON;
                 IF NOT EXISTS (SELECT 1 FROM inserted) RETURN;
+                {LineageLock(options, "Shared")}
                 {changedTable}
                 INSERT INTO #SqlOSLineageChanged (Id) SELECT Id FROM inserted;
                 EXEC {refresh} @RejectMalformed = 1, @WalkAll = 0;
@@ -419,6 +423,7 @@ internal sealed partial class SqlServerDatabaseProvider
             BEGIN
                 SET NOCOUNT ON;
                 IF NOT (UPDATE(ParentId) OR UPDATE(IsActive) OR UPDATE(ResourceTypeId)) RETURN;
+                {LineageLock(options, "Exclusive")}
                 {changedTable}
                 INSERT INTO #SqlOSLineageChanged (Id)
                 SELECT Id FROM (SELECT Id, ParentId, IsActive FROM inserted EXCEPT SELECT Id, ParentId, IsActive FROM deleted) changed;
@@ -447,6 +452,7 @@ internal sealed partial class SqlServerDatabaseProvider
             AS
             BEGIN
                 SET NOCOUNT ON;
+                {(clears.Length == 0 ? "" : LineageLock(options, "Exclusive"))}
                 {clears}
             END
             """;
@@ -487,6 +493,8 @@ internal sealed partial class SqlServerDatabaseProvider
             AS
             BEGIN
                 SET NOCOUNT ON;
+                IF NOT EXISTS (SELECT 1 FROM inserted) RETURN;
+                {LineageLock(options, "Shared")}
                 {copy}
             END
             """,
@@ -497,6 +505,7 @@ internal sealed partial class SqlServerDatabaseProvider
             BEGIN
                 SET NOCOUNT ON;
                 IF NOT UPDATE([{Escape(table.ResourceIdColumn)}]) RETURN;
+                {LineageLock(options, "Shared")}
                 {copy}
             END
             """,
@@ -533,16 +542,17 @@ internal sealed partial class SqlServerDatabaseProvider
         return $"""
             SET NOCOUNT ON;
             SET XACT_ABORT ON;
-            {RangeLoop(resources, ScopeFillRange(options, table, SqlOSFgaLineage.Levels(options)))}
+            {WithSessionLineageLock(options, RangeLoop(resources, SqlOSFgaLineage.RebuildRangeRows.ToString(CultureInfo.InvariantCulture), ScopeFillRange(options, table, SqlOSFgaLineage.Levels(options))))}
             """;
     }
 
     /// <summary>
-    /// Runs <paramref name="body"/> once per range of <see cref="SqlOSFgaLineage.RebuildRangeRows"/> resources
-    /// in key order, with <c>@from</c> and <c>@to</c> the range's first and last id (inclusive), each range
-    /// in its own transaction. The ranges are found with one ordered pass over the key.
+    /// Runs <paramref name="body"/> once per range of <paramref name="rangeRows"/> resources (an expression:
+    /// a literal, or the rebuild's parameter) in key order, with <c>@from</c> and <c>@to</c> the range's first
+    /// and last id (inclusive), each range in its own transaction. The ranges are found with one ordered pass
+    /// over the key.
     /// </summary>
-    private static string RangeLoop(string resources, string body)
+    private static string RangeLoop(string resources, string rangeRows, string body)
         => $"""
             CREATE TABLE #SqlOSLineageRanges (
                 N INT IDENTITY(1, 1) PRIMARY KEY,
@@ -551,7 +561,7 @@ internal sealed partial class SqlServerDatabaseProvider
             );
             INSERT INTO #SqlOSLineageRanges (FromId, ToId)
             SELECT MIN(x.Id), MAX(x.Id)
-            FROM (SELECT Id, (ROW_NUMBER() OVER (ORDER BY Id) - 1) / {SqlOSFgaLineage.RebuildRangeRows.ToString(CultureInfo.InvariantCulture)} AS Range FROM {resources}) x
+            FROM (SELECT Id, (ROW_NUMBER() OVER (ORDER BY Id) - 1) / {rangeRows} AS Range FROM {resources}) x
             GROUP BY x.Range
             ORDER BY x.Range;
             DECLARE @n INT = 1, @ranges INT = (SELECT COUNT(*) FROM #SqlOSLineageRanges);
@@ -714,4 +724,35 @@ internal sealed partial class SqlServerDatabaseProvider
 
     private static string SqlLiteral(string value)
         => value.Replace("'", "''", StringComparison.Ordinal);
+
+    /// <summary>Takes the lineage lock (see <see cref="SqlOSFgaLineage.LineageLockName"/>) for the trigger's transaction.</summary>
+    private static string LineageLock(SqlOSFgaOptions options, string mode)
+        => $"""
+            DECLARE @sqlosLineageLock INT;
+            EXEC @sqlosLineageLock = sys.sp_getapplock @Resource = N'{SqlLiteral(SqlOSFgaLineage.LineageLockName(options))}', @LockMode = '{mode}', @LockOwner = 'Transaction', @LockTimeout = -1;
+            IF @sqlosLineageLock < 0 THROW 51014, 'SqlOS FGA: the resource lineage lock was not granted.', 1;
+            """;
+
+    /// <summary>
+    /// Runs <paramref name="body"/> holding the lineage lock exclusively for the session: the rebuild and the
+    /// one-time fill commit in ranges, and no change to the tree may land between two of them.
+    /// </summary>
+    private static string WithSessionLineageLock(SqlOSFgaOptions options, string body)
+    {
+        var name = SqlLiteral(SqlOSFgaLineage.LineageLockName(options));
+        return $"""
+            DECLARE @sqlosLineageLock INT;
+            EXEC @sqlosLineageLock = sys.sp_getapplock @Resource = N'{name}', @LockMode = 'Exclusive', @LockOwner = 'Session', @LockTimeout = -1;
+            IF @sqlosLineageLock < 0 THROW 51014, 'SqlOS FGA: the resource lineage lock was not granted.', 1;
+            BEGIN TRY
+                {body}
+                EXEC sys.sp_releaseapplock @Resource = N'{name}', @LockOwner = 'Session';
+            END TRY
+            BEGIN CATCH
+                IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+                EXEC sys.sp_releaseapplock @Resource = N'{name}', @LockOwner = 'Session';
+                THROW;
+            END CATCH
+            """;
+    }
 }

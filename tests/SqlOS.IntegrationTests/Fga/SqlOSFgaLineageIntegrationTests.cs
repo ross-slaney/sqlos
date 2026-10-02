@@ -2,8 +2,12 @@ using System.Data.Common;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using SqlOS.Fga;
+using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Models;
+using SqlOS.Fga.Services;
 using SqlOS.IntegrationTests.Fga.Infrastructure;
 using SqlOS.IntegrationTests.Infrastructure;
 
@@ -345,6 +349,494 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
         // Everything the other suites left behind, checked against the walk-up definition.
         var all = (await ReadResourcesAsync()).Select(r => r.Id).ToArray();
         await AssertLineageMatchesAsync(all);
+    }
+
+    [TestMethod]
+    public async Task BulkMove_SeveralSubtreesInOneStatement()
+    {
+        var from = await CreateChainAsync("bulk_from", "agency");
+        var to = await CreateChainAsync("bulk_to", "agency");
+        var teams = new List<string[]>();
+        var rows = new List<string>();
+        try
+        {
+            for (var i = 0; i < 3; i++)
+            {
+                var team = await CreateUnderAsync(from[0], $"bulk_team{i}", "team", "project");
+                teams.Add(team);
+                rows.Add(await CreateEntityAsync(team[1]));
+            }
+
+            // One UPDATE moves every team of one agency under another.
+            await Context.Database.ExecuteSqlRawAsync(
+                TestDatabase.Rewrite("UPDATE [dbo].[SqlOSFgaResources] SET [ParentId] = {0} WHERE [ParentId] = {1}"), to[0], from[0]);
+
+            await AssertLineageMatchesAsync([.. from, .. to, .. teams.SelectMany(t => t)]);
+            var toSeq = (await ReadResourcesAsync()).Single(r => r.Id == to[0]).Seq;
+            foreach (var row in rows)
+            {
+                (await ReadEntityAsync(row)).Ancestors[1].Should().Be(toSeq, "every moved row now sits under the other agency");
+            }
+        }
+        finally
+        {
+            foreach (var row in rows)
+            {
+                await DeleteEntityAsync(row);
+            }
+
+            foreach (var team in teams)
+            {
+                await DeleteAsync(team);
+            }
+
+            await DeleteAsync(from);
+            await DeleteAsync(to);
+        }
+    }
+
+    [TestMethod]
+    public async Task BulkRowOperations_ExecuteUpdateAndExecuteDelete()
+    {
+        var first = await CreateChainAsync("bulk_rows_a", "agency", "team");
+        var second = await CreateChainAsync("bulk_rows_b", "agency", "team");
+        var suffix = Guid.NewGuid().ToString("N");
+        var ids = Enumerable.Range(0, 4).Select(i => $"bulk_row_{i}_{suffix}").ToArray();
+        try
+        {
+            foreach (var id in ids)
+            {
+                Context.Set<LifecycleProtectedEntity>().Add(new LifecycleProtectedEntity { Id = id, ResourceId = first[1] });
+            }
+
+            await Context.SaveChangesAsync();
+            Context.ChangeTracker.Clear();
+
+            // ExecuteUpdate re-points every row at another resource in one statement: each takes its lineage.
+            await Context.Set<LifecycleProtectedEntity>().Where(e => ids.Contains(e.Id))
+                .ExecuteUpdateAsync(set => set.SetProperty(e => e.ResourceId, second[1]));
+            await AssertLineageMatchesAsync([.. first, .. second]);
+            var secondSeq = (await ReadResourcesAsync()).Single(r => r.Id == second[1]).Seq;
+            foreach (var id in ids)
+            {
+                (await ReadEntityAsync(id)).Ancestors[2].Should().Be(secondSeq);
+            }
+
+            // ExecuteDelete removes them; nothing is left to maintain.
+            await Context.Set<LifecycleProtectedEntity>().Where(e => ids.Contains(e.Id)).ExecuteDeleteAsync();
+            (await ReadEntitiesAsync()).Should().NotContain(e => ids.Contains(e.Id));
+        }
+        finally
+        {
+            await Context.Set<LifecycleProtectedEntity>().Where(e => ids.Contains(e.Id)).ExecuteDeleteAsync();
+            await DeleteAsync(first);
+            await DeleteAsync(second);
+        }
+    }
+
+    [TestMethod]
+    public async Task UpdatingOtherColumnsThroughEf_LeavesTheScopeAlone()
+    {
+        var ids = await CreateChainAsync("ef_update", "agency", "team");
+        var entityId = await CreateEntityAsync(ids[1]);
+        try
+        {
+            var before = await Context.Set<LifecycleProtectedEntity>().AsNoTracking().SingleAsync(e => e.Id == entityId);
+            before.FgaScope.Should().NotBeNull();
+
+            var tracked = await Context.Set<LifecycleProtectedEntity>().SingleAsync(e => e.Id == entityId);
+            tracked.Rank = 42;
+            await Context.SaveChangesAsync();
+            Context.ChangeTracker.Clear();
+
+            var after = await Context.Set<LifecycleProtectedEntity>().AsNoTracking().SingleAsync(e => e.Id == entityId);
+            after.Rank.Should().Be(42);
+            after.FgaScope.Should().Equal(before.FgaScope, "EF Core never writes the scope column");
+        }
+        finally
+        {
+            await DeleteEntityAsync(entityId);
+            await DeleteAsync(ids);
+        }
+    }
+
+    [TestMethod]
+    public async Task ReactivatingUnderAnAncestorThatIsStillInactive_KeepsTheReachCut()
+    {
+        var ids = await CreateChainAsync("nested_deact", "agency", "team", "project");
+        var entityId = await CreateEntityAsync(ids[2]);
+        try
+        {
+            await SetActiveAsync(ids[0], false);
+            await SetActiveAsync(ids[1], false);
+            await SetActiveAsync(ids[1], true);
+
+            await AssertLineageMatchesAsync(ids);
+            (await ReadEntityAsync(entityId)).Reach.Should().Be(2, "the agency is still inactive: access flows from the team down");
+
+            await SetActiveAsync(ids[0], true);
+            await AssertLineageMatchesAsync(ids);
+            (await ReadEntityAsync(entityId)).Reach.Should().Be(0);
+        }
+        finally
+        {
+            await DeleteEntityAsync(entityId);
+            await DeleteAsync(ids);
+        }
+    }
+
+    [TestMethod]
+    public async Task Rebuild_AcrossManyRanges_ReproducesTheLineage()
+    {
+        var ids = await CreateChainAsync("ranges", "agency", "team", "project");
+        var entityId = await CreateEntityAsync(ids[2]);
+        try
+        {
+            var maintained = await ReadResourcesAsync();
+            var maintainedEntities = await ReadEntitiesAsync();
+
+            // SQL Server commits the rebuild in ranges of the key; three resources a range makes many ranges here.
+            await Context.Database.ExecuteSqlRawAsync(
+                TestDatabase.IsPostgreSql
+                    ? "SELECT \"dbo\".\"fn_SqlOSFgaResources_LineageRebuild\"()"
+                    : "EXEC [dbo].[sp_SqlOSFgaResources_LineageRebuild] @RangeRows = 3");
+
+            (await ReadResourcesAsync()).Should().BeEquivalentTo(maintained);
+            (await ReadEntitiesAsync()).Should().BeEquivalentTo(maintainedEntities);
+        }
+        finally
+        {
+            await DeleteEntityAsync(entityId);
+            await DeleteAsync(ids);
+        }
+    }
+
+    [TestMethod]
+    public async Task Startup_OnADatabaseWithoutLineage_BuildsItAndFillsEveryRow()
+    {
+        // The state an existing database is in before its first start on this version: resources and rows with no
+        // lineage, no scope, and no stored routines hash.
+        var ids = await CreateChainAsync("upgrade", "agency", "team", "project");
+        var entityId = await CreateEntityAsync(ids[2]);
+        try
+        {
+            var maintained = await ReadResourcesAsync();
+            var maintainedEntities = await ReadEntitiesAsync();
+            var ancestors = string.Join(", ", Enumerable.Range(0, Levels).Select(l => $"[Ancestor{l}] = NULL"));
+            await Context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite($"UPDATE [dbo].[SqlOSFgaResources] SET [Depth] = NULL, [Reach] = NULL, {ancestors}"));
+            await Context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("UPDATE [LifecycleProtectedEntities] SET [FgaScope] = NULL"));
+            await Context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("UPDATE [dbo].[SqlOSFgaSchema] SET [RoutinesHash] = NULL"));
+
+            await new SqlOSFgaFunctionInitializer(Context, Options.Create(new SqlOSFgaOptions()), NullLogger<SqlOSFgaFunctionInitializer>.Instance)
+                .EnsureFunctionsExistAsync();
+
+            (await ReadResourcesAsync()).Should().BeEquivalentTo(maintained);
+            (await ReadEntitiesAsync()).Should().BeEquivalentTo(maintainedEntities);
+        }
+        finally
+        {
+            await DeleteEntityAsync(entityId);
+            await DeleteAsync(ids);
+        }
+    }
+
+    [TestMethod]
+    public async Task Startup_AfterANewDefinition_FillsRowsWrittenWithoutTheirScope()
+    {
+        // A table that gained the column, or rows written while the triggers were off: the lineage is there,
+        // the rows' scope is not. A start that applies new definitions fills them.
+        var ids = await CreateChainAsync("refill", "agency", "team");
+        var entityId = await CreateEntityAsync(ids[1]);
+        try
+        {
+            var maintainedEntities = await ReadEntitiesAsync();
+            await Context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("UPDATE [LifecycleProtectedEntities] SET [FgaScope] = NULL"));
+            await Context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("UPDATE [dbo].[SqlOSFgaSchema] SET [RoutinesHash] = NULL"));
+
+            await new SqlOSFgaFunctionInitializer(Context, Options.Create(new SqlOSFgaOptions()), NullLogger<SqlOSFgaFunctionInitializer>.Instance)
+                .EnsureFunctionsExistAsync();
+
+            (await ReadEntitiesAsync()).Should().BeEquivalentTo(maintainedEntities);
+        }
+        finally
+        {
+            await DeleteEntityAsync(entityId);
+            await DeleteAsync(ids);
+        }
+    }
+
+    private static async Task<string[]> CreateUnderAsync(string parent, string prefix, params string[] types)
+    {
+        Context.ChangeTracker.Clear();
+        var suffix = Guid.NewGuid().ToString("N");
+        var ids = new string[types.Length];
+        for (var i = 0; i < types.Length; i++)
+        {
+            ids[i] = $"{prefix}_{i}_{suffix}";
+            Context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource { Id = ids[i], ParentId = parent, Name = ids[i], ResourceTypeId = types[i] });
+            parent = ids[i];
+        }
+
+        await Context.SaveChangesAsync();
+        return ids;
+    }
+
+    private static async Task SetActiveAsync(string id, bool active)
+    {
+        Context.ChangeTracker.Clear();
+        var resource = await Context.Set<SqlOSFgaResource>().SingleAsync(r => r.Id == id);
+        resource.IsActive = active;
+        await Context.SaveChangesAsync();
+        Context.ChangeTracker.Clear();
+    }
+
+    // ---- Concurrent transactions: each test holds two transactions open on separate connections with a fixed
+    // interleaving, commits both, and checks the committed tree against the walk-up definition. ----
+
+    [TestMethod]
+    public async Task Concurrent_InsertUnderAParent_ThenTheParentIsDeactivated()
+    {
+        var ids = await CreateChainAsync("race_ins", "agency", "team");
+        var child = $"race_ins_child_{Guid.NewGuid():N}";
+        var entityId = $"race_ins_row_{Guid.NewGuid():N}";
+        try
+        {
+            await using var first = await Tx.BeginAsync();
+            await first.InsertResourceAsync(child, ids[1], "project");
+            await first.InsertEntityAsync(entityId, child);
+
+            await using var second = await Tx.BeginAsync();
+            await RaceAsync(first, second, second.SetActiveAsync(ids[1], false));
+
+            await AssertLineageMatchesAsync([.. ids, child]);
+            (await ReadEntityAsync(entityId)).Reach.Should().Be(3, "the team is inactive: only a grant on the project itself reaches the row");
+        }
+        finally
+        {
+            await DeleteEntityAsync(entityId);
+            await DeleteAsync([.. ids, child]);
+        }
+    }
+
+    [TestMethod]
+    public async Task Concurrent_TheParentIsDeactivated_ThenAChildIsInsertedUnderIt()
+    {
+        var ids = await CreateChainAsync("race_deact", "agency", "team");
+        var child = $"race_deact_child_{Guid.NewGuid():N}";
+        var entityId = $"race_deact_row_{Guid.NewGuid():N}";
+        try
+        {
+            await using var first = await Tx.BeginAsync();
+            await first.SetActiveAsync(ids[1], false);
+
+            await using var second = await Tx.BeginAsync();
+            await RaceAsync(first, second, Task.Run(async () =>
+            {
+                await second.InsertResourceAsync(child, ids[1], "project");
+                await second.InsertEntityAsync(entityId, child);
+            }));
+
+            await AssertLineageMatchesAsync([.. ids, child]);
+            (await ReadEntityAsync(entityId)).Reach.Should().Be(3, "the team is inactive: only a grant on the project itself reaches the row");
+        }
+        finally
+        {
+            await DeleteEntityAsync(entityId);
+            await DeleteAsync([.. ids, child]);
+        }
+    }
+
+    [TestMethod]
+    public async Task Concurrent_ASubtreeMovesUnderAParent_WhileTheParentIsDeactivated()
+    {
+        var target = await CreateChainAsync("race_move_target", "agency", "team");
+        var moving = await CreateChainAsync("race_move_src", "agency", "team", "project");
+        var entityId = await CreateEntityAsync(moving[2]);
+        try
+        {
+            await using var first = await Tx.BeginAsync();
+            await first.SetParentAsync(moving[1], target[1]);
+
+            await using var second = await Tx.BeginAsync();
+            await RaceAsync(first, second, second.SetActiveAsync(target[1], false));
+
+            await AssertLineageMatchesAsync([.. target, .. moving]);
+            (await ReadEntityAsync(entityId)).Reach.Should().Be(3, "the moved team now sits under an inactive team");
+        }
+        finally
+        {
+            await DeleteEntityAsync(entityId);
+            await DeleteAsync(moving);
+            await DeleteAsync(target);
+        }
+    }
+
+    [TestMethod]
+    public async Task Concurrent_TwoMovesThatTogetherFormACycle_DoNotBothCommit()
+    {
+        var a = await CreateChainAsync("race_cycle_a", "agency", "team");
+        var b = await CreateChainAsync("race_cycle_b", "agency", "team");
+        try
+        {
+            // Each move alone is fine; together they put a's team under b's team and b's team under a's team.
+            await using var first = await Tx.BeginAsync();
+            await first.SetParentAsync(a[1], b[1]);
+
+            await using var second = await Tx.BeginAsync();
+            await RaceAsync(first, second, second.SetParentAsync(b[1], a[1]));
+
+            await AssertLineageMatchesAsync([.. a, .. b]);
+            var rows = (await ReadResourcesAsync()).ToDictionary(r => r.Id, StringComparer.Ordinal);
+            (rows[a[1]].ParentId == b[1] && rows[b[1]].ParentId == a[1]).Should().BeFalse("a cycle must never commit");
+        }
+        finally
+        {
+            await Context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("UPDATE [dbo].[SqlOSFgaResources] SET [ParentId] = {0} WHERE [Id] = {1}"), a[0], a[1]);
+            await Context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("UPDATE [dbo].[SqlOSFgaResources] SET [ParentId] = {0} WHERE [Id] = {1}"), b[0], b[1]);
+            await DeleteAsync(a);
+            await DeleteAsync(b);
+        }
+    }
+
+    [TestMethod]
+    public async Task PostgreSql_ARepeatableReadTransaction_CannotChangeTheTree()
+    {
+        if (!TestDatabase.IsPostgreSql)
+        {
+            return;
+        }
+
+        var ids = await CreateChainAsync("repeatable", "agency", "team");
+        try
+        {
+            await using var connection = TestDatabase.CreateConnection(Context.Database.GetConnectionString()!);
+            await connection.OpenAsync();
+            await using var transaction = await connection.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead);
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "UPDATE \"dbo\".\"SqlOSFgaResources\" SET \"IsActive\" = false WHERE \"Id\" = @id";
+            TestDatabase.AddParameter(command, "@id", ids[1]);
+
+            var act = () => command.ExecuteNonQueryAsync();
+            (await act.Should().ThrowAsync<DbException>()).Which.Message.Should().Contain("REPEATABLE READ");
+        }
+        finally
+        {
+            await DeleteAsync(ids);
+        }
+    }
+
+    /// <summary>
+    /// The second transaction's work starts while the first is open; it either finishes or waits on a lock. The
+    /// first commits, then the second finishes and commits. A transaction the database rejects (a deadlock victim,
+    /// or a malformed tree) rolls back, as it would in an application.
+    /// </summary>
+    private static async Task RaceAsync(Tx first, Tx second, Task secondWork)
+    {
+        await Task.WhenAny(secondWork, Task.Delay(TimeSpan.FromSeconds(2)));
+        await first.TryCommitAsync();
+        try
+        {
+            await secondWork;
+            await second.TryCommitAsync();
+        }
+        catch (DbException)
+        {
+            await second.RollbackAsync();
+        }
+    }
+
+    private sealed class Tx : IAsyncDisposable
+    {
+        private readonly DbConnection _connection;
+        private readonly DbTransaction _transaction;
+        private bool _done;
+
+        private Tx(DbConnection connection, DbTransaction transaction)
+        {
+            _connection = connection;
+            _transaction = transaction;
+        }
+
+        public static async Task<Tx> BeginAsync()
+        {
+            var connection = TestDatabase.CreateConnection(Context.Database.GetConnectionString()!);
+            await connection.OpenAsync();
+            return new Tx(connection, await connection.BeginTransactionAsync());
+        }
+
+        public Task InsertResourceAsync(string id, string parentId, string typeId)
+            => ExecuteAsync(
+                "INSERT INTO [dbo].[SqlOSFgaResources] ([Id], [ParentId], [Name], [ResourceTypeId], [IsActive], [CreatedAt], [UpdatedAt]) VALUES (@id, @parent, @id, @type, @active, @now, @now)",
+                ("@id", id), ("@parent", parentId), ("@type", typeId), ("@active", true), ("@now", DateTime.UtcNow));
+
+        public Task InsertEntityAsync(string id, string resourceId)
+            => ExecuteAsync("INSERT INTO [LifecycleProtectedEntities] ([Id], [ResourceId], [Rank]) VALUES (@id, @resource, 0)", ("@id", id), ("@resource", resourceId));
+
+        public Task SetActiveAsync(string id, bool active)
+            => ExecuteAsync("UPDATE [dbo].[SqlOSFgaResources] SET [IsActive] = @active WHERE [Id] = @id", ("@id", id), ("@active", active));
+
+        public Task SetParentAsync(string id, string parentId)
+            => ExecuteAsync("UPDATE [dbo].[SqlOSFgaResources] SET [ParentId] = @parent WHERE [Id] = @id", ("@id", id), ("@parent", parentId));
+
+        public async Task TryCommitAsync()
+        {
+            if (_done)
+            {
+                return;
+            }
+
+            try
+            {
+                await _transaction.CommitAsync();
+            }
+            catch (DbException)
+            {
+                await RollbackAsync();
+            }
+
+            _done = true;
+        }
+
+        public async Task RollbackAsync()
+        {
+            if (_done)
+            {
+                return;
+            }
+
+            try
+            {
+                await _transaction.RollbackAsync();
+            }
+            catch (Exception)
+            {
+                // Already rolled back by the server (a deadlock victim).
+            }
+
+            _done = true;
+        }
+
+        private async Task ExecuteAsync(string sql, params (string Name, object Value)[] parameters)
+        {
+            await using var command = _connection.CreateCommand();
+            command.Transaction = _transaction;
+            command.CommandTimeout = 60;
+            command.CommandText = TestDatabase.Rewrite(sql);
+            foreach (var (name, value) in parameters)
+            {
+                TestDatabase.AddParameter(command, name, value);
+            }
+
+            await command.ExecuteNonQueryAsync();
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await RollbackAsync();
+            await _transaction.DisposeAsync();
+            await _connection.DisposeAsync();
+        }
     }
 
     private static async Task<string[]> CreateChainAsync(string prefix, params string[] types)

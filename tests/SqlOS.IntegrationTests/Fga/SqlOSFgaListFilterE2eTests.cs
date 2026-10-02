@@ -33,17 +33,115 @@ public class SqlOSFgaListFilterE2eTests
 {
     private const string FolderType = "e2e_folder";
     private const string DocumentType = "e2e_document";
+    private const string NoteType = "e2e_note";
     private const string Read = "E2E_READ";
     private const string ReaderRoleId = "role_e2e_reader";
 
     [TestMethod]
     public async Task SqlOSDbContext_WithResourceEntities()
     {
-        var database = "FgaE2eHosted_" + Guid.NewGuid().ToString("N");
-        await TestDatabase.CreateDatabaseAsync(AspireFixture.SqlConnectionString, database);
-        var connectionString = TestDatabase.CreateIsolatedConnectionString(AspireFixture.SqlConnectionString, database);
-        try
+        await using var host = await HostedApp.StartAsync();
+        await using var scope = host.App.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HostedFgaDbContext>();
+        var (alice, bob) = await CreateFoldersUsersAndGrantAsync(db);
+
+        // ISqlOSResourceEntity: saving the documents creates their FGA resources under their folder.
+        db.Documents.AddRange(
+            new HostedDocument("a1", "folder_a"), new HostedDocument("a2", "folder_a"), new HostedDocument("a3", "folder_a"),
+            new HostedDocument("b1", "folder_b"), new HostedDocument("b2", "folder_b"));
+        await db.SaveChangesAsync();
+
+        var fga = scope.ServiceProvider.GetRequiredService<ISqlOSFgaAuthService>();
+        (await PageAsync(db.Documents, fga, alice)).Should().Equal("a1", "a2", "a3");
+        (await PageAsync(db.Documents, fga, bob)).Should().BeEmpty();
+
+        db.Documents.Add(new HostedDocument("a4", "folder_a"));
+        await db.SaveChangesAsync();
+        (await PageAsync(db.Documents, fga, alice)).Should().Equal("a1", "a2", "a3", "a4");
+
+        db.ChangeTracker.Clear();
+        (await db.Documents.AsNoTracking().ToListAsync()).Should().OnlyContain(d => d.FgaScope != null, "SqlOS fills every row's scope");
+    }
+
+    [TestMethod]
+    public async Task SqlOSDbContext_ResourceEntityLifecycle()
+    {
+        await using var host = await HostedApp.StartAsync();
+        await using var scope = host.App.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HostedFgaDbContext>();
+        var fga = scope.ServiceProvider.GetRequiredService<ISqlOSFgaAuthService>();
+
+        // Folders and their documents are all entities, saved together: parents and children in one SaveChanges.
+        var folderA = new HostedFolder("fa");
+        var folderB = new HostedFolder("fb");
+        db.Folders.AddRange(folderA, folderB);
+        db.Documents.AddRange(new HostedDocument("d1", folderA.ResourceId), new HostedDocument("d2", folderA.ResourceId), new HostedDocument("d3", folderB.ResourceId));
+        await db.SaveChangesAsync();
+
+        var subjects = new SqlOSFgaSubjectService(db, NullLogger<SqlOSFgaSubjectService>.Instance);
+        var alice = (await subjects.CreateUserAsync("Alice", $"alice-{Guid.NewGuid():N}@example.test")).SubjectId;
+        var bob = (await subjects.CreateUserAsync("Bob", $"bob-{Guid.NewGuid():N}@example.test")).SubjectId;
+        db.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant { Id = "grant_alice_fa", SubjectId = alice, ResourceId = folderA.ResourceId, RoleId = ReaderRoleId });
+        await db.SaveChangesAsync();
+        (await PageAsync(db.Documents, fga, alice)).Should().Equal("d1", "d2");
+
+        // Move: d2 goes to folder B.
+        var d2 = await db.Documents.SingleAsync(d => d.Id == "d2");
+        d2.FolderResourceId = folderB.ResourceId;
+        await db.SaveChangesAsync();
+        (await PageAsync(db.Documents, fga, alice)).Should().Equal("d1");
+
+        // Deactivate the granted folder: nothing flows from it. Reactivate: it flows again.
+        folderA.Active = false;
+        await db.SaveChangesAsync();
+        (await PageAsync(db.Documents, fga, alice)).Should().BeEmpty();
+        folderA.Active = true;
+        await db.SaveChangesAsync();
+        (await PageAsync(db.Documents, fga, alice)).Should().Equal("d1");
+
+        // Deactivate the document itself: it is hidden even under an active folder.
+        var d1 = await db.Documents.SingleAsync(d => d.Id == "d1");
+        d1.Active = false;
+        await db.SaveChangesAsync();
+        (await PageAsync(db.Documents, fga, alice)).Should().BeEmpty();
+        d1.Active = true;
+        await db.SaveChangesAsync();
+
+        // Retype: the permission covers documents, not notes.
+        d1.TypeId = NoteType;
+        await db.SaveChangesAsync();
+        (await PageAsync(db.Documents, fga, alice)).Should().BeEmpty();
+        d1.TypeId = DocumentType;
+        await db.SaveChangesAsync();
+        (await PageAsync(db.Documents, fga, alice)).Should().Equal("d1");
+
+        // Delete: the row and its resource go.
+        db.Documents.Remove(d1);
+        await db.SaveChangesAsync();
+        (await PageAsync(db.Documents, fga, alice)).Should().BeEmpty();
+        (await db.Set<SqlOSFgaResource>().AnyAsync(r => r.Id == "doc::d1")).Should().BeFalse();
+
+        (await PageAsync(db.Documents, fga, bob)).Should().BeEmpty("bob holds no grant at any point");
+    }
+
+    /// <summary>An application host on a fresh database: AddSqlOS, the application's tables, then SqlOS's own start.</summary>
+    private sealed class HostedApp : IAsyncDisposable
+    {
+        private readonly string _database;
+
+        private HostedApp(WebApplication app, string database)
         {
+            App = app;
+            _database = database;
+        }
+
+        public WebApplication App { get; }
+
+        public static async Task<HostedApp> StartAsync()
+        {
+            var database = "FgaE2eHosted_" + Guid.NewGuid().ToString("N");
+            await TestDatabase.CreateDatabaseAsync(AspireFixture.SqlConnectionString, database);
+            var connectionString = TestDatabase.CreateIsolatedConnectionString(AspireFixture.SqlConnectionString, database);
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = Environments.Development });
             builder.WebHost.UseTestServer();
             builder.Logging.ClearProviders();
@@ -56,11 +154,12 @@ public class SqlOSFgaListFilterE2eTests
                     options.Fga.Seed(seed => seed
                         .ResourceType(FolderType, "Folder")
                         .ResourceType(DocumentType, "Document")
+                        .ResourceType(NoteType, "Note")
                         .Permission(Read, "Read documents", DocumentType)
                         .Role(ReaderRoleId, "e2e_reader", "Reader")
                         .RolePermission("e2e_reader", Read));
                 });
-            await using var app = builder.Build();
+            var app = builder.Build();
 
             // The application creates its tables, then SqlOS initializes (the hosted service does it on start).
             await using (var scope = app.Services.CreateAsyncScope())
@@ -69,38 +168,15 @@ public class SqlOSFgaListFilterE2eTests
             }
 
             await app.StartAsync();
-            try
-            {
-                await using var scope = app.Services.CreateAsyncScope();
-                var db = scope.ServiceProvider.GetRequiredService<HostedFgaDbContext>();
-                var (alice, bob) = await CreateFoldersUsersAndGrantAsync(db);
-
-                // ISqlOSResourceEntity: saving the documents creates their FGA resources under their folder.
-                db.Documents.AddRange(
-                    new HostedDocument("a1", "folder_a"), new HostedDocument("a2", "folder_a"), new HostedDocument("a3", "folder_a"),
-                    new HostedDocument("b1", "folder_b"), new HostedDocument("b2", "folder_b"));
-                await db.SaveChangesAsync();
-
-                var fga = scope.ServiceProvider.GetRequiredService<ISqlOSFgaAuthService>();
-                (await PageAsync(db.Documents, fga, alice)).Should().Equal("a1", "a2", "a3");
-                (await PageAsync(db.Documents, fga, bob)).Should().BeEmpty();
-
-                db.Documents.Add(new HostedDocument("a4", "folder_a"));
-                await db.SaveChangesAsync();
-                (await PageAsync(db.Documents, fga, alice)).Should().Equal("a1", "a2", "a3", "a4");
-
-                db.ChangeTracker.Clear();
-                (await db.Documents.AsNoTracking().ToListAsync()).Should().OnlyContain(d => d.FgaScope != null, "SqlOS fills every row's scope");
-            }
-            finally
-            {
-                await app.StopAsync();
-            }
+            return new HostedApp(app, database);
         }
-        finally
+
+        public async ValueTask DisposeAsync()
         {
+            await App.StopAsync();
+            await App.DisposeAsync();
             TestDatabase.ClearPools();
-            await TestDatabase.DropDatabaseAsync(AspireFixture.SqlConnectionString, database);
+            await TestDatabase.DropDatabaseAsync(AspireFixture.SqlConnectionString, _database);
         }
     }
 
@@ -206,22 +282,57 @@ public class SqlOSFgaListFilterE2eTests
 
         public string Id { get; private set; } = string.Empty;
         public string ResourceId { get; private set; } = string.Empty;
-        public string FolderResourceId { get; private set; } = string.Empty;
         public byte[]? FgaScope { get; private set; }
+        public string FolderResourceId { get; set; } = string.Empty;
+        public string TypeId { get; set; } = DocumentType;
+        public bool Active { get; set; } = true;
 
-        public string ResourceTypeId => DocumentType;
+        public string ResourceTypeId => TypeId;
         public string ResourceName => Id;
         public string? ParentResourceId => FolderResourceId;
         public string? ResourceDescription => null;
-        public bool ResourceIsActive => true;
+        public bool ResourceIsActive => Active;
+    }
+
+    public sealed class HostedFolder : ISqlOSResourceEntity
+    {
+        private HostedFolder()
+        {
+        }
+
+        public HostedFolder(string id)
+        {
+            Id = id;
+            ResourceId = "folder::" + id;
+        }
+
+        public string Id { get; private set; } = string.Empty;
+        public string ResourceId { get; private set; } = string.Empty;
+        public byte[]? FgaScope { get; private set; }
+        public bool Active { get; set; } = true;
+
+        public string ResourceTypeId => FolderType;
+        public string ResourceName => Id;
+        public string? ParentResourceId => "root";
+        public string? ResourceDescription => null;
+        public bool ResourceIsActive => Active;
     }
 
     public sealed class HostedFgaDbContext(DbContextOptions<HostedFgaDbContext> options) : SqlOSDbContext<HostedFgaDbContext>(options)
     {
         public DbSet<HostedDocument> Documents => Set<HostedDocument>();
 
+        public DbSet<HostedFolder> Folders => Set<HostedFolder>();
+
         protected override void OnApplicationModelCreating(ModelBuilder modelBuilder)
         {
+            modelBuilder.Entity<HostedFolder>(folder =>
+            {
+                folder.ToTable("E2eFolders");
+                folder.HasKey(f => f.Id);
+                folder.Property(f => f.Id).HasMaxLength(64);
+                folder.Property(f => f.ResourceId).HasMaxLength(128);
+            });
             modelBuilder.Entity<HostedDocument>(document =>
             {
                 document.ToTable("E2eDocuments");
@@ -229,6 +340,7 @@ public class SqlOSFgaListFilterE2eTests
                 document.Property(d => d.Id).HasMaxLength(64);
                 document.Property(d => d.ResourceId).HasMaxLength(128);
                 document.Property(d => d.FolderResourceId).HasMaxLength(128);
+                document.Property(d => d.TypeId).HasMaxLength(64);
             });
         }
     }

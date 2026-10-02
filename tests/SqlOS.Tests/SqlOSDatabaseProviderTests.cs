@@ -139,6 +139,10 @@ public class SqlOSDatabaseProviderTests
         all.Should().Contain("\"FgaScope\" = CASE WHEN r.\"Id\" IS NULL THEN NULL ELSE substring(int2send(COALESCE(r.\"Depth\", 0)::smallint) from 2 for 1) || int4send(rt.\"Seq\") || int8send(COALESCE(CASE WHEN r.\"Reach\" <= 0 THEN r.\"Ancestor0\" END, 0))");
         all.Should().Contain("int8send(COALESCE(CASE WHEN r.\"Reach\" <= 4 THEN r.\"Ancestor4\" END, 0)) END");
         all.Should().Contain("\"FgaScope\" = NULL");
+        var key = SqlOSFgaLineage.LineageLockKey(options).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        all.Should().Contain($"PERFORM pg_advisory_xact_lock_shared({key});");
+        all.Should().Contain($"PERFORM pg_advisory_xact_lock({key});");
+        all.Should().Contain("IF current_setting('transaction_isolation') = 'repeatable read' THEN");
 
         // Per level: an expression index on the level's eight bytes, over the key and over each declared order,
         // filtered on the depth byte to the rows at or below the level; stale mirrors dropped.

@@ -140,10 +140,11 @@ public class SqlOSFgaFunctionInitializerTests
 
         // The rebuild never runs as one transaction: the nodes are computed in a temp table, then every range
         // of the key commits on its own.
-        var rebuild = batches.Single(b => b.Contains("sp_SqlOSFgaResources_LineageRebuild]\nAS", StringComparison.Ordinal));
+        var rebuild = batches.Single(b => b.Contains("CREATE OR ALTER PROCEDURE [dbo].[sp_SqlOSFgaResources_LineageRebuild]", StringComparison.Ordinal));
         rebuild.Should().Contain("CREATE TABLE #SqlOSLineageNodes");
         rebuild.Should().Contain("CREATE TABLE #SqlOSLineageRanges");
-        rebuild.Should().Contain("/ 500000 AS Range");
+        rebuild.Should().Contain("@RangeRows INT = 500000");
+        rebuild.Should().Contain("/ @RangeRows AS Range");
         rebuild.Should().Contain("WHERE r.Id >= @from AND r.Id <= @to");
         rebuild.Should().Contain("BEGIN TRANSACTION;");
         rebuild.Should().Contain("COMMIT TRANSACTION;");
@@ -172,6 +173,14 @@ public class SqlOSFgaFunctionInitializerTests
         all.Should().Contain("INNER JOIN #SqlOSLineageAffected s ON s.Id = t.[ResourceId]");
         all.Should().Contain("[FgaScope] = NULL");
         all.Should().Contain("IF NOT UPDATE([ResourceId]) RETURN;");
+
+        // Every maintaining trigger takes the lineage lock for its transaction before reading anything: inserts
+        // shared, tree changes exclusive; the rebuild holds it for the whole session.
+        all.Should().Contain("sys.sp_getapplock @Resource = N'SqlOS:FgaLineage:dbo.SqlOSFgaResources', @LockMode = 'Shared', @LockOwner = 'Transaction'");
+        all.Should().Contain("sys.sp_getapplock @Resource = N'SqlOS:FgaLineage:dbo.SqlOSFgaResources', @LockMode = 'Exclusive', @LockOwner = 'Transaction'");
+        all.Should().Contain("sys.sp_getapplock @Resource = N'SqlOS:FgaLineage:dbo.SqlOSFgaResources', @LockMode = 'Exclusive', @LockOwner = 'Session'");
+        var update = batches.Single(b => b.Contains("AFTER UPDATE", StringComparison.Ordinal) && b.Contains("UPDATE(ParentId)", StringComparison.Ordinal));
+        update.IndexOf("@LockMode = 'Exclusive'", StringComparison.Ordinal).Should().BeGreaterThan(update.IndexOf("UPDATE(ParentId)", StringComparison.Ordinal), "an update that changes no parent, activity, or type takes no lock");
         all.Should().Contain("SELECT Id FROM (SELECT Id, ParentId, IsActive FROM inserted EXCEPT SELECT Id, ParentId, IsActive FROM deleted) changed");
         all.Should().NotContain("INNER JOIN deleted d ON d.Id = i.Id", "a join of inserted and deleted has nothing to plan by");
     }

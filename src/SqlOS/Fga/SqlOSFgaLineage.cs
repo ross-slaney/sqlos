@@ -33,6 +33,21 @@ internal static class SqlOSFgaLineage
     /// </summary>
     public const int RebuildRangeRows = 500_000;
 
+    /// <summary>
+    /// The lock that serializes changes to the resource tree. Every trigger that maintains the lineage or a scope
+    /// column takes it before reading anything: inserts (of resources or of application rows) take it shared, so
+    /// they run side by side; moves, activity changes, retypes, deletes, the rebuild, and the one-time fill take
+    /// it exclusively. A change therefore never computes from another transaction's uncommitted state: it waits
+    /// for that transaction to commit, then reads what was committed. Without it, an insert racing a
+    /// deactivation could leave the new row visible, and two moves could together commit a cycle.
+    /// </summary>
+    public static string LineageLockName(SqlOSFgaOptions options) => $"SqlOS:FgaLineage:{options.Schema}.{options.TableNames.Resources}";
+
+    /// <summary>The same lock as a PostgreSQL advisory lock key: the first eight bytes of the name's SHA-256.</summary>
+    public static long LineageLockKey(SqlOSFgaOptions options)
+        => System.Buffers.Binary.BinaryPrimitives.ReadInt64BigEndian(
+            System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(LineageLockName(options))));
+
     /// <summary>The ancestor column for a level: <c>Ancestor0</c> is the top of the resource's tree.</summary>
     public static string AncestorColumn(int level) => "Ancestor" + level.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
