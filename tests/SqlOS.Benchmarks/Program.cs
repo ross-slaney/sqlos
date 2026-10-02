@@ -44,6 +44,12 @@ if (options.EvaluatePath is { } resultsPath)
         new JsonSerializerOptions { PreferredObjectCreationHandling = JsonObjectCreationHandling.Populate })
         ?? throw new InvalidOperationException($"Could not read {resultsPath}.");
     var evaluated = GateEvaluator.Evaluate(saved, GateConfig.Load(options.GatesPath));
+    saved.Gates = evaluated;
+    if (options.SummaryPath is { } summaryFile)
+    {
+        await File.WriteAllTextAsync(summaryFile, ReportWriter.Markdown(saved));
+    }
+
     foreach (var group in evaluated.GroupBy(g => g.Gate))
     {
         Console.WriteLine($"{(group.All(g => g.Passed) ? "PASS" : "FAIL")} {group.Key} {group.Count(g => g.Passed)}/{group.Count()}");

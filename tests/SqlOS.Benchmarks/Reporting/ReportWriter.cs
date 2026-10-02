@@ -37,34 +37,31 @@ internal static class ReportWriter
         text.AppendLine(report.Dataset.Description);
         text.AppendLine();
 
-        // The three ways side by side: one row per page, three columns per scale.
+        // The three ways side by side, one table per scale: what the previous release's function took, what
+        // the lineage takes, what the scope columns take, and how many times faster each is than before.
         var pages = largest.Scenarios.Where(s => s.Kind == "List").ToList();
-        if (pages.Count > 0)
+        var points = largest.Scenarios.Where(s => s.Kind == "PointFunction").ToList();
+        foreach (var step in steps)
         {
-            text.AppendLine("**Pages: previous function · lineage · scope columns** (median ms)");
+            text.AppendLine(CultureInfo.InvariantCulture, $"**At {RetailTree.Count(step.Products)} products: before, R1 (lineage), R2 (scope columns)** (median ms; × = times faster than before)");
             text.AppendLine();
-            text.Append("| Page | σ |");
-            foreach (var step in steps)
-            {
-                text.Append(CultureInfo.InvariantCulture, $" {RetailTree.Count(step.Products)} |");
-            }
-
-            text.AppendLine();
-            text.Append("|---|---:|");
-            text.Append(string.Concat(Enumerable.Repeat("---|", steps.Count)));
-            text.AppendLine();
+            text.AppendLine("| Page | σ | Before | R1 lineage | R2 scope columns | R1 × | R2 × |");
+            text.AppendLine("|---|---:|---:|---:|---:|---:|---:|");
             foreach (var page in pages)
             {
-                text.Append(CultureInfo.InvariantCulture, $"| {page.Title} | {Selectivity(page.Selectivity)} |");
-                foreach (var step in steps)
-                {
-                    var previous = step.Scenarios.FirstOrDefault(s => s.Id == "reference." + page.Id);
-                    var lineage = step.Scenarios.FirstOrDefault(s => s.Id == page.Id);
-                    var scoped = step.Scenarios.FirstOrDefault(s => s.Id == "scoped." + page.Id);
-                    text.Append(CultureInfo.InvariantCulture, $" {Cell(previous)} · {Cell(lineage)} · {Cell(scoped)} |");
-                }
+                var previous = step.Scenarios.FirstOrDefault(s => s.Id == "reference." + page.Id);
+                var lineage = step.Scenarios.FirstOrDefault(s => s.Id == page.Id);
+                var scoped = step.Scenarios.FirstOrDefault(s => s.Id == "scoped." + page.Id);
+                text.AppendLine(CultureInfo.InvariantCulture,
+                    $"| {page.Title} | {Selectivity(page.Selectivity)} | {Cell(previous)} | {Cell(lineage)} | {Cell(scoped)} | {Faster(previous, lineage)} | {Faster(previous, scoped)} |");
+            }
 
-                text.AppendLine();
+            foreach (var point in points)
+            {
+                var previous = step.Scenarios.FirstOrDefault(s => s.Id == "reference." + point.Id);
+                var current = step.Scenarios.FirstOrDefault(s => s.Id == point.Id);
+                text.AppendLine(CultureInfo.InvariantCulture,
+                    $"| {point.Title} | – | {Cell(previous)} | {Cell(current)} | – | {Faster(previous, current)} | – |");
             }
 
             text.AppendLine();
@@ -218,6 +215,19 @@ internal static class ReportWriter
         text.AppendLine(CultureInfo.InvariantCulture,
             $"<sub>{environment.Cpu} × {environment.ProcessorCount} · {environment.MemoryBytes / 1e9:F0} GB · {environment.OperatingSystem} · {report.Server} · {(environment.Commit is { Length: >= 7 } c ? c[..7] : "local")} · {TimeSpan.FromSeconds(report.DurationSeconds):h\\:mm\\:ss}</sub>");
         return text.ToString();
+    }
+
+    /// <summary>How many times faster <paramref name="current"/> is than <paramref name="previous"/>; a budgeted previous run gives a lower bound.</summary>
+    private static string Faster(ScenarioResult? previous, ScenarioResult? current)
+    {
+        if (previous is null || current is null || current.MedianMs <= 0)
+        {
+            return "–";
+        }
+
+        var times = previous.MedianMs / current.MedianMs;
+        var text = times >= 100 ? times.ToString("N0", CultureInfo.InvariantCulture) : times.ToString(times >= 10 ? "F0" : "F1", CultureInfo.InvariantCulture);
+        return (previous.TimedOut ? "> ×" : "×") + text;
     }
 
     private static string Cell(ScenarioResult? result)

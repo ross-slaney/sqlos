@@ -88,34 +88,101 @@ the two the scale gate compares. The lineage and scope-columns pages run at ever
 
 ## Results of the latest full run
 
-Run 36917634660 (2026-10-01, hosted `ubuntu-latest`, 4 vCPU, 17 GB, 8 GB to the engine), 1M → 10M → 50M on
-both engines. Median milliseconds per page, **previous function · lineage · scope columns**; the full tables
-with every scenario, rows read, and server time are on the run's summary page and in its artifacts.
+Run 36933080921 (2026-10-01, hosted `ubuntu-latest`, 4 vCPU, 17 GB, 8 GB to the engine), 1M → 10M → 50M on
+both engines, every gate green. **Before** is the previous release's function through the same
+`BuildFilterAsync`, **R1** the lineage read from the resources table, **R2** the lineage read from the row's
+scope columns. A dash means that form was not run at that scale. The run's summary page has the 10M tables,
+every scenario with rows read and server time, and the plans.
 
-| Page (k = 20) | σ | PostgreSQL 1M | PostgreSQL 50M | SQL Server 1M | SQL Server 50M |
-|---|---:|---|---|---|---|
-| Company admin, first page | 1 | 10.8 · 2.07 · 1.82 | 11.6 · 2.15 · 1.90 | 25.2 · 1.46 · 1.63 | 138 · 1.34 · 1.35 |
-| Chain manager (D = 5) | 7.1% | 34.0 · 3.26 · 1.89 | 36.6 · 3.72 · 1.89 | 112 · 2.36 · 1.57 | 764 · 2.44 · 1.74 |
-| Region manager (D = 5) | 0.97% | 186 · 11.7 · 1.88 | 201 · 14.5 · 1.89 | 677 · 5.29 · 1.70 | 5,194 · 5.99 · 1.94 |
-| Region manager, by price | 0.97% | 259 · 21.1 · 2.02 | 320 · 33.7 · 1.78 | 909 · 13.0 · 1.29 | 4,625 · 24.6 · 1.33 |
-| Store manager, sparse | 0.0065% | 44.6 s · 2.48 · 1.84 | 48.4 s · 39.3 · 1.86 | 163 s · 2.64 · 1.13 | 573 s · 57.4 · 1.27 |
-| Store manager, sparse, by price | 0.0065% | 50.2 s · 2.46 · 1.87 | 40.5 s · 39.2 · 1.81 | 177 s · 2.02 · 1.18 | > 600 s · 56.7 · 1.48 |
-| Store manager, filtered to the store | 0.0065% | 13.0 · 2.37 · 2.05 | 243 · 9.47 · 6.62 | 24.1 · 1.28 · 1.92 | 25.9 · 1.65 · 22.4 |
-| 10,000 single-product grants (row by row) | 0.02% | – · 85.8 · 85.5 | – · 89.9 · 89.1 | – · 84.2 · 84.6 | – · 87.3 · 88.9 |
-| 100,000 single-product grants (row by row) | 0.2% | – · 14.6 · 14.6 | – · 15.1 · 15.1 | – · 13.9 · 14.0 | – · 14.1 · 14.3 |
+**PostgreSQL 16, 1M products** (median ms; × = times faster than before)
 
-Point checks (`fn_IsResourceAccessible`, one product): PostgreSQL 8.5 ms → 2.0 ms, SQL Server 2.5 ms → 0.8 ms,
-flat from 1M to 50M; for a caller with 100,000 grants, 390 ms → 0.9 ms on SQL Server.
+| Page | σ | Before | R1 lineage | R2 scope columns | R1 × | R2 × |
+|---|---:|---:|---:|---:|---:|---:|
+| Company admin, first page (k = 20) | 1 | 10.98 | 2.05 | 1.82 | ×5.4 | ×6.0 |
+| Company admin, first page (k = 100) | 1 | 20.19 | 2.58 | 1.99 | ×7.8 | ×10 |
+| Company admin, page from the middle of the table | 1 | 11.21 | 2.11 | 1.81 | ×5.3 | ×6.2 |
+| Company admin, first page by price | 1 | 11.11 | 2.07 | 1.87 | ×5.4 | ×5.9 |
+| Chain manager (D = 5) | 7.1% | 33.54 | 3.25 | 1.83 | ×10 | ×18 |
+| Region manager (D = 5) | 0.9729% | 184 | 11.02 | 1.85 | ×17 | ×100 |
+| Region manager, first page by price | 0.9729% | 256 | 20.63 | 1.94 | ×12 | ×132 |
+| Chain manager (D = 10) | 10% | 32.65 | 3.16 | 2.06 | ×10 | ×16 |
+| Store manager, every visible product (sparse) | 0.0065% | 44.9 s | 2.54 | 1.88 | ×17,658 | ×23,919 |
+| Store manager, first page by price (sparse) | 0.0065% | 49.0 s | 2.45 | 1.83 | ×19,995 | ×26,815 |
+| Store manager, filtered to the store (StoreId index) | 0.0065% | 12.03 | 1.99 | 1.97 | ×6.0 | ×6.1 |
+| 10,000 single-product grants, first page | 0.02% | – | 82.34 | 82.39 | – | – |
+| 100,000 single-product grants, first page | 0.2% | – | 14.43 | 14.57 | – | – |
+| fn_IsResourceAccessible, product at depth 4 | – | 8.38 | 1.88 | – | ×4.5 | – |
+| fn_IsResourceAccessible, 100,000 grants, a granted product | – | 8.22 | 1.92 | – | ×4.3 | – |
 
-The store manager's lineage page grows with the catalog (2.5 → 39 ms on PostgreSQL, 2.6 → 57 ms on SQL
-Server) because the store itself does: 65 products at 1M, 3,315 at 50M, and the page reads the whole scope
-(min(k / σ, σN)). The scope-columns page reads 21 rows at either size. The page filtered to the store reads
-the store's rows through the `StoreId` index on either engine; at 50M, SQL Server's optimizer took that path
-for the scope-columns form (22 ms) and the ancestor index for the lineage form (1.7 ms).
+**PostgreSQL 16, 50M products** (median ms; × = times faster than before)
 
-Costs measured in the same run, at 1M: a single-row resource insert 3.96 ms with the lineage triggers and
-0.76 ms without on PostgreSQL (2.89 ms and 1.23 ms on SQL Server); reparenting a region of 9,959 resources
-with scope columns on about 1.7 s on SQL Server; the first-start rebuild of 1,074,481 resources and 1,000,000
+| Page | σ | Before | R1 lineage | R2 scope columns | R1 × | R2 × |
+|---|---:|---:|---:|---:|---:|---:|
+| Company admin, first page (k = 20) | 1 | 11.00 | 2.07 | 1.81 | ×5.3 | ×6.1 |
+| Company admin, first page (k = 100) | 1 | 21.01 | 2.78 | 1.97 | ×7.6 | ×11 |
+| Company admin, page from the middle of the table | 1 | 11.74 | 2.08 | 1.88 | ×5.7 | ×6.2 |
+| Company admin, first page by price | 1 | 10.75 | 2.20 | 1.78 | ×4.9 | ×6.1 |
+| Chain manager (D = 5) | 7.1% | 35.91 | 3.62 | 1.88 | ×9.9 | ×19 |
+| Region manager (D = 5) | 0.9729% | 197 | 13.95 | 1.91 | ×14 | ×103 |
+| Region manager, first page by price | 0.9729% | 322 | 31.36 | 1.77 | ×10 | ×181 |
+| Chain manager (D = 10) | 10% | 33.84 | 3.48 | 1.85 | ×9.7 | ×18 |
+| Store manager, every visible product (sparse) | 0.0065% | 47.0 s | 38.27 | 1.81 | ×1,229 | ×25,989 |
+| Store manager, first page by price (sparse) | 0.0065% | 120.6 s | 37.97 | 1.79 | ×3,175 | ×67,304 |
+| Store manager, filtered to the store (StoreId index) | 0.0065% | 241 | 9.11 | 6.78 | ×26 | ×36 |
+| 10,000 single-product grants, first page | 0.02% | – | 88.49 | 88.21 | – | – |
+| 100,000 single-product grants, first page | 0.2% | – | 14.99 | 14.91 | – | – |
+| fn_IsResourceAccessible, product at depth 4 | – | 8.44 | 1.94 | – | ×4.4 | – |
+| fn_IsResourceAccessible, 100,000 grants, a granted product | – | 8.76 | 1.99 | – | ×4.4 | – |
+
+**SQL Server 2022, 1M products** (median ms; × = times faster than before)
+
+| Page | σ | Before | R1 lineage | R2 scope columns | R1 × | R2 × |
+|---|---:|---:|---:|---:|---:|---:|
+| Company admin, first page (k = 20) | 1 | 15.31 | 0.85 | 0.84 | ×18 | ×18 |
+| Company admin, first page (k = 100) | 1 | 71.90 | 1.30 | 1.17 | ×55 | ×61 |
+| Company admin, page from the middle of the table | 1 | 15.49 | 0.84 | 0.84 | ×18 | ×19 |
+| Company admin, first page by price | 1 | 16.02 | 0.88 | 0.85 | ×18 | ×19 |
+| Chain manager (D = 5) | 7.1% | 71.14 | 1.44 | 1.02 | ×49 | ×70 |
+| Region manager (D = 5) | 0.9729% | 426 | 3.67 | 1.13 | ×116 | ×378 |
+| Region manager, first page by price | 0.9729% | 578 | 8.49 | 0.87 | ×68 | ×667 |
+| Chain manager (D = 10) | 10% | 73.11 | 1.40 | 1.03 | ×52 | ×71 |
+| Store manager, every visible product (sparse) | 0.0065% | 103.4 s | 1.56 | 0.85 | ×66,248 | ×121,082 |
+| Store manager, first page by price (sparse) | 0.0065% | 111.2 s | 1.57 | 0.90 | ×70,628 | ×123,538 |
+| Store manager, filtered to the store (StoreId index) | 0.0065% | 16.00 | 0.94 | 1.47 | ×17 | ×11 |
+| 10,000 single-product grants, first page | 0.02% | – | 66.06 | 65.84 | – | – |
+| 100,000 single-product grants, first page | 0.2% | – | 11.30 | 11.11 | – | – |
+| fn_IsResourceAccessible, product at depth 4 | – | 1.81 | 0.59 | – | ×3.0 | – |
+| fn_IsResourceAccessible, 100,000 grants, a granted product | – | 319 | 0.65 | – | ×489 | – |
+
+**SQL Server 2022, 50M products** (median ms; × = times faster than before)
+
+| Page | σ | Before | R1 lineage | R2 scope columns | R1 × | R2 × |
+|---|---:|---:|---:|---:|---:|---:|
+| Company admin, first page (k = 20) | 1 | 92.23 | 0.84 | 0.83 | ×109 | ×111 |
+| Company admin, first page (k = 100) | 1 | 170 | 1.35 | 1.16 | ×126 | ×146 |
+| Company admin, page from the middle of the table | 1 | 81.29 | 1.03 | 1.02 | ×79 | ×79 |
+| Company admin, first page by price | 1 | 84.09 | 0.88 | 0.86 | ×96 | ×98 |
+| Chain manager (D = 5) | 7.1% | 487 | 1.57 | 1.02 | ×311 | ×479 |
+| Region manager (D = 5) | 0.9729% | 3301 | 4.13 | 1.11 | ×799 | ×2,973 |
+| Region manager, first page by price | 0.9729% | 3084 | 15.83 | 0.86 | ×195 | ×3,590 |
+| Chain manager (D = 10) | 10% | 425 | 1.53 | 1.02 | ×278 | ×417 |
+| Store manager, every visible product (sparse) | 0.0065% | 369.2 s | 49.44 | 0.87 | ×7,467 | ×426,327 |
+| Store manager, first page by price (sparse) | 0.0065% | > 600 s‡ | 52.62 | 0.85 | > ×11,403 | > ×703,070 |
+| Store manager, filtered to the store (StoreId index) | 0.0065% | 16.30 | 0.95 | 13.44 | ×17 | ×1.2 |
+| 10,000 single-product grants, first page | 0.02% | – | 66.78 | 67.02 | – | – |
+| 100,000 single-product grants, first page | 0.2% | – | 11.07 | 11.16 | – | – |
+| fn_IsResourceAccessible, product at depth 4 | – | 1.82 | 0.59 | – | ×3.1 | – |
+| fn_IsResourceAccessible, 100,000 grants, a granted product | – | 327 | 0.64 | – | ×507 | – |
+
+The store manager's R1 page grows with the catalog (2.5 → 38 ms on PostgreSQL, 1.6 → 49 ms on SQL Server)
+because the store itself does: 65 products at 1M, 3,315 at 50M, and the page reads the whole scope
+(min(k / σ, σN)). The R2 page reads 21 rows at either size. The page filtered to the store reads the store's
+rows through the `StoreId` index on either engine; at 50M, SQL Server's optimizer took that path for the R2
+form (13 ms) and the ancestor index for the R1 form (1 ms).
+
+Costs measured in the same run, at 1M: a single-row resource insert 3.9 ms with the lineage triggers and
+0.8 ms without on PostgreSQL (2.9 ms and 1.2 ms on SQL Server); reparenting a region of 9,959 resources with
+scope columns on about 1.7 s on SQL Server; the first-start rebuild of 1,074,481 resources and 1,000,000
 scope-column rows 120 s on PostgreSQL and 56 s on SQL Server. Storage at 50M products with scope columns and
 their per-level indexes: 62.7 GB on PostgreSQL, 71.1 GB on SQL Server, of which the lineage and scope
 columns with their indexes are about half.

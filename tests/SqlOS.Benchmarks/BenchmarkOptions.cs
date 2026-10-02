@@ -70,7 +70,8 @@ internal sealed record BenchmarkOptions
           --exclude <ids>          scenario ids to skip, comma-separated (e.g. list.store.first-page)
           --scenario-budget <s>    the longest a single query may run, in seconds (default 600); a
                                    scenario that exceeds it is reported as not finished, at the budget
-          --evaluate <file>        evaluate the gates on an existing results.json and exit (no database)
+          --evaluate <file>        evaluate the gates on an existing results.json and exit (no database);
+                                   with --summary, also re-renders the Markdown summary to that file
         """;
 
     public static BenchmarkOptions? Parse(string[] args)
