@@ -19,7 +19,6 @@ namespace SqlOS.Benchmarks.Scenarios;
 /// </summary>
 internal sealed class ScenarioRunner(
     Func<BenchDbContext> createContext,
-    Func<ScopedBenchDbContext> createScopedContext,
     DatabaseProvider provider,
     SqlOSFgaOptions fga,
     RetailTree tree,
@@ -197,14 +196,13 @@ internal sealed class ScenarioRunner(
 
     private async Task<Execution> ExecuteAsync(Scenario scenario, CancellationToken cancellationToken, CapturedPlan? capture = null)
     {
-        await using BenchDbContextBase db = scenario.Kind == ScenarioKind.ListScoped ? createScopedContext() : createContext();
+        await using var db = createContext();
         db.Database.SetCommandTimeout(TimeSpan.FromSeconds(budgetSeconds));
         var service = new SqlOSFgaAuthService(db, Options.Create(fga), NullLogger<SqlOSFgaAuthService>.Instance);
         switch (scenario.Kind)
         {
             case ScenarioKind.List:
             case ScenarioKind.ListReference:
-            case ScenarioKind.ListScoped:
             {
                 var query = await BuildListQueryAsync(db, service, scenario);
 
@@ -258,7 +256,7 @@ internal sealed class ScenarioRunner(
     /// The page an application asks for: authorized, optionally store-scoped, in key order after a cursor or
     /// in price order, k + 1 rows. The same LINQ for all three ways; only the filter differs.
     /// </summary>
-    private static async Task<IQueryable<Product>> BuildListQueryAsync(BenchDbContextBase db, SqlOSFgaAuthService service, Scenario scenario)
+    private static async Task<IQueryable<Product>> BuildListQueryAsync(BenchDbContext db, SqlOSFgaAuthService service, Scenario scenario)
     {
         IQueryable<Product> query;
         if (scenario.Kind == ScenarioKind.ListReference)

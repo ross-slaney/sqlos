@@ -2,7 +2,7 @@ using SqlOS.Fga;
 
 namespace SqlOS.Benchmarks.Data;
 
-/// <summary>The checksum queries both loaders run over the lineage and the scope columns.</summary>
+/// <summary>The checksum queries both loaders run over the lineage and the scope column.</summary>
 internal static class LineageSql
 {
     /// <summary>
@@ -21,15 +21,21 @@ internal static class LineageSql
             """;
     }
 
-    public static string ProductsChecksum(string table, Func<string, string> quote, Func<string, string> cast)
+    /// <summary>
+    /// An order-independent hash of the scope values: each row's key with its value, hashed by the engine
+    /// (<c>CHECKSUM</c> on SQL Server, <c>hashtext</c> on PostgreSQL), summed. Equal counts and hashes mean the
+    /// same value in every row.
+    /// </summary>
+    public static string ProductsChecksum(string table, bool postgres)
     {
-        var terms = string.Join(" + ", Enumerable.Range(0, DatasetRows.Levels)
-            .Select(level => $"COALESCE({cast(quote(SqlOSFgaLineage.ScopeAncestorColumn(level)))}, 0) * {level + 1}"));
+        var scope = postgres ? $"\"{SqlOSFgaLineage.ScopeColumn}\"" : $"[{SqlOSFgaLineage.ScopeColumn}]";
+        var hash = postgres
+            ? $"hashtext(\"Id\"::text || ':' || {scope}::text)::bigint"
+            : $"CAST(CHECKSUM([Id], {scope}) AS DECIMAL(38, 0))";
         return $"""
-            SELECT COUNT(*) AS Rows,
-                   COALESCE(SUM({cast(quote("Id"))} * ({quote(SqlOSFgaLineage.ScopeReachColumn)} + 1) * 31 + COALESCE({quote(SqlOSFgaLineage.ScopeTypeSeqColumn)}, -1) * 7 + {terms}), 0)
+            SELECT COUNT(*) AS Rows, COALESCE(SUM({hash}), 0)
             FROM {table}
-            WHERE {quote(SqlOSFgaLineage.ScopeReachColumn)} IS NOT NULL
+            WHERE {scope} IS NOT NULL
             """;
     }
 }

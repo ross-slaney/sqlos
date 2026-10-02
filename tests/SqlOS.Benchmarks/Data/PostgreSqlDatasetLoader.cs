@@ -3,6 +3,8 @@ using Npgsql;
 using NpgsqlTypes;
 using SqlOS.Fga.Configuration;
 
+using SqlOS.Fga;
+
 namespace SqlOS.Benchmarks.Data;
 
 /// <summary>
@@ -67,12 +69,12 @@ internal sealed class PostgreSqlDatasetLoader(string connectionString, SqlOSFgaO
             var end = Math.Min(start + chunk, to);
             var (s, e) = (start, end);
             copies.Add(Task.Run(() => CopyAsync(Resources, DatasetRows.Columns.Resources, DatasetRows.ProductResources(tree, s, e), cancellationToken), cancellationToken));
-            copies.Add(Task.Run(() => CopyAsync(Products, DatasetRows.Columns.Products, DatasetRows.Products(tree, productType, s, e), cancellationToken), cancellationToken));
+            copies.Add(Task.Run(() => CopyAsync(Products, DatasetRows.Columns.Products(typeof(long?[])), DatasetRows.Products(tree, productType, s, e, (_, type, ancestors) => SqlOSFgaScope.EncodeArray(type, ancestors)), cancellationToken), cancellationToken));
         }
 
         await Task.WhenAll(copies);
         rows.Stop();
-        log.Info($"  rows loaded in {rows.Elapsed.TotalSeconds:F1}s ({streams} streams per table, lineage and scope columns included)");
+        log.Info($"  rows loaded in {rows.Elapsed.TotalSeconds:F1}s ({streams} streams per table, lineage and scope column included)");
 
         var indexes = Stopwatch.StartNew();
         foreach (var definition in dropped)
@@ -98,7 +100,7 @@ internal sealed class PostgreSqlDatasetLoader(string connectionString, SqlOSFgaO
         static string Quote(string column) => $"\"{column}\"";
         static string Cast(string expression) => $"CAST({expression} AS numeric)";
         var resources = await ChecksumAsync(LineageSql.ResourcesChecksum(Resources, Quote, Cast), cancellationToken);
-        var products = await ChecksumAsync(LineageSql.ProductsChecksum(Products, Quote, Cast), cancellationToken);
+        var products = await ChecksumAsync(LineageSql.ProductsChecksum(Products, postgres: true), cancellationToken);
         return new LineageChecksum(resources, products);
     }
 
@@ -206,6 +208,7 @@ internal sealed class PostgreSqlDatasetLoader(string connectionString, SqlOSFgaO
             ? column == "Name" && table.Contains("SqlOSFga", StringComparison.Ordinal) ? NpgsqlDbType.Text : NpgsqlDbType.Varchar
             : type == typeof(int) ? NpgsqlDbType.Integer
             : type == typeof(long) ? NpgsqlDbType.Bigint
+            : type == typeof(long?[]) ? NpgsqlDbType.Array | NpgsqlDbType.Bigint
             : type == typeof(short) ? NpgsqlDbType.Smallint
             : type == typeof(bool) ? NpgsqlDbType.Boolean
             : type == typeof(DateTime) ? NpgsqlDbType.Timestamp

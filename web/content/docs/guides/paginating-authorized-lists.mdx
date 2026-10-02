@@ -83,7 +83,7 @@ The *principal set* (the subject plus its group memberships) and the caller's gr
 
 ## Pages that cost the same at any size
 
-With [scope columns](/docs/fga/list-filter#scope-columns) on, SqlOS mirrors every index you declare on a protected table once per level of the tree, with the ancestor column first. A keyset page ordered by a declared index's columns, for a caller whose access comes from one grant, is then one index seek plus the page's rows, however large the table. Declare an index for each order you page in, and end it with the key, as below.
+SqlOS mirrors every index you declare on a protected table once per level of the tree, with that level's part of the [scope column](/docs/fga/list-filter#the-scope-column) first. A keyset page ordered by a declared index's columns, for a caller whose access comes from one grant, is then one index seek plus the page's rows, however large the table. Declare an index for each order you page in, and end it with the key, as below.
 
 ## Always end with a unique tiebreaker
 

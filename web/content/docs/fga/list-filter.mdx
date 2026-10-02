@@ -30,35 +30,33 @@ The subject only sees chains they have access to. The filter translates to a SQL
 
 ## How the filter works
 
-Every FGA resource carries its **lineage**: its ancestor at each level of the tree, its depth, and its **reach**, the highest level from which access flows down to it through active resources only. Schema v11 adds the columns (one ancestor column per level up to the default depth of 10; a larger `MaxResourceHierarchyDepth` adds the rest at startup), SqlOS keeps them exact with triggers on the resource table, and fills them once when you upgrade.
+Every FGA resource carries its **lineage**: its ancestor at each level of the tree, its depth, and its **reach**, the highest level from which access flows down to it through active resources only. Schema v11 adds the columns to the resource table (one ancestor column per level up to the default depth of 10; a larger `MaxResourceHierarchyDepth` adds the rest at startup), SqlOS keeps them exact with triggers, and fills them once when you upgrade.
 
-When you build a filter, SqlOS reads the caller's **access roots** once: the resources on which the caller, or one of their active groups, holds a current grant whose role includes the permission. The filter then says, for each row: the row's resource has one of those roots as its ancestor at the root's level, and the row's reach includes that level. It is the same predicate for every caller and every table.
+Every table of yours whose entity implements `IHasResourceId` carries one more column, the **scope column** (`SqlOSFgaScope`): its row's resource type and, for each level of the tree, the ancestor at that level where access flows down to the row from it. SqlOS keeps it current with triggers on your table and on the resource table, and fills it once when you upgrade. It is the only thing SqlOS adds to your tables; see [the scope column](#the-scope-column).
 
-The database can run it two ways, and chooses per query from its statistics: scan the rows in the order you asked for and test each one (one lookup per row, which is what a caller who sees most rows wants), or start from the caller's roots, read their scope from the ancestor index, and join it to your table (what a caller who sees a few rows wants). Neither way walks the tree at query time. A page costs the cheaper of the two: the rows read in your order until the page is full, or the caller's whole scope. A caller whose scope grows with the table (a store manager's store gains products as the catalog does) pays for that growth; the [scope columns](#scope-columns) remove it.
+When you build a filter, SqlOS reads the caller's **access roots** once: the resources on which the caller, or one of their active groups, holds a current grant whose role includes the permission. The filter then says, for each row: at the level of one of those roots, the row's scope column holds that root. It is the same predicate for every caller and every table, it joins nothing, and for a caller whose access comes from one grant the database answers a page with one index seek plus the rows of the page, whatever the table's size, in any order you declared an index for.
 
 A caller with more than 1,000 roots (thousands of grants on single resources, say) is checked row by row by `fn_IsResourceAccessible` instead, which probes the grants of each row's ancestors: the same rule, at a cost that does not depend on how many grants the caller holds.
 
-## Scope columns
+## The scope column
 
-By default the filter reads a row's lineage from the resources table by the row's `ResourceId`. With `ScopeColumns` on, SqlOS copies the lineage onto every table whose entity implements `IHasResourceId`, and the filter reads it from the row itself:
+The scope column is one column per table, and SqlOS manages it. What lands in your schema:
 
-```csharp
-builder.Services.AddSqlOS(options =>
-{
-    options.Fga.ScopeColumns = true;
-});
-```
+- `SqlOSFgaScope` on every table whose entity implements `IHasResourceId`, as a shadow property: your entity classes do not change, and your next EF migration carries the column. It is `bigint[]` on PostgreSQL and `varbinary(512)` on SQL Server, sized for any depth you may configure later.
+- An index on the table's `ResourceId`, if you have none: the triggers find a resource's rows by it.
 
-What this does, for every such table:
+What SqlOS creates and maintains itself at startup, outside your migrations:
 
-- adds the configured depth plus one ancestor columns, a reach column, and a resource type column, as shadow properties: your entity classes do not change, and your next EF migration carries the columns;
-- adds, per level, an index starting with that level's ancestor column followed by the table's primary key, and one more per index you declared on the table (the orders you page in), filtered to rows at or below the level;
-- creates triggers that copy a row's lineage when it is inserted or its `ResourceId` changes, and keep it current when resources move, are deactivated, or are deleted;
-- fills the columns once when the setting is turned on.
+- per level of the tree, an index on that level's part of the scope column followed by your primary key, and one more per index you declared on the table (the orders you page in), filtered to the rows at or below the level, so a level deeper than any row costs nothing. On SQL Server the level's part is read through a computed column that takes no storage;
+- statistics on the type part of the column (on SQL Server through one more storage-free computed column), so the optimizer knows the type test keeps nearly every row and walks the level's index instead of sorting the caller's whole scope;
+- two triggers on your table that copy a row's scope when it is inserted or its `ResourceId` changes, and the resource table's triggers that keep it current when resources move, are deactivated, retyped, or deleted;
+- the one-time fill when a table first gets the column.
 
-With the columns in place, a page for a caller whose access comes from one grant is one index seek plus the rows of the page, whatever the table's size, in any order you declared an index for. The price is storage: at the default depth that is 13 columns per row, and one index per level per declared order over the rows at or below that level.
+Declare an index for each order you page in and end it with the key, as the [pagination guide](/docs/guides/paginating-authorized-lists) shows; SqlOS mirrors it per level. A page sorted by a column you declared no index for still returns the right rows, through the caller's whole scope rather than one seek.
 
-The setting is database-wide. For a context derived from `SqlOSDbContext<TContext>` nothing else is needed. A context that calls `ApplySqlOSFgaModel` itself must call it after configuring its entities and pass `Database.ProviderName`.
+The price is storage: one index per level per declared order, over the rows at or below that level. In the benchmark's 50-million-row catalog the scope column and its indexes are about half of the database.
+
+For a context derived from `SqlOSDbContext<TContext>` nothing else is needed. A context that calls `ApplySqlOSFgaModel` itself must call it after configuring its entities and pass `Database.ProviderName`, which decides the column's type.
 
 ## Filter lifetime
 

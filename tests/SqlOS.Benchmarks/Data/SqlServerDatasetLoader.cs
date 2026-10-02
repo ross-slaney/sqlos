@@ -3,12 +3,14 @@ using System.Globalization;
 using Microsoft.Data.SqlClient;
 using SqlOS.Fga.Configuration;
 
+using SqlOS.Fga;
+
 namespace SqlOS.Benchmarks.Data;
 
 /// <summary>
 /// SQL Server: ordered <c>SqlBulkCopy</c> with a table lock into the clustered primary keys (minimally logged
 /// under the simple recovery model), nonclustered indexes disabled during the load and rebuilt afterwards.
-/// Bulk copy fires no triggers, so the lineage and scope columns travel with the rows.
+/// Bulk copy fires no triggers, so the lineage and scope value travel with the rows.
 /// </summary>
 internal sealed class SqlServerDatasetLoader(string connectionString, SqlOSFgaOptions fga, long? diskBudgetBytes, Log log) : IDatasetLoader
 {
@@ -100,10 +102,10 @@ internal sealed class SqlServerDatasetLoader(string connectionString, SqlOSFgaOp
         var productType = typeSeq["product"];
         await Task.WhenAll(
             Task.Run(() => BulkCopyAsync(Resources, DatasetRows.Columns.Resources, DatasetRows.ProductResources(tree, from, to), orderedBy: ["Id"], cancellationToken), cancellationToken),
-            Task.Run(() => BulkCopyAsync(Products, DatasetRows.Columns.Products, DatasetRows.Products(tree, productType, from, to), orderedBy: ["Id"], cancellationToken), cancellationToken));
+            Task.Run(() => BulkCopyAsync(Products, DatasetRows.Columns.Products(typeof(byte[])), DatasetRows.Products(tree, productType, from, to, SqlOSFgaScope.Encode), orderedBy: ["Id"], cancellationToken), cancellationToken));
         rows.Stop();
         await ExecuteAsync("CHECKPOINT;", cancellationToken);
-        log.Info($"  rows loaded in {rows.Elapsed.TotalSeconds:F1}s (lineage and scope columns included)");
+        log.Info($"  rows loaded in {rows.Elapsed.TotalSeconds:F1}s (lineage and scope column included)");
         await LogFileSizesAsync("load", cancellationToken);
 
         var indexes = Stopwatch.StartNew();
@@ -135,7 +137,7 @@ internal sealed class SqlServerDatasetLoader(string connectionString, SqlOSFgaOp
         static string Quote(string column) => $"[{column}]";
         static string Cast(string expression) => $"CONVERT(DECIMAL(38, 0), {expression})";
         var resources = await ChecksumAsync(LineageSql.ResourcesChecksum(Resources, Quote, Cast), cancellationToken);
-        var products = await ChecksumAsync(LineageSql.ProductsChecksum(Products, Quote, Cast), cancellationToken);
+        var products = await ChecksumAsync(LineageSql.ProductsChecksum(Products, postgres: false), cancellationToken);
         return new LineageChecksum(resources, products);
     }
 

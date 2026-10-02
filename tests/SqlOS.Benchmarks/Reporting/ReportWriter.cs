@@ -37,31 +37,22 @@ internal static class ReportWriter
         text.AppendLine(report.Dataset.Description);
         text.AppendLine();
 
-        // The three ways side by side, one table per scale: what the previous release's function took, what
-        // the lineage takes, what the scope columns take, and how many times faster each is than before.
+        // Before and after side by side, one table per scale: what the previous release's function took,
+        // what the filter takes now, and how many times faster it is.
         var pages = largest.Scenarios.Where(s => s.Kind == "List").ToList();
         var points = largest.Scenarios.Where(s => s.Kind == "PointFunction").ToList();
         foreach (var step in steps)
         {
-            text.AppendLine(CultureInfo.InvariantCulture, $"**At {RetailTree.Count(step.Products)} products: before, R1 (lineage), R2 (scope columns)** (median ms; × = times faster than before)");
+            text.AppendLine(CultureInfo.InvariantCulture, $"**At {RetailTree.Count(step.Products)} products: before and now** (median ms; × = times faster than before)");
             text.AppendLine();
-            text.AppendLine("| Page | σ | Before | R1 lineage | R2 scope columns | R1 × | R2 × |");
-            text.AppendLine("|---|---:|---:|---:|---:|---:|---:|");
-            foreach (var page in pages)
+            text.AppendLine("| Page | σ | Before | Now | × |");
+            text.AppendLine("|---|---:|---:|---:|---:|");
+            foreach (var scenario in pages.Concat(points))
             {
-                var previous = step.Scenarios.FirstOrDefault(s => s.Id == "reference." + page.Id);
-                var lineage = step.Scenarios.FirstOrDefault(s => s.Id == page.Id);
-                var scoped = step.Scenarios.FirstOrDefault(s => s.Id == "scoped." + page.Id);
+                var previous = step.Scenarios.FirstOrDefault(s => s.Id == "reference." + scenario.Id);
+                var current = step.Scenarios.FirstOrDefault(s => s.Id == scenario.Id);
                 text.AppendLine(CultureInfo.InvariantCulture,
-                    $"| {page.Title} | {Selectivity(page.Selectivity)} | {Cell(previous)} | {Cell(lineage)} | {Cell(scoped)} | {Faster(previous, lineage)} | {Faster(previous, scoped)} |");
-            }
-
-            foreach (var point in points)
-            {
-                var previous = step.Scenarios.FirstOrDefault(s => s.Id == "reference." + point.Id);
-                var current = step.Scenarios.FirstOrDefault(s => s.Id == point.Id);
-                text.AppendLine(CultureInfo.InvariantCulture,
-                    $"| {point.Title} | – | {Cell(previous)} | {Cell(current)} | – | {Faster(previous, current)} | – |");
+                    $"| {scenario.Title} | {(IsPage(scenario.Kind) ? Selectivity(scenario.Selectivity) : "–")} | {Cell(previous)} | {Cell(current)} | {Faster(previous, current)} |");
             }
 
             text.AppendLine();
@@ -127,9 +118,6 @@ internal static class ReportWriter
             (current, twin) => string.Create(CultureInfo.InvariantCulture, $"{current.Title}: {WithUnit(current.MedianMs)} now vs {WithUnit(twin.MedianMs)} before (×{current.MedianMs / twin.MedianMs:F2})"));
         AppendTwins(text, largest, "PointFunctionReference", null,
             (current, twin) => string.Create(CultureInfo.InvariantCulture, $"{current.Title}: {WithUnit(current.MedianMs)} now vs {WithUnit(twin.MedianMs)} before (×{current.MedianMs / twin.MedianMs:F2})"));
-        AppendTwins(text, largest, "ListScoped", "**Scope columns** (the same page read from the row instead of the resources table)",
-            (current, twin) => string.Create(CultureInfo.InvariantCulture,
-                $"{current.Title}: {WithUnit(current.MedianMs)} → {WithUnit(twin.MedianMs)} (×{twin.MedianMs / current.MedianMs:F3}{(twin.RowsExamined is { } rows ? $", {rows:N0} product rows read" : "")})"));
 
         if (smallest.Density.Count > 0)
         {
@@ -277,7 +265,7 @@ internal static class ReportWriter
         text.AppendLine(".");
     }
 
-    private static bool IsPage(string kind) => kind is "List" or "ListReference" or "ListScoped";
+    private static bool IsPage(string kind) => kind is "List" or "ListReference";
 
     private static string Selectivity(double value)
         => value >= 0.9999 ? "1"

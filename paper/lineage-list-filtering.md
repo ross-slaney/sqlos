@@ -53,9 +53,8 @@ Lemma 1, that x is active and a_ℓ…a_d are all active; (a, ℓ) ∈ roots(S, 
 Definition 1 holds. ∎
 
 The predicate `SqlOSFgaFilterBuilder` emits is the disjunction over the caller's roots of
-`Ancestor_ℓ = a AND Reach ≤ ℓ`, grouped by level, conjoined with the type condition; with the scope columns
-it reads the same values from the application row, which carries a copy of its resource's lineage
-(Section 4). The point check `fn_IsResourceAccessible` evaluates the same condition from the other side:
+`Scope_ℓ = a`, grouped by level, conjoined with the type condition, where Scope_ℓ is the application row's
+copy of Ancestor_ℓ held only where Reach ≤ ℓ (Section 4), so that one equality is the whole condition. The point check `fn_IsResourceAccessible` evaluates the same condition from the other side:
 for the one target x it enumerates the levels Reach(x)…d and probes the grants on each Ancestor_ℓ(x).
 
 ## 3. The triggers keep the lineage exact
@@ -97,42 +96,44 @@ The cost of a statement is proportional to its affected set: constant for creati
 move or a change of activity, and nothing for a grant or a revoke, which are not part of the lineage. The
 rebuild (`…_LineageRebuild`) is the same recurrence run over every row, level by level.
 
-## 4. Scope columns
+## 4. The scope column
 
-With `ScopeColumns` on, every application table whose entity carries a `ResourceId` holds a copy of its
-resource's Ancestor₀…Ancestor_D, Reach, and type. The copy is refreshed by the resources triggers for every
-affected resource (step 5 of the refresh, keyed by `ResourceId`), by the table's own insert trigger, and by
-its update trigger when a row's `ResourceId` changes; a deleted resource clears the copy. Each copy is
-therefore equal to the lineage of the resource the row names at all times, or NULL when that resource does
-not exist, which denies the row. Theorem 1 then applies to the row's own columns.
+Every application table whose entity carries a `ResourceId` holds one column, the scope value of its row:
+the resource's type and, for each level ℓ, Scope_ℓ = Ancestor_ℓ if Reach ≤ ℓ ≤ d and NULL otherwise. On
+PostgreSQL it is an array indexed per level by an expression index; on SQL Server a byte string with a depth
+byte first, read per level through a computed column whose filtered index covers the rows at or below the
+level. The value is refreshed by the resources triggers for every affected resource (step 5 of the refresh,
+keyed by `ResourceId`), by the table's own insert trigger, and by its update trigger when a row's
+`ResourceId` changes; a deleted resource clears it. Each value is therefore a function of the lineage of the
+resource the row names at all times, or NULL when that resource does not exist, which denies the row.
+Theorem 1 then reads: x is visible iff Scope_ℓ(x) = a for some root (a, ℓ), since Scope_ℓ(x) = a already
+says Ancestor_ℓ(x) = a and Reach(x) ≤ ℓ.
 
 ## 5. The cost of a page
 
 Take a page of k rows in an order the application chose, for a caller whose roots cover a fraction σ of the
 table, N rows in all, and let S be the number of rows beneath the caller's roots (S = σN).
 
-**Without scope columns**, the predicate joins each candidate row to its resource. The optimizer has two
-plans, and chooses from its statistics on the ancestor columns:
+**Reading the lineage from the resources table** (the form the first version of this work measured, and
+SqlOS no longer ships), the predicate joins each candidate row to its resource. The optimizer has two plans:
 
 - *Scan*: read the table in the requested order and test each row with one primary-key lookup of its
-  resource. About k/σ rows are examined; each costs one lookup, not a walk of D steps with a grant probe at
-  each. This is the plan for a caller who sees most of the table.
+  resource. About k/σ rows are examined. This is the plan for a caller who sees most of the table.
 - *Drive*: read the caller's scope from the ancestor index at the root's level (S entries), join the rows by
   `ResourceId`, sort, and take k. This is the plan for a caller who sees little of it.
 
-The cost is therefore min(k/σ, S) lookups plus a sort of at most S rows, and a page never examines more rows
-than the paper's filter did; it only examines them more cheaply. Over all callers the worst case is a scope
-of about √(kN) rows, where both plans cost the same. Note that S = σN grows with the table for a caller whose
-share of it is fixed: the benchmark's store manager sees 0.0065% of the catalog, 65 rows at 1M products and
-3,250 at 50M, and the *drive* plan reads all of them for every page (2.4 ms at 1M, 39 ms at 50M on
-PostgreSQL), while the scope-columns page below reads k rows at either size (1.7 ms).
+The cost is min(k/σ, S) lookups plus a sort of at most S rows. Over all callers the worst case is a scope of
+about √(kN) rows, where both plans cost the same. S = σN grows with the table for a caller whose share of it
+is fixed: the benchmark's store manager sees 0.0065% of the catalog, 65 rows at 1M products and 3,250 at
+50M, and the *drive* plan read all of them for every page (2.4 ms at 1M, 39 ms at 50M on PostgreSQL).
 
-**With scope columns**, for a caller with one root at level ℓ and an order the application declared an
-index for, the predicate is `Ancestor_ℓ = a AND Reach ≤ ℓ` on the row itself, and the mirrored index
-(Ancestor_ℓ, order columns, key) answers the page with one seek followed by k entries: the cost does not
-depend on N or σ. A caller with several roots reads one seek per root; the engine merges or sorts the
-streams, which costs at most S. A caller with more roots than the list limit (1,000) is checked row by row by
-`fn_IsResourceAccessible`, which enumerates the levels Reach(x)…d of each candidate row and probes the grants on
-its ancestor at each: D + 1 lookups per row at most, whatever the number of grants, and the scan plan only.
+**Reading the scope column**, for a caller with one root at level ℓ and an order the application declared
+an index for, the predicate is `Scope_ℓ = a` on the row itself, and the mirrored index (Scope_ℓ, order
+columns, key) answers the page with one seek followed by k entries: the cost does not depend on N or σ (the
+same page: 1.7 ms at either size). A caller with several roots reads one seek per root; the engine merges or
+sorts the streams, which costs at most S. A caller with more roots than the list limit (1,000) is checked
+row by row by `fn_IsResourceAccessible`, which enumerates the levels Reach(x)…d of each candidate row and
+probes the grants on its ancestor at each: D + 1 lookups per row at most, whatever the number of grants, and
+the scan plan only.
 
-The benchmark harness (`tests/SqlOS.Benchmarks`) measures the three on the same data from 1M to 50M rows.
+The benchmark harness (`tests/SqlOS.Benchmarks`) measures the previous function and the scope column on the same data from 100K to 50M rows.

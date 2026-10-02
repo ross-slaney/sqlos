@@ -94,14 +94,14 @@ Triggers on the resources table keep the lineage exact. The cost of each operati
 |---|---|---|
 | Create a resource | Computes its lineage from its parent | One row |
 | Grant or revoke | Nothing: grants are not part of the lineage | Nothing |
-| Change a resource's type | Updates the type on its application rows (scope columns only) | Its rows |
+| Change a resource's type | Updates the scope column of its application rows | Its rows |
 | Move a resource to another parent | Recomputes the subtree beneath it, level by level | The subtree |
 | Deactivate or reactivate a resource | Recomputes the reach of the subtree beneath it | The subtree |
-| Delete a resource | Clears its application rows' scope columns | Its rows |
+| Delete a resource | Clears its application rows' scope column | Its rows |
 | A move that would create a cycle, or place a resource deeper than the configured depth | Rejects the statement | — |
 | First start after upgrading, or a changed depth | Fills the lineage once: the internal nodes level by level, then every range of 500,000 resources in its own transaction | The whole table, once |
 
-With [scope columns](/docs/fga/list-filter#scope-columns) on, every operation above also updates the application rows of the resources it touched.
+Every operation above also updates the [scope column](/docs/fga/list-filter#the-scope-column) of the application rows of the resources it touched.
 
 Bulk loads that skip triggers must fill the lineage themselves or run the rebuild procedure afterwards (`sp_SqlOSFgaResources_LineageRebuild` on SQL Server, `fn_SqlOSFgaResources_LineageRebuild()` on PostgreSQL). The rebuild writes the whole table once, in ranges of 500,000 resources on SQL Server (each range its own transaction, so the log stays small at any size) and in one transaction on PostgreSQL. A rebuild that fails part-way is run again at the next start: SqlOS records the routines as current only after it completes.
 

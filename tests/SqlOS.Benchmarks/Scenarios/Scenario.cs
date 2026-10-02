@@ -4,14 +4,11 @@ namespace SqlOS.Benchmarks.Scenarios;
 
 internal enum ScenarioKind
 {
-    /// <summary>A cursor page of products through <c>BuildFilterAsync</c> on the table without scope columns: the lineage read from the resources table.</summary>
+    /// <summary>A cursor page of products through <c>BuildFilterAsync</c>: the lineage read from the row's scope column.</summary>
     List,
 
     /// <summary>The same page through the previous release's function (<see cref="Infrastructure.ReferenceFunction"/>).</summary>
     ListReference,
-
-    /// <summary>The same page through <c>BuildFilterAsync</c> on the table with scope columns: the lineage read from the row.</summary>
-    ListScoped,
 
     /// <summary><c>fn_IsResourceAccessible</c> for one resource, the enforcement primitive the paper measures.</summary>
     PointFunction,
@@ -49,7 +46,7 @@ internal sealed record Scenario(
     string? Baseline = null,
     PageOrder Order = PageOrder.Id)
 {
-    public bool IsPage => Kind is ScenarioKind.List or ScenarioKind.ListReference or ScenarioKind.ListScoped;
+    public bool IsPage => Kind is ScenarioKind.List or ScenarioKind.ListReference;
 }
 
 internal static class ScenarioCatalog
@@ -95,7 +92,7 @@ internal static class ScenarioCatalog
             }
         }
 
-        // Twins: the previous function (the regression gate) and the scope columns (the independence gate).
+        // Twins: the previous function, for the regression and improvement gates.
         var all = new List<Scenario>();
         foreach (var scenario in current)
         {
@@ -104,7 +101,6 @@ internal static class ScenarioCatalog
             {
                 case ScenarioKind.List:
                     all.Add(scenario with { Id = "reference." + scenario.Id, Title = scenario.Title + " · previous function", Kind = ScenarioKind.ListReference, Baseline = scenario.Id });
-                    all.Add(scenario with { Id = "scoped." + scenario.Id, Title = scenario.Title + " · scope columns", Kind = ScenarioKind.ListScoped, Baseline = scenario.Id });
                     break;
                 case ScenarioKind.PointFunction:
                     all.Add(scenario with { Id = "reference." + scenario.Id, Title = scenario.Title + " · previous function", Kind = ScenarioKind.PointFunctionReference, Baseline = scenario.Id });
@@ -121,7 +117,7 @@ internal static class ScenarioCatalog
     /// </summary>
     public static IReadOnlyList<Scenario> Density(IReadOnlyList<Scenario> scenarios)
         => scenarios
-            .Where(s => s.Id is "list.region.first-page" or "reference.list.region.first-page" or "scoped.list.region.first-page" or "point.function.denied")
+            .Where(s => s.Id is "list.region.first-page" or "reference.list.region.first-page" or "point.function.denied")
             .Select(s => s with
             {
                 Id = "density." + s.Id,

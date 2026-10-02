@@ -78,36 +78,27 @@ if (options.Provider == DatabaseProvider.PostgreSql)
 await using var server = await DatabaseServer.StartAsync(options, log, cancellation);
 await server.RecreateDatabaseAsync(cancellation);
 
-// The FGA options an application would register: the scope columns on, so every table with a ResourceId
-// carries the lineage. The plain context maps the same tables without them, so both forms of the filter are
-// measured on the same data.
-var fga = new SqlOSFgaOptions { RootResourceId = BenchmarkModel.RootResourceId, RootResourceName = "Retail", ScopeColumns = true };
+// The FGA options an application would register.
+var fga = new SqlOSFgaOptions { RootResourceId = BenchmarkModel.RootResourceId, RootResourceName = "Retail" };
 var plainOptions = new DbContextOptionsBuilder<BenchDbContext>();
-var scopedOptions = new DbContextOptionsBuilder<ScopedBenchDbContext>();
 if (options.Provider == DatabaseProvider.PostgreSql)
 {
     plainOptions.UseNpgsql(server.DatabaseConnectionString);
-    scopedOptions.UseNpgsql(server.DatabaseConnectionString);
 }
 else
 {
     plainOptions.UseSqlServer(server.DatabaseConnectionString);
-    scopedOptions.UseSqlServer(server.DatabaseConnectionString);
 }
 
 var planCapture = new PlanCapture(options.Provider);
 plainOptions.AddInterceptors(planCapture);
-scopedOptions.AddInterceptors(planCapture);
 var builtPlainOptions = plainOptions.Options;
-var builtScopedOptions = scopedOptions.Options;
 BenchDbContext CreateContext() => new(builtPlainOptions);
-ScopedBenchDbContext CreateScopedContext() => new(builtScopedOptions);
 
-// The schema, indexes, functions, lineage triggers, scope columns, and core seed exactly as SqlOS creates them
-// for an application whose context declares the scope columns; then the previous release's function beside
-// them, for the regression comparison.
-log.Info("Creating the SqlOS FGA schema, the lineage, fn_AccessRoots, fn_IsResourceAccessible, the triggers, the scope columns, and the authorization model...");
-await using (var db = CreateScopedContext())
+// The schema, indexes, functions, lineage triggers, scope column, and core seed exactly as SqlOS creates them
+// for an application; then the previous release's function beside them, for the regression comparison.
+log.Info("Creating the SqlOS FGA schema, the lineage, fn_AccessRoots, fn_IsResourceAccessible, the triggers, the scope column, and the authorization model...");
+await using (var db = CreateContext())
 {
     await db.Database.EnsureCreatedAsync(cancellation);
     await new SqlOSFgaSchemaInitializer(db, Options.Create(fga), NullLogger<SqlOSFgaSchemaInitializer>.Instance).EnsureSchemaAsync(cancellation);
@@ -130,7 +121,7 @@ var dataset = new DatasetShape(
     MaxDepth: 10,
     options.Seed,
     string.Create(CultureInfo.InvariantCulture,
-        $"The shipped schema, indexes, resource lineage, `fn_AccessRoots`, and `fn_IsResourceAccessible`, queried through `BuildFilterAsync` three ways on the same product table: the previous release's function (walks up from every row), the lineage read from the resources table, and the lineage read from the row's own scope columns. The tree: {chains} retail chains ({chains - 1} at D = 5, one at D = 10) with {tree.Stores.Count:N0} stores and {tree.Nodes.Count + 1:N0} organizational nodes. Store sizes are log-normal, and products are spread through the id range the way rows arrive over time. {managedScopes:N0} managers hold grants on their store, region, or chain. Two more people hold 10,000 and 100,000 grants on single products, spread through the catalog. The people measured each resolve to 3 subjects (M = 3)."));
+        $"The shipped schema, indexes, resource lineage, `fn_AccessRoots`, and `fn_IsResourceAccessible`, queried through `BuildFilterAsync` two ways on the same product table: the previous release's function (walks up from every row) and the lineage read from the row's own scope column. The tree: {chains} retail chains ({chains - 1} at D = 5, one at D = 10) with {tree.Stores.Count:N0} stores and {tree.Nodes.Count + 1:N0} organizational nodes. Store sizes are log-normal, and products are spread through the id range the way rows arrive over time. {managedScopes:N0} managers hold grants on their store, region, or chain. Two more people hold 10,000 and 100,000 grants on single products, spread through the catalog. The people measured each resolve to 3 subjects (M = 3)."));
 
 // Leave room for the CI runner's own logs and the uploaded results.
 long? FreeBytes() => options.DataDirectory is { } directory ? new DriveInfo(Path.GetFullPath(directory)).AvailableFreeSpace : null;
@@ -177,7 +168,7 @@ var report = new BenchmarkReport
 };
 log.Info($"Engine: {report.Engine}");
 
-var runner = new ScenarioRunner(CreateContext, CreateScopedContext, options.Provider, fga, tree, Path.Combine(outputDirectory, "plans"), options.ScenarioBudgetSeconds, log);
+var runner = new ScenarioRunner(CreateContext, options.Provider, fga, tree, Path.Combine(outputDirectory, "plans"), options.ScenarioBudgetSeconds, log);
 var extraGates = new List<GateResult>();
 long loaded = 0;
 long lastSize = 0;

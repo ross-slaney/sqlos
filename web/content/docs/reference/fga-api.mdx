@@ -95,7 +95,7 @@ var chains = await dbContext.Chains
 
 **Filter lifetime**: the subject's principal set (the subject plus its active group memberships) and their grants are resolved when the task is awaited; the caller's own lifecycle is rechecked when the query runs. Build the filter once per request and compose it into that request's queries; do not cache it in statics or reuse it across requests.
 
-**Scope columns**: with `SqlOSFgaOptions.ScopeColumns` on, the predicate reads the lineage from the entity's own table instead of joining the resources table; see [List filtering](/docs/fga/list-filter#scope-columns).
+**The scope column**: the predicate reads the entity's own `SqlOSFgaScope` column and joins nothing; see [List filtering](/docs/fga/list-filter#the-scope-column). An entity type whose table has no scope column (one configured before `UseSqlOS` or `ApplySqlOSFgaModel` ran) is reported with an exception that says so.
 
 ### Lifecycle enforcement
 

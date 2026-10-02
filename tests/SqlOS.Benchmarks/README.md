@@ -6,27 +6,25 @@ catalog grows from 1M to 50M products in CI, and fails CI when that behavior reg
 It is the maintained successor to the harness behind the paper's Section 7 (kept in `paper/benchmark`),
 which ran a hand-copied version of the schema and function at 1.2M–1.5M resources on SQL Server only.
 
-## Three ways to filter the same table
+## Before and now on the same table
 
-Every list page is measured three ways on the same `Products` table, the same data, and the same LINQ:
+Every list page is measured two ways on the same `Products` table, the same data, and the same LINQ:
 
 | Way | Scenario ids | What the filter does |
 |---|---|---|
 | **Previous function** | `reference.list.*` | The row filter as the last release shipped it (`Reference/*.sql`, created as `fn_IsResourceAccessible_Reference`): for every candidate row, walk up the tree and look for a grant at each ancestor |
-| **Lineage** | `list.*` | `BuildFilterAsync` on a context without scope columns: for every candidate row, one lookup of its resource's lineage (its ancestor at the caller's level and its reach), or, when the optimizer prefers it, the caller's scope read from the ancestor index and joined to the rows |
-| **Scope columns** | `scoped.list.*` | `BuildFilterAsync` on a context with `ScopeColumns = true`: the lineage sits on the product row, so a single-grant caller's page is one seek of an index that starts with the ancestor column and continues with the page's order |
+| **Now** | `list.*` | `BuildFilterAsync`: the row's own scope column holds its resource's ancestor at every level access flows down from, so a single-grant caller's page is one seek of an index that starts with that level's part of the column and continues with the order the page asks for |
 
-The two `BuildFilterAsync` ways are the same predicate; only where the lineage is read differs. Point
-checks are measured twice (`fn_IsResourceAccessible` now and as the previous release shipped it), plus
+Point checks are measured twice (`fn_IsResourceAccessible` now and as the previous release shipped it), plus
 `Allows` (`CheckAccessAsync`), which applications call.
 
 ## What is measured
 
 - **The shipped artifacts.** The FGA schema scripts, their indexes, the lineage columns and their triggers,
-  the scope columns and theirs, `fn_ActiveSubjects`, `fn_AccessRoots`, `fn_IsResourceAccessible`, and the
-  core seed are created by SqlOS's own initializers (`SqlOSFgaSchemaInitializer`,
-  `SqlOSFgaFunctionInitializer`, `SqlOSFgaSeedService`) from a context that declares the scope columns. A
-  change to any of them is what gets measured.
+  the scope column with its per-level indexes and triggers, `fn_ActiveSubjects`, `fn_AccessRoots`,
+  `fn_IsResourceAccessible`, and the core seed are created by SqlOS's own initializers
+  (`SqlOSFgaSchemaInitializer`, `SqlOSFgaFunctionInitializer`, `SqlOSFgaSeedService`) from an application
+  context. A change to any of them is what gets measured.
 - **The application's queries.** Pages go through `BuildFilterAsync<Product>` and EF Core, so the timing
   includes the SQL EF generates for callers. The filter is built before the clock starts, as the paper
   measured; the authorized query alone is timed. Warm cache; median and p95 over up to 25 runs.
@@ -36,7 +34,7 @@ checks are measured twice (`fn_IsResourceAccessible` now and as the previous rel
 - **The actual plan is captured** for each page (`EXPLAIN (ANALYZE, BUFFERS)` or `SET STATISTICS XML`). From
   it the report takes product rows read, server execution time, and server planning time. The plans are
   uploaded with the results.
-- **The lineage is verified.** At the first scale, the lineage and scope columns the loader generated are
+- **The lineage is verified.** At the first scale, the lineage and scope values the loader generated are
   compared (counts and order-independent hashes over every column) with the same after the maintenance pass
   and with what SqlOS rebuilds from the resource tree alone with its own procedure.
 - **Every query has a budget** (`--scenario-budget`, 600 s by default). A scenario whose first execution
@@ -57,13 +55,13 @@ A retail company under the SqlOS root: twelve chains, about 13,800 stores and 74
   store, which put the store manager's rows at the front of the table and hid the cost of sparse access.)
 - **Every product is a resource**, as with `ISqlOSResourceEntity`. `Products` carries the indexes such a
   table has: the unique `ResourceId`, the `StoreId` foreign key, and one declared order besides the key,
-  `Price`. With the scope columns on, SqlOS mirrors the key and the price index once per level.
+  `Price`. SqlOS mirrors the key and the price index once per level of the scope column.
 - **Five people, M = 3 each** (the user and two groups): a company admin granted through a group on the
   root, a chain manager, a region manager, a manager of the deep chain, and the manager of a median-sized
   store. Two more people hold 10,000 and 100,000 grants on single products.
 
 The data is a pure function of the seed, so it grows in place (1M → 10M → 50M) and any page can be verified.
-The loaders write sequence numbers, lineage, and scope columns themselves; the first scale checks them
+The loaders write sequence numbers, lineage, and scope values themselves; the first scale checks them
 against SqlOS's rebuild.
 
 ## Scenarios
@@ -78,21 +76,22 @@ against SqlOS's rebuild.
 | `list.store.first-page` | Sparse access (σ ≈ 0.0065%): the previous function examined about 400K rows per page |
 | `list.store.by-store` | The same person listing their store with `WHERE StoreId = …`: the application narrowed the page itself |
 | `list.grants10k.first-page`, `list.grants100k.first-page` | More roots than the filter lists: each row is checked by `fn_IsResourceAccessible`, which probes the grants of the row's ancestors |
-| `reference.*`, `scoped.*` | The twins of every page and point check, as above |
+| `reference.*` | The previous function's twin of every page and point check |
 | `point.function.*`, `point.api.*` | `fn_IsResourceAccessible` for one product at depth 4 and 9, a denial, the many-grants people, and `Allows` |
 | `density.*` | At the first scale only: the region pages and the denied check re-run while 100 other people hold grants on the root. Only the caller's own grants should matter. Reported, not gated |
 | maintenance | At the first scale only: 2,000 single-row inserts with the lineage triggers on and off, one 2,000-row insert, one 2,000-row delete, and reparent, deactivate and reactivate of a region subtree; then a rebuild from scratch, compared with the maintained lineage |
 
 The previous function's sparse pages cost minutes, so they run only at the first and last scales, which are
-the two the scale gate compares. The lineage and scope-columns pages run at every scale.
+the two the scale gate compares. The current filter's pages run at every scale.
 
-## Results of the latest full run
+## Results of the run that chose the design
 
 Run 36933080921 (2026-10-01, hosted `ubuntu-latest`, 4 vCPU, 17 GB, 8 GB to the engine), 1M → 10M → 50M on
-both engines, every gate green. **Before** is the previous release's function through the same
-`BuildFilterAsync`, **R1** the lineage read from the resources table, **R2** the lineage read from the row's
-scope columns. A dash means that form was not run at that scale. The run's summary page has the 10M tables,
-every scenario with rows read and server time, and the plans.
+both engines, every gate green, measured when the filter had two forms: **R1** read the lineage from the
+resources table by a join, **R2** read it from columns on the product row. **Before** is the previous
+release's function through the same `BuildFilterAsync`. R2 won on every page and is what SqlOS ships now,
+as one column instead of thirteen; R1 is gone. A dash means that form was not run at that scale. The run's
+summary page has the 10M tables, every scenario with rows read and server time, and the plans.
 
 **PostgreSQL 16, 1M products** (median ms; × = times faster than before)
 
@@ -190,20 +189,18 @@ columns with their indexes are about half.
 ## Gates (`gates.json`)
 
 - **correctness**: every scenario returned exactly the authorized answer.
-- **lineage**: the loaded lineage and scope columns, the same after the maintenance pass, and SqlOS's
+- **lineage**: the loaded lineage and scope values, the same after the maintenance pass, and SqlOS's
   rebuild are identical (counts and hashes).
 - **scale**: per-page cost must follow the work the paper predicts, not N. The median at the largest scale
-  may be at most `maxRatio` (3.0) times the median at the smallest, times the growth of the rows the page has
-  to touch, plus `slackMilliseconds`. A lineage page touches min(k / σ, σN) rows (the cheaper of the rows in
-  the requested order and the caller's scope): flat for a dense caller, growing with the catalog for a sparse
-  one whose scope grows with it. The previous function touches min(k / σ, N). A page filtered to a store
-  touches that store's σN rows through its own index. The scope-columns pages use `scopedMaxRatio` (1.5) and
-  no growth term: one index seek and k rows at any N. The previous function's pages are measured at every
-  scale but not gated: how its cost grows is a finding about it, not a regression of the current filter.
-- **regression**: the lineage and the scope-columns pages against the previous function, at every scale: at
-  most `maxRatio` (1.15) times the previous median, plus slack.
-- **improvement**: for the sparse pages, the lineage page must take at most `lineageMaxRatio` (0.2) of the
-  previous function's time and the scope-columns page at most `scopedMaxRatio` (0.05).
+  may be at most `maxRatio` (2.0) times the median at the smallest, times the growth of the rows the page has
+  to touch, plus `slackMilliseconds`. A page through the scope column touches k rows at any N (one index
+  seek), so it has no growth term; a page filtered to a store touches that store's σN rows through its own
+  index. The previous function's pages are measured at every scale but not gated: how its cost grows is a
+  finding about it, not a regression of the current filter.
+- **regression**: the current filter against the previous function, at every scale: at most `maxRatio`
+  (1.15) times the previous time, plus slack.
+- **improvement**: for the sparse pages, the current filter must take at most `maxRatio` (0.05) of the
+  previous function's time.
 - **ceiling**: an absolute median budget per scenario and engine, for regressions that slow every scale
   alike. Set them to several times the values CI reports, and raise them only with an explanation.
 
@@ -257,7 +254,7 @@ Filled in from the CI runs of this branch; see the run summaries until then.
 Each engine uses its bulk path, into the tables SqlOS created:
 
 - **SQL Server**: ordered `SqlBulkCopy` with a table lock into the clustered primary keys (minimally logged
-  under simple recovery). Bulk copy fires no triggers, so the lineage and scope columns travel with the rows.
+  under simple recovery). Bulk copy fires no triggers, so the lineage and scope values travel with the rows.
 - **PostgreSQL**: parallel `COPY … (FORMAT BINARY)` with foreign-key and lineage triggers skipped for the
   loading sessions (`session_replication_role = replica`).
 

@@ -59,7 +59,7 @@ Coverage settings live in `tests/coverlet.runsettings`.
 
 ## Benchmarks
 
-`tests/SqlOS.Benchmarks` measures list filtering and point checks on the schema, indexes, functions, lineage triggers, and scope columns that SqlOS ships. Every page is measured three ways on the same product table: through the previous release's row filter, through `BuildFilterAsync` reading the lineage from the resources table, and through `BuildFilterAsync` with scope columns on. The catalog grows in place from 1M to 50M products in CI, every answer is checked against ground truth, each page's actual plan is captured, and the lineage is checked against SqlOS's own rebuild after a maintenance pass of inserts, deletes, and subtree updates.
+`tests/SqlOS.Benchmarks` measures list filtering and point checks on the schema, indexes, functions, lineage triggers, and scope column that SqlOS ships. Every page is measured two ways on the same product table: through the previous release's row filter and through `BuildFilterAsync`. The catalog grows in place from 100K to 1M products on every CI run and to 50M on a labelled pull request, every answer is checked against ground truth, each page's actual plan is captured, and the lineage is checked against SqlOS's own rebuild after a maintenance pass of inserts, deletes, and subtree updates.
 
 ```bash
 # PostgreSQL, 100K and 1M products; the harness starts the database with Testcontainers

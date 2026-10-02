@@ -1,10 +1,10 @@
 name: Benchmarks
 
-# SHRBAC list filtering and point checks on the shipped schema, the resource lineage, the scope columns, and
+# SHRBAC list filtering and point checks on the shipped schema, the resource lineage, the scope column, and
 # fn_IsResourceAccessible, one job per engine, beside Pull Request CI. See tests/SqlOS.Benchmarks/README.md.
 #
-# Every page is measured three ways on the same table: the previous release's function, BuildFilterAsync
-# reading the lineage from the resources table, and BuildFilterAsync reading it from the row's scope columns.
+# Every page is measured two ways on the same table: the previous release's function, and BuildFilterAsync
+# reading the row's scope column.
 #
 # Two tiers:
 # - CI (every pull request push, merge to main, weekly): the catalog grows 100K -> 1M, about 15 minutes per

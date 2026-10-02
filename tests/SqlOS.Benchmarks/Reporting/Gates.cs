@@ -14,21 +14,15 @@ namespace SqlOS.Benchmarks.Reporting;
 /// and the same as SqlOS rebuilds from the resources alone (count and hash).</item>
 /// <item><b>scale</b>: per-page cost must follow the work the paper predicts, not N. The median at the
 /// largest scale may be at most <c>maxRatio</c> times the median at the smallest, times the growth of the
-/// rows the page has to touch, plus <c>slackMilliseconds</c> for sub-millisecond noise. A lineage page costs
-/// the cheaper of two plans, k / σ rows in the requested order or the caller's whole scope of σN rows, so
-/// its work is min(k / σ, σN): flat for a dense caller, and growing with the catalog for a sparse one whose
-/// scope grows with it (the store manager's store gains products as the catalog does). The previous
-/// function has only the first plan: min(k / σ, N). A page filtered to a store touches that store's σN rows
-/// through its own index. The scope-columns pages have their own, tighter ratio (<c>scopedMaxRatio</c>) and
-/// no growth term: a caller's page is one index seek and k rows at any N. The previous function's pages are
-/// measured at every scale but not gated: how its cost grows is a finding about it (its per-row walk gets
-/// dearer as the tree outgrows memory), not a regression of the current filter.</item>
+/// rows the page has to touch, plus <c>slackMilliseconds</c> for sub-millisecond noise. A page through the
+/// scope column touches k rows at any N (one index seek), so it has no growth term; a page filtered to a
+/// store touches that store's σN rows through its own index. The previous function's pages are measured at
+/// every scale but not gated: how its cost grows is a finding about it (its per-row walk gets dearer as the
+/// tree outgrows memory), not a regression of the current filter.</item>
 /// <item><b>regression</b>: the current filter against the previous release's, on the same data in the same
-/// job, for both the lineage and the scope-columns pages: the median may be at most <c>maxRatio</c> times
-/// the previous one, plus slack.</item>
-/// <item><b>improvement</b>: for the listed sparse pages, the lineage page must take at most
-/// <c>lineageMaxRatio</c> of the previous function's time, and the scope-columns page at most
-/// <c>scopedMaxRatio</c>.</item>
+/// job: the median may be at most <c>maxRatio</c> times the previous one, plus slack.</item>
+/// <item><b>improvement</b>: for the listed sparse pages, the current filter must take at most
+/// <c>maxRatio</c> of the previous function's time.</item>
 /// <item><b>ceiling</b>: an absolute budget per scenario and engine, for regressions that slow every scale
 /// alike (a heavier function body, a lost index).</item>
 /// </list>
@@ -64,24 +58,16 @@ internal sealed class GateConfig
         public List<string> Exempt { get; init; } = [];
     }
 
-    internal sealed class ScaleGate : RatioGate
-    {
-        /// <summary>The ratio for the scope-columns pages, whose cost must not follow N.</summary>
-        [JsonPropertyName("scopedMaxRatio")]
-        public double ScopedMaxRatio { get; init; } = 1.5;
-    }
+    internal sealed class ScaleGate : RatioGate;
 
     internal sealed class ImprovementGate
     {
-        /// <summary>Lineage scenario ids whose twins must beat the previous function by the ratios.</summary>
+        /// <summary>Scenario ids that must beat their previous-function twin by the ratio.</summary>
         [JsonPropertyName("scenarios")]
         public List<string> Scenarios { get; init; } = [];
 
-        [JsonPropertyName("lineageMaxRatio")]
-        public double LineageMaxRatio { get; init; } = 0.2;
-
-        [JsonPropertyName("scopedMaxRatio")]
-        public double ScopedMaxRatio { get; init; } = 0.05;
+        [JsonPropertyName("maxRatio")]
+        public double MaxRatio { get; init; } = 0.05;
     }
 }
 
@@ -127,9 +113,8 @@ internal static class GateEvaluator
                     continue;
                 }
 
-                var ratio = scenario.Kind == "ListScoped" ? config.Scale.ScopedMaxRatio : config.Scale.MaxRatio;
                 var growth = ExpectedRows(scenario, largest.Products) / ExpectedRows(baseline, smallest.Products);
-                var limit = baseline.MedianMs * ratio * growth + config.Scale.SlackMilliseconds;
+                var limit = baseline.MedianMs * config.Scale.MaxRatio * growth + config.Scale.SlackMilliseconds;
                 results.Add(new GateResult(
                     "scale",
                     scenario.Id,
@@ -145,9 +130,8 @@ internal static class GateEvaluator
             var scale = RetailTree.Count(step.Products);
             foreach (var reference in step.Scenarios.Where(s => s.Kind is "ListReference" or "PointFunctionReference" && s.Baseline is not null))
             {
-                foreach (var id in new[] { reference.Baseline!, "scoped." + reference.Baseline })
                 {
-                    var current = step.Scenarios.FirstOrDefault(s => s.Id == id);
+                    var current = step.Scenarios.FirstOrDefault(s => s.Id == reference.Baseline);
                     if (current is null || config.Regression.Exempt.Contains(current.Id))
                     {
                         continue;
@@ -172,23 +156,20 @@ internal static class GateEvaluator
                     continue;
                 }
 
-                foreach (var (twinId, ratio, name) in new[] { (id, config.Improvement.LineageMaxRatio, "lineage page"), ("scoped." + id, config.Improvement.ScopedMaxRatio, "scope-columns page") })
+                var current = step.Scenarios.FirstOrDefault(s => s.Id == id);
+                if (current is null)
                 {
-                    var twin = step.Scenarios.FirstOrDefault(s => s.Id == twinId);
-                    if (twin is null)
-                    {
-                        continue;
-                    }
-
-                    var limit = previous.MedianMs * ratio;
-                    results.Add(new GateResult(
-                        "improvement",
-                        $"{twinId} @ {scale}",
-                        twin.MedianMs <= limit,
-                        string.Create(
-                            CultureInfo.InvariantCulture,
-                            $"{name} {twin.MedianMs:F2} ms vs previous function {previous.MedianMs:F2} ms (×{twin.MedianMs / previous.MedianMs:F4}; limit {limit:F2} ms)")));
+                    continue;
                 }
+
+                var limit = previous.MedianMs * config.Improvement.MaxRatio;
+                results.Add(new GateResult(
+                    "improvement",
+                    $"{id} @ {scale}",
+                    current.MedianMs <= limit,
+                    string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"{current.MedianMs:F2} ms vs previous function {previous.MedianMs:F2} ms (×{current.MedianMs / previous.MedianMs:F4}; limit {limit:F2} ms)")));
             }
         }
 
@@ -220,9 +201,9 @@ internal static class GateEvaluator
         => scenario.Kind is "ListReference" or "PointFunctionReference";
 
     /// <summary>
-    /// The rows a page has to touch at a catalog of <paramref name="products"/> rows, from the paper: a
-    /// lineage page min(k / σ, σN), the previous function min(k / σ, N), a page filtered to one store that
-    /// store's σN rows, a scope-columns page k. Point checks touch one row.
+    /// The rows a page has to touch at a catalog of <paramref name="products"/> rows, from the paper: a page
+    /// through the scope column k, the previous function min(k / σ, N), a page filtered to one store that
+    /// store's σN rows. Point checks touch one row.
     /// </summary>
     internal static double ExpectedRows(ScenarioResult scenario, long products)
     {
@@ -238,11 +219,6 @@ internal static class GateEvaluator
             return Math.Max(k, scope);
         }
 
-        return scenario.Kind switch
-        {
-            "ListScoped" => k,
-            "ListReference" => Math.Min(k / scenario.Selectivity, products),
-            _ => Math.Min(k / scenario.Selectivity, scope),
-        };
+        return scenario.Kind == "ListReference" ? Math.Min(k / scenario.Selectivity, products) : k;
     }
 }
