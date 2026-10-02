@@ -73,16 +73,10 @@ public class SqlOSFgaFunctionInitializer
             await _context.Database.OpenConnectionAsync(cancellationToken);
             try
             {
-                if (await IsCurrentAsync(provider, scopeTables, hash, cancellationToken))
-                {
-                    _logger.LogDebug("The FGA routines, the resource lineage, and its triggers are current.");
-                    _logger.LogInformation("Database functions verified.");
-                    return;
-                }
-
-                // The routines' DDL takes schema-modification locks that can deadlock with queries running
-                // beside the initializer; the engine then picks a victim. The session asks to be it (so a query
-                // never is) and tries again.
+                // Checked and applied under the lock, inside the retry: the routines' DDL takes
+                // schema-modification locks that can deadlock with queries running beside the initializer (an
+                // initializer's own check among them); the engine then picks a victim. The session asks to be it
+                // (so a query never is) and tries again.
                 for (var attempt = 1; ; attempt++)
                 {
                     await provider.AcquireSessionLockAsync(
@@ -93,7 +87,7 @@ public class SqlOSFgaFunctionInitializer
                         cancellationToken);
                     try
                     {
-                        // Another process may have applied the same definitions while this one waited.
+                        // Unchanged definitions (or ones another process applied while this one waited) are skipped.
                         if (!await IsCurrentAsync(provider, scopeTables, hash, cancellationToken))
                         {
                             await ApplyAsync(provider, batches, scopeTables, hash, cancellationToken);

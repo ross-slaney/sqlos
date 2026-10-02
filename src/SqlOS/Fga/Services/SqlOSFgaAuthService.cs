@@ -425,15 +425,14 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
         }
 
         // The caller's access roots, read once: the resources their live subjects hold a current grant on
-        // with a role that includes the permission. The filter compares each row's ancestor at a root's
-        // level with the root. Grants are read when the filter is built, as group membership is; build the
-        // filter per request. A caller with more roots than the filter lists is checked row by row instead.
+        // with a role that includes the permission. The filter compares each row's scope at a root's level with
+        // the root. Grants are read when the filter is built, as group membership is; build the filter per
+        // request.
         var provider = SqlOSDatabase.Resolve(_context.Database);
         var subjectIdsJson = JsonSerializer.Serialize(subjectIds);
         var roots = await _context.Set<SqlOSFgaAccessRoot>()
             .FromSqlRaw(provider.BuildAccessRootsQuerySql(_options), subjectIdsJson, permission.Id)
             .AsNoTracking()
-            .Take(SqlOSFgaLineage.MaxListedRoots + 1)
             .ToListAsync();
         if (roots.Count == 0)
         {
@@ -444,14 +443,7 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
             .FromSqlRaw(provider.BuildActiveSubjectsQuerySql(_options), subjectIdsJson)
             .AsNoTracking();
 
-        return SqlOSFgaFilterBuilder.Build<T>(
-            _context,
-            roots,
-            liveQuery,
-            subjectIdsJson,
-            permission.Id,
-            permission.TypeSeq,
-            SqlOSFgaLineage.Levels(_options));
+        return SqlOSFgaFilterBuilder.Build<T>(roots, liveQuery, permission.TypeSeq, SqlOSFgaLineage.Levels(_options));
     }
 
     private async Task<List<string>> ResolveSubjectsAsync(string subjectId, List<SqlOSFgaAccessTrace> trace)

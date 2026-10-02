@@ -8,14 +8,11 @@ namespace SqlOS.Fga.Services;
 
 /// <summary>
 /// Builds the predicate <c>BuildFilterAsync</c> returns: a row is visible when, at the level of one of the
-/// caller's access roots, the row's resource has that root as its ancestor and access flows down to the row
-/// from that level (every resource from the root down to the row is active), and the row's resource type is
-/// the permission's. The predicate is the same for every caller and every table, and reads everything from
-/// the row's own scope column. The roots are written into the predicate as parameters, one per level when
-/// the caller holds one root at that level, which is what lets the database turn the page into one index
-/// seek. A caller with more roots than <see cref="SqlOSFgaLineage.MaxListedRoots"/> is checked row by row by
-/// <c>fn_IsResourceAccessible</c> instead, which probes the grants of each row's ancestors: the same rule, at a
-/// cost that does not depend on how many grants the caller holds.
+/// caller's access roots, the row's scope column holds that root (it holds an ancestor only where access flows
+/// down to the row from it), and the row's resource type is the permission's. One predicate for every caller,
+/// every table, and any number of grants: the roots are written into it as parameters, an equality at a level
+/// with one root (which lets the database answer a page with one index seek) and a membership test at a level
+/// with several.
 /// </summary>
 internal static class SqlOSFgaFilterBuilder
 {
@@ -26,29 +23,18 @@ internal static class SqlOSFgaFilterBuilder
     private static readonly MethodInfo QueryableAnyNoPredicate = typeof(Queryable).GetMethods()
         .Single(m => m.Name == nameof(Queryable.Any) && m.GetParameters().Length == 1);
 
-    /// <param name="context">The context the predicate will run in.</param>
-    /// <param name="roots">The caller's access roots, at most <see cref="SqlOSFgaLineage.MaxListedRoots"/> + 1 of them.</param>
+    /// <param name="roots">The caller's access roots: every resource the caller holds a usable grant on, and its level.</param>
     /// <param name="liveQuery">The composable query over <c>fn_ActiveSubjects</c>: the caller's subjects that are alive now.</param>
-    /// <param name="subjectIdsJson">The caller's subject ids as JSON, for the row-by-row function.</param>
-    /// <param name="permissionId">The permission's id.</param>
     /// <param name="typeSeq">The compact key of the permission's resource type, or null when it applies to every type.</param>
     /// <param name="levels">The number of levels the scope value holds (depth + 1).</param>
     public static Expression<Func<T, bool>> Build<T>(
-        ISqlOSFgaDbContext context,
         IReadOnlyList<SqlOSFgaAccessRoot> roots,
         IQueryable<SqlOSFgaActiveSubject> liveQuery,
-        string subjectIdsJson,
-        string permissionId,
         int? typeSeq,
         int levels)
         where T : IHasResourceId
     {
         var entity = Expression.Parameter(typeof(T), "entity");
-        if (roots.Count > SqlOSFgaLineage.MaxListedRoots)
-        {
-            return RowByRow<T>(context, entity, subjectIdsJson, permissionId);
-        }
-
         var deepest = roots.Max(r => (int)r.Depth);
         if (deepest >= levels)
         {
@@ -77,25 +63,6 @@ internal static class SqlOSFgaFilterBuilder
         // query runs, once per query (an uncorrelated EXISTS the engine evaluates as a one-time filter).
         var alive = Expression.Call(QueryableAnyNoPredicate.MakeGenericMethod(typeof(SqlOSFgaActiveSubject)), liveQuery.Expression);
         return Expression.Lambda<Func<T, bool>>(Expression.AndAlso(alive, body!), entity);
-    }
-
-    /// <summary>
-    /// <c>EXISTS (SELECT 1 FROM fn_IsResourceAccessible(entity.ResourceId, @subjects, @permission))</c>: the point
-    /// check per row, through the context's registered table-valued function.
-    /// </summary>
-    private static Expression<Func<T, bool>> RowByRow<T>(ISqlOSFgaDbContext context, ParameterExpression entity, string subjectIdsJson, string permissionId)
-    {
-        var contextType = context.GetType();
-        var function = contextType.GetMethod(nameof(ISqlOSFgaDbContext.IsResourceAccessible), [typeof(string), typeof(string), typeof(string)])
-            ?? throw new InvalidOperationException($"{contextType.Name} does not declare IsResourceAccessible(string, string, string); see ISqlOSFgaDbContext.");
-        var call = Expression.Call(
-            Expression.Constant(context, contextType),
-            function,
-            Expression.Property(entity, nameof(IHasResourceId.ResourceId)),
-            Parameter<string>(subjectIdsJson),
-            Parameter<string>(permissionId));
-        var any = Expression.Call(QueryableAnyNoPredicate.MakeGenericMethod(typeof(SqlOSFgaAccessibleResource)), call);
-        return Expression.Lambda<Func<T, bool>>(any, entity);
     }
 
     /// <summary>

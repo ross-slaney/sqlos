@@ -23,9 +23,6 @@ internal static class SqlOSFgaLineage
     /// </summary>
     public const string ReachColumn = "Reach";
 
-    /// <summary>A caller holding more roots than this is checked row by row by <c>fn_IsResourceAccessible</c> instead of by a listed predicate.</summary>
-    public const int MaxListedRoots = 1_000;
-
     /// <summary>
     /// Rows per transaction when the lineage is rebuilt over the whole table: every write of the rebuild is
     /// a range of the resources table in key order, committed on its own, so the transaction log stays

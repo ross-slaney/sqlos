@@ -75,7 +75,7 @@ against SqlOS's rebuild.
 | `list.deep-chain.first-page` | The same at D = 10 |
 | `list.store.first-page` | Sparse access (σ ≈ 0.0065%): the previous function examined about 400K rows per page |
 | `list.store.by-store` | The same person listing their store with `WHERE StoreId = …`: the application narrowed the page itself |
-| `list.grants10k.first-page`, `list.grants100k.first-page` | More roots than the filter lists: each row is checked by `fn_IsResourceAccessible`, which probes the grants of the row's ancestors |
+| `list.grants10k.first-page`, `list.grants100k.first-page` | Thousands of roots: the same predicate, with the roots at the product level sent as one list parameter |
 | `reference.*` | The previous function's twin of every page and point check |
 | `point.function.*`, `point.api.*` | `fn_IsResourceAccessible` for one product at depth 4 and 9, a denial, the many-grants people, and `Allows` |
 | `density.*` | At the first scale only: the region pages and the denied check re-run while 100 other people hold grants on the root. Only the caller's own grants should matter. Reported, not gated |
@@ -90,7 +90,9 @@ Run 36964060038 (2026-10-02, hosted `ubuntu-latest`, 4 vCPU, 17 GB, 8 GB to the 
 both engines, every gate green. **Before** is the previous release's function through the same
 `BuildFilterAsync`; **Now** is the filter reading the row's scope column. A dash means the previous
 function was not run for that page (its many-grants pages take minutes at 10M). The run's summary page has
-the 10M tables, every scenario with rows read and server time, and the plans.
+the 10M tables, every scenario with rows read and server time, and the plans. The many-grants list rows were
+measured when callers with more than 1,000 roots were still checked row by row; that path is gone, and those
+callers now get the same filter as everyone else.
 
 **PostgreSQL 16, 1M products** (median ms; × = times faster than before)
 

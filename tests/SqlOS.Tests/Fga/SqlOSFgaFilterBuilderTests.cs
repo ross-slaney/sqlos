@@ -17,8 +17,7 @@ namespace SqlOS.Tests.Fga;
 /// prints the SQL here; the integration tests run the real thing on both engines). A root at a level compares
 /// the level's eight bytes of the scope column, read with the expression of the computed column the level's
 /// index is built on, against a parameter, under the comparison on the depth byte that is the index's
-/// filter; several roots at a level are a membership test; more than the list limit checks each row with the
-/// function.
+/// filter; several roots at a level, however many, are a membership test.
 /// </summary>
 [TestClass]
 public class SqlOSFgaFilterBuilderTests
@@ -56,16 +55,19 @@ public class SqlOSFgaFilterBuilderTests
     }
 
     [TestMethod]
-    public void MoreRootsThanTheListLimit_CheckEachRowWithTheFunction()
+    public void ThousandsOfRoots_AreTheSameMembershipTest()
     {
+        // Any number of grants is the same predicate: the roots at a level travel as one collection parameter.
         using var context = Create();
-        var roots = Enumerable.Range(1, SqlOSFgaLineage.MaxListedRoots + 1).Select(i => Root(i, 4)).ToList();
+        var roots = Enumerable.Range(1, 5_000).Select(i => Root(i, 4)).Append(Root(9_999, 1)).ToList();
         var filter = Build(context, roots, typeSeq: 7);
         var sql = context.Set<Item>().Where(filter).ToQueryString();
 
-        sql.Should().Contain("fn_IsResourceAccessible");
-        sql.Should().NotContain("SUBSTRING(", "the row's ancestors are probed inside the function, never listed");
-        sql.Should().NotContain("fn_ActiveSubjects", "the function checks the caller's liveness itself");
+        sql.Should().Contain($"SUBSTRING(\"i\".\"FgaScope\", {SqlOSFgaLineage.ScopeAncestorOffset(4)}, 8)");
+        sql.Should().Contain("json_each(@__p_");
+        sql.Should().Contain($"SUBSTRING(\"i\".\"FgaScope\", {SqlOSFgaLineage.ScopeAncestorOffset(1)}, 8) = @", "one root at level 1");
+        sql.Should().Contain("fn_ActiveSubjects");
+        sql.Should().NotContain("fn_IsResourceAccessible");
     }
 
     [TestMethod]
@@ -95,7 +97,7 @@ public class SqlOSFgaFilterBuilderTests
     private static System.Linq.Expressions.Expression<Func<Item, bool>> Build(FilterDbContext context, IReadOnlyList<SqlOSFgaAccessRoot> roots, int? typeSeq)
     {
         var liveQuery = context.Set<SqlOSFgaActiveSubject>().FromSqlRaw("SELECT SubjectId FROM fn_ActiveSubjects({0})", "[\"u\"]").AsNoTracking();
-        return SqlOSFgaFilterBuilder.Build<Item>(context, roots, liveQuery, "[\"u\"]", "perm", typeSeq, levels: 11);
+        return SqlOSFgaFilterBuilder.Build<Item>(roots, liveQuery, typeSeq, levels: 11);
     }
 
     private static FilterDbContext Create()

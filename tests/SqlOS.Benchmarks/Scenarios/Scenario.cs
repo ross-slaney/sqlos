@@ -78,8 +78,8 @@ internal static class ScenarioCatalog
             new("point.api.deep-product", "Allows (CheckAccessAsync), product at depth 9", ScenarioKind.PointApi, people.Admin, 1.0, "9", ProductId: deepProduct),
         };
 
-        // People holding thousands of single-product grants, the way per-item sharing accumulates: more roots
-        // than the filter lists, so each row is checked by fn_IsResourceAccessible instead.
+        // People holding thousands of single-product grants, the way per-item sharing accumulates: the same
+        // predicate, with all of their roots in one list parameter.
         foreach (var person in people.ManyGrants.Where(p => p.GrantedProducts > 0))
         {
             var share = (double)person.GrantedProducts / productCount;

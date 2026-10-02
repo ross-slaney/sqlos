@@ -131,9 +131,7 @@ is fixed: the benchmark's store manager sees 0.0065% of the catalog, 65 rows at 
 an index for, the predicate is `Scope_ℓ = a` on the row itself, and the mirrored index (Scope_ℓ, order
 columns, key) answers the page with one seek followed by k entries: the cost does not depend on N or σ (the
 same page: 1.7 ms at either size). A caller with several roots reads one seek per root; the engine merges or
-sorts the streams, which costs at most S. A caller with more roots than the list limit (1,000) is checked
-row by row by `fn_IsResourceAccessible`, which enumerates the levels Reach(x)…d of each candidate row and
-probes the grants on its ancestor at each: D + 1 lookups per row at most, whatever the number of grants, and
-the scan plan only.
+sorts the streams, which costs at most S. There is no other form: a caller with thousands of roots gets the
+same predicate, with the roots at each level sent as one list parameter, and pays one seek per root.
 
 The benchmark harness (`tests/SqlOS.Benchmarks`) measures the previous function and the scope column on the same data from 100K to 50M rows.

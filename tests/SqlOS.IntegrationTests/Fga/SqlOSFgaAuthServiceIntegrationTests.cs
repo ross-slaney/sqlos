@@ -92,14 +92,14 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
     }
 
     [TestMethod]
-    public async Task ACallerWithMoreRootsThanTheListLimit_IsCheckedRowByRow()
+    public async Task ACallerWithThousandsOfGrants_IsFilteredByTheSameScopeTest()
     {
-        // 1,001 grants on single projects: the predicate checks each row with fn_IsResourceAccessible instead
-        // of listing the roots, and still returns exactly the granted rows.
+        // 2,500 grants on single projects: the predicate tests each row's scope against all of them, the same
+        // test as for one grant, and returns exactly the granted rows.
         var subjectService = CreateSubjectService();
         var user = await subjectService.CreateUserAsync("Many Grants User", $"many-grants-{Guid.NewGuid():N}@example.com");
         var suffix = Guid.NewGuid().ToString("N");
-        var granted = Enumerable.Range(0, 1_001).Select(i => $"many_{i}_{suffix}").ToArray();
+        var granted = Enumerable.Range(0, 2_500).Select(i => $"many_{i}_{suffix}").ToArray();
         var ungranted = $"many_none_{suffix}";
         Context.ChangeTracker.Clear();
         foreach (var id in granted.Append(ungranted))
@@ -122,7 +122,9 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
 
         var filter = await _authService.BuildFilterAsync<LifecycleProtectedEntity>(user.SubjectId, "TEST_VIEW");
         var query = Context.Set<LifecycleProtectedEntity>().AsNoTracking().Where(e => e.Id.EndsWith(suffix)).Where(filter);
-        StringAssert.Contains(query.ToQueryString(), "fn_IsResourceAccessible");
+        var sql = query.ToQueryString();
+        StringAssert.Contains(sql, SqlOSFgaLineage.ScopeColumn);
+        Assert.IsFalse(sql.Contains("fn_IsResourceAccessible"), "one method: no per-row function");
         var visible = await query.Select(e => e.Id).ToListAsync();
         CollectionAssert.AreEquivalent(new[] { $"manyrow_a_{suffix}", $"manyrow_b_{suffix}" }, visible);
     }
