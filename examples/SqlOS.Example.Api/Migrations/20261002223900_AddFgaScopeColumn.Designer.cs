@@ -12,7 +12,7 @@ using SqlOS.Example.Api.Data;
 namespace SqlOS.Example.Api.Migrations
 {
     [DbContext(typeof(ExampleAppDbContext))]
-    [Migration("20261002135709_AddFgaScopeColumn")]
+    [Migration("20261002223900_AddFgaScopeColumn")]
     partial class AddFgaScopeColumn
     {
         /// <inheritdoc />
@@ -3887,6 +3887,31 @@ namespace SqlOS.Example.Api.Migrations
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
+            modelBuilder.Entity("SqlOS.Fga.Models.SqlOSFgaAccessMatch", b =>
+                {
+                    b.Property<string>("GrantId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Id")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Level")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RoleId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("SubjectId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.ToTable((string)null);
+
+                    b.ToView(null, (string)null);
+                });
+
             modelBuilder.Entity("SqlOS.Fga.Models.SqlOSFgaAccessRoot", b =>
                 {
                     b.Property<short>("Depth")
@@ -3894,16 +3919,6 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.Property<long>("ResourceSeq")
                         .HasColumnType("bigint");
-
-                    b.ToTable((string)null);
-
-                    b.ToView(null, (string)null);
-                });
-
-            modelBuilder.Entity("SqlOS.Fga.Models.SqlOSFgaAccessibleResource", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("nvarchar(max)");
 
                     b.ToTable((string)null);
 
@@ -4002,6 +4017,34 @@ namespace SqlOS.Example.Api.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SqlOS.Fga.Models.SqlOSFgaPathNode", b =>
+                {
+                    b.Property<bool>("InReach")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("Level")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ResourceId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ResourceTypeId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.ToTable((string)null);
+
+                    b.ToView(null, (string)null);
+                });
+
             modelBuilder.Entity("SqlOS.Fga.Models.SqlOSFgaPermission", b =>
                 {
                     b.Property<string>("Id")
@@ -4040,44 +4083,8 @@ namespace SqlOS.Example.Api.Migrations
                     b.Property<string>("Id")
                         .HasColumnType("nvarchar(450)");
 
-                    b.Property<long?>("Ancestor0")
-                        .HasColumnType("bigint");
-
-                    b.Property<long?>("Ancestor1")
-                        .HasColumnType("bigint");
-
-                    b.Property<long?>("Ancestor10")
-                        .HasColumnType("bigint");
-
-                    b.Property<long?>("Ancestor2")
-                        .HasColumnType("bigint");
-
-                    b.Property<long?>("Ancestor3")
-                        .HasColumnType("bigint");
-
-                    b.Property<long?>("Ancestor4")
-                        .HasColumnType("bigint");
-
-                    b.Property<long?>("Ancestor5")
-                        .HasColumnType("bigint");
-
-                    b.Property<long?>("Ancestor6")
-                        .HasColumnType("bigint");
-
-                    b.Property<long?>("Ancestor7")
-                        .HasColumnType("bigint");
-
-                    b.Property<long?>("Ancestor8")
-                        .HasColumnType("bigint");
-
-                    b.Property<long?>("Ancestor9")
-                        .HasColumnType("bigint");
-
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
-
-                    b.Property<short?>("Depth")
-                        .HasColumnType("smallint");
 
                     b.Property<string>("Description")
                         .HasColumnType("nvarchar(max)");
@@ -4092,15 +4099,9 @@ namespace SqlOS.Example.Api.Migrations
                     b.Property<string>("ParentId")
                         .HasColumnType("nvarchar(450)");
 
-                    b.Property<short?>("Reach")
-                        .HasColumnType("smallint");
-
                     b.Property<string>("ResourceTypeId")
                         .IsRequired()
                         .HasColumnType("nvarchar(450)");
-
-                    b.Property<long?>("Seq")
-                        .HasColumnType("bigint");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2");

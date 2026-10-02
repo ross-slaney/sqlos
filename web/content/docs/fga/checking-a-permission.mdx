@@ -6,7 +6,7 @@ group: "checks"
 order: 0
 ---
 
-Use `CheckAccessAsync` for a yes/no answer: can this subject perform this action on this resource?
+Use `CheckAccessAsync` for a yes/no answer: can this subject perform this action on this resource? It reads the resource's lineage in one query and looks for a grant on the resources access flows down to it from, the same rule list filters apply. It runs in the database, so it needs SQL Server or PostgreSQL.
 
 <Callout type="warning" title="Authenticate before you authorize">
   FGA checks a subject ID; it does not validate bearer tokens. Protect the route group for this API's exact audience first, then derive the subject ID from `GetSqlOSValidatedToken()`. Never trust a subject ID supplied by the client.
@@ -50,7 +50,7 @@ Test access decisions visually in the dashboard at Fine-Grained Auth > Access Te
 
 ![Access Tester](/docs/dashboard-access-tester.png)
 
-Select a subject, permission, and resource to see whether access is allowed and trace the decision path.
+Select a subject, permission, and resource to see whether access is allowed, the path from the top of the resource's tree down to it, and the grants on that path. The tester's decision is the point check's.
 
 ## Full mutation example
 
@@ -94,6 +94,6 @@ api.MapPost("/workspaces", async (
     db.Workspaces.Add(workspace);
     await db.SaveChangesAsync(ct);
 
-    return Results.Created($"/api/workspaces/{workspace.Id}", workspace);
+    return Results.Created($"/api/workspaces/{workspace.Id}", new { workspace.Id, workspace.Name });
 });
 ```

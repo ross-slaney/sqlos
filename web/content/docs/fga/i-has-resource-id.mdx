@@ -16,10 +16,16 @@ public interface IHasResourceId
 }
 ```
 
-Implement both as public properties: `ResourceId` holds the row's FGA resource, and `FgaScope` is the column SqlOS fills and maintains so list filters stay fast at any table size. Declare it with a private setter; your code never sets it:
+`ResourceId` holds the row's FGA resource; map it as an ordinary property. `FgaScope` is the column SqlOS fills and maintains so list filters stay fast at any table size. Declare it with a private setter; your code never sets or reads it:
 
 ```csharp
 public byte[]? FgaScope { get; private set; }
+```
+
+Keep it out of API responses by returning DTOs. To keep it off the class's public surface altogether, implement it explicitly; SqlOS maps the column either way:
+
+```csharp
+byte[]? IHasResourceId.FgaScope => null;
 ```
 
 For protected domain entities whose resource lifecycle should be managed by SqlOS, prefer `ISqlOSResourceEntity`. It extends `IHasResourceId` with resource metadata used by `SqlOSDbContext<TContext>` during `SaveChanges` / `SaveChangesAsync`.

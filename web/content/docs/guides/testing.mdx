@@ -19,7 +19,7 @@ You'll learn how to run the full test suite and focused filters while developing
 ## Test layout
 
 - `tests/SqlOS.Tests` — unit tests
-- `tests/SqlOS.IntegrationTests` — real SQL Server or PostgreSQL (Aspire container; set `SQLOS_TEST_PROVIDER=postgresql` for Postgres)
+- `tests/SqlOS.IntegrationTests` — real SQL Server or PostgreSQL (Aspire container; set `SQLOS_TEST_PROVIDER=postgresql` for Postgres, or `SQLOS_TEST_SQLSERVER_RCSI=1` to run SQL Server with read-committed snapshot, the Azure SQL default)
 - `examples/SqlOS.Example.IntegrationTests` — example API flows
 - `examples/SqlOS.Todo.IntegrationTests` — Todo sample flows
 - `tests/SqlOS.Benchmarks` — authorization benchmarks on SQL Server and PostgreSQL, 1M to 50M products in CI
@@ -46,6 +46,8 @@ Integration tests use Aspire and SQL Server or PostgreSQL containers for:
 - Client registration and resource indicators
 - FGA checks and EF query composition
 - Example and Todo sample end-to-end paths
+
+Authorization checks and list filters run in the database. Unit tests on an in-memory provider can check the grants a feature creates, but not the access decision; test that against SQL Server or PostgreSQL.
 
 ## Focused runs
 

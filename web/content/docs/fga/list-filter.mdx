@@ -53,9 +53,9 @@ What SqlOS creates and maintains itself at startup, outside your migrations:
 - per level of the tree, an index on that level's part of the scope column followed by your primary key, and one more per index you declared on the table (the orders you page in), filtered to the rows at or below the level, so a level deeper than any row costs nothing. On PostgreSQL these are expression indexes; on SQL Server they are built on computed columns that take no storage;
 - statistics on the type part of the column, so the optimizer knows the type test keeps nearly every row and walks the level's index instead of sorting the caller's whole scope;
 - two triggers on your table that set a row's scope when it is inserted or its `ResourceId` changes, and the resource table's triggers that keep it current when resources move, are deactivated, retyped, or deleted;
-- the one-time fill when a table first gets the column.
+- at every start, the scope of rows that have none (a new table's rows, rows a bulk load wrote without triggers), set through an index on those rows.
 
-If a table's column is missing because its migration was not applied, SqlOS stops at startup and names the table.
+If SqlOS starts before the migration that adds a table's column, it logs a warning naming the table and protects the table at the next start.
 
 Declare an index for each order you page in and end it with the key, as the [pagination guide](/docs/guides/paginating-authorized-lists) shows; SqlOS mirrors it per level. A page sorted by a column you declared no index for still returns the right rows, through the caller's whole scope rather than one seek.
 
@@ -66,6 +66,18 @@ The price is storage: one index per level per declared order, over the rows at o
 ## Filter lifetime
 
 The caller's principal set (the subject plus its active group memberships) and their grants are read when the returned task is awaited. Build the filter once per request and compose it into that request's queries. Do not cache the filter in statics or reuse it across requests -- grant and membership changes are not reflected in an already-built filter. The caller's own lifecycle is still checked when the query runs: a user deactivated after the filter was built sees nothing.
+
+The filter holds no `DbContext`: compose it into a query on any instance of your context, one from `IDbContextFactory` or a pool included. List filters and point checks run in the database, so they need SQL Server or PostgreSQL; an in-memory provider fails with a message that says so.
+
+## Queries that stay flat, and queries that don't
+
+For a caller whose access comes from a few grants, a page in an order you declared an index for (keyset pagination, or the first page of an offset query) costs the same at any table size; a caller with very many grants pays for them, as above. Some queries read the caller's whole scope instead, so they grow with what the caller can see:
+
+- `Count()`, `Sum()`, and other aggregates over the filtered rows;
+- a large `Skip(...)`, which reads every row it skips;
+- a sort by a column you declared no index for.
+
+Fetch `pageSize + 1` rows to know whether there is a next page, as the [pagination guide](/docs/guides/paginating-authorized-lists) shows, instead of counting.
 
 ## Composing with plain EF
 
