@@ -86,6 +86,7 @@ public sealed class TodoItem : ISqlOSResourceEntity
 {
     public Guid Id { get; set; }
     public string ResourceId { get; set; } = string.Empty;
+    public byte[]? FgaScope { get; private set; }
     public string OwnerSubjectId { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
     public bool IsCompleted { get; set; }

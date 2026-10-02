@@ -80,6 +80,7 @@ public sealed class Workspace : ISqlOSResourceEntity
 {
     public Guid Id { get; set; }
     public string ResourceId { get; set; } = string.Empty;
+    public byte[]? FgaScope { get; private set; }
     public string Name { get; set; } = string.Empty;
 
     public string ResourceTypeId => "workspace";

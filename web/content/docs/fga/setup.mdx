@@ -1,0 +1,172 @@
+---
+title: "Set Up FGA"
+description: "Add SqlOS authorization to an EF Core app on SQL Server or PostgreSQL, with SqlOSDbContext or your own DbContext."
+section: "authorization"
+order: 1
+---
+
+There are two ways to add SqlOS authorization to an EF Core application. Both give you the same `BuildFilterAsync` list filter and the same performance, on SQL Server and on PostgreSQL. Pick by who should own the FGA resource behind each row.
+
+| | SqlOSDbContext (recommended) | Your own DbContext |
+| --- | --- | --- |
+| Your context | derives from `SqlOSDbContext<TContext>` | derives from `DbContext` and calls `UseSqlOS(GetType())` last in `OnModelCreating` |
+| Your protected entities | implement `ISqlOSResourceEntity` | implement `IHasResourceId` |
+| Each row's FGA resource | created, moved, and deleted by SqlOS on `SaveChanges` | created by your code |
+| Database | SQL Server or PostgreSQL | SQL Server or PostgreSQL |
+
+## What every protected entity declares
+
+Every protected entity declares two things: the id of its FGA resource, and the `FgaScope` column SqlOS keeps current. The compiler requires both: an entity that implements `IHasResourceId` or `ISqlOSResourceEntity` without `FgaScope` does not build.
+
+```csharp
+public string ResourceId { get; set; } = "";
+public byte[]? FgaScope { get; private set; }   // SqlOS fills and maintains it; never set it
+```
+
+`FgaScope` holds the row's resource type and the ancestors access flows down from. `BuildFilterAsync` reads it, so a page of a list costs the same whether the table holds a thousand rows or fifty million, and whether the caller can see all of it or a sliver. It is a byte string on both databases (`varbinary(512)` on SQL Server, `bytea` on PostgreSQL), so nothing about it depends on which one you use.
+
+## Option 1: SqlOSDbContext and ISqlOSResourceEntity
+
+The entity describes its resource; SqlOS creates and maintains it.
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using SqlOS;
+using SqlOS.Fga.Interfaces;
+
+public sealed class Project : ISqlOSResourceEntity
+{
+    public Guid Id { get; set; }
+    public string ResourceId { get; set; } = "";
+    public byte[]? FgaScope { get; private set; }
+    public string Name { get; set; } = "";
+    public string WorkspaceResourceId { get; set; } = "";
+
+    public string ResourceTypeId => "project";
+    public string ResourceName => Name;
+    public string? ParentResourceId => WorkspaceResourceId;
+    public string? ResourceDescription => null;
+    public bool ResourceIsActive => true;
+}
+
+public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
+    : SqlOSDbContext<AppDbContext>(options)
+{
+    public DbSet<Project> Projects => Set<Project>();
+
+    protected override void OnApplicationModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Project>(entity =>
+        {
+            entity.HasKey(project => project.Id);
+            entity.HasIndex(project => project.ResourceId).IsUnique();
+            entity.HasIndex(project => new { project.Name, project.Id });   // an order you page in
+        });
+    }
+}
+```
+
+Saving a `Project` creates its FGA resource under its workspace in the same `SaveChanges`.
+
+## Option 2: your own DbContext and IHasResourceId
+
+Your context keeps its own base class and calls SqlOS's model method as the last line of `OnModelCreating`. Your code creates each row's FGA resource.
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using SqlOS.AuthServer.Interfaces;
+using SqlOS.Extensions;
+using SqlOS.Fga.Interfaces;
+using SqlOS.Fga.Models;
+
+public sealed class Ticket : IHasResourceId
+{
+    public Guid Id { get; set; }
+    public string ResourceId { get; set; } = "";
+    public byte[]? FgaScope { get; private set; }
+    public string Title { get; set; } = "";
+}
+
+public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
+    : DbContext(options), ISqlOSAuthServerDbContext, ISqlOSFgaDbContext
+{
+    public DbSet<Ticket> Tickets => Set<Ticket>();
+
+    public IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessible(string resourceId, string subjectIds, string permissionId)
+        => FromExpression(() => IsResourceAccessible(resourceId, subjectIds, permissionId));
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Ticket>(entity =>
+        {
+            entity.HasKey(ticket => ticket.Id);
+            entity.HasIndex(ticket => ticket.ResourceId).IsUnique();
+        });
+
+        modelBuilder.UseSqlOS(GetType());   // SqlOS's auth and FGA model, last
+    }
+}
+```
+
+Create the resource when you create the row:
+
+```csharp
+var id = Guid.NewGuid();
+await db.CreateResourceWithIdAsync($"ticket::{id:D}", "ticket", "Printer jam", parentResourceId: workspaceResourceId);
+db.Tickets.Add(new Ticket { Id = id, ResourceId = $"ticket::{id:D}", Title = "Printer jam" });
+await db.SaveChangesAsync();
+```
+
+`UseSqlOS` applies SqlOS's auth model and its FGA model. A context that only holds FGA data, next to the context you register with SqlOS, calls `modelBuilder.ApplySqlOSFgaModel(GetType())` instead.
+
+## Register SqlOS on SQL Server or PostgreSQL
+
+Both options register the same way. The provider call is the only line that differs between the databases.
+
+```csharp
+builder.AddSqlOS<AppDbContext>(
+    db => db.UseSqlServer(connectionString),   // SQL Server
+    // db => db.UseNpgsql(connectionString),   // PostgreSQL
+    options =>
+    {
+        options.AuthServer.PublicOrigin = "https://app.example.com";
+        options.AuthServer.Issuer = "https://app.example.com/sqlos/auth";
+
+        options.Fga.Seed(seed =>
+        {
+            seed.ResourceType("project", "Project");
+            seed.Permission("project.read", "Read project", "project");
+            seed.Role("project_reader", "Project reader").Can("project.read");
+        });
+    });
+```
+
+## Create the tables, then start
+
+1. Add a migration for your context (`dotnet ef migrations add AddProjects`) and apply it, or call `EnsureCreated` in development. The migration carries your tables with their `FgaScope` column, and an index on `ResourceId` if you declared none.
+2. Start the application. SqlOS creates its own tables, then, for every table with an `FgaScope` column, its per-level indexes and the triggers that keep the column current, and fills the column for existing rows. None of that is in your migrations.
+
+If a table's `FgaScope` column is missing (the migration was not applied), SqlOS stops at startup and names the table.
+
+## Filter a list
+
+The same code for both options and both databases:
+
+```csharp
+var filter = await authorization.BuildFilterAsync<Project>(subjectId, "project.read");
+
+var page = await db.Projects
+    .AsNoTracking()
+    .Where(filter)
+    .OrderBy(project => project.Name).ThenBy(project => project.Id)
+    .Take(25)
+    .ToListAsync(cancellationToken);
+```
+
+Page in an order you declared an index for, ended by the key, as above: SqlOS mirrors each such index per level of the resource tree, so the page is one index seek. A page sorted by a column you declared no index for still returns the right rows; it reads the caller's whole scope to sort them. See [List filtering](/docs/fga/list-filter) for how the filter works and what it costs.
+
+## Upgrading from a version without FgaScope
+
+1. Add `public byte[]? FgaScope { get; private set; }` to every entity that implements `IHasResourceId` or `ISqlOSResourceEntity`. The build lists every one that needs it.
+2. Add and apply one migration for each context that has such entities.
+3. Start the application. SqlOS builds the resource lineage and fills every `FgaScope` column once; on a large database that first start takes a few minutes per million resources.

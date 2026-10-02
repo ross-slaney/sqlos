@@ -45,7 +45,7 @@ protected SqlOSDbContext(DbContextOptions<TContext> options)
 | --- | --- | --- |
 | `options` | `DbContextOptions<TContext>` | EF Core options registered for the derived application context. |
 
-The base context registers SqlOS auth, email, calendar, and FGA entities in the EF model, with the resource lineage columns the configured `Fga.MaxResourceHierarchyDepth` calls for. Relational contexts also register the `dbo.fn_IsResourceAccessible` table-valued function. Its sealed `OnModelCreating` implementation invokes `OnApplicationModelCreating` for application-owned mappings, and afterwards adds the scope column to every application entity that implements `IHasResourceId`.
+The base context registers SqlOS auth, email, calendar, and FGA entities in the EF model, with the resource lineage columns the configured `Fga.MaxResourceHierarchyDepth` calls for. Relational contexts also register the `dbo.fn_IsResourceAccessible` table-valued function. Its sealed `OnModelCreating` implementation invokes `OnApplicationModelCreating` for application-owned mappings, and afterwards configures the `FgaScope` column of every application entity that implements `IHasResourceId`.
 
 `SaveChanges` and `SaveChangesAsync` synchronize tracked entities that implement `ISqlOSResourceEntity` into the FGA resource table before EF saves the unit of work.
 
@@ -96,7 +96,7 @@ public static WebApplicationBuilder AddSqlOS<TContext>(
 | Parameter | Type | Description |
 | --- | --- | --- |
 | `builder` | `WebApplicationBuilder` | The application host builder. |
-| `configureDbContext` | `Action<DbContextOptionsBuilder>` | Configures the application EF Core context. Use `UseSqlServer(...)` for the supported provider. |
+| `configureDbContext` | `Action<DbContextOptionsBuilder>` | Configures the application EF Core context: `UseSqlServer(...)` for SQL Server or `UseNpgsql(...)` for PostgreSQL. |
 | `configureSqlOS` | `Action<SqlOSOptions>?` | Optional SqlOS configuration callback. |
 
 **Returns:** the same `WebApplicationBuilder`, for chaining.

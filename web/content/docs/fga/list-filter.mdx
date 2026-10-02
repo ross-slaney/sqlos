@@ -32,7 +32,7 @@ The subject only sees chains they have access to. The filter translates to a SQL
 
 Every FGA resource carries its **lineage**: its ancestor at each level of the tree, its depth, and its **reach**, the highest level from which access flows down to it through active resources only. Schema v11 adds the columns to the resource table (one ancestor column per level up to the default depth of 10; a larger `MaxResourceHierarchyDepth` adds the rest at startup), SqlOS keeps them exact with triggers, and fills them once when you upgrade.
 
-Every table of yours whose entity implements `IHasResourceId` carries one more column, the **scope column** (`SqlOSFgaScope`): its row's resource type and, for each level of the tree, the ancestor at that level where access flows down to the row from it. SqlOS keeps it current with triggers on your table and on the resource table, and fills it once when you upgrade. It is the only thing SqlOS adds to your tables; see [the scope column](#the-scope-column).
+Every entity of yours that implements `IHasResourceId` declares one more column, the **scope column** (`FgaScope`): its row's resource type and, for each level of the tree, the ancestor at that level where access flows down to the row from it. SqlOS keeps it current with triggers on your table and on the resource table, and fills it once when you upgrade. [Set up FGA](/docs/fga/setup) shows the declaration for both ways of adding SqlOS.
 
 When you build a filter, SqlOS reads the caller's **access roots** once: the resources on which the caller, or one of their active groups, holds a current grant whose role includes the permission. The filter then says, for each row: at the level of one of those roots, the row's scope column holds that root. It is the same predicate for every caller and every table, it joins nothing, and for a caller whose access comes from one grant the database answers a page with one index seek plus the rows of the page, whatever the table's size, in any order you declared an index for.
 
@@ -40,25 +40,28 @@ A caller with more than 1,000 roots (thousands of grants on single resources, sa
 
 ## The scope column
 
-The scope column is one column per table, and SqlOS manages it. What lands in your schema:
+The scope column is one column per table. Your entity declares it, and SqlOS manages its contents:
 
-- `SqlOSFgaScope` on every table whose entity implements `IHasResourceId`, as a shadow property: your entity classes do not change, and your next EF migration carries the column. It is `bigint[]` on PostgreSQL and `varbinary(512)` on SQL Server, sized for any depth you may configure later.
-- An index on the table's `ResourceId`, if you have none: the triggers find a resource's rows by it.
+```csharp
+public byte[]? FgaScope { get; private set; }
+```
+
+The compiler requires it: `IHasResourceId` (and `ISqlOSResourceEntity`, which extends it) has an `FgaScope` member, so an entity without it does not build. EF Core maps it like any other property, as `varbinary(512)` on SQL Server and `bytea` on PostgreSQL, the same layout on both, sized for any depth you may configure later. Your migration carries it, with an index on `ResourceId` if you declared none: the triggers find a resource's rows by it. SqlOS never writes it through EF Core, and your code never sets it.
 
 What SqlOS creates and maintains itself at startup, outside your migrations:
 
-- per level of the tree, an index on that level's part of the scope column followed by your primary key, and one more per index you declared on the table (the orders you page in), filtered to the rows at or below the level, so a level deeper than any row costs nothing. On SQL Server the level's part is read through a computed column that takes no storage;
-- statistics on the type part of the column (on SQL Server through one more storage-free computed column), so the optimizer knows the type test keeps nearly every row and walks the level's index instead of sorting the caller's whole scope;
-- two triggers on your table that copy a row's scope when it is inserted or its `ResourceId` changes, and the resource table's triggers that keep it current when resources move, are deactivated, retyped, or deleted;
+- per level of the tree, an index on that level's part of the scope column followed by your primary key, and one more per index you declared on the table (the orders you page in), filtered to the rows at or below the level, so a level deeper than any row costs nothing. On PostgreSQL these are expression indexes; on SQL Server they are built on computed columns that take no storage;
+- statistics on the type part of the column, so the optimizer knows the type test keeps nearly every row and walks the level's index instead of sorting the caller's whole scope;
+- two triggers on your table that set a row's scope when it is inserted or its `ResourceId` changes, and the resource table's triggers that keep it current when resources move, are deactivated, retyped, or deleted;
 - the one-time fill when a table first gets the column.
+
+If a table's column is missing because its migration was not applied, SqlOS stops at startup and names the table.
 
 Declare an index for each order you page in and end it with the key, as the [pagination guide](/docs/guides/paginating-authorized-lists) shows; SqlOS mirrors it per level. A page sorted by a column you declared no index for still returns the right rows, through the caller's whole scope rather than one seek.
 
 The price is storage: one index per level per declared order, over the rows at or below that level. In the benchmark's 50-million-row catalog the scope column and its indexes are about half of the database.
 
-For a context derived from `SqlOSDbContext<TContext>` nothing else is needed. A context that calls `ApplySqlOSFgaModel` itself must call it after configuring its entities and pass `Database.ProviderName`, which decides the column's type.
-
-**Upgrading**: after taking this version, add a migration for every context that has entities with a `ResourceId` (`dotnet ef migrations add AddSqlOSFgaScopeColumn`), and apply it before the application starts; it adds the column and, where missing, the `ResourceId` index. A context that uses `EnsureCreated` gets the column with its tables. SqlOS fills the column and builds its indexes at the first start.
+**Upgrading**: add `public byte[]? FgaScope { get; private set; }` to every entity that implements `IHasResourceId` (the build lists them), add and apply one migration per context, and start the application. A context that uses `EnsureCreated` gets the column with its tables.
 
 ## Filter lifetime
 

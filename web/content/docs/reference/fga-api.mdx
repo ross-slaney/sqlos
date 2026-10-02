@@ -87,7 +87,7 @@ var chains = await dbContext.Chains
 | `subjectId` | `string` | The subject to filter for. |
 | `permissionKey` | `string` | The permission key that determines which resources are visible. |
 
-**Type constraint**: `T : IHasResourceId` — the entity must expose a `ResourceId` property. Protected domain entities should usually implement `ISqlOSResourceEntity`, which extends `IHasResourceId` and lets `SqlOSDbContext<TContext>` sync backing resource rows during EF saves.
+**Type constraint**: `T : IHasResourceId`: the entity exposes its `ResourceId` and declares the `FgaScope` column SqlOS maintains. Protected domain entities should usually implement `ISqlOSResourceEntity`, which extends `IHasResourceId` and lets `SqlOSDbContext<TContext>` sync backing resource rows during EF saves.
 
 **Returns**
 
@@ -95,7 +95,7 @@ var chains = await dbContext.Chains
 
 **Filter lifetime**: the subject's principal set (the subject plus its active group memberships) and their grants are resolved when the task is awaited; the caller's own lifecycle is rechecked when the query runs. Build the filter once per request and compose it into that request's queries; do not cache it in statics or reuse it across requests.
 
-**The scope column**: the predicate reads the entity's own `SqlOSFgaScope` column and joins nothing; see [List filtering](/docs/fga/list-filter#the-scope-column). An entity type whose table has no scope column (one configured before `UseSqlOS` or `ApplySqlOSFgaModel` ran) is reported with an exception that says so.
+**The scope column**: the predicate reads the entity's own `FgaScope` column (`IHasResourceId.FgaScope`) and joins nothing; see [List filtering](/docs/fga/list-filter#the-scope-column).
 
 ### Lifecycle enforcement
 
@@ -144,6 +144,7 @@ public sealed class Workspace : ISqlOSResourceEntity
 {
     public Guid Id { get; set; }
     public string ResourceId { get; set; } = "";
+    public byte[]? FgaScope { get; private set; }
     public string OrganizationId { get; set; } = "";
     public string Name { get; set; } = "";
 
@@ -273,6 +274,7 @@ public class Chain : IHasResourceId
 {
     public string Id { get; set; } = Guid.NewGuid().ToString();
     public string ResourceId { get; set; } = "";
+    public byte[]? FgaScope { get; private set; }
     public string Name { get; set; } = "";
 }
 ```

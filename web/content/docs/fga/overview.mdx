@@ -38,7 +38,7 @@ Define resources (projects, chains, stores), roles (admin, viewer), and permissi
 <CardGrid cols={3}>
   <Card title="Resources" description="Organizations, projects, chains, stores, or any hierarchy you define." />
   <Card title="Roles and permissions" description="Attach reusable permission bundles to a resource and inherit them downward." />
-  <Card title="Query filters" description="Push auth checks into SQL Server instead of loading data and trimming it in memory." />
+  <Card title="Query filters" description="Push auth checks into SQL Server or PostgreSQL instead of loading data and trimming it in memory." />
 </CardGrid>
 
 ## Query-time filtering
@@ -87,11 +87,16 @@ Define resources (projects, chains, stores), roles (admin, viewer), and permissi
 
 ## Setup
 
+Derive your context from `SqlOSDbContext<TContext>` (or call `modelBuilder.UseSqlOS(GetType())` from your own), declare `ResourceId` and `FgaScope` on each protected entity, and register SqlOS with your database provider:
+
 ```csharp
-builder.AddSqlOS<AppDbContext>();
+builder.AddSqlOS<AppDbContext>(
+    db => db.UseSqlServer(connectionString));   // or db.UseNpgsql(connectionString)
 
 var app = builder.Build();
 ```
+
+[Set up FGA](/docs/fga/setup) walks through both ways, on SQL Server and on PostgreSQL.
 
 ## Dashboard
 
@@ -117,5 +122,6 @@ var app = builder.Build();
 
 - [Model FGA for multi-tenant apps](/docs/fga/overview)
 - [Turn AuthServer memberships into FGA access](/docs/guides/authserver-to-fga)
+- [Set up FGA on SQL Server or PostgreSQL](/docs/fga/setup)
 - [Filter EF queries with FGA](/docs/fga/list-filter)
 - [The Developer's Guide to Hierarchical RBAC](/blog/developers-guide-to-hierarchical-rbac)
