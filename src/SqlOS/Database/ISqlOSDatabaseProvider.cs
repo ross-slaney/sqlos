@@ -44,7 +44,7 @@ internal interface ISqlOSDatabaseProvider
     /// <summary>A composable SELECT of <c>ResourceSeq, Depth</c> over <c>fn_AccessRoots({0}, {1})</c>.</summary>
     string BuildAccessRootsQuerySql(SqlOSFgaOptions options);
 
-    /// <summary>Idempotent batches adding the ancestor columns of the configured depth and their indexes.</summary>
+    /// <summary>Idempotent batches adding the ancestor columns of the configured depth.</summary>
     IReadOnlyList<string> BuildEnsureLineageColumnsSql(SqlOSFgaOptions options);
 
     /// <summary>

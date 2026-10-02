@@ -118,33 +118,24 @@ internal sealed partial class SqlServerDatabaseProvider
     }
 
     /// <summary>
-    /// Adds the ancestor columns the configured depth calls for, and their indexes: one filtered index per
-    /// level, which is the range a caller's scope is read from when the optimizer starts from the caller's
-    /// grants. Idempotent; a deeper configuration adds columns, never removes any.
+    /// Adds the ancestor columns the configured depth calls for. Idempotent; a deeper configuration adds
+    /// columns, never removes any. The columns carry no index: they are read by resource id or by Seq.
     /// </summary>
     public IReadOnlyList<string> BuildEnsureLineageColumnsSql(SqlOSFgaOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        var schema = Escape(options.Schema);
-        var resources = Escape(options.TableNames.Resources);
-        var table = $"[{schema}].[{resources}]";
+        var table = $"[{Escape(options.Schema)}].[{Escape(options.TableNames.Resources)}]";
         var columns = new StringBuilder();
-        var indexes = new StringBuilder();
         for (var level = 0; level < SqlOSFgaLineage.Levels(options); level++)
         {
             var column = SqlOSFgaLineage.AncestorColumn(level);
-            var index = Escape(SqlOSFgaLineage.AncestorIndexName(options.TableNames.Resources, level));
             columns.AppendLine(CultureInfo.InvariantCulture, $"""
                 IF COL_LENGTH('{SqlLiteral(table)}', '{column}') IS NULL
                     ALTER TABLE {table} ADD [{column}] BIGINT NULL;
                 """);
-            indexes.AppendLine(CultureInfo.InvariantCulture, $"""
-                IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = '{SqlLiteral(SqlOSFgaLineage.AncestorIndexName(options.TableNames.Resources, level))}' AND object_id = OBJECT_ID('{SqlLiteral(table)}'))
-                    CREATE NONCLUSTERED INDEX [{index}] ON {table}([{column}]) INCLUDE ([{SqlOSFgaLineage.ReachColumn}]) WHERE [{column}] IS NOT NULL;
-                """);
         }
 
-        return [columns.ToString(), indexes.ToString()];
+        return [columns.ToString()];
     }
 
     /// <summary>

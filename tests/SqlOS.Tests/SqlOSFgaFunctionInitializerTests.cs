@@ -84,15 +84,14 @@ public class SqlOSFgaFunctionInitializerTests
     }
 
     [TestMethod]
-    public void LineageColumnsSql_AddsOneFilteredIndexPerLevel()
+    public void LineageColumnsSql_AddsOneColumnPerLevel_AndNoIndexes()
     {
-        var batches = SqlServerDatabaseProvider.Instance.BuildEnsureLineageColumnsSql(new SqlOSFgaOptions { MaxResourceHierarchyDepth = 3 });
+        var sql = SqlServerDatabaseProvider.Instance.BuildEnsureLineageColumnsSql(new SqlOSFgaOptions { MaxResourceHierarchyDepth = 3 }).Single();
 
-        batches.Should().HaveCount(2, "columns first, then the indexes that reference them");
-        batches[0].Should().Contain("ALTER TABLE [dbo].[SqlOSFgaResources] ADD [Ancestor0] BIGINT NULL");
-        batches[0].Should().Contain("ADD [Ancestor3] BIGINT NULL");
-        batches[0].Should().NotContain("Ancestor4");
-        batches[1].Should().Contain("CREATE NONCLUSTERED INDEX [IX_SqlOSFgaResources_Ancestor2] ON [dbo].[SqlOSFgaResources]([Ancestor2]) INCLUDE ([Reach]) WHERE [Ancestor2] IS NOT NULL");
+        sql.Should().Contain("ALTER TABLE [dbo].[SqlOSFgaResources] ADD [Ancestor0] BIGINT NULL");
+        sql.Should().Contain("ADD [Ancestor3] BIGINT NULL");
+        sql.Should().NotContain("Ancestor4");
+        sql.Should().NotContain("INDEX", "the ancestor columns are read by resource id or by Seq, never searched by value");
     }
 
     [TestMethod]

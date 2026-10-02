@@ -44,8 +44,6 @@ internal static class SqlOSFgaLineage
     /// <summary>The deepest level a resource may sit at.</summary>
     public static int MaxLevel(SqlOSFgaOptions options) => Levels(options) - 1;
 
-    public static string AncestorIndexName(string resourcesTable, int level) => $"IX_{resourcesTable}_{AncestorColumn(level)}";
-
     /// <summary>The statement triggers on the resources table that keep the lineage exact.</summary>
     public static IReadOnlyList<string> TriggerNames(string resourcesTable)
         => [$"TR_{resourcesTable}_Lineage_Insert", $"TR_{resourcesTable}_Lineage_Update", $"TR_{resourcesTable}_Lineage_Delete"];
