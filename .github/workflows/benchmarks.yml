@@ -5,13 +5,16 @@ name: Benchmarks
 #
 # Every page is measured three ways on the same table: the previous release's function, BuildFilterAsync
 # reading the lineage from the resources table, and BuildFilterAsync reading it from the row's scope columns.
-# Pull requests grow the catalog 1M -> 10M and skip the previous function's sparse pages (30 s a page on
-# PostgreSQL, 160 s on SQL Server), so both jobs finish inside the PR CI envelope. The full run,
-# 1M -> 10M -> 50M, runs on every merge to main, weekly, on demand, and on a pull request labelled
-# `benchmark-full`. 50M is the largest scale that fits a standard runner's disk with the per-level indexes.
-# The full tier skips the previous release's function for the many-grants people's pages: it takes about a
-# minute per page on SQL Server at 10M and grows with the catalog; the PR tier keeps that comparison. Every
-# query has a budget (600 s): a page that exceeds it is reported as "> 600 s" and counted at the budget.
+#
+# Two tiers:
+# - CI (every pull request push, merge to main, weekly): the catalog grows 100K -> 1M, about 15 minutes per
+#   engine. It skips the previous function's sparse store pages, which take minutes each on SQL Server.
+# - Full (1M -> 10M -> 50M, about two hours on SQL Server): only when the `benchmark-full` label is added to a
+#   pull request. It runs once per labelling, and later pushes run the CI tier; remove and re-add the label
+#   to run it again. A manual run can ask for any scales. 50M is the largest scale that fits a standard
+#   runner's disk with the per-level indexes. It skips the previous function's many-grants pages (minutes
+#   each at 10M on SQL Server); the CI tier keeps that comparison. Every query has a budget (600 s): a page
+#   that exceeds it is reported as "> 600 s" and counted at the budget, a lower bound.
 # Standard runners are free for public repositories.
 
 on:
@@ -32,17 +35,20 @@ on:
   workflow_dispatch:
     inputs:
       scales:
-        description: "Product counts to grow through, comma-separated"
+        description: "Product counts to grow through, comma-separated (1m,10m,50m for the full tier)"
         required: false
-        default: "1m,10m,50m"
+        default: "100k,1m"
 
+# A full run and a CI run of the same pull request are separate groups, so a push made while the full run is
+# going does not cancel it.
 concurrency:
-  group: benchmarks-${{ github.event.pull_request.number || github.ref }}
+  group: benchmarks-${{ github.event.pull_request.number || github.ref }}-${{ github.event.action == 'labeled' && 'full' || 'ci' }}
   cancel-in-progress: true
 
 env:
   DOTNET_VERSION: "9.0.x"
-  FULL_RUN: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'benchmark-full') }}
+  # The full tier: the moment `benchmark-full` is added to a pull request, or a manual run that asks for 50M.
+  FULL_RUN: ${{ (github.event.action == 'labeled' && github.event.label.name == 'benchmark-full') || (github.event_name == 'workflow_dispatch' && contains(inputs.scales, '50m')) }}
 
 jobs:
   benchmark:
@@ -50,7 +56,7 @@ jobs:
     # Adding some other label to a pull request should not re-run the benchmarks.
     if: github.event.action != 'labeled' || github.event.label.name == 'benchmark-full'
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'benchmark-full')) && 170 || 45 }}
+    timeout-minutes: ${{ ((github.event.action == 'labeled' && github.event.label.name == 'benchmark-full') || (github.event_name == 'workflow_dispatch' && contains(inputs.scales, '50m'))) && 170 || 45 }}
     strategy:
       fail-fast: false
       matrix:
@@ -85,7 +91,7 @@ jobs:
             # Preinstalled toolchains the benchmark does not use; about 20 GB of headroom for the database.
             sudo rm -rf /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift
           else
-            echo "scales=1m,10m" >> "$GITHUB_OUTPUT"
+            echo "scales=${{ inputs.scales || '100k,1m' }}" >> "$GITHUB_OUTPUT"
             echo "exclude=reference.list.store.first-page,reference.list.store.by-price" >> "$GITHUB_OUTPUT"
           fi
           sudo mkdir -p /mnt/sqlos-bench

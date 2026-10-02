@@ -236,8 +236,8 @@ repositories.
 
 | Tier | When | Scales | What is skipped |
 |---|---|---|---|
-| Pull request | Every pull request that touches `src/SqlOS` | 1M → 10M | the previous function's sparse pages (minutes each) |
-| Full | Every merge to `main`, weekly, on demand, and on a pull request labelled `benchmark-full` | 1M → 10M → 50M | the previous function's many-grants pages |
+| CI | Every push to a pull request that touches `src/SqlOS`, every merge to `main`, weekly | 100K → 1M | the previous function's sparse store pages (minutes each on SQL Server) |
+| Full | Only when the `benchmark-full` label is added to a pull request (once per labelling: remove and re-add it to run again), or a manual run that asks for 50M | 1M → 10M → 50M | the previous function's many-grants pages |
 
 Most of the full run is loading: 90M new rows in each of two tables, then rebuilding indexes. PostgreSQL
 loads in parallel `COPY` streams. SQL Server takes the table lock that minimal logging needs, so it has one

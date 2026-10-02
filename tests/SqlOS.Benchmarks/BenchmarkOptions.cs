@@ -55,7 +55,7 @@ internal sealed record BenchmarkOptions
 
         Options:
           --provider <name>        postgresql (default) or sqlserver
-          --scales <list>          product counts, e.g. 100k,1m (default) or 1m,10m,100m (CI)
+          --scales <list>          product counts, e.g. 100k,1m (default, the CI tier) or 1m,10m,50m (full tier)
           --connection <string>    use this server instead of starting a container
                                    (drops and recreates the SqlOSBenchmarks database on it)
           --data-dir <path>        host directory for database files (container mode)

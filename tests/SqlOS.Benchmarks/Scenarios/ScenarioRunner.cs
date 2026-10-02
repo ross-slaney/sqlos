@@ -73,30 +73,7 @@ internal sealed class ScenarioRunner(
         }
         catch (Exception ex) when (IsTimeout(ex))
         {
-            // Counted at the budget: a lower bound on its real cost, which keeps the comparisons sound and the
-            // run bounded.
-            log.Info($"  {scenario.Id,-44} did not finish within {budgetSeconds} s");
-            return new ScenarioResult(
-                scenario.Id,
-                scenario.Title,
-                scenario.Kind.ToString(),
-                scenario.Baseline,
-                scenario.Selectivity,
-                scenario.ProductDepth,
-                scenario.IsPage ? scenario.PageSize : 1,
-                Iterations: 0,
-                MedianMs: budgetSeconds * 1_000d,
-                P95Ms: budgetSeconds * 1_000d,
-                MinMs: budgetSeconds * 1_000d,
-                MaxMs: budgetSeconds * 1_000d,
-                Correct: true,
-                FullPage: false,
-                CorrectnessDetail: null,
-                RowsExamined: null,
-                ServerPlanningMs: null,
-                ServerExecutionMs: null,
-                PlanFile: null)
-            { TimedOut = true, StoreFiltered = scenario.StoreId is not null };
+            return OverBudget(scenario);
         }
 
         var (correct, fullPage, detail) = Verify(scenario, first, productCount);
@@ -104,21 +81,40 @@ internal sealed class ScenarioRunner(
 
         // The captured run executed the query twice (the plan, then EF's own execution).
         var estimate = capture is null ? first.Elapsed.TotalMilliseconds : first.Elapsed.TotalMilliseconds / 2;
-        var warmups = estimate switch { < 50 => 4, < 1_000 => 2, _ => 0 };
-        for (var i = 0; i < warmups; i++)
+
+        // A query that already took more than half the budget is not run again: one more run could exceed the
+        // budget and costs up to ten minutes. Its single verified run is the measurement.
+        double[] timings;
+        if (estimate > budgetSeconds * 1_000d / 2)
         {
-            await ExecuteAsync(scenario, cancellationToken);
+            timings = [estimate];
+        }
+        else
+        {
+            try
+            {
+                var warmups = estimate switch { < 50 => 4, < 1_000 => 2, _ => 0 };
+                for (var i = 0; i < warmups; i++)
+                {
+                    await ExecuteAsync(scenario, cancellationToken);
+                }
+
+                // Queries that take tens of seconds (the previous function's sparse scans) are timed once; their
+                // spread is small relative to their length, and each run costs minutes of CI time on SQL Server.
+                var iterations = estimate switch { < 250 => 25, < 2_000 => 7, < 10_000 => 3, _ => 1 };
+                timings = new double[iterations];
+                for (var i = 0; i < iterations; i++)
+                {
+                    timings[i] = (await ExecuteAsync(scenario, cancellationToken)).Elapsed.TotalMilliseconds;
+                }
+            }
+            catch (Exception ex) when (IsTimeout(ex))
+            {
+                return OverBudget(scenario);
+            }
         }
 
-        // Queries that take tens of seconds (the previous function's sparse scans) are timed once; their spread
-        // is small relative to their length, and each run costs minutes of CI time on SQL Server.
-        var iterations = estimate switch { < 250 => 25, < 2_000 => 7, < 10_000 => 3, _ => 1 };
-        var timings = new double[iterations];
-        for (var i = 0; i < iterations; i++)
-        {
-            timings[i] = (await ExecuteAsync(scenario, cancellationToken)).Elapsed.TotalMilliseconds;
-        }
-
+        var iterationsRun = timings.Length;
         Array.Sort(timings);
 
         var result = new ScenarioResult(
@@ -129,7 +125,7 @@ internal sealed class ScenarioRunner(
             scenario.Selectivity,
             scenario.ProductDepth,
             scenario.IsPage ? scenario.PageSize : 1,
-            iterations,
+            iterationsRun,
             MedianMs: Percentile(timings, 0.50),
             P95Ms: Percentile(timings, 0.95),
             MinMs: timings[0],
@@ -144,13 +140,43 @@ internal sealed class ScenarioRunner(
         { StoreFiltered = scenario.StoreId is not null };
 
         log.Info(
-            $"  {scenario.Id,-44} p50 {result.MedianMs,9:F2} ms  p95 {result.P95Ms,9:F2} ms  n={iterations,2}" +
+            $"  {scenario.Id,-44} p50 {result.MedianMs,9:F2} ms  p95 {result.P95Ms,9:F2} ms  n={iterationsRun,2}" +
             (plan?.RowsExamined is { } examined ? $"  examined {examined:N0}" : "") +
             (plan?.PlanningMs is { } planning ? $"  plan {planning:F2} ms" : "") +
             (plan?.ExecutionMs is { } execution ? $"  exec {execution:F2} ms" : "") +
             (correct ? "" : $"  WRONG: {detail}") +
             (fullPage ? "" : "  (partial page)"));
         return result;
+    }
+
+    /// <summary>
+    /// A scenario that ran into the budget, on any of its executions: counted at the budget, a lower bound on
+    /// its real cost, which keeps the comparisons sound and the run bounded.
+    /// </summary>
+    private ScenarioResult OverBudget(Scenario scenario)
+    {
+        log.Info($"  {scenario.Id,-44} did not finish within {budgetSeconds} s");
+        return new ScenarioResult(
+            scenario.Id,
+            scenario.Title,
+            scenario.Kind.ToString(),
+            scenario.Baseline,
+            scenario.Selectivity,
+            scenario.ProductDepth,
+            scenario.IsPage ? scenario.PageSize : 1,
+            Iterations: 0,
+            MedianMs: budgetSeconds * 1_000d,
+            P95Ms: budgetSeconds * 1_000d,
+            MinMs: budgetSeconds * 1_000d,
+            MaxMs: budgetSeconds * 1_000d,
+            Correct: true,
+            FullPage: false,
+            CorrectnessDetail: null,
+            RowsExamined: null,
+            ServerPlanningMs: null,
+            ServerExecutionMs: null,
+            PlanFile: null)
+        { TimedOut = true, StoreFiltered = scenario.StoreId is not null };
     }
 
     /// <summary>A query the engine stopped at the budget: SQL Server's timeout, or PostgreSQL's cancellation on Npgsql's.</summary>
