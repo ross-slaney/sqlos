@@ -58,6 +58,8 @@ The price is storage: one index per level per declared order, over the rows at o
 
 For a context derived from `SqlOSDbContext<TContext>` nothing else is needed. A context that calls `ApplySqlOSFgaModel` itself must call it after configuring its entities and pass `Database.ProviderName`, which decides the column's type.
 
+**Upgrading**: after taking this version, add a migration for every context that has entities with a `ResourceId` (`dotnet ef migrations add AddSqlOSFgaScopeColumn`), and apply it before the application starts; it adds the column and, where missing, the `ResourceId` index. A context that uses `EnsureCreated` gets the column with its tables. SqlOS fills the column and builds its indexes at the first start.
+
 ## Filter lifetime
 
 The caller's principal set (the subject plus its active group memberships) and their grants are read when the returned task is awaited. Build the filter once per request and compose it into that request's queries. Do not cache the filter in statics or reuse it across requests -- grant and membership changes are not reflected in an already-built filter. The caller's own lifecycle is still checked when the query runs: a user deactivated after the filter was built sees nothing.
