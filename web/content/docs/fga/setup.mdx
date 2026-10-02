@@ -148,6 +148,8 @@ builder.AddSqlOS<AppDbContext>(
 
 If a table's `FgaScope` column is missing (the migration was not applied), SqlOS stops at startup and names the table.
 
+From then on SqlOS keeps every row's `FgaScope` current through every change: inserts, moves, deactivations, retypes, deletes, bulk `ExecuteUpdate`/`ExecuteDelete`, raw SQL, and transactions running at the same time. See [Resource hierarchy](/docs/fga/resource-hierarchy#changes-made-at-the-same-time) for the one isolation rule: write resources in `READ COMMITTED` (the default) or `SERIALIZABLE` transactions.
+
 ## Filter a list
 
 The same code for both options and both databases:

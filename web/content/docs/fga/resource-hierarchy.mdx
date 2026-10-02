@@ -106,6 +106,19 @@ Every operation above also updates the [scope column](/docs/fga/list-filter#the-
 
 Bulk loads that skip triggers must fill the lineage themselves or run the rebuild procedure afterwards (`sp_SqlOSFgaResources_LineageRebuild` on SQL Server, `fn_SqlOSFgaResources_LineageRebuild()` on PostgreSQL). The rebuild writes the whole table once, in ranges of 500,000 resources on SQL Server (each range its own transaction, so the log stays small at any size) and in one transaction on PostgreSQL. A rebuild that fails part-way is run again at the next start: SqlOS records the routines as current only after it completes.
 
+## Changes made at the same time
+
+SqlOS keeps the lineage correct when transactions change the tree concurrently, including on PostgreSQL and on SQL Server with read-committed snapshot (the Azure SQL default), where reads do not wait for writers. Every trigger that maintains the lineage or a scope column takes one lock before it reads anything:
+
+- **Inserts** of resources and of protected rows take it shared, so they run side by side.
+- **Moves, activity changes, retypes, and deletes** take it exclusively. Each waits for transactions that are already writing to commit, then computes from what they committed; inserts that start meanwhile wait for it.
+
+Without the lock, a row inserted while its parent was being deactivated could stay visible, and two moves could together commit a cycle; the integration tests run those races on both databases.
+
+Change resources and protected rows in `READ COMMITTED` (the default for EF Core on both databases) or `SERIALIZABLE` transactions. A `REPEATABLE READ` transaction keeps reading the state it started with, so on PostgreSQL SqlOS refuses tree changes inside one with a clear error. On SQL Server, do not change resources inside `SNAPSHOT` isolation transactions, for the same reason.
+
+A move or deactivation of a large subtree holds the exclusive lock while it rewrites the subtree, so inserts elsewhere wait for it to commit. Moves and deactivations are rare next to inserts; schedule bulk reorganizations of very large subtrees outside peak traffic.
+
 ## Browse in the dashboard
 
 **Path**: Fine-Grained Auth > Resources
