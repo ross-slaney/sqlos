@@ -102,17 +102,20 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
         var permissions = Qualify(options.Schema, tables.Permissions);
         var levels = string.Join(", ", Enumerable.Range(0, SqlOSFgaLineage.Levels(options))
             .Select(level => $"({level.ToString(CultureInfo.InvariantCulture)}, x.{QuoteIdentifier(SqlOSFgaLineage.AncestorColumn(level))})"));
+        // The result shape changed in 8.0 (it names the deciding grant), and CREATE OR REPLACE cannot change a
+        // function's result type: drop the old one first, in the same transaction.
         return $"""
-            CREATE OR REPLACE FUNCTION {schema}."fn_IsResourceAccessible"(
+            DROP FUNCTION IF EXISTS {schema}."fn_IsResourceAccessible"(varchar, text, varchar);
+            CREATE FUNCTION {schema}."fn_IsResourceAccessible"(
                 p_resource_id varchar(128),
                 p_subject_ids text,
                 p_permission_id varchar(128)
             )
-            RETURNS TABLE("Id" varchar(450))
+            RETURNS TABLE("Id" varchar(450), "GrantId" varchar(450), "SubjectId" varchar(450), "RoleId" varchar(450), "Level" integer)
             LANGUAGE sql
             STABLE
             AS $sqlos$
-            SELECT a."Id"
+            SELECT a."Id", g."Id", g."SubjectId", g."RoleId", lv."Level"
             FROM {resources} x
             CROSS JOIN LATERAL (VALUES {levels}) AS lv("Level", "Seq")
             INNER JOIN {resources} a ON a."Seq" = lv."Seq"
@@ -131,8 +134,36 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
               AND g."RoleId" = ANY (ARRAY(SELECT rp."RoleId" FROM {rolePermissions} rp WHERE rp."PermissionId" = p_permission_id))
               AND (g."EffectiveFrom" IS NULL OR g."EffectiveFrom" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))
               AND (g."EffectiveTo" IS NULL OR g."EffectiveTo" >= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))
+            ORDER BY lv."Level" DESC
             LIMIT 1
             $sqlos$;
+            """;
+    }
+
+    /// <summary>The point check as a query (see the SQL Server provider).</summary>
+    public string BuildAccessMatchQuerySql(SqlOSFgaOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return $"SELECT m.\"Id\", m.\"GrantId\", m.\"SubjectId\", m.\"RoleId\", m.\"Level\" FROM {QuoteIdentifier(options.Schema)}.\"fn_IsResourceAccessible\"({{0}}, {{1}}, {{2}}) AS m";
+    }
+
+    /// <summary>The query's first argument, as EF Core's FromSqlRaw numbers them.</summary>
+    private const string ResourceIdArgument = "{0}";
+
+    /// <summary>The path from the top of a resource's tree down to it, from its lineage (see the SQL Server provider).</summary>
+    public string BuildResourcePathQuerySql(SqlOSFgaOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var resources = Qualify(options.Schema, options.TableNames.Resources);
+        var levels = string.Join(", ", Enumerable.Range(0, SqlOSFgaLineage.Levels(options))
+            .Select(level => $"({level.ToString(CultureInfo.InvariantCulture)}, x.{QuoteIdentifier(SqlOSFgaLineage.AncestorColumn(level))})"));
+        return $"""
+            SELECT lv."Level" AS "Level", a."Id" AS "ResourceId", a."Name" AS "Name", a."ResourceTypeId" AS "ResourceTypeId", a."IsActive" AS "IsActive",
+                   (x."Reach" IS NOT NULL AND lv."Level" >= x."Reach") AS "InReach"
+            FROM {resources} x
+            CROSS JOIN LATERAL (VALUES {levels}) AS lv("Level", "Seq")
+            INNER JOIN {resources} a ON a."Seq" = lv."Seq"
+            WHERE x."Id" = {ResourceIdArgument}
             """;
     }
 

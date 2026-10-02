@@ -74,14 +74,17 @@ public class SqlOSDatabaseProviderTests
     }
 
     [TestMethod]
-    public void PostgreSqlFunctionSql_UsesReplaceableTableFunction()
+    public void PostgreSqlFunctionSql_ReturnsTheDecidingGrant()
     {
         var sql = PostgreSqlDatabaseProvider.Instance.BuildIsResourceAccessibleFunctionSql(
             new SqlOSFgaOptions { MaxResourceHierarchyDepth = 7 });
 
-        sql.Should().Contain("CREATE OR REPLACE FUNCTION");
-        sql.Should().Contain("fn_IsResourceAccessible");
-        sql.Should().Contain("RETURNS TABLE(\"Id\"");
+        // The result names the deciding grant, a different result type than 7.x returned, which CREATE OR
+        // REPLACE cannot change: the old function is dropped first, in the same batch (one transaction).
+        sql.Should().Contain("DROP FUNCTION IF EXISTS \"dbo\".\"fn_IsResourceAccessible\"(varchar, text, varchar);");
+        sql.Should().Contain("CREATE FUNCTION \"dbo\".\"fn_IsResourceAccessible\"");
+        sql.Should().Contain("RETURNS TABLE(\"Id\" varchar(450), \"GrantId\" varchar(450), \"SubjectId\" varchar(450), \"RoleId\" varchar(450), \"Level\" integer)");
+        sql.Should().Contain("ORDER BY lv.\"Level\" DESC\nLIMIT 1");
         sql.Should().Contain("CROSS JOIN LATERAL (VALUES (0, x.\"Ancestor0\"), (1, x.\"Ancestor1\")");
         sql.Should().Contain("(7, x.\"Ancestor7\")) AS lv(\"Level\", \"Seq\")");
         sql.Should().NotContain("Ancestor8");
@@ -245,7 +248,7 @@ file sealed class HostDateTimeTestDbContext(DbContextOptions<HostDateTimeTestDbC
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<HostDateTimeRow>();
-        modelBuilder.UseSqlOS(GetType(), SqlOSDatabase.PostgreSqlProviderName);
+        modelBuilder.UseSqlOS(SqlOSDatabase.PostgreSqlProviderName);
     }
 }
 

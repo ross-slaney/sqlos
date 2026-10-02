@@ -15,9 +15,6 @@ public class TestInMemoryDbContext : DbContext, ISqlOSFgaDbContext
 {
     public TestInMemoryDbContext(DbContextOptions<TestInMemoryDbContext> options) : base(options) { }
 
-    public IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessible(
-        string resourceId, string subjectIds, string permissionId)
-        => throw new NotSupportedException("TVF not supported with InMemory provider");
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -81,25 +78,21 @@ public class SqlOSFgaSubjectServiceTests
     }
 
     [TestMethod]
-    public async Task BuildFilterAsync_UsesCapturedParametersInsteadOfLiteralConstants()
+    public async Task BuildFilterAsync_OnAnInMemoryProvider_SaysAuthorizationRunsInTheDatabase()
     {
-        _context.Set<SqlOSFgaPermission>().Add(new SqlOSFgaPermission
-        {
-            Id = "perm_read",
-            Key = "READ",
-            Name = "Read"
-        });
-        _context.SaveChanges();
         var authService = new SqlOSFgaAuthService(
             _context,
             Options.Create(new SqlOSFgaOptions()),
             NullLogger<SqlOSFgaAuthService>.Instance);
 
-        var filter = await authService.BuildFilterAsync<TestProtectedEntity>("subj_user", "READ");
-        var constants = ConstantCollector.Collect(filter);
+        var filter = await Assert.ThrowsExceptionAsync<InvalidOperationException>(
+            () => authService.BuildFilterAsync<TestProtectedEntity>("subj_user", "READ"));
+        var check = await Assert.ThrowsExceptionAsync<InvalidOperationException>(
+            () => authService.CheckAccessAsync("subj_user", "READ", "res_a"));
 
-        Assert.IsFalse(constants.Contains("subj_user"));
-        Assert.IsFalse(constants.Contains("perm_read"));
+        StringAssert.Contains(filter.Message, "run in the database");
+        StringAssert.Contains(filter.Message, "SQL Server or PostgreSQL");
+        StringAssert.Contains(check.Message, "run in the database");
     }
 
     [TestMethod]
@@ -259,23 +252,5 @@ public class SqlOSFgaSubjectServiceTests
         public byte[]? FgaScope { get; private set; }
 
         public string ResourceId { get; set; } = string.Empty;
-    }
-
-    private sealed class ConstantCollector : ExpressionVisitor
-    {
-        private readonly List<object?> _values = new();
-
-        public static List<object?> Collect(Expression expression)
-        {
-            var collector = new ConstantCollector();
-            collector.Visit(expression);
-            return collector._values;
-        }
-
-        protected override Expression VisitConstant(ConstantExpression node)
-        {
-            _values.Add(node.Value);
-            return base.VisitConstant(node);
-        }
     }
 }

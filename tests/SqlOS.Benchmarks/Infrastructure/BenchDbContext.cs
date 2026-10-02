@@ -3,28 +3,29 @@ using SqlOS.Benchmarks.Data;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
-using SqlOS.Fga.Models;
 
 namespace SqlOS.Benchmarks.Infrastructure;
 
 /// <summary>
-/// An application context the way SqlOS consumers write one: the app's own tables, the FGA model, and the TVF
-/// method. Queries go through <c>BuildFilterAsync</c>, so the benchmark measures the SQL EF Core generates for
-/// real callers, not a hand-written copy of it.
+/// An application context the way SqlOS consumers write one: the app's own tables and the FGA model. Queries go
+/// through <c>BuildFilterAsync</c>, so the benchmark measures the SQL EF Core generates for real callers, not a
+/// hand-written copy of it. The two point-check functions are mapped here only so the harness can time them
+/// directly; applications call <c>CheckAccessAsync</c>.
 /// </summary>
 internal sealed class BenchDbContext(DbContextOptions<BenchDbContext> options) : DbContext(options), ISqlOSFgaDbContext
 {
     public DbSet<Product> Products => Set<Product>();
     public DbSet<Store> Stores => Set<Store>();
 
-    public IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessible(
+    /// <summary><c>fn_IsResourceAccessible</c> as SqlOS ships it: the grant that decides a point check, or no row.</summary>
+    public IQueryable<AccessibleRow> IsResourceAccessible(
         string resourceId,
         string subjectIds,
         string permissionId)
         => FromExpression(() => IsResourceAccessible(resourceId, subjectIds, permissionId));
 
     /// <summary>The previous release's row filter (see <see cref="ReferenceFunction"/>), for the regression gate.</summary>
-    public IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessibleReference(
+    public IQueryable<AccessibleRow> IsResourceAccessibleReference(
         string resourceId,
         string subjectIds,
         string permissionId)
@@ -64,11 +65,25 @@ internal sealed class BenchDbContext(DbContextOptions<BenchDbContext> options) :
 
         // The app's entities first, then SqlOS: every entity above with a ResourceId gets the scope column
         // (ApplySqlOSFgaModel documents the order).
-        modelBuilder.ApplySqlOSFgaModel(GetType(), Database.ProviderName, options => options.RootResourceId = BenchmarkModel.RootResourceId);
+        modelBuilder.ApplySqlOSFgaModel(options => options.RootResourceId = BenchmarkModel.RootResourceId);
+        modelBuilder.Entity<AccessibleRow>(row =>
+        {
+            row.HasNoKey();
+            row.ToView(null);
+        });
+        modelBuilder.HasDbFunction(GetType().GetMethod(nameof(IsResourceAccessible))!)
+            .HasName("fn_IsResourceAccessible")
+            .HasSchema("dbo");
         modelBuilder.HasDbFunction(GetType().GetMethod(nameof(IsResourceAccessibleReference))!)
             .HasName(ReferenceFunction.Name)
             .HasSchema("dbo");
     }
+}
+
+/// <summary>A row of a point-check function: the id of the resource that holds the deciding grant.</summary>
+internal sealed class AccessibleRow
+{
+    public string Id { get; set; } = string.Empty;
 }
 
 /// <summary>A catalog row. Every product is its own FGA resource, as with <c>ISqlOSResourceEntity</c>.</summary>

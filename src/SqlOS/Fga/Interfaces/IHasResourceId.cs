@@ -13,11 +13,14 @@ public interface IHasResourceId
     string ResourceId { get; }
 
     /// <summary>
-    /// Gets the row's FGA scope: its resource's type and, for each level of the resource tree, the ancestor
-    /// from which access flows down to the row. SqlOS fills and maintains this column in the database;
-    /// application code never sets it. Declare it as a public property with a private setter:
+    /// The row's FGA scope column: its resource's type and, for each level of the resource tree, the ancestor
+    /// from which access flows down to the row. SqlOS fills and maintains it in the database, and list queries
+    /// filtered by <c>BuildFilterAsync</c> read it there, so a page costs the same at any table size.
+    /// Application code never sets or reads it. Declare it with a private setter,
     /// <code>public byte[]? FgaScope { get; private set; }</code>
-    /// List queries filtered by <c>BuildFilterAsync</c> read it, so a page costs the same at any table size.
+    /// or, to keep it off the class's public surface (and out of JSON), implement it explicitly:
+    /// <code>byte[]? IHasResourceId.FgaScope => null;</code>
+    /// SqlOS maps the column either way.
     /// </summary>
     byte[]? FgaScope { get; }
 }

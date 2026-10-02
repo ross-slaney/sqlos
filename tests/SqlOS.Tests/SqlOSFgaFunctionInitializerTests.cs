@@ -237,7 +237,7 @@ public class SqlOSFgaFunctionInitializerTests
     }
 
     [TestMethod]
-    public void ResourcesTable_DeclaresTheLineageColumnsAndTriggers()
+    public void ResourcesTable_DeclaresItsTriggers_AndLeavesTheLineageToTheDatabase()
     {
         var options = new DbContextOptionsBuilder<LineageModelDbContext>()
             .UseSqlServer("Server=.;Database=SqlOS_Lineage;Trusted_Connection=True;TrustServerCertificate=True")
@@ -248,23 +248,21 @@ public class SqlOSFgaFunctionInitializerTests
         resources.GetDeclaredTriggers().Select(t => t.GetDatabaseName())
             .Should().BeEquivalentTo(SqlOSFgaLineage.TriggerNames("SqlOSFgaResources"));
 
+        // Only SqlOS's SQL routines read the lineage, so the model leaves it out and does not depend on the
+        // configured depth: nothing in an application's model or migrations changes when the depth does.
         foreach (var name in new[] { "Seq", "Depth", "Reach", "Ancestor0", "Ancestor3" })
         {
-            var property = resources.FindProperty(name);
-            property.Should().NotBeNull(name);
-            property!.IsShadowProperty().Should().BeTrue(name);
-            property.GetBeforeSaveBehavior().Should().Be(Microsoft.EntityFrameworkCore.Metadata.PropertySaveBehavior.Ignore, "{0} is maintained by the database", name);
-            property.GetAfterSaveBehavior().Should().Be(Microsoft.EntityFrameworkCore.Metadata.PropertySaveBehavior.Ignore, name);
+            resources.FindProperty(name).Should().BeNull(name);
         }
 
-        resources.FindProperty("Ancestor4").Should().BeNull("the model declares depth 3, so levels 0..3");
-        context.Model.FindEntityType(typeof(SqlOSFgaResourceType))!.FindProperty("Seq").Should().NotBeNull();
+        context.Model.FindEntityType(typeof(SqlOSFgaResourceType))!.FindProperty("Seq").Should().NotBeNull("the filter reads a permission's type key");
         context.Model.FindEntityType(typeof(SqlOSFgaAccessRoot))!.FindPrimaryKey().Should().BeNull("the roots are a query result");
+        context.Model.FindEntityType(typeof(SqlOSFgaAccessMatch))!.FindPrimaryKey().Should().BeNull("the point check's grant is a query result");
     }
 }
 
 file sealed class LineageModelDbContext(DbContextOptions<LineageModelDbContext> options) : DbContext(options)
 {
     protected override void OnModelCreating(ModelBuilder modelBuilder)
-        => modelBuilder.UseSqlOS(GetType(), SqlOSDatabase.SqlServerProviderName, new SqlOSFgaOptions { MaxResourceHierarchyDepth = 3 });
+        => modelBuilder.UseSqlOS(SqlOSDatabase.SqlServerProviderName, new SqlOSFgaOptions { MaxResourceHierarchyDepth = 3 });
 }

@@ -103,14 +103,7 @@ internal sealed partial class SqlServerDatabaseProvider
             """;
     }
 
-    /// <summary>The composable query over <c>fn_ActiveSubjects</c>; <c>{0}</c> is the subject ids JSON.</summary>
-    public string BuildActiveSubjectsQuerySql(SqlOSFgaOptions options)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return $"SELECT live.SubjectId FROM [{Escape(options.Schema)}].fn_ActiveSubjects({{0}}) AS live";
-    }
-
-    /// <summary>The composable query over <c>fn_AccessRoots</c>; <c>{0}</c> is the subject ids JSON, <c>{1}</c> the permission id.</summary>
+    /// <summary>The query over <c>fn_AccessRoots</c>; <c>{0}</c> is the subject ids JSON, <c>{1}</c> the permission id.</summary>
     public string BuildAccessRootsQuerySql(SqlOSFgaOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);

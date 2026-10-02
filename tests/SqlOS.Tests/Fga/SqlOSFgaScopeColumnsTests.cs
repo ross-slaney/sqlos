@@ -57,6 +57,24 @@ public class SqlOSFgaScopeColumnsTests
     }
 
     [TestMethod]
+    public void AnEntityThatImplementsTheColumnExplicitly_GetsTheSameColumn()
+    {
+        // byte[]? IHasResourceId.FgaScope => null; keeps the column off the class's public surface (and out of
+        // JSON). EF Core does not map an explicit implementation by convention, so SqlOS maps the column itself.
+        using var context = new ExplicitScopeDbContext(new DbContextOptionsBuilder<ExplicitScopeDbContext>()
+            .UseSqlServer("Server=unused;Database=unused;TrustServerCertificate=True").Options);
+        var entity = context.Model.FindEntityType(typeof(ExplicitNote))!;
+
+        var scope = entity.FindProperty(SqlOSFgaLineage.ScopeColumn)!;
+        scope.IsShadowProperty().Should().BeTrue();
+        scope.ClrType.Should().Be(typeof(byte[]));
+        scope.GetMaxLength().Should().Be(SqlOSFgaLineage.ScopeMaxLength);
+        scope.GetBeforeSaveBehavior().Should().Be(PropertySaveBehavior.Ignore);
+        entity.GetDeclaredTriggers().Select(t => t.GetDatabaseName()).Should().BeEquivalentTo(SqlOSFgaLineage.ScopeTriggerNames("ExplicitNotes"));
+        SqlOSFgaScopeColumns.Tables(context.Model).Should().ContainSingle(t => t.Table == "ExplicitNotes");
+    }
+
+    [TestMethod]
     public void WithoutAProvider_TheModelIsTheSame()
     {
         // ApplySqlOSFgaModel without a provider name, or an in-memory test context: nothing depends on it.
@@ -126,8 +144,31 @@ public class SqlOSFgaScopeColumnsTests
             });
 
             // The application configured its entities first; the SqlOS model and the scope pass come last.
-            modelBuilder.UseSqlOS(GetType(), providerName, new SqlOSFgaOptions { MaxResourceHierarchyDepth = depth });
+            modelBuilder.UseSqlOS(providerName, new SqlOSFgaOptions { MaxResourceHierarchyDepth = depth });
         }
+    }
+
+    private sealed class ExplicitScopeDbContext(DbContextOptions<ExplicitScopeDbContext> options) : DbContext(options)
+    {
+        public DbSet<ExplicitNote> Notes => Set<ExplicitNote>();
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<ExplicitNote>(note =>
+            {
+                note.ToTable("ExplicitNotes");
+                note.HasKey(n => n.Id);
+            });
+            modelBuilder.UseSqlOS(SqlOSDatabase.SqlServerProviderName);
+        }
+    }
+
+    private sealed class ExplicitNote : IHasResourceId
+    {
+        public int Id { get; set; }
+        public string ResourceId { get; set; } = string.Empty;
+
+        byte[]? IHasResourceId.FgaScope => null;
     }
 
     private sealed class Store

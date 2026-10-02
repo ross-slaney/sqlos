@@ -97,12 +97,6 @@ internal sealed partial class PostgreSqlDatabaseProvider
             """;
     }
 
-    public string BuildActiveSubjectsQuerySql(SqlOSFgaOptions options)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return $"SELECT live.\"SubjectId\" FROM {QuoteIdentifier(options.Schema)}.\"fn_ActiveSubjects\"({{0}}) AS live";
-    }
-
     public string BuildAccessRootsQuerySql(SqlOSFgaOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);

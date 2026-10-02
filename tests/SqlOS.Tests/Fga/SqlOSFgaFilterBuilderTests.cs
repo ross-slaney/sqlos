@@ -29,7 +29,10 @@ public class SqlOSFgaFilterBuilderTests
         var filter = Build(context, [Root(5, 1), Root(9, 3)], typeSeq: 7);
         var sql = context.Set<Item>().Where(filter).ToQueryString();
 
-        sql.Should().Contain("fn_ActiveSubjects");
+        // The caller's subjects travel as a parameter (SQLite prints its value in a .param line), so every caller
+        // shares the query's plan.
+        sql.Should().MatchRegex(@"fn_ActiveSubjects""\((@\w+)\)");
+        sql.Should().Contain(".param set @__p_0 '[\"u\"]'");
         sql.Should().Contain($"SUBSTRING(\"i\".\"FgaScope\", {SqlOSFgaLineage.ScopeAncestorOffset(1)}, 8) = @", "level 1");
         sql.Should().Contain($"SUBSTRING(\"i\".\"FgaScope\", {SqlOSFgaLineage.ScopeAncestorOffset(3)}, 8) = @", "level 3");
         sql.Should().Contain("\"i\".\"FgaScope\" >= X'01'", "the depth byte selects the level's filtered index");
@@ -71,6 +74,21 @@ public class SqlOSFgaFilterBuilderTests
     }
 
     [TestMethod]
+    public void AFilterBuiltOnOneContextInstance_ComposesIntoAnother()
+    {
+        // The filter carries no DbContext instance: SqlOS's functions are mapped to static methods. So a filter
+        // built by the request's ISqlOSFgaAuthService composes into a query on a context from a factory or a pool.
+        using var builtOn = Create();
+        using var queried = Create();
+        var filter = Build(builtOn, [Root(5, 1)], typeSeq: 7);
+
+        var sql = queried.Set<Item>().Where(filter).ToQueryString();
+
+        sql.Should().Contain("fn_ActiveSubjects");
+        sql.Should().Contain($"SUBSTRING(\"i\".\"FgaScope\", {SqlOSFgaLineage.ScopeAncestorOffset(1)}, 8) = @");
+    }
+
+    [TestMethod]
     public void ARootDeeperThanTheConfiguredDepth_Fails()
     {
         using var context = Create();
@@ -96,8 +114,7 @@ public class SqlOSFgaFilterBuilderTests
 
     private static System.Linq.Expressions.Expression<Func<Item, bool>> Build(FilterDbContext context, IReadOnlyList<SqlOSFgaAccessRoot> roots, int? typeSeq)
     {
-        var liveQuery = context.Set<SqlOSFgaActiveSubject>().FromSqlRaw("SELECT SubjectId FROM fn_ActiveSubjects({0})", "[\"u\"]").AsNoTracking();
-        return SqlOSFgaFilterBuilder.Build<Item>(roots, liveQuery, typeSeq, levels: 11);
+        return SqlOSFgaFilterBuilder.Build<Item>(roots, "[\"u\"]", typeSeq, levels: 11);
     }
 
     private static FilterDbContext Create()
@@ -109,8 +126,6 @@ public class SqlOSFgaFilterBuilderTests
 
     private sealed class FilterDbContext(DbContextOptions<FilterDbContext> options) : DbContext(options), ISqlOSFgaDbContext
     {
-        public IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessible(string resourceId, string subjectIds, string permissionId)
-            => throw new NotSupportedException();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -121,7 +136,7 @@ public class SqlOSFgaFilterBuilderTests
             });
 
             // SQLite only prints the SQL here; the model is SQL Server's (a byte string scope column).
-            modelBuilder.UseSqlOS(GetType(), SqlOSDatabase.SqlServerProviderName, new SqlOSFgaOptions());
+            modelBuilder.UseSqlOS(SqlOSDatabase.SqlServerProviderName, new SqlOSFgaOptions());
         }
     }
 

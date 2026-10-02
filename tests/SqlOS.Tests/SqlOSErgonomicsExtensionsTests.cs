@@ -540,11 +540,6 @@ public sealed class SqlOSErgonomicsExtensionsTests
     private sealed class ManualDepthFgaDbContext(DbContextOptions<ManualDepthFgaDbContext> options)
         : DbContext(options), ISqlOSFgaDbContext
     {
-        public IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessible(
-            string resourceId,
-            string subjectIds,
-            string permissionId)
-            => throw new NotSupportedException();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
             => modelBuilder.ApplySqlOSFgaModel(options =>

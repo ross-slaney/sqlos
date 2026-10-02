@@ -24,12 +24,12 @@ internal static class SqlOSFgaFilterBuilder
         .Single(m => m.Name == nameof(Queryable.Any) && m.GetParameters().Length == 1);
 
     /// <param name="roots">The caller's access roots: every resource the caller holds a usable grant on, and its level.</param>
-    /// <param name="liveQuery">The composable query over <c>fn_ActiveSubjects</c>: the caller's subjects that are alive now.</param>
+    /// <param name="subjectIdsJson">The caller's subject ids as JSON, the caller first, for the liveness check.</param>
     /// <param name="typeSeq">The compact key of the permission's resource type, or null when it applies to every type.</param>
     /// <param name="levels">The number of levels the scope value holds (depth + 1).</param>
     public static Expression<Func<T, bool>> Build<T>(
         IReadOnlyList<SqlOSFgaAccessRoot> roots,
-        IQueryable<SqlOSFgaActiveSubject> liveQuery,
+        string subjectIdsJson,
         int? typeSeq,
         int levels)
         where T : IHasResourceId
@@ -39,8 +39,8 @@ internal static class SqlOSFgaFilterBuilder
         if (deepest >= levels)
         {
             throw new InvalidOperationException(
-                $"A grant sits at level {deepest} of the resource tree, but SqlOS is configured for {levels} levels. "
-                + "Configure the same MaxResourceHierarchyDepth in SqlOSFgaOptions and in ApplySqlOSFgaModel.");
+                $"A grant sits at level {deepest} of the resource tree, deeper than the configured "
+                + $"Fga.MaxResourceHierarchyDepth of {levels - 1}. Start SqlOS with the depth the database was built with.");
         }
 
         var reader = new ScopeReader(Property<byte[]>(entity, SqlOSFgaLineage.ScopeColumn));
@@ -60,8 +60,10 @@ internal static class SqlOSFgaFilterBuilder
         }
 
         // The grants were read when the filter was built; the caller's own liveness is still checked when the
-        // query runs, once per query (an uncorrelated EXISTS the engine evaluates as a one-time filter).
-        var alive = Expression.Call(QueryableAnyNoPredicate.MakeGenericMethod(typeof(SqlOSFgaActiveSubject)), liveQuery.Expression);
+        // query runs, once per query (an uncorrelated EXISTS the engine evaluates as a one-time filter). The
+        // function is mapped to a static method, so the filter composes into a query on any context instance.
+        var live = Expression.Call(SqlOSFgaFunctions.ActiveSubjectsMethod, Parameter(subjectIdsJson));
+        var alive = Expression.Call(QueryableAnyNoPredicate.MakeGenericMethod(typeof(SqlOSFgaActiveSubject)), live);
         return Expression.Lambda<Func<T, bool>>(Expression.AndAlso(alive, body!), entity);
     }
 

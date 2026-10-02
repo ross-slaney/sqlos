@@ -5,7 +5,6 @@ using SqlOS.Extensions;
 using SqlOS.Fga;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
-using SqlOS.Fga.Models;
 
 namespace SqlOS;
 
@@ -31,17 +30,11 @@ public abstract class SqlOSDbContext<TContext> : DbContext, ISqlOSAuthServerDbCo
         }
     }
 
-    public IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessible(
-        string resourceId,
-        string subjectIds,
-        string permissionId)
-        => FromExpression(() => IsResourceAccessible(resourceId, subjectIds, permissionId));
-
     protected sealed override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
         var fga = SqlOSFgaOptionsResolver.Resolve(Database);
-        modelBuilder.UseSqlOS(Database.IsRelational() ? typeof(TContext) : null, Database.ProviderName, fga);
+        modelBuilder.UseSqlOS(Database.ProviderName, fga);
         OnApplicationModelCreating(modelBuilder);
 
         // Last, so every application entity is configured: the scope column on each table with a resource id.

@@ -102,11 +102,10 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
                 FgaTestDataSeeder.SystemAdminSubjectId,
                 "TEST_VIEW",
                 level2.Id);
-            var sqlFilterVisible = await Context.IsResourceAccessible(
-                    level2.Id,
-                    JsonSerializer.Serialize(new[] { FgaTestDataSeeder.SystemAdminSubjectId }),
-                    FgaTestDataSeeder.ViewPermissionId)
-                .AnyAsync();
+            var sqlFilterVisible = await Context.FunctionAllowsAsync(
+                level2.Id,
+                JsonSerializer.Serialize(new[] { FgaTestDataSeeder.SystemAdminSubjectId }),
+                FgaTestDataSeeder.ViewPermissionId);
 
             pointCheck.Allowed.Should().BeTrue();
             sqlFilterVisible.Should().BeTrue();
@@ -198,11 +197,10 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
             await initializer.EnsureFunctionsExistAsync();
 
             // The statement was rolled back: first is still a root the admin holds a grant on, and second its child.
-            var visible = await Context.IsResourceAccessible(
-                    second.Id,
-                    JsonSerializer.Serialize(new[] { FgaTestDataSeeder.SystemAdminSubjectId }),
-                    FgaTestDataSeeder.ViewPermissionId)
-                .AnyAsync();
+            var visible = await Context.FunctionAllowsAsync(
+                second.Id,
+                JsonSerializer.Serialize(new[] { FgaTestDataSeeder.SystemAdminSubjectId }),
+                FgaTestDataSeeder.ViewPermissionId);
 
             visible.Should().BeTrue();
         }

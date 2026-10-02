@@ -107,7 +107,8 @@ internal sealed partial class SqlServerDatabaseProvider : ISqlOSDatabaseProvider
     /// <c>fn_IsResourceAccessible(@ResourceId, @SubjectIds, @PermissionId)</c>: the point check. The target's
     /// lineage names its ancestor at every level; the levels its reach covers are the active path a grant may
     /// sit on. One grant lookup per such ancestor, by resource, so the cost is the depth of the tree and never
-    /// the number of grants the caller holds. Returns the granted ancestor's id, or no row.
+    /// the number of grants the caller holds. Returns the grant that decides it (on the nearest ancestor that
+    /// holds one): the ancestor's id, the grant, its subject and role, and the ancestor's level; or no row.
     /// </summary>
     public string BuildIsResourceAccessibleFunctionSql(SqlOSFgaOptions options)
     {
@@ -130,7 +131,7 @@ internal sealed partial class SqlServerDatabaseProvider : ISqlOSDatabaseProvider
             AS
             RETURN
             (
-                SELECT TOP 1 a.Id
+                SELECT TOP 1 a.Id, g.Id AS GrantId, g.SubjectId, g.RoleId, lv.[Level] AS [Level]
                 FROM [{schema}].[{resources}] x
                 INNER JOIN [{schema}].[{permissions}] permission ON permission.Id = @PermissionId
                 CROSS APPLY (VALUES {levels}) AS lv([Level], [Seq])
@@ -145,7 +146,39 @@ internal sealed partial class SqlServerDatabaseProvider : ISqlOSDatabaseProvider
                   AND g.SubjectId IN (SELECT live.SubjectId FROM [{schema}].fn_ActiveSubjects(@SubjectIds) live)
                   AND (g.EffectiveFrom IS NULL OR g.EffectiveFrom <= GETUTCDATE())
                   AND (g.EffectiveTo IS NULL OR g.EffectiveTo >= GETUTCDATE())
+                ORDER BY lv.[Level] DESC
             )
+            """;
+    }
+
+    /// <summary>The point check as a query; <c>{0}</c> is the resource id, <c>{1}</c> the subject ids JSON, <c>{2}</c> the permission id.</summary>
+    public string BuildAccessMatchQuerySql(SqlOSFgaOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return $"SELECT m.Id, m.GrantId, m.SubjectId, m.RoleId, m.[Level] FROM [{Escape(options.Schema)}].fn_IsResourceAccessible({{0}}, {{1}}, {{2}}) AS m";
+    }
+
+    /// <summary>The query's first argument, as EF Core's FromSqlRaw numbers them.</summary>
+    private const string ResourceIdArgument = "{0}";
+
+    /// <summary>
+    /// The path from the top of a resource's tree down to it, from its lineage (<c>{0}</c> is the resource id):
+    /// each ancestor's level, and whether access flows down from it to the resource. No rows when the
+    /// resource has no lineage (it lies in a cycle, or deeper than the configured depth).
+    /// </summary>
+    public string BuildResourcePathQuerySql(SqlOSFgaOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var resources = $"[{Escape(options.Schema)}].[{Escape(options.TableNames.Resources)}]";
+        var levels = string.Join(", ", Enumerable.Range(0, SqlOSFgaLineage.Levels(options))
+            .Select(level => $"({level.ToString(CultureInfo.InvariantCulture)}, x.{SqlOSFgaLineage.AncestorColumn(level)})"));
+        return $"""
+            SELECT lv.[Level] AS [Level], a.Id AS ResourceId, a.Name AS Name, a.ResourceTypeId AS ResourceTypeId, a.IsActive AS IsActive,
+                   CAST(CASE WHEN x.Reach IS NOT NULL AND lv.[Level] >= x.Reach THEN 1 ELSE 0 END AS BIT) AS InReach
+            FROM {resources} x
+            CROSS APPLY (VALUES {levels}) AS lv([Level], [Seq])
+            INNER JOIN {resources} a ON a.Seq = lv.Seq
+            WHERE x.Id = {ResourceIdArgument}
             """;
     }
 

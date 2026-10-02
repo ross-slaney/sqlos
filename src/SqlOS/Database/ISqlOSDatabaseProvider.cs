@@ -32,16 +32,19 @@ internal interface ISqlOSDatabaseProvider
     string BuildSelectFgaVersionSql(string schema);
     string BuildIsResourceAccessibleFunctionSql(SqlOSFgaOptions options);
 
+    /// <summary>The point check as a query over <c>fn_IsResourceAccessible</c>: <c>{0}</c> resource id, <c>{1}</c> subject ids JSON, <c>{2}</c> permission id.</summary>
+    string BuildAccessMatchQuerySql(SqlOSFgaOptions options);
+
+    /// <summary>The path from the top of a resource's tree down to it, read from its lineage: <c>{0}</c> resource id.</summary>
+    string BuildResourcePathQuerySql(SqlOSFgaOptions options);
+
     /// <summary><c>fn_ActiveSubjects</c>: the caller's live principal set; the point check and the roots use it.</summary>
     string BuildActiveSubjectsFunctionSql(SqlOSFgaOptions options);
 
     /// <summary><c>fn_AccessRoots</c>: the caller's access roots (compact key and level), for the row filter.</summary>
     string BuildAccessRootsFunctionSql(SqlOSFgaOptions options);
 
-    /// <summary>A composable SELECT of <c>SubjectId</c> over <c>fn_ActiveSubjects({0})</c>.</summary>
-    string BuildActiveSubjectsQuerySql(SqlOSFgaOptions options);
-
-    /// <summary>A composable SELECT of <c>ResourceSeq, Depth</c> over <c>fn_AccessRoots({0}, {1})</c>.</summary>
+    /// <summary>A SELECT of <c>ResourceSeq, Depth</c> over <c>fn_AccessRoots({0}, {1})</c>.</summary>
     string BuildAccessRootsQuerySql(SqlOSFgaOptions options);
 
     /// <summary>Idempotent batches adding the ancestor columns of the configured depth.</summary>

@@ -817,11 +817,6 @@ public sealed class SqlOSResourceEntitySyncTests
     {
         public DbSet<ResourceBackedEntity> Resources => Set<ResourceBackedEntity>();
 
-        public IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessible(
-            string resourceId,
-            string subjectIds,
-            string permissionId)
-            => throw new NotSupportedException("TVFs are not supported for the in-memory test context.");
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

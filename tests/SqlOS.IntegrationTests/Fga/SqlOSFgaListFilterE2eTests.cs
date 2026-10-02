@@ -64,6 +64,39 @@ public class SqlOSFgaListFilterE2eTests
     }
 
     [TestMethod]
+    public async Task ExplicitScopeEntity_AndAFilterUsedOnAnotherContextInstance()
+    {
+        await using var host = await HostedApp.StartAsync();
+        await using var scope = host.App.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HostedFgaDbContext>();
+        var (alice, bob) = await CreateFoldersUsersAndGrantAsync(db);
+
+        // HostedNote implements FgaScope explicitly (byte[]? IHasResourceId.FgaScope => null): SqlOS maps the
+        // column itself, keeps it current, and the list filter reads it.
+        db.Notes.AddRange(new HostedNote("n1", "folder_a"), new HostedNote("n2", "folder_a"), new HostedNote("n3", "folder_b"));
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        (await db.Notes.AsNoTracking().CountAsync(n => EF.Property<byte[]>(n, nameof(IHasResourceId.FgaScope)) != null))
+            .Should().Be(3, "SqlOS fills the column of an explicit implementation too");
+
+        // A filter built by this request's service composes into a query on another context instance, as a
+        // context from IDbContextFactory or a pool would be: the filter carries no DbContext.
+        var fga = scope.ServiceProvider.GetRequiredService<ISqlOSFgaAuthService>();
+        var filter = await fga.BuildFilterAsync<HostedNote>(alice, Read);
+        await using var otherScope = host.App.Services.CreateAsyncScope();
+        var other = otherScope.ServiceProvider.GetRequiredService<HostedFgaDbContext>();
+        other.Should().NotBeSameAs(db);
+        (await other.Notes.AsNoTracking().Where(filter).OrderBy(n => n.Id).Select(n => n.Id).ToListAsync())
+            .Should().Equal("n1", "n2");
+        (await PageAsync(db.Notes, fga, bob)).Should().BeEmpty();
+
+        // The point check reads the same lineage, in one query.
+        (await fga.CheckAccessAsync(alice, Read, "note::n1")).Allowed.Should().BeTrue();
+        (await fga.CheckAccessAsync(alice, Read, "note::n3")).Allowed.Should().BeFalse();
+        (await fga.CheckAccessAsync(bob, Read, "note::n1")).Allowed.Should().BeFalse();
+    }
+
+    [TestMethod]
     public async Task SqlOSDbContext_ResourceEntityLifecycle()
     {
         await using var host = await HostedApp.StartAsync();
@@ -294,6 +327,33 @@ public class SqlOSFgaListFilterE2eTests
         public bool ResourceIsActive => Active;
     }
 
+    public sealed class HostedNote : ISqlOSResourceEntity, IE2eRow
+    {
+        private HostedNote()
+        {
+        }
+
+        public HostedNote(string id, string folderResourceId)
+        {
+            Id = id;
+            ResourceId = "note::" + id;
+            FolderResourceId = folderResourceId;
+        }
+
+        public string Id { get; private set; } = string.Empty;
+        public string ResourceId { get; private set; } = string.Empty;
+        public string FolderResourceId { get; private set; } = string.Empty;
+
+        // SqlOS's column, kept off the class's public surface.
+        byte[]? IHasResourceId.FgaScope => null;
+
+        string ISqlOSResourceEntity.ResourceTypeId => DocumentType;
+        string ISqlOSResourceEntity.ResourceName => Id;
+        string? ISqlOSResourceEntity.ParentResourceId => FolderResourceId;
+        string? ISqlOSResourceEntity.ResourceDescription => null;
+        bool ISqlOSResourceEntity.ResourceIsActive => true;
+    }
+
     public sealed class HostedFolder : ISqlOSResourceEntity
     {
         private HostedFolder()
@@ -324,8 +384,18 @@ public class SqlOSFgaListFilterE2eTests
 
         public DbSet<HostedFolder> Folders => Set<HostedFolder>();
 
+        public DbSet<HostedNote> Notes => Set<HostedNote>();
+
         protected override void OnApplicationModelCreating(ModelBuilder modelBuilder)
         {
+            modelBuilder.Entity<HostedNote>(note =>
+            {
+                note.ToTable("E2eNotes");
+                note.HasKey(n => n.Id);
+                note.Property(n => n.Id).HasMaxLength(64);
+                note.Property(n => n.ResourceId).HasMaxLength(128);
+                note.Property(n => n.FolderResourceId).HasMaxLength(128);
+            });
             modelBuilder.Entity<HostedFolder>(folder =>
             {
                 folder.ToTable("E2eFolders");
@@ -361,13 +431,11 @@ public class SqlOSFgaListFilterE2eTests
         public static ManualFgaDbContext Create(string connectionString)
             => new(new DbContextOptionsBuilder<ManualFgaDbContext>().UseTestProvider(connectionString).Options);
 
-        public IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessible(string resourceId, string subjectIds, string permissionId)
-            => FromExpression(() => IsResourceAccessible(resourceId, subjectIds, permissionId));
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             // Called first and without a provider name: neither matters, the column is the entity's own.
-            modelBuilder.ApplySqlOSFgaModel(GetType());
+            modelBuilder.ApplySqlOSFgaModel();
             modelBuilder.Entity<ManualTicket>(ticket =>
             {
                 ticket.ToTable("E2eTickets");
