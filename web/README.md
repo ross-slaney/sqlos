@@ -24,7 +24,7 @@ npm run build
 npm run start
 ```
 
-`web/Dockerfile` uses the same `npm run build` / `npm run start` path. `scripts/docs-check.sh` audits the production `web` dependency graph (`npm audit --omit=dev`) and fails on high or critical findings. Reviewable exceptions, if one is genuinely needed, live in `npm-audit-exceptions.json`.
+`web/Dockerfile` uses the same `npm run build` / `npm run start` path.
 
 ## Deployment
 
