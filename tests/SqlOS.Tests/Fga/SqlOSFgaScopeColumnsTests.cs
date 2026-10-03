@@ -75,6 +75,41 @@ public class SqlOSFgaScopeColumnsTests
     }
 
     [TestMethod]
+    public void AnEntityDerivingFromTheBaseClass_GetsTheShadowColumn_AndNoResourceDescriptionColumns()
+    {
+        // SqlOSResourceEntity brings ResourceId and the scope column with it; the members that describe the
+        // backing resource (ResourceTypeId, ResourceName, ...) feed synchronization and are never columns,
+        // even when an override has a backing field EF Core's conventions would map.
+        using var context = new BaseClassDbContext(new DbContextOptionsBuilder<BaseClassDbContext>()
+            .UseSqlServer("Server=unused;Database=unused;TrustServerCertificate=True").Options);
+        var entity = context.Model.FindEntityType(typeof(BasedProject))!;
+
+        var scope = entity.FindProperty(SqlOSFgaLineage.ScopeColumn)!;
+        scope.IsShadowProperty().Should().BeTrue();
+        scope.ClrType.Should().Be(typeof(byte[]));
+        scope.GetMaxLength().Should().Be(SqlOSFgaLineage.ScopeMaxLength);
+        scope.GetBeforeSaveBehavior().Should().Be(PropertySaveBehavior.Ignore);
+        entity.FindProperty(nameof(IHasResourceId.ResourceId)).Should().NotBeNull();
+        entity.FindProperty(nameof(ISqlOSResourceEntity.ResourceTypeId)).Should().BeNull();
+        entity.FindProperty(nameof(ISqlOSResourceEntity.ResourceName)).Should().BeNull();
+        entity.FindProperty(nameof(ISqlOSResourceEntity.ParentResourceId)).Should().BeNull();
+        entity.FindProperty(nameof(ISqlOSResourceEntity.ResourceDescription)).Should().BeNull();
+        entity.FindProperty(nameof(ISqlOSResourceEntity.ResourceIsActive)).Should().BeNull();
+        entity.GetDeclaredTriggers().Select(t => t.GetDatabaseName()).Should().BeEquivalentTo(SqlOSFgaLineage.ScopeTriggerNames("BasedProjects"));
+        SqlOSFgaScopeColumns.Tables(context.Model).Should().ContainSingle(t => t.Table == "BasedProjects");
+    }
+
+    [TestMethod]
+    public void MappingTheBaseClassItself_Fails()
+    {
+        // A DbSet of the base class would make every derived entity part of one EF Core hierarchy and SqlOS
+        // would protect none of them; the model fails loudly instead.
+        var act = () => new MappedBaseClassDbContext(new DbContextOptionsBuilder<MappedBaseClassDbContext>()
+            .UseSqlServer("Server=unused;Database=unused;TrustServerCertificate=True").Options).Model;
+        act.Should().Throw<InvalidOperationException>().WithMessage($"*{nameof(SqlOSResourceEntity)}*base class*");
+    }
+
+    [TestMethod]
     public void WithoutAProvider_TheModelIsTheSame()
     {
         // ApplySqlOSFgaModel without a provider name, or an in-memory test context: nothing depends on it.
@@ -169,6 +204,41 @@ public class SqlOSFgaScopeColumnsTests
         public string ResourceId { get; set; } = string.Empty;
 
         byte[]? IHasResourceId.FgaScope => null;
+    }
+
+    private sealed class BaseClassDbContext(DbContextOptions<BaseClassDbContext> options) : DbContext(options)
+    {
+        public DbSet<BasedProject> Projects => Set<BasedProject>();
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<BasedProject>(project =>
+            {
+                project.ToTable("BasedProjects");
+                project.HasKey(p => p.Id);
+            });
+            modelBuilder.UseSqlOS(SqlOSDatabase.SqlServerProviderName);
+        }
+    }
+
+    private sealed class MappedBaseClassDbContext(DbContextOptions<MappedBaseClassDbContext> options) : DbContext(options)
+    {
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<SqlOSResourceEntity>();
+            modelBuilder.UseSqlOS(SqlOSDatabase.SqlServerProviderName);
+        }
+    }
+
+    private sealed class BasedProject : SqlOSResourceEntity
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+
+        public override string ResourceTypeId => "project";
+
+        // An override with a backing field: EF Core's conventions would map it as a column.
+        public override string ResourceName { get; } = "fixed";
     }
 
     private sealed class Store

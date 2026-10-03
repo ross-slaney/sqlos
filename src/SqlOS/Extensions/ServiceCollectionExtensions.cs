@@ -15,7 +15,9 @@ using SqlOS.Calendar.Services;
 using SqlOS.Dashboard;
 using SqlOS.Email.Configuration;
 using SqlOS.Email.Interfaces;
+using Microsoft.Extensions.Logging;
 using SqlOS.Email.Services;
+using SqlOS.Fga;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Services;
@@ -142,6 +144,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<SqlOSCalendarSyncService>();
         services.AddScoped<SqlOSScimService>();
         services.AddScoped<ISqlOSFgaAuthService, SqlOSFgaAuthService>();
+        services.ConfigureDbContext<TContext>((provider, builder) =>
+            builder.AddInterceptors(new SqlOSFgaUnindexedOrderInterceptor(provider.GetRequiredService<ILoggerFactory>())));
         services.AddScoped<ISqlOSFgaSubjectService, SqlOSFgaSubjectService>();
         services.AddScoped<SqlOSFgaSeedService>();
         services.AddScoped<SqlOSFgaFunctionInitializer>();

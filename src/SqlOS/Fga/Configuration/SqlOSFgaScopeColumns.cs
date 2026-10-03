@@ -16,12 +16,31 @@ namespace SqlOS.Fga.Configuration;
 /// </summary>
 internal static class SqlOSFgaScopeColumns
 {
+    /// <summary>The <see cref="ISqlOSResourceEntity"/> members that describe the backing resource and are never columns of the entity's table.</summary>
+    private static readonly string[] ResourceDescriptionMembers =
+    [
+        nameof(ISqlOSResourceEntity.ResourceTypeId),
+        nameof(ISqlOSResourceEntity.ResourceName),
+        nameof(ISqlOSResourceEntity.ParentResourceId),
+        nameof(ISqlOSResourceEntity.ResourceDescription),
+        nameof(ISqlOSResourceEntity.ResourceIsActive),
+    ];
+
     /// <summary>Configures every application entity type in the model that implements <see cref="IHasResourceId"/>.</summary>
     public static void Configure(ModelBuilder modelBuilder, SqlOSFgaOptions options)
     {
         if (SqlOSFgaLineage.Levels(options) > SqlOSFgaLineage.ScopeMaxLevels)
         {
             throw new InvalidOperationException($"SqlOS FGA supports a MaxResourceHierarchyDepth of at most {SqlOSFgaLineage.ScopeMaxLevels - 1}.");
+        }
+
+        if (modelBuilder.Model.FindEntityType(typeof(SqlOSResourceEntity)) is not null)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(SqlOSResourceEntity)} is the base class of the application's entities and cannot be "
+                + "mapped as an entity itself (an EF Core hierarchy would put every derived entity in one "
+                + "table, and SqlOS would protect none of them). Remove its DbSet or mapping and map the "
+                + "entities that derive from it.");
         }
 
         var sqlosAssembly = typeof(SqlOSFgaScopeColumns).Assembly;
@@ -33,6 +52,18 @@ internal static class SqlOSFgaScopeColumns
             }
 
             var entity = modelBuilder.Entity(entityType.ClrType);
+            if (typeof(SqlOSResourceEntity).IsAssignableFrom(entityType.ClrType))
+            {
+                // The descriptive members feed resource synchronization, never the table. An override with a
+                // backing field would be mapped by convention; an explicit mapping by the app is kept.
+                foreach (var member in ResourceDescriptionMembers)
+                {
+                    if (((IConventionEntityType)entityType).FindProperty(member)?.GetConfigurationSource() == ConfigurationSource.Convention)
+                    {
+                        entity.Ignore(member);
+                    }
+                }
+            }
             var table = entityType.GetTableName()!;
             var scope = entity.Property<byte[]>(SqlOSFgaLineage.ScopeColumn).HasMaxLength(SqlOSFgaLineage.ScopeMaxLength);
             SqlOSFgaModelConfiguration.DatabaseOwned(scope);

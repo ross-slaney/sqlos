@@ -28,22 +28,18 @@ Keep it out of API responses by returning DTOs. To keep it off the class's publi
 byte[]? IHasResourceId.FgaScope => null;
 ```
 
-For protected domain entities whose resource lifecycle should be managed by SqlOS, prefer `ISqlOSResourceEntity`. It extends `IHasResourceId` with resource metadata used by `SqlOSDbContext<TContext>` during `SaveChanges` / `SaveChangesAsync`.
+For protected domain entities whose resource lifecycle should be managed by SqlOS, derive from `SqlOSResourceEntity` (or implement `ISqlOSResourceEntity`, which it implements for you). It extends `IHasResourceId` with resource metadata used by `SqlOSDbContext<TContext>` during `SaveChanges` / `SaveChangesAsync`, and the base class carries `ResourceId` and the scope column so the entity declares neither:
 
 ```csharp
-public sealed class Workspace : ISqlOSResourceEntity
+public sealed class Workspace : SqlOSResourceEntity
 {
     public Guid Id { get; set; }
-    public string ResourceId { get; set; } = "";
-    public byte[]? FgaScope { get; private set; }
     public string Name { get; set; } = "";
     public string OrganizationId { get; set; } = "";
 
-    public string ResourceTypeId => "workspace";
-    public string ResourceName => Name;
-    public string ParentResourceId => $"org::{OrganizationId}";
-    public string? ResourceDescription => null;
-    public bool ResourceIsActive => true;
+    public override string ResourceTypeId => "workspace";
+    public override string ResourceName => Name;
+    public override string? ParentResourceId => $"org::{OrganizationId}";
 }
 ```
 
@@ -59,4 +55,4 @@ var workspaces = await db.Workspaces
     .ToListAsync(ct);
 ```
 
-Use plain `IHasResourceId` directly for lower-level/manual resources where your application owns the FGA resource lifecycle. Use `ISqlOSResourceEntity` for the normal SDK path.
+Use plain `IHasResourceId` directly for lower-level/manual resources where your application owns the FGA resource lifecycle. Use `SqlOSResourceEntity` — or `ISqlOSResourceEntity`, when the entity's base class is spoken for — for the normal SDK path.

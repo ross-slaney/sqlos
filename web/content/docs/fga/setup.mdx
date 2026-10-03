@@ -10,20 +10,20 @@ There are two ways to add SqlOS authorization to an EF Core application. Both gi
 | | SqlOSDbContext (recommended) | Your own DbContext |
 | --- | --- | --- |
 | Your context | derives from `SqlOSDbContext<TContext>` | derives from `DbContext` and calls `modelBuilder.UseSqlOS(Database.ProviderName)` last in `OnModelCreating` |
-| Your protected entities | implement `ISqlOSResourceEntity` | implement `IHasResourceId` |
+| Your protected entities | derive from `SqlOSResourceEntity` (or implement `ISqlOSResourceEntity`) | implement `IHasResourceId` |
 | Each row's FGA resource | created, moved, and deleted by SqlOS on `SaveChanges` | created by your code |
 | Database | SQL Server or PostgreSQL | SQL Server or PostgreSQL |
 
 ## What every protected entity declares
 
-Every protected entity declares two things: the id of its FGA resource, and the `FgaScope` column SqlOS keeps current. The compiler requires both: an entity that implements `IHasResourceId` or `ISqlOSResourceEntity` without `FgaScope` does not build.
+Every protected entity carries two things: the id of its FGA resource, and the `FgaScope` column SqlOS keeps current. An entity that derives from `SqlOSResourceEntity` carries both already and declares nothing. An entity that spends its base class elsewhere implements the interface instead, and the compiler requires both members: an entity that implements `IHasResourceId` or `ISqlOSResourceEntity` without `FgaScope` does not build.
 
 ```csharp
 public string ResourceId { get; set; } = "";
 public byte[]? FgaScope { get; private set; }   // SqlOS fills and maintains it; never set it
 ```
 
-Your code never reads `FgaScope` either, so keep it out of your API's responses: return DTOs, as the examples below do. If you prefer it off the class's public surface, implement it explicitly. SqlOS maps the column either way:
+Your code never reads `FgaScope`, so keep it out of your API's responses: return DTOs, as the examples below do. If you prefer it off the class's public surface, implement it explicitly, as `SqlOSResourceEntity` itself does. SqlOS maps the column either way:
 
 ```csharp
 byte[]? IHasResourceId.FgaScope => null;   // the column is SqlOS's; the entity never holds it
@@ -31,28 +31,24 @@ byte[]? IHasResourceId.FgaScope => null;   // the column is SqlOS's; the entity 
 
 `FgaScope` holds the row's resource type and the ancestors access flows down from. `BuildFilterAsync` reads it, so a page of a list costs the same whether the table holds a thousand rows or fifty million, and whether the caller can see all of it or a sliver. It is a byte string on both databases (`varbinary(512)` on SQL Server, `bytea` on PostgreSQL), so nothing about it depends on which one you use.
 
-## Option 1: SqlOSDbContext and ISqlOSResourceEntity
+## Option 1: SqlOSDbContext and SqlOSResourceEntity
 
-The entity describes its resource; SqlOS creates and maintains it.
+The entity describes its resource; SqlOS creates and maintains it. Derive from `SqlOSResourceEntity` and override what describes the resource — the resource id and the scope column come with the base class, and the members you override are never columns of your table:
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
 using SqlOS;
-using SqlOS.Fga.Interfaces;
+using SqlOS.Fga;
 
-public sealed class Project : ISqlOSResourceEntity
+public sealed class Project : SqlOSResourceEntity
 {
     public Guid Id { get; set; }
-    public string ResourceId { get; set; } = "";
-    public byte[]? FgaScope { get; private set; }
     public string Name { get; set; } = "";
     public string WorkspaceResourceId { get; set; } = "";
 
-    public string ResourceTypeId => "project";
-    public string ResourceName => Name;
-    public string? ParentResourceId => WorkspaceResourceId;
-    public string? ResourceDescription => null;
-    public bool ResourceIsActive => true;
+    public override string ResourceTypeId => "project";
+    public override string ResourceName => Name;
+    public override string? ParentResourceId => WorkspaceResourceId;
 }
 
 public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
@@ -73,6 +69,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
 ```
 
 Saving a `Project` creates its FGA resource under its workspace in the same `SaveChanges`.
+
+An entity whose base class is already spoken for implements `ISqlOSResourceEntity` itself and declares the two members from [above](#what-every-protected-entity-declares); SqlOS treats both forms the same. Map the entities, never the base class: a `DbSet<SqlOSResourceEntity>` fails at model building with an error saying so.
 
 ## Option 2: your own DbContext and IHasResourceId
 
@@ -180,11 +178,11 @@ var page = await db.Projects
     .ToListAsync(cancellationToken);
 ```
 
-Page in an order you declared an index for, ended by the key, as above: SqlOS mirrors each such index per level of the resource tree, so the page is one index seek. A page sorted by a column you declared no index for still returns the right rows; it reads the caller's whole scope to sort them. See [List filtering](/docs/fga/list-filter) for how the filter works and what it costs.
+Page in an order you declared an index for, ended by the key, as above: SqlOS mirrors each such index per level of the resource tree, so the page is one index seek. A page sorted by a column you declared no index for still returns the right rows; it reads the caller's whole scope to sort them, and SqlOS logs a warning naming the entity, the order, and the index to declare — once per query shape, so a hot page does not flood the log. (`AddSqlOS` puts the warning on your context; a context built by hand gets it with `optionsBuilder.AddInterceptors(new SqlOSFgaUnindexedOrderInterceptor(loggerFactory))`.) See [List filtering](/docs/fga/list-filter) for how the filter works and what it costs.
 
 ## Upgrading from a version without FgaScope
 
-1. Add `public byte[]? FgaScope { get; private set; }` to every entity that implements `IHasResourceId` or `ISqlOSResourceEntity`. The build lists every one that needs it.
+1. Derive each resource entity from `SqlOSResourceEntity` (dropping its own `ResourceId` and the interface members the base class carries), or add `public byte[]? FgaScope { get; private set; }` to every entity that implements `IHasResourceId` or `ISqlOSResourceEntity`. The build lists every one that needs it.
 2. On a context of your own: delete its `IsResourceAccessible` method, and change `modelBuilder.UseSqlOS(GetType())` to `modelBuilder.UseSqlOS(Database.ProviderName)` (or `ApplySqlOSFgaModel(GetType())` to `ApplySqlOSFgaModel()`). The build points at both.
 3. Add and apply one migration for each context. It adds the `FgaScope` column, and an index on `ResourceId` where you declared none.
 4. Start the application. SqlOS builds the resource lineage and fills every `FgaScope` column once; on a large database that first start takes a few minutes per million resources, and other instances wait for it.

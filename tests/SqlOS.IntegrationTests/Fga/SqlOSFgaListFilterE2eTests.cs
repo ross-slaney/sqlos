@@ -12,6 +12,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.Extensions;
+using SqlOS.Fga;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
@@ -354,7 +355,8 @@ public class SqlOSFgaListFilterE2eTests
         bool ISqlOSResourceEntity.ResourceIsActive => true;
     }
 
-    public sealed class HostedFolder : ISqlOSResourceEntity
+    // The base-class form: the resource id and the scope column come from SqlOSResourceEntity.
+    public sealed class HostedFolder : SqlOSResourceEntity
     {
         private HostedFolder()
         {
@@ -367,15 +369,12 @@ public class SqlOSFgaListFilterE2eTests
         }
 
         public string Id { get; private set; } = string.Empty;
-        public string ResourceId { get; private set; } = string.Empty;
-        public byte[]? FgaScope { get; private set; }
         public bool Active { get; set; } = true;
 
-        public string ResourceTypeId => FolderType;
-        public string ResourceName => Id;
-        public string? ParentResourceId => "root";
-        public string? ResourceDescription => null;
-        public bool ResourceIsActive => Active;
+        public override string ResourceTypeId => FolderType;
+        public override string ResourceName => Id;
+        public override string? ParentResourceId => "root";
+        public override bool ResourceIsActive => Active;
     }
 
     public sealed class HostedFgaDbContext(DbContextOptions<HostedFgaDbContext> options) : SqlOSDbContext<HostedFgaDbContext>(options)

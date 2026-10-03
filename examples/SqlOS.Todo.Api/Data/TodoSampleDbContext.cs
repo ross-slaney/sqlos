@@ -20,11 +20,6 @@ public sealed class TodoSampleDbContext(DbContextOptions<TodoSampleDbContext> op
             entity.HasIndex(x => x.ResourceId).IsUnique();
             entity.HasIndex(x => x.OwnerSubjectId);
             entity.HasIndex(x => new { x.OwnerSubjectId, x.IsCompleted });
-            entity.Ignore(x => x.ResourceTypeId);
-            entity.Ignore(x => x.ResourceName);
-            entity.Ignore(x => x.ParentResourceId);
-            entity.Ignore(x => x.ResourceDescription);
-            entity.Ignore(x => x.ResourceIsActive);
         });
     }
 }
