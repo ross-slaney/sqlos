@@ -232,6 +232,12 @@ public sealed partial class ScimProtocolIntegrationTests
         await using (var setup = server.Services.CreateAsyncScope())
         {
             var context = setup.ServiceProvider.GetRequiredService<TestSqlOSDbContext>();
+            // SqlOS's triggers reject a cycle or an over-deep chain outright (SQ012), so such rows reach a
+            // database only through a load that skips the triggers; this arrange takes that path, as the
+            // startup tests do, and the SCIM layer must still fail closed when it meets the rows.
+            await context.Database.ExecuteSqlRawAsync(TestDatabase.IsPostgreSql
+                ? """ALTER TABLE "dbo"."SqlOSFgaResources" DISABLE TRIGGER USER;"""
+                : "ALTER TABLE [dbo].[SqlOSFgaResources] DISABLE TRIGGER ALL;");
             AddResource(context, "loop_1", null, "region");
             AddResource(context, "loop_2", "loop_1", "region");
             AddResource(context, "store::cycle", "loop_2", "store");
@@ -246,6 +252,9 @@ public sealed partial class ScimProtocolIntegrationTests
             // Foreign keys allow a cycle once both rows exist.
             (await context.Set<SqlOSFgaResource>().SingleAsync(x => x.Id == "loop_1")).ParentId = "loop_2";
             await context.SaveChangesAsync();
+            await context.Database.ExecuteSqlRawAsync(TestDatabase.IsPostgreSql
+                ? """ALTER TABLE "dbo"."SqlOSFgaResources" ENABLE TRIGGER USER;"""
+                : "ALTER TABLE [dbo].[SqlOSFgaResources] ENABLE TRIGGER ALL;");
         }
         await BoundConnectionToTenantRootAsync(server, BoundaryTenantRoot);
         await CreateMappingAsync(server, "store::{storeId}");
