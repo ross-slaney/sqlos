@@ -7,7 +7,7 @@ using SqlOS.Benchmarks.Scenarios;
 namespace SqlOS.Benchmarks.Reporting;
 
 /// <summary>
-/// Regression gates, defined in <c>gates.json</c>:
+/// The gates, defined in <c>gates.json</c>:
 /// <list type="bullet">
 /// <item><b>correctness</b>: every scenario returned exactly the authorized answer.</item>
 /// <item><b>lineage</b>: the lineage and scope columns the loader wrote, the same after the maintenance pass,
@@ -16,37 +16,25 @@ namespace SqlOS.Benchmarks.Reporting;
 /// largest scale may be at most <c>maxRatio</c> times the median at the smallest, times the growth of the
 /// rows the page has to touch, plus <c>slackMilliseconds</c> for sub-millisecond noise. A page through the
 /// scope column touches k rows at any N (one index seek), so it has no growth term; a page filtered to a
-/// store touches that store's σN rows through its own index. The previous function's pages are measured at
-/// every scale but not gated: how its cost grows is a finding about it (its per-row walk gets dearer as the
-/// tree outgrows memory), not a regression of the current filter.</item>
-/// <item><b>regression</b>: the current filter against the previous release's, on the same data in the same
-/// job: the median may be at most <c>maxRatio</c> times the previous one, plus slack.</item>
-/// <item><b>improvement</b>: for the listed sparse pages, the current filter must take at most
-/// <c>maxRatio</c> of the previous function's time.</item>
-/// <item><b>ceiling</b>: an absolute budget per scenario and engine, for regressions that slow every scale
-/// alike (a heavier function body, a lost index).</item>
+/// store touches that store's σN rows through its own index.</item>
+/// <item><b>regression</b>: every scenario's median against the constant set for it and the engine in
+/// <c>regressionMilliseconds</c>: what the scenario costs today, with headroom for runner noise. A change
+/// that makes any page or point check slower than that fails the run.</item>
 /// </list>
-/// Every timing gate compares runs on the same machine, so they hold on shared CI runners.
 /// </summary>
 internal sealed class GateConfig
 {
     [JsonPropertyName("scale")]
     public ScaleGate Scale { get; init; } = new();
 
-    [JsonPropertyName("regression")]
-    public RatioGate Regression { get; init; } = new() { MaxRatio = 1.15, SlackMilliseconds = 2.0 };
-
-    [JsonPropertyName("improvement")]
-    public ImprovementGate Improvement { get; init; } = new();
-
-    [JsonPropertyName("ceilingsMilliseconds")]
-    public Dictionary<string, Dictionary<string, double>> CeilingsMilliseconds { get; init; } = new();
+    [JsonPropertyName("regressionMilliseconds")]
+    public Dictionary<string, Dictionary<string, double>> RegressionMilliseconds { get; init; } = new();
 
     public static GateConfig Load(string path)
         => JsonSerializer.Deserialize<GateConfig>(File.ReadAllText(path))
            ?? throw new InvalidOperationException($"Could not read {path}.");
 
-    internal class RatioGate
+    internal sealed class ScaleGate
     {
         [JsonPropertyName("maxRatio")]
         public double MaxRatio { get; init; } = 2.0;
@@ -56,18 +44,6 @@ internal sealed class GateConfig
 
         [JsonPropertyName("exempt")]
         public List<string> Exempt { get; init; } = [];
-    }
-
-    internal sealed class ScaleGate : RatioGate;
-
-    internal sealed class ImprovementGate
-    {
-        /// <summary>Scenario ids that must beat their previous-function twin by the ratio.</summary>
-        [JsonPropertyName("scenarios")]
-        public List<string> Scenarios { get; init; } = [];
-
-        [JsonPropertyName("maxRatio")]
-        public double MaxRatio { get; init; } = 0.05;
     }
 }
 
@@ -103,7 +79,7 @@ internal static class GateEvaluator
         {
             var smallest = report.Steps[0];
             var largest = report.Steps[^1];
-            foreach (var scenario in largest.Scenarios.Where(s => !config.Scale.Exempt.Contains(s.Id) && !IsReference(s)))
+            foreach (var scenario in largest.Scenarios.Where(s => !config.Scale.Exempt.Contains(s.Id)))
             {
                 var baseline = smallest.Scenarios.FirstOrDefault(s => s.Id == scenario.Id);
                 if (baseline is null || !baseline.FullPage || !scenario.FullPage || baseline.TimedOut || scenario.TimedOut)
@@ -125,70 +101,22 @@ internal static class GateEvaluator
             }
         }
 
-        foreach (var step in report.Steps)
-        {
-            var scale = RetailTree.Count(step.Products);
-            foreach (var reference in step.Scenarios.Where(s => s.Kind is "ListReference" or "PointFunctionReference" && s.Baseline is not null))
-            {
-                {
-                    var current = step.Scenarios.FirstOrDefault(s => s.Id == reference.Baseline);
-                    if (current is null || config.Regression.Exempt.Contains(current.Id))
-                    {
-                        continue;
-                    }
-
-                    var limit = reference.MedianMs * config.Regression.MaxRatio + config.Regression.SlackMilliseconds;
-                    results.Add(new GateResult(
-                        "regression",
-                        $"{current.Id} @ {scale}",
-                        current.MedianMs <= limit,
-                        string.Create(
-                            CultureInfo.InvariantCulture,
-                            $"{current.MedianMs:F2} ms vs {reference.MedianMs:F2} ms with the previous function (×{current.MedianMs / reference.MedianMs:F2}; limit {limit:F2} ms)")));
-                }
-            }
-
-            foreach (var id in config.Improvement.Scenarios)
-            {
-                var previous = step.Scenarios.FirstOrDefault(s => s.Id == "reference." + id);
-                if (previous is null)
-                {
-                    continue;
-                }
-
-                var current = step.Scenarios.FirstOrDefault(s => s.Id == id);
-                if (current is null)
-                {
-                    continue;
-                }
-
-                var limit = previous.MedianMs * config.Improvement.MaxRatio;
-                results.Add(new GateResult(
-                    "improvement",
-                    $"{id} @ {scale}",
-                    current.MedianMs <= limit,
-                    string.Create(
-                        CultureInfo.InvariantCulture,
-                        $"{current.MedianMs:F2} ms vs previous function {previous.MedianMs:F2} ms (×{current.MedianMs / previous.MedianMs:F4}; limit {limit:F2} ms)")));
-            }
-        }
-
-        if (config.CeilingsMilliseconds.TryGetValue(report.Provider, out var ceilings))
+        if (config.RegressionMilliseconds.TryGetValue(report.Provider, out var limits))
         {
             foreach (var step in report.Steps)
             {
                 foreach (var scenario in step.Scenarios)
                 {
-                    if (!ceilings.TryGetValue(scenario.Id, out var ceiling))
+                    if (!limits.TryGetValue(scenario.Id, out var limit))
                     {
                         continue;
                     }
 
                     results.Add(new GateResult(
-                        "ceiling",
+                        "regression",
                         $"{scenario.Id} @ {RetailTree.Count(step.Products)}",
-                        scenario.MedianMs <= ceiling,
-                        string.Create(CultureInfo.InvariantCulture, $"{scenario.MedianMs:F2} ms (ceiling {ceiling:F0} ms)")));
+                        scenario.MedianMs <= limit,
+                        string.Create(CultureInfo.InvariantCulture, $"{scenario.MedianMs:F2} ms (limit {limit:F0} ms)")));
                 }
             }
         }
@@ -196,14 +124,9 @@ internal static class GateEvaluator
         return results;
     }
 
-    /// <summary>The previous release's function, measured for comparison.</summary>
-    private static bool IsReference(ScenarioResult scenario)
-        => scenario.Kind is "ListReference" or "PointFunctionReference";
-
     /// <summary>
     /// The rows a page has to touch at a catalog of <paramref name="products"/> rows, from the paper: a page
-    /// through the scope column k, the previous function min(k / σ, N), a page filtered to one store that
-    /// store's σN rows. Point checks touch one row.
+    /// through the scope column k, a page filtered to one store that store's σN rows. Point checks touch one row.
     /// </summary>
     internal static double ExpectedRows(ScenarioResult scenario, long products)
     {
@@ -213,12 +136,6 @@ internal static class GateEvaluator
         }
 
         var k = scenario.PageSize + 1d;
-        var scope = scenario.Selectivity * products;
-        if (scenario.StoreFiltered)
-        {
-            return Math.Max(k, scope);
-        }
-
-        return scenario.Kind == "ListReference" ? Math.Min(k / scenario.Selectivity, products) : k;
+        return scenario.StoreFiltered ? Math.Max(k, scenario.Selectivity * products) : k;
     }
 }

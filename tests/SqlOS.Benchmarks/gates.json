@@ -4,24 +4,10 @@
     "slackMilliseconds": 2.0,
     "exempt": [
       "list.grants10k.first-page",
-      "reference.list.grants10k.first-page",
-      "list.grants100k.first-page",
-      "reference.list.grants100k.first-page"
+      "list.grants100k.first-page"
     ]
   },
-  "regression": {
-    "maxRatio": 1.15,
-    "slackMilliseconds": 2.0,
-    "exempt": []
-  },
-  "improvement": {
-    "scenarios": [
-      "list.store.first-page",
-      "list.store.by-price"
-    ],
-    "maxRatio": 0.05
-  },
-  "ceilingsMilliseconds": {
+  "regressionMilliseconds": {
     "postgresql": {
       "list.admin.first-page": 60,
       "list.admin.k100": 120,
@@ -34,9 +20,14 @@
       "list.store.first-page": 60,
       "list.store.by-price": 60,
       "list.store.by-store": 60,
+      "list.grants10k.first-page": 25,
+      "list.grants100k.first-page": 190,
       "point.function.product": 25,
       "point.function.deep-product": 25,
       "point.function.denied": 25,
+      "point.function.grants10k": 25,
+      "point.function.grants10k.denied": 25,
+      "point.function.grants100k": 25,
       "point.api.product": 85,
       "point.api.deep-product": 150
     },
@@ -52,9 +43,14 @@
       "list.store.first-page": 150,
       "list.store.by-price": 150,
       "list.store.by-store": 150,
+      "list.grants10k.first-page": 1300,
+      "list.grants100k.first-page": 2900,
       "point.function.product": 11,
       "point.function.deep-product": 14,
       "point.function.denied": 8,
+      "point.function.grants10k": 11,
+      "point.function.grants10k.denied": 8,
+      "point.function.grants100k": 11,
       "point.api.product": 125,
       "point.api.deep-product": 230
     }

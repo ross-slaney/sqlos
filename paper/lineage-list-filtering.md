@@ -134,4 +134,4 @@ same page: 1.7 ms at either size). A caller with several roots reads one seek pe
 sorts the streams, which costs at most S. There is no other form: a caller with thousands of roots gets the
 same predicate, with the roots at each level sent as one list parameter, and pays one seek per root.
 
-The benchmark harness (`tests/SqlOS.Benchmarks`) measures the previous function and the scope column on the same data from 100K to 50M rows.
+The benchmark harness (`tests/SqlOS.Benchmarks`) measures the scope column from 100K to 50M rows and holds every page and point check to a fixed limit per engine; its README keeps the run that measured the previous function beside it.

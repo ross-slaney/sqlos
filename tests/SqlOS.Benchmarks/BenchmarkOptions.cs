@@ -38,8 +38,7 @@ internal sealed record BenchmarkOptions
 
     /// <summary>
     /// The longest a single query may run. A scenario whose first execution exceeds it is reported as
-    /// "did not finish" and counted at the budget, so the previous function's sparse scans (hours at 50M)
-    /// bound the run instead of ending it.
+    /// "did not finish" and counted at the budget, so a pathological page bounds the run instead of ending it.
     /// </summary>
     public int ScenarioBudgetSeconds { get; init; } = 600;
 

@@ -6,17 +6,10 @@ catalog grows from 1M to 50M products in CI, and fails CI when that behavior reg
 It is the maintained successor to the harness behind the paper's Section 7 (kept in `paper/benchmark`),
 which ran a hand-copied version of the schema and function at 1.2M–1.5M resources on SQL Server only.
 
-## Before and now on the same table
-
-Every list page is measured two ways on the same `Products` table, the same data, and the same LINQ:
-
-| Way | Scenario ids | What the filter does |
-|---|---|---|
-| **Previous function** | `reference.list.*` | The row filter as the last release shipped it (`Reference/*.sql`, created as `fn_IsResourceAccessible_Reference`): for every candidate row, walk up the tree and look for a grant at each ancestor |
-| **Now** | `list.*` | `BuildFilterAsync`: the row's own scope column holds its resource's ancestor at every level access flows down from, so a single-grant caller's page is one seek of an index that starts with that level's part of the column and continues with the order the page asks for |
-
-Point checks are measured twice (`fn_IsResourceAccessible` now and as the previous release shipped it), plus
-`Allows` (`CheckAccessAsync`), which applications call.
+Every list page (`list.*`) goes through `BuildFilterAsync`: the row's own scope column holds its resource's
+ancestor at every level access flows down from, so a single-grant caller's page is one seek of an index that
+starts with that level's part of the column and continues with the order the page asks for. Point checks
+measure `fn_IsResourceAccessible` and `Allows` (`CheckAccessAsync`), which applications call.
 
 ## What is measured
 
@@ -38,8 +31,8 @@ Point checks are measured twice (`fn_IsResourceAccessible` now and as the previo
   compared (counts and order-independent hashes over every column) with the same after the maintenance pass
   and with what SqlOS rebuilds from the resource tree alone with its own procedure.
 - **Every query has a budget** (`--scenario-budget`, 600 s by default). A scenario whose first execution
-  exceeds it is reported as `> 600 s‡` and counted at the budget, a lower bound, in every ratio: the
-  previous function's sparse pages take hours at 50M, and they bound the run instead of ending it.
+  exceeds it is reported as `> 600 s‡` and counted at the budget, a lower bound, in every ratio, so a
+  pathological page bounds the run instead of ending it.
 
 ## The dataset
 
@@ -73,26 +66,23 @@ against SqlOS's rebuild.
 | `list.admin.by-price`, `list.region.by-price`, `list.store.by-price` | Pages in an order the application declared an index for, dense to sparse |
 | `list.chain.first-page`, `list.region.first-page` | Narrower grants (σ = 7%, 1%) |
 | `list.deep-chain.first-page` | The same at D = 10 |
-| `list.store.first-page` | Sparse access (σ ≈ 0.0065%): the previous function examined about 400K rows per page |
+| `list.store.first-page` | Sparse access (σ ≈ 0.0065%): one seek, the same as a dense page |
 | `list.store.by-store` | The same person listing their store with `WHERE StoreId = …`: the application narrowed the page itself |
-| `list.grants10k.first-page`, `list.grants100k.first-page` | Thousands of roots: the same predicate, with the roots at the product level sent as one list parameter |
-| `reference.*` | The previous function's twin of every page and point check |
+| `list.grants10k.first-page`, `list.grants100k.first-page` | Thousands of roots: the same predicate, with the roots at the product level sent as one list parameter. Callers with tens of thousands of single-resource grants are outside the model's intended shape (access flows down a hierarchy); these pages are measured and held to their own limits, not expected to be flat |
 | `point.function.*`, `point.api.*` | `fn_IsResourceAccessible` for one product at depth 4 and 9, a denial, the many-grants people, and `Allows` |
 | `density.*` | At the first scale only: the region pages and the denied check re-run while 100 other people hold grants on the root. Only the caller's own grants should matter. Reported, not gated |
 | maintenance | At the first scale only: 2,000 single-row inserts with the lineage triggers on and off, one 2,000-row insert, one 2,000-row delete, and reparent, deactivate and reactivate of a region subtree; then a rebuild from scratch, compared with the maintained lineage |
 
-The previous function's sparse pages cost minutes, so they run only at the first and last scales, which are
-the two the scale gate compares. The current filter's pages run at every scale.
-
-## Results of the latest full run
+## The run that replaced the tree walk
 
 Run 36964060038 (2026-10-02, hosted `ubuntu-latest`, 4 vCPU, 17 GB, 8 GB to the engine), 1M → 10M → 50M on
-both engines, every gate green. **Before** is the previous release's function through the same
-`BuildFilterAsync`; **Now** is the filter reading the row's scope column. A dash means the previous
-function was not run for that page (its many-grants pages take minutes at 10M). The run's summary page has
-the 10M tables, every scenario with rows read and server time, and the plans. The many-grants list rows were
-measured when callers with more than 1,000 roots were still checked row by row; that path is gone, and those
-callers now get the same filter as everyone else.
+both engines, measured the scope column against the function it replaced, which walked up the tree from
+every candidate row. The harness no longer runs that function; these tables are the record of why. **Before**
+is that function through the same `BuildFilterAsync`; **Now** is the filter reading the row's scope column.
+A dash means the old function was not run for that page (its many-grants pages take minutes at 10M). The
+many-grants list rows were measured when callers with more than 1,000 roots were still checked row by row;
+that path is gone, and those callers now get the same filter as everyone else (their current costs are the
+limits in `gates.json`).
 
 **PostgreSQL 16, 1M products** (median ms; × = times faster than before)
 
@@ -191,14 +181,11 @@ the application's own `StoreId` index; every other page reads the page's rows an
   may be at most `maxRatio` (2.0) times the median at the smallest, times the growth of the rows the page has
   to touch, plus `slackMilliseconds`. A page through the scope column touches k rows at any N (one index
   seek), so it has no growth term; a page filtered to a store touches that store's σN rows through its own
-  index. The previous function's pages are measured at every scale but not gated: how its cost grows is a
-  finding about it, not a regression of the current filter.
-- **regression**: the current filter against the previous function, at every scale: at most `maxRatio`
-  (1.15) times the previous time, plus slack.
-- **improvement**: for the sparse pages, the current filter must take at most `maxRatio` (0.05) of the
-  previous function's time.
-- **ceiling**: an absolute median budget per scenario and engine, for regressions that slow every scale
-  alike. Set them to several times the values CI reports, and raise them only with an explanation.
+  index. The many-grants pages are exempt: their cost follows the caller's grants, not N.
+- **regression**: every scenario's median against the constant set for it and the engine in
+  `regressionMilliseconds`: what the scenario costs today, with headroom for runner noise (the many-grants
+  pages sit at about 1.5× the values CI reports; the rest, several times). A change that makes any page or
+  point check slower than its limit fails the run. Raise a limit only with an explanation.
 
 ## Run it
 
@@ -227,10 +214,10 @@ correctness but not for timings.
 project, or the workflow changes. Standard GitHub-hosted runners (4 vCPU, 16 GB) are free for public
 repositories.
 
-| Tier | When | Scales | What is skipped |
-|---|---|---|---|
-| CI | Every push to a pull request that touches `src/SqlOS`, every merge to `main`, weekly | 100K → 1M | the previous function's sparse store pages (minutes each on SQL Server) |
-| Full | Only when the `benchmark-full` label is added to a pull request (once per labelling: remove and re-add it to run again), or a manual run that asks for 50M | 1M → 10M → 50M | the previous function's many-grants pages |
+| Tier | When | Scales |
+|---|---|---|
+| CI | Every push to a pull request that touches `src/SqlOS`, every merge to `main`, weekly | 100K → 1M |
+| Full | Only when the `benchmark-full` label is added to a pull request (once per labelling: remove and re-add it to run again), or a manual run that asks for 50M | 1M → 10M → 50M |
 
 Most of the full run is loading: 90M new rows in each of two tables, then rebuilding indexes. PostgreSQL
 loads in parallel `COPY` streams. SQL Server takes the table lock that minimal logging needs, so it has one

@@ -32,8 +32,8 @@ internal sealed class ScenarioRunner(
     public async Task<List<ScenarioResult>> RunAsync(IReadOnlyList<Scenario> scenarios, long productCount, CancellationToken cancellationToken)
     {
         // One pass over every query shape first, so no scenario is timed while EF Core compiles its query or
-        // the engine reads freshly rebuilt index pages for the first time. The sparse scans warm themselves below.
-        foreach (var scenario in scenarios.Where(s => !IsSparseScan(s)))
+        // the engine reads freshly rebuilt index pages for the first time.
+        foreach (var scenario in scenarios)
         {
             try
             {
@@ -53,12 +53,6 @@ internal sealed class ScenarioRunner(
 
         return results;
     }
-
-    /// <summary>The previous function's page for a sparse principal: k / σ rows walked, minutes on SQL Server.</summary>
-    internal static bool IsSparseScan(Scenario scenario)
-        => scenario.Kind is ScenarioKind.ListReference
-           && scenario.StoreId is null
-           && scenario.Selectivity < 0.001;
 
     private async Task<ScenarioResult> RunAsync(Scenario scenario, long productCount, CancellationToken cancellationToken)
     {
@@ -98,8 +92,8 @@ internal sealed class ScenarioRunner(
                     await ExecuteAsync(scenario, cancellationToken);
                 }
 
-                // Queries that take tens of seconds (the previous function's sparse scans) are timed once; their
-                // spread is small relative to their length, and each run costs minutes of CI time on SQL Server.
+                // Queries that take tens of seconds are timed once: their spread is small relative to their
+                // length, and each run costs minutes of CI time on SQL Server.
                 var iterations = estimate switch { < 250 => 25, < 2_000 => 7, < 10_000 => 3, _ => 1 };
                 timings = new double[iterations];
                 for (var i = 0; i < iterations; i++)
@@ -120,7 +114,6 @@ internal sealed class ScenarioRunner(
             scenario.Id,
             scenario.Title,
             scenario.Kind.ToString(),
-            scenario.Baseline,
             scenario.Selectivity,
             scenario.ProductDepth,
             scenario.IsPage ? scenario.PageSize : 1,
@@ -159,7 +152,6 @@ internal sealed class ScenarioRunner(
             scenario.Id,
             scenario.Title,
             scenario.Kind.ToString(),
-            scenario.Baseline,
             scenario.Selectivity,
             scenario.ProductDepth,
             scenario.IsPage ? scenario.PageSize : 1,
@@ -202,7 +194,6 @@ internal sealed class ScenarioRunner(
         switch (scenario.Kind)
         {
             case ScenarioKind.List:
-            case ScenarioKind.ListReference:
             {
                 var query = await BuildListQueryAsync(db, service, scenario);
 
@@ -226,14 +217,11 @@ internal sealed class ScenarioRunner(
             }
 
             case ScenarioKind.PointFunction:
-            case ScenarioKind.PointFunctionReference:
             {
                 var subjects = JsonSerializer.Serialize(scenario.Principal.ResolvedSubjectIds);
                 var resourceId = RetailTree.ProductResourceId(scenario.ProductId);
                 var clock = Stopwatch.StartNew();
-                var allowed = scenario.Kind == ScenarioKind.PointFunction
-                    ? await db.IsResourceAccessible(resourceId, subjects, ProductPermissionId).AnyAsync(cancellationToken)
-                    : await db.IsResourceAccessibleReference(resourceId, subjects, ProductPermissionId).AnyAsync(cancellationToken);
+                var allowed = await db.IsResourceAccessible(resourceId, subjects, ProductPermissionId).AnyAsync(cancellationToken);
                 clock.Stop();
                 return new Execution(clock.Elapsed, Page: null, allowed);
             }
@@ -254,22 +242,12 @@ internal sealed class ScenarioRunner(
 
     /// <summary>
     /// The page an application asks for: authorized, optionally store-scoped, in key order after a cursor or
-    /// in price order, k + 1 rows. The same LINQ for all three ways; only the filter differs.
+    /// in price order, k + 1 rows.
     /// </summary>
     private static async Task<IQueryable<Product>> BuildListQueryAsync(BenchDbContext db, SqlOSFgaAuthService service, Scenario scenario)
     {
-        IQueryable<Product> query;
-        if (scenario.Kind == ScenarioKind.ListReference)
-        {
-            // The previous release's function, with the subject set BuildFilterAsync resolves for this person.
-            var subjects = JsonSerializer.Serialize(scenario.Principal.ResolvedSubjectIds);
-            query = db.Products.AsNoTracking().Where(p => db.IsResourceAccessibleReference(p.ResourceId, subjects, ProductPermissionId).Any());
-        }
-        else
-        {
-            var authorized = await service.BuildFilterAsync<Product>(scenario.Principal.SubjectId, BenchmarkModel.ProductView);
-            query = db.Products.AsNoTracking().Where(authorized);
-        }
+        var authorized = await service.BuildFilterAsync<Product>(scenario.Principal.SubjectId, BenchmarkModel.ProductView);
+        IQueryable<Product> query = db.Products.AsNoTracking().Where(authorized);
 
         if (scenario.StoreId is { } storeId)
         {
@@ -382,13 +360,11 @@ internal sealed class ScenarioRunner(
     private sealed record PlanSummary(long? RowsExamined, double? PlanningMs, double? ExecutionMs, string File);
 }
 
-/// <param name="Baseline">For a twin scenario, the id of the lineage scenario it is compared with.</param>
 /// <param name="RowsExamined">Product rows the plan read, produced or discarded, summed over loops.</param>
 internal sealed record ScenarioResult(
     string Id,
     string Title,
     string Kind,
-    string? Baseline,
     double Selectivity,
     string ProductDepth,
     int PageSize,

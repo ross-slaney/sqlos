@@ -9,8 +9,8 @@ namespace SqlOS.Benchmarks.Infrastructure;
 /// <summary>
 /// An application context the way SqlOS consumers write one: the app's own tables and the FGA model. Queries go
 /// through <c>BuildFilterAsync</c>, so the benchmark measures the SQL EF Core generates for real callers, not a
-/// hand-written copy of it. The two point-check functions are mapped here only so the harness can time them
-/// directly; applications call <c>CheckAccessAsync</c>.
+/// hand-written copy of it. The point-check function is mapped here only so the harness can time it directly;
+/// applications call <c>CheckAccessAsync</c>.
 /// </summary>
 internal sealed class BenchDbContext(DbContextOptions<BenchDbContext> options) : DbContext(options), ISqlOSFgaDbContext
 {
@@ -23,13 +23,6 @@ internal sealed class BenchDbContext(DbContextOptions<BenchDbContext> options) :
         string subjectIds,
         string permissionId)
         => FromExpression(() => IsResourceAccessible(resourceId, subjectIds, permissionId));
-
-    /// <summary>The previous release's row filter (see <see cref="ReferenceFunction"/>), for the regression gate.</summary>
-    public IQueryable<AccessibleRow> IsResourceAccessibleReference(
-        string resourceId,
-        string subjectIds,
-        string permissionId)
-        => FromExpression(() => IsResourceAccessibleReference(resourceId, subjectIds, permissionId));
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -73,9 +66,6 @@ internal sealed class BenchDbContext(DbContextOptions<BenchDbContext> options) :
         });
         modelBuilder.HasDbFunction(GetType().GetMethod(nameof(IsResourceAccessible))!)
             .HasName("fn_IsResourceAccessible")
-            .HasSchema("dbo");
-        modelBuilder.HasDbFunction(GetType().GetMethod(nameof(IsResourceAccessibleReference))!)
-            .HasName(ReferenceFunction.Name)
             .HasSchema("dbo");
     }
 }

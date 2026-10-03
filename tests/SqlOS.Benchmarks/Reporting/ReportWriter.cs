@@ -37,27 +37,6 @@ internal static class ReportWriter
         text.AppendLine(report.Dataset.Description);
         text.AppendLine();
 
-        // Before and after side by side, one table per scale: what the previous release's function took,
-        // what the filter takes now, and how many times faster it is.
-        var pages = largest.Scenarios.Where(s => s.Kind == "List").ToList();
-        var points = largest.Scenarios.Where(s => s.Kind == "PointFunction").ToList();
-        foreach (var step in steps)
-        {
-            text.AppendLine(CultureInfo.InvariantCulture, $"**At {RetailTree.Count(step.Products)} products: before and now** (median ms; × = times faster than before)");
-            text.AppendLine();
-            text.AppendLine("| Page | σ | Before | Now | × |");
-            text.AppendLine("|---|---:|---:|---:|---:|");
-            foreach (var scenario in pages.Concat(points))
-            {
-                var previous = step.Scenarios.FirstOrDefault(s => s.Id == "reference." + scenario.Id);
-                var current = step.Scenarios.FirstOrDefault(s => s.Id == scenario.Id);
-                text.AppendLine(CultureInfo.InvariantCulture,
-                    $"| {scenario.Title} | {(IsPage(scenario.Kind) ? Selectivity(scenario.Selectivity) : "–")} | {Cell(previous)} | {Cell(current)} | {Faster(previous, current)} |");
-            }
-
-            text.AppendLine();
-        }
-
         text.AppendLine("**Every scenario**");
         text.AppendLine();
         text.Append("| Scenario | σ |");
@@ -113,11 +92,6 @@ internal static class ReportWriter
         {
             text.AppendLine("‡ Did not finish within the run's budget for one query; counted at the budget, a lower bound, in every ratio.");
         }
-
-        AppendTwins(text, largest, "ListReference", "**Previous function** (regression check, same data, same job)",
-            (current, twin) => string.Create(CultureInfo.InvariantCulture, $"{current.Title}: {WithUnit(current.MedianMs)} now vs {WithUnit(twin.MedianMs)} before (×{current.MedianMs / twin.MedianMs:F2})"));
-        AppendTwins(text, largest, "PointFunctionReference", null,
-            (current, twin) => string.Create(CultureInfo.InvariantCulture, $"{current.Title}: {WithUnit(current.MedianMs)} now vs {WithUnit(twin.MedianMs)} before (×{current.MedianMs / twin.MedianMs:F2})"));
 
         if (smallest.Density.Count > 0)
         {
@@ -205,19 +179,6 @@ internal static class ReportWriter
         return text.ToString();
     }
 
-    /// <summary>How many times faster <paramref name="current"/> is than <paramref name="previous"/>; a budgeted previous run gives a lower bound.</summary>
-    private static string Faster(ScenarioResult? previous, ScenarioResult? current)
-    {
-        if (previous is null || current is null || current.MedianMs <= 0)
-        {
-            return "–";
-        }
-
-        var times = previous.MedianMs / current.MedianMs;
-        var text = times >= 100 ? times.ToString("N0", CultureInfo.InvariantCulture) : times.ToString(times >= 10 ? "F0" : "F1", CultureInfo.InvariantCulture);
-        return (previous.TimedOut ? "> ×" : "×") + text;
-    }
-
     private static string Cell(ScenarioResult? result)
     {
         if (result is null)
@@ -234,38 +195,7 @@ internal static class ReportWriter
         return Milliseconds(result.MedianMs) + mark;
     }
 
-    /// <summary>One paragraph pairing each twin of <paramref name="kind"/> at the largest scale with its lineage scenario.</summary>
-    private static void AppendTwins(StringBuilder text, ScaleStep step, string kind, string? heading, Func<ScenarioResult, ScenarioResult, string> describe)
-    {
-        var pairs = step.Scenarios
-            .Where(s => s.Kind == kind && s.Baseline is not null)
-            .Select(twin => (Current: step.Scenarios.FirstOrDefault(s => s.Id == twin.Baseline), Twin: twin))
-            .Where(p => p.Current is not null)
-            .ToList();
-        if (pairs.Count == 0)
-        {
-            return;
-        }
-
-        if (heading is not null)
-        {
-            text.AppendLine();
-            text.Append(heading);
-            text.Append(CultureInfo.InvariantCulture, $" · at {RetailTree.Count(step.Products)}:");
-        }
-
-        foreach (var (current, twin) in pairs)
-        {
-            text.Append(' ');
-            text.Append(describe(current!, twin));
-            text.Append(';');
-        }
-
-        text.Length -= 1;
-        text.AppendLine(".");
-    }
-
-    private static bool IsPage(string kind) => kind is "List" or "ListReference";
+    private static bool IsPage(string kind) => kind is "List";
 
     private static string Selectivity(double value)
         => value >= 0.9999 ? "1"

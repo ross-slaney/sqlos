@@ -22,7 +22,6 @@
 
   <ItemGroup>
     <None Update="gates.json" CopyToOutputDirectory="PreserveNewest" />
-    <None Update="Reference\*.sql" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

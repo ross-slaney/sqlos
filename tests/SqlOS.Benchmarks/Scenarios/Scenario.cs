@@ -7,14 +7,8 @@ internal enum ScenarioKind
     /// <summary>A cursor page of products through <c>BuildFilterAsync</c>: the lineage read from the row's scope column.</summary>
     List,
 
-    /// <summary>The same page through the previous release's function (<see cref="Infrastructure.ReferenceFunction"/>).</summary>
-    ListReference,
-
     /// <summary><c>fn_IsResourceAccessible</c> for one resource, the enforcement primitive the paper measures.</summary>
     PointFunction,
-
-    /// <summary>The previous release's function for one resource.</summary>
-    PointFunctionReference,
 
     /// <summary><c>Allows</c> (<c>CheckAccessAsync</c>), the point check applications call.</summary>
     PointApi,
@@ -30,7 +24,6 @@ internal enum PageOrder
 /// <param name="Selectivity">σ: the fraction of all products the principal may see.</param>
 /// <param name="ProductDepth">Depth of the products involved below the root (4 in a D = 5 chain, 9 in the D = 10 chain).</param>
 /// <param name="Cursor">For pages in key order: the product id the page starts after (0 for the first page).</param>
-/// <param name="Baseline">For the twins: the id of the lineage scenario they pair with.</param>
 internal sealed record Scenario(
     string Id,
     string Title,
@@ -43,10 +36,9 @@ internal sealed record Scenario(
     int? StoreId = null,
     long ProductId = 0,
     bool ExpectAllowed = true,
-    string? Baseline = null,
     PageOrder Order = PageOrder.Id)
 {
-    public bool IsPage => Kind is ScenarioKind.List or ScenarioKind.ListReference;
+    public bool IsPage => Kind is ScenarioKind.List;
 }
 
 internal static class ScenarioCatalog
@@ -92,23 +84,7 @@ internal static class ScenarioCatalog
             }
         }
 
-        // Twins: the previous function, for the regression and improvement gates.
-        var all = new List<Scenario>();
-        foreach (var scenario in current)
-        {
-            all.Add(scenario);
-            switch (scenario.Kind)
-            {
-                case ScenarioKind.List:
-                    all.Add(scenario with { Id = "reference." + scenario.Id, Title = scenario.Title + " · previous function", Kind = ScenarioKind.ListReference, Baseline = scenario.Id });
-                    break;
-                case ScenarioKind.PointFunction:
-                    all.Add(scenario with { Id = "reference." + scenario.Id, Title = scenario.Title + " · previous function", Kind = ScenarioKind.PointFunctionReference, Baseline = scenario.Id });
-                    break;
-            }
-        }
-
-        return all;
+        return current;
     }
 
     /// <summary>
@@ -117,12 +93,11 @@ internal static class ScenarioCatalog
     /// </summary>
     public static IReadOnlyList<Scenario> Density(IReadOnlyList<Scenario> scenarios)
         => scenarios
-            .Where(s => s.Id is "list.region.first-page" or "reference.list.region.first-page" or "point.function.denied")
+            .Where(s => s.Id is "list.region.first-page" or "point.function.denied")
             .Select(s => s with
             {
                 Id = "density." + s.Id,
                 Title = $"{s.Title}, {BenchmarkModel.RootCrowdGrants} others' grants on the root",
-                Baseline = null,
             })
             .ToList();
 }

@@ -96,7 +96,7 @@ var builtPlainOptions = plainOptions.Options;
 BenchDbContext CreateContext() => new(builtPlainOptions);
 
 // The schema, indexes, functions, lineage triggers, scope column, and core seed exactly as SqlOS creates them
-// for an application; then the previous release's function beside them, for the regression comparison.
+// for an application.
 log.Info("Creating the SqlOS FGA schema, the lineage, fn_AccessRoots, fn_IsResourceAccessible, the triggers, the scope column, and the authorization model...");
 await using (var db = CreateContext())
 {
@@ -107,8 +107,6 @@ await using (var db = CreateContext())
     await seed.SeedCoreAsync(cancellation);
     await seed.SeedAuthorizationDataAsync(BenchmarkModel.Seed, cancellation);
 }
-
-await ReferenceFunction.CreateAsync(options.Provider, server.DatabaseConnectionString, cancellation);
 
 var tree = RetailTree.Build(fga.RootResourceId, options.Seed);
 var chains = tree.Nodes.Count(n => n.TypeId == "chain");
@@ -121,7 +119,7 @@ var dataset = new DatasetShape(
     MaxDepth: 10,
     options.Seed,
     string.Create(CultureInfo.InvariantCulture,
-        $"The shipped schema, indexes, resource lineage, `fn_AccessRoots`, and `fn_IsResourceAccessible`, queried through `BuildFilterAsync` two ways on the same product table: the previous release's function (walks up from every row) and the lineage read from the row's own scope column. The tree: {chains} retail chains ({chains - 1} at D = 5, one at D = 10) with {tree.Stores.Count:N0} stores and {tree.Nodes.Count + 1:N0} organizational nodes. Store sizes are log-normal, and products are spread through the id range the way rows arrive over time. {managedScopes:N0} managers hold grants on their store, region, or chain. Two more people hold 10,000 and 100,000 grants on single products, spread through the catalog. The people measured each resolve to 3 subjects (M = 3)."));
+        $"The shipped schema, indexes, resource lineage, `fn_AccessRoots`, and `fn_IsResourceAccessible`, queried through `BuildFilterAsync` on a product table: the lineage read from the row's own scope column. The tree: {chains} retail chains ({chains - 1} at D = 5, one at D = 10) with {tree.Stores.Count:N0} stores and {tree.Nodes.Count + 1:N0} organizational nodes. Store sizes are log-normal, and products are spread through the id range the way rows arrive over time. {managedScopes:N0} managers hold grants on their store, region, or chain. Two more people hold 10,000 and 100,000 grants on single products, spread through the catalog. The people measured each resolve to 3 subjects (M = 3)."));
 
 // Leave room for the CI runner's own logs and the uploaded results.
 long? FreeBytes() => options.DataDirectory is { } directory ? new DriveInfo(Path.GetFullPath(directory)).AvailableFreeSpace : null;
@@ -207,11 +205,8 @@ foreach (var target in options.Scales)
     log.Info(
         $"Measuring at {RetailTree.Count(target)} products ({tree.TotalResources(target):N0} resources, {size / 1e9:F1} GB)" +
         (FreeBytes() is { } left ? $", {left / 1e9:F0} GB free on the data disk..." : "..."));
-    // The previous function's sparse scans are independent of N and cost minutes, so they run at the first
-    // and last scales only: the two the scale gate compares. The lineage pages run at every scale.
-    var intermediate = target != options.Scales[0] && target != options.Scales[^1];
     var scenarios = ScenarioCatalog.Build(tree, people, target)
-        .Where(s => !options.Exclude.Contains(s.Id) && !(intermediate && ScenarioRunner.IsSparseScan(s)))
+        .Where(s => !options.Exclude.Contains(s.Id))
         .ToList();
     var results = await runner.RunAsync(scenarios, target, cancellation);
 
