@@ -797,6 +797,13 @@ public sealed partial class ScimProtocolIntegrationTests
                 fgaOptions,
                 loggerFactory.CreateLogger<SqlOSFgaSeedService>())
                 .SeedCoreAsync();
+            // The harness removes the hosted services, so the bootstrap that creates SqlOS's database
+            // routines never runs; the point check (fn_IsResourceAccessible) needs them.
+            await new SqlOSFgaFunctionInitializer(
+                bootstrap,
+                fgaOptions,
+                loggerFactory.CreateLogger<SqlOSFgaFunctionInitializer>())
+                .EnsureFunctionsExistAsync();
             var connectionString = bootstrap.Database.GetConnectionString()!;
             var databaseName = bootstrap.Database.GetDbConnection().Database;
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = Environments.Development });
