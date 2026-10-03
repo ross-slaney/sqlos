@@ -68,7 +68,7 @@ public sealed class SqlOSScimGrantBoundaryTests
         data["reason"]!.GetValue<string>().Should().Be("outside_boundary");
         (await f.Context.Set<SqlOSAuditEvent>().CountAsync(x => x.Action == "scim.grant.outside_boundary" && x.Source == "scim" && x.OrganizationId == OrgA))
             .Should().Be(1);
-        (await f.Fga.CheckAccessAsync(await SubjectIdAsync(f, ada), ManageStore, LegacyStoreB9001)).Allowed.Should().BeFalse();
+        (await InMemoryAccessOracle.AllowsAsync(f.Context, await SubjectIdAsync(f, ada), ManageStore, LegacyStoreB9001)).Should().BeFalse();
     }
 
     [TestMethod]
@@ -84,7 +84,7 @@ public sealed class SqlOSScimGrantBoundaryTests
         (await f.Context.Set<SqlOSFgaGrant>().CountAsync()).Should().Be(0);
         var violation = await f.Context.Set<SqlOSScimSyncEvent>().SingleAsync(x => x.Action == "scim.grant.outside_boundary");
         JsonNode.Parse(violation.DataJson!)!["resourceId"]!.GetValue<string>().Should().Be(StoreB9001);
-        (await f.Fga.CheckAccessAsync(await SubjectIdAsync(f, ada), ManageStore, StoreB9001)).Allowed.Should().BeFalse();
+        (await InMemoryAccessOracle.AllowsAsync(f.Context, await SubjectIdAsync(f, ada), ManageStore, StoreB9001)).Should().BeFalse();
     }
 
     [TestMethod]
@@ -100,7 +100,7 @@ public sealed class SqlOSScimGrantBoundaryTests
         (await f.Context.Set<SqlOSFgaGrant>().CountAsync()).Should().Be(0,
             "a resource ID that merely starts with org A's prefix is still in org B's subtree");
         (await f.Context.Set<SqlOSScimSyncEvent>().CountAsync(x => x.Action == "scim.grant.outside_boundary")).Should().Be(1);
-        (await f.Fga.CheckAccessAsync(await SubjectIdAsync(f, ada), ManageStore, AcmeLookingStoreInB)).Allowed.Should().BeFalse();
+        (await InMemoryAccessOracle.AllowsAsync(f.Context, await SubjectIdAsync(f, ada), ManageStore, AcmeLookingStoreInB)).Should().BeFalse();
     }
 
     [TestMethod]
@@ -113,7 +113,7 @@ public sealed class SqlOSScimGrantBoundaryTests
         var subject = await SubjectIdAsync(f, ada);
         await PushGroupAsync(f, connection, "grp-rename", "Store-42-Managers", ada);
         (await f.Context.Set<SqlOSFgaGrant>().SingleAsync()).ResourceId.Should().Be(LegacyStoreA42);
-        (await f.Fga.CheckAccessAsync(subject, ManageStore, LegacyStoreA42)).Allowed.Should().BeTrue();
+        (await InMemoryAccessOracle.AllowsAsync(f.Context, subject, ManageStore, LegacyStoreA42)).Should().BeTrue();
 
         await PushGroupAsync(f, connection, "grp-rename", "Store-9001-Managers", ada);
 
@@ -121,8 +121,8 @@ public sealed class SqlOSScimGrantBoundaryTests
         (await f.Context.Set<SqlOSScimManagedGrant>().SingleAsync()).RevokedAt.Should().NotBeNull();
         (await f.Context.Set<SqlOSScimSyncEvent>().CountAsync(x => x.Action == "scim.grant.revoked")).Should().Be(1);
         (await f.Context.Set<SqlOSScimSyncEvent>().CountAsync(x => x.Action == "scim.grant.outside_boundary")).Should().Be(1);
-        (await f.Fga.CheckAccessAsync(subject, ManageStore, LegacyStoreA42)).Allowed.Should().BeFalse();
-        (await f.Fga.CheckAccessAsync(subject, ManageStore, LegacyStoreB9001)).Allowed.Should().BeFalse();
+        (await InMemoryAccessOracle.AllowsAsync(f.Context, subject, ManageStore, LegacyStoreA42)).Should().BeFalse();
+        (await InMemoryAccessOracle.AllowsAsync(f.Context, subject, ManageStore, LegacyStoreB9001)).Should().BeFalse();
     }
 
     [TestMethod]
@@ -183,7 +183,7 @@ public sealed class SqlOSScimGrantBoundaryTests
             .Should().Be(1);
         (await f.Context.Set<SqlOSAuditEvent>().CountAsync(x => x.Action == "scim.grant.boundary_missing" && x.Source == "scim"))
             .Should().Be(1);
-        (await f.Fga.CheckAccessAsync(await SubjectIdAsync(f, ada), ManageStore, LegacyStoreB9001)).Allowed.Should().BeFalse();
+        (await InMemoryAccessOracle.AllowsAsync(f.Context, await SubjectIdAsync(f, ada), ManageStore, LegacyStoreB9001)).Should().BeFalse();
     }
 
     [TestMethod]
@@ -196,7 +196,7 @@ public sealed class SqlOSScimGrantBoundaryTests
         var mapping = await InsertLegacyPatternMappingAsync(f, connection.Id, "store::{storeId}");
         await InsertLegacyManagedGrantAsync(f, connection.Id, mapping.Id, groupId, "grp-planted", LegacyStoreB9001);
         var subject = await SubjectIdAsync(f, ada);
-        (await f.Fga.CheckAccessAsync(subject, ManageStore, LegacyStoreB9001)).Allowed.Should().BeTrue(
+        (await InMemoryAccessOracle.AllowsAsync(f.Context, subject, ManageStore, LegacyStoreB9001)).Should().BeTrue(
             "the fixture reproduces a cross-tenant grant planted before the upgrade");
 
         await PushGroupAsync(f, connection, "grp-planted", "Store-9001-Managers", ada);
@@ -204,7 +204,7 @@ public sealed class SqlOSScimGrantBoundaryTests
         (await f.Context.Set<SqlOSFgaGrant>().CountAsync()).Should().Be(0);
         (await f.Context.Set<SqlOSScimManagedGrant>().SingleAsync()).RevokedAt.Should().NotBeNull();
         (await f.Context.Set<SqlOSScimSyncEvent>().CountAsync(x => x.Action == "scim.grant.boundary_missing")).Should().Be(1);
-        (await f.Fga.CheckAccessAsync(subject, ManageStore, LegacyStoreB9001)).Allowed.Should().BeFalse();
+        (await InMemoryAccessOracle.AllowsAsync(f.Context, subject, ManageStore, LegacyStoreB9001)).Should().BeFalse();
     }
 
     [TestMethod]
@@ -257,15 +257,15 @@ public sealed class SqlOSScimGrantBoundaryTests
         var grant = await f.Context.Set<SqlOSFgaGrant>().SingleAsync();
         grant.ResourceId.Should().Be(StoreA42);
         (await f.Context.Set<SqlOSScimSyncEvent>().CountAsync(x => x.Action == "scim.grant.mapped")).Should().Be(1);
-        (await f.Fga.CheckAccessAsync(subject, ManageStore, StoreA42)).Allowed.Should().BeTrue();
-        var explanation = await f.Fga.TraceResourceAccessAsync(subject, StoreA42, ManageStore);
-        explanation.AccessGranted.Should().BeTrue();
-        explanation.GrantsUsed.Should().Contain(item =>
-            item.ViaGroupName == "Store-42-Managers" && item.RoleKey == StoreManager && item.ResourceId == StoreA42);
-        (await f.Fga.CheckAccessAsync(subject, ManageStore, StoreB9001)).Allowed.Should().BeFalse();
+        (await InMemoryAccessOracle.AllowsAsync(f.Context, subject, ManageStore, StoreA42)).Should().BeTrue();
+        // The access comes through the group's grant, not one to the user.
+        var group42 = await f.Context.Set<SqlOSFgaUserGroup>().SingleAsync(g => g.Name == "Store-42-Managers");
+        grant.SubjectId.Should().Be(group42.SubjectId);
+        (await f.Context.Set<SqlOSFgaRole>().SingleAsync(r => r.Id == grant.RoleId)).Key.Should().Be(StoreManager);
+        (await InMemoryAccessOracle.AllowsAsync(f.Context, subject, ManageStore, StoreB9001)).Should().BeFalse();
 
         await PushGroupAsync(f, connection, "grp-42", "Store-42-Managers");
-        (await f.Fga.CheckAccessAsync(subject, ManageStore, StoreA42)).Allowed.Should().BeFalse(
+        (await InMemoryAccessOracle.AllowsAsync(f.Context, subject, ManageStore, StoreA42)).Should().BeFalse(
             "removing the member removes group-derived access without rewriting the group grant");
         (await f.Context.Set<SqlOSFgaGrant>().CountAsync()).Should().Be(1);
 
@@ -287,10 +287,10 @@ public sealed class SqlOSScimGrantBoundaryTests
 
         var adaSubject = await SubjectIdAsync(f, ada);
         (await f.Context.Set<SqlOSFgaGrant>().SingleAsync()).ResourceId.Should().Be(BoundaryA);
-        (await f.Fga.CheckAccessAsync(adaSubject, ManageStore, StoreA42)).Allowed.Should().BeTrue();
-        (await f.Fga.CheckAccessAsync(adaSubject, ManageStore, StoreAWest7)).Allowed.Should().BeTrue();
-        (await f.Fga.CheckAccessAsync(adaSubject, ManageStore, StoreB9001)).Allowed.Should().BeFalse();
-        (await f.Fga.CheckAccessAsync(await SubjectIdAsync(f, grace), ManageStore, StoreA42)).Allowed.Should().BeFalse(
+        (await InMemoryAccessOracle.AllowsAsync(f.Context, adaSubject, ManageStore, StoreA42)).Should().BeTrue();
+        (await InMemoryAccessOracle.AllowsAsync(f.Context, adaSubject, ManageStore, StoreAWest7)).Should().BeTrue();
+        (await InMemoryAccessOracle.AllowsAsync(f.Context, adaSubject, ManageStore, StoreB9001)).Should().BeFalse();
+        (await InMemoryAccessOracle.AllowsAsync(f.Context, await SubjectIdAsync(f, grace), ManageStore, StoreA42)).Should().BeFalse(
             "a directory user outside the mapped group has no grant");
     }
 
@@ -777,15 +777,13 @@ public sealed class SqlOSScimGrantBoundaryTests
         return new Fixture(
             context,
             new SqlOSAdminService(context, options, crypto),
-            new SqlOSScimService(context, options, crypto),
-            new SqlOSFgaAuthService(context, Options.Create(new SqlOSFgaOptions()), NullLogger<SqlOSFgaAuthService>.Instance));
+            new SqlOSScimService(context, options, crypto));
     }
 
     private sealed record Fixture(
         TestSqlOSInMemoryDbContext Context,
         SqlOSAdminService Admin,
-        SqlOSScimService Scim,
-        SqlOSFgaAuthService Fga) : IDisposable
+        SqlOSScimService Scim) : IDisposable
     {
         public void Dispose() => Context.Dispose();
     }

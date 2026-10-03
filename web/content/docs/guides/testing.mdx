@@ -19,10 +19,10 @@ You'll learn how to run the full test suite and focused filters while developing
 ## Test layout
 
 - `tests/SqlOS.Tests` — unit tests
-- `tests/SqlOS.IntegrationTests` — real SQL Server or PostgreSQL (Aspire container; set `SQLOS_TEST_PROVIDER=postgresql` for Postgres)
+- `tests/SqlOS.IntegrationTests` — real SQL Server or PostgreSQL (Aspire container; set `SQLOS_TEST_PROVIDER=postgresql` for Postgres, or `SQLOS_TEST_SQLSERVER_RCSI=1` to run SQL Server with read-committed snapshot, the Azure SQL default)
 - `examples/SqlOS.Example.IntegrationTests` — example API flows
 - `examples/SqlOS.Todo.IntegrationTests` — Todo sample flows
-- `tests/SqlOS.Benchmarks` — performance benchmarks
+- `tests/SqlOS.Benchmarks` — authorization benchmarks on SQL Server and PostgreSQL, 1M to 50M products in CI
 
 ## Run everything
 
@@ -47,6 +47,8 @@ Integration tests use Aspire and SQL Server or PostgreSQL containers for:
 - FGA checks and EF query composition
 - Example and Todo sample end-to-end paths
 
+Authorization checks and list filters run in the database. Unit tests on an in-memory provider can check the grants a feature creates, but not the access decision; test that against SQL Server or PostgreSQL.
+
 ## Focused runs
 
 ```bash
@@ -56,6 +58,20 @@ dotnet test tests/SqlOS.IntegrationTests/SqlOS.IntegrationTests.csproj --filter 
 ```
 
 Coverage settings live in `tests/coverlet.runsettings`.
+
+## Benchmarks
+
+`tests/SqlOS.Benchmarks` measures list filtering and point checks on the schema, indexes, functions, lineage triggers, and scope column that SqlOS ships. Every page is measured two ways on the same product table: through the previous release's row filter and through `BuildFilterAsync`. The catalog grows in place from 100K to 1M products on every CI run and to 50M on a labelled pull request, every answer is checked against ground truth, each page's actual plan is captured, and the lineage is checked against SqlOS's own rebuild after a maintenance pass of inserts, deletes, and subtree updates.
+
+```bash
+# PostgreSQL, 100K and 1M products; the harness starts the database with Testcontainers
+dotnet run --project tests/SqlOS.Benchmarks -c Release -- --provider postgresql
+
+# SQL Server at the CI scales, with database files on a large disk
+dotnet run --project tests/SqlOS.Benchmarks -c Release -- --provider sqlserver --scales 1m,10m,50m --data-dir /mnt/sqlos-bench
+```
+
+The `Benchmarks` workflow runs one job per engine beside pull-request CI whenever `src/SqlOS` changes. It fails on a wrong answer, on a lineage that differs from the rebuild, on per-page cost that grows with the catalog, on either filter form being slower than the previous release's, on the sparse pages not beating it by the configured ratios, or on a median above its budget in `tests/SqlOS.Benchmarks/gates.json`. The project README explains the dataset, the scenarios, and how to read the results.
 
 ## Test control-plane parity
 

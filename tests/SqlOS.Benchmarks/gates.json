@@ -1,0 +1,62 @@
+{
+  "scale": {
+    "maxRatio": 2.0,
+    "slackMilliseconds": 2.0,
+    "exempt": [
+      "list.grants10k.first-page",
+      "reference.list.grants10k.first-page",
+      "list.grants100k.first-page",
+      "reference.list.grants100k.first-page"
+    ]
+  },
+  "regression": {
+    "maxRatio": 1.15,
+    "slackMilliseconds": 2.0,
+    "exempt": []
+  },
+  "improvement": {
+    "scenarios": [
+      "list.store.first-page",
+      "list.store.by-price"
+    ],
+    "maxRatio": 0.05
+  },
+  "ceilingsMilliseconds": {
+    "postgresql": {
+      "list.admin.first-page": 60,
+      "list.admin.k100": 120,
+      "list.admin.mid-cursor": 60,
+      "list.admin.by-price": 60,
+      "list.chain.first-page": 60,
+      "list.region.first-page": 60,
+      "list.region.by-price": 60,
+      "list.deep-chain.first-page": 60,
+      "list.store.first-page": 60,
+      "list.store.by-price": 60,
+      "list.store.by-store": 60,
+      "point.function.product": 25,
+      "point.function.deep-product": 25,
+      "point.function.denied": 25,
+      "point.api.product": 85,
+      "point.api.deep-product": 150
+    },
+    "sqlserver": {
+      "list.admin.first-page": 150,
+      "list.admin.k100": 400,
+      "list.admin.mid-cursor": 150,
+      "list.admin.by-price": 150,
+      "list.chain.first-page": 150,
+      "list.region.first-page": 150,
+      "list.region.by-price": 150,
+      "list.deep-chain.first-page": 150,
+      "list.store.first-page": 150,
+      "list.store.by-price": 150,
+      "list.store.by-store": 150,
+      "point.function.product": 11,
+      "point.function.deep-product": 14,
+      "point.function.denied": 8,
+      "point.api.product": 125,
+      "point.api.deep-product": 230
+    }
+  }
+}

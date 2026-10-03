@@ -612,8 +612,8 @@ public sealed class SqlOSControlPlaneParityTests
 
             (await harness.Context.Set<SqlOS.Fga.Models.SqlOSFgaGrant>().Select(x => x.ResourceId).OrderBy(x => x).ToListAsync())
                 .Should().Equal(ParityStore42, ParityStore7);
-            (await harness.Fga.CheckAccessAsync(subjects[harness], "STORE_MANAGE", ParityStore42)).Allowed.Should().BeTrue();
-            (await harness.Fga.CheckAccessAsync(subjects[harness], "STORE_MANAGE", OtherTenantStore)).Allowed.Should().BeFalse();
+            (await InMemoryAccessOracle.AllowsAsync(harness.Context, subjects[harness], "STORE_MANAGE", ParityStore42)).Should().BeTrue();
+            (await InMemoryAccessOracle.AllowsAsync(harness.Context, subjects[harness], "STORE_MANAGE", OtherTenantStore)).Should().BeFalse();
             (await harness.Context.Set<SqlOSScimSyncEvent>().CountAsync(x => x.Action == "scim.grant.outside_boundary" && x.Result == "failed")).Should().Be(1);
             (await harness.Context.Set<SqlOSAuditEvent>().CountAsync(x => x.Action == "scim.grant.outside_boundary" && x.Source == "scim")).Should().Be(1);
         }
@@ -664,7 +664,7 @@ public sealed class SqlOSControlPlaneParityTests
         {
             (await harness.Context.Set<SqlOS.Fga.Models.SqlOSFgaGrant>().Select(x => x.ResourceId).ToListAsync())
                 .Should().Equal(ParityStore7);
-            (await harness.Fga.CheckAccessAsync(subjects[harness], "STORE_MANAGE", ParityStore42)).Allowed.Should().BeFalse();
+            (await InMemoryAccessOracle.AllowsAsync(harness.Context, subjects[harness], "STORE_MANAGE", ParityStore42)).Should().BeFalse();
             (await harness.Context.Set<SqlOSScimConnection>().AsNoTracking().SingleAsync(x => x.Id == connectionIds[harness])).GrantBoundaryResourceId.Should().Be(ParityRegion);
             (await harness.Context.Set<SqlOSAuditEvent>().CountAsync(x => x.Action == "scim.connection.grant_boundary_changed")).Should().Be(1);
         }

@@ -31,6 +31,7 @@ public sealed class Workspace : ISqlOSResourceEntity
 {
     public Guid Id { get; set; }
     public string ResourceId { get; set; } = "";
+    public byte[]? FgaScope { get; private set; }
     public string OrganizationId { get; set; } = "";
     public string Name { get; set; } = "";
 
@@ -79,6 +80,44 @@ When checking `WORKSPACE_VIEW` on `workspace::1`:
 4. If any ancestor has a grant with a role that includes `WORKSPACE_VIEW`, access is allowed.
 
 This means a single grant at the organization level can authorize resources underneath it without creating per-resource grants.
+
+An inactive resource cuts the chain: a grant above it does not reach anything beneath it, and the inactive resource itself is denied.
+
+## The lineage
+
+SqlOS does not walk the tree at query time. Every resource carries its **lineage**: its ancestor at each level of the tree (`Ancestor0` is the top of its tree, `Ancestor1` the next level down, and so on, up to the configured `MaxResourceHierarchyDepth`), its `Depth`, and its `Reach`, the highest level from which access flows down to it through active resources only. A resource that is inactive, lies in a cycle, or sits deeper than the configured depth has no reach, and is denied.
+
+With the lineage, "is `workspace::1` under a grant on `org::acme`" is one comparison: `workspace::1`'s ancestor at level 1 is `org::acme`, and its reach includes level 1. That is what [`BuildFilterAsync`](/docs/fga/list-filter) evaluates for every row of a list, and what [`CheckAccessAsync`](/docs/fga/checking-a-permission) evaluates for one resource, in one query, looking for a grant on the resources access flows down to it from.
+
+Triggers on the resources table keep the lineage exact. The cost of each operation:
+
+| Operation | What SqlOS does | Cost |
+|---|---|---|
+| Create a resource | Computes its lineage from its parent | One row |
+| Grant or revoke | Nothing: grants are not part of the lineage | Nothing |
+| Change a resource's type | Updates the scope column of its application rows | Its rows |
+| Move a resource to another parent | Recomputes the subtree beneath it, level by level | The subtree |
+| Deactivate or reactivate a resource | Recomputes the reach of the subtree beneath it | The subtree |
+| Delete a resource | Clears its application rows' scope column | Its rows |
+| A move that would create a cycle, or place a resource deeper than the configured depth | Rejects the statement | — |
+| First start after upgrading, or a changed depth | Fills the lineage once: the internal nodes level by level, then every range of 500,000 resources in its own transaction | The whole table, once |
+
+Every operation above also updates the [scope column](/docs/fga/list-filter#the-scope-column) of the application rows of the resources it touched.
+
+A bulk load of resources that skips triggers must fill the lineage itself or run the rebuild procedure afterwards (`sp_SqlOSFgaResources_LineageRebuild` on SQL Server, `fn_SqlOSFgaResources_LineageRebuild()` on PostgreSQL). The rebuild writes the whole table once, in ranges of 500,000 resources on SQL Server (each range its own transaction, so the log stays small at any size) and in one transaction on PostgreSQL. A rebuild that fails part-way is run again at the next start: SqlOS records the routines as current only after it completes. A bulk load of application rows only needs the [scope fill](/docs/fga/setup#rows-written-without-the-triggers), which SqlOS also runs at every start.
+
+## Changes made at the same time
+
+SqlOS keeps the lineage correct when transactions change the tree concurrently, including on PostgreSQL and on SQL Server with read-committed snapshot (the Azure SQL default), where reads do not wait for writers. Every trigger that maintains the lineage or a scope column takes one lock before it reads anything:
+
+- **Inserts** of resources and of protected rows take it shared, so they run side by side.
+- **Moves, activity changes, retypes, and deletes** take it exclusively. Each waits for transactions that are already writing to commit, then computes from what they committed; inserts that start meanwhile wait for it.
+
+Without the lock, a row inserted while its parent was being deactivated could stay visible, and two moves could together commit a cycle; the integration tests run those races on both databases.
+
+Change resources and protected rows in `READ COMMITTED` (the default for EF Core on both databases) or `SERIALIZABLE` transactions. A transaction that keeps reading the state it started with could compute from a tree another transaction has since changed, so SqlOS refuses resource and protected-row writes inside one with a clear error: `REPEATABLE READ` on PostgreSQL, `SNAPSHOT` on SQL Server. Read-committed snapshot is `READ COMMITTED` and is fine.
+
+A move or deactivation of a large subtree holds the exclusive lock while it rewrites the subtree, so inserts elsewhere wait for it to commit. Moves and deactivations are rare next to inserts; schedule bulk reorganizations of very large subtrees outside peak traffic.
 
 ## Browse in the dashboard
 

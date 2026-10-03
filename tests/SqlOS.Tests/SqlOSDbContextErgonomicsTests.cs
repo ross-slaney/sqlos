@@ -9,6 +9,7 @@ using SqlOS.AuthServer.Interfaces;
 using SqlOS.Configuration;
 using SqlOS.Extensions;
 using SqlOS.Fga.Configuration;
+using SqlOS.Fga;
 using SqlOS.Fga.Interfaces;
 
 namespace SqlOS.Tests;
@@ -17,7 +18,7 @@ namespace SqlOS.Tests;
 public sealed class SqlOSDbContextErgonomicsTests
 {
     [TestMethod]
-    public void SqlOSDbContext_RegistersInheritedTvfOnRelationalContext()
+    public void SqlOSDbContext_MapsSqlOSFunctions_WithoutApplicationMethods()
     {
         var options = new DbContextOptionsBuilder<RecommendedSetupTestDbContext>()
             .UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=SqlOS_RecommendedSetup_Test;Trusted_Connection=True;TrustServerCertificate=True")
@@ -25,16 +26,13 @@ public sealed class SqlOSDbContextErgonomicsTests
 
         using var context = new RecommendedSetupTestDbContext(options);
 
-        var tvfMethod = typeof(RecommendedSetupTestDbContext).GetMethod(
-            nameof(ISqlOSFgaDbContext.IsResourceAccessible),
-            [typeof(string), typeof(string), typeof(string)]);
-
-        tvfMethod.Should().NotBeNull();
-
-        var dbFunction = context.Model.FindDbFunction(tvfMethod!);
-        dbFunction.Should().NotBeNull();
-        dbFunction!.Name.Should().Be("fn_IsResourceAccessible");
-        dbFunction.Schema.Should().Be("dbo");
+        // The list filter's function is mapped to SqlOS's own static method: the application's context declares
+        // nothing for it, and a filter built on one context instance composes into another's query.
+        var function = context.Model.FindDbFunction(SqlOSFgaFunctions.ActiveSubjectsMethod);
+        function.Should().NotBeNull();
+        function!.Name.Should().Be("fn_ActiveSubjects");
+        function.Schema.Should().Be("dbo");
+        typeof(RecommendedSetupTestDbContext).GetMethod("IsResourceAccessible").Should().BeNull();
     }
 
     [TestMethod]

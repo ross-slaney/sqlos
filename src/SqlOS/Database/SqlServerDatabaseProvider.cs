@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using SqlOS.Fga;
 using SqlOS.Fga.Configuration;
 
 namespace SqlOS.Database;
@@ -102,6 +103,13 @@ internal sealed partial class SqlServerDatabaseProvider : ISqlOSDatabaseProvider
         return sql;
     }
 
+    /// <summary>
+    /// <c>fn_IsResourceAccessible(@ResourceId, @SubjectIds, @PermissionId)</c>: the point check. The target's
+    /// lineage names its ancestor at every level; the levels its reach covers are the active path a grant may
+    /// sit on. One grant lookup per such ancestor, by resource, so the cost is the depth of the tree and never
+    /// the number of grants the caller holds. Returns the grant that decides it (on the nearest ancestor that
+    /// holds one): the ancestor's id, the grant, its subject and role, and the ancestor's level; or no row.
+    /// </summary>
     public string BuildIsResourceAccessibleFunctionSql(SqlOSFgaOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -110,14 +118,9 @@ internal sealed partial class SqlServerDatabaseProvider : ISqlOSDatabaseProvider
         var resources = Escape(tables.Resources);
         var grants = Escape(tables.Grants);
         var rolePermissions = Escape(tables.RolePermissions);
-        var subjects = Escape(tables.Subjects);
-        var users = Escape(tables.Users);
-        var serviceAccounts = Escape(tables.ServiceAccounts);
-        var userGroups = Escape(tables.UserGroups);
-        var agents = Escape(tables.Agents);
         var permissions = Escape(tables.Permissions);
-        var maxDepth = Math.Max(1, options.MaxResourceHierarchyDepth)
-            .ToString(CultureInfo.InvariantCulture);
+        var levels = string.Join(", ", Enumerable.Range(0, SqlOSFgaLineage.Levels(options))
+            .Select(level => $"({level.ToString(CultureInfo.InvariantCulture)}, x.{SqlOSFgaLineage.AncestorColumn(level)})"));
         return $"""
             CREATE OR ALTER FUNCTION [{schema}].fn_IsResourceAccessible(
                 @ResourceId NVARCHAR(128),
@@ -128,78 +131,54 @@ internal sealed partial class SqlServerDatabaseProvider : ISqlOSDatabaseProvider
             AS
             RETURN
             (
-                WITH ancestors AS (
-                    SELECT
-                        Id,
-                        ParentId,
-                        0 AS Depth,
-                        CAST(N'|' + Id + N'|' AS NVARCHAR(MAX)) AS VisitedPath,
-                        CAST(0 AS BIT) AS CycleDetected
-                    FROM [{schema}].[{resources}]
-                    WHERE Id = @ResourceId AND IsActive = 1
-
-                    UNION ALL
-
-                    SELECT
-                        r.Id,
-                        r.ParentId,
-                        a.Depth + 1,
-                        CAST(a.VisitedPath + r.Id + N'|' AS NVARCHAR(MAX)),
-                        CAST(CASE
-                            WHEN CHARINDEX(N'|' + r.Id + N'|', a.VisitedPath) > 0 THEN 1
-                            ELSE 0
-                        END AS BIT)
-                    FROM [{schema}].[{resources}] r
-                    INNER JOIN ancestors a ON r.Id = a.ParentId
-                    WHERE a.Depth < {maxDepth}
-                      AND a.CycleDetected = 0
-                      AND r.IsActive = 1
-                )
-                SELECT TOP 1 a.Id
-                FROM ancestors a
-                INNER JOIN [{schema}].[{grants}] g ON a.Id = g.ResourceId
-                INNER JOIN [{schema}].[{rolePermissions}] rp ON g.RoleId = rp.RoleId
-                INNER JOIN [{schema}].[{subjects}] s ON g.SubjectId = s.Id
-                LEFT JOIN [{schema}].[{users}] u ON s.Id = u.SubjectId
-                LEFT JOIN [{schema}].[{serviceAccounts}] sa ON s.Id = sa.SubjectId
-                LEFT JOIN [{schema}].[{userGroups}] ug ON s.Id = ug.SubjectId
-                LEFT JOIN [{schema}].[{agents}] ag ON s.Id = ag.SubjectId
-                WHERE g.SubjectId IN (SELECT CONVERT(NVARCHAR(450), [value]) FROM OPENJSON(@SubjectIds))
-                  AND rp.PermissionId = @PermissionId
-                  AND NOT EXISTS (SELECT 1 FROM ancestors malformed WHERE malformed.CycleDetected = 1)
-                  AND NOT EXISTS (
-                      SELECT 1
-                      FROM ancestors truncated
-                      WHERE truncated.Depth = {maxDepth}
-                        AND truncated.ParentId IS NOT NULL
-                  )
-                  AND EXISTS (
-                      SELECT 1
-                      FROM [{schema}].[{resources}] target
-                      INNER JOIN [{schema}].[{permissions}] permission ON permission.Id = @PermissionId
-                      WHERE target.Id = @ResourceId
-                        AND (permission.ResourceTypeId IS NULL OR permission.ResourceTypeId = target.ResourceTypeId)
-                  )
-                  AND (s.SubjectTypeId <> 'user' OR u.IsActive = 1)
-                  AND (s.SubjectTypeId <> 'service_account' OR (sa.SubjectId IS NOT NULL AND (sa.ExpiresAt IS NULL OR sa.ExpiresAt > GETUTCDATE())))
-                  AND (s.SubjectTypeId <> 'group' OR ug.IsActive = 1)
-                  AND (s.SubjectTypeId <> 'agent' OR ag.SubjectId IS NOT NULL)
-                  AND EXISTS (
-                      SELECT 1
-                      FROM [{schema}].[{subjects}] caller
-                      LEFT JOIN [{schema}].[{users}] callerUser ON caller.Id = callerUser.SubjectId
-                      LEFT JOIN [{schema}].[{serviceAccounts}] callerSa ON caller.Id = callerSa.SubjectId
-                      LEFT JOIN [{schema}].[{userGroups}] callerGroup ON caller.Id = callerGroup.SubjectId
-                      LEFT JOIN [{schema}].[{agents}] callerAgent ON caller.Id = callerAgent.SubjectId
-                      WHERE caller.Id = JSON_VALUE(@SubjectIds, '$[0]')
-                        AND (caller.SubjectTypeId <> 'user' OR callerUser.IsActive = 1)
-                        AND (caller.SubjectTypeId <> 'service_account' OR (callerSa.SubjectId IS NOT NULL AND (callerSa.ExpiresAt IS NULL OR callerSa.ExpiresAt > GETUTCDATE())))
-                        AND (caller.SubjectTypeId <> 'group' OR callerGroup.IsActive = 1)
-                        AND (caller.SubjectTypeId <> 'agent' OR callerAgent.SubjectId IS NOT NULL)
-                  )
+                SELECT TOP 1 a.Id, g.Id AS GrantId, g.SubjectId, g.RoleId, lv.[Level] AS [Level]
+                FROM [{schema}].[{resources}] x
+                INNER JOIN [{schema}].[{permissions}] permission ON permission.Id = @PermissionId
+                CROSS APPLY (VALUES {levels}) AS lv([Level], [Seq])
+                INNER JOIN [{schema}].[{resources}] a ON a.Seq = lv.Seq
+                INNER JOIN [{schema}].[{grants}] g ON g.ResourceId = a.Id
+                INNER JOIN [{schema}].[{rolePermissions}] rp ON rp.RoleId = g.RoleId AND rp.PermissionId = @PermissionId
+                WHERE x.Id = @ResourceId
+                  AND x.Reach IS NOT NULL
+                  AND lv.Seq IS NOT NULL
+                  AND lv.[Level] >= x.Reach
+                  AND (permission.ResourceTypeId IS NULL OR permission.ResourceTypeId = x.ResourceTypeId)
+                  AND g.SubjectId IN (SELECT live.SubjectId FROM [{schema}].fn_ActiveSubjects(@SubjectIds) live)
                   AND (g.EffectiveFrom IS NULL OR g.EffectiveFrom <= GETUTCDATE())
                   AND (g.EffectiveTo IS NULL OR g.EffectiveTo >= GETUTCDATE())
+                ORDER BY lv.[Level] DESC
             )
+            """;
+    }
+
+    /// <summary>The point check as a query; <c>{0}</c> is the resource id, <c>{1}</c> the subject ids JSON, <c>{2}</c> the permission id.</summary>
+    public string BuildAccessMatchQuerySql(SqlOSFgaOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return $"SELECT m.Id, m.GrantId, m.SubjectId, m.RoleId, m.[Level] FROM [{Escape(options.Schema)}].fn_IsResourceAccessible({{0}}, {{1}}, {{2}}) AS m";
+    }
+
+    /// <summary>The query's first argument, as EF Core's FromSqlRaw numbers them.</summary>
+    private const string ResourceIdArgument = "{0}";
+
+    /// <summary>
+    /// The path from the top of a resource's tree down to it, from its lineage (<c>{0}</c> is the resource id):
+    /// each ancestor's level, and whether access flows down from it to the resource. No rows when the
+    /// resource has no lineage (it lies in a cycle, or deeper than the configured depth).
+    /// </summary>
+    public string BuildResourcePathQuerySql(SqlOSFgaOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var resources = $"[{Escape(options.Schema)}].[{Escape(options.TableNames.Resources)}]";
+        var levels = string.Join(", ", Enumerable.Range(0, SqlOSFgaLineage.Levels(options))
+            .Select(level => $"({level.ToString(CultureInfo.InvariantCulture)}, x.{SqlOSFgaLineage.AncestorColumn(level)})"));
+        return $"""
+            SELECT lv.[Level] AS [Level], a.Id AS ResourceId, a.Name AS Name, a.ResourceTypeId AS ResourceTypeId, a.IsActive AS IsActive,
+                   CAST(CASE WHEN x.Reach IS NOT NULL AND lv.[Level] >= x.Reach THEN 1 ELSE 0 END AS BIT) AS InReach
+            FROM {resources} x
+            CROSS APPLY (VALUES {levels}) AS lv([Level], [Seq])
+            INNER JOIN {resources} a ON a.Seq = lv.Seq
+            WHERE x.Id = {ResourceIdArgument}
             """;
     }
 
@@ -225,6 +204,50 @@ internal sealed partial class SqlServerDatabaseProvider : ISqlOSDatabaseProvider
             [CreateParameter("@resource", resource)],
             cancellationToken);
     }
+
+
+    public async Task AcquireSessionLockAsync(
+        DatabaseFacade database,
+        string resource,
+        TimeSpan timeout,
+        string failureMessage,
+        CancellationToken cancellationToken)
+    {
+        await database.ExecuteSqlRawAsync(
+            BuildAcquireSessionLockSql(timeout, failureMessage),
+            [CreateParameter("@resource", resource)],
+            cancellationToken);
+    }
+
+    public Task ReleaseSessionLockAsync(DatabaseFacade database, string resource, CancellationToken cancellationToken)
+        => database.ExecuteSqlRawAsync(
+            ReleaseSessionLockSql,
+            [CreateParameter("@resource", resource)],
+            cancellationToken);
+
+    /// <summary>
+    /// Takes the session lock. The DDL run under it takes schema-modification locks that can deadlock with
+    /// the schema-stability locks of queries running beside it; the session volunteers as the deadlock
+    /// victim, so a query never is, and the caller retries.
+    /// </summary>
+    internal static string BuildAcquireSessionLockSql(TimeSpan timeout, string failureMessage)
+    {
+        var timeoutMs = Math.Max(0, (int)timeout.TotalMilliseconds);
+        var escaped = failureMessage.Replace("'", "''", StringComparison.Ordinal);
+        return $"""
+            SET DEADLOCK_PRIORITY LOW;
+            DECLARE @result int;
+            EXEC @result = sys.sp_getapplock
+                @Resource = @resource,
+                @LockMode = 'Exclusive',
+                @LockOwner = 'Session',
+                @LockTimeout = {timeoutMs};
+            IF @result < 0 THROW 51000, '{escaped}', 1;
+            """;
+    }
+
+    internal const string ReleaseSessionLockSql =
+        "EXEC sys.sp_releaseapplock @Resource = @resource, @LockOwner = 'Session'; SET DEADLOCK_PRIORITY NORMAL;";
 
     private static string Escape(string identifier)
         => identifier.Replace("]", "]]", StringComparison.Ordinal);

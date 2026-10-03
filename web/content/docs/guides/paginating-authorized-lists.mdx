@@ -15,7 +15,7 @@ order: 6
   SqlOS provides the authorization filter. Pagination, sorting, search, and projection are ordinary EF Core (or an external pagination library) composed on the same query.
 </Banner>
 
-`BuildFilterAsync` returns an `Expression<Func<T, bool>>` that translates to the SqlOS authorization TVF at query time. Anything you compose after `.Where(filter)` — projections, ordering, `Skip`/`Take`, keyset predicates — ends up in the same SQL statement.
+`BuildFilterAsync` returns an `Expression<Func<T, bool>>` that translates to the SqlOS authorization predicate at query time. Anything you compose after `.Where(filter)` — projections, ordering, `Skip`/`Take`, keyset predicates — ends up in the same SQL statement.
 
 ## Offset pagination
 
@@ -77,11 +77,13 @@ if (hasNextPage) rows.RemoveAt(pageSize);
 
 Fetching `pageSize + 1` rows and trimming the extra is a simple way to compute `hasNextPage` without a `COUNT(*)`. Encode the last row's sort value and `Id` into an opaque cursor string for the client to send back; the retail example app's inventory endpoint (`examples/SqlOS.Example.Api/FgaRetail/Endpoints/InventoryEndpoints.cs`) shows this end to end, including per-`sortBy` keysets.
 
-## Authorization is evaluated at query time
+## What the filter captures
 
-The filter's TVF runs inside each page's SQL query. If grants change between keyset pages, newly authorized rows appear and newly revoked rows disappear from subsequent pages — the keyset predicate skips by position in the sort order, not by a snapshot of the first page. This is normally exactly what you want: a revoked subject stops seeing rows on the very next page fetch.
+The *principal set* (the subject plus its group memberships) and the caller's grants are captured when `BuildFilterAsync` is awaited; the caller's own lifecycle is rechecked when each page's query runs. Build the filter once per request, so each page fetch sees the grants current at that request; do not cache it in statics or reuse it across requests. The keyset predicate skips by position in the sort order, not by a snapshot of the first page, so a row authorized between two requests appears on the next page and a revoked one disappears.
 
-Note that the *principal set* (the subject plus its group memberships) is captured when `BuildFilterAsync` is awaited. Build the filter once per request; do not cache it in statics or reuse it across requests.
+## Pages that cost the same at any size
+
+SqlOS mirrors every index you declare on a protected table once per level of the tree, with that level's part of the [scope column](/docs/fga/list-filter#the-scope-column) first. A keyset page ordered by a declared index's columns, for a caller whose access comes from one grant, is then one index seek plus the page's rows, however large the table. Declare an index for each order you page in, and end it with the key, as below.
 
 ## Always end with a unique tiebreaker
 

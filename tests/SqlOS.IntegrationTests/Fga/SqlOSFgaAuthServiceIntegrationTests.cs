@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SqlOS.Fga;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Models;
 using SqlOS.IntegrationTests.Fga.Infrastructure;
@@ -27,18 +28,105 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
     }
 
     [TestMethod]
-    public async Task BuildFilterAsync_ComposesIntoASingleSqlQuery()
+    public async Task BuildFilterAsync_ComposesIntoASingleSqlQuery_OverTheScopeColumn()
     {
         var filter = await _authService.BuildFilterAsync<LifecycleProtectedEntity>(
-            FgaTestDataSeeder.SystemAdminSubjectId,
+            FgaTestDataSeeder.AgencyAdminSubjectId,
             "TEST_VIEW");
         var sql = Context.Set<LifecycleProtectedEntity>().Where(filter).ToQueryString();
 
-        StringAssert.Contains(sql, "fn_IsResourceAccessible");
-        Assert.AreEqual(
-            1,
-            Regex.Matches(sql, "fn_IsResourceAccessible", RegexOptions.IgnoreCase).Count,
-            $"Authorization filter must compose to one SQL query. SQL:{Environment.NewLine}{sql}");
+        // The predicate reads the row's own scope column at the agency admin's level (1), with the root as a
+        // parameter, joins nothing, and checks the caller's liveness once per query. On SQL Server the level is
+        // The same SQL on both engines: the level's eight bytes compared with a parameter, under the depth-byte
+        // filter of the level's index.
+        StringAssert.Contains(sql, $"{SqlOSFgaLineage.ScopeAncestorOffset(1)}, 8)");
+        StringAssert.Contains(sql, "SUBSTRING(");
+        StringAssert.Contains(sql, "FgaScope");
+        StringAssert.Contains(sql, "fn_ActiveSubjects");
+        Assert.IsFalse(sql.Contains("fn_IsResourceAccessible", StringComparison.OrdinalIgnoreCase), sql);
+        Assert.IsFalse(sql.Contains("SqlOSFgaResources", StringComparison.OrdinalIgnoreCase), sql);
+        Assert.AreEqual(1, Regex.Matches(sql, "LifecycleProtectedEntities", RegexOptions.IgnoreCase).Count, $"One query over the table. SQL:{Environment.NewLine}{sql}");
+    }
+
+    [TestMethod]
+    public async Task TheFilter_AgreesWithThePointCheck()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        foreach (var (resource, i) in new[] { FgaTestDataSeeder.TestAgencyResourceId, FgaTestDataSeeder.TestTeamResourceId, FgaTestDataSeeder.TestProjectResourceId, FgaTestDataSeeder.OtherAgencyResourceId, "root" }.Select((r, i) => (r, i)))
+        {
+            Context.Set<LifecycleProtectedEntity>().Add(new LifecycleProtectedEntity { Id = $"agree_{i}_{suffix}", ResourceId = resource, Rank = i });
+        }
+
+        await Context.SaveChangesAsync();
+        Context.ChangeTracker.Clear();
+
+        var subjects = new[]
+        {
+            FgaTestDataSeeder.SystemAdminSubjectId, FgaTestDataSeeder.AgencyAdminSubjectId, FgaTestDataSeeder.AgencyMemberSubjectId,
+            FgaTestDataSeeder.GroupMemberSubjectId, FgaTestDataSeeder.UnauthorizedSubjectId,
+        };
+        var rows = await Context.Set<LifecycleProtectedEntity>().AsNoTracking().Where(e => e.Id.EndsWith(suffix)).ToListAsync();
+        foreach (var subject in subjects)
+        {
+            foreach (var permission in new[] { "TEST_VIEW", "TEST_EDIT" })
+            {
+                var expected = new List<string>();
+                foreach (var row in rows)
+                {
+                    if ((await _authService.CheckAccessAsync(subject, permission, row.ResourceId)).Allowed)
+                    {
+                        expected.Add(row.Id);
+                    }
+                }
+
+                var visible = await Context.Set<LifecycleProtectedEntity>().AsNoTracking()
+                    .Where(e => e.Id.EndsWith(suffix))
+                    .Where(await _authService.BuildFilterAsync<LifecycleProtectedEntity>(subject, permission))
+                    .OrderBy(e => e.Rank)
+                    .Select(e => e.Id)
+                    .ToListAsync();
+
+                CollectionAssert.AreEqual(expected.OrderBy(id => id).ToList(), visible.OrderBy(id => id).ToList(), $"{subject} / {permission}");
+            }
+        }
+    }
+
+    [TestMethod]
+    public async Task ACallerWithThousandsOfGrants_IsFilteredByTheSameScopeTest()
+    {
+        // 2,500 grants on single projects: the predicate tests each row's scope against all of them, the same
+        // test as for one grant, and returns exactly the granted rows.
+        var subjectService = CreateSubjectService();
+        var user = await subjectService.CreateUserAsync("Many Grants User", $"many-grants-{Guid.NewGuid():N}@example.com");
+        var suffix = Guid.NewGuid().ToString("N");
+        var granted = Enumerable.Range(0, 2_500).Select(i => $"many_{i}_{suffix}").ToArray();
+        var ungranted = $"many_none_{suffix}";
+        Context.ChangeTracker.Clear();
+        foreach (var id in granted.Append(ungranted))
+        {
+            Context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource { Id = id, ParentId = FgaTestDataSeeder.TestAgencyResourceId, Name = id, ResourceTypeId = "project" });
+        }
+
+        await Context.SaveChangesAsync();
+        foreach (var id in granted)
+        {
+            Context.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant { Id = $"grant_{id}", SubjectId = user.SubjectId, ResourceId = id, RoleId = FgaTestDataSeeder.AgencyMemberRoleId });
+        }
+
+        Context.Set<LifecycleProtectedEntity>().AddRange(
+            new LifecycleProtectedEntity { Id = $"manyrow_a_{suffix}", ResourceId = granted[0] },
+            new LifecycleProtectedEntity { Id = $"manyrow_b_{suffix}", ResourceId = granted[^1] },
+            new LifecycleProtectedEntity { Id = $"manyrow_c_{suffix}", ResourceId = ungranted });
+        await Context.SaveChangesAsync();
+        Context.ChangeTracker.Clear();
+
+        var filter = await _authService.BuildFilterAsync<LifecycleProtectedEntity>(user.SubjectId, "TEST_VIEW");
+        var query = Context.Set<LifecycleProtectedEntity>().AsNoTracking().Where(e => e.Id.EndsWith(suffix)).Where(filter);
+        var sql = query.ToQueryString();
+        StringAssert.Contains(sql, SqlOSFgaLineage.ScopeColumn);
+        Assert.IsFalse(sql.Contains("fn_IsResourceAccessible"), "one method: no per-row function");
+        var visible = await query.Select(e => e.Id).ToListAsync();
+        CollectionAssert.AreEquivalent(new[] { $"manyrow_a_{suffix}", $"manyrow_b_{suffix}" }, visible);
     }
 
     [TestMethod]

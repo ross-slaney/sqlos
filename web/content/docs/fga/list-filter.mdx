@@ -8,7 +8,7 @@ order: 1
 
 `BuildFilterAsync` returns a filter for `Where(...)`. Lists only rows the subject may see. Use this on list endpoints.
 
-This is a read-side helper. Lifecycle-managed domain rows normally implement `ISqlOSResourceEntity`; the filter only needs the inherited `ResourceId` contract to join application rows to accessible FGA resources.
+This is a read-side helper. Lifecycle-managed domain rows normally implement `ISqlOSResourceEntity`; the filter only needs the inherited `ResourceId` contract to tie application rows to their FGA resources.
 
 <Callout type="warning" title="Authentication comes first">
   The filter authorizes a subject ID; it does not authenticate the request. Validate a bearer token for the API's exact audience before the endpoint runs, then use the validated token's user ID as the FGA subject.
@@ -26,11 +26,58 @@ var chains = await dbContext.Chains
     .ToListAsync();
 ```
 
-The subject only sees chains they have access to. The filter translates to a SQL query -- no in-memory filtering.
+The subject only sees chains they have access to. The filter translates to a SQL predicate -- no in-memory filtering.
+
+## How the filter works
+
+Every FGA resource carries its **lineage**: its ancestor at each level of the tree, its depth, and its **reach**, the highest level from which access flows down to it through active resources only. Schema v11 adds the columns to the resource table (one ancestor column per level up to the default depth of 10; a larger `MaxResourceHierarchyDepth` adds the rest at startup), SqlOS keeps them exact with triggers, and fills them once when you upgrade.
+
+Every entity of yours that implements `IHasResourceId` declares one more column, the **scope column** (`FgaScope`): its row's resource type and, for each level of the tree, the ancestor at that level where access flows down to the row from it. SqlOS keeps it current with triggers on your table and on the resource table, and fills it once when you upgrade. [Set up FGA](/docs/fga/setup) shows the declaration for both ways of adding SqlOS.
+
+When you build a filter, SqlOS reads the caller's **access roots** once: the resources on which the caller, or one of their active groups, holds a current grant whose role includes the permission. The filter then says, for each row: at the level of one of those roots, the row's scope column holds that root. It is the same predicate for every caller and every table, it joins nothing, and for a caller whose access comes from one grant the database answers a page with one index seek plus the rows of the page, whatever the table's size, in any order you declared an index for.
+
+There is one filter, whatever the number of grants. A caller with several roots at a level, up to thousands of grants on single resources, gets the same test: the row's scope at that level is one of the roots, sent as one list parameter. The database reads that list for every query, so a page costs more as the caller's grants grow.
+
+## The scope column
+
+The scope column is one column per table. Your entity declares it, and SqlOS manages its contents:
+
+```csharp
+public byte[]? FgaScope { get; private set; }
+```
+
+The compiler requires it: `IHasResourceId` (and `ISqlOSResourceEntity`, which extends it) has an `FgaScope` member, so an entity without it does not build. EF Core maps it like any other property, as `varbinary(512)` on SQL Server and `bytea` on PostgreSQL, the same layout on both, sized for any depth you may configure later. Your migration carries it, with an index on `ResourceId` if you declared none: the triggers find a resource's rows by it. SqlOS never writes it through EF Core, and your code never sets it.
+
+What SqlOS creates and maintains itself at startup, outside your migrations:
+
+- per level of the tree, an index on that level's part of the scope column followed by your primary key, and one more per index you declared on the table (the orders you page in), filtered to the rows at or below the level, so a level deeper than any row costs nothing. On PostgreSQL these are expression indexes; on SQL Server they are built on computed columns that take no storage;
+- statistics on the type part of the column, so the optimizer knows the type test keeps nearly every row and walks the level's index instead of sorting the caller's whole scope;
+- two triggers on your table that set a row's scope when it is inserted or its `ResourceId` changes, and the resource table's triggers that keep it current when resources move, are deactivated, retyped, or deleted;
+- at every start, the scope of rows that have none (a new table's rows, rows a bulk load wrote without triggers), set through an index on those rows.
+
+If SqlOS starts before the migration that adds a table's column, it logs a warning naming the table and protects the table at the next start.
+
+Declare an index for each order you page in and end it with the key, as the [pagination guide](/docs/guides/paginating-authorized-lists) shows; SqlOS mirrors it per level. A page sorted by a column you declared no index for still returns the right rows, through the caller's whole scope rather than one seek, and SqlOS logs a warning naming the entity, the order, and the index to declare, once per query shape.
+
+The price is storage: one index per level per declared order, over the rows at or below that level. In the benchmark's 50-million-row catalog the scope column and its indexes are about half of the database.
+
+**Upgrading**: add `public byte[]? FgaScope { get; private set; }` to every entity that implements `IHasResourceId` (the build lists them), add and apply one migration per context, and start the application. A context that uses `EnsureCreated` gets the column with its tables.
 
 ## Filter lifetime
 
-The subject's principal set (the subject plus its active group memberships) is resolved when the returned task is awaited. Build the filter once per request and compose it into that request's queries. Do not cache the filter in statics or reuse it across requests -- grant and membership changes are not reflected in an already-built filter.
+The caller's principal set (the subject plus its active group memberships) and their grants are read when the returned task is awaited. Build the filter once per request and compose it into that request's queries. Do not cache the filter in statics or reuse it across requests -- grant and membership changes are not reflected in an already-built filter. The caller's own lifecycle is still checked when the query runs: a user deactivated after the filter was built sees nothing.
+
+The filter holds no `DbContext`: compose it into a query on any instance of your context, one from `IDbContextFactory` or a pool included. List filters and point checks run in the database, so they need SQL Server or PostgreSQL; an in-memory provider fails with a message that says so.
+
+## Queries that stay flat, and queries that don't
+
+For a caller whose access comes from a few grants, a page in an order you declared an index for (keyset pagination, or the first page of an offset query) costs the same at any table size; a caller with very many grants pays for them, as above. Some queries read the caller's whole scope instead, so they grow with what the caller can see:
+
+- `Count()`, `Sum()`, and other aggregates over the filtered rows;
+- a large `Skip(...)`, which reads every row it skips;
+- a sort by a column you declared no index for.
+
+Fetch `pageSize + 1` rows to know whether there is a next page, as the [pagination guide](/docs/guides/paginating-authorized-lists) shows, instead of counting.
 
 ## Composing with plain EF
 
@@ -54,7 +101,7 @@ var items = await db.InventoryItems
     .ToListAsync();
 ```
 
-Everything composes into one SQL statement: the authorization TVF join, your business predicates, the projection, the ordering, and the paging.
+Everything composes into one SQL statement: the authorization predicate, your business predicates, the projection, the ordering, and the paging.
 
 For cursor/keyset pagination over authorized lists, see [Paginating authorized lists](/docs/guides/paginating-authorized-lists).
 

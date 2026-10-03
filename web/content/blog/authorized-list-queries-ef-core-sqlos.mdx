@@ -86,6 +86,7 @@ public sealed class TodoItem : ISqlOSResourceEntity
 {
     public Guid Id { get; set; }
     public string ResourceId { get; set; } = string.Empty;
+    public byte[]? FgaScope { get; private set; }
     public string OwnerSubjectId { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
     public bool IsCompleted { get; set; }
@@ -104,7 +105,7 @@ The todo row can still have app-specific columns, indexes, and constraints. SqlO
 
 ## The DbContext maps the SQL function
 
-The Todo sample context derives from `SqlOSDbContext<TContext>`, which registers the SqlOS EF model and TVF mapping:
+The Todo sample context derives from `SqlOSDbContext<TContext>`, which registers the SqlOS EF model and the `FgaScope` column of every protected entity:
 
 ```csharp
 public sealed class TodoSampleDbContext(DbContextOptions<TodoSampleDbContext> options)

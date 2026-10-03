@@ -21,7 +21,7 @@ Create projects through an audience-protected API and return only projects the s
 ## Prerequisites
 
 - SqlOS 7.2.1;
-- .NET 9, EF Core 9, and SQL Server;
+- .NET 9, EF Core 9, and SQL Server or PostgreSQL;
 - a completed [Protect an API](/docs/quickstarts/protect-api) flow;
 - a valid access token whose `aud` is `http://localhost:5050/api`.
 
@@ -53,7 +53,7 @@ var dashboardPassword = builder.Configuration["SqlOS:Dashboard:Password"]
         "Configure SqlOS:Dashboard:Password with user secrets or your secret store.");
 
 builder.AddSqlOS<AppDbContext>(
-    db => db.UseSqlServer(connectionString),
+    db => db.UseSqlServer(connectionString),   // or db.UseNpgsql(connectionString) for PostgreSQL
     options =>
     {
         options.AuthServer.PublicOrigin = publicOrigin;
@@ -188,6 +188,7 @@ public sealed class Project : ISqlOSResourceEntity
 {
     public Guid Id { get; set; }
     public string ResourceId { get; set; } = string.Empty;
+    public byte[]? FgaScope { get; private set; }
     public string Name { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; }
 
@@ -201,7 +202,7 @@ public sealed class Project : ISqlOSResourceEntity
 public sealed record CreateProjectRequest(string Name);
 ```
 
-Create the `Projects` table with your normal EF migration workflow. SqlOS owns its own tables; your application migration owns `Projects`.
+Create the `Projects` table with your normal EF migration workflow. SqlOS owns its own tables; your application migration owns `Projects`, including its `FgaScope` column. At startup SqlOS adds the indexes and triggers that keep `FgaScope` current; they are not part of your migration.
 
 ## How the write works
 

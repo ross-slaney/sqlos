@@ -80,6 +80,7 @@ public sealed class Workspace : ISqlOSResourceEntity
 {
     public Guid Id { get; set; }
     public string ResourceId { get; set; } = string.Empty;
+    public byte[]? FgaScope { get; private set; }
     public string Name { get; set; } = string.Empty;
 
     public string ResourceTypeId => "workspace";
@@ -148,7 +149,7 @@ api.MapPost("/workspaces", async (
         ct);
 
     await db.SaveChangesAsync(ct);
-    return Results.Created($"/api/workspaces/{workspace.Id}", workspace);
+    return Results.Created($"/api/workspaces/{workspace.Id}", new { workspace.Id, workspace.Name });
 });
 ```
 
@@ -210,6 +211,8 @@ Hosted auth and dashboard HTML use a restrictive nonce-based Content Security Po
 ## Schema ownership
 
 SqlOS runs its own SQL scripts on startup. Your EF migrations **do not** own SqlOS tables. If you need SqlOS tables before your migrations, call `SqlOSBootstrapper.InitializeAsync()` once first.
+
+Your migrations own your tables, including the `FgaScope` column of protected entities. On those tables SqlOS keeps its own triggers and per-level indexes, created at startup. See [Set up FGA](/docs/fga/setup).
 
 ## Dashboard paths
 

@@ -59,7 +59,7 @@ api.MapPost("/workspaces", async (
     db.Workspaces.Add(workspace);
     await db.SaveChangesAsync(ct);
 
-    return Results.Created($"/api/workspaces/{workspace.Id}", workspace);
+    return Results.Created($"/api/workspaces/{workspace.Id}", new { workspace.Id, workspace.Name });
 });
 ```
 
@@ -91,7 +91,7 @@ api.MapPut("/workspaces/{id}", async (
     workspace.Name = request.Name.Trim();
     await db.SaveChangesAsync(ct);
 
-    return Results.Ok(workspace);
+    return Results.Ok(new { workspace.Id, workspace.Name });
 });
 ```
 
