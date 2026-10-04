@@ -103,10 +103,23 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
         var levels = string.Join(", ", Enumerable.Range(0, SqlOSFgaLineage.Levels(options))
             .Select(level => $"({level.ToString(CultureInfo.InvariantCulture)}, x.{QuoteIdentifier(SqlOSFgaLineage.AncestorColumn(level))})"));
         // The result shape changed in 8.0 (it names the deciding grant), and CREATE OR REPLACE cannot change a
-        // function's result type: drop the old one first, in the same transaction.
+        // function's result type, so a function with the old shape is dropped first. Only that one: a drop
+        // gives the function a new oid, and a query planned against the old one fails ("cache lookup failed
+        // for function"), so the current shape is replaced in place while other sessions call it.
+        var schemaLiteral = SqlLiteral(options.Schema);
         return $"""
-            DROP FUNCTION IF EXISTS {schema}."fn_IsResourceAccessible"(varchar, text, varchar);
-            CREATE FUNCTION {schema}."fn_IsResourceAccessible"(
+            DO $sqlos_drop$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM pg_proc p INNER JOIN pg_namespace n ON n.oid = p.pronamespace
+                    WHERE n.nspname = '{schemaLiteral}' AND p.proname = 'fn_IsResourceAccessible'
+                      AND pg_get_function_result(p.oid) NOT LIKE '%"GrantId"%')
+                THEN
+                    DROP FUNCTION {schema}."fn_IsResourceAccessible"(varchar, text, varchar);
+                END IF;
+            END
+            $sqlos_drop$;
+            CREATE OR REPLACE FUNCTION {schema}."fn_IsResourceAccessible"(
                 p_resource_id varchar(128),
                 p_subject_ids text,
                 p_permission_id varchar(128)
