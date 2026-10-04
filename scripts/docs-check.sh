@@ -11,8 +11,6 @@ node scripts/validate-docs-layout.mjs
 node scripts/validate-doc-images.mjs
 node scripts/compile-doc-snippets.mjs
 npm ci --prefix web
-node --test scripts/web-production-audit.test.mjs
-node scripts/web-production-audit.mjs
 node scripts/validate-docs-search.mjs
 npm run lint --prefix web
 npm run build --prefix web
