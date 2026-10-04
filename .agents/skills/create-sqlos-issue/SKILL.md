@@ -13,7 +13,7 @@ Use this skill to convert a rough desired state into a SqlOS issue that is ready
 - Include current-state evidence with concrete file paths, symbols, routes, docs, tests, or missing surfaces.
 - Check for duplicates or adjacent issues and link them.
 - Separate what already exists from what is missing.
-- Assign all defensible issue metadata: priority in title/body, labels, milestone when clearly mapped, assignee only when the repo convention or user explicitly indicates one.
+- Assign all defensible issue metadata: priority in the body (never in the title), labels, milestone when clearly mapped, assignee only when the repo convention or user explicitly indicates one.
 - When filing (not drafting), always add the issue to the **sqlos Roadmap** project and assign **Business Value** and **Job Size**. Do not assign **Release** unless the caller explicitly named a current board release. Never default Release to **No Release**.
 - Do not invent implementation facts. If evidence is absent, say "I did not find..." and list the search terms or areas checked.
 - If the user asked to file the issue, create it with `gh issue create` after the research, then score it on the roadmap. If they asked for a draft, do not file it and do not add a project item.
@@ -87,8 +87,8 @@ Milestones currently used by this repo are Phase 1 Foundation, Phase 2 Credentia
 
 Priority convention:
 
-- Put `P1`, `P2`, `P3`, or combined `P1/P2` in the title when the recent issue family uses it.
-- Explain the priority in the body. Tie it to security risk, roadmap dependency, or product polish.
+- Never put a priority (`P1`, `P2`, `P3`, `P1/P2`) in the issue title. Older issues did; don't copy them.
+- State the priority in a `## Priority` section in the body, and explain it. Tie it to security risk, roadmap dependency, or product polish.
 
 Roadmap project fields (required when filing):
 
