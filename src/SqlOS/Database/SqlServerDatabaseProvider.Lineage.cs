@@ -716,7 +716,7 @@ internal sealed partial class SqlServerDatabaseProvider
         }
 
         // And nothing stale anywhere.
-        foreach (var stale in new[] { StaleTriggers(scopeTables), StaleIndexes(scopeTables, levels), StaleStatistics(scopeTables), StaleComputedColumns(scopeTables), StaleDirectTables(options, scopeTables), StaleDirectProcedures(options, scopeTables) })
+        foreach (var stale in new[] { StaleTriggers(options, scopeTables), StaleIndexes(options, scopeTables, levels), StaleStatistics(options, scopeTables), StaleComputedColumns(options, scopeTables), StaleDirectTables(options, scopeTables), StaleDirectProcedures(options, scopeTables) })
         {
             conditions.Add($"NOT EXISTS ({stale})");
         }
@@ -825,37 +825,51 @@ internal sealed partial class SqlServerDatabaseProvider
 
     private static string NameList(IEnumerable<string> names) => string.Join(", ", names.Select(n => $"N'{SqlLiteral(n)}'"));
 
-    private static string StaleTriggers(IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
+    /// <summary>
+    /// The object id is one of this installation's tables: one it recorded (see <c>SqlOSFgaScopeTables</c>), or
+    /// one the model protects now (a renamed table carries objects named for its old name). Another SqlOS
+    /// installation's tables are neither, so its objects are never taken for stale.
+    /// </summary>
+    private static string Owned(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables, string objectId)
+        => $"{objectId} IN (SELECT OBJECT_ID(QUOTENAME(o.[TableSchema]) + N'.' + QUOTENAME(o.[TableName])) FROM [{Escape(options.Schema)}].[SqlOSFgaScopeTables] o"
+           + string.Concat(scopeTables.Select(t => $" UNION ALL SELECT {ObjectOf(t)}"))
+           + ")";
+
+    private static string StaleTriggers(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
         => $"""
             SELECT N'DROP TRIGGER ' + QUOTENAME(OBJECT_SCHEMA_NAME(tr.object_id)) + N'.' + QUOTENAME(tr.name) + N';' AS Statement
             FROM sys.triggers tr
             WHERE tr.parent_class = 1 AND tr.name LIKE N'TR[_]%[_]{SqlOSFgaLineage.ScopePrefix}Scope[_]%'
+              AND {Owned(options, scopeTables, "tr.parent_id")}
               AND NOT ({Wanted(scopeTables, t => $"tr.parent_id = {ObjectOf(t)} AND tr.name IN ({NameList(SqlOSFgaLineage.ScopeTriggerNames(t.Table))})")})
             """;
 
-    private static string StaleIndexes(IReadOnlyList<SqlOSFgaScopeTable> scopeTables, int levels)
+    private static string StaleIndexes(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables, int levels)
         => $"""
             SELECT N'DROP INDEX ' + QUOTENAME(i.name) + N' ON ' + QUOTENAME(OBJECT_SCHEMA_NAME(i.object_id)) + N'.' + QUOTENAME(OBJECT_NAME(i.object_id)) + N';' AS Statement
             FROM sys.indexes i
             WHERE (i.name LIKE N'IX[_]%[_]{SqlOSFgaLineage.ScopeColumn}[0-9]%' OR i.name LIKE N'IX[_]%[_]{SqlOSFgaLineage.ScopeColumn}Missing')
               AND OBJECTPROPERTY(i.object_id, 'IsUserTable') = 1
+              AND {Owned(options, scopeTables, "i.object_id")}
               AND NOT ({Wanted(scopeTables, t => $"i.object_id = {ObjectOf(t)} AND i.name IN ({NameList(SqlOSFgaLineage.ScopeIndexNames(t, levels))})")})
             """;
 
-    private static string StaleStatistics(IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
+    private static string StaleStatistics(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
         => $"""
             SELECT N'DROP STATISTICS ' + QUOTENAME(OBJECT_SCHEMA_NAME(st.object_id)) + N'.' + QUOTENAME(OBJECT_NAME(st.object_id)) + N'.' + QUOTENAME(st.name) + N';' AS Statement
             FROM sys.stats st
             WHERE st.user_created = 1 AND st.name LIKE N'ST[_]%[_]{SqlOSFgaLineage.ScopeTypeColumn}'
+              AND {Owned(options, scopeTables, "st.object_id")}
               AND NOT ({Wanted(scopeTables, t => $"st.object_id = {ObjectOf(t)} AND st.name = N'{SqlLiteral(SqlOSFgaLineage.ScopeTypeStatisticsName(t.Table))}'")})
             """;
 
-    private static string StaleComputedColumns(IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
+    private static string StaleComputedColumns(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
         => $"""
             SELECT N'ALTER TABLE ' + QUOTENAME(OBJECT_SCHEMA_NAME(c.object_id)) + N'.' + QUOTENAME(OBJECT_NAME(c.object_id)) + N' DROP COLUMN ' + QUOTENAME(c.name) + N';' AS Statement
             FROM sys.computed_columns c
             WHERE (c.name LIKE N'{SqlOSFgaLineage.ScopeColumn}[0-9]%' OR c.name = N'{SqlOSFgaLineage.ScopeTypeColumn}')
               AND OBJECTPROPERTY(c.object_id, 'IsUserTable') = 1
+              AND {Owned(options, scopeTables, "c.object_id")}
               AND NOT ({Wanted(scopeTables, t => $"c.object_id = {ObjectOf(t)}")})
             """;
 
@@ -877,9 +891,10 @@ internal sealed partial class SqlServerDatabaseProvider
             """;
 
     /// <summary>
-    /// Drops SqlOS's stale objects from every table of the database (see the naming above): triggers first,
-    /// then indexes, then statistics, then the computed columns they were built on, then direct indexes of
-    /// tables no longer maintained and their rebuild procedures. Idempotent.
+    /// Drops SqlOS's stale objects from this installation's tables (see <see cref="Owned"/> and the naming
+    /// above): triggers first, then indexes, then statistics, then the computed columns they were built on,
+    /// then the direct indexes of tables no longer maintained and their rebuild procedures. Then records the
+    /// tables the model protects now as this installation's. Idempotent.
     /// </summary>
     public string BuildScopeCleanupSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
     {
@@ -887,13 +902,22 @@ internal sealed partial class SqlServerDatabaseProvider
         ArgumentNullException.ThrowIfNull(scopeTables);
         var levels = SqlOSFgaLineage.Levels(options);
         var sql = new StringBuilder("DECLARE @sqlosStale NVARCHAR(MAX);\n");
-        foreach (var stale in new[] { StaleTriggers(scopeTables), StaleIndexes(scopeTables, levels), StaleStatistics(scopeTables), StaleComputedColumns(scopeTables), StaleDirectTables(options, scopeTables), StaleDirectProcedures(options, scopeTables) })
+        foreach (var stale in new[] { StaleTriggers(options, scopeTables), StaleIndexes(options, scopeTables, levels), StaleStatistics(options, scopeTables), StaleComputedColumns(options, scopeTables), StaleDirectTables(options, scopeTables), StaleDirectProcedures(options, scopeTables) })
         {
             sql.AppendLine(CultureInfo.InvariantCulture, $"""
                 SET @sqlosStale = N'';
                 SELECT @sqlosStale += s.Statement FROM ({stale}) s;
                 EXEC (@sqlosStale);
                 """);
+        }
+
+        var registry = $"[{Escape(options.Schema)}].[SqlOSFgaScopeTables]";
+        sql.AppendLine(CultureInfo.InvariantCulture, $"DELETE FROM {registry};");
+        if (scopeTables.Count > 0)
+        {
+            sql.AppendLine($"INSERT INTO {registry} ([TableSchema], [TableName]) VALUES "
+                + string.Join(", ", scopeTables.Select(t => $"(ISNULL(OBJECT_SCHEMA_NAME({ObjectOf(t)}), SCHEMA_NAME()), N'{SqlLiteral(t.Table)}')"))
+                + ";");
         }
 
         return sql.ToString();

@@ -146,6 +146,45 @@ public class SqlOSFgaStartupIntegrationTests
     }
 
     [TestMethod]
+    public async Task AnotherSqlOSInstallation_InTheSameDatabase_LeavesThisOnesTablesAlone()
+    {
+        // Two SqlOS installations, each in its own schema, share a database. The second protects none of the
+        // first's tables, and its start must not treat them as stale.
+        await using var db = await FreshDatabase.CreateAsync();
+        await using var app = db.Open<DocsContext>();
+        await SetUpAsync(app);
+        var (alice, _) = await CreateFoldersAndAliceAsync(app);
+        await AddDocsAsync(app, ("a1", "folder_a"), ("b1", "folder_b"));
+
+        await using var other = db.Open<OtherInstallationContext>();
+        if (!TestDatabase.IsPostgreSql)
+        {
+            await other.Database.ExecuteSqlRawAsync($"CREATE SCHEMA [{OtherInstallationContext.Schema}];");
+        }
+
+        var otherOptions = Options.Create(new SqlOSFgaOptions { Schema = OtherInstallationContext.Schema });
+        await new SqlOSFgaSchemaInitializer(other, otherOptions, NullLogger<SqlOSFgaSchemaInitializer>.Instance).EnsureSchemaAsync();
+        await new SqlOSFgaSeedService(other, otherOptions, NullLogger<SqlOSFgaSeedService>.Instance).SeedCoreAsync();
+        await new SqlOSFgaFunctionInitializer(other, otherOptions, NullLogger<SqlOSFgaFunctionInitializer>.Instance).EnsureFunctionsExistAsync();
+
+        (await SqlOSObjectsAsync(app)).Should().Contain(["TR_StDocs_SqlOSFgaScope_Insert", "TR_StDocs_SqlOSFgaScope_Update", "IX_StDocs_FgaScope0"]);
+
+        // The triggers still keep the first installation's rows current: a row pointed at a resource Alice
+        // cannot see stops being visible to her.
+        var doc = await app.Set<StDoc>().SingleAsync(d => d.Id == "a1");
+        doc.ResourceId = "doc::b1";
+        await app.SaveChangesAsync();
+        app.ChangeTracker.Clear();
+        (await VisibleAsync(app, alice)).Should().BeEmpty();
+
+        // And the first installation's next start still finds its own stale objects: a table it no longer
+        // protects is cleaned up as before.
+        await using var plain = db.Open<UnprotectedDocsContext>();
+        await StartAsync(plain);
+        (await SqlOSObjectsAsync(plain)).Should().BeEmpty();
+    }
+
+    [TestMethod]
     public async Task WhileAnotherInstanceSetsUp_AStartWaitsForIt_InsteadOfFailing()
     {
         await using var db = await FreshDatabase.CreateAsync();
@@ -463,6 +502,15 @@ public class SqlOSFgaStartupIntegrationTests
             });
             modelBuilder.ApplySqlOSFgaModel();
         }
+    }
+
+    /// <summary>A second SqlOS installation in its own schema, protecting none of the first's tables.</summary>
+    public sealed class OtherInstallationContext(DbContextOptions<OtherInstallationContext> options) : DbContext(options), ISqlOSFgaDbContext
+    {
+        public const string Schema = "sqlos_other";
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+            => modelBuilder.ApplySqlOSFgaModel(o => o.Schema = Schema);
     }
 
     public sealed class UnprotectedDocsContext(DbContextOptions<UnprotectedDocsContext> options) : DbContext(options), ISqlOSFgaDbContext

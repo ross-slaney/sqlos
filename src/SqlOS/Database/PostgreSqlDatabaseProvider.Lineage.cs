@@ -772,7 +772,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
         }
 
         // And nothing stale anywhere.
-        foreach (var stale in new[] { StaleTriggers(scopeTables), StaleFunctions(options, scopeTables), StaleIndexes(scopeTables, levels), StaleStatistics(scopeTables), StaleDirectTables(options, scopeTables) })
+        foreach (var stale in new[] { StaleTriggers(options, scopeTables), StaleFunctions(options, scopeTables), StaleIndexes(options, scopeTables, levels), StaleStatistics(options, scopeTables), StaleDirectTables(options, scopeTables) })
         {
             conditions.Add($"NOT EXISTS ({stale})");
         }
@@ -881,13 +881,24 @@ internal sealed partial class PostgreSqlDatabaseProvider
     private static string Wanted(IReadOnlyList<SqlOSFgaScopeTable> scopeTables, Func<SqlOSFgaScopeTable, string> condition)
         => scopeTables.Count == 0 ? "FALSE" : string.Join(" OR ", scopeTables.Select(t => $"({condition(t)})"));
 
-    private static string StaleTriggers(IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
+    /// <summary>
+    /// The table is one of this installation's: one it recorded (see <c>SqlOSFgaScopeTables</c>), or one the
+    /// model protects now (a renamed table carries objects named for its old name). Another SqlOS
+    /// installation's tables are neither, so its objects are never taken for stale.
+    /// </summary>
+    private static string Owned(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables, string schemaColumn, string tableColumn)
+        => $"({schemaColumn}::text, {tableColumn}::text) IN (SELECT o.\"TableSchema\"::text, o.\"TableName\"::text FROM \"{options.Schema.Replace("\"", "\"\"", StringComparison.Ordinal)}\".\"SqlOSFgaScopeTables\" o"
+           + string.Concat(scopeTables.Select(t => $" UNION ALL SELECT {ScopeSchemaLiteral(t)}::text, '{SqlLiteral(t.Table)}'::text"))
+           + ")";
+
+    private static string StaleTriggers(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
         => $"""
             SELECT format('DROP TRIGGER %I ON %I.%I', t.tgname, n.nspname, c.relname) AS statement
             FROM pg_trigger t
             INNER JOIN pg_class c ON c.oid = t.tgrelid
             INNER JOIN pg_namespace n ON n.oid = c.relnamespace
             WHERE NOT t.tgisinternal AND t.tgname LIKE 'TR\_%\_{SqlOSFgaLineage.ScopePrefix}Scope\_%'
+              AND {Owned(options, scopeTables, "n.nspname", "c.relname")}
               AND NOT ({Wanted(scopeTables, tb => $"n.nspname = {ScopeSchemaLiteral(tb)} AND c.relname = '{SqlLiteral(tb.Table)}' AND t.tgname IN ({NameList(SqlOSFgaLineage.ScopeTriggerNames(tb.Table))})")})
             """;
 
@@ -911,32 +922,39 @@ internal sealed partial class PostgreSqlDatabaseProvider
               AND c.relname NOT IN ({(scopeTables.Count == 0 ? "''" : NameList(scopeTables.Select(SqlOSFgaPageIndex.DirectTable)))})
             """;
 
-    private static string StaleIndexes(IReadOnlyList<SqlOSFgaScopeTable> scopeTables, int levels)
+    private static string StaleIndexes(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables, int levels)
         => $"""
             SELECT format('DROP INDEX %I.%I', i.schemaname, i.indexname) AS statement
             FROM pg_indexes i
             WHERE i.indexname ~ '^IX_.*_{SqlOSFgaLineage.ScopeColumn}([0-9]|Missing)'
+              AND {Owned(options, scopeTables, "i.schemaname", "i.tablename")}
               AND NOT ({Wanted(scopeTables, t => $"i.schemaname = {ScopeSchemaLiteral(t)} AND i.tablename = '{SqlLiteral(t.Table)}' AND i.indexname IN ({NameList(SqlOSFgaLineage.ScopeIndexNames(t, levels))})")})
             """;
 
-    private static string StaleStatistics(IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
+    private static string StaleStatistics(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
         => $"""
             SELECT format('DROP STATISTICS %I.%I', n.nspname, s.stxname) AS statement
             FROM pg_statistic_ext s
             INNER JOIN pg_namespace n ON n.oid = s.stxnamespace
             INNER JOIN pg_class c ON c.oid = s.stxrelid
+            INNER JOIN pg_namespace tn ON tn.oid = c.relnamespace
             WHERE s.stxname LIKE 'ST\_%\_{SqlOSFgaLineage.ScopeTypeColumn}'
+              AND {Owned(options, scopeTables, "tn.nspname", "c.relname")}
               AND NOT ({Wanted(scopeTables, t => $"n.nspname = {ScopeSchemaLiteral(t)} AND c.relname = '{SqlLiteral(t.Table)}' AND s.stxname = '{SqlLiteral(SqlOSFgaLineage.ScopeTypeStatisticsName(t.Table))}'")})
             """;
 
-    /// <summary>Drops SqlOS's stale objects from every table of the database: triggers, their functions, indexes, statistics. Idempotent.</summary>
+    /// <summary>
+    /// Drops SqlOS's stale objects from this installation's tables (see <see cref="Owned"/>): triggers, their
+    /// functions, indexes, statistics. Then records the tables the model protects now as this installation's.
+    /// Idempotent.
+    /// </summary>
     public string BuildScopeCleanupSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(scopeTables);
         var levels = SqlOSFgaLineage.Levels(options);
         var loops = new StringBuilder();
-        foreach (var stale in new[] { StaleTriggers(scopeTables), StaleFunctions(options, scopeTables), StaleIndexes(scopeTables, levels), StaleStatistics(scopeTables), StaleDirectTables(options, scopeTables) })
+        foreach (var stale in new[] { StaleTriggers(options, scopeTables), StaleFunctions(options, scopeTables), StaleIndexes(options, scopeTables, levels), StaleStatistics(options, scopeTables), StaleDirectTables(options, scopeTables) })
         {
             loops.AppendLine(CultureInfo.InvariantCulture, $"""
                 FOR stale IN {stale}
@@ -944,6 +962,15 @@ internal sealed partial class PostgreSqlDatabaseProvider
                     EXECUTE stale.statement;
                 END LOOP;
                 """);
+        }
+
+        var registry = Qualify(options.Schema, "SqlOSFgaScopeTables");
+        loops.AppendLine(CultureInfo.InvariantCulture, $"DELETE FROM {registry};");
+        if (scopeTables.Count > 0)
+        {
+            loops.AppendLine($"INSERT INTO {registry} (\"TableSchema\", \"TableName\") VALUES "
+                + string.Join(", ", scopeTables.Select(t => $"({ScopeSchemaLiteral(t)}, '{SqlLiteral(t.Table)}')"))
+                + ";");
         }
 
         return $"""
