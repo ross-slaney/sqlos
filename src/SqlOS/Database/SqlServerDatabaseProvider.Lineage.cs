@@ -85,7 +85,7 @@ internal sealed partial class SqlServerDatabaseProvider
         return $"""
             CREATE OR ALTER FUNCTION [{schema}].fn_AccessRoots(
                 @SubjectIds NVARCHAR(MAX),
-                @PermissionId NVARCHAR(128)
+                @PermissionId NVARCHAR(450)
             )
             RETURNS TABLE
             AS

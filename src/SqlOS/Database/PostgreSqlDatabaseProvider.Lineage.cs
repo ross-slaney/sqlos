@@ -74,7 +74,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
         return $"""
             CREATE OR REPLACE FUNCTION {schema}."fn_AccessRoots"(
                 p_subject_ids text,
-                p_permission_id varchar(128)
+                p_permission_id varchar(450)
             )
             RETURNS TABLE("ResourceSeq" bigint, "Depth" smallint)
             LANGUAGE sql

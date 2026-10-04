@@ -130,6 +130,50 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
     }
 
     [TestMethod]
+    public async Task IdsLongerThan128Characters_AreComparedInFull()
+    {
+        // Ids may be 450 characters. A routine that took them narrower would cut two ids sharing their first
+        // 128 characters down to the same value, and a grant on one would allow the other.
+        var subjectService = CreateSubjectService();
+        var user = await subjectService.CreateUserAsync("Long Id User", $"long-ids-{Guid.NewGuid():N}@example.com");
+        var prefix = ("long_" + Guid.NewGuid().ToString("N")).PadRight(128, 'x');
+        var granted = prefix;
+        var ungranted = prefix + "_private";
+        Context.ChangeTracker.Clear();
+        Context.Set<SqlOSFgaResource>().AddRange(
+            new SqlOSFgaResource { Id = granted, ParentId = FgaTestDataSeeder.TestAgencyResourceId, Name = "granted", ResourceTypeId = "project" },
+            new SqlOSFgaResource { Id = ungranted, ParentId = FgaTestDataSeeder.OtherAgencyResourceId, Name = "private", ResourceTypeId = "project" });
+
+        // Two permissions whose ids share their first 128 characters; the role holds only the first.
+        var allowedPermission = new SqlOSFgaPermission { Id = prefix + "_perm_a", Key = $"LONG_A_{prefix[5..37]}", Name = "Allowed" };
+        var otherPermission = new SqlOSFgaPermission { Id = prefix + "_perm_b", Key = $"LONG_B_{prefix[5..37]}", Name = "Other" };
+        var role = new SqlOSFgaRole { Id = $"role_{prefix[5..37]}", Key = $"ROLE_{prefix[5..37]}", Name = "Long id role" };
+        Context.Set<SqlOSFgaPermission>().AddRange(allowedPermission, otherPermission);
+        Context.Set<SqlOSFgaRole>().Add(role);
+        await Context.SaveChangesAsync();
+        Context.Set<SqlOSFgaRolePermission>().Add(new SqlOSFgaRolePermission { RoleId = role.Id, PermissionId = allowedPermission.Id });
+        Context.Set<SqlOSFgaGrant>().AddRange(
+            new SqlOSFgaGrant { Id = $"grant_view_{prefix[5..37]}", SubjectId = user.SubjectId, ResourceId = granted, RoleId = FgaTestDataSeeder.AgencyMemberRoleId },
+            new SqlOSFgaGrant { Id = $"grant_long_{prefix[5..37]}", SubjectId = user.SubjectId, ResourceId = granted, RoleId = role.Id });
+        Context.Set<LifecycleProtectedEntity>().AddRange(
+            new LifecycleProtectedEntity { Id = $"long_granted_{prefix[5..37]}", ResourceId = granted },
+            new LifecycleProtectedEntity { Id = $"long_private_{prefix[5..37]}", ResourceId = ungranted });
+        await Context.SaveChangesAsync();
+        Context.ChangeTracker.Clear();
+
+        Assert.IsTrue((await _authService.CheckAccessAsync(user.SubjectId, "TEST_VIEW", granted)).Allowed);
+        Assert.IsFalse((await _authService.CheckAccessAsync(user.SubjectId, "TEST_VIEW", ungranted)).Allowed, "a resource id is compared in full");
+        Assert.IsTrue((await _authService.CheckAccessAsync(user.SubjectId, allowedPermission.Key, granted)).Allowed);
+        Assert.IsFalse((await _authService.CheckAccessAsync(user.SubjectId, otherPermission.Key, granted)).Allowed, "a permission id is compared in full");
+
+        var filter = await _authService.BuildFilterAsync<LifecycleProtectedEntity>(user.SubjectId, otherPermission.Key);
+        Assert.IsFalse(await Context.Set<LifecycleProtectedEntity>().AsNoTracking()
+            .Where(e => e.ResourceId == granted || e.ResourceId == ungranted)
+            .Where(filter)
+            .AnyAsync(), "the list filter compares the permission id in full");
+    }
+
+    [TestMethod]
     public async Task CheckAccess_SystemAdmin_HasAccessToEverything()
     {
         var result = await _authService.CheckAccessAsync(

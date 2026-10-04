@@ -120,9 +120,9 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
             END
             $sqlos_drop$;
             CREATE OR REPLACE FUNCTION {schema}."fn_IsResourceAccessible"(
-                p_resource_id varchar(128),
+                p_resource_id varchar(450),
                 p_subject_ids text,
-                p_permission_id varchar(128)
+                p_permission_id varchar(450)
             )
             RETURNS TABLE("Id" varchar(450), "GrantId" varchar(450), "SubjectId" varchar(450), "RoleId" varchar(450), "Level" integer)
             LANGUAGE sql

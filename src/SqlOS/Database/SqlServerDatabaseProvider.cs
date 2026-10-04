@@ -123,9 +123,9 @@ internal sealed partial class SqlServerDatabaseProvider : ISqlOSDatabaseProvider
             .Select(level => $"({level.ToString(CultureInfo.InvariantCulture)}, x.{SqlOSFgaLineage.AncestorColumn(level)})"));
         return $"""
             CREATE OR ALTER FUNCTION [{schema}].fn_IsResourceAccessible(
-                @ResourceId NVARCHAR(128),
+                @ResourceId NVARCHAR(450),
                 @SubjectIds NVARCHAR(MAX),
-                @PermissionId NVARCHAR(128)
+                @PermissionId NVARCHAR(450)
             )
             RETURNS TABLE
             AS
