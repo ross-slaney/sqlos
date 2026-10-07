@@ -114,7 +114,7 @@ public class SqlOSDatabaseProviderTests
     {
         var options = new SqlOSFgaOptions { Schema = "ten\"ant", MaxResourceHierarchyDepth = 4 };
         options.TableNames.Resources = "res\"ources";
-        var scope = new SqlOSFgaScopeTable("app", "Items", "ResourceId", ["Id"]);
+        var scope = new SqlOSFgaScopeTable("app", "Items", "ResourceId", ["Id"], [], [new SqlOSFgaScopeColumn("Id", "integer", false)]);
 
         var columns = PostgreSqlDatabaseProvider.Instance.BuildEnsureLineageColumnsSql(options).Single();
         columns.Should().Contain("ALTER TABLE \"ten\"\"ant\".\"res\"\"ources\" ADD COLUMN IF NOT EXISTS \"Ancestor4\" bigint NULL;");
@@ -138,7 +138,11 @@ public class SqlOSDatabaseProviderTests
         all.Should().Contain("CREATE OR REPLACE FUNCTION \"ten\"\"ant\".\"fn_SqlOSFgaScope_app_Items_Insert\"()");
         all.Should().Contain("CREATE OR REPLACE FUNCTION \"ten\"\"ant\".\"fn_SqlOSFgaScope_app_Items_Update\"()");
         all.Should().Contain("SELECT \"Id\", \"ParentId\", \"IsActive\" FROM new_rows\n        EXCEPT\n        SELECT \"Id\", \"ParentId\", \"IsActive\" FROM old_rows", "changed rows come from a hashed set operation");
-        all.Should().Contain("SELECT \"Id\", \"ResourceId\" FROM new_rows\n            EXCEPT\n            SELECT \"Id\", \"ResourceId\" FROM old_rows");
+        System.Text.RegularExpressions.Regex.IsMatch(all, "SELECT \"Id\", \"ResourceId\" FROM new_rows\\s+EXCEPT\\s+SELECT \"Id\", \"ResourceId\" FROM old_rows").Should().BeTrue();
+        all.Should().Contain("IF NOT EXISTS (SELECT 1 FROM (SELECT \"Id\", \"ResourceId\" FROM new_rows EXCEPT SELECT \"Id\", \"ResourceId\" FROM old_rows) c) THEN", "the rows whose key, order columns, or resource id changed drive the direct index");
+        all.Should().NotContain("TEMP TABLE \"SqlOSScopeChanged\"", "this function's own update fires it again, and a nested call must not disturb the outer one");
+        all.Should().Contain("CREATE OR REPLACE FUNCTION \"ten\"\"ant\".\"fn_SqlOSFgaScope_app_Items_Delete\"()");
+        all.Should().Contain("AFTER DELETE ON \"app\".\"Items\"");
         all.Should().NotContain("JOIN old_rows", "a join of the transition tables has nothing to plan by");
         all.Should().Contain("IF NOT EXISTS (", "the update function must leave before updating, or its own update fires it forever");
         all.Should().Contain("AFTER UPDATE ON \"app\".\"Items\"");
@@ -164,9 +168,9 @@ public class SqlOSDatabaseProviderTests
         // The cleanup finds SqlOS's objects on every table by name and keeps the ones of maintained tables.
         var cleanup = PostgreSqlDatabaseProvider.Instance.BuildScopeCleanupSql(options, [scope]);
         cleanup.Should().Contain("t.tgname LIKE 'TR\\_%\\_SqlOSFgaScope\\_%'");
-        cleanup.Should().Contain("n.nspname = 'app' AND c.relname = 'Items' AND t.tgname IN ('TR_Items_SqlOSFgaScope_Insert', 'TR_Items_SqlOSFgaScope_Update')");
+        cleanup.Should().Contain("n.nspname = 'app' AND c.relname = 'Items' AND t.tgname IN ('TR_Items_SqlOSFgaScope_Insert', 'TR_Items_SqlOSFgaScope_Update', 'TR_Items_SqlOSFgaScope_Delete')");
         cleanup.Should().Contain("p.proname LIKE 'fn\\_SqlOSFgaScope\\_%'");
-        cleanup.Should().Contain("p.proname NOT IN ('fn_SqlOSFgaScope_app_Items_Insert', 'fn_SqlOSFgaScope_app_Items_Update')");
+        cleanup.Should().Contain("p.proname NOT IN ('fn_SqlOSFgaScope_app_Items_Insert', 'fn_SqlOSFgaScope_app_Items_Update', 'fn_SqlOSFgaScope_app_Items_Delete', 'fn_SqlOSFgaDirect_app_Items_Rebuild')");
         cleanup.Should().Contain("i.indexname ~ '^IX_.*_FgaScope([0-9]|Missing)'");
         cleanup.Should().Contain("s.stxname LIKE 'ST\\_%\\_FgaScopeType'");
         cleanup.Should().Contain("EXECUTE stale.statement;");

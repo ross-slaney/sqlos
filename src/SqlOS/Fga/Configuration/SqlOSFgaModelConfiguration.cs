@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using SqlOS.Fga;
 using SqlOS.Fga.Models;
+using SqlOS.Fga.Paging;
 
 namespace SqlOS.Fga.Configuration;
 
@@ -106,7 +107,17 @@ public static class SqlOSFgaModelConfiguration
         // Grant
         modelBuilder.Entity<SqlOSFgaGrant>(entity =>
         {
-            entity.ToTable(tables.Grants, schema, t => t.ExcludeFromMigrations());
+            entity.ToTable(tables.Grants, schema, t =>
+            {
+                t.ExcludeFromMigrations();
+
+                // The page-index triggers (grant counts and direct indexes), declared for the same reason as
+                // the lineage triggers above.
+                foreach (var trigger in SqlOSFgaPageIndex.GrantTriggerNames(tables.Grants))
+                {
+                    t.HasTrigger(trigger);
+                }
+            });
             entity.HasKey(e => e.Id);
             entity.HasOne(e => e.Subject)
                 .WithMany(s => s.Grants)

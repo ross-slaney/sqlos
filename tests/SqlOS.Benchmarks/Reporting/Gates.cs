@@ -130,7 +130,7 @@ internal static class GateEvaluator
     /// </summary>
     internal static double ExpectedRows(ScenarioResult scenario, long products)
     {
-        if (!scenario.Kind.StartsWith("List", StringComparison.Ordinal))
+        if (scenario.Kind is not ("List" or "Page"))
         {
             return 1;
         }

@@ -6,10 +6,14 @@ catalog grows from 1M to 50M products in CI, and fails CI when that behavior reg
 It is the maintained successor to the harness behind the paper's Section 7 (kept in `paper/benchmark`),
 which ran a hand-copied version of the schema and function at 1.2M–1.5M resources on SQL Server only.
 
-Every list page (`list.*`) goes through `BuildFilterAsync`: the row's own scope column holds its resource's
-ancestor at every level access flows down from, so a single-grant caller's page is one seek of an index that
-starts with that level's part of the column and continues with the order the page asks for. Point checks
-measure `fn_IsResourceAccessible` and `Allows` (`CheckAccessAsync`), which applications call.
+Every page is measured two ways. A list page (`list.*`) goes through `BuildFilterAsync`: the row's own scope
+column holds its resource's ancestor at every level access flows down from, so a single-grant caller's page
+is one seek of an index that starts with that level's part of the column and continues with the order the
+page asks for. The same page as a page call (`page.*`) goes through `ToAccessiblePageAsync`: the library owns
+the access path (the adaptive walk over the per-subject grant counts, the same per-level indexes, and the
+direct index of rows granted on their own resource) and returns the page with its cursor, so the work is
+about a page's worth for any caller, dense or sparse, one grant or a hundred thousand. Point checks measure
+`fn_IsResourceAccessible` and `Allows` (`CheckAccessAsync`), which applications call.
 
 ## What is measured
 
@@ -18,15 +22,18 @@ measure `fn_IsResourceAccessible` and `Allows` (`CheckAccessAsync`), which appli
   `fn_IsResourceAccessible`, and the core seed are created by SqlOS's own initializers
   (`SqlOSFgaSchemaInitializer`, `SqlOSFgaFunctionInitializer`, `SqlOSFgaSeedService`) from an application
   context. A change to any of them is what gets measured.
-- **The application's queries.** Pages go through `BuildFilterAsync<Product>` and EF Core, so the timing
-  includes the SQL EF generates for callers. The filter is built before the clock starts, as the paper
-  measured; the authorized query alone is timed. Warm cache; median and p95 over up to 25 runs.
+- **The application's queries.** Filter pages go through `BuildFilterAsync<Product>` and EF Core, so the
+  timing includes the SQL EF generates for callers. The filter is built before the clock starts, as the paper
+  measured; the authorized query alone is timed. Page calls go through `ToAccessiblePageAsync` on the same
+  query shapes, with everything inside the clock (principal resolution, the walk's round trips, loading the
+  page's rows), as a request pays it. Warm cache; median and p95 over up to 25 runs.
 - **Every answer is checked against ground truth.** The exact page (k + 1 rows after the cursor, or the first
-  k + 1 rows by price) and every allow or deny are recomputed from the dataset generator, so a fast wrong
-  answer fails the run.
-- **The actual plan is captured** for each page (`EXPLAIN (ANALYZE, BUFFERS)` or `SET STATISTICS XML`). From
-  it the report takes product rows read, server execution time, and server planning time. The plans are
-  uploaded with the results.
+  k + 1 rows by price; for a page call, k rows and whether a next page exists) and every allow or deny are
+  recomputed from the dataset generator, so a fast wrong answer fails the run.
+- **The actual plan is captured** for each filter page (`EXPLAIN (ANALYZE, BUFFERS)` or `SET STATISTICS
+  XML`). From it the report takes product rows read, server execution time, and server planning time. The
+  plans are uploaded with the results. A page call is several statements, so it reports the executor's own
+  counters instead: round trips, statements, index rows fetched, streams opened (one seek each).
 - **The lineage is verified.** At the first scale, the lineage and scope values the loader generated are
   compared (counts and order-independent hashes over every column) with the same after the maintenance pass
   and with what SqlOS rebuilds from the resource tree alone with its own procedure.
@@ -49,9 +56,10 @@ A retail company under the SqlOS root: twelve chains, about 13,800 stores and 74
 - **Every product is a resource**, as with `ISqlOSResourceEntity`. `Products` carries the indexes such a
   table has: the unique `ResourceId`, the `StoreId` foreign key, and one declared order besides the key,
   `Price`. SqlOS mirrors the key and the price index once per level of the scope column.
-- **Five people, M = 3 each** (the user and two groups): a company admin granted through a group on the
+- **Eight people, M = 3 each** (the user and two groups): a company admin granted through a group on the
   root, a chain manager, a region manager, a manager of the deep chain, and the manager of a median-sized
-  store. Two more people hold 10,000 and 100,000 grants on single products.
+  store. One person holds 100 store grants spread across every chain (a hundred roots). Two more people hold
+  10,000 and 100,000 grants on single products.
 
 The data is a pure function of the seed, so it grows in place (1M → 10M → 50M) and any page can be verified.
 The loaders write sequence numbers, lineage, and scope values themselves; the first scale checks them
@@ -66,11 +74,13 @@ against SqlOS's rebuild.
 | `list.admin.by-price`, `list.region.by-price`, `list.store.by-price` | Pages in an order the application declared an index for, dense to sparse |
 | `list.chain.first-page`, `list.region.first-page` | Narrower grants (σ = 7%, 1%) |
 | `list.deep-chain.first-page` | The same at D = 10 |
-| `list.store.first-page` | Sparse access (σ ≈ 0.0065%): one seek, the same as a dense page |
+| `list.store.first-page`, `list.store.mid-cursor` | Sparse access (σ ≈ 0.0065%): one seek, the same as a dense page, from the start and from the middle of the table |
 | `list.store.by-store` | The same person listing their store with `WHERE StoreId = …`: the application narrowed the page itself |
-| `list.grants10k.first-page`, `list.grants100k.first-page` | Thousands of roots: the same predicate, with the roots at the product level sent as one list parameter. Callers with tens of thousands of single-resource grants are outside the model's intended shape (access flows down a hierarchy); these pages are measured and held to their own limits, not expected to be flat |
+| `list.stores100.first-page`, `list.stores100.by-price` | A hundred roots: one person granted 100 stores across every chain, in key order and by price |
+| `list.grants10k.first-page`, `list.grants100k.first-page` | Thousands of roots: the same predicate, with the roots at the product level sent as one list parameter. Callers with tens of thousands of single-resource grants are outside the filter's intended shape (access flows down a hierarchy); these filter pages are measured and held to their own limits, not expected to be flat |
+| `page.*` | Every `list.*` page above, as a page call through `ToAccessiblePageAsync`: the same person, filter, order, and page size. Held to the scale gate like any other page, the many-grants people included: the page call reads their rows from the direct index |
 | `point.function.*`, `point.api.*` | `fn_IsResourceAccessible` for one product at depth 4 and 9, a denial, the many-grants people, and `Allows` |
-| `density.*` | At the first scale only: the region pages and the denied check re-run while 100 other people hold grants on the root. Only the caller's own grants should matter. Reported, not gated |
+| `density.*` | At the first scale only: the region page (both ways) and the denied check re-run while 100 other people hold grants on the root. Only the caller's own grants should matter. Reported, not gated |
 | maintenance | At the first scale only: 2,000 single-row inserts with the lineage triggers on and off, one 2,000-row insert, one 2,000-row delete, and reparent, deactivate and reactivate of a region subtree; then a rebuild from scratch, compared with the maintained lineage |
 
 ## The run that replaced the tree walk
@@ -184,8 +194,10 @@ the application's own `StoreId` index; every other page reads the page's rows an
   index. The many-grants pages are exempt: their cost follows the caller's grants, not N.
 - **regression**: every scenario's median against the constant set for it and the engine in
   `regressionMilliseconds`: what the scenario costs today, with headroom for runner noise (the many-grants
-  pages sit at about 1.5× the values CI reports; the rest, several times). A change that makes any page or
-  point check slower than its limit fails the run. Raise a limit only with an explanation.
+  filter pages sit at about 1.5× the values CI reports; the rest, several times). A change that makes any
+  page or point check slower than its limit fails the run. Raise a limit only with an explanation. The
+  `page.*` scenarios and the new `list.store.mid-cursor` and `list.stores100.*` pages have no limit yet:
+  theirs are set from their first full run.
 
 ## Run it
 
@@ -245,7 +257,10 @@ Secondary indexes, the per-level ancestor and scope indexes among them, are set 
 rebuilt from their own definitions, so no DDL is copied into the harness. Foreign keys are revalidated (SQL
 Server), statistics are refreshed, PostgreSQL tables are vacuumed so the visibility map matches a table
 autovacuum maintains, and the resource sequence is moved past the loaded numbers so the maintenance pass
-inserts like an application would.
+inserts like an application would. The grant counts and the direct indexes behind the page call are then
+rebuilt with SqlOS's own routine, as SqlOS does at every start: the load went past the triggers that keep
+them, and a store becomes a container (its grants enter the counts) only once it has products. The rebuild's
+time is reported with the load.
 
 The PostgreSQL container turns off durability settings that only affect writes (`fsync`, WAL level,
 synchronous commit). Planner settings are the usual SSD values.

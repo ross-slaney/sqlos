@@ -154,6 +154,7 @@ public static class ServiceCollectionExtensions
         services.AddHostedService<SqlOSSigningKeyRotationService>();
         services.AddHostedService<SqlOSCalendarSyncHostedService>();
         services.AddHostedService<SqlOSBootstrapHostedService>();
+        services.AddHostedService<SqlOSFgaGrantCountsRefreshService>();
         services.AddSingleton<IStartupFilter, SqlOSPipelineStartupFilter>();
         SqlOSJwtAuthentication.Add(services, options);
 

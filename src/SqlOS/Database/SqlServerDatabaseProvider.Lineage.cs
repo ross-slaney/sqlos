@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using SqlOS.Fga;
 using SqlOS.Fga.Configuration;
+using SqlOS.Fga.Paging;
 
 namespace SqlOS.Database;
 
@@ -292,6 +293,10 @@ internal sealed partial class SqlServerDatabaseProvider
 
                 -- 5. The scope columns of the affected rows' application rows.
                 {Propagate("#SqlOSLineageAffected")}
+                -- 6. The grant counts of the principals holding grants on the affected resources (their chains
+                --    changed), and the activity and type of their rows' direct entries.
+                {CountsRefreshForResources(options, "#SqlOSLineageAffected")}
+                {string.Concat(scopeTables.Select(t => DirectRefresh(options, t, "#SqlOSLineageAffected") + "\n"))}
                 DROP TABLE #SqlOSLineageAffected;
             END
             """;
@@ -372,6 +377,8 @@ internal sealed partial class SqlServerDatabaseProvider
                 {string.Concat(scopeTables.Select(t => ScopeFillRange(options, t, levels)))}
                 """)}
                 DROP TABLE #SqlOSLineageNodes;
+                -- 3. The grant counts and the direct indexes, from the grants and the new lineage.
+                EXEC [{schema}].[sp_{SqlOSFgaPageIndex.RebuildRoutine}];
                 """)}
             END
             """;
@@ -392,7 +399,24 @@ internal sealed partial class SqlServerDatabaseProvider
                 INSERT INTO #SqlOSLineageChanged (Id) SELECT Id FROM inserted;
                 EXEC {refresh} @RejectMalformed = 1, @WalkAll = 0;
                 DROP TABLE #SqlOSLineageChanged;
+                -- A parent that had no children before this statement is now a container: the grants on it
+                -- enter the grant counts (a childless resource's grants are served by the direct index alone).
+                {CountsRefreshForResources(options, $"(SELECT DISTINCT n.ParentId AS Id FROM inserted n WHERE n.ParentId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM {resources} c WHERE c.ParentId = n.ParentId AND NOT EXISTS (SELECT 1 FROM inserted x WHERE x.Id = c.Id)))")}
             END
+            """;
+
+        // The parents that gained their first children or lost their last ones in an update: their grants
+        // enter or leave the grant counts. The moved rows come from EXCEPT, never from a join of inserted and deleted.
+        const string movedIn = "(SELECT Id, ParentId FROM inserted EXCEPT SELECT Id, ParentId FROM deleted)";
+        const string movedOut = "(SELECT Id, ParentId FROM deleted EXCEPT SELECT Id, ParentId FROM inserted)";
+        var transitionedParents = $"""
+            (SELECT m.ParentId AS Id FROM {movedIn} m
+             WHERE m.ParentId IS NOT NULL
+               AND NOT EXISTS (SELECT 1 FROM {resources} c WHERE c.ParentId = m.ParentId AND NOT EXISTS (SELECT 1 FROM {movedIn} y WHERE y.Id = c.Id))
+             UNION
+             SELECT o.ParentId FROM {movedOut} o
+             WHERE o.ParentId IS NOT NULL
+               AND NOT EXISTS (SELECT 1 FROM {resources} c WHERE c.ParentId = o.ParentId))
             """;
 
         // Changed rows are found with EXCEPT, a hashed set operation: a join of inserted and deleted has no
@@ -406,6 +430,7 @@ internal sealed partial class SqlServerDatabaseProvider
                 INNER JOIN (SELECT Id, ResourceTypeId FROM inserted EXCEPT SELECT Id, ResourceTypeId FROM deleted) i ON i.Id = t.[{Escape(table.ResourceIdColumn)}]
                 INNER JOIN {resources} r ON r.Id = i.Id
                 INNER JOIN {resourceTypes} rt ON rt.Id = r.ResourceTypeId;
+                {DirectRefresh(options, table, "(SELECT i.Id FROM (SELECT Id, ResourceTypeId FROM inserted EXCEPT SELECT Id, ResourceTypeId FROM deleted) i)")}
                 """);
         }
 
@@ -423,6 +448,7 @@ internal sealed partial class SqlServerDatabaseProvider
                 IF EXISTS (SELECT 1 FROM #SqlOSLineageChanged)
                 BEGIN
                     EXEC {refresh} @RejectMalformed = 1, @WalkAll = 1;
+                    {CountsRefreshForResources(options, transitionedParents)}
                 END
                 DROP TABLE #SqlOSLineageChanged;
                 {(typeChanges.Length == 0 ? "" : $"IF UPDATE(ResourceTypeId)\nBEGIN\n{typeChanges}END")}
@@ -445,8 +471,11 @@ internal sealed partial class SqlServerDatabaseProvider
             AS
             BEGIN
                 SET NOCOUNT ON;
-                {(clears.Length == 0 ? "" : LineageLock(options, "Exclusive"))}
+                IF NOT EXISTS (SELECT 1 FROM deleted) RETURN;
+                {LineageLock(options, "Exclusive")}
                 {clears}
+                -- A parent left without children is a container no more: the grants on it leave the grant counts.
+                {CountsRefreshForResources(options, $"(SELECT DISTINCT o.ParentId AS Id FROM deleted o WHERE o.ParentId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM {resources} c WHERE c.ParentId = o.ParentId))")}
             END
             """;
 
@@ -502,8 +531,9 @@ internal sealed partial class SqlServerDatabaseProvider
     }
 
     /// <summary>
-    /// The two triggers on an application table: an inserted row, or one whose resource id changed, takes
-    /// the scope value of its resource (NULL when there is none, which denies it).
+    /// The three triggers on an application table: an inserted row, or one whose resource id changed, takes
+    /// the scope value of its resource (NULL when there is none, which denies it); the direct index follows
+    /// every row inserted, every row whose resource id or sort columns changed, and every row deleted.
     /// </summary>
     private IReadOnlyList<string> ScopeTriggers(SqlOSFgaOptions options, SqlOSFgaScopeTable table, int levels)
     {
@@ -520,6 +550,8 @@ internal sealed partial class SqlServerDatabaseProvider
             LEFT JOIN {resources} r ON r.Id = t.[{Escape(table.ResourceIdColumn)}]
             LEFT JOIN {resourceTypes} rt ON rt.Id = r.ResourceTypeId;
             """;
+        var directColumns = SqlOSFgaPageIndex.DirectColumns(table).Select(c => c.Column).Append(table.ResourceIdColumn).Distinct().ToList();
+        var anyDirectChange = string.Join(" OR ", directColumns.Select(c => $"UPDATE([{Escape(c)}])"));
         return
         [
             $"""
@@ -531,6 +563,7 @@ internal sealed partial class SqlServerDatabaseProvider
                 IF NOT EXISTS (SELECT 1 FROM inserted) RETURN;
                 {LineageLock(options, "Shared")}
                 {copy}
+                {DirectInsertFromRows(options, table, "inserted")}
             END
             """,
             $"""
@@ -539,9 +572,24 @@ internal sealed partial class SqlServerDatabaseProvider
             AS
             BEGIN
                 SET NOCOUNT ON;
-                IF NOT UPDATE([{Escape(table.ResourceIdColumn)}]) RETURN;
+                IF NOT ({anyDirectChange}) RETURN;
+                IF NOT EXISTS (SELECT 1 FROM inserted) RETURN;
                 {LineageLock(options, "Shared")}
-                {copy}
+                IF UPDATE([{Escape(table.ResourceIdColumn)}])
+                BEGIN
+                    {copy}
+                END
+                {DirectDeleteRows(options, table, "inserted")}
+                {DirectInsertFromRows(options, table, "inserted")}
+            END
+            """,
+            $"""
+            CREATE OR ALTER TRIGGER {triggerSchema}[{Escape(triggers[2])}] ON {ScopeTable(table)}
+            AFTER DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                {DirectDeleteRows(options, table, "deleted")}
             END
             """,
         ];
@@ -642,9 +690,14 @@ internal sealed partial class SqlServerDatabaseProvider
             Exists(options.Schema, "fn_IsResourceAccessible", "IF"),
             Exists(options.Schema, "sp_" + SqlOSFgaLineage.RefreshRoutineName(resourcesTable), "P"),
             Exists(options.Schema, "sp_" + SqlOSFgaLineage.RebuildRoutineName(resourcesTable), "P"),
+            Exists(options.Schema, "sp_" + SqlOSFgaPageIndex.CountsRebuildRoutine, "P"),
+            Exists(options.Schema, "sp_" + SqlOSFgaPageIndex.CountsAdjustRoutine, "P"),
+            Exists(options.Schema, "sp_" + SqlOSFgaPageIndex.CountsRefreshRoutine, "P"),
+            Exists(options.Schema, "sp_" + SqlOSFgaPageIndex.RebuildRoutine, "P"),
         };
         conditions.Add(Exists(options.Schema, "sp_" + SqlOSFgaLineage.ScopeFillRoutineName(resourcesTable), "P"));
         conditions.AddRange(SqlOSFgaLineage.TriggerNames(resourcesTable).Select(t => Exists(options.Schema, t, "TR")));
+        conditions.AddRange(SqlOSFgaPageIndex.GrantTriggerNames(options.TableNames.Grants).Select(t => Exists(options.Schema, t, "TR")));
         conditions.Add($"COL_LENGTH('{SqlLiteral($"[{schema}].[{Escape(resourcesTable)}]")}', '{SqlOSFgaLineage.AncestorColumn(SqlOSFgaLineage.MaxLevel(options))}') IS NOT NULL");
         var levels = SqlOSFgaLineage.Levels(options);
         foreach (var table in scopeTables)
@@ -652,13 +705,18 @@ internal sealed partial class SqlServerDatabaseProvider
             // Every object of the table exists: an application migration may have dropped some (a column a
             // mirrored index used, say) without changing anything SqlOS's definitions are hashed from.
             var indexes = SqlOSFgaLineage.ScopeIndexNames(table, levels);
-            conditions.Add($"(SELECT COUNT(*) FROM sys.triggers WHERE parent_id = {ObjectOf(table)} AND name IN ({NameList(SqlOSFgaLineage.ScopeTriggerNames(table.Table))})) = 2");
+            conditions.Add($"(SELECT COUNT(*) FROM sys.triggers WHERE parent_id = {ObjectOf(table)} AND name IN ({NameList(SqlOSFgaLineage.ScopeTriggerNames(table.Table))})) = 3");
             conditions.Add($"(SELECT COUNT(*) FROM sys.indexes WHERE object_id = {ObjectOf(table)} AND name IN ({NameList(indexes)})) = {indexes.Count.ToString(CultureInfo.InvariantCulture)}");
             conditions.Add($"EXISTS (SELECT 1 FROM sys.stats WHERE object_id = {ObjectOf(table)} AND name = N'{SqlLiteral(SqlOSFgaLineage.ScopeTypeStatisticsName(table.Table))}')");
+            var direct = SqlOSFgaPageIndex.DirectTable(table);
+            var directIndexes = SqlOSFgaPageIndex.DirectIndexNames(table).Append(SqlOSFgaPageIndex.DirectIndexName(table, "Key")).Append(SqlOSFgaPageIndex.DirectIndexName(table, "Row")).ToList();
+            conditions.Add(Exists(options.Schema, direct, "U"));
+            conditions.Add(Exists(options.Schema, "sp_" + SqlOSFgaPageIndex.DirectRebuildRoutine(table), "P"));
+            conditions.Add($"(SELECT COUNT(*) FROM sys.indexes WHERE object_id = OBJECT_ID(N'{SqlLiteral($"[{schema}].[{Escape(direct)}]")}') AND name IN ({NameList(directIndexes)})) = {directIndexes.Count.ToString(CultureInfo.InvariantCulture)}");
         }
 
         // And nothing stale anywhere.
-        foreach (var stale in new[] { StaleTriggers(scopeTables), StaleIndexes(scopeTables, levels), StaleStatistics(scopeTables), StaleComputedColumns(scopeTables) })
+        foreach (var stale in new[] { StaleTriggers(scopeTables), StaleIndexes(scopeTables, levels), StaleStatistics(scopeTables), StaleComputedColumns(scopeTables), StaleDirectTables(options, scopeTables), StaleDirectProcedures(options, scopeTables) })
         {
             conditions.Add($"NOT EXISTS ({stale})");
         }
@@ -801,9 +859,27 @@ internal sealed partial class SqlServerDatabaseProvider
               AND NOT ({Wanted(scopeTables, t => $"c.object_id = {ObjectOf(t)}")})
             """;
 
+    /// <summary>A direct index of a table SqlOS no longer maintains (renamed, or no longer protected).</summary>
+    private static string StaleDirectTables(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
+        => $"""
+            SELECT N'DROP TABLE ' + QUOTENAME(OBJECT_SCHEMA_NAME(t.object_id)) + N'.' + QUOTENAME(t.name) + N';' AS Statement
+            FROM sys.tables t
+            WHERE OBJECT_SCHEMA_NAME(t.object_id) = N'{SqlLiteral(options.Schema)}' AND t.name LIKE N'{SqlOSFgaPageIndex.DirectPrefix.Replace("_", "[_]", StringComparison.Ordinal)}%'
+              AND t.name NOT IN ({(scopeTables.Count == 0 ? "N''" : NameList(scopeTables.Select(SqlOSFgaPageIndex.DirectTable)))})
+            """;
+
+    private static string StaleDirectProcedures(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
+        => $"""
+            SELECT N'DROP PROCEDURE ' + QUOTENAME(OBJECT_SCHEMA_NAME(p.object_id)) + N'.' + QUOTENAME(p.name) + N';' AS Statement
+            FROM sys.procedures p
+            WHERE OBJECT_SCHEMA_NAME(p.object_id) = N'{SqlLiteral(options.Schema)}' AND p.name LIKE N'sp[_]{SqlOSFgaPageIndex.DirectPrefix.Replace("_", "[_]", StringComparison.Ordinal)}%'
+              AND p.name NOT IN ({(scopeTables.Count == 0 ? "N''" : NameList(scopeTables.Select(t => "sp_" + SqlOSFgaPageIndex.DirectRebuildRoutine(t))))})
+            """;
+
     /// <summary>
     /// Drops SqlOS's stale objects from every table of the database (see the naming above): triggers first,
-    /// then indexes, then statistics, then the computed columns they were built on. Idempotent.
+    /// then indexes, then statistics, then the computed columns they were built on, then direct indexes of
+    /// tables no longer maintained and their rebuild procedures. Idempotent.
     /// </summary>
     public string BuildScopeCleanupSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
     {
@@ -811,7 +887,7 @@ internal sealed partial class SqlServerDatabaseProvider
         ArgumentNullException.ThrowIfNull(scopeTables);
         var levels = SqlOSFgaLineage.Levels(options);
         var sql = new StringBuilder("DECLARE @sqlosStale NVARCHAR(MAX);\n");
-        foreach (var stale in new[] { StaleTriggers(scopeTables), StaleIndexes(scopeTables, levels), StaleStatistics(scopeTables), StaleComputedColumns(scopeTables) })
+        foreach (var stale in new[] { StaleTriggers(scopeTables), StaleIndexes(scopeTables, levels), StaleStatistics(scopeTables), StaleComputedColumns(scopeTables), StaleDirectTables(options, scopeTables), StaleDirectProcedures(options, scopeTables) })
         {
             sql.AppendLine(CultureInfo.InvariantCulture, $"""
                 SET @sqlosStale = N'';

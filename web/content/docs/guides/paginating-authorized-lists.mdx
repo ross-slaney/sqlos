@@ -1,6 +1,6 @@
 ---
 title: "Paginating authorized lists"
-description: "Compose BuildFilterAsync with offset or keyset pagination in plain EF Core."
+description: "Authorized pages with ToAccessiblePageAsync, and BuildFilterAsync composed with plain EF Core pagination."
 section: "authorization"
 group: "checks"
 order: 6
@@ -8,18 +8,56 @@ order: 6
 
 <Banner
   eyebrow="Guide"
-  title="Authorization filter + plain EF pagination"
+  title="Two ways to page"
   href="/docs/fga/list-filter"
   actionLabel="List filtering"
 >
-  SqlOS provides the authorization filter. Pagination, sorting, search, and projection are ordinary EF Core (or an external pagination library) composed on the same query.
+  `ToAccessiblePageAsync` is a page call: SqlOS owns the access path and the work is about a page's worth for any caller. `BuildFilterAsync` is a predicate you compose into any query, pages included.
 </Banner>
 
-`BuildFilterAsync` returns an `Expression<Func<T, bool>>` that translates to the SqlOS authorization predicate at query time. Anything you compose after `.Where(filter)` — projections, ordering, `Skip`/`Take`, keyset predicates — ends up in the same SQL statement.
+## The page call
 
-## Offset pagination
+`ToAccessiblePageAsync` takes the query you would have written, minus the authorization, and returns the next page the caller may see with the cursor of the page after it:
 
-Plain `Skip`/`Take` after the authorization filter:
+```csharp
+using SqlOS.Fga.Extensions;
+using SqlOS.Pagination;
+
+SqlOSCursorPage<InventoryItem> page = await db.InventoryItems
+    .AsNoTracking()
+    .Where(i => i.LocationId == locationId)
+    .OrderBy(i => i.Name).ThenBy(i => i.Id)
+    .ToAccessiblePageAsync(fga, subjectId, RetailPermissionKeys.InventoryView, cursor, pageSize);
+
+// page.Data, page.HasNextPage, page.NextCursor (null on the last page)
+```
+
+The query declares three things, and SqlOS does the rest:
+
+- **Filters** (`Where`) over the entity's own columns. They are applied inside every index seek the page makes, so a filter the order's index serves costs nothing extra, and one it does not serve is tested row by row as rows arrive in order.
+- **The order** (`OrderBy`/`ThenBy`), ascending, ending with the key: either the key alone or the columns of an index you declared on the entity (`HasIndex(x => new { x.Name, x.Id })`). SqlOS mirrors every declared index per level of the resource tree, which is what makes a page one seek per place the caller is granted. A page in an order you declared no index for fails with a message naming the index to declare.
+- **How the rows load**: `AsNoTracking`, `Include`, `IgnoreQueryFilters`, `TagWith` and the like pass through to the query that loads the page's rows. `Select` does not: the page returns entities; project them afterwards.
+
+The cursor is opaque and bound to the query: another order or another filter refuses it with `SqlOSCursorException`, which an endpoint turns into a 400. It is a keyset cursor, so a row that became visible between two requests appears on its page and a revoked one disappears; no page is ever skipped or repeated.
+
+### What it costs
+
+The page call reads the rows the caller may see from where they are, instead of testing rows the caller may not see:
+
+- a caller granted on one node of the tree (a tenant, a folder, a region) pays one index seek at that node's level, plus the page's rows, at any table size;
+- a caller granted on a hundred nodes pays about a hundred seeks for the first page and far fewer for later ones (the cursor skips the nodes already behind it);
+- a caller granted on single rows, ten thousand of them, pays one seek of the direct index, where each grant's own rows sit in the page's order;
+- a caller who can see everything pays the same as the first case.
+
+The call makes a few round trips, not one: SqlOS opens the caller's grants level by level and merges their rows in the page's order, stopping as soon as the page is full. Everything it does is counted and logged at debug level (`rounds`, `statements`, `fetched`), so you can see what a page cost.
+
+SqlOS keeps two structures for this, created at startup and maintained by triggers: per subject, how many grants on resources with children sit on and below each resource (`SqlOSFgaGrantCounts`), and per protected table, the rows granted directly on their own resource with their key and sort columns (`SqlOSFgaDirect_<Table>`). Grants that take effect or expire on a schedule are folded in as their window opens or closes. Both are rebuilt from the grants and the rows at every start, so a bulk load that bypassed the triggers is caught up at the next start.
+
+## The filter, for everything else
+
+`BuildFilterAsync` returns an `Expression<Func<T, bool>>` that translates to the SqlOS authorization predicate at query time. Anything you compose after `.Where(filter)` — projections, joins, aggregates, ordering, `Skip`/`Take`, keyset predicates — ends up in the same SQL statement. It is the tool for counts, dashboards, joins, offset pagination, and any query shape the page call does not take.
+
+### Offset pagination
 
 ```csharp
 var canView = await fga.BuildFilterAsync<InventoryItem>(
@@ -39,9 +77,9 @@ var items = await db.InventoryItems
     .ToListAsync();
 ```
 
-Offset pagination is fine for small admin-style lists and simple UIs. For large tables or infinite scrolling, prefer keyset pagination, which does not degrade as the offset grows.
+Offset pagination is fine for small admin-style lists and simple UIs. For large tables or infinite scrolling, prefer the page call or keyset pagination, which do not degrade as the offset grows.
 
-## Keyset pagination with an external package
+### Keyset pagination with an external package
 
 Keyset (cursor/seek) pagination works with any library that composes on `IQueryable`. This example uses [MR.EntityFrameworkCore.KeysetPagination](https://github.com/mrahhal/MR.EntityFrameworkCore.KeysetPagination):
 
@@ -77,13 +115,13 @@ if (hasNextPage) rows.RemoveAt(pageSize);
 
 Fetching `pageSize + 1` rows and trimming the extra is a simple way to compute `hasNextPage` without a `COUNT(*)`. Encode the last row's sort value and `Id` into an opaque cursor string for the client to send back; the retail example app's inventory endpoint (`examples/SqlOS.Example.Api/FgaRetail/Endpoints/InventoryEndpoints.cs`) shows this end to end, including per-`sortBy` keysets.
 
-## What the filter captures
+### What the filter costs
 
-The *principal set* (the subject plus its group memberships) and the caller's grants are captured when `BuildFilterAsync` is awaited; the caller's own lifecycle is rechecked when each page's query runs. Build the filter once per request, so each page fetch sees the grants current at that request; do not cache it in statics or reuse it across requests. The keyset predicate skips by position in the sort order, not by a snapshot of the first page, so a row authorized between two requests appears on the next page and a revoked one disappears.
+For a caller whose access comes from one grant, a keyset page through the filter in an order you declared an index for is one index seek plus the page's rows, the same as the page call. A caller granted on many nodes, or on many single rows, pays for every page: the filter tests each row's scope against the whole list of the caller's roots. That is the case the page call exists for.
 
-## Pages that cost the same at any size
+### What the filter captures
 
-SqlOS mirrors every index you declare on a protected table once per level of the tree, with that level's part of the [scope column](/docs/fga/list-filter#the-scope-column) first. A keyset page ordered by a declared index's columns, for a caller whose access comes from one grant, is then one index seek plus the page's rows, however large the table. Declare an index for each order you page in, and end it with the key, as below.
+The *principal set* (the subject plus its group memberships) and the caller's grants are captured when `BuildFilterAsync` is awaited; the caller's own lifecycle is rechecked when each page's query runs. Build the filter once per request, so each page fetch sees the grants current at that request; do not cache it in statics or reuse it across requests.
 
 ## Always end with a unique tiebreaker
 
@@ -93,8 +131,8 @@ Whatever pagination style you use, always end the `OrderBy` chain with a unique 
 .OrderBy(d => d.Name).ThenBy(d => d.Id)
 ```
 
-Without a unique tiebreaker, rows that share the same sort value have no deterministic order, so rows can be skipped or duplicated across pages.
+Without a unique tiebreaker, rows that share the same sort value have no deterministic order, so rows can be skipped or duplicated across pages. The page call requires it and refuses an order that does not end with the key.
 
 ## Admin surfaces
 
-SqlOS's own dashboard and admin APIs use an internal keyset helper with opaque versioned cursors — see [Admin cursor pagination](/docs/guides/admin-cursor-pagination). That contract is for SqlOS admin endpoints; application lists compose `BuildFilterAsync` with the patterns above.
+SqlOS's own dashboard and admin APIs use an internal keyset helper with opaque versioned cursors — see [Admin cursor pagination](/docs/guides/admin-cursor-pagination). That contract is for SqlOS admin endpoints; application lists use the page call or compose `BuildFilterAsync` with the patterns above.

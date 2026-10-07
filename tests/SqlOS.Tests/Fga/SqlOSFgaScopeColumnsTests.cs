@@ -7,6 +7,7 @@ using SqlOS.Extensions;
 using SqlOS.Fga;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
+using SqlOS.Fga.Paging;
 
 namespace SqlOS.Tests.Fga;
 
@@ -48,11 +49,20 @@ public class SqlOSFgaScopeColumnsTests
             // The tables for the database routines, with the orders to mirror per level: the declared PlacedAt
             // index (then the key); not the ResourceId lookup, the unique Number, or the StoreId foreign key's
             // index; and not Stores, which has no resource id.
-            SqlOSFgaScopeColumns.Tables(context.Model).Should().BeEquivalentTo(
-            [
-                new SqlOSFgaScopeTable(null, "Notes", "ResourceId", ["Id"], []),
-                new SqlOSFgaScopeTable("sales", "Orders", "ResourceId", ["Id"], [new SqlOSFgaScopeOrder("PlacedAt", ["PlacedAt", "Id"])]),
-            ]);
+            var tables = SqlOSFgaScopeColumns.Tables(context.Model);
+            tables.Should().BeEquivalentTo(
+                [
+                    new SqlOSFgaScopeTable(null, "Notes", "ResourceId", ["Id"], []),
+                    new SqlOSFgaScopeTable("sales", "Orders", "ResourceId", ["Id"], [new SqlOSFgaScopeOrder("PlacedAt", ["PlacedAt", "Id"])]),
+                ],
+                options => options.Excluding(t => t.Columns));
+
+            // The columns with the engine's store types, so the direct index (one row per grant and row granted
+            // directly on its own resource) can carry the key and every order's columns.
+            var columns = tables.Single(t => t.Table == "Orders").Columns;
+            columns.Should().Contain(c => c.Column == "Id" && !c.IsNullable && c.StoreType.Length > 0);
+            columns.Should().Contain(c => c.Column == "PlacedAt" && !c.IsNullable && c.StoreType.Length > 0);
+            SqlOSFgaPageIndex.DirectColumns(tables.Single(t => t.Table == "Orders")).Select(c => c.Column).Should().Equal("Id", "PlacedAt");
         }
     }
 

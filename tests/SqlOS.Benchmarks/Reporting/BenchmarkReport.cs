@@ -66,6 +66,9 @@ internal sealed record ScaleStep(
     long DatabaseBytes,
     IReadOnlyList<ScenarioResult> Scenarios)
 {
+    /// <summary>Rebuilding the grant counts and the direct indexes after the load, as SqlOS does at every start.</summary>
+    public double PageIndexSeconds { get; init; }
+
     /// <summary>The grant-density pass (first scale only): the same scenarios with others' grants on the root.</summary>
     public IReadOnlyList<ScenarioResult> Density { get; init; } = [];
 

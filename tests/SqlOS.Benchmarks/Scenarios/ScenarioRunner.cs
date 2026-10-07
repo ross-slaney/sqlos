@@ -8,6 +8,7 @@ using SqlOS.Benchmarks.Data;
 using SqlOS.Benchmarks.Infrastructure;
 using SqlOS.Extensions;
 using SqlOS.Fga.Configuration;
+using SqlOS.Fga.Paging;
 using SqlOS.Fga.Services;
 
 namespace SqlOS.Benchmarks.Scenarios;
@@ -56,9 +57,11 @@ internal sealed class ScenarioRunner(
 
     private async Task<ScenarioResult> RunAsync(Scenario scenario, long productCount, CancellationToken cancellationToken)
     {
-        // The first execution is untimed: its answer is the one verified, and for page scenarios the same
-        // command is run once more under EXPLAIN ANALYZE / STATISTICS XML for rows examined and server time.
-        var capture = scenario.IsPage ? new CapturedPlan { Relation = "Products" } : null;
+        // The first execution is untimed: its answer is the one verified, and for filter pages the same command
+        // is run once more under EXPLAIN ANALYZE / STATISTICS XML for rows examined and server time. A page call
+        // is several statements, so it reports the executor's own counters (rounds, statements, rows fetched)
+        // instead of a plan.
+        var capture = scenario.Kind == ScenarioKind.List ? new CapturedPlan { Relation = "Products" } : null;
         Execution first;
         try
         {
@@ -98,7 +101,13 @@ internal sealed class ScenarioRunner(
                 timings = new double[iterations];
                 for (var i = 0; i < iterations; i++)
                 {
-                    timings[i] = (await ExecuteAsync(scenario, cancellationToken)).Elapsed.TotalMilliseconds;
+                    var run = await ExecuteAsync(scenario, cancellationToken);
+                    timings[i] = run.Elapsed.TotalMilliseconds;
+                    if (run.Counters is not null)
+                    {
+                        // The breakdown of a warm execution, the last one; the counts are the same on every run.
+                        first = first with { Counters = run.Counters };
+                    }
                 }
             }
             catch (Exception ex) when (IsTimeout(ex))
@@ -110,6 +119,7 @@ internal sealed class ScenarioRunner(
         var iterationsRun = timings.Length;
         Array.Sort(timings);
 
+        var counters = first.Counters;
         var result = new ScenarioResult(
             scenario.Id,
             scenario.Title,
@@ -129,13 +139,23 @@ internal sealed class ScenarioRunner(
             plan?.PlanningMs,
             plan?.ExecutionMs,
             plan?.File)
-        { StoreFiltered = scenario.StoreId is not null };
+        {
+            StoreFiltered = scenario.StoreId is not null,
+            Rounds = counters?.Rounds,
+            Statements = counters?.Statements,
+            RowsFetched = counters?.RowsFetched,
+            Streams = counters?.StreamsOpened,
+            ResolveMs = counters?.ResolveMs,
+            WalkMs = counters?.WalkMs,
+            LoadMs = counters?.LoadMs,
+        };
 
         log.Info(
             $"  {scenario.Id,-44} p50 {result.MedianMs,9:F2} ms  p95 {result.P95Ms,9:F2} ms  n={iterationsRun,2}" +
             (plan?.RowsExamined is { } examined ? $"  examined {examined:N0}" : "") +
             (plan?.PlanningMs is { } planning ? $"  plan {planning:F2} ms" : "") +
             (plan?.ExecutionMs is { } execution ? $"  exec {execution:F2} ms" : "") +
+            (counters is null ? "" : $"  rounds {counters.Rounds} stmts {counters.Statements} fetched {counters.RowsFetched} streams {counters.StreamsOpened}") +
             (correct ? "" : $"  WRONG: {detail}") +
             (fullPage ? "" : "  (partial page)"));
         return result;
@@ -216,6 +236,18 @@ internal sealed class ScenarioRunner(
                 }
             }
 
+            case ScenarioKind.Page:
+            {
+                // The application's call: the query declares the filter and the order; SqlOS finds the rows the
+                // caller may see and returns the page with its cursor. Everything, principal resolution
+                // included, is inside the clock, as a request would pay it.
+                var query = BuildPageQuery(db, scenario);
+                var clock = Stopwatch.StartNew();
+                var page = await service.PageAsync(query, scenario.Principal.SubjectId, BenchmarkModel.ProductView, cursor: null, scenario.PageSize, cancellationToken);
+                clock.Stop();
+                return new Execution(clock.Elapsed, page.Data.ToList(), Allowed: null) { HasNextPage = page.HasNextPage, Counters = service.LastPageCounters };
+            }
+
             case ScenarioKind.PointFunction:
             {
                 var subjects = JsonSerializer.Serialize(scenario.Principal.ResolvedSubjectIds);
@@ -261,6 +293,32 @@ internal sealed class ScenarioRunner(
 
         var cursor = scenario.Cursor;
         return query.Where(p => p.Id > cursor).OrderBy(p => p.Id).Take(scenario.PageSize + 1);
+    }
+
+    /// <summary>
+    /// The same page as a page call: the application's filters and the order, nothing else. A page from the
+    /// middle of the table is the application's own predicate on the key, which the per-level seeks serve.
+    /// </summary>
+    private static IQueryable<Product> BuildPageQuery(BenchDbContext db, Scenario scenario)
+    {
+        IQueryable<Product> query = db.Products.AsNoTracking();
+        if (scenario.StoreId is { } storeId)
+        {
+            query = query.Where(p => p.StoreId == storeId);
+        }
+
+        if (scenario.Order == PageOrder.Price)
+        {
+            return query.OrderBy(p => p.Price).ThenBy(p => p.Id);
+        }
+
+        if (scenario.Cursor > 0)
+        {
+            var cursor = scenario.Cursor;
+            query = query.Where(p => p.Id > cursor);
+        }
+
+        return query.OrderBy(p => p.Id);
     }
 
     private async Task<PlanSummary?> SavePlanAsync(Scenario scenario, CapturedPlan plan, long productCount, CancellationToken cancellationToken)
@@ -320,7 +378,22 @@ internal sealed class ScenarioRunner(
 
         var page = execution.Page!;
         var actual = page.Select(p => p.Id).ToList();
-        if (!actual.SequenceEqual(expected))
+        if (scenario.Kind == ScenarioKind.Page)
+        {
+            // The page call returns k rows and says whether a next page exists; the filter page returns k + 1.
+            var wanted = expected.Take(scenario.PageSize).ToList();
+            if (!actual.SequenceEqual(wanted))
+            {
+                return (false, false, $"page [{Preview(actual)}] != expected [{Preview(wanted)}]");
+            }
+
+            var more = expected.Count > scenario.PageSize;
+            if (execution.HasNextPage != more)
+            {
+                return (false, false, $"hasNextPage {execution.HasNextPage}, expected {more}");
+            }
+        }
+        else if (!actual.SequenceEqual(expected))
         {
             return (false, false, $"page [{Preview(actual)}] != expected [{Preview(expected)}]");
         }
@@ -355,7 +428,14 @@ internal sealed class ScenarioRunner(
         return sorted[low] + (sorted[high] - sorted[low]) * (rank - low);
     }
 
-    private sealed record Execution(TimeSpan Elapsed, List<Product>? Page, bool? Allowed);
+    private sealed record Execution(TimeSpan Elapsed, List<Product>? Page, bool? Allowed)
+    {
+        /// <summary>For a page call: whether it reported a next page.</summary>
+        public bool HasNextPage { get; init; }
+
+        /// <summary>For a page call: what the executor did, in its own units.</summary>
+        public SqlOSFgaPageCounters? Counters { get; init; }
+    }
 
     private sealed record PlanSummary(long? RowsExamined, double? PlanningMs, double? ExecutionMs, string File);
 }
@@ -386,6 +466,27 @@ internal sealed record ScenarioResult(
 
     /// <summary>The page was filtered to one store as well, so it touches that store's rows through its own index.</summary>
     public bool StoreFiltered { get; init; }
+
+    /// <summary>For a page call: round trips the executor made.</summary>
+    public int? Rounds { get; init; }
+
+    /// <summary>For a page call: statements it ran (the prelude and every round).</summary>
+    public int? Statements { get; init; }
+
+    /// <summary>For a page call: index rows the rounds fetched, the page's rows and the ones judged or discarded.</summary>
+    public int? RowsFetched { get; init; }
+
+    /// <summary>For a page call: streams opened (one seek each).</summary>
+    public int? Streams { get; init; }
+
+    /// <summary>For a page call, on its first (verified) execution: milliseconds resolving the caller's principals and the permission.</summary>
+    public double? ResolveMs { get; init; }
+
+    /// <summary>For a page call, on its first execution: milliseconds in the walk (prelude and rounds).</summary>
+    public double? WalkMs { get; init; }
+
+    /// <summary>For a page call, on its first execution: milliseconds loading the page's rows through the application's query.</summary>
+    public double? LoadMs { get; init; }
 
     /// <summary>
     /// Server execution time per row examined, in microseconds: the paper's per-row constant, without

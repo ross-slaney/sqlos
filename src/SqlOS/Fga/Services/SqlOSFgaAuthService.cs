@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Linq.Expressions;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -8,6 +9,8 @@ using SqlOS.Database;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
+using SqlOS.Fga.Paging;
+using SqlOS.Pagination;
 
 namespace SqlOS.Fga.Services;
 
@@ -418,6 +421,76 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
         }
 
         return SqlOSFgaFilterBuilder.Build<T>(roots, subjectIdsJson, permission.TypeSeq, SqlOSFgaLineage.Levels(_options));
+    }
+
+    /// <summary>What the last page this service answered cost, in the executor's own units (for the benchmarks and tests).</summary>
+    internal SqlOSFgaPageCounters? LastPageCounters { get; private set; }
+
+    public async Task<SqlOSCursorPage<T>> PageAsync<T>(
+        IQueryable<T> query,
+        string subjectId,
+        string permissionKey,
+        string? cursor,
+        int pageSize,
+        CancellationToken cancellationToken = default) where T : class, IHasResourceId
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ArgumentOutOfRangeException.ThrowIfLessThan(pageSize, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(pageSize, 1_000);
+        EnsureRelational();
+        EnsureProtectedEntity<T>();
+        var db = _context as DbContext
+            ?? throw new InvalidOperationException("SqlOS pages run on the DbContext registered with SqlOS.");
+        var analyzed = SqlOSFgaPageQuery<T>.Analyze(query, db, permissionKey);
+        var position = cursor is null ? null : SqlOSFgaPageCursor.Decode(analyzed, cursor);
+
+        var clock = Stopwatch.StartNew();
+        var subjectIds = await ResolveSubjectIdsAsync(subjectId);
+        if (subjectIds.Count == 0)
+        {
+            _logger.LogWarning("No subjects found for {SubjectId}", subjectId);
+            return new SqlOSCursorPage<T>([], pageSize, null);
+        }
+
+        var permissionId = await _context.Set<SqlOSFgaPermission>()
+            .AsNoTracking()
+            .Where(p => p.Key == permissionKey)
+            .Select(p => p.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (permissionId == null)
+        {
+            _logger.LogWarning("Permission {PermissionKey} not found", permissionKey);
+            return new SqlOSCursorPage<T>([], pageSize, null);
+        }
+
+        // One more row than the page: whether a next page exists, without a second query.
+        var provider = SqlOSDatabase.Resolve(_context.Database);
+        var backend = new SqlOSFgaPageBackend<T>(db, provider, _options, analyzed, JsonSerializer.Serialize(subjectIds), permissionId);
+        var executor = new SqlOSFgaPageExecutor(backend);
+        var counters = executor.Counters;
+        counters.ResolveMs = clock.Elapsed.TotalMilliseconds;
+        clock.Restart();
+        var positions = await executor.PageAsync(position, pageSize + 1, cancellationToken);
+        counters.WalkMs = clock.Elapsed.TotalMilliseconds;
+        LastPageCounters = counters;
+
+        var more = positions.Count > pageSize;
+        if (more)
+        {
+            positions.RemoveAt(pageSize);
+        }
+
+        if (positions.Count == 0)
+        {
+            _logger.LogDebug("SqlOS page over {Entity}: {Counters}", typeof(T).Name, counters);
+            return new SqlOSCursorPage<T>([], pageSize, null);
+        }
+
+        clock.Restart();
+        var rows = await SqlOSFgaPageLoader.LoadAsync(analyzed, positions.Select(p => p[^1]!).ToList(), cancellationToken);
+        counters.LoadMs = clock.Elapsed.TotalMilliseconds;
+        _logger.LogDebug("SqlOS page over {Entity}: {Counters}", typeof(T).Name, counters);
+        return new SqlOSCursorPage<T>(rows, pageSize, more ? SqlOSFgaPageCursor.Encode(analyzed, positions[^1]) : null);
     }
 
     /// <summary>The grant that decides a point check (fn_IsResourceAccessible), or null when it is denied.</summary>

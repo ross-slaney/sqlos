@@ -58,6 +58,9 @@ internal static class BenchmarkModel
         ],
     };
 
+    /// <summary>Stores granted to the many-stores person: spread through every chain, the deep one included.</summary>
+    public const int HundredStoreGrants = 100;
+
     /// <summary>
     /// Creates the people the scenarios query as. Each resolves to three subjects (the user and two groups),
     /// matching the paper's M = 3. The admin's grant is held by a group, so group resolution is exercised too.
@@ -65,6 +68,8 @@ internal static class BenchmarkModel
     public static async Task<Principals> CreatePrincipalsAsync(BenchDbContext db, RetailTree tree, CancellationToken cancellationToken)
     {
         var store = tree.MedianStoreIn(1);
+        var stride = Math.Max(1, tree.Stores.Count / HundredStoreGrants);
+        var hundredStores = tree.Stores.Where((s, i) => i % stride == 0).Take(HundredStoreGrants).Select(s => s.ResourceId).ToList();
         var principals = new Principals(
             Admin: new Principal("admin", tree.RootId, "role_company_admin", GrantViaGroup: true),
             ChainManager: new Principal("chain", RetailTree.ChainId(1), "role_chain_manager", GrantViaGroup: false),
@@ -72,6 +77,7 @@ internal static class BenchmarkModel
             DeepChainManager: new Principal("deep", RetailTree.ChainId(RetailTree.DeepChain), "role_chain_manager", GrantViaGroup: false),
             StoreManager: new Principal("store", store.ResourceId, "role_store_manager", GrantViaGroup: false),
             StoreManagerStoreId: store.StoreId,
+            HundredStores: new Principal("stores100", hundredStores[0], "role_store_manager", GrantViaGroup: false) { ScopeResourceIds = hundredStores },
             Grants10K: new Principal("grants10k", "", "role_store_manager", GrantViaGroup: false, RequestedProductGrants: 10_000),
             Grants100K: new Principal("grants100k", "", "role_store_manager", GrantViaGroup: false, RequestedProductGrants: 100_000));
 
@@ -102,13 +108,17 @@ internal static class BenchmarkModel
                 continue;
             }
 
-            db.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant
+            var scopes = principal.ScopeResourceIds;
+            for (var i = 0; i < scopes.Count; i++)
             {
-                Id = $"grant_{principal.Key}",
-                SubjectId = principal.GrantViaGroup ? principal.GroupSubjectId(1) : principal.SubjectId,
-                ResourceId = principal.ScopeResourceId,
-                RoleId = principal.RoleId,
-            });
+                db.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant
+                {
+                    Id = scopes.Count == 1 ? $"grant_{principal.Key}" : $"grant_{principal.Key}_{i:D3}",
+                    SubjectId = principal.GrantViaGroup ? principal.GroupSubjectId(1) : principal.SubjectId,
+                    ResourceId = scopes[i],
+                    RoleId = principal.RoleId,
+                });
+            }
         }
 
         await db.SaveChangesAsync(cancellationToken);
@@ -244,10 +254,19 @@ internal static class BenchmarkModel
     private static SqlOSFgaResourceType Type(string id, string name) => new() { Id = id, Name = name };
 }
 
-/// <param name="ScopeResourceId">The one resource the principal is granted on, for the hierarchy people.</param>
+/// <param name="ScopeResourceId">The one resource the principal is granted on, for the hierarchy people (the first of <see cref="ScopeResourceIds"/>).</param>
 /// <param name="RequestedProductGrants">For the many-grants people: how many single products to grant instead.</param>
 internal sealed record Principal(string Key, string ScopeResourceId, string RoleId, bool GrantViaGroup, int RequestedProductGrants = 0)
 {
+    private IReadOnlyList<string>? _scopes;
+
+    /// <summary>Every resource the principal is granted on: one for most people, a hundred stores for the many-stores person.</summary>
+    public IReadOnlyList<string> ScopeResourceIds
+    {
+        get => _scopes ?? [ScopeResourceId];
+        init => _scopes = value;
+    }
+
     /// <summary>Single-product grants actually created (at most the first scale's product count).</summary>
     public int GrantedProducts { get; set; }
 
@@ -256,11 +275,28 @@ internal sealed record Principal(string Key, string ScopeResourceId, string Role
 
     public long GrantedProductId(int index) => 1 + index * ProductStride;
 
+    /// <summary>σ: the fraction of all products this principal may see through its grants on the tree.</summary>
+    public double ShareOf(RetailTree tree) => ScopeResourceIds.Sum(tree.ShareOf);
+
     /// <summary>Ground truth: whether this principal may see product <paramref name="productId"/>.</summary>
     public bool Sees(RetailTree tree, long productId)
-        => RequestedProductGrants > 0
-            ? (productId - 1) % ProductStride == 0 && (productId - 1) / ProductStride < GrantedProducts
-            : tree.LeafOf(productId).IsUnder(ScopeResourceId);
+    {
+        if (RequestedProductGrants > 0)
+        {
+            return (productId - 1) % ProductStride == 0 && (productId - 1) / ProductStride < GrantedProducts;
+        }
+
+        var leaf = tree.LeafOf(productId);
+        foreach (var scope in ScopeResourceIds)
+        {
+            if (leaf.IsUnder(scope))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     public string SubjectId => $"u_{Key}";
     public string GroupSubjectId(int group) => $"g_{Key}_{group}";
@@ -276,10 +312,11 @@ internal sealed record Principals(
     Principal DeepChainManager,
     Principal StoreManager,
     int StoreManagerStoreId,
+    Principal HundredStores,
     Principal Grants10K,
     Principal Grants100K)
 {
-    public IReadOnlyList<Principal> All => [Admin, ChainManager, RegionManager, DeepChainManager, StoreManager, Grants10K, Grants100K];
+    public IReadOnlyList<Principal> All => [Admin, ChainManager, RegionManager, DeepChainManager, StoreManager, HundredStores, Grants10K, Grants100K];
 
     /// <summary>People granted many single products rather than one node of the tree.</summary>
     public IReadOnlyList<Principal> ManyGrants => [Grants10K, Grants100K];

@@ -133,7 +133,7 @@ public class SqlOSFgaFunctionInitializerTests
 
         // Found by name on every table, kept when they belong to a maintained table under its current name.
         sql.Should().Contain("tr.name LIKE N'TR[_]%[_]SqlOSFgaScope[_]%'");
-        sql.Should().Contain("tr.parent_id = ISNULL(OBJECT_ID(N'[app].[Items]'), 0) AND tr.name IN (N'TR_Items_SqlOSFgaScope_Insert', N'TR_Items_SqlOSFgaScope_Update')");
+        sql.Should().Contain("tr.parent_id = ISNULL(OBJECT_ID(N'[app].[Items]'), 0) AND tr.name IN (N'TR_Items_SqlOSFgaScope_Insert', N'TR_Items_SqlOSFgaScope_Update', N'TR_Items_SqlOSFgaScope_Delete')");
         sql.Should().Contain("i.name LIKE N'IX[_]%[_]FgaScope[0-9]%' OR i.name LIKE N'IX[_]%[_]FgaScopeMissing'");
         sql.Should().Contain("i.name IN (N'IX_Items_FgaScope0', N'IX_Items_FgaScope0_Price', N'IX_Items_FgaScope1', N'IX_Items_FgaScope1_Price', N'IX_Items_FgaScopeMissing')");
         sql.Should().Contain("st.name LIKE N'ST[_]%[_]FgaScopeType'");
@@ -153,7 +153,7 @@ public class SqlOSFgaFunctionInitializerTests
     public void LineageMaintenanceSql_CreatesTheRoutinesTriggersAndGuards()
     {
         var options = new SqlOSFgaOptions { MaxResourceHierarchyDepth = 4 };
-        var scope = new SqlOSFgaScopeTable("app", "Items", "ResourceId", ["Id"]);
+        var scope = new SqlOSFgaScopeTable("app", "Items", "ResourceId", ["Id"], [], [new SqlOSFgaScopeColumn("Id", "int", false)]);
         var batches = SqlServerDatabaseProvider.Instance.BuildLineageMaintenanceSql(options, [scope]);
         var all = string.Join("\n", batches);
 
@@ -194,7 +194,14 @@ public class SqlOSFgaFunctionInitializerTests
         all.Should().Contain("CAST(ISNULL(CASE WHEN r.Reach <= 4 THEN r.Ancestor4 END, 0) AS BINARY(8)) END");
         all.Should().Contain("INNER JOIN #SqlOSLineageAffected s ON s.Id = t.[ResourceId]");
         all.Should().Contain("[FgaScope] = NULL");
-        all.Should().Contain("IF NOT UPDATE([ResourceId]) RETURN;");
+
+        // The row triggers: the scope follows a changed resource id; the direct index (rows granted on their
+        // own resource, with the key and every declared order's columns) follows any change to those columns
+        // and every delete.
+        all.Should().Contain("IF NOT (UPDATE([Id]) OR UPDATE([ResourceId])) RETURN;");
+        all.Should().Contain("IF UPDATE([ResourceId])");
+        all.Should().Contain("CREATE OR ALTER TRIGGER [app].[TR_Items_SqlOSFgaScope_Delete] ON [app].[Items]");
+        all.Should().Contain("[dbo].[SqlOSFgaDirect_app_Items]");
 
         // Every maintaining trigger takes the lineage lock for its transaction before reading anything: inserts
         // shared, tree changes exclusive; the rebuild holds it for the whole session.
@@ -234,7 +241,7 @@ public class SqlOSFgaFunctionInitializerTests
         HashFor(new SqlOSFgaOptions(), []).Should().Be(baseline, "the same definitions hash the same");
         HashFor(new SqlOSFgaOptions { MaxResourceHierarchyDepth = 11 }, []).Should().NotBe(baseline, "the depth changes the columns and the guards");
         HashFor(new SqlOSFgaOptions { Schema = "other" }, []).Should().NotBe(baseline);
-        HashFor(new SqlOSFgaOptions(), [new SqlOSFgaScopeTable(null, "Items", "ResourceId", ["Id"])]).Should().NotBe(baseline, "a newly registered application table adds triggers");
+        HashFor(new SqlOSFgaOptions(), [new SqlOSFgaScopeTable(null, "Items", "ResourceId", ["Id"], [], [new SqlOSFgaScopeColumn("Id", "int", false)])]).Should().NotBe(baseline, "a newly registered application table adds triggers");
         baseline.Should().HaveLength(64);
     }
 
@@ -255,7 +262,7 @@ public class SqlOSFgaFunctionInitializerTests
         hash.Should().Contain("OBJECT_ID(N'[ten''ant].[TR_res]]ources_Lineage_Insert]', N'TR') IS NOT NULL");
         hash.Should().Contain("OBJECT_ID(N'[ten''ant].[TR_res]]ources_Lineage_Delete]', N'TR') IS NOT NULL");
         hash.Should().Contain("OBJECT_ID(N'[ten''ant].[sp_res]]ources_ScopeFill]', N'P') IS NOT NULL");
-        hash.Should().Contain("(SELECT COUNT(*) FROM sys.triggers WHERE parent_id = ISNULL(OBJECT_ID(N'[app].[Items]'), 0) AND name IN (N'TR_Items_SqlOSFgaScope_Insert', N'TR_Items_SqlOSFgaScope_Update')) = 2");
+        hash.Should().Contain("(SELECT COUNT(*) FROM sys.triggers WHERE parent_id = ISNULL(OBJECT_ID(N'[app].[Items]'), 0) AND name IN (N'TR_Items_SqlOSFgaScope_Insert', N'TR_Items_SqlOSFgaScope_Update', N'TR_Items_SqlOSFgaScope_Delete')) = 3");
         hash.Should().Contain("(SELECT COUNT(*) FROM sys.indexes WHERE object_id = ISNULL(OBJECT_ID(N'[app].[Items]'), 0) AND name IN (");
         hash.Should().Contain("N'IX_Items_FgaScopeMissing')) = 5", "levels 0..3 and the missing-rows index");
         hash.Should().Contain("NOT EXISTS (SELECT N'DROP TRIGGER '", "nothing stale anywhere");

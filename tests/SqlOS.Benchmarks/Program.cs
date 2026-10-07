@@ -119,7 +119,7 @@ var dataset = new DatasetShape(
     MaxDepth: 10,
     options.Seed,
     string.Create(CultureInfo.InvariantCulture,
-        $"The shipped schema, indexes, resource lineage, `fn_AccessRoots`, and `fn_IsResourceAccessible`, queried through `BuildFilterAsync` on a product table: the lineage read from the row's own scope column. The tree: {chains} retail chains ({chains - 1} at D = 5, one at D = 10) with {tree.Stores.Count:N0} stores and {tree.Nodes.Count + 1:N0} organizational nodes. Store sizes are log-normal, and products are spread through the id range the way rows arrive over time. {managedScopes:N0} managers hold grants on their store, region, or chain. Two more people hold 10,000 and 100,000 grants on single products, spread through the catalog. The people measured each resolve to 3 subjects (M = 3)."));
+        $"The shipped schema, indexes, resource lineage, `fn_AccessRoots`, and `fn_IsResourceAccessible`, queried on a product table two ways: every page through `BuildFilterAsync` (`list.*`, the lineage read from the row's own scope column) and the same page through `ToAccessiblePageAsync` (`page.*`, the library-owned page: the adaptive walk over the grant counts, the per-level indexes, and the direct index). The tree: {chains} retail chains ({chains - 1} at D = 5, one at D = 10) with {tree.Stores.Count:N0} stores and {tree.Nodes.Count + 1:N0} organizational nodes. Store sizes are log-normal, and products are spread through the id range the way rows arrive over time. {managedScopes:N0} managers hold grants on their store, region, or chain. One person holds {BenchmarkModel.HundredStoreGrants} store grants across the chains; two more hold 10,000 and 100,000 grants on single products, spread through the catalog. The people measured each resolve to 3 subjects (M = 3)."));
 
 // Leave room for the CI runner's own logs and the uploaded results.
 long? FreeBytes() => options.DataDirectory is { } directory ? new DriveInfo(Path.GetFullPath(directory)).AvailableFreeSpace : null;
@@ -198,6 +198,17 @@ foreach (var target in options.Scales)
         log.Info($"Granted {granted:N0} single products to the many-grants people ({string.Join(", ", people.ManyGrants.Select(p => $"{p.Key}: {p.GrantedProducts:N0}"))}).");
     }
 
+    // The bulk load wrote the rows past the triggers (the harness supplies lineage and scope itself), so the
+    // grant counts and the direct indexes are rebuilt from the grants and the rows, as SqlOS does at every start.
+    var pageIndex = Stopwatch.StartNew();
+    await using (var db = CreateContext())
+    {
+        db.Database.SetCommandTimeout(0);
+        await db.Database.ExecuteSqlRawAsync(SqlOSDatabase.Resolve(db.Database).BuildPageIndexRebuildSql(fga), cancellation);
+    }
+
+    pageIndex.Stop();
+    log.Info($"  grant counts and direct indexes rebuilt in {pageIndex.Elapsed.TotalSeconds:F1}s");
     loaded = target;
 
     var size = await loader.DatabaseSizeBytesAsync(cancellation);
@@ -264,6 +275,7 @@ foreach (var target in options.Scales)
         size,
         results)
     {
+        PageIndexSeconds = pageIndex.Elapsed.TotalSeconds,
         Density = density,
         Maintenance = maintenance,
         LineageCheck = lineageCheck,

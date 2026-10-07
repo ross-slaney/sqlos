@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using SqlOS.Fga;
 using SqlOS.Fga.Configuration;
+using SqlOS.Fga.Paging;
 
 namespace SqlOS.Database;
 
@@ -284,6 +285,10 @@ internal sealed partial class PostgreSqlDatabaseProvider
 
                 -- 5. The scope columns of the affected rows' application rows.
                 {Propagate(affected)}
+                -- 6. The grant counts of the principals holding grants on the affected resources (their chains
+                --    changed), and the activity and type of their rows' direct entries.
+                {CountsRefreshForResources(options, affected)}
+                {string.Concat(scopeTables.Select(t => DirectRefresh(options, t, affected) + "\n"))}
                 DROP TABLE {affected};
             END
             $sqlos$;
@@ -352,6 +357,8 @@ internal sealed partial class PostgreSqlDatabaseProvider
 
                 -- 3. The scope columns of every application row.
                 {string.Concat(scopeTables.Select(t => ScopeFillUpdate(options, t) + ";\n"))}
+                -- 4. The grant counts and the direct indexes, from the grants and the new lineage.
+                PERFORM {Qualify(options.Schema, "fn_" + SqlOSFgaPageIndex.RebuildRoutine)}();
                 DROP TABLE {nodes};
             END
             $sqlos$;
@@ -411,9 +418,26 @@ internal sealed partial class PostgreSqlDatabaseProvider
                 END LOOP;
 
                 {Propagate("new_rows")}
+                -- A parent that had no children before this statement is now a container: the grants on it
+                -- enter the grant counts (a childless resource's grants are served by the direct index alone).
+                {CountsRefreshForResources(options, $"(SELECT DISTINCT n.\"ParentId\" AS \"Id\" FROM new_rows n WHERE n.\"ParentId\" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM {resources} c WHERE c.\"ParentId\" = n.\"ParentId\" AND NOT EXISTS (SELECT 1 FROM new_rows x WHERE x.\"Id\" = c.\"Id\")))")}
                 RETURN NULL;
             END
             $sqlos$;
+            """;
+
+        // The parents that gained their first children or lost their last ones in an update: their grants
+        // enter or leave the grant counts. The moved rows come from EXCEPT, never from a join of the transition tables.
+        const string movedIn = "(SELECT \"Id\", \"ParentId\" FROM new_rows EXCEPT SELECT \"Id\", \"ParentId\" FROM old_rows)";
+        const string movedOut = "(SELECT \"Id\", \"ParentId\" FROM old_rows EXCEPT SELECT \"Id\", \"ParentId\" FROM new_rows)";
+        var transitionedParents = $"""
+            (SELECT m."ParentId" AS "Id" FROM {movedIn} m
+             WHERE m."ParentId" IS NOT NULL
+               AND NOT EXISTS (SELECT 1 FROM {resources} c WHERE c."ParentId" = m."ParentId" AND NOT EXISTS (SELECT 1 FROM {movedIn} y WHERE y."Id" = c."Id"))
+             UNION
+             SELECT o."ParentId" FROM {movedOut} o
+             WHERE o."ParentId" IS NOT NULL
+               AND NOT EXISTS (SELECT 1 FROM {resources} c WHERE c."ParentId" = o."ParentId"))
             """;
 
         var typeChanges = new StringBuilder();
@@ -425,6 +449,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
                 INNER JOIN {resources} r ON r."Id" = n."Id"
                 INNER JOIN {resourceTypes} rt ON rt."Id" = r."ResourceTypeId"
                 WHERE t.{QuoteIdentifier(table.ResourceIdColumn)} = n."Id";
+                {DirectRefresh(options, table, "(SELECT n.\"Id\" FROM (SELECT \"Id\", \"ResourceTypeId\" FROM new_rows EXCEPT SELECT \"Id\", \"ResourceTypeId\" FROM old_rows) n)")}
                 """);
         }
 
@@ -460,6 +485,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
                 {lockExclusive}
                 IF v_ids IS NOT NULL THEN
                     PERFORM {refresh}(v_ids, true);
+                    {CountsRefreshForResources(options, transitionedParents)}
                 END IF;
                 IF v_types THEN
                     {(typeChanges.Length == 0 ? "NULL;" : typeChanges.ToString())}
@@ -485,8 +511,10 @@ internal sealed partial class PostgreSqlDatabaseProvider
             LANGUAGE plpgsql
             AS $sqlos$
             BEGIN
-                {(clears.Length == 0 ? "" : lockExclusive)}
+                {lockExclusive}
                 {clears}
+                -- A parent left without children is a container no more: the grants on it leave the grant counts.
+                {CountsRefreshForResources(options, $"(SELECT DISTINCT o.\"ParentId\" AS \"Id\" FROM old_rows o WHERE o.\"ParentId\" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM {resources} c WHERE c.\"ParentId\" = o.\"ParentId\"))")}
                 RETURN NULL;
             END
             $sqlos$;
@@ -557,9 +585,10 @@ internal sealed partial class PostgreSqlDatabaseProvider
     }
 
     /// <summary>
-    /// The trigger functions and the two triggers on an application table (see the SQL Server provider). The
+    /// The trigger functions and the three triggers on an application table (see the SQL Server provider). The
     /// update trigger fires for every update of the table (a statement trigger with transition tables cannot
-    /// name columns) and copies the lineage only onto rows whose resource id changed.
+    /// name columns) and copies the lineage only onto rows whose resource id changed; the direct index follows
+    /// every row whose resource id or sort columns changed, and every row deleted.
     /// </summary>
     private string ScopeTriggers(SqlOSFgaOptions options, SqlOSFgaScopeTable table, int levels)
     {
@@ -567,10 +596,17 @@ internal sealed partial class PostgreSqlDatabaseProvider
         var resourceTypes = Qualify(options.Schema, options.TableNames.ResourceTypes);
         var onInsert = Qualify(options.Schema, ScopeFunctionName(table, "Insert"));
         var onUpdate = Qualify(options.Schema, ScopeFunctionName(table, "Update"));
+        var onDelete = Qualify(options.Schema, ScopeFunctionName(table, "Delete"));
         var triggers = SqlOSFgaLineage.ScopeTriggerNames(table.Table);
         var resourceId = QuoteIdentifier(table.ResourceIdColumn);
         var keys = string.Join(" AND ", table.KeyColumns.Select(k => $"t.{QuoteIdentifier(k)} = n.{QuoteIdentifier(k)}"));
         var keyList = string.Join(", ", table.KeyColumns.Select(QuoteIdentifier));
+        var directList = string.Join(", ", SqlOSFgaPageIndex.DirectColumns(table).Select(c => c.Column).Append(table.ResourceIdColumn).Distinct().Select(QuoteIdentifier));
+        // The rows whose key, sort columns, or resource id changed: a hashed set operation over the transition
+        // tables, computed where it is needed rather than kept in a temp table (this function's own update of
+        // the scope fires it again, and a nested call must not disturb the outer one).
+        var changedKeys = $"(SELECT {directList} FROM new_rows EXCEPT SELECT {directList} FROM old_rows)";
+        var changedRows = $"(SELECT n.* FROM new_rows n WHERE EXISTS (SELECT 1 FROM {changedKeys} c WHERE {string.Join(" AND ", table.KeyColumns.Select(k => $"c.{QuoteIdentifier(k)} = n.{QuoteIdentifier(k)}"))}))";
         return $"""
             CREATE OR REPLACE FUNCTION {onInsert}()
             RETURNS trigger
@@ -584,6 +620,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
                 LEFT JOIN {resources} r ON r."Id" = n.{resourceId}
                 LEFT JOIN {resourceTypes} rt ON rt."Id" = r."ResourceTypeId"
                 WHERE {keys};
+                {DirectInsertFromRows(options, table, "new_rows")}
                 RETURN NULL;
             END
             $sqlos$;
@@ -593,14 +630,9 @@ internal sealed partial class PostgreSqlDatabaseProvider
             AS $sqlos$
             BEGIN
                 -- Statement triggers fire for every update of the table, this function's own included and
-                -- statements that touched no row: leave unless some row's resource id changed. The changed
-                -- rows come from EXCEPT, a hashed set operation, never from a join of the transition tables.
-                IF NOT EXISTS (
-                    SELECT 1 FROM (
-                        SELECT {keyList}, {resourceId} FROM new_rows
-                        EXCEPT
-                        SELECT {keyList}, {resourceId} FROM old_rows
-                    ) changed) THEN
+                -- statements that touched no row: leave unless some row's resource id, key, or sort column changed.
+                -- The changed rows come from EXCEPT, a hashed set operation, never from a join of the transition tables.
+                IF NOT EXISTS (SELECT 1 FROM {changedKeys} c) THEN
                     RETURN NULL;
                 END IF;
 
@@ -615,6 +647,17 @@ internal sealed partial class PostgreSqlDatabaseProvider
                 LEFT JOIN {resources} r ON r."Id" = n.{resourceId}
                 LEFT JOIN {resourceTypes} rt ON rt."Id" = r."ResourceTypeId"
                 WHERE {keys};
+                {DirectDeleteRows(options, table, changedKeys)}
+                {DirectInsertFromRows(options, table, changedRows)}
+                RETURN NULL;
+            END
+            $sqlos$;
+            CREATE OR REPLACE FUNCTION {onDelete}()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $sqlos$
+            BEGIN
+                {DirectDeleteRows(options, table, "old_rows")}
                 RETURN NULL;
             END
             $sqlos$;
@@ -626,6 +669,10 @@ internal sealed partial class PostgreSqlDatabaseProvider
                 AFTER UPDATE ON {ScopeTable(table)}
                 REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows
                 FOR EACH STATEMENT EXECUTE FUNCTION {onUpdate}();
+            CREATE OR REPLACE TRIGGER {QuoteIdentifier(triggers[2])}
+                AFTER DELETE ON {ScopeTable(table)}
+                REFERENCING OLD TABLE AS old_rows
+                FOR EACH STATEMENT EXECUTE FUNCTION {onDelete}();
             """;
     }
 
@@ -697,9 +744,14 @@ internal sealed partial class PostgreSqlDatabaseProvider
             Routine("fn_" + SqlOSFgaLineage.RefreshRoutineName(resourcesTable)),
             Routine("fn_" + SqlOSFgaLineage.RebuildRoutineName(resourcesTable)),
             Routine("fn_" + SqlOSFgaLineage.ScopeFillRoutineName(resourcesTable)),
+            Routine("fn_" + SqlOSFgaPageIndex.CountsRebuildRoutine),
+            Routine("fn_" + SqlOSFgaPageIndex.CountsAdjustRoutine),
+            Routine("fn_" + SqlOSFgaPageIndex.CountsRefreshRoutine),
+            Routine("fn_" + SqlOSFgaPageIndex.RebuildRoutine),
             Column(SqlOSFgaLineage.AncestorColumn(SqlOSFgaLineage.MaxLevel(options))),
         };
         conditions.AddRange(SqlOSFgaLineage.TriggerNames(resourcesTable).Select(t => Trigger(options.Schema, resourcesTable, t)));
+        conditions.AddRange(SqlOSFgaPageIndex.GrantTriggerNames(options.TableNames.Grants).Select(t => Trigger(options.Schema, options.TableNames.Grants, t)));
         var levels = SqlOSFgaLineage.Levels(options);
         foreach (var table in scopeTables)
         {
@@ -707,15 +759,20 @@ internal sealed partial class PostgreSqlDatabaseProvider
             var indexes = SqlOSFgaLineage.ScopeIndexNames(table, levels);
             conditions.Add(Routine(ScopeFunctionName(table, "Insert")));
             conditions.Add(Routine(ScopeFunctionName(table, "Update")));
+            conditions.Add(Routine(ScopeFunctionName(table, "Delete")));
+            conditions.Add(Routine("fn_" + SqlOSFgaPageIndex.DirectRebuildRoutine(table)));
             conditions.AddRange(SqlOSFgaLineage.ScopeTriggerNames(table.Table).Select(t => Trigger(table.Schema, table.Table, t)));
             conditions.Add(
                 $"(SELECT count(*) FROM pg_indexes WHERE schemaname = {ScopeSchemaLiteral(table)} AND tablename = '{SqlLiteral(table.Table)}' AND indexname IN ({NameList(indexes)})) = {indexes.Count.ToString(CultureInfo.InvariantCulture)}");
             conditions.Add(
                 $"EXISTS (SELECT 1 FROM pg_statistic_ext s INNER JOIN pg_namespace n ON n.oid = s.stxnamespace WHERE n.nspname = {ScopeSchemaLiteral(table)} AND s.stxname = '{SqlLiteral(SqlOSFgaLineage.ScopeTypeStatisticsName(table.Table))}')");
+            var directIndexes = SqlOSFgaPageIndex.DirectIndexNames(table).Append(SqlOSFgaPageIndex.DirectIndexName(table, "Key")).Append(SqlOSFgaPageIndex.DirectIndexName(table, "Row")).ToList();
+            conditions.Add(
+                $"(SELECT count(*) FROM pg_indexes WHERE schemaname = '{schema}' AND tablename = '{SqlLiteral(SqlOSFgaPageIndex.DirectTable(table))}' AND indexname IN ({NameList(directIndexes)})) = {directIndexes.Count.ToString(CultureInfo.InvariantCulture)}");
         }
 
         // And nothing stale anywhere.
-        foreach (var stale in new[] { StaleTriggers(scopeTables), StaleFunctions(options, scopeTables), StaleIndexes(scopeTables, levels), StaleStatistics(scopeTables) })
+        foreach (var stale in new[] { StaleTriggers(scopeTables), StaleFunctions(options, scopeTables), StaleIndexes(scopeTables, levels), StaleStatistics(scopeTables), StaleDirectTables(options, scopeTables) })
         {
             conditions.Add($"NOT EXISTS ({stale})");
         }
@@ -839,8 +896,19 @@ internal sealed partial class PostgreSqlDatabaseProvider
             SELECT format('DROP FUNCTION %I.%I()', n.nspname, p.proname) AS statement
             FROM pg_proc p
             INNER JOIN pg_namespace n ON n.oid = p.pronamespace
-            WHERE n.nspname = '{SqlLiteral(options.Schema)}' AND p.proname LIKE 'fn\_{SqlOSFgaLineage.ScopePrefix}Scope\_%'
-              AND p.proname NOT IN ({(scopeTables.Count == 0 ? "''" : NameList(scopeTables.SelectMany(t => new[] { ScopeFunctionName(t, "Insert"), ScopeFunctionName(t, "Update") })))})
+            WHERE n.nspname = '{SqlLiteral(options.Schema)}'
+              AND (p.proname LIKE 'fn\_{SqlOSFgaLineage.ScopePrefix}Scope\_%' OR p.proname LIKE 'fn\_{SqlOSFgaPageIndex.DirectPrefix.Replace("_", "\\_", StringComparison.Ordinal)}%')
+              AND p.proname NOT IN ({(scopeTables.Count == 0 ? "''" : NameList(scopeTables.SelectMany(t => new[] { ScopeFunctionName(t, "Insert"), ScopeFunctionName(t, "Update"), ScopeFunctionName(t, "Delete"), "fn_" + SqlOSFgaPageIndex.DirectRebuildRoutine(t) })))})
+            """;
+
+    /// <summary>A direct index of a table SqlOS no longer maintains (renamed, or no longer protected).</summary>
+    private static string StaleDirectTables(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
+        => $"""
+            SELECT format('DROP TABLE %I.%I', n.nspname, c.relname) AS statement
+            FROM pg_class c
+            INNER JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = '{SqlLiteral(options.Schema)}' AND c.relkind = 'r' AND c.relname LIKE '{SqlOSFgaPageIndex.DirectPrefix.Replace("_", "\\_", StringComparison.Ordinal)}%'
+              AND c.relname NOT IN ({(scopeTables.Count == 0 ? "''" : NameList(scopeTables.Select(SqlOSFgaPageIndex.DirectTable)))})
             """;
 
     private static string StaleIndexes(IReadOnlyList<SqlOSFgaScopeTable> scopeTables, int levels)
@@ -868,7 +936,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
         ArgumentNullException.ThrowIfNull(scopeTables);
         var levels = SqlOSFgaLineage.Levels(options);
         var loops = new StringBuilder();
-        foreach (var stale in new[] { StaleTriggers(scopeTables), StaleFunctions(options, scopeTables), StaleIndexes(scopeTables, levels), StaleStatistics(scopeTables) })
+        foreach (var stale in new[] { StaleTriggers(scopeTables), StaleFunctions(options, scopeTables), StaleIndexes(scopeTables, levels), StaleStatistics(scopeTables), StaleDirectTables(options, scopeTables) })
         {
             loops.AppendLine(CultureInfo.InvariantCulture, $"""
                 FOR stale IN {stale}

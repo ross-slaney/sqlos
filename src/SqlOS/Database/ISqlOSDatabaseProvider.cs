@@ -84,6 +84,28 @@ internal interface ISqlOSDatabaseProvider
 
     /// <summary>Stores the routines hash; parameter <c>@RoutinesHash</c>.</summary>
     string BuildStoreRoutinesHashSql(SqlOSFgaOptions options);
+
+    /// <summary>
+    /// Idempotent batches creating what a page needs beyond the lineage: the grant-count routines, the direct
+    /// index of each application table with its rebuild routine, the triggers on the grants table, and the
+    /// routine that rebuilds all of it (see <see cref="SqlOS.Fga.Paging.SqlOSFgaPageIndex"/>).
+    /// </summary>
+    IReadOnlyList<string> BuildPageIndexSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables);
+
+    /// <summary>Rebuilds the grant counts and every direct index from the grants, the lineage and the rows.</summary>
+    string BuildPageIndexRebuildSql(SqlOSFgaOptions options);
+
+    /// <summary>Rebuilds the counts of the principals whose grants crossed a validity boundary in <c>(@From, @To]</c>; returns how many.</summary>
+    string BuildCountsRefreshSql(SqlOSFgaOptions options);
+
+    /// <summary>A scalar query: the next moment after <c>@Now</c> a grant's window opens or closes, or NULL.</summary>
+    string BuildNextValidityBoundarySql(SqlOSFgaOptions options);
+
+    /// <summary>Three result sets: the caller's live subjects, the roles carrying the permission, and the permission's type with the root's key. Parameters <c>@SubjectIds</c>, <c>@PermissionId</c>, <c>@RootId</c>.</summary>
+    string BuildPagePreludeSql(SqlOSFgaOptions options);
+
+    /// <summary>The two statements of a page round (see the SQL Server provider).</summary>
+    string BuildPageRoundSql(SqlOSFgaOptions options, SqlOS.Fga.Paging.SqlOSFgaPageSpec spec);
     string BuildLockedSelectSql(string schema, string table, string whereSql, string? orderBySql = null);
 
     string BuildRateLimitIncrementSql(string schema);

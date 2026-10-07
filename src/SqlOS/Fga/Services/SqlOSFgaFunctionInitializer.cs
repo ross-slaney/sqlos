@@ -160,6 +160,9 @@ public class SqlOSFgaFunctionInitializer
         batches.Add(provider.BuildActiveSubjectsFunctionSql(_options));
         batches.Add(provider.BuildAccessRootsFunctionSql(_options));
         batches.Add(provider.BuildIsResourceAccessibleFunctionSql(_options));
+        // The page index (grant counts, direct indexes, grants triggers) before the lineage maintenance: the
+        // scope triggers and the rebuild refer to its tables and routines.
+        batches.AddRange(provider.BuildPageIndexSql(_options, tables));
         batches.AddRange(provider.BuildLineageMaintenanceSql(_options, tables));
         batches.Add(provider.BuildScopeCleanupSql(_options, tables));
         batches.AddRange(provider.BuildEnsureScopeIndexesSql(_options, tables));
@@ -210,8 +213,15 @@ public class SqlOSFgaFunctionInitializer
 
         if (await LineageNeedsBuildAsync(provider, cancellationToken))
         {
-            // The rebuild fills the scope columns of every application table as well.
+            // The rebuild fills the scope columns of every application table as well, and the page index.
             await BuildLineageAsync(provider, cancellationToken);
+        }
+        else
+        {
+            // A new definition (a new table, order or version) rebuilds the grant counts and the direct
+            // indexes from the grants and the rows: seconds, proportional to the grants.
+            _logger.LogInformation("Rebuilding the FGA grant counts and direct indexes...");
+            await ExecuteNonQueryAsync(provider.BuildPageIndexRebuildSql(_options), cancellationToken);
         }
 
         // Stored last: a rebuild that fails part-way (its ranges commit one by one) leaves the hash behind, so

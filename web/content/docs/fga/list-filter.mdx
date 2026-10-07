@@ -6,7 +6,9 @@ group: "checks"
 order: 1
 ---
 
-`BuildFilterAsync` returns a filter for `Where(...)`. Lists only rows the subject may see. Use this on list endpoints.
+`BuildFilterAsync` returns a filter for `Where(...)`. Lists only rows the subject may see. Use it wherever authorization has to sit inside a query of your own: counts, joins, aggregates, offset pages, search.
+
+For a paged list, use the page call instead: `ToAccessiblePageAsync` takes your query's filters and order and returns the next page the caller may see with its cursor, with about a page's worth of work for any caller, whether they see three rows in a million or everything, through one grant or ten thousand. [Paginating authorized lists](/docs/guides/paginating-authorized-lists) covers both.
 
 This is a read-side helper. Lifecycle-managed domain rows normally implement `ISqlOSResourceEntity`; the filter only needs the inherited `ResourceId` contract to tie application rows to their FGA resources.
 
@@ -36,7 +38,7 @@ Every entity of yours that implements `IHasResourceId` declares one more column,
 
 When you build a filter, SqlOS reads the caller's **access roots** once: the resources on which the caller, or one of their active groups, holds a current grant whose role includes the permission. The filter then says, for each row: at the level of one of those roots, the row's scope column holds that root. It is the same predicate for every caller and every table, it joins nothing, and for a caller whose access comes from one grant the database answers a page with one index seek plus the rows of the page, whatever the table's size, in any order you declared an index for.
 
-There is one filter, whatever the number of grants. A caller with several roots at a level, up to thousands of grants on single resources, gets the same test: the row's scope at that level is one of the roots, sent as one list parameter. The database reads that list for every query, so a page costs more as the caller's grants grow.
+There is one filter, whatever the number of grants. A caller with several roots at a level, up to thousands of grants on single resources, gets the same test: the row's scope at that level is one of the roots, sent as one list parameter. The database reads that list for every query, so a page through the filter costs more as the caller's grants grow. The page call does not have this cost: it reads each grant's rows from where they are and merges them in the page's order.
 
 ## The scope column
 
@@ -75,9 +77,10 @@ For a caller whose access comes from a few grants, a page in an order you declar
 
 - `Count()`, `Sum()`, and other aggregates over the filtered rows;
 - a large `Skip(...)`, which reads every row it skips;
-- a sort by a column you declared no index for.
+- a sort by a column you declared no index for;
+- a page for a caller with many grants, which tests every row against all of them.
 
-Fetch `pageSize + 1` rows to know whether there is a next page, as the [pagination guide](/docs/guides/paginating-authorized-lists) shows, instead of counting.
+For pages, `ToAccessiblePageAsync` answers all four: it needs no count to know whether a next page exists, takes a cursor instead of an offset, requires a declared index for its order, and reads a caller's grants one seek each. The [pagination guide](/docs/guides/paginating-authorized-lists) shows it.
 
 ## Composing with plain EF
 

@@ -115,7 +115,11 @@ internal static class SqlOSFgaScopeColumns
                     i.Properties.Select(p => p.GetColumnName(store)!).Concat(key).Distinct().ToList()))
                 .OrderBy(o => o.Suffix, StringComparer.Ordinal)
                 .ToList();
-            tables.Add(new SqlOSFgaScopeTable(schema, table, resourceId.GetColumnName(store)!, key, orders));
+            var columns = entityType.GetProperties()
+                .Where(p => p.GetColumnName(store) is not null)
+                .Select(p => new SqlOSFgaScopeColumn(p.GetColumnName(store)!, p.GetColumnType(store), p.IsNullable))
+                .ToList();
+            tables.Add(new SqlOSFgaScopeTable(schema, table, resourceId.GetColumnName(store)!, key, orders, columns));
         }
 
         return tables.OrderBy(t => t.Schema, StringComparer.Ordinal).ThenBy(t => t.Table, StringComparer.Ordinal).ToList();

@@ -86,7 +86,7 @@ Role and permission matrix:
 
 The app grants `tenant_owner` on the user tenant node. Child Todo resources inherit access from that node, so the sample can:
 
-- list Todos with `BuildFilterAsync<TodoItem>(...)`;
+- list Todos as authorized pages with `ToAccessiblePageAsync(...)` (cursor and page size in the query string);
 - authorize create against the tenant node;
 - authorize toggle and delete against each Todo resource.
 

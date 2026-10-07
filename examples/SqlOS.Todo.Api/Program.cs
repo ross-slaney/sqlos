@@ -10,7 +10,9 @@ using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Services;
 using SqlOS.Configuration;
 using SqlOS.Extensions;
+using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
+using SqlOS.Pagination;
 using SqlOS.Todo.Api.Configuration;
 using SqlOS.Todo.Api.Data;
 using SqlOS.Todo.Api.Models;
@@ -407,6 +409,8 @@ app.MapGet("/api/todos", async (
     ISqlOSFgaAuthService fgaAuthService,
     IOptions<TodoSampleOptions> sampleOptions,
     TodoSampleDbContext dbContext,
+    string? cursor,
+    int? pageSize,
     CancellationToken cancellationToken) =>
 {
     var authResult = await RequireTodoContextAsync(httpContext, authService, todoFgaService, sampleOptions.Value, "todos.read", cancellationToken);
@@ -416,15 +420,25 @@ app.MapGet("/api/todos", async (
     }
 
     var todoContext = authResult.Context!;
-    var filter = await fgaAuthService.BuildFilterAsync<TodoItem>(
-        todoContext.SubjectId,
-        TodoFgaService.TodoReadPermission);
 
-    var items = await dbContext.TodoItems
-        .AsNoTracking()
-        .Where(filter)
-        .OrderBy(x => x.IsCompleted)
-        .ThenBy(x => x.CreatedAt)
+    // An authorized page: the query declares the order (one the entity has an index for) and how rows load;
+    // SqlOS finds the rows the caller may see with about a page's worth of work, and returns the cursor of
+    // the next page. BuildFilterAsync remains the tool for counts, joins and other non-page queries.
+    SqlOSCursorPage<TodoItem> page;
+    try
+    {
+        page = await dbContext.TodoItems
+            .AsNoTracking()
+            .OrderBy(x => x.IsCompleted)
+            .ThenBy(x => x.CreatedAt)
+            .ToAccessiblePageAsync(fgaAuthService, todoContext.SubjectId, TodoFgaService.TodoReadPermission, cursor, Math.Clamp(pageSize ?? 50, 1, 200), cancellationToken);
+    }
+    catch (SqlOSCursorException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+
+    var items = page.Data
         .Select(x => new
         {
             x.Id,
@@ -434,7 +448,7 @@ app.MapGet("/api/todos", async (
             x.CreatedAt,
             x.CompletedAt
         })
-        .ToListAsync(cancellationToken);
+        .ToList();
 
     return Results.Ok(new
     {
@@ -442,7 +456,9 @@ app.MapGet("/api/todos", async (
         audience = todoContext.ValidatedToken.Audience,
         subjectId = todoContext.SubjectId,
         organizationId = todoContext.ValidatedToken.OrganizationId,
-        items
+        items,
+        nextCursor = page.NextCursor,
+        hasNextPage = page.HasNextPage
     });
 });
 

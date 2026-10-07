@@ -135,9 +135,9 @@ internal static class SqlOSFgaLineage
 
     public static string ScopeResourceIdIndexName(string table) => $"IX_{table}_{ScopePrefix}ResourceId";
 
-    /// <summary>The statement triggers on an application table that copy the lineage onto its rows.</summary>
+    /// <summary>The statement triggers on an application table that copy the lineage onto its rows and keep its direct index current.</summary>
     public static IReadOnlyList<string> ScopeTriggerNames(string table)
-        => [$"TR_{table}_{ScopePrefix}Scope_Insert", $"TR_{table}_{ScopePrefix}Scope_Update"];
+        => [$"TR_{table}_{ScopePrefix}Scope_Insert", $"TR_{table}_{ScopePrefix}Scope_Update", $"TR_{table}_{ScopePrefix}Scope_Delete"];
 }
 
 /// <summary>An application table that carries the scope column, as the database routines need to address it.</summary>
@@ -146,13 +146,28 @@ internal static class SqlOSFgaLineage
 /// <param name="ResourceIdColumn">The column holding the resource id.</param>
 /// <param name="KeyColumns">The primary key columns, used to join a statement's rows back to the table.</param>
 /// <param name="Orders">The orders the application declared indexes for, each mirrored per level.</param>
-internal sealed record SqlOSFgaScopeTable(string? Schema, string Table, string ResourceIdColumn, IReadOnlyList<string> KeyColumns, IReadOnlyList<SqlOSFgaScopeOrder> Orders)
+/// <param name="Columns">The store types of the key and order columns, for the direct index and the page statements.</param>
+internal sealed record SqlOSFgaScopeTable(
+    string? Schema,
+    string Table,
+    string ResourceIdColumn,
+    IReadOnlyList<string> KeyColumns,
+    IReadOnlyList<SqlOSFgaScopeOrder> Orders,
+    IReadOnlyList<SqlOSFgaScopeColumn> Columns)
 {
     public SqlOSFgaScopeTable(string? schema, string table, string resourceIdColumn, IReadOnlyList<string> keyColumns)
-        : this(schema, table, resourceIdColumn, keyColumns, [])
+        : this(schema, table, resourceIdColumn, keyColumns, [], [])
+    {
+    }
+
+    public SqlOSFgaScopeTable(string? schema, string table, string resourceIdColumn, IReadOnlyList<string> keyColumns, IReadOnlyList<SqlOSFgaScopeOrder> orders)
+        : this(schema, table, resourceIdColumn, keyColumns, orders, [])
     {
     }
 }
 
 /// <summary>An index the application declared on a table: the suffix that names its mirrors, and its columns followed by the key.</summary>
 internal sealed record SqlOSFgaScopeOrder(string Suffix, IReadOnlyList<string> Columns);
+
+/// <summary>A key or order column of an application table: its name, its store type (<c>int</c>, <c>nvarchar(200)</c>…), and whether it is nullable.</summary>
+internal sealed record SqlOSFgaScopeColumn(string Column, string StoreType, bool IsNullable);

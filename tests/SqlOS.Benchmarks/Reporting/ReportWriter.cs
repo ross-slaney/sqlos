@@ -82,7 +82,7 @@ internal static class ReportWriter
         }
 
         text.AppendLine();
-        text.AppendLine("Median milliseconds per query as the application sees it, warm cache; every answer is checked against ground truth. Product rows read and server times come from the actual plan.");
+        text.AppendLine("Median milliseconds per query as the application sees it, warm cache; every answer is checked against ground truth. Product rows read and server times come from the actual plan of a filter page; a page call runs several statements and reports its own counters below.");
         if (steps.SelectMany(s => s.Scenarios).Any(s => !s.FullPage && !s.TimedOut))
         {
             text.AppendLine("† Fewer authorized rows than the page asks for exist at this scale, so the engine read to the end of the table; excluded from the scale gate.");
@@ -92,6 +92,8 @@ internal static class ReportWriter
         {
             text.AppendLine("‡ Did not finish within the run's budget for one query; counted at the budget, a lower bound, in every ratio.");
         }
+
+        AppendFilterVersusPage(text, steps);
 
         if (smallest.Density.Count > 0)
         {
@@ -142,7 +144,7 @@ internal static class ReportWriter
         foreach (var step in steps)
         {
             text.Append(CultureInfo.InvariantCulture,
-                $" {RetailTree.Count(step.Products)} products / {step.Resources:N0} resources: {Seconds(step.LoadRowsSeconds)} rows + {Seconds(step.LoadIndexesSeconds)} indexes + {Seconds(step.LoadMaintenanceSeconds)} statistics, {step.DatabaseBytes / 1e9:F1} GB ·");
+                $" {RetailTree.Count(step.Products)} products / {step.Resources:N0} resources: {Seconds(step.LoadRowsSeconds)} rows + {Seconds(step.LoadIndexesSeconds)} indexes + {Seconds(step.LoadMaintenanceSeconds)} statistics + {Seconds(step.PageIndexSeconds)} grant counts and direct indexes, {step.DatabaseBytes / 1e9:F1} GB ·");
         }
 
         text.Length -= 2;
@@ -179,6 +181,48 @@ internal static class ReportWriter
         return text.ToString();
     }
 
+    /// <summary>
+    /// The same page both ways, side by side: through <c>BuildFilterAsync</c> and through the page call, with
+    /// what the page call did at the largest scale (round trips, statements, index rows fetched, streams opened).
+    /// </summary>
+    private static void AppendFilterVersusPage(StringBuilder text, IReadOnlyList<ScaleStep> steps)
+    {
+        var largest = steps[^1];
+        var pages = largest.Scenarios.Where(s => s.Kind == "Page").ToList();
+        if (pages.Count == 0)
+        {
+            return;
+        }
+
+        text.AppendLine();
+        text.AppendLine("**Filter vs. page call** · the same page through `BuildFilterAsync` (filter) and through `ToAccessiblePageAsync` (page), median ms");
+        text.AppendLine();
+        text.Append("| Page | σ |");
+        foreach (var step in steps)
+        {
+            text.Append(CultureInfo.InvariantCulture, $" {RetailTree.Count(step.Products)} filter | {RetailTree.Count(step.Products)} page |");
+        }
+
+        text.AppendLine(CultureInfo.InvariantCulture, $" page call @ {RetailTree.Count(largest.Products)}: rounds / statements / rows fetched / streams · ms resolve + walk + load (first run) |");
+        text.Append("|---|---:|");
+        text.Append(string.Concat(Enumerable.Repeat("---:|", steps.Count * 2)));
+        text.AppendLine("---|");
+
+        foreach (var page in pages)
+        {
+            var twin = "list." + page.Id["page.".Length..];
+            text.Append(CultureInfo.InvariantCulture, $"| {page.Title} | {Selectivity(page.Selectivity)} |");
+            foreach (var step in steps)
+            {
+                text.Append(CultureInfo.InvariantCulture, $" {Cell(step.Scenarios.FirstOrDefault(s => s.Id == twin))} | {Cell(step.Scenarios.FirstOrDefault(s => s.Id == page.Id))} |");
+            }
+
+            text.AppendLine(page.Rounds is null
+                ? " – |"
+                : string.Create(CultureInfo.InvariantCulture, $" {page.Rounds} / {page.Statements} / {page.RowsFetched:N0} / {page.Streams} · {page.ResolveMs:F1} + {page.WalkMs:F1} + {page.LoadMs:F1} |"));
+        }
+    }
+
     private static string Cell(ScenarioResult? result)
     {
         if (result is null)
@@ -195,7 +239,7 @@ internal static class ReportWriter
         return Milliseconds(result.MedianMs) + mark;
     }
 
-    private static bool IsPage(string kind) => kind is "List";
+    private static bool IsPage(string kind) => kind is "List" or "Page";
 
     private static string Selectivity(double value)
         => value >= 0.9999 ? "1"
