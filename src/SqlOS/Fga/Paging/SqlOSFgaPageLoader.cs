@@ -19,17 +19,22 @@ internal static class SqlOSFgaPageLoader
         where T : class, IHasResourceId
     {
         var key = query.Key.Property;
-        var typedKeys = (System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(key.ClrType))!;
+        var listType = typeof(List<>).MakeGenericType(key.ClrType);
+        var typedKeys = (System.Collections.IList)Activator.CreateInstance(listType)!;
         foreach (var k in keys)
         {
             typedKeys.Add(k);
         }
 
+        // The keys reach the query as a member of a captured object, the way a C# closure captures a local:
+        // EF Core then sends them as one parameter and compiles the query once per shape, where a constant
+        // list would be compiled into the SQL and the query compiled again for every page.
+        var holder = Activator.CreateInstance(typeof(KeyHolder<>).MakeGenericType(key.ClrType), typedKeys)!;
         var e = Expression.Parameter(typeof(T), "e");
         var predicate = Expression.Lambda<Func<T, bool>>(
             Expression.Call(
                 EnumerableContains.MakeGenericMethod(key.ClrType),
-                Expression.Constant(typedKeys),
+                Expression.Field(Expression.Constant(holder), nameof(KeyHolder<int>.Keys)),
                 Expression.Call(EFPropertyMethod.MakeGenericMethod(key.ClrType), e, Expression.Constant(key.Name))),
             e);
         var loaded = await query.Materialization.Where(predicate).ToListAsync(cancellationToken);
@@ -47,5 +52,13 @@ internal static class SqlOSFgaPageLoader
             .OrderBy(x => x.Index)
             .Select(x => x.Row)
             .ToList();
+    }
+
+    /// <summary>The page's keys, held the way a closure holds a captured local.</summary>
+    private sealed class KeyHolder<TKey>(List<TKey> keys)
+    {
+#pragma warning disable SA1401 // A field, as a closure's: EF Core parameterizes member access on a constant.
+        public readonly List<TKey> Keys = keys;
+#pragma warning restore SA1401
     }
 }

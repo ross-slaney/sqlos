@@ -531,7 +531,7 @@ internal sealed partial class SqlServerDatabaseProvider
             blocks.AppendLine(CultureInfo.InvariantCulture, $"""
                 UNION ALL
                 SELECT 0 AS kind, s.[level], s.seq, CAST(NULL AS NVARCHAR(450)) AS principal, CAST(NULL AS NVARCHAR(450)) AS role, q.rn, q.cnt, CAST(1 AS BIT) AS granted, {string.Join(", ", order.Select((_, i) => $"q.c{i}"))}
-                FROM streams s
+                FROM @StreamsT s
                 CROSS APPLY (
                     SELECT ROW_NUMBER() OVER (ORDER BY {outCols}) AS rn, COUNT(*) OVER () AS cnt, z.*
                     FROM (SELECT TOP (s.f) {selectCols}
@@ -542,7 +542,7 @@ internal sealed partial class SqlServerDatabaseProvider
                 WHERE s.kind = 0 AND s.[level] = {level}
                 UNION ALL
                 SELECT 1, s.[level], s.seq, NULL, NULL, q.rn, q.cnt, q.granted, {string.Join(", ", order.Select((_, i) => $"q.c{i}"))}
-                FROM streams s
+                FROM @StreamsT s
                 CROSS APPLY (
                     SELECT ROW_NUMBER() OVER (ORDER BY {outCols}) AS rn, COUNT(*) OVER () AS cnt, z.*
                     FROM (SELECT TOP (s.f) {selectCols}, CAST(CASE WHEN {RowTest(options, spec, level, levels)} THEN 1 ELSE 0 END AS BIT) AS granted
@@ -561,7 +561,7 @@ internal sealed partial class SqlServerDatabaseProvider
         var directBlock = $"""
             UNION ALL
             SELECT 2, -1, CAST(0 AS BIGINT), s.principal, s.role, q.rn, q.cnt, CAST(1 AS BIT), {string.Join(", ", order.Select((_, i) => $"q.c{i}"))}
-            FROM streams s
+            FROM @StreamsT s
             CROSS APPLY (
                 SELECT ROW_NUMBER() OVER (ORDER BY {outCols}) AS rn, COUNT(*) OVER () AS cnt, z.*
                 FROM (SELECT TOP (s.f) {string.Join(", ", order.Select((c, i) => $"d.[{Escape(c.Column)}] AS c{i}"))}
@@ -574,15 +574,18 @@ internal sealed partial class SqlServerDatabaseProvider
             WHERE s.kind = 2
             """;
 
+        // The streams of the round go into a table variable first. SQL Server inlines a common table expression
+        // at every reference, and the stream set is referenced by every level's blocks: evaluated there, the
+        // opened nodes (the JSON, the recursive descent, the lookups) would be computed twenty times a round.
         var second = $"""
-            {common},
-            streams AS (
-                SELECT s.sid, s.kind, s.[level], s.seq, s.principal, s.role, s.f, s.has_after, {afterList}
-                FROM OPENJSON(@Streams) WITH (sid INT '$.sid', kind INT '$.kind', [level] INT '$.level', seq BIGINT '$.seq', principal NVARCHAR(450) '$.principal', role NVARCHAR(450) '$.role', f INT '$.f', has_after BIT '$.has_after', {afterJson}) s
-                UNION ALL
-                SELECT -1, kind, [level], node, NULL, NULL, fetch_n, has_after, {afterList}
-                FROM opened WHERE kind IN (0, 1)
-            )
+            DECLARE @StreamsT TABLE (sid INT NOT NULL, kind INT NOT NULL, [level] INT NOT NULL, seq BIGINT NOT NULL, principal NVARCHAR(450) COLLATE DATABASE_DEFAULT NULL, role NVARCHAR(450) COLLATE DATABASE_DEFAULT NULL, f INT NOT NULL, has_after BIT NOT NULL, {string.Join(", ", order.Select((c, i) => $"a{i} {c.StoreType} NULL"))});
+            {common}
+            INSERT INTO @StreamsT (sid, kind, [level], seq, principal, role, f, has_after, {afterList})
+            SELECT s.sid, s.kind, s.[level], s.seq, s.principal, s.role, s.f, s.has_after, {afterList}
+            FROM OPENJSON(@Streams) WITH (sid INT '$.sid', kind INT '$.kind', [level] INT '$.level', seq BIGINT '$.seq', principal NVARCHAR(450) '$.principal', role NVARCHAR(450) '$.role', f INT '$.f', has_after BIT '$.has_after', {afterJson}) s
+            UNION ALL
+            SELECT -1, kind, [level], node, NULL, NULL, fetch_n, has_after, {afterList}
+            FROM opened WHERE kind IN (0, 1);
             SELECT u.* FROM (
                 SELECT 0 AS kind, 0 AS [level], CAST(0 AS BIGINT) AS seq, CAST(NULL AS NVARCHAR(450)) AS principal, CAST(NULL AS NVARCHAR(450)) AS role, CAST(0 AS BIGINT) AS rn, 0 AS cnt, CAST(0 AS BIT) AS granted, {string.Join(", ", order.Select((c, i) => $"CAST(NULL AS {c.StoreType}) AS c{i}"))}
                 WHERE 1 = 0
