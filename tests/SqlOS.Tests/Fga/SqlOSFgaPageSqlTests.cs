@@ -112,8 +112,13 @@ public class SqlOSFgaPageSqlTests
         for (var level = 0; level <= 2; level++)
         {
             round.Should().Contain($"s.[level] = {level}");
+
+            // Every stream seeks the level's mirror of the page's order, by hint: the optimizer must not read
+            // the table in key order and filter the level, which costs rows in proportion to the table.
+            round.Should().Contain($"[app].[Items] AS i WITH (FORCESEEK ([IX_Items_FgaScope{level}_Price] ([FgaScope{level}])))");
         }
 
+        round.Should().Contain("WITH (FORCESEEK ([IX_SqlOSFgaDirect_app_Items_Price] ([SubjectId], [RoleId])))");
         round.Should().NotContain("s.[level] = 3");
         round.Should().Contain("ORDER BY c0, c1");
     }

@@ -524,10 +524,14 @@ internal sealed partial class SqlServerDatabaseProvider
             SELECT req, node, [level], active, granted, has_children, thr, cutg, fetch_n FROM opened ORDER BY req, node;
             """;
 
+        // Every stream is a seek of the level's mirrored index, by hint: the key order is also the clustered
+        // index's order, and left to its estimates the optimizer may read the table in key order and filter
+        // the level instead, which costs rows in proportion to the table rather than to the page.
         var blocks = new StringBuilder();
         for (var level = 0; level < levels; level++)
         {
             var seek = $"SUBSTRING({scope}, {SqlOSFgaPageIndex.Offset(level)}, 8) = CAST(s.seq AS BINARY(8)) AND {scope} >= 0x{level:X2}";
+            var hint = $"WITH (FORCESEEK ([{Escape(SqlOSFgaLineage.ScopeIndexName(spec.Table.Table, level, spec.IndexSuffix))}] ([{SqlOSFgaLineage.ScopeLevelColumn(level)}])))";
             blocks.AppendLine(CultureInfo.InvariantCulture, $"""
                 UNION ALL
                 SELECT 0 AS kind, s.[level], s.seq, CAST(NULL AS NVARCHAR(450)) AS principal, CAST(NULL AS NVARCHAR(450)) AS role, q.rn, q.cnt, CAST(1 AS BIT) AS granted, {string.Join(", ", order.Select((_, i) => $"q.c{i}"))}
@@ -535,7 +539,7 @@ internal sealed partial class SqlServerDatabaseProvider
                 CROSS APPLY (
                     SELECT ROW_NUMBER() OVER (ORDER BY {outCols}) AS rn, COUNT(*) OVER () AS cnt, z.*
                     FROM (SELECT TOP (s.f) {selectCols}
-                          FROM {ScopeTable(spec.Table)} AS {a}
+                          FROM {ScopeTable(spec.Table)} AS {a} {hint}
                           WHERE {seek}{typeFilter}{predicate}
                             AND {keyset}
                           ORDER BY {string.Join(", ", orderCols)}) z) q
@@ -546,7 +550,7 @@ internal sealed partial class SqlServerDatabaseProvider
                 CROSS APPLY (
                     SELECT ROW_NUMBER() OVER (ORDER BY {outCols}) AS rn, COUNT(*) OVER () AS cnt, z.*
                     FROM (SELECT TOP (s.f) {selectCols}, CAST(CASE WHEN {RowTest(options, spec, level, levels)} THEN 1 ELSE 0 END AS BIT) AS granted
-                          FROM {ScopeTable(spec.Table)} AS {a}
+                          FROM {ScopeTable(spec.Table)} AS {a} {hint}
                           WHERE {seek}{predicate}
                             AND {keyset}
                           ORDER BY {string.Join(", ", orderCols)}) z) q
@@ -565,7 +569,7 @@ internal sealed partial class SqlServerDatabaseProvider
             CROSS APPLY (
                 SELECT ROW_NUMBER() OVER (ORDER BY {outCols}) AS rn, COUNT(*) OVER () AS cnt, z.*
                 FROM (SELECT TOP (s.f) {string.Join(", ", order.Select((c, i) => $"d.[{Escape(c.Column)}] AS c{i}"))}
-                      FROM {DirectTable(options, spec.Table)} d{directJoin}
+                      FROM {DirectTable(options, spec.Table)} d WITH (FORCESEEK ([{Escape(SqlOSFgaPageIndex.DirectIndexName(spec.Table, spec.IndexSuffix ?? "Key"))}] ([SubjectId], [RoleId]))){directJoin}
                       WHERE d.SubjectId = s.principal AND d.RoleId = s.role AND d.Active = 1
                         AND (@TypeSeq IS NULL OR d.TypeSeq = @TypeSeq)
                         AND {Validity("d")}{predicate}
