@@ -87,4 +87,4 @@ Example: check `CHAIN_VIEW` on `chain_walmart`.
 3. Walk up: `chain_walmart` → `org::acme` → `root`.
 4. Match on any ancestor? Allow.
 
-SQL Server runs this as a **TVF**. EF uses it in `Where`. No giant loads into memory.
+The database runs this as a predicate over each row's resource lineage. EF uses it in `Where`. No giant loads into memory.

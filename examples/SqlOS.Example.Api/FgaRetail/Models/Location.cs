@@ -4,6 +4,8 @@ namespace SqlOS.Example.Api.FgaRetail.Models;
 
 public class Location : IHasResourceId
 {
+    public byte[]? FgaScope { get; private set; }
+
     public string Id { get; set; } = Guid.NewGuid().ToString();
     public string ResourceId { get; set; } = string.Empty;
     public string ChainId { get; set; } = string.Empty;

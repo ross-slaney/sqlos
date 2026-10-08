@@ -1,0 +1,122 @@
+name: Benchmarks
+
+# SHRBAC list filtering and point checks on the shipped schema, the resource lineage, the scope column, and
+# fn_IsResourceAccessible, one job per engine, beside Pull Request CI. See tests/SqlOS.Benchmarks/README.md.
+#
+# Two tiers:
+# - CI (every pull request push, merge to main, weekly): the catalog grows 100K -> 1M, about 15 minutes per
+#   engine.
+# - Full (1M -> 10M -> 50M, about two hours on SQL Server): only when the `benchmark-full` label is added to a
+#   pull request. It runs once per labelling, and later pushes run the CI tier; remove and re-add the label
+#   to run it again. A manual run can ask for any scales. 50M is the largest scale that fits a standard
+#   runner's disk with the per-level indexes. Every query has a budget (600 s): a page that exceeds it is
+#   reported as "> 600 s" and counted at the budget, a lower bound.
+# Standard runners are free for public repositories.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/SqlOS/**"
+      - "tests/SqlOS.Benchmarks/**"
+      - ".github/workflows/benchmarks.yml"
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - "src/SqlOS/**"
+      - "tests/SqlOS.Benchmarks/**"
+      - ".github/workflows/benchmarks.yml"
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      scales:
+        description: "Product counts to grow through, comma-separated (1m,10m,50m for the full tier)"
+        required: false
+        default: "100k,1m"
+
+# A full run and a CI run of the same pull request are separate groups, so a push made while the full run is
+# going does not cancel it.
+concurrency:
+  group: benchmarks-${{ github.event.pull_request.number || github.ref }}-${{ github.event.action == 'labeled' && 'full' || 'ci' }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_VERSION: "9.0.x"
+  # The full tier: the moment `benchmark-full` is added to a pull request, or a manual run that asks for 50M.
+  FULL_RUN: ${{ (github.event.action == 'labeled' && github.event.label.name == 'benchmark-full') || (github.event_name == 'workflow_dispatch' && contains(inputs.scales, '50m')) }}
+
+jobs:
+  benchmark:
+    name: SHRBAC benchmarks (${{ matrix.name }})
+    # Adding some other label to a pull request should not re-run the benchmarks.
+    if: github.event.action != 'labeled' || github.event.label.name == 'benchmark-full'
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ ((github.event.action == 'labeled' && github.event.label.name == 'benchmark-full') || (github.event_name == 'workflow_dispatch' && contains(inputs.scales, '50m'))) && 170 || 45 }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - provider: postgresql
+            name: PostgreSQL
+            image: postgres:16
+          - provider: sqlserver
+            name: SQL Server
+            image: mcr.microsoft.com/mssql/server:2022-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Choose the tier
+        id: tier
+        run: |
+          if [ "$FULL_RUN" = "true" ]; then
+            echo "scales=${{ inputs.scales || '1m,10m,50m' }}" >> "$GITHUB_OUTPUT"
+            # Preinstalled toolchains the benchmark does not use; about 20 GB of headroom for the database.
+            sudo rm -rf /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift
+          else
+            echo "scales=${{ inputs.scales || '100k,1m' }}" >> "$GITHUB_OUTPUT"
+          fi
+          sudo mkdir -p /mnt/sqlos-bench
+          sudo chmod 0777 /mnt/sqlos-bench
+          df -h /mnt/sqlos-bench
+
+      - name: Pull ${{ matrix.image }}
+        run: docker pull ${{ matrix.image }}
+
+      - name: Build
+        run: dotnet build tests/SqlOS.Benchmarks --configuration Release
+
+      - name: Run benchmarks (${{ steps.tier.outputs.scales }})
+        env:
+          # Set the repository variable to a number of milliseconds to get the actual plans of statements
+          # slower than that in the PostgreSQL artifact's container.log (diagnostic; it slows every statement).
+          SQLOS_BENCH_EXPLAIN_MS: ${{ vars.SQLOS_BENCH_EXPLAIN_MS }}
+        run: >-
+          dotnet run --project tests/SqlOS.Benchmarks --configuration Release --no-build --
+          --provider ${{ matrix.provider }}
+          --scales ${{ steps.tier.outputs.scales }}
+          --data-dir /mnt/sqlos-bench
+          --out artifacts/benchmarks
+          --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Disk usage
+        if: always()
+        run: df -h /mnt/sqlos-bench
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmarks-${{ matrix.provider }}
+          path: artifacts/benchmarks/${{ matrix.provider }}

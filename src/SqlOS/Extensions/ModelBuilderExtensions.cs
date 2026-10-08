@@ -11,14 +11,26 @@ namespace SqlOS.Extensions;
 public static class ModelBuilderExtensions
 {
     /// <summary>
-    /// Registers SqlOS auth server and FGA EF models.
+    /// Registers the SqlOS auth server and FGA EF models, and configures the <c>FgaScope</c> column of every
+    /// application entity that implements <c>IHasResourceId</c>. Call it last in <c>OnModelCreating</c>, after
+    /// your own entities, and pass <c>Database.ProviderName</c> so SqlOS maps its columns for that provider.
     /// </summary>
-    public static ModelBuilder UseSqlOS(this ModelBuilder modelBuilder, Type? contextType = null, string? providerName = null)
+    public static ModelBuilder UseSqlOS(this ModelBuilder modelBuilder, string? providerName = null)
+        => modelBuilder.UseSqlOS(providerName, new SqlOSFgaOptions());
+
+    /// <summary>
+    /// Registers the SqlOS auth server and FGA EF models with the given FGA options (their schema and table
+    /// names), and configures the <c>FgaScope</c> column of every application entity that implements
+    /// <c>IHasResourceId</c>.
+    /// </summary>
+    public static ModelBuilder UseSqlOS(this ModelBuilder modelBuilder, string? providerName, SqlOSFgaOptions fgaOptions)
     {
+        ArgumentNullException.ThrowIfNull(fgaOptions);
         SqlOSAuthServerModelConfiguration.Configure(modelBuilder, new SqlOSAuthServerOptions(), providerName);
         SqlOSEmailModelConfiguration.Configure(modelBuilder, new SqlOSAuthServerOptions().Schema, providerName);
         SqlOSCalendarModelConfiguration.Configure(modelBuilder, new SqlOSAuthServerOptions().Schema);
-        SqlOSFgaModelConfiguration.Configure(modelBuilder, new SqlOSFgaOptions(), contextType);
+        SqlOSFgaModelConfiguration.Configure(modelBuilder, fgaOptions);
+        SqlOSFgaScopeColumns.Configure(modelBuilder, fgaOptions);
         if (SqlOSDatabase.IsPostgreSql(providerName))
         {
             SqlOSDatabase.EnablePostgreSqlTimestampCompatibility();

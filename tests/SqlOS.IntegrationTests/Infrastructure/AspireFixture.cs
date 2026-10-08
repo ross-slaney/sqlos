@@ -46,6 +46,17 @@ public static class AspireFixture
         var databaseName = $"SqlOSTest_{Guid.NewGuid():N}"[..30];
         await TestDatabase.CreateDatabaseAsync(baseConnectionString, databaseName);
         SqlConnectionString = TestDatabase.CreateIsolatedConnectionString(baseConnectionString, databaseName);
+        if (TestDatabase.IsSqlServer && Environment.GetEnvironmentVariable("SQLOS_TEST_SQLSERVER_RCSI") == "1")
+        {
+            // Read-committed snapshot, the Azure SQL default: reads see the last committed version instead of
+            // waiting on writers, as on PostgreSQL.
+            await using var rcsi = TestDatabase.CreateConnection(SqlConnectionString);
+            await rcsi.OpenAsync();
+            await using var command = rcsi.CreateCommand();
+            command.CommandText = $"ALTER DATABASE [{databaseName}] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE";
+            await command.ExecuteNonQueryAsync();
+        }
+
         Options = new SqlOSAuthServerOptions { Issuer = "https://tests/sqlos/auth", BasePath = "/sqlos/auth" };
         Options.SeedBrowserClient("test-client", "Test Client", "https://client.example.test/callback");
         FgaOptions = new SqlOSFgaOptions();

@@ -395,7 +395,7 @@ if (!decision.Allowed)
 }
 ```
 
-For collection queries, keep the generated expression inside the EF Core `IQueryable` so SQL Server applies the authorization TVF:
+For collection queries, keep the generated expression inside the EF Core `IQueryable` so the database applies the authorization predicate:
 
 ```csharp
 var filter = await fga.BuildFilterAsync<Workspace>(

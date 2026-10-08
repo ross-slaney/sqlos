@@ -1,11 +1,15 @@
 using System.Linq.Expressions;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using SqlOS.Database;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
+using SqlOS.Fga.Paging;
 
 namespace SqlOS.Fga.Services;
 
@@ -36,11 +40,14 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
         string permissionKey,
         string resourceId)
     {
+        EnsureRelational();
         var trace = new List<SqlOSFgaAccessTrace>();
 
         var resource = await _context.Set<SqlOSFgaResource>()
-            .Include(r => r.ResourceType)
-            .FirstOrDefaultAsync(r => r.Id == resourceId);
+            .AsNoTracking()
+            .Where(r => r.Id == resourceId)
+            .Select(r => new { r.Id, r.Name, r.ResourceTypeId })
+            .FirstOrDefaultAsync();
 
         if (resource == null)
         {
@@ -55,7 +62,7 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
             ResourceName = resource.Name,
         });
 
-        var permission = await _context.Set<SqlOSFgaPermission>().FirstOrDefaultAsync(p => p.Key == permissionKey);
+        var permission = await _context.Set<SqlOSFgaPermission>().AsNoTracking().FirstOrDefaultAsync(p => p.Key == permissionKey);
         if (permission == null)
         {
             return new SqlOSFgaAccessCheckResult { Allowed = false, Trace = trace, Error = $"Permission {permissionKey} not found" };
@@ -91,71 +98,42 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
             return new SqlOSFgaAccessCheckResult { Allowed = false, Trace = trace, Error = "No subjects found" };
         }
 
-        var ancestorResources = await GetAncestorResourcesAsync(resourceId);
-        trace.Add(new SqlOSFgaAccessTrace
+        // The decision: one query over the target's lineage (fn_IsResourceAccessible), the same rule the list
+        // filter applies to a row, read from the other side.
+        var match = await FindDecidingGrantAsync(resourceId, allSubjects, permission.Id);
+        if (match == null)
         {
-            Step = "Resource Path",
-            Detail = $"Checking {ancestorResources.Count} resource(s) in hierarchy",
-        });
-
-        foreach (var ancestorResource in ancestorResources)
-        {
-            var resourceType = await _context.Set<SqlOSFgaResourceType>().FirstOrDefaultAsync(rt => rt.Id == ancestorResource.ResourceTypeId);
             trace.Add(new SqlOSFgaAccessTrace
             {
-                Step = "Checking Resource",
-                Detail = $"[{resourceType?.Name ?? "Unknown"}] {ancestorResource.Name}",
-                ResourceId = ancestorResource.Id,
-                ResourceName = ancestorResource.Name,
+                Step = "Access Denied",
+                Detail = $"No matching grants found that provide permission \"{permission.Name}\"",
             });
-
-            foreach (var sid in allSubjects)
-            {
-                var subjectData = await _context.Set<SqlOSFgaSubject>().FirstOrDefaultAsync(s => s.Id == sid);
-                var grants = await GetActiveGrantsAsync(sid, ancestorResource.Id);
-
-                foreach (var grant in grants)
-                {
-                    var role = await _context.Set<SqlOSFgaRole>().FirstOrDefaultAsync(r => r.Id == grant.RoleId);
-                    if (role == null) continue;
-
-                    var roleHasPermission = await _context.Set<SqlOSFgaRolePermission>()
-                        .AnyAsync(rp => rp.RoleId == role.Id && rp.PermissionId == permission.Id);
-
-                    if (roleHasPermission)
-                    {
-                        trace.Add(new SqlOSFgaAccessTrace
-                        {
-                            Step = "Access Granted",
-                            Detail = $"Role \"{role.Name}\" provides permission \"{permission.Name}\" via grant at {ancestorResource.Name}",
-                            ResourceId = ancestorResource.Id,
-                            ResourceName = ancestorResource.Name,
-                            GrantId = grant.Id,
-                            RoleName = role.Name,
-                            SubjectName = subjectData?.DisplayName,
-                        });
-                        return new SqlOSFgaAccessCheckResult { Allowed = true, Trace = trace };
-                    }
-                    else
-                    {
-                        trace.Add(new SqlOSFgaAccessTrace
-                        {
-                            Step = "Role Checked",
-                            Detail = $"Role \"{role.Name}\" does not provide permission \"{permission.Name}\"",
-                            RoleName = role.Name,
-                        });
-                    }
-                }
-            }
+            return new SqlOSFgaAccessCheckResult { Allowed = false, Trace = trace };
         }
 
+        var grant = await _context.Set<SqlOSFgaGrant>()
+            .AsNoTracking()
+            .Where(g => g.Id == match.GrantId)
+            .Select(g => new
+            {
+                RoleName = g.Role != null ? g.Role.Name : g.RoleId,
+                SubjectName = g.Subject != null ? g.Subject.DisplayName : g.SubjectId,
+                ResourceName = g.Resource != null ? g.Resource.Name : g.ResourceId,
+            })
+            .FirstOrDefaultAsync();
+        var roleName = grant?.RoleName ?? match.RoleId;
+        var grantedAt = grant?.ResourceName ?? match.Id;
         trace.Add(new SqlOSFgaAccessTrace
         {
-            Step = "Access Denied",
-            Detail = $"No matching grants found that provide permission \"{permission.Name}\"",
+            Step = "Access Granted",
+            Detail = $"Role \"{roleName}\" provides permission \"{permission.Name}\" via grant at {grantedAt}",
+            ResourceId = match.Id,
+            ResourceName = grantedAt,
+            GrantId = match.GrantId,
+            RoleName = roleName,
+            SubjectName = grant?.SubjectName ?? match.SubjectId,
         });
-
-        return new SqlOSFgaAccessCheckResult { Allowed = false, Trace = trace };
+        return new SqlOSFgaAccessCheckResult { Allowed = true, Trace = trace };
     }
 
     public async Task<SqlOSFgaResourceAccessTrace> TraceResourceAccessAsync(
@@ -163,6 +141,7 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
         string resourceId,
         string permissionKey)
     {
+        EnsureRelational();
         var trace = new SqlOSFgaResourceAccessTrace
         {
             SubjectId = subjectId,
@@ -170,6 +149,7 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
         };
 
         var resource = await _context.Set<SqlOSFgaResource>()
+            .AsNoTracking()
             .Include(r => r.ResourceType)
             .FirstOrDefaultAsync(r => r.Id == resourceId);
 
@@ -185,7 +165,7 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
         trace.TargetResourceName = resource.Name;
         trace.TargetResourceType = resource.ResourceType?.Name ?? resource.ResourceTypeId;
 
-        var subject = await _context.Set<SqlOSFgaSubject>().FirstOrDefaultAsync(s => s.Id == subjectId);
+        var subject = await _context.Set<SqlOSFgaSubject>().AsNoTracking().FirstOrDefaultAsync(s => s.Id == subjectId);
         if (subject == null)
         {
             trace.AccessGranted = false;
@@ -196,7 +176,7 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
 
         trace.SubjectDisplayName = subject.DisplayName;
 
-        var permission = await _context.Set<SqlOSFgaPermission>().FirstOrDefaultAsync(p => p.Key == permissionKey);
+        var permission = await _context.Set<SqlOSFgaPermission>().AsNoTracking().FirstOrDefaultAsync(p => p.Key == permissionKey);
         if (permission == null)
         {
             trace.AccessGranted = false;
@@ -218,65 +198,76 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
 
         var allSubjects = await ResolveSubjectsWithInfoAsync(subjectId);
         trace.SubjectsChecked = allSubjects;
-
         var subjectIds = allSubjects.Select(s => s.SubjectId).ToList();
-        var ancestorResources = await GetAncestorResourcesAsync(resourceId);
+
+        // The decision is the point check's (fn_IsResourceAccessible). The rest explains it: the active path
+        // from the target's lineage (the resources a grant can reach the target from), and the caller's grants
+        // on that path.
+        var match = subjectIds.Count == 0 ? null : await FindDecidingGrantAsync(resourceId, subjectIds, permission.Id);
+        var provider = SqlOSDatabase.Resolve(_context.Database);
+        var path = await _context.Set<SqlOSFgaPathNode>()
+            .FromSqlRaw(provider.BuildResourcePathQuerySql(_options), resourceId)
+            .AsNoTracking()
+            .ToListAsync();
+        var activePath = path.Where(n => n.InReach).OrderBy(n => n.Level).ToList();
+
+        var typeIds = activePath.Select(n => n.ResourceTypeId).Distinct().ToList();
+        var typeNames = await _context.Set<SqlOSFgaResourceType>()
+            .AsNoTracking()
+            .Where(rt => typeIds.Contains(rt.Id))
+            .ToDictionaryAsync(rt => rt.Id, rt => rt.Name);
+
+        var nodeIds = activePath.Select(n => n.ResourceId).ToList();
+        var now = DateTime.UtcNow;
+        var grants = subjectIds.Count == 0 || nodeIds.Count == 0
+            ? []
+            : await _context.Set<SqlOSFgaGrant>()
+                .AsNoTracking()
+                .Include(g => g.Role)
+                .Include(g => g.Subject)
+                .Where(g => nodeIds.Contains(g.ResourceId) &&
+                            subjectIds.Contains(g.SubjectId) &&
+                            (g.EffectiveFrom == null || g.EffectiveFrom <= now) &&
+                            (g.EffectiveTo == null || g.EffectiveTo >= now))
+                .ToListAsync();
+        var roleIds = grants.Select(g => g.RoleId).Distinct().ToList();
+        var rolePermissions = roleIds.Count == 0
+            ? []
+            : await _context.Set<SqlOSFgaRolePermission>()
+                .AsNoTracking()
+                .Include(rp => rp.Permission)
+                .Where(rp => roleIds.Contains(rp.RoleId))
+                .ToListAsync();
+
         var pathNodes = new List<SqlOSFgaResourcePathNodeTrace>();
         var allGrantsUsed = new List<SqlOSFgaGrantTrace>();
         var allRolesUsed = new Dictionary<string, SqlOSFgaRoleTrace>();
-        var now = DateTime.UtcNow;
-
-        bool accessGranted = false;
-        string? grantingNodeName = null;
-        string? grantingRoleName = null;
-        string? grantingPrincipalName = null;
-        bool grantedViaGroup = false;
-        string? grantingGroupName = null;
-
-        int depth = 0;
-        foreach (var ancestorResource in ancestorResources)
+        foreach (var node in activePath)
         {
-            var resourceType = await _context.Set<SqlOSFgaResourceType>().FirstOrDefaultAsync(rt => rt.Id == ancestorResource.ResourceTypeId);
-
             var pathNode = new SqlOSFgaResourcePathNodeTrace
             {
-                ResourceId = ancestorResource.Id,
-                Name = ancestorResource.Name,
-                ResourceType = resourceType?.Name ?? ancestorResource.ResourceTypeId,
-                Depth = depth,
-                IsTarget = ancestorResource.Id == resourceId
+                ResourceId = node.ResourceId,
+                Name = node.Name,
+                ResourceType = typeNames.GetValueOrDefault(node.ResourceTypeId) ?? node.ResourceTypeId,
+                Depth = pathNodes.Count,
+                IsTarget = node.ResourceId == resourceId,
+                PermissionFoundHere = match != null && node.ResourceId == match.Id,
             };
 
-            var grantsOnNode = await _context.Set<SqlOSFgaGrant>()
-                .Include(g => g.Role)
-                .Include(g => g.Subject)
-                .Where(g => g.ResourceId == ancestorResource.Id &&
-                           subjectIds.Contains(g.SubjectId) &&
-                           (g.EffectiveFrom == null || g.EffectiveFrom <= now) &&
-                           (g.EffectiveTo == null || g.EffectiveTo >= now))
-                .ToListAsync();
-
-            foreach (var grant in grantsOnNode)
+            foreach (var grant in grants.Where(g => g.ResourceId == node.ResourceId))
             {
                 var role = grant.Role;
                 if (role == null) continue;
 
-                var rolePermissions = await _context.Set<SqlOSFgaRolePermission>()
-                    .Include(rp => rp.Permission)
-                    .Where(rp => rp.RoleId == role.Id)
-                    .ToListAsync();
-
-                var hasRequestedPermission = rolePermissions.Any(rp => rp.PermissionId == permission.Id);
-
+                var roleGrants = rolePermissions.Where(rp => rp.RoleId == role.Id).ToList();
+                var decided = match != null && grant.Id == match.GrantId;
                 var subjectInfo = allSubjects.FirstOrDefault(s => s.SubjectId == grant.SubjectId);
                 var isDirect = subjectInfo?.IsDirect ?? false;
-                var viaGroupName = !isDirect ? subjectInfo?.DisplayName : null;
-
                 var grantTrace = new SqlOSFgaGrantTrace
                 {
                     GrantId = grant.Id,
-                    ResourceId = ancestorResource.Id,
-                    ResourceName = ancestorResource.Name,
+                    ResourceId = node.ResourceId,
+                    ResourceName = node.Name,
                     ResourceType = pathNode.ResourceType,
                     RoleKey = role.Key,
                     RoleName = role.Name,
@@ -284,26 +275,25 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
                     SubjectDisplayName = grant.Subject?.DisplayName ?? grant.SubjectId,
                     AppliesToSubject = true,
                     IsDirectGrant = isDirect,
-                    ViaGroupName = viaGroupName,
-                    ContributedToDecision = hasRequestedPermission && !accessGranted
+                    ViaGroupName = !isDirect ? subjectInfo?.DisplayName : null,
+                    ContributedToDecision = decided
                 };
 
                 pathNode.GrantsOnThisNode.Add(grantTrace);
                 allGrantsUsed.Add(grantTrace);
 
-                if (!allRolesUsed.ContainsKey(role.Id))
+                if (!allRolesUsed.TryGetValue(role.Id, out var roleTrace))
                 {
-                    var roleTrace = new SqlOSFgaRoleTrace
+                    roleTrace = new SqlOSFgaRoleTrace
                     {
                         RoleKey = role.Key,
                         RoleName = role.Name,
                         IsFromGrant = true,
                         IsVirtualRole = role.IsVirtual,
-                        SourceResourceId = ancestorResource.Id,
-                        SourceResourceName = ancestorResource.Name,
+                        SourceResourceId = node.ResourceId,
+                        SourceResourceName = node.Name,
                         SourceResourceType = pathNode.ResourceType,
-                        ContributedToDecision = hasRequestedPermission && !accessGranted,
-                        Permissions = rolePermissions.Select(rp => new SqlOSFgaPermissionAssignmentTrace
+                        Permissions = roleGrants.Select(rp => new SqlOSFgaPermissionAssignmentTrace
                         {
                             PermissionKey = rp.Permission?.Key ?? "",
                             PermissionName = rp.Permission?.Name ?? "",
@@ -313,82 +303,72 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
                     allRolesUsed[role.Id] = roleTrace;
                 }
 
-                foreach (var rp in rolePermissions)
+                roleTrace.ContributedToDecision |= decided;
+
+                foreach (var rp in roleGrants)
                 {
                     if (rp.Permission != null && !pathNode.EffectivePermissions.Contains(rp.Permission.Key))
                     {
                         pathNode.EffectivePermissions.Add(rp.Permission.Key);
                     }
                 }
-
-                if (hasRequestedPermission && !accessGranted)
-                {
-                    accessGranted = true;
-                    pathNode.PermissionFoundHere = true;
-                    grantingNodeName = ancestorResource.Name;
-                    grantingRoleName = role.Name;
-                    grantingPrincipalName = grant.Subject?.DisplayName ?? grant.SubjectId;
-                    grantedViaGroup = !isDirect;
-                    grantingGroupName = viaGroupName;
-                }
             }
 
             pathNodes.Add(pathNode);
-            depth++;
-        }
-
-        pathNodes.Reverse();
-        for (int i = 0; i < pathNodes.Count; i++)
-        {
-            pathNodes[i].Depth = i;
         }
 
         trace.PathNodes = pathNodes;
         trace.AllRolesUsed = allRolesUsed.Values.ToList();
         trace.GrantsUsed = allGrantsUsed;
-        trace.AccessGranted = accessGranted;
+        trace.AccessGranted = match != null;
 
-        if (accessGranted)
+        if (match != null)
         {
-            if (grantedViaGroup && grantingGroupName != null)
+            var decidingGrant = allGrantsUsed.FirstOrDefault(g => g.GrantId == match.GrantId);
+            var grantingNodeName = decidingGrant?.ResourceName ?? match.Id;
+            var grantingRoleName = decidingGrant?.RoleName ?? match.RoleId;
+            if (decidingGrant is { IsDirectGrant: false, ViaGroupName: not null })
             {
-                trace.DecisionSummary = $"Access granted via group '{grantingGroupName}' which has role '{grantingRoleName}' on '{grantingNodeName}'. " +
+                trace.DecisionSummary = $"Access granted via group '{decidingGrant.ViaGroupName}' which has role '{grantingRoleName}' on '{grantingNodeName}'. " +
                                        $"The role '{grantingRoleName}' includes permission '{permissionKey}' which is inherited by child resources.";
+            }
+            else if (match.Id == resourceId)
+            {
+                trace.DecisionSummary = $"Access granted because {trace.SubjectDisplayName} has role '{grantingRoleName}' " +
+                                       $"directly on this resource, and '{grantingRoleName}' includes permission '{permissionKey}'.";
             }
             else
             {
-                var targetNode = pathNodes.FirstOrDefault(n => n.IsTarget);
-                if (targetNode != null && targetNode.PermissionFoundHere)
-                {
-                    trace.DecisionSummary = $"Access granted because {trace.SubjectDisplayName} has role '{grantingRoleName}' " +
-                                           $"directly on this resource, and '{grantingRoleName}' includes permission '{permissionKey}'.";
-                }
-                else
-                {
-                    trace.DecisionSummary = $"Access granted because {trace.SubjectDisplayName} has role '{grantingRoleName}' " +
-                                           $"on parent resource '{grantingNodeName}', and '{grantingRoleName}' includes permission '{permissionKey}' " +
-                                           $"which is inherited by child resources.";
-                }
+                trace.DecisionSummary = $"Access granted because {trace.SubjectDisplayName} has role '{grantingRoleName}' " +
+                                       $"on parent resource '{grantingNodeName}', and '{grantingRoleName}' includes permission '{permissionKey}' " +
+                                       $"which is inherited by child resources.";
             }
+        }
+        else if (path.Count == 0)
+        {
+            trace.DenialReason = "The resource has no place in the hierarchy SqlOS can use: it lies in a cycle, or deeper than the configured maximum depth.";
+            trace.DecisionSummary = $"Access denied. '{trace.TargetResourceName}' is denied to everyone until its place in the hierarchy is repaired.";
+        }
+        else if (activePath.Count == 0)
+        {
+            trace.DenialReason = $"'{trace.TargetResourceName}' is inactive.";
+            trace.DecisionSummary = $"Access denied. '{trace.TargetResourceName}' is inactive, so no grant reaches it.";
+        }
+        else if (allGrantsUsed.Count == 0)
+        {
+            trace.DenialReason = $"No grants found for {trace.SubjectDisplayName} (or their groups) on this resource or any ancestor resources.";
+            trace.DecisionSummary = $"Access denied. No roles are assigned to {trace.SubjectDisplayName} on '{trace.TargetResourceName}' " +
+                                   $"or any of its parent resources.";
+            trace.Suggestion = $"To grant access, assign a role that includes '{permissionKey}' on this resource or on a parent.";
         }
         else
         {
-            if (allGrantsUsed.Count == 0)
-            {
-                trace.DenialReason = $"No grants found for {trace.SubjectDisplayName} (or their groups) on this resource or any ancestor resources.";
-                trace.DecisionSummary = $"Access denied. No roles are assigned to {trace.SubjectDisplayName} on '{trace.TargetResourceName}' " +
-                                       $"or any of its parent resources.";
-                trace.Suggestion = $"To grant access, assign a role that includes '{permissionKey}' on this resource or on a parent.";
-            }
-            else
-            {
-                var roleNames = allRolesUsed.Values.Select(r => r.RoleName).Distinct().ToList();
-                trace.DenialReason = $"Grants were found, but none of the roles ({string.Join(", ", roleNames)}) include permission '{permissionKey}'.";
-                trace.DecisionSummary = $"Access denied. {trace.SubjectDisplayName} has grants on ancestor resources, " +
-                                       $"but none of the assigned roles include permission '{permissionKey}'.";
-                trace.Suggestion = $"Either assign a different role that includes '{permissionKey}', or add '{permissionKey}' " +
-                                  $"to one of the existing roles ({string.Join(", ", roleNames)}).";
-            }
+            var roleNames = allRolesUsed.Values.Select(r => r.RoleName).Distinct().ToList();
+            trace.DenialReason = $"Grants were found, but none of the roles ({string.Join(", ", roleNames)}) include permission '{permissionKey}'.";
+            trace.DecisionSummary = $"Access denied. {trace.SubjectDisplayName} has grants on ancestor resources, " +
+                                   $"but none of the assigned roles include permission '{permissionKey}'.";
+            trace.Suggestion = $"Either assign a different role that includes '{permissionKey}', or add '{permissionKey}' " +
+                              $"to one of the existing roles ({string.Join(", ", roleNames)}).";
         }
 
         return trace;
@@ -398,6 +378,9 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
         string subjectId,
         string permissionKey) where T : IHasResourceId
     {
+        EnsureRelational();
+        EnsureProtectedEntity<T>();
+        EnsureSqlOSQueryExecution();
         var subjectIds = await ResolveSubjectIdsAsync(subjectId);
         if (subjectIds.Count == 0)
         {
@@ -407,7 +390,14 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
 
         var permission = await _context.Set<SqlOSFgaPermission>()
             .AsNoTracking()
-            .FirstOrDefaultAsync(p => p.Key == permissionKey);
+            .Where(p => p.Key == permissionKey)
+            .Select(p => new
+            {
+                p.Id,
+                p.ResourceTypeId,
+                TypeSeq = p.ResourceTypeId == null ? null : EF.Property<int?>(p.ResourceType!, SqlOSFgaLineage.SeqColumn),
+            })
+            .FirstOrDefaultAsync();
 
         if (permission == null)
         {
@@ -415,40 +405,63 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
             return entity => false;
         }
 
-        var subjectIdsJson = JsonSerializer.Serialize(subjectIds);
-        var permissionId = permission.Id;
+        // The filter names who the rows are for (the caller's live subjects, resolved now as group membership
+        // is, and the permission) and reads no grant: the query that uses it reads what it needs when it runs.
+        // A page over it is walked from the caller's grants; any other query gets the predicate over the
+        // caller's access roots, read at that moment (SqlOSFgaQueryCompiler). Build the filter per request.
+        return SqlOSFgaAccess.Filter<T>(new SqlOSFgaAccessToken(subjectIds, JsonSerializer.Serialize(subjectIds), permission.Id, permissionKey, permission.TypeSeq, _options));
+    }
 
-        // Build the expression using the concrete DbContext type's method
-        // so EF Core can match it to the registered DbFunction (TVF).
-        // Using the interface method directly would fail because EF Core only
-        // registers DbFunctions on DbContext subclasses, not interfaces.
-        var contextType = _context.GetType();
-        var tvfMethod = contextType.GetMethod(
-            nameof(ISqlOSFgaDbContext.IsResourceAccessible),
-            new[] { typeof(string), typeof(string), typeof(string) });
-
-        if (tvfMethod == null)
+    /// <summary>
+    /// A filter is evaluated by SqlOS's query execution, which <c>AddSqlOS</c> configures on the context it
+    /// registers; a context without it could not run a query over the filter at all, so say so here.
+    /// </summary>
+    private void EnsureSqlOSQueryExecution()
+    {
+        if (_context is DbContext db && db.GetService<IDbContextOptions>().FindExtension<SqlOSFgaOptionsExtension>() is null)
         {
-            _logger.LogWarning("IsResourceAccessible method not found on {ContextType}", contextType.Name);
-            return entity => false;
+            throw new InvalidOperationException(
+                "Filters from BuildFilterAsync run on a context with SqlOS's query execution. AddSqlOS configures the context it registers; "
+                + "a context built by hand calls UseSqlOSFga() on its DbContextOptionsBuilder.");
         }
+    }
 
-        var entityParam = Expression.Parameter(typeof(T), "entity");
-        var resourceIdProp = Expression.Property(entityParam, nameof(IHasResourceId.ResourceId));
-        var contextExpr = Expression.Constant(_context, contextType);
-        var filterParameters = new AuthorizationFilterParameters(subjectIdsJson, permissionId);
-        var filterParametersExpr = Expression.Constant(filterParameters);
-        var tvfCall = Expression.Call(contextExpr, tvfMethod,
-            resourceIdProp,
-            Expression.Field(filterParametersExpr, nameof(AuthorizationFilterParameters.SubjectIds)),
-            Expression.Field(filterParametersExpr, nameof(AuthorizationFilterParameters.PermissionId)));
+    /// <summary>The grant that decides a point check (fn_IsResourceAccessible), or null when it is denied.</summary>
+    private Task<SqlOSFgaAccessMatch?> FindDecidingGrantAsync(string resourceId, IReadOnlyList<string> subjectIds, string permissionId)
+        => _context.Set<SqlOSFgaAccessMatch>()
+            .FromSqlRaw(
+                SqlOSDatabase.Resolve(_context.Database).BuildAccessMatchQuerySql(_options),
+                resourceId,
+                JsonSerializer.Serialize(subjectIds),
+                permissionId)
+            .AsNoTracking()
+            .FirstOrDefaultAsync();
 
-        var anyMethod = typeof(Queryable).GetMethods()
-            .First(m => m.Name == "Any" && m.GetParameters().Length == 1)
-            .MakeGenericMethod(typeof(SqlOSFgaAccessibleResource));
-        var anyCall = Expression.Call(anyMethod, tvfCall);
+    /// <summary>Authorization runs in the database; an in-memory provider cannot run it.</summary>
+    private void EnsureRelational()
+    {
+        if (!_context.Database.IsRelational())
+        {
+            throw new InvalidOperationException(
+                "SqlOS authorization checks and list filters run in the database. Use SQL Server or PostgreSQL; "
+                + "an in-memory EF Core provider cannot run them.");
+        }
+    }
 
-        return Expression.Lambda<Func<T, bool>>(anyCall, entityParam);
+    /// <summary>
+    /// A filter is only correct on a table SqlOS keeps the scope column of: an entity of the context registered
+    /// with SqlOS. Say so instead of failing inside EF Core, or returning rows from a table nobody maintains.
+    /// </summary>
+    private void EnsureProtectedEntity<T>()
+    {
+        var model = (_context as DbContext)?.Model;
+        var entityType = model?.FindEntityType(typeof(T));
+        if (model != null && entityType?.FindProperty(SqlOSFgaLineage.ScopeColumn) == null)
+        {
+            throw new InvalidOperationException(
+                $"{typeof(T).Name} is not a protected entity of {_context.GetType().Name}, the DbContext registered with SqlOS. "
+                + "Map it in that context, so SqlOS keeps its FgaScope column current; list filters only work on its entities.");
+        }
     }
 
     private async Task<List<string>> ResolveSubjectsAsync(string subjectId, List<SqlOSFgaAccessTrace> trace)
@@ -531,36 +544,6 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
         return result;
     }
 
-    private async Task<List<SqlOSFgaResource>> GetAncestorResourcesAsync(string resourceId)
-    {
-        var ancestors = new List<SqlOSFgaResource>();
-        string? currentId = resourceId;
-        var visited = new HashSet<string>(StringComparer.Ordinal);
-        var depth = 0;
-        var maxDepth = Math.Max(1, _options.MaxResourceHierarchyDepth);
-
-        while (currentId != null)
-        {
-            if (!visited.Add(currentId))
-            {
-                throw new InvalidOperationException("FGA resource hierarchy contains a cycle.");
-            }
-
-            if (depth > maxDepth)
-            {
-                throw new InvalidOperationException($"FGA resource hierarchy exceeds the configured maximum depth of {maxDepth}.");
-            }
-
-            var resource = await _context.Set<SqlOSFgaResource>().FirstOrDefaultAsync(r => r.Id == currentId);
-            if (resource == null || !resource.IsActive) break;
-            ancestors.Add(resource);
-            currentId = resource.ParentId;
-            depth++;
-        }
-
-        return ancestors;
-    }
-
     private async Task<bool> IsSubjectActiveAsync(string subjectId)
     {
         var subjectType = await _context.Set<SqlOSFgaSubject>()
@@ -586,29 +569,5 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
                 .AnyAsync(agent => agent.SubjectId == subjectId),
             _ => false
         };
-    }
-
-    private async Task<List<SqlOSFgaGrant>> GetActiveGrantsAsync(string subjectId, string resourceId)
-    {
-        var now = DateTime.UtcNow;
-
-        return await _context.Set<SqlOSFgaGrant>()
-            .Where(g => g.SubjectId == subjectId &&
-                       g.ResourceId == resourceId &&
-                       (g.EffectiveFrom == null || g.EffectiveFrom <= now) &&
-                       (g.EffectiveTo == null || g.EffectiveTo >= now))
-            .ToListAsync();
-    }
-
-    private sealed class AuthorizationFilterParameters
-    {
-        public AuthorizationFilterParameters(string subjectIds, string permissionId)
-        {
-            SubjectIds = subjectIds;
-            PermissionId = permissionId;
-        }
-
-        public readonly string SubjectIds;
-        public readonly string PermissionId;
     }
 }

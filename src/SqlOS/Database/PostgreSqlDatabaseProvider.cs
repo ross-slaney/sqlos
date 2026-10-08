@@ -3,6 +3,7 @@ using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Npgsql;
+using SqlOS.Fga;
 using SqlOS.Fga.Configuration;
 
 namespace SqlOS.Database;
@@ -89,6 +90,7 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
         return sql + " FOR UPDATE";
     }
 
+    /// <summary><c>fn_IsResourceAccessible</c>: the point check over the lineage (see the SQL Server provider).</summary>
     public string BuildIsResourceAccessibleFunctionSql(SqlOSFgaOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -97,94 +99,84 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
         var resources = Qualify(options.Schema, tables.Resources);
         var grants = Qualify(options.Schema, tables.Grants);
         var rolePermissions = Qualify(options.Schema, tables.RolePermissions);
-        var subjects = Qualify(options.Schema, tables.Subjects);
-        var users = Qualify(options.Schema, tables.Users);
-        var serviceAccounts = Qualify(options.Schema, tables.ServiceAccounts);
-        var userGroups = Qualify(options.Schema, tables.UserGroups);
-        var agents = Qualify(options.Schema, tables.Agents);
         var permissions = Qualify(options.Schema, tables.Permissions);
-        var maxDepth = Math.Max(1, options.MaxResourceHierarchyDepth)
-            .ToString(CultureInfo.InvariantCulture);
+        var levels = string.Join(", ", Enumerable.Range(0, SqlOSFgaLineage.Levels(options))
+            .Select(level => $"({level.ToString(CultureInfo.InvariantCulture)}, x.{QuoteIdentifier(SqlOSFgaLineage.AncestorColumn(level))})"));
+        // The result shape changed in 8.0 (it names the deciding grant), and CREATE OR REPLACE cannot change a
+        // function's result type, so a function with the old shape is dropped first. Only that one: a drop
+        // gives the function a new oid, and a query planned against the old one fails ("cache lookup failed
+        // for function"), so the current shape is replaced in place while other sessions call it.
+        var schemaLiteral = SqlLiteral(options.Schema);
         return $"""
+            DO $sqlos_drop$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM pg_proc p INNER JOIN pg_namespace n ON n.oid = p.pronamespace
+                    WHERE n.nspname = '{schemaLiteral}' AND p.proname = 'fn_IsResourceAccessible'
+                      AND pg_get_function_result(p.oid) NOT LIKE '%"GrantId"%')
+                THEN
+                    DROP FUNCTION {schema}."fn_IsResourceAccessible"(varchar, text, varchar);
+                END IF;
+            END
+            $sqlos_drop$;
             CREATE OR REPLACE FUNCTION {schema}."fn_IsResourceAccessible"(
-                p_resource_id varchar(128),
+                p_resource_id varchar(450),
                 p_subject_ids text,
-                p_permission_id varchar(128)
+                p_permission_id varchar(450)
             )
-            RETURNS TABLE("Id" varchar(450))
+            RETURNS TABLE("Id" varchar(450), "GrantId" varchar(450), "SubjectId" varchar(450), "RoleId" varchar(450), "Level" integer)
             LANGUAGE sql
             STABLE
             AS $sqlos$
-            WITH RECURSIVE ancestors AS (
-                SELECT
-                    "Id",
-                    "ParentId",
-                    0 AS "Depth",
-                    ('|' || "Id" || '|')::text AS "VisitedPath",
-                    FALSE AS "CycleDetected"
-                FROM {resources}
-                WHERE "Id" = p_resource_id AND "IsActive" = TRUE
-
-                UNION ALL
-
-                SELECT
-                    r."Id",
-                    r."ParentId",
-                    a."Depth" + 1,
-                    (a."VisitedPath" || r."Id" || '|')::text,
-                    (strpos(a."VisitedPath", '|' || r."Id" || '|') > 0)
-                FROM {resources} r
-                INNER JOIN ancestors a ON r."Id" = a."ParentId"
-                WHERE a."Depth" < {maxDepth}
-                  AND a."CycleDetected" = FALSE
-                  AND r."IsActive" = TRUE
-            )
-            SELECT a."Id"
-            FROM ancestors a
-            INNER JOIN {grants} g ON a."Id" = g."ResourceId"
-            INNER JOIN {rolePermissions} rp ON g."RoleId" = rp."RoleId"
-            INNER JOIN {subjects} s ON g."SubjectId" = s."Id"
-            LEFT JOIN {users} u ON s."Id" = u."SubjectId"
-            LEFT JOIN {serviceAccounts} sa ON s."Id" = sa."SubjectId"
-            LEFT JOIN {userGroups} ug ON s."Id" = ug."SubjectId"
-            LEFT JOIN {agents} ag ON s."Id" = ag."SubjectId"
-            WHERE g."SubjectId" IN (SELECT jsonb_array_elements_text(p_subject_ids::jsonb))
-              AND rp."PermissionId" = p_permission_id
-              AND NOT EXISTS (SELECT 1 FROM ancestors malformed WHERE malformed."CycleDetected" = TRUE)
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM ancestors truncated
-                  WHERE truncated."Depth" = {maxDepth}
-                    AND truncated."ParentId" IS NOT NULL
-              )
+            SELECT a."Id", g."Id", g."SubjectId", g."RoleId", lv."Level"
+            FROM {resources} x
+            CROSS JOIN LATERAL (VALUES {levels}) AS lv("Level", "Seq")
+            INNER JOIN {resources} a ON a."Seq" = lv."Seq"
+            INNER JOIN {grants} g ON g."ResourceId" = a."Id"
+            WHERE x."Id" = p_resource_id
+              AND x."Reach" IS NOT NULL
+              AND lv."Seq" IS NOT NULL
+              AND lv."Level" >= x."Reach"
               AND EXISTS (
                   SELECT 1
-                  FROM {resources} target
-                  INNER JOIN {permissions} permission ON permission."Id" = p_permission_id
-                  WHERE target."Id" = p_resource_id
-                    AND (permission."ResourceTypeId" IS NULL OR permission."ResourceTypeId" = target."ResourceTypeId")
+                  FROM {permissions} permission
+                  WHERE permission."Id" = p_permission_id
+                    AND (permission."ResourceTypeId" IS NULL OR permission."ResourceTypeId" = x."ResourceTypeId")
               )
-              AND (s."SubjectTypeId" <> 'user' OR u."IsActive" = TRUE)
-              AND (s."SubjectTypeId" <> 'service_account' OR (sa."SubjectId" IS NOT NULL AND (sa."ExpiresAt" IS NULL OR sa."ExpiresAt" > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))))
-              AND (s."SubjectTypeId" <> 'group' OR ug."IsActive" = TRUE)
-              AND (s."SubjectTypeId" <> 'agent' OR ag."SubjectId" IS NOT NULL)
-              AND EXISTS (
-                  SELECT 1
-                  FROM {subjects} caller
-                  LEFT JOIN {users} callerUser ON caller."Id" = callerUser."SubjectId"
-                  LEFT JOIN {serviceAccounts} callerSa ON caller."Id" = callerSa."SubjectId"
-                  LEFT JOIN {userGroups} callerGroup ON caller."Id" = callerGroup."SubjectId"
-                  LEFT JOIN {agents} callerAgent ON caller."Id" = callerAgent."SubjectId"
-                  WHERE caller."Id" = (p_subject_ids::jsonb ->> 0)
-                    AND (caller."SubjectTypeId" <> 'user' OR callerUser."IsActive" = TRUE)
-                    AND (caller."SubjectTypeId" <> 'service_account' OR (callerSa."SubjectId" IS NOT NULL AND (callerSa."ExpiresAt" IS NULL OR callerSa."ExpiresAt" > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))))
-                    AND (caller."SubjectTypeId" <> 'group' OR callerGroup."IsActive" = TRUE)
-                    AND (caller."SubjectTypeId" <> 'agent' OR callerAgent."SubjectId" IS NOT NULL)
-              )
+              AND g."SubjectId" = ANY (ARRAY(SELECT live."SubjectId" FROM {schema}."fn_ActiveSubjects"(p_subject_ids) live))
+              AND g."RoleId" = ANY (ARRAY(SELECT rp."RoleId" FROM {rolePermissions} rp WHERE rp."PermissionId" = p_permission_id))
               AND (g."EffectiveFrom" IS NULL OR g."EffectiveFrom" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))
               AND (g."EffectiveTo" IS NULL OR g."EffectiveTo" >= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))
+            ORDER BY lv."Level" DESC
             LIMIT 1
             $sqlos$;
+            """;
+    }
+
+    /// <summary>The point check as a query (see the SQL Server provider).</summary>
+    public string BuildAccessMatchQuerySql(SqlOSFgaOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return $"SELECT m.\"Id\", m.\"GrantId\", m.\"SubjectId\", m.\"RoleId\", m.\"Level\" FROM {QuoteIdentifier(options.Schema)}.\"fn_IsResourceAccessible\"({{0}}, {{1}}, {{2}}) AS m";
+    }
+
+    /// <summary>The query's first argument, as EF Core's FromSqlRaw numbers them.</summary>
+    private const string ResourceIdArgument = "{0}";
+
+    /// <summary>The path from the top of a resource's tree down to it, from its lineage (see the SQL Server provider).</summary>
+    public string BuildResourcePathQuerySql(SqlOSFgaOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var resources = Qualify(options.Schema, options.TableNames.Resources);
+        var levels = string.Join(", ", Enumerable.Range(0, SqlOSFgaLineage.Levels(options))
+            .Select(level => $"({level.ToString(CultureInfo.InvariantCulture)}, x.{QuoteIdentifier(SqlOSFgaLineage.AncestorColumn(level))})"));
+        return $"""
+            SELECT lv."Level" AS "Level", a."Id" AS "ResourceId", a."Name" AS "Name", a."ResourceTypeId" AS "ResourceTypeId", a."IsActive" AS "IsActive",
+                   (x."Reach" IS NOT NULL AND lv."Level" >= x."Reach") AS "InReach"
+            FROM {resources} x
+            CROSS JOIN LATERAL (VALUES {levels}) AS lv("Level", "Seq")
+            INNER JOIN {resources} a ON a."Seq" = lv."Seq"
+            WHERE x."Id" = {ResourceIdArgument}
             """;
     }
 
@@ -213,4 +205,41 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
             throw new InvalidOperationException(failureMessage, ex);
         }
     }
+
+    public async Task AcquireSessionLockAsync(
+        DatabaseFacade database,
+        string resource,
+        TimeSpan timeout,
+        string failureMessage,
+        CancellationToken cancellationToken)
+    {
+        var timeoutMs = Math.Max(1, (int)timeout.TotalMilliseconds);
+        try
+        {
+            await database.ExecuteSqlRawAsync(
+                $"""
+                SET lock_timeout = '{timeoutMs}ms';
+                SELECT pg_advisory_lock(
+                    ('x' || substr(md5(@resource), 1, 8))::bit(32)::int,
+                    ('x' || substr(md5(@resource), 9, 8))::bit(32)::int);
+                RESET lock_timeout;
+                """,
+                [CreateParameter("@resource", resource)],
+                cancellationToken);
+        }
+        catch (Exception ex) when (ex is PostgresException { SqlState: PostgresErrorCodes.LockNotAvailable or "57014" })
+        {
+            throw new InvalidOperationException(failureMessage, ex);
+        }
+    }
+
+    public Task ReleaseSessionLockAsync(DatabaseFacade database, string resource, CancellationToken cancellationToken)
+        => database.ExecuteSqlRawAsync(
+            """
+            SELECT pg_advisory_unlock(
+                ('x' || substr(md5(@resource), 1, 8))::bit(32)::int,
+                ('x' || substr(md5(@resource), 9, 8))::bit(32)::int);
+            """,
+            [CreateParameter("@resource", resource)],
+            cancellationToken);
 }

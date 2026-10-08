@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Npgsql;
 using SqlOS.Database;
+using SqlOS.Fga;
 
 namespace SqlOS.IntegrationTests.Infrastructure;
 
@@ -22,6 +23,10 @@ internal static class TestDatabase
     public static bool IsPostgreSqlProvider(string? value)
         => value?.Trim().ToLowerInvariant() is "postgresql" or "postgres" or "npgsql";
 
+    /// <summary>
+    /// The engine under test, and SqlOS's query execution (what evaluates filters from <c>BuildFilterAsync</c>),
+    /// as an application's <c>UseSqlOSFga()</c> gives a context it builds by hand.
+    /// </summary>
     public static DbContextOptionsBuilder UseTestProvider(
         this DbContextOptionsBuilder builder,
         string connectionString,
@@ -30,14 +35,14 @@ internal static class TestDatabase
         if (IsPostgreSql)
         {
             SqlOSDatabase.EnablePostgreSqlTimestampCompatibility();
-            return sqlServer is null
+            return (sqlServer is null
                 ? builder.UseNpgsql(connectionString)
-                : builder.UseNpgsql(connectionString, npgsql => npgsql.EnableRetryOnFailure());
+                : builder.UseNpgsql(connectionString, npgsql => npgsql.EnableRetryOnFailure())).UseSqlOSFga();
         }
 
-        return sqlServer is null
+        return (sqlServer is null
             ? builder.UseSqlServer(connectionString)
-            : builder.UseSqlServer(connectionString, sqlServer);
+            : builder.UseSqlServer(connectionString, sqlServer)).UseSqlOSFga();
     }
 
     public static DbContextOptionsBuilder<TContext> UseTestProvider<TContext>(
