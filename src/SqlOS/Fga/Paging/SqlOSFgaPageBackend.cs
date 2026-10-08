@@ -41,39 +41,65 @@ internal sealed class SqlOSFgaPageBackend<T>(
 
     public IReadOnlyList<(string Principal, string Role)> DirectStreams => _direct;
 
+    /// <summary>Principals whose grant counts had fallen behind the clock and were rebuilt before this page.</summary>
+    public int CountsRebuilt { get; private set; }
+
     public async Task<bool> BeginAsync(CancellationToken cancellationToken)
     {
         var (connection, opened) = await OpenAsync(cancellationToken);
         try
         {
-            await using var command = connection.CreateCommand();
-            command.CommandText = provider.BuildPagePreludeSql(options);
-            Enlist(command);
-            command.Parameters.Add(Parameter(command, "@SubjectIds", subjectIdsJson, DbType.String));
-            command.Parameters.Add(Parameter(command, "@PermissionId", permissionId, DbType.String));
-            command.Parameters.Add(Parameter(command, "@RootId", options.RootResourceId, DbType.String));
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            _live = [];
-            while (await reader.ReadAsync(cancellationToken))
+            List<string> stale;
+            await using (var command = connection.CreateCommand())
             {
-                _live.Add(reader.GetString(0));
+                command.CommandText = provider.BuildPagePreludeSql(options);
+                Enlist(command);
+                command.Parameters.Add(Parameter(command, "@SubjectIds", subjectIdsJson, DbType.String));
+                command.Parameters.Add(Parameter(command, "@PermissionId", permissionId, DbType.String));
+                command.Parameters.Add(Parameter(command, "@RootId", options.RootResourceId, DbType.String));
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                _live = [];
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    _live.Add(reader.GetString(0));
+                }
+
+                await reader.NextResultAsync(cancellationToken);
+                _roles = [];
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    _roles.Add(reader.GetString(0));
+                }
+
+                await reader.NextResultAsync(cancellationToken);
+                if (!await reader.ReadAsync(cancellationToken))
+                {
+                    return false;
+                }
+
+                _typeSeq = reader.IsDBNull(1) ? null : Convert.ToInt32(reader.GetValue(1), CultureInfo.InvariantCulture);
+                _root = reader.IsDBNull(2) ? -1 : Convert.ToInt64(reader.GetValue(2), CultureInfo.InvariantCulture);
+
+                stale = [];
+                await reader.NextResultAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    stale.Add(reader.GetString(0));
+                }
             }
 
-            await reader.NextResultAsync(cancellationToken);
-            _roles = [];
-            while (await reader.ReadAsync(cancellationToken))
+            // A grant's window opened or closed since these principals' counts were built: the counts say
+            // where the walk may jump, so they are rebuilt first. The hosted refresh does this ahead of time;
+            // the page does not depend on it.
+            if (stale.Count > 0)
             {
-                _roles.Add(reader.GetString(0));
+                await using var rebuild = connection.CreateCommand();
+                rebuild.CommandText = provider.BuildCountsRebuildSql(options);
+                Enlist(rebuild);
+                rebuild.Parameters.Add(Parameter(rebuild, "@Subjects", JsonSerializer.Serialize(stale), DbType.String));
+                await rebuild.ExecuteNonQueryAsync(cancellationToken);
+                CountsRebuilt = stale.Count;
             }
-
-            await reader.NextResultAsync(cancellationToken);
-            if (!await reader.ReadAsync(cancellationToken))
-            {
-                return false;
-            }
-
-            _typeSeq = reader.IsDBNull(1) ? null : Convert.ToInt32(reader.GetValue(1), CultureInfo.InvariantCulture);
-            _root = reader.IsDBNull(2) ? -1 : Convert.ToInt64(reader.GetValue(2), CultureInfo.InvariantCulture);
         }
         finally
         {

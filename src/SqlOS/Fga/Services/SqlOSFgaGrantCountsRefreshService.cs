@@ -13,12 +13,12 @@ using SqlOS.Fga.Interfaces;
 namespace SqlOS.Fga.Services;
 
 /// <summary>
-/// Keeps the grant counts behind authorized pages aligned with the clock. The triggers count a grant when it is
-/// written and usable; a grant whose window opens or closes later changes nothing in the database by itself,
-/// so this service wakes at the next window boundary (and at least every hour) and rebuilds the counts of the
-/// principals whose grants crossed one since its last run. Until it runs, such a principal's pages are still
-/// correct — the row test reads the grants themselves — only slower, as the walk steps into subtrees whose
-/// grants no longer apply.
+/// Keeps the grant counts behind authorized pages aligned with the clock, ahead of time. The triggers count a
+/// grant when it is written and usable; a grant whose window opens or closes later changes nothing in the
+/// database by itself, so this service wakes at the next window boundary (and at least every hour) and
+/// rebuilds the counts of the principals whose grants crossed one since its last run. A page does not depend
+/// on it: a caller whose counts fell behind the clock (each principal's root count row carries the next
+/// boundary) has them rebuilt before the walk, at the cost of that one page.
 /// </summary>
 public sealed class SqlOSFgaGrantCountsRefreshService(
     IServiceScopeFactory scopes,

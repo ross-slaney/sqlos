@@ -98,10 +98,17 @@ internal interface ISqlOSDatabaseProvider
     /// <summary>Rebuilds the counts of the principals whose grants crossed a validity boundary in <c>(@From, @To]</c>; returns how many.</summary>
     string BuildCountsRefreshSql(SqlOSFgaOptions options);
 
+    /// <summary>Rebuilds the counts of the principals in <c>@Subjects</c> (a JSON array of subject ids).</summary>
+    string BuildCountsRebuildSql(SqlOSFgaOptions options);
+
     /// <summary>A scalar query: the next moment after <c>@Now</c> a grant's window opens or closes, or NULL.</summary>
     string BuildNextValidityBoundarySql(SqlOSFgaOptions options);
 
-    /// <summary>Three result sets: the caller's live subjects, the roles carrying the permission, and the permission's type with the root's key. Parameters <c>@SubjectIds</c>, <c>@PermissionId</c>, <c>@RootId</c>.</summary>
+    /// <summary>
+    /// Four result sets: the caller's live subjects, the roles carrying the permission, the permission's type
+    /// with the root's key, and the live subjects whose grant counts fell behind the clock (a grant's window
+    /// opened or closed since they were built). Parameters <c>@SubjectIds</c>, <c>@PermissionId</c>, <c>@RootId</c>.
+    /// </summary>
     string BuildPagePreludeSql(SqlOSFgaOptions options);
 
     /// <summary>The two statements of a page round (see the SQL Server provider).</summary>

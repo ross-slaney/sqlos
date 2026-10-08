@@ -20,6 +20,28 @@ internal sealed partial class PostgreSqlDatabaseProvider
 
     private string Counts(SqlOSFgaOptions options) => Qualify(options.Schema, SqlOSFgaPageIndex.CountsTable);
 
+    private string RootSeq(SqlOSFgaOptions options)
+        => $"(SELECT r.\"Seq\" FROM {Qualify(options.Schema, options.TableNames.Resources)} r WHERE r.\"Id\" = '{SqlLiteral(options.RootResourceId)}')";
+
+    /// <summary>
+    /// Per principal of a set of grants (<paramref name="grantsFrom"/>, aliased <c>g</c>), the next moment one
+    /// of their grants on a container opens or closes: when the counts, which hold only usable grants, fall
+    /// behind the clock. Grants on childless resources are the direct index's, which tests windows itself.
+    /// </summary>
+    private string NextBoundaries(SqlOSFgaOptions options, string grantsFrom)
+    {
+        var resources = Qualify(options.Schema, options.TableNames.Resources);
+        return $"""
+            SELECT g."SubjectId", MIN(b.v) AS "ValidUntil"
+            FROM {grantsFrom}
+            INNER JOIN {resources} r ON r."Id" = g."ResourceId"
+            CROSS JOIN LATERAL (VALUES (CASE WHEN g."EffectiveFrom" > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') THEN g."EffectiveFrom" END),
+                                       (CASE WHEN g."EffectiveTo" > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') THEN g."EffectiveTo" END)) AS b(v)
+            WHERE b.v IS NOT NULL AND EXISTS (SELECT 1 FROM {resources} ch WHERE ch."ParentId" = r."Id")
+            GROUP BY g."SubjectId"
+            """;
+    }
+
     private string DirectTable(SqlOSFgaOptions options, SqlOSFgaScopeTable table) => Qualify(options.Schema, SqlOSFgaPageIndex.DirectTable(table));
 
     private static string LevelCases(int levels)
@@ -93,6 +115,13 @@ internal sealed partial class PostgreSqlDatabaseProvider
                     GROUP BY "SubjectId", "ParentSeq"
                 ) ch
                 WHERE c."SubjectId" = ch."SubjectId" AND c."ResourceSeq" = ch."ParentSeq";
+                -- When these counts fall behind the clock: the next window boundary among the principal's
+                -- grants on containers, on the principal's root row (a row of its own when nothing is usable yet).
+                UPDATE {counts} SET "ValidUntil" = NULL WHERE "ResourceSeq" = {RootSeq(options)} AND (p_subjects IS NULL OR "SubjectId" = ANY (p_subjects));
+                INSERT INTO {counts} ("SubjectId", "ResourceSeq", "ParentSeq", "Grants", "GrantChildren", "CutGrants", "ValidUntil")
+                SELECT b."SubjectId", {RootSeq(options)}, NULL, 0, 0, 0, b."ValidUntil"
+                FROM ({NextBoundaries(options, $"(SELECT * FROM {grants} g0 WHERE p_subjects IS NULL OR g0.\"SubjectId\" = ANY (p_subjects)) g")}) b
+                ON CONFLICT ("SubjectId", "ResourceSeq") DO UPDATE SET "ValidUntil" = EXCLUDED."ValidUntil";
             END
             $sqlos$;
             """;
@@ -117,6 +146,16 @@ internal sealed partial class PostgreSqlDatabaseProvider
                 v_cuts int[];
                 v_old int[];
             BEGIN
+                -- A grant arriving with a window boundary ahead brings that moment forward on its principal's
+                -- root row, whether or not the grant counts yet; a grant leaving changes nothing there (a
+                -- boundary kept too long costs one needless rebuild).
+                IF p_sign > 0 THEN
+                    INSERT INTO {counts} ("SubjectId", "ResourceSeq", "ParentSeq", "Grants", "GrantChildren", "CutGrants", "ValidUntil")
+                    SELECT b."SubjectId", {RootSeq(options)}, NULL, 0, 0, 0, b."ValidUntil"
+                    FROM ({NextBoundaries(options, "unnest(p_subjects, p_resources, p_from, p_to) AS g(\"SubjectId\", \"ResourceId\", \"EffectiveFrom\", \"EffectiveTo\")")}) b
+                    ON CONFLICT ("SubjectId", "ResourceSeq") DO UPDATE SET "ValidUntil" = LEAST({counts}."ValidUntil", EXCLUDED."ValidUntil");
+                END IF;
+
                 SELECT array_agg(x."SubjectId"), array_agg(x."ResourceSeq"), array_agg(x."ParentSeq"), array_agg(x."Grants"), array_agg(x."CutGrants"), array_agg(COALESCE(c."Grants", 0))
                 INTO v_subjects, v_seqs, v_parents, v_grants, v_cuts, v_old
                 FROM ({CountContributions(options, "unnest(p_subjects, p_resources, p_from, p_to) AS g(\"SubjectId\", \"ResourceId\", \"EffectiveFrom\", \"EffectiveTo\")", levels)}) x
@@ -147,7 +186,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
 
                 DELETE FROM {counts} c
                 USING {delta}
-                WHERE c."SubjectId" = d."SubjectId" AND c."ResourceSeq" = d."ResourceSeq" AND c."Grants" <= 0 AND c."GrantChildren" <= 0;
+                WHERE c."SubjectId" = d."SubjectId" AND c."ResourceSeq" = d."ResourceSeq" AND c."Grants" <= 0 AND c."GrantChildren" <= 0 AND c."ValidUntil" IS NULL;
             END
             $sqlos$;
             """;
@@ -409,6 +448,12 @@ internal sealed partial class PostgreSqlDatabaseProvider
         return $"SELECT {Qualify(options.Schema, "fn_" + SqlOSFgaPageIndex.CountsRefreshRoutine)}(@From, @To);";
     }
 
+    public string BuildCountsRebuildSql(SqlOSFgaOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return $"SELECT {Qualify(options.Schema, "fn_" + SqlOSFgaPageIndex.CountsRebuildRoutine)}(ARRAY(SELECT CAST(value AS varchar(450)) FROM jsonb_array_elements_text(@Subjects::jsonb) AS t(value)));";
+    }
+
     public string BuildNextValidityBoundarySql(SqlOSFgaOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -440,6 +485,10 @@ internal sealed partial class PostgreSqlDatabaseProvider
             FROM {Qualify(options.Schema, options.TableNames.Permissions)} p
             LEFT JOIN {Qualify(options.Schema, options.TableNames.ResourceTypes)} rt ON rt."Id" = p."ResourceTypeId"
             WHERE p."Id" = @PermissionId;
+            SELECT c."SubjectId" FROM {Counts(options)} c
+            WHERE c."ResourceSeq" = (SELECT r."Seq" FROM {Qualify(options.Schema, options.TableNames.Resources)} r WHERE r."Id" = @RootId)
+              AND c."SubjectId" IN (SELECT live."SubjectId" FROM {schema}."fn_ActiveSubjects"(@SubjectIds) live)
+              AND c."ValidUntil" IS NOT NULL AND c."ValidUntil" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC');
             """;
     }
 

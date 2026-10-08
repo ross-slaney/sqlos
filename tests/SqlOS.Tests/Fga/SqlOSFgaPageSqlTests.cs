@@ -106,6 +106,11 @@ public class SqlOSFgaPageSqlTests
 
         var prelude = SqlServerDatabaseProvider.Instance.BuildPagePreludeSql(options);
         prelude.Should().Contain("fn_ActiveSubjects").And.Contain("@SubjectIds").And.Contain("@PermissionId").And.Contain("@RootId");
+        prelude.Should().Contain("c.ValidUntil <= GETUTCDATE()", "the prelude names the live principals whose counts fell behind the clock");
+        SqlServerDatabaseProvider.Instance.BuildCountsRebuildSql(options).Should().Be("EXEC [dbo].[sp_SqlOSFgaGrantCounts_Rebuild] @Subjects = @Subjects;");
+        var routines = string.Join("\n", SqlServerDatabaseProvider.Instance.BuildPageIndexSql(options, [Items]));
+        routines.Should().Contain("ValidUntil = NULL WHERE ResourceSeq = @Root", "a rebuild recomputes each principal's next window boundary")
+            .And.Contain("AND c.ValidUntil IS NULL", "a root row holding a pending boundary survives the cleanup");
 
         var round = SqlServerDatabaseProvider.Instance.BuildPageRoundSql(options, spec);
         round.Should().Contain("OPENJSON(@Opens)").And.Contain("OPENJSON(@Streams)");
@@ -140,6 +145,11 @@ public class SqlOSFgaPageSqlTests
 
         var prelude = PostgreSqlDatabaseProvider.Instance.BuildPagePreludeSql(options);
         prelude.Should().Contain("\"fn_ActiveSubjects\"(@SubjectIds)").And.Contain("@PermissionId").And.Contain("@RootId");
+        prelude.Should().Contain("c.\"ValidUntil\" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')", "the prelude names the live principals whose counts fell behind the clock");
+        PostgreSqlDatabaseProvider.Instance.BuildCountsRebuildSql(options).Should().Contain("\"fn_SqlOSFgaGrantCounts_Rebuild\"(ARRAY(").And.Contain("@Subjects::jsonb");
+        var routines = string.Join("\n", PostgreSqlDatabaseProvider.Instance.BuildPageIndexSql(options, [Items]));
+        routines.Should().Contain("\"ValidUntil\" = LEAST(", "an arriving grant brings its principal's next boundary forward")
+            .And.Contain("AND c.\"ValidUntil\" IS NULL", "a root row holding a pending boundary survives the cleanup");
 
         var round = PostgreSqlDatabaseProvider.Instance.BuildPageRoundSql(options, spec);
         round.Should().Contain("jsonb_to_recordset(@Opens::jsonb)").And.Contain("jsonb_to_recordset(@Streams::jsonb)");

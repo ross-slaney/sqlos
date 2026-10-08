@@ -310,6 +310,123 @@ public class SqlOSFgaPageIntegrationTests
         (await db.Items.AsNoTracking().Where(nothing).OrderBy(i => i.Rank).Take(5).ToListAsync()).Should().BeEmpty();
     }
 
+    [TestMethod]
+    public async Task AnOrderThatContinuesPastTheKey_ReturnsOnlyWhatTheCallerMaySee()
+    {
+        await using var host = await HostedApp.StartAsync();
+        await using var scope = host.App.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<PageDbContext>();
+        var fga = scope.ServiceProvider.GetRequiredService<ISqlOSFgaAuthService>();
+        await Tree.CreateAsync(db);
+        var subjects = new SqlOSFgaSubjectService(db, NullLogger<SqlOSFgaSubjectService>.Instance);
+        var one = (await subjects.CreateUserAsync("One", $"one-{Guid.NewGuid():N}@example.test")).SubjectId;
+        db.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant { Id = "k_one", SubjectId = one, ResourceId = Tree.ItemResource(0), RoleId = ReaderRoleId });
+        await db.SaveChangesAsync();
+
+        // A second row shares the first's rank: a page that took the rank for the key would load it too.
+        var rows = await db.Items.Where(i => i.Id == Tree.ItemId(0) || i.Id == Tree.ItemId(1)).OrderBy(i => i.Id).ToListAsync();
+        rows[1].Rank = rows[0].Rank;
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var filter = await fga.BuildFilterAsync<PageItem>(one, Read);
+        (await fga.Allows(one, Read, Tree.ItemResource(1))).Should().BeFalse("the caller may see one row");
+
+        // The order ends at the key as far as the rows are concerned (the key is unique), so this is the key
+        // order, walked; the page must carry the key, not the column that follows it.
+        SqlOSFgaPageDiagnostics.Collect();
+        var page = await db.Items.AsNoTracking().Where(filter).OrderBy(i => i.Id).ThenBy(i => i.Rank).Take(2).ToListAsync();
+        page.Select(i => i.Id).Should().Equal(Tree.ItemId(0));
+        SqlOSFgaPageDiagnostics.LastCounters.Should().NotBeNull();
+
+        SqlOSFgaPageDiagnostics.Collect();
+        var first = await db.Items.AsNoTracking().Where(filter).OrderBy(i => i.Id).ThenBy(i => i.Rank).FirstOrDefaultAsync();
+        first!.Id.Should().Be(Tree.ItemId(0));
+        SqlOSFgaPageDiagnostics.LastCounters.Should().NotBeNull();
+    }
+
+    [TestMethod]
+    public async Task AConditionAfterThePage_RunsAsEfCoreWould()
+    {
+        await using var host = await HostedApp.StartAsync();
+        await using var scope = host.App.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<PageDbContext>();
+        var fga = scope.ServiceProvider.GetRequiredService<ISqlOSFgaAuthService>();
+        await Tree.CreateAsync(db);
+        var subjects = new SqlOSFgaSubjectService(db, NullLogger<SqlOSFgaSubjectService>.Instance);
+        var alice = (await subjects.CreateUserAsync("Alice", $"alice-{Guid.NewGuid():N}@example.test")).SubjectId;
+        db.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant { Id = "p_a", SubjectId = alice, ResourceId = "root", RoleId = ReaderRoleId });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var filter = await fga.BuildFilterAsync<PageItem>(alice, Read);
+        var truth = await db.Items.AsNoTracking().Where(filter).OrderBy(i => i.Rank).ToListAsync();
+        var second = truth[1];
+
+        // A condition after Take applies to the page's rows: the one row is not the second, so nothing.
+        SqlOSFgaPageDiagnostics.Collect();
+        var after = await db.Items.AsNoTracking().Where(filter).OrderBy(i => i.Rank).Take(1).Where(i => i.Id == second.Id).ToListAsync();
+        after.Should().BeEmpty("the condition applies to the page's one row, which is the first, not the second");
+        SqlOSFgaPageDiagnostics.LastCounters.Should().BeNull("a query with a condition after its page is not a page SqlOS walks");
+
+        // An order after Take re-sorts the page's rows: the first row by rank, however it is then sorted.
+        SqlOSFgaPageDiagnostics.Collect();
+        var resorted = await db.Items.AsNoTracking().Where(filter).OrderBy(i => i.Rank).Take(3).OrderBy(i => i.Id).ToListAsync();
+        resorted.Select(i => i.Id).Should().BeEquivalentTo(truth.Take(3).Select(i => i.Id));
+        resorted.Select(i => i.Id).Should().BeInAscendingOrder(StringComparer.Ordinal);
+        SqlOSFgaPageDiagnostics.LastCounters.Should().BeNull();
+
+        // The same condition before the page is the page's own filter, and the page is walked.
+        SqlOSFgaPageDiagnostics.Collect();
+        var before = await db.Items.AsNoTracking().Where(filter).Where(i => i.Id == second.Id).OrderBy(i => i.Rank).Take(1).ToListAsync();
+        before.Select(i => i.Id).Should().Equal(second.Id);
+        SqlOSFgaPageDiagnostics.LastCounters.Should().NotBeNull();
+    }
+
+    [TestMethod]
+    public async Task AGrantWhoseWindowOpened_IsWalkedBeforeTheCountsAreRefreshed()
+    {
+        await using var host = await HostedApp.StartAsync();
+        await using var scope = host.App.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<PageDbContext>();
+        var fga = scope.ServiceProvider.GetRequiredService<ISqlOSFgaAuthService>();
+        await Tree.CreateAsync(db);
+        var subjects = new SqlOSFgaSubjectService(db, NullLogger<SqlOSFgaSubjectService>.Instance);
+        var later = (await subjects.CreateUserAsync("Later", $"later-{Guid.NewGuid():N}@example.test")).SubjectId;
+        var opensAt = DateTime.UtcNow.AddSeconds(2);
+        db.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant { Id = "w_later", SubjectId = later, ResourceId = Tree.Folder(0, 1), RoleId = ReaderRoleId, EffectiveFrom = opensAt });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var item = Tree.ItemsOf(0, 1).First();
+        (await fga.Allows(later, Read, Tree.ItemResource(item))).Should().BeFalse("the grant's window has not opened");
+        var closed = await fga.BuildFilterAsync<PageItem>(later, Read);
+        (await db.Items.AsNoTracking().Where(closed).OrderBy(i => i.Rank).Take(10).ToListAsync()).Should().BeEmpty();
+
+        // The trigger counted nothing (the grant is not usable yet) but recorded when the counts fall behind
+        // the clock: the moment the window opens, on the principal's root row.
+        var validUntil = TestDatabase.IsPostgreSql
+            ? $"SELECT \"ValidUntil\" FROM \"dbo\".\"SqlOSFgaGrantCounts\" WHERE \"SubjectId\" = '{later}' AND \"ResourceSeq\" = (SELECT \"Seq\" FROM \"dbo\".\"SqlOSFgaResources\" WHERE \"Id\" = 'root')"
+            : $"SELECT ValidUntil FROM dbo.SqlOSFgaGrantCounts WHERE SubjectId = '{later}' AND ResourceSeq = (SELECT Seq FROM dbo.SqlOSFgaResources WHERE Id = 'root')";
+        (await ReadAsync(db, validUntil)).Should().ContainSingle().Which.Should().NotBe("null");
+
+        // The window opens as the clock moves, which no trigger sees; the hosted refresh is asleep (it woke at
+        // start, when no window was pending, and sleeps an hour). The point check and a planned statement read
+        // the grant itself and see the rows; so must the page, rebuilding the caller's counts first.
+        await Task.Delay(opensAt.AddSeconds(1) - DateTime.UtcNow);
+        (await fga.Allows(later, Read, Tree.ItemResource(item))).Should().BeTrue();
+        var filter = await fga.BuildFilterAsync<PageItem>(later, Read);
+        (await db.Items.Where(filter).CountAsync()).Should().Be(Tree.ItemsPerFolder);
+        SqlOSFgaPageDiagnostics.Collect();
+        var page = await db.Items.AsNoTracking().Where(filter).OrderBy(i => i.Rank).Take(10).ToListAsync();
+        SqlOSFgaPageDiagnostics.LastCounters.Should().NotBeNull();
+        SqlOSFgaPageDiagnostics.LastCounters!.CountsRebuilt.Should().Be(1, "the caller's counts had fallen behind the clock");
+        page.Select(i => i.Id).Should().BeEquivalentTo(Tree.ItemsOf(0, 1).Select(Tree.ItemId), "the page must see a grant whose window opened before the counts were refreshed");
+
+        // Having rebuilt them, the next page finds nothing to rebuild, and the counts equal a rebuild from scratch.
+        SqlOSFgaPageDiagnostics.Collect();
+        (await db.Items.AsNoTracking().Where(filter).OrderBy(i => i.Rank).Take(10).ToListAsync()).Should().HaveCount(Tree.ItemsPerFolder);
+        SqlOSFgaPageDiagnostics.LastCounters!.CountsRebuilt.Should().Be(0);
+        await AssertIndexMatchesRebuildAsync(db);
+    }
+
     /// <summary>A query shape every scenario is checked in: the application's own filter, its order, and the keyset predicate it writes for the next page.</summary>
     private sealed record Shape(
         string Name,
@@ -518,6 +635,9 @@ public class SqlOSFgaPageIntegrationTests
                 item.Property(i => i.FolderResourceId).HasMaxLength(128);
                 item.Property(i => i.TypeId).HasMaxLength(64);
                 item.HasIndex(i => i.Rank).HasDatabaseName("IX_PageItems_Rank");
+
+                // An order that continues past the key: the key is unique, so the rest of it never matters.
+                item.HasIndex(i => new { i.Id, i.Rank }).HasDatabaseName("IX_PageItems_Id_Rank");
             });
         }
     }

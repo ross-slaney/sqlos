@@ -91,6 +91,9 @@ internal sealed class SqlOSFgaPageCounters
     /// <summary>Levels passed through on the way to an opened node: ungranted nodes with exactly one grant-bearing child.</summary>
     public int Collapsed;
 
+    /// <summary>Principals whose grant counts had fallen behind the clock (a grant's window opened or closed) and were rebuilt before the walk.</summary>
+    public int CountsRebuilt;
+
     /// <summary>Milliseconds spent resolving the caller's principals and the permission, before the walk.</summary>
     public double ResolveMs;
 
@@ -103,7 +106,7 @@ internal sealed class SqlOSFgaPageCounters
     public override string ToString()
         => $"rounds {Rounds} ({Statements} statements), fetched {RowsFetched}, judged {RowsJudged}, denials {Denials}, discarded {Discarded}, "
            + $"streams reach {ReachStreams} / structural {StructuralStreams} / direct {DirectStreams}, splits {Splits} (+{EagerSplits} eager), nodes {NodesExamined}, collapsed {Collapsed}, "
-           + $"ms resolve {ResolveMs:F1} / walk {WalkMs:F1} / load {LoadMs:F1}";
+           + $"counts rebuilt {CountsRebuilt}, ms resolve {ResolveMs:F1} / walk {WalkMs:F1} / load {LoadMs:F1}";
 }
 
 /// <summary>

@@ -107,16 +107,20 @@ internal sealed class SqlOSFgaPageQuery<T> where T : class, IHasResourceId
             throw new InvalidOperationException($"{typeof(T).Name} has a composite key; SqlOS pages need a single-column key.");
         }
 
-        var descending = order.Count > 0 && order[0].Descending;
-        if (order.Any(o => o.Descending != descending))
+        // The order ends at the key: the key is unique, so nothing after it decides anything, and the walk's
+        // positions end with the key. An order without the key gets it appended.
+        var keyProperty = key.Properties[0];
+        var kept = order.TakeWhile((o, i) => i == 0 || order[i - 1].Property != keyProperty.Name).ToList();
+        var descending = kept.Count > 0 && kept[0].Descending;
+        if (kept.Any(o => o.Descending != descending))
         {
             throw new InvalidOperationException(
-                $"The order of this page over {typeof(T).Name} mixes directions ({string.Join(", ", order.Select(o => o.Property + (o.Descending ? " desc" : " asc")))}). "
+                $"The order of this page over {typeof(T).Name} mixes directions ({string.Join(", ", kept.Select(o => o.Property + (o.Descending ? " desc" : " asc")))}). "
                 + "A page's order is all ascending or all descending: the index that serves it is read one way.");
         }
 
         var orderColumns = new List<SqlOSFgaPageColumn>();
-        foreach (var (name, _) in order)
+        foreach (var (name, _) in kept)
         {
             var property = entityType.FindProperty(name)
                 ?? throw new InvalidOperationException($"{typeof(T).Name}.{name} is not a mapped property; a page can only sort by mapped columns.");
@@ -129,8 +133,7 @@ internal sealed class SqlOSFgaPageQuery<T> where T : class, IHasResourceId
             orderColumns.Add(Column(property, store));
         }
 
-        var keyProperty = key.Properties[0];
-        if (orderColumns.All(c => c.Property != keyProperty))
+        if (orderColumns.Count == 0 || orderColumns[^1].Property != keyProperty)
         {
             orderColumns.Add(Column(keyProperty, store));
         }

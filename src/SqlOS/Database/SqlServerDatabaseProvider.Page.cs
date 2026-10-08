@@ -28,6 +28,28 @@ internal sealed partial class SqlServerDatabaseProvider
 
     private static string Counts(SqlOSFgaOptions options) => $"[{Escape(options.Schema)}].[{SqlOSFgaPageIndex.CountsTable}]";
 
+    private static string RootSeq(SqlOSFgaOptions options)
+        => $"(SELECT r.Seq FROM [{Escape(options.Schema)}].[{Escape(options.TableNames.Resources)}] r WHERE r.Id = N'{options.RootResourceId.Replace("'", "''", StringComparison.Ordinal)}')";
+
+    /// <summary>
+    /// Per principal of a set of grants (<paramref name="grantsFrom"/>, aliased <c>g</c>), the next moment one
+    /// of their grants on a container opens or closes: when the counts, which hold only usable grants, fall
+    /// behind the clock. Grants on childless resources are the direct index's, which tests windows itself.
+    /// </summary>
+    private static string NextBoundaries(SqlOSFgaOptions options, string grantsFrom)
+    {
+        var resources = $"[{Escape(options.Schema)}].[{Escape(options.TableNames.Resources)}]";
+        return $"""
+            SELECT g.SubjectId, MIN(b.v) AS ValidUntil
+            FROM {grantsFrom}
+            INNER JOIN {resources} r ON r.Id = g.ResourceId
+            CROSS APPLY (VALUES (CASE WHEN g.EffectiveFrom > GETUTCDATE() THEN g.EffectiveFrom END),
+                                (CASE WHEN g.EffectiveTo > GETUTCDATE() THEN g.EffectiveTo END)) AS b(v)
+            WHERE b.v IS NOT NULL AND EXISTS (SELECT 1 FROM {resources} ch WHERE ch.ParentId = r.Id)
+            GROUP BY g.SubjectId
+            """;
+    }
+
     private static string DirectTable(SqlOSFgaOptions options, SqlOSFgaScopeTable table) => $"[{Escape(options.Schema)}].[{Escape(SqlOSFgaPageIndex.DirectTable(table))}]";
 
     private static string LevelCases(int levels)
@@ -102,6 +124,15 @@ internal sealed partial class SqlServerDatabaseProvider
                     WHERE ParentSeq IS NOT NULL AND Grants > 0 AND (@Subjects IS NULL OR SubjectId IN (SELECT SubjectId FROM @SubjectSet))
                     GROUP BY SubjectId, ParentSeq
                 ) ch ON ch.SubjectId = c.SubjectId AND ch.ParentSeq = c.ResourceSeq;
+                -- When these counts fall behind the clock: the next window boundary among the principal's
+                -- grants on containers, on the principal's root row (a row of its own when nothing is usable yet).
+                DECLARE @Root BIGINT = {RootSeq(options)};
+                UPDATE {counts} SET ValidUntil = NULL WHERE ResourceSeq = @Root AND (@Subjects IS NULL OR SubjectId IN (SELECT SubjectId FROM @SubjectSet));
+                MERGE {counts} AS c
+                USING ({NextBoundaries(options, $"(SELECT g0.* FROM {grants} g0 WHERE @Subjects IS NULL OR g0.SubjectId IN (SELECT SubjectId FROM @SubjectSet)) g")}) AS b
+                    ON c.SubjectId = b.SubjectId AND c.ResourceSeq = @Root
+                WHEN MATCHED THEN UPDATE SET ValidUntil = b.ValidUntil
+                WHEN NOT MATCHED THEN INSERT (SubjectId, ResourceSeq, ParentSeq, Grants, GrantChildren, CutGrants, ValidUntil) VALUES (b.SubjectId, @Root, NULL, 0, 0, 0, b.ValidUntil);
             END
             """;
 
@@ -114,6 +145,18 @@ internal sealed partial class SqlServerDatabaseProvider
             AS
             BEGIN
                 SET NOCOUNT ON;
+                -- A grant arriving with a window boundary ahead brings that moment forward on its principal's
+                -- root row, whether or not the grant counts yet; a grant leaving changes nothing there (a
+                -- boundary kept too long costs one needless rebuild).
+                IF @Sign > 0
+                BEGIN
+                    DECLARE @Root BIGINT = {RootSeq(options)};
+                    MERGE {counts} AS c
+                    USING ({NextBoundaries(options, "#SqlOSGrantDelta g")}) AS b
+                        ON c.SubjectId = b.SubjectId AND c.ResourceSeq = @Root
+                    WHEN MATCHED THEN UPDATE SET ValidUntil = CASE WHEN c.ValidUntil IS NULL OR b.ValidUntil < c.ValidUntil THEN b.ValidUntil ELSE c.ValidUntil END
+                    WHEN NOT MATCHED THEN INSERT (SubjectId, ResourceSeq, ParentSeq, Grants, GrantChildren, CutGrants, ValidUntil) VALUES (b.SubjectId, @Root, NULL, 0, 0, 0, b.ValidUntil);
+                END
                 SELECT x.*, ISNULL(c.Grants, 0) AS Old
                 INTO #SqlOSGrantCountDelta
                 FROM ({CountContributions(options, "#SqlOSGrantDelta g", levels)}) x
@@ -143,7 +186,7 @@ internal sealed partial class SqlServerDatabaseProvider
                 DELETE c
                 FROM {counts} c
                 INNER JOIN #SqlOSGrantCountDelta d ON d.SubjectId = c.SubjectId AND d.ResourceSeq = c.ResourceSeq
-                WHERE c.Grants <= 0 AND c.GrantChildren <= 0;
+                WHERE c.Grants <= 0 AND c.GrantChildren <= 0 AND c.ValidUntil IS NULL;
                 DROP TABLE #SqlOSGrantCountDelta;
             END
             """;
@@ -368,6 +411,12 @@ internal sealed partial class SqlServerDatabaseProvider
         return $"EXEC [{Escape(options.Schema)}].[sp_{SqlOSFgaPageIndex.RebuildRoutine}];";
     }
 
+    public string BuildCountsRebuildSql(SqlOSFgaOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return $"EXEC [{Escape(options.Schema)}].[sp_{SqlOSFgaPageIndex.CountsRebuildRoutine}] @Subjects = @Subjects;";
+    }
+
     public string BuildCountsRefreshSql(SqlOSFgaOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -402,6 +451,10 @@ internal sealed partial class SqlServerDatabaseProvider
             FROM [{schema}].[{Escape(options.TableNames.Permissions)}] p
             LEFT JOIN [{schema}].[{Escape(options.TableNames.ResourceTypes)}] rt ON rt.Id = p.ResourceTypeId
             WHERE p.Id = @PermissionId;
+            SELECT c.SubjectId FROM {Counts(options)} c
+            WHERE c.ResourceSeq = (SELECT r.Seq FROM [{schema}].[{Escape(options.TableNames.Resources)}] r WHERE r.Id = @RootId)
+              AND c.SubjectId IN (SELECT live.SubjectId FROM [{schema}].fn_ActiveSubjects(@SubjectIds) live)
+              AND c.ValidUntil IS NOT NULL AND c.ValidUntil <= GETUTCDATE();
             """;
     }
 

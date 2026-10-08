@@ -120,6 +120,7 @@ internal static class SqlOSFgaPagePlanner
                 var counters = executor.Counters;
                 var positions = await executor.PageAsync(query.After, wanted, cancellationToken).ConfigureAwait(false);
                 counters.WalkMs = clock.Elapsed.TotalMilliseconds;
+                counters.CountsRebuilt = backend.CountsRebuilt;
                 if (shape.Skip > 0)
                 {
                     positions = positions.Skip(shape.Skip).ToList();
@@ -284,11 +285,13 @@ internal static class SqlOSFgaPagePlanner
                             // A projection on the way out only: the filters and the order below it are over the entity.
                             Projection = selector;
                             break;
-                        case nameof(Queryable.Where) when call.Arguments.Count == 2 && Unquote(call.Arguments[1]) is LambdaExpression { Parameters.Count: 1 } filter:
+                        // A condition or an order outside the page (after Take, in the query's order) applies to
+                        // the page's rows, which is not what the walk does: such a query is not a page.
+                        case nameof(Queryable.Where) when sawPage && call.Arguments.Count == 2 && Unquote(call.Arguments[1]) is LambdaExpression { Parameters.Count: 1 } filter:
                             AddFilter(filter, ref sawFilter);
                             sawRows = true;
                             break;
-                        case nameof(Queryable.OrderBy) or nameof(Queryable.ThenBy) or nameof(Queryable.OrderByDescending) or nameof(Queryable.ThenByDescending) when call.Arguments.Count == 2:
+                        case nameof(Queryable.OrderBy) or nameof(Queryable.ThenBy) or nameof(Queryable.OrderByDescending) or nameof(Queryable.ThenByDescending) when sawPage && call.Arguments.Count == 2:
                             if (Unquote(call.Arguments[1]) is not LambdaExpression { Parameters.Count: 1 } keySelector || OrderProperty(keySelector) is not { } property)
                             {
                                 return false;
