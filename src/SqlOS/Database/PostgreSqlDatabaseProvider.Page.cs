@@ -524,11 +524,18 @@ internal sealed partial class PostgreSqlDatabaseProvider
             """;
 
         // Two blocks per stream kind and level: one for the streams that have a position (the keyset written
-        // as a range the index serves), one for those that have none.
+        // as a range the index serves), one for those that have none. Each ORDER BY starts with the column
+        // the stream's index starts with (the level's ancestor bytes; the direct index's principal and
+        // role), which is constant within the stream: it names the one index that can answer the ORDER BY
+        // without a sort. Without it the planner may take an index that starts with the order's first column
+        // instead and filter the stream's rows out of everything it reads in that order: for a principal with
+        // no direct rows that is every row of the direct index after the position, per stream and round.
         var blocks = new StringBuilder();
         for (var level = 0; level < levels; level++)
         {
-            var seek = $"SUBSTRING({scope}, {SqlOSFgaPageIndex.Offset(level)}, 8) = int8send(s.seq) AND {scope} >= '\\x{level:x2}'::bytea";
+            var ancestor = $"SUBSTRING({scope}, {SqlOSFgaPageIndex.Offset(level)}, 8)";
+            var seek = $"{ancestor} = int8send(s.seq) AND {scope} >= '\\x{level:x2}'::bytea";
+            var seekOrder = $"{ancestor}{direction}, {orderBy}";
             foreach (var positioned in new[] { true, false })
             {
                 var position = positioned ? $"\n                            AND {keyset}" : "";
@@ -542,7 +549,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
                         FROM (SELECT {selectCols}
                               FROM {ScopeTable(spec.Table)} AS {a}
                               WHERE {seek}{typeFilter}{predicate}{position}
-                              ORDER BY {orderBy}
+                              ORDER BY {seekOrder}
                               LIMIT s.f) z) q
                     WHERE s.kind = 0 AND s.level = {level} AND {streams}
                     UNION ALL
@@ -553,7 +560,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
                         FROM (SELECT {selectCols}, {RowTest(options, spec, level, levels)} AS granted
                               FROM {ScopeTable(spec.Table)} AS {a}
                               WHERE {seek}{predicate}{position}
-                              ORDER BY {orderBy}
+                              ORDER BY {seekOrder}
                               LIMIT s.f) z) q
                     WHERE s.kind = 1 AND s.level = {level} AND {streams}
                     """);
@@ -561,7 +568,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
         }
 
         var directColumns = string.Join(", ", order.Select((c, i) => $"d.{QuoteIdentifier(c.Column)} AS c{i}"));
-        var directOrderBy = string.Join(", ", order.Select(c => $"d.{QuoteIdentifier(c.Column)}{direction}"));
+        var directOrderBy = $"d.\"SubjectId\"{direction}, d.\"RoleId\"{direction}, {string.Join(", ", order.Select(c => $"d.{QuoteIdentifier(c.Column)}{direction}"))}";
         var directKeyset = Keyset(order.Select(c => $"d.{QuoteIdentifier(c.Column)}").ToList(), afterValues, spec.Descending);
         var directJoin = spec.PredicateSql is null
             ? ""

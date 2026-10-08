@@ -155,6 +155,15 @@ public class SqlOSFgaPageSqlTests
         // A positioned stream's keyset is a range the index serves, never behind an OR on the position's presence.
         round.Should().Contain("AND s.has_after").And.Contain("AND NOT s.has_after").And.NotContain("NOT s.has_after OR");
         round.Should().Contain("(i.\"Price\" >= s.a0 AND (i.\"Price\" > s.a0 OR i.\"Id\" > s.a1))");
+
+        // Every ORDER BY starts with the stream's index's own first column, so no other index can answer it
+        // in order: the level's ancestor bytes for a level's streams, the principal and role for direct ones.
+        for (var level = 0; level <= 2; level++)
+        {
+            round.Should().Contain($"ORDER BY SUBSTRING(i.\"FgaScope\", {SqlOSFgaPageIndex.Offset(level)}, 8), i.\"Price\", i.\"Id\"");
+        }
+
+        round.Should().Contain("ORDER BY d.\"SubjectId\", d.\"RoleId\", d.\"Price\", d.\"Id\"");
     }
 
     [TestMethod]
@@ -172,8 +181,8 @@ public class SqlOSFgaPageSqlTests
 
         var postgres = PostgreSqlDatabaseProvider.Instance.BuildPageRoundSql(options, spec);
         postgres.Should().Contain("ORDER BY c0 DESC, c1 DESC");
-        postgres.Should().Contain("ORDER BY i.\"Price\" DESC, i.\"Id\" DESC");
-        postgres.Should().Contain("ORDER BY d.\"Price\" DESC, d.\"Id\" DESC");
+        postgres.Should().Contain("ORDER BY SUBSTRING(i.\"FgaScope\", 6, 8) DESC, i.\"Price\" DESC, i.\"Id\" DESC", "a descending page reads the level's index backwards, the constant prefix included");
+        postgres.Should().Contain("ORDER BY d.\"SubjectId\" DESC, d.\"RoleId\" DESC, d.\"Price\" DESC, d.\"Id\" DESC");
         postgres.Should().Contain("(i.\"Price\" <= s.a0 AND (i.\"Price\" < s.a0 OR i.\"Id\" < s.a1))", "the keyset seeks before the position");
         postgres.Should().NotContain(" > s.a").And.NotContain(" >= s.a");
 
