@@ -78,6 +78,11 @@ public class SqlOSFgaPageSqlTests
         all.Should().Contain("\"dbo\".\"SqlOSFgaDirect_app_Items\"");
         all.Should().Contain("CREATE OR REPLACE FUNCTION \"dbo\".\"fn_SqlOSFgaDirect_app_Items_Rebuild\"");
         all.Should().Contain("\"IX_SqlOSFgaDirect_app_Items_Price\"");
+
+        // The row index answers the triggers' equality lookups only: a B-tree on the key alone would also
+        // answer a page's ORDER BY past its position, with the principal as a filter over the whole index.
+        all.Should().Contain("CREATE INDEX IF NOT EXISTS \"IX_SqlOSFgaDirect_app_Items_Row\" ON \"dbo\".\"SqlOSFgaDirect_app_Items\" USING hash (\"Id\")");
+        all.Should().Contain("am.amname <> 'hash'", "an existing B-tree row index is replaced on the next start");
         all.Should().Contain("\"fn_SqlOSFgaGrants_PageOnInsert\"");
         all.Should().Contain("\"TR_SqlOSFgaGrants_SqlOSFgaPage_Insert\"");
         all.Should().Contain("\"TR_SqlOSFgaGrants_SqlOSFgaPage_Delete\"");
@@ -156,14 +161,7 @@ public class SqlOSFgaPageSqlTests
         round.Should().Contain("AND s.has_after").And.Contain("AND NOT s.has_after").And.NotContain("NOT s.has_after OR");
         round.Should().Contain("(i.\"Price\" >= s.a0 AND (i.\"Price\" > s.a0 OR i.\"Id\" > s.a1))");
 
-        // Every ORDER BY starts with the stream's index's own first column, so no other index can answer it
-        // in order: the level's ancestor bytes for a level's streams, the principal and role for direct ones.
-        for (var level = 0; level <= 2; level++)
-        {
-            round.Should().Contain($"ORDER BY SUBSTRING(i.\"FgaScope\", {SqlOSFgaPageIndex.Offset(level)}, 8), i.\"Price\", i.\"Id\"");
-        }
-
-        round.Should().Contain("ORDER BY d.\"SubjectId\", d.\"RoleId\", d.\"Price\", d.\"Id\"");
+        round.Should().Contain("ORDER BY i.\"Price\", i.\"Id\"").And.Contain("ORDER BY d.\"Price\", d.\"Id\"");
     }
 
     [TestMethod]
@@ -181,8 +179,8 @@ public class SqlOSFgaPageSqlTests
 
         var postgres = PostgreSqlDatabaseProvider.Instance.BuildPageRoundSql(options, spec);
         postgres.Should().Contain("ORDER BY c0 DESC, c1 DESC");
-        postgres.Should().Contain("ORDER BY SUBSTRING(i.\"FgaScope\", 6, 8) DESC, i.\"Price\" DESC, i.\"Id\" DESC", "a descending page reads the level's index backwards, the constant prefix included");
-        postgres.Should().Contain("ORDER BY d.\"SubjectId\" DESC, d.\"RoleId\" DESC, d.\"Price\" DESC, d.\"Id\" DESC");
+        postgres.Should().Contain("ORDER BY i.\"Price\" DESC, i.\"Id\" DESC");
+        postgres.Should().Contain("ORDER BY d.\"Price\" DESC, d.\"Id\" DESC");
         postgres.Should().Contain("(i.\"Price\" <= s.a0 AND (i.\"Price\" < s.a0 OR i.\"Id\" < s.a1))", "the keyset seeks before the position");
         postgres.Should().NotContain(" > s.a").And.NotContain(" >= s.a");
 

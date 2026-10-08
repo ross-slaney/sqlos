@@ -301,9 +301,28 @@ internal sealed partial class PostgreSqlDatabaseProvider
                 $"CREATE INDEX IF NOT EXISTS {QuoteIdentifier(SqlOSFgaPageIndex.DirectIndexName(table, order.Suffix))} ON {direct} (\"SubjectId\", \"RoleId\", {string.Join(", ", order.Columns.Select(QuoteIdentifier))});");
         }
 
+        // The row index serves the triggers' lookups of a row's direct entries by key, which are equalities.
+        // A hash index answers those and nothing else: a B-tree on the key alone would also answer the page's
+        // "ORDER BY key LIMIT f" past a position, and the planner took it on a 1M-row catalog, filtering the
+        // principal and role out of every entry after the position (110,000 of them, per stream and round).
+        // A composite key cannot be hashed; such a table cannot be paged either, so its index stays a B-tree.
+        var rowIndex = QuoteIdentifier(SqlOSFgaPageIndex.DirectIndexName(table, "Row"));
+        var rowIndexUpgrade = table.KeyColumns.Count == 1
+            ? $"""
+              DO $sqlos$
+              BEGIN
+                  IF EXISTS (SELECT 1 FROM pg_class c INNER JOIN pg_namespace n ON n.oid = c.relnamespace INNER JOIN pg_am am ON am.oid = c.relam
+                             WHERE n.nspname = '{SqlLiteral(options.Schema)}' AND c.relname = '{SqlLiteral(SqlOSFgaPageIndex.DirectIndexName(table, "Row"))}' AND am.amname <> 'hash') THEN
+                      EXECUTE 'DROP INDEX {Qualify(options.Schema, SqlOSFgaPageIndex.DirectIndexName(table, "Row")).Replace("'", "''", StringComparison.Ordinal)}';
+                  END IF;
+              END
+              $sqlos$;
+              CREATE INDEX IF NOT EXISTS {rowIndex} ON {direct} USING hash ({QuoteIdentifier(table.KeyColumns[0])});
+              """
+            : $"CREATE INDEX IF NOT EXISTS {rowIndex} ON {direct} ({string.Join(", ", table.KeyColumns.Select(QuoteIdentifier))});";
         sql.AppendLine(CultureInfo.InvariantCulture, $"""
             CREATE INDEX IF NOT EXISTS {QuoteIdentifier(SqlOSFgaPageIndex.DirectIndexName(table, "Key"))} ON {direct} ("SubjectId", "RoleId", {string.Join(", ", table.KeyColumns.Select(QuoteIdentifier))});
-            CREATE INDEX IF NOT EXISTS {QuoteIdentifier(SqlOSFgaPageIndex.DirectIndexName(table, "Row"))} ON {direct} ({string.Join(", ", table.KeyColumns.Select(QuoteIdentifier))});
+            {rowIndexUpgrade}
             CREATE OR REPLACE FUNCTION {Qualify(options.Schema, "fn_" + SqlOSFgaPageIndex.DirectRebuildRoutine(table))}()
             RETURNS void
             LANGUAGE plpgsql
@@ -524,18 +543,13 @@ internal sealed partial class PostgreSqlDatabaseProvider
             """;
 
         // Two blocks per stream kind and level: one for the streams that have a position (the keyset written
-        // as a range the index serves), one for those that have none. Each ORDER BY starts with the column
-        // the stream's index starts with (the level's ancestor bytes; the direct index's principal and
-        // role), which is constant within the stream: it names the one index that can answer the ORDER BY
-        // without a sort. Without it the planner may take an index that starts with the order's first column
-        // instead and filter the stream's rows out of everything it reads in that order: for a principal with
-        // no direct rows that is every row of the direct index after the position, per stream and round.
+        // as a range the index serves), one for those that have none. The only index that can answer a
+        // stream's ORDER BY past its position without a sort is the level's own (the direct index's row index
+        // is a hash index for that reason), so the seek is the plan.
         var blocks = new StringBuilder();
         for (var level = 0; level < levels; level++)
         {
-            var ancestor = $"SUBSTRING({scope}, {SqlOSFgaPageIndex.Offset(level)}, 8)";
-            var seek = $"{ancestor} = int8send(s.seq) AND {scope} >= '\\x{level:x2}'::bytea";
-            var seekOrder = $"{ancestor}{direction}, {orderBy}";
+            var seek = $"SUBSTRING({scope}, {SqlOSFgaPageIndex.Offset(level)}, 8) = int8send(s.seq) AND {scope} >= '\\x{level:x2}'::bytea";
             foreach (var positioned in new[] { true, false })
             {
                 var position = positioned ? $"\n                            AND {keyset}" : "";
@@ -549,7 +563,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
                         FROM (SELECT {selectCols}
                               FROM {ScopeTable(spec.Table)} AS {a}
                               WHERE {seek}{typeFilter}{predicate}{position}
-                              ORDER BY {seekOrder}
+                              ORDER BY {orderBy}
                               LIMIT s.f) z) q
                     WHERE s.kind = 0 AND s.level = {level} AND {streams}
                     UNION ALL
@@ -560,7 +574,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
                         FROM (SELECT {selectCols}, {RowTest(options, spec, level, levels)} AS granted
                               FROM {ScopeTable(spec.Table)} AS {a}
                               WHERE {seek}{predicate}{position}
-                              ORDER BY {seekOrder}
+                              ORDER BY {orderBy}
                               LIMIT s.f) z) q
                     WHERE s.kind = 1 AND s.level = {level} AND {streams}
                     """);
@@ -568,7 +582,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
         }
 
         var directColumns = string.Join(", ", order.Select((c, i) => $"d.{QuoteIdentifier(c.Column)} AS c{i}"));
-        var directOrderBy = $"d.\"SubjectId\"{direction}, d.\"RoleId\"{direction}, {string.Join(", ", order.Select(c => $"d.{QuoteIdentifier(c.Column)}{direction}"))}";
+        var directOrderBy = string.Join(", ", order.Select(c => $"d.{QuoteIdentifier(c.Column)}{direction}"));
         var directKeyset = Keyset(order.Select(c => $"d.{QuoteIdentifier(c.Column)}").ToList(), afterValues, spec.Descending);
         var directJoin = spec.PredicateSql is null
             ? ""
