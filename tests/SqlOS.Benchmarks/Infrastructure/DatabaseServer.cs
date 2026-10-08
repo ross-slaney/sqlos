@@ -103,14 +103,24 @@ internal sealed class DatabaseServer : IAsyncDisposable
     }
 
     /// <summary>
+    /// Set to a number of milliseconds to have PostgreSQL log the actual plan of every statement slower than
+    /// that (<c>auto_explain</c>, with analyze, buffers and parameters) into the container log, which the run
+    /// then saves beside its results. Diagnostic: the instrumentation itself slows every statement a little.
+    /// </summary>
+    public const string ExplainEnvironmentVariable = "SQLOS_BENCH_EXPLAIN_MS";
+
+    public static int? ExplainMilliseconds
+        => int.TryParse(Environment.GetEnvironmentVariable(ExplainEnvironmentVariable), NumberStyles.Integer, CultureInfo.InvariantCulture, out var ms) && ms >= 0 ? ms : null;
+
+    /// <summary>
     /// Load-only durability settings (fsync, WAL level, commit mode) do not change how reads are planned or
     /// executed; the planner settings are the usual SSD values.
     /// </summary>
     private static string[] PostgresSettings(int memoryMegabytes)
     {
         string Mb(double fraction) => $"{Math.Max(64, (int)(memoryMegabytes * fraction))}MB";
-        return
-        [
+        var settings = new List<string>
+        {
             "-c", $"shared_buffers={Mb(0.25)}",
             "-c", $"effective_cache_size={Mb(0.75)}",
             "-c", $"maintenance_work_mem={Mb(0.125)}",
@@ -126,7 +136,33 @@ internal sealed class DatabaseServer : IAsyncDisposable
             "-c", "full_page_writes=off",
             "-c", "random_page_cost=1.1",
             "-c", "effective_io_concurrency=200",
-        ];
+        };
+        if (ExplainMilliseconds is { } explain)
+        {
+            settings.AddRange(
+            [
+                "-c", "session_preload_libraries=auto_explain",
+                "-c", $"auto_explain.log_min_duration={explain.ToString(CultureInfo.InvariantCulture)}ms",
+                "-c", "auto_explain.log_analyze=on",
+                "-c", "auto_explain.log_buffers=on",
+                "-c", "auto_explain.log_nested_statements=on",
+                "-c", "auto_explain.log_parameter_max_length=4000",
+            ]);
+        }
+
+        return [.. settings];
+    }
+
+    /// <summary>Writes the container's log (the engine's own messages, the plans <c>auto_explain</c> logged) to a file; nothing for an existing server.</summary>
+    public async Task SaveLogsAsync(string path, CancellationToken cancellationToken)
+    {
+        if (_container is null)
+        {
+            return;
+        }
+
+        var (stdout, stderr) = await _container.GetLogsAsync(ct: cancellationToken);
+        await File.WriteAllTextAsync(path, stdout + stderr, cancellationToken);
     }
 
     private static string? PrepareDataDirectory(BenchmarkOptions options)

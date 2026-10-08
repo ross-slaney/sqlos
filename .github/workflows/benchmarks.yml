@@ -99,6 +99,10 @@ jobs:
         run: dotnet build tests/SqlOS.Benchmarks --configuration Release
 
       - name: Run benchmarks (${{ steps.tier.outputs.scales }})
+        env:
+          # Set the repository variable to a number of milliseconds to get the actual plans of statements
+          # slower than that in the PostgreSQL artifact's container.log (diagnostic; it slows every statement).
+          SQLOS_BENCH_EXPLAIN_MS: ${{ vars.SQLOS_BENCH_EXPLAIN_MS }}
         run: >-
           dotnet run --project tests/SqlOS.Benchmarks --configuration Release --no-build --
           --provider ${{ matrix.provider }}

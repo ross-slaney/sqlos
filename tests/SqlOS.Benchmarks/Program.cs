@@ -293,6 +293,13 @@ var summary = await ReportWriter.WriteAsync(report, outputDirectory, options.Sum
 Console.WriteLine();
 Console.WriteLine(summary);
 log.Info($"Results: {outputDirectory}");
+if (DatabaseServer.ExplainMilliseconds is { } explainMs)
+{
+    // The engine's log, with the actual plan of every statement slower than the threshold (auto_explain).
+    var containerLog = Path.Combine(outputDirectory, "container.log");
+    await server.SaveLogsAsync(containerLog, cancellation);
+    log.Info($"Plans of statements over {explainMs} ms: {containerLog}");
+}
 
 var failed = report.Gates.Where(g => !g.Passed).ToList();
 if (failed.Count == 0)
