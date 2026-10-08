@@ -436,6 +436,61 @@ public class SqlOSFgaPageIntegrationTests
         await AssertIndexMatchesRebuildAsync(db);
     }
 
+    [TestMethod]
+    public async Task ATimestampOrder_InASessionWhoseTimeZoneIsNotUtc_KeepsEveryInstant()
+    {
+        await using var host = await HostedApp.StartAsync();
+        await using var scope = host.App.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<PageDbContext>();
+        var fga = scope.ServiceProvider.GetRequiredService<ISqlOSFgaAuthService>();
+        await Tree.CreateAsync(db);
+
+        // The two earliest rows: one under an active folder, in the root's reach; one under a folder of the
+        // inactive workspace, a cut the walk opens in a later round. The root's row is held meanwhile.
+        var early = Tree.ItemsOf(0, 0).First();
+        var cut = Tree.ItemsOf(Tree.InactiveWorkspace, 2).First();
+        var items = await db.Items.Where(i => i.Id == Tree.ItemId(early) || i.Id == Tree.ItemId(cut)).ToListAsync();
+        items.Single(i => i.Id == Tree.ItemId(early)).Stamp = new DateTime(2026, 1, 1, 10, 0, 0, DateTimeKind.Utc);
+        items.Single(i => i.Id == Tree.ItemId(cut)).Stamp = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+        var subjects = new SqlOSFgaSubjectService(db, NullLogger<SqlOSFgaSubjectService>.Instance);
+        var zoned = (await subjects.CreateUserAsync("Zoned", $"zoned-{Guid.NewGuid():N}@example.test")).SubjectId;
+        db.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant { Id = "z_root", SubjectId = zoned, ResourceId = "root", RoleId = ReaderRoleId });
+        db.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant { Id = "z_cut", SubjectId = zoned, ResourceId = Tree.Folder(Tree.InactiveWorkspace, 2), RoleId = ReaderRoleId });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        if (TestDatabase.IsPostgreSql)
+        {
+            // A session whose time zone is not UTC reads a timestamp that names no zone in that zone: twelve
+            // hours behind UTC here (POSIX sign), far from any machine's own zone. The connection stays open,
+            // so every statement of the page runs in this session.
+            await db.Database.OpenConnectionAsync();
+            await db.Database.ExecuteSqlRawAsync("SET TIME ZONE 'Etc/GMT+12'");
+            (await ReadAsync(db, "SHOW TIME ZONE")).Should().Equal(["Etc/GMT+12"]);
+            (await ReadAsync(db, "SELECT '2026-01-01T10:00:00'::timestamptz AT TIME ZONE 'UTC'")).Should().Equal(["01/01/2026 22:00:00"], "a literal without a zone is read in the session's zone");
+        }
+
+        var filter = await fga.BuildFilterAsync<PageItem>(zoned, Read);
+        var truth = await db.Items.AsNoTracking().Where(filter).OrderBy(i => i.Stamp).ThenBy(i => i.Id).Select(i => i.Id).ToListAsync();
+        truth.Take(2).Should().Equal(Tree.ItemId(early), Tree.ItemId(cut));
+
+        SqlOSFgaPageDiagnostics.Collect();
+        var first = await db.Items.AsNoTracking().Where(filter).OrderBy(i => i.Stamp).ThenBy(i => i.Id).Take(1).ToListAsync();
+        SqlOSFgaPageDiagnostics.LastCounters.Should().NotBeNull();
+        SqlOSFgaPageDiagnostics.LastCounters!.RowsRetained.Should().BePositive("the root's row is held while the cut below the root is opened");
+        first.Select(i => i.Id).Should().Equal([Tree.ItemId(early)], $"a held timestamp must keep its instant ({SqlOSFgaPageDiagnostics.LastCounters})");
+
+        // A longer page refills the root's stream from the position it was fetched to, a timestamp as well; and
+        // the next page starts from a timestamp the application read back.
+        var page = await db.Items.AsNoTracking().Where(filter).OrderBy(i => i.Stamp).ThenBy(i => i.Id).Take(5).ToListAsync();
+        page.Select(i => i.Id).Should().Equal(truth.Take(5), "a refill's position must keep its instant");
+        var last = page[^1];
+        var next = await db.Items.AsNoTracking().Where(filter)
+            .Where(i => i.Stamp > last.Stamp || (i.Stamp == last.Stamp && i.Id.CompareTo(last.Id) > 0))
+            .OrderBy(i => i.Stamp).ThenBy(i => i.Id).Take(5).ToListAsync();
+        next.Select(i => i.Id).Should().Equal(truth.Skip(5).Take(5), "a cursor's instant must be read as the instant it is");
+    }
+
     /// <summary>A query shape every scenario is checked in: the application's own filter, its order, and the keyset predicate it writes for the next page.</summary>
     private sealed record Shape(
         string Name,
@@ -565,6 +620,9 @@ public class SqlOSFgaPageIntegrationTests
         public const int Items = Workspaces * FoldersPerWorkspace * ItemsPerFolder;
         public const int InactiveWorkspace = 3;
 
+        /// <summary>Every item's stamp is this plus its number in hours; a test moves a few to earlier instants.</summary>
+        public static readonly DateTime Epoch = new(2030, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
         public static string Workspace(int w) => $"pw{w}";
         public static string Folder(int w, int f) => $"pf{w}_{f}";
         public static string ItemId(int n) => $"item{n:D3}";
@@ -594,7 +652,7 @@ public class SqlOSFgaPageIntegrationTests
             {
                 var w = n / (FoldersPerWorkspace * ItemsPerFolder);
                 var f = n / ItemsPerFolder % FoldersPerWorkspace;
-                db.Items.Add(new PageItem(ItemId(n), Folder(w, f)) { Rank = ranks[n], Status = n % 3, Price = (n * 37) % 100, TypeId = n % 11 == 5 ? OtherType : ItemType });
+                db.Items.Add(new PageItem(ItemId(n), Folder(w, f)) { Rank = ranks[n], Status = n % 3, Price = (n * 37) % 100, Stamp = Epoch.AddHours(n), TypeId = n % 11 == 5 ? OtherType : ItemType });
             }
 
             await db.SaveChangesAsync();
@@ -621,6 +679,9 @@ public class SqlOSFgaPageIntegrationTests
         public int Rank { get; set; }
         public int Status { get; set; }
         public int Price { get; set; }
+
+        /// <summary>An instant (UTC), the declared order of the timestamp page: <c>timestamp with time zone</c> on PostgreSQL, <c>datetime2</c> on SQL Server.</summary>
+        public DateTime Stamp { get; set; } = Tree.Epoch;
         public string TypeId { get; set; } = ItemType;
         public bool Active { get; set; } = true;
 
@@ -645,6 +706,13 @@ public class SqlOSFgaPageIntegrationTests
                 item.Property(i => i.FolderResourceId).HasMaxLength(128);
                 item.Property(i => i.TypeId).HasMaxLength(64);
                 item.HasIndex(i => i.Rank).HasDatabaseName("IX_PageItems_Rank");
+                item.HasIndex(i => i.Stamp).HasDatabaseName("IX_PageItems_Stamp");
+                if (TestDatabase.IsPostgreSql)
+                {
+                    // An instant column. (Under the library's timestamp compatibility switch, Npgsql maps DateTime
+                    // to a plain timestamp by default and reads this type back as local time.)
+                    item.Property(i => i.Stamp).HasColumnType("timestamp with time zone");
+                }
 
                 // An order that continues past the key: the key is unique, so the rest of it never matters.
                 item.HasIndex(i => new { i.Id, i.Rank }).HasDatabaseName("IX_PageItems_Id_Rank");

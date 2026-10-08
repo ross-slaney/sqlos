@@ -321,7 +321,7 @@ internal sealed class SqlOSFgaPageBackend<T>(
             writer.WriteBoolean("granted", r.Granted);
             for (var i = 0; i < query.OrderColumns.Count; i++)
             {
-                WriteValue(writer, "c" + i.ToString(CultureInfo.InvariantCulture), r.Position[i]);
+                SqlOSFgaPageValues.Write(writer, "c" + i.ToString(CultureInfo.InvariantCulture), r.Position[i], query.OrderColumns[i].Mapping.StoreType, provider.Kind);
             }
 
             writer.WriteEndObject();
@@ -340,66 +340,7 @@ internal sealed class SqlOSFgaPageBackend<T>(
                 continue;
             }
 
-            WriteValue(writer, name, position[i]);
-        }
-    }
-
-    /// <summary>A position value in the JSON the engine types by the column's store type.</summary>
-    private void WriteValue(Utf8JsonWriter writer, string name, object? value)
-    {
-        switch (value)
-        {
-            case null or DBNull:
-                writer.WriteNull(name);
-                break;
-            case int i:
-                writer.WriteNumber(name, i);
-                break;
-            case long l:
-                writer.WriteNumber(name, l);
-                break;
-            case short s:
-                writer.WriteNumber(name, s);
-                break;
-            case byte b:
-                writer.WriteNumber(name, b);
-                break;
-            case decimal d:
-                writer.WriteNumber(name, d);
-                break;
-            case double d:
-                writer.WriteNumber(name, d);
-                break;
-            case float f:
-                writer.WriteNumber(name, f);
-                break;
-            case bool b:
-                writer.WriteBoolean(name, b);
-                break;
-            case string s:
-                writer.WriteString(name, s);
-                break;
-            case Guid g:
-                writer.WriteString(name, g.ToString("D"));
-                break;
-            case DateTime dt:
-                writer.WriteString(name, dt.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff", CultureInfo.InvariantCulture));
-                break;
-            case DateTimeOffset dto:
-                writer.WriteString(name, dto.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffffzzz", CultureInfo.InvariantCulture));
-                break;
-            case DateOnly d:
-                writer.WriteString(name, d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
-                break;
-            case TimeOnly t:
-                writer.WriteString(name, t.ToString("HH:mm:ss.fffffff", CultureInfo.InvariantCulture));
-                break;
-            case byte[] bytes:
-                writer.WriteString(name, provider.Kind == SqlOSDatabaseProviderKind.PostgreSql ? "\\x" + Convert.ToHexString(bytes) : Convert.ToBase64String(bytes));
-                break;
-            default:
-                writer.WriteString(name, Convert.ToString(value, CultureInfo.InvariantCulture));
-                break;
+            SqlOSFgaPageValues.Write(writer, name, position[i], query.OrderColumns[i].Mapping.StoreType, provider.Kind);
         }
     }
 }
