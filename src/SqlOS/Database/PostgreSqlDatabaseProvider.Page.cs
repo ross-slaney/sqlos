@@ -491,15 +491,18 @@ internal sealed partial class PostgreSqlDatabaseProvider
                 WHERE {GrantChildCount("n.node")} = 1 AND NOT {grantedHere}
             ),
             nodes AS (
-                -- The resource of each node through a lateral lookup (the LIMIT keeps it one): the planner's
-                -- estimate of a recursive set is loose, and a join on it would hash the whole resource table.
+                -- The resource of each node, and whether it has a child, through lateral lookups (the LIMIT keeps
+                -- each one probe): the planner's estimate of a recursive set is loose, and a join on it would
+                -- hash the whole resource table, as an EXISTS on the children would (the planner turns such an
+                -- EXISTS into a hashed subplan that reads every resource's parent once per statement).
                 SELECT n.*, r."IsActive" AS active,
-                       EXISTS (SELECT 1 FROM {resources} ch WHERE ch."ParentId" = r."Id") AS has_children,
+                       COALESCE(hc.yes, FALSE) AS has_children,
                        g.granted,
                        g.thr, COALESCE(agg.cutg, 0) AS cutg,
                        CASE WHEN n.children THEN GREATEST(2, CEIL(n.f::numeric / COUNT(*) OVER (PARTITION BY n.req)))::int ELSE n.f END AS pf
                 FROM n
                 CROSS JOIN LATERAL (SELECT r."Id", r."IsActive" FROM {resources} r WHERE r."Seq" = n.node LIMIT 1) r
+                LEFT JOIN LATERAL (SELECT TRUE AS yes FROM {resources} ch WHERE ch."ParentId" = r."Id" LIMIT 1) hc ON TRUE
                 CROSS JOIN LATERAL (SELECT {GrantChildCount("n.node")}::int AS thr, {grantedHere} AS granted) g
                 LEFT JOIN LATERAL (
                     SELECT SUM(c."CutGrants")::int AS cutg
