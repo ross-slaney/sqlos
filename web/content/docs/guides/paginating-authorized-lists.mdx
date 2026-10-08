@@ -33,7 +33,7 @@ var hasNextPage = rows.Count > pageSize;
 if (hasNextPage) rows.RemoveAt(pageSize);
 ```
 
-That is an ordinary EF Core query. On the context registered with `AddSqlOS` it is also a page, and SqlOS runs it: instead of one statement the optimizer plans over the filter, SqlOS walks the caller's granted branches of the resource tree, merges their rows in the query's order and stops when the page is full. The rows come back as the query asked for them (`AsNoTracking`, `Include`, a `Select` all apply). Nothing about the query says so; the filter carries who it is for, and SqlOS recognizes the page.
+That is an ordinary EF Core query. On the context registered with `AddSqlOS` it is also a page, and SqlOS runs it: instead of one statement the optimizer plans over the filter, SqlOS walks the caller's granted branches of the resource tree, merges their rows in the query's order and stops when the page is full. The rows come back as the query asked for them (`AsNoTracking`, `Include`, a `Select` all apply). Nothing about the query says so; the filter carries who it is for, and SqlOS recognizes the page. `BuildFilterAsync` itself resolves the caller's principals and the permission and reads no grant: a request that pages pays for its page and nothing else, whether the caller holds one grant or a hundred thousand.
 
 A query is a page when it has:
 
@@ -43,7 +43,7 @@ A query is a page when it has:
 - **The page**: `Take(k)`, or `First`, `FirstOrDefault`, `Single`, `SingleOrDefault`; `Skip(n)` before `Take` works (SqlOS walks `n + k` rows and drops the first `n`, so keep offsets small and use a keyset for deep pages).
 - Optionally a **`Select`** after the order, applied when the rows load. `Include`, `AsNoTracking`, `IgnoreQueryFilters`, `TagWith` and `AsSplitQuery` pass through.
 
-Everything else runs as EF Core would, the filter as a predicate: a count, a join, a `GroupBy`, a query without `Take`, a page in an order you declared no index for, an order of mixed directions. Those are correct too; their cost is the optimizer's choice. A page SqlOS declined for a reason you can fix (an order without an index, a filter that joins) is logged once per query shape with the fix, under the `SqlOS.Fga` logger category.
+Everything else runs as EF Core would, the filter as a predicate: a count, a join, a `GroupBy`, a query without `Take`, a page in an order you declared no index for, an order of mixed directions. Those are correct too; their cost is the optimizer's choice. For them SqlOS reads the caller's access roots when the query runs (the resources the caller holds a usable grant on) and writes them into the predicate, so a count costs more as the caller's grants grow, and a page never pays that. A page SqlOS declined for a reason you can fix (an order without an index, a filter that joins) is logged once per query shape with the fix, under the `SqlOS.Fga` logger category.
 
 ### The cursor
 
@@ -103,11 +103,11 @@ Keyset (cursor/seek) pagination works with any library that composes on `IQuerya
 
 ### What the filter costs
 
-For a caller whose access comes from one grant, a keyset page through the filter in an order you declared an index for is one index seek plus the page's rows, the same as the walk. A caller granted on many nodes, or on many single rows, pays for every page the optimizer plans: the filter tests each row's scope against the whole list of the caller's roots. That is the case the walk exists for, and why a page is walked.
+For a caller whose access comes from one grant, a statement over the predicate in an order you declared an index for is one index seek plus the rows asked for, the same as the walk. A caller granted on many nodes, or on many single rows, pays for every statement the optimizer plans: SqlOS reads all of the caller's roots when the statement runs, and the predicate tests each row's scope against that list. That is the case the walk exists for, and why a page is walked.
 
 ### What the filter captures
 
-The *principal set* (the subject plus its group memberships) and the caller's grants are captured when `BuildFilterAsync` is awaited; the caller's own lifecycle is rechecked when each page's query runs. Build the filter once per request, so each page fetch sees the grants current at that request; do not cache it in statics or reuse it across requests.
+The *principal set* (the subject plus its group memberships) and the permission are resolved when `BuildFilterAsync` is awaited; no grant is read then. A walked page reads the caller's grants as it goes, and a planned statement reads the caller's access roots when it runs, so every query sees the grants of its moment; the caller's own lifecycle is rechecked by each query too. Build the filter once per request, so each request's queries see the principal set current at that request; do not cache it in statics or reuse it across requests. The filter runs on the context it was built for, the one with SqlOS's query execution (`AddSqlOS` configures it; a context built by hand calls `UseSqlOSFga`).
 
 ## Always end with a unique tiebreaker
 

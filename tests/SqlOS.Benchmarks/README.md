@@ -6,16 +6,19 @@ catalog grows from 1M to 50M products in CI, and fails CI when that behavior reg
 It is the maintained successor to the harness behind the paper's Section 7 (kept in `paper/benchmark`),
 which ran a hand-copied version of the schema and function at 1.2M–1.5M resources on SQL Server only.
 
-Every page is measured two ways, from the one query an application writes: `BuildFilterAsync`'s filter
-composed into `Where`, the cursor, the order, `Take(k + 1)`. A list page (`list.*`) is that query as one
-statement the optimizer plans, the filter as a predicate: the row's own scope column holds its resource's
+Every page is measured two ways, both from `BuildFilterAsync`'s filter composed into the query an
+application writes (`Where(filter)`, the cursor, the order, `Take(k + 1)`) on the context SqlOS registers
+(`UseSqlOSFga`, what `AddSqlOS` applies). A list page (`list.*`) is the page written as a projection ordered
+after `Select`, which is not a page SqlOS walks: the optimizer plans it as one statement over the predicate,
+the same statement every query that is not a page gets (a count, a join). SqlOS reads the caller's access
+roots when that statement runs and writes them into it; the row's own scope column holds its resource's
 ancestor at every level access flows down from, so a single-grant caller's page is one seek of an index that
-starts with that level's part of the column and continues with the order the page asks for. The same query
-on a context with SqlOS's query execution (`page.*`, `UseSqlOSFga`, what `AddSqlOS` applies to the registered
-context) is walked by SqlOS: the library owns the access path (the adaptive walk over the per-subject grant
-counts, the same per-level indexes, and the direct index of rows granted on their own resource), so the work
-is about a page's worth for any caller, dense or sparse, one grant or a hundred thousand. Point checks
-measure `fn_IsResourceAccessible` and `Allows` (`CheckAccessAsync`), which applications call.
+starts with that level's part of the column and continues with the order the page asks for. The same page
+as written (`page.*`) is walked by SqlOS: the library owns the access path (the adaptive walk over the
+per-subject grant counts, the same per-level indexes, and the direct index of rows granted on their own
+resource), reads no root up front, and the work is about a page's worth for any caller, dense or sparse,
+one grant or a hundred thousand. Point checks measure `fn_IsResourceAccessible` and `Allows`
+(`CheckAccessAsync`), which applications call.
 
 ## What is measured
 
@@ -25,11 +28,14 @@ measure `fn_IsResourceAccessible` and `Allows` (`CheckAccessAsync`), which appli
   (`SqlOSFgaSchemaInitializer`, `SqlOSFgaFunctionInitializer`, `SqlOSFgaSeedService`) from an application
   context. A change to any of them is what gets measured.
 - **The application's queries.** Every page is `BuildFilterAsync<Product>` composed into the query an
-  application writes, through EF Core, so the timing includes the SQL EF generates for callers. The filter
-  is built before the clock starts, as the paper measured (its cost is reported beside the walked pages as
-  `resolve`); the query alone is timed, whether the optimizer plans it (`list.*`) or SqlOS walks it
-  (`page.*`: the walk's round trips and loading the page's rows). Warm cache; median and p95 over up to 25
-  runs. The harness fails a `page.*` scenario that ran as a plain query, and a `list.*` one that was walked.
+  application writes, through EF Core, so the timing includes the SQL EF generates for callers. Three
+  timings per page: `BuildFilterAsync` (`prepare`: the caller's principals and the permission; it reads no
+  grant, and the harness fails the run if it did), the query alone (what the gates hold: for `list.*` the
+  planned statement with the roots it reads when it runs, for `page.*` the walk's round trips and loading
+  the page's rows), and the whole request (`request`, both). What each path transferred before its rows is
+  reported too: the access roots a planned statement read (`roots`), the walk's rounds, statements, index
+  rows fetched and streams. Warm cache; median and p95 over up to 25 runs. The harness fails a `page.*`
+  scenario that ran as a plain query or read a root, and a `list.*` one that was walked.
 - **Every answer is checked against ground truth.** The exact page (k + 1 rows after the cursor, or the first
   k + 1 rows by price) and every allow or deny are recomputed from the dataset generator, so a fast wrong
   answer fails the run.
@@ -198,7 +204,10 @@ the application's own `StoreId` index; every other page reads the page's rows an
 - **regression**: every scenario's median against the constant set for it and the engine in
   `regressionMilliseconds`: what the scenario costs today, with headroom for runner noise (several times the
   values CI reports). A change that makes any page or point check slower than its limit fails the run. Raise
-  a limit only with an explanation. The SQL Server limits of the many-grants filter pages
+  a limit only with an explanation. The gated timing is the query alone; for a `list.*` page that includes
+  reading the caller's access roots, which the planned statement does when it runs (a `page.*` page reads
+  none): the many-grants filter pages carry 10,000 and 100,000 roots per execution, which is most of their
+  time (on PostgreSQL at 1M, locally: 59 of 71 ms and 522 of 638 ms), and their limits say so. The SQL Server limits of the many-grants filter pages
   (`list.grants10k.first-page`, `list.grants100k.first-page`) cover the full tier's runner, where those two
   statements take 8.6 s and 31.6 s at every scale (0.5 s and 1 s on the CI tier's runner): they are the cost
   of the optimizer planning a predicate with ten thousand roots in it, which is what the walked pages of the

@@ -449,7 +449,10 @@ internal sealed partial class SqlServerDatabaseProvider
         var afterValues = order.Select((_, i) => $"s.a{i}").ToList();
         var predicate = spec.PredicateSql is null ? "" : $"\n              AND ({spec.PredicateSql})";
         var typeFilter = spec.Typed ? $"\n              AND SUBSTRING({scope}, {SqlOSFgaLineage.ScopeTypeOffset}, 4) = @Type" : "";
-        var keyset = $"(s.has_after = 0 OR {Keyset(orderCols, afterValues, spec.Descending)})";
+        // A stream with a position seeks straight to it: a range on the order's first column (which the index
+        // serves), the rest nested, written only in the blocks for positioned streams. Wrapped in "no position
+        // OR …" it is no range at all, and a root stream would read every row before the position.
+        var keyset = Keyset(orderCols, afterValues, spec.Descending);
 
         var header = $"""
             DECLARE @LiveT TABLE (SubjectId NVARCHAR(450) COLLATE DATABASE_DEFAULT NOT NULL PRIMARY KEY);
@@ -532,56 +535,67 @@ internal sealed partial class SqlServerDatabaseProvider
         // Every stream is a seek of the level's mirrored index, by hint: the key order is also the clustered
         // index's order, and left to its estimates the optimizer may read the table in key order and filter
         // the level instead, which costs rows in proportion to the table rather than to the page.
+        // Two blocks per stream kind and level: one for the streams that have a position (the keyset written
+        // as a range the index serves), one for those that have none.
         var blocks = new StringBuilder();
         for (var level = 0; level < levels; level++)
         {
             var seek = $"SUBSTRING({scope}, {SqlOSFgaPageIndex.Offset(level)}, 8) = CAST(s.seq AS BINARY(8)) AND {scope} >= 0x{level:X2}";
             var hint = $"WITH (FORCESEEK ([{Escape(SqlOSFgaLineage.ScopeIndexName(spec.Table.Table, level, spec.IndexSuffix))}] ([{SqlOSFgaLineage.ScopeLevelColumn(level)}])))";
-            blocks.AppendLine(CultureInfo.InvariantCulture, $"""
-                UNION ALL
-                SELECT 0 AS kind, s.[level], s.seq, CAST(NULL AS NVARCHAR(450)) AS principal, CAST(NULL AS NVARCHAR(450)) AS role, q.rn, q.cnt, CAST(1 AS BIT) AS granted, {string.Join(", ", order.Select((_, i) => $"q.c{i}"))}
-                FROM @StreamsT s
-                CROSS APPLY (
-                    SELECT ROW_NUMBER() OVER (ORDER BY {outOrder}) AS rn, COUNT(*) OVER () AS cnt, z.*
-                    FROM (SELECT TOP (s.f) {selectCols}
-                          FROM {ScopeTable(spec.Table)} AS {a} {hint}
-                          WHERE {seek}{typeFilter}{predicate}
-                            AND {keyset}
-                          ORDER BY {orderBy}) z) q
-                WHERE s.kind = 0 AND s.[level] = {level}
-                UNION ALL
-                SELECT 1, s.[level], s.seq, NULL, NULL, q.rn, q.cnt, q.granted, {string.Join(", ", order.Select((_, i) => $"q.c{i}"))}
-                FROM @StreamsT s
-                CROSS APPLY (
-                    SELECT ROW_NUMBER() OVER (ORDER BY {outOrder}) AS rn, COUNT(*) OVER () AS cnt, z.*
-                    FROM (SELECT TOP (s.f) {selectCols}, CAST(CASE WHEN {RowTest(options, spec, level, levels)} THEN 1 ELSE 0 END AS BIT) AS granted
-                          FROM {ScopeTable(spec.Table)} AS {a} {hint}
-                          WHERE {seek}{predicate}
-                            AND {keyset}
-                          ORDER BY {orderBy}) z) q
-                WHERE s.kind = 1 AND s.[level] = {level}
-                """);
+            foreach (var positioned in new[] { true, false })
+            {
+                var position = positioned ? $"\n                            AND {keyset}" : "";
+                var streams = positioned ? "s.has_after = 1" : "s.has_after = 0";
+                blocks.AppendLine(CultureInfo.InvariantCulture, $"""
+                    UNION ALL
+                    SELECT 0 AS kind, s.[level], s.seq, CAST(NULL AS NVARCHAR(450)) AS principal, CAST(NULL AS NVARCHAR(450)) AS role, q.rn, q.cnt, CAST(1 AS BIT) AS granted, {string.Join(", ", order.Select((_, i) => $"q.c{i}"))}
+                    FROM @StreamsT s
+                    CROSS APPLY (
+                        SELECT ROW_NUMBER() OVER (ORDER BY {outOrder}) AS rn, COUNT(*) OVER () AS cnt, z.*
+                        FROM (SELECT TOP (s.f) {selectCols}
+                              FROM {ScopeTable(spec.Table)} AS {a} {hint}
+                              WHERE {seek}{typeFilter}{predicate}{position}
+                              ORDER BY {orderBy}) z) q
+                    WHERE s.kind = 0 AND s.[level] = {level} AND {streams}
+                    UNION ALL
+                    SELECT 1, s.[level], s.seq, NULL, NULL, q.rn, q.cnt, q.granted, {string.Join(", ", order.Select((_, i) => $"q.c{i}"))}
+                    FROM @StreamsT s
+                    CROSS APPLY (
+                        SELECT ROW_NUMBER() OVER (ORDER BY {outOrder}) AS rn, COUNT(*) OVER () AS cnt, z.*
+                        FROM (SELECT TOP (s.f) {selectCols}, CAST(CASE WHEN {RowTest(options, spec, level, levels)} THEN 1 ELSE 0 END AS BIT) AS granted
+                              FROM {ScopeTable(spec.Table)} AS {a} {hint}
+                              WHERE {seek}{predicate}{position}
+                              ORDER BY {orderBy}) z) q
+                    WHERE s.kind = 1 AND s.[level] = {level} AND {streams}
+                    """);
+            }
         }
 
         var directCols = order.Select(c => $"d.[{Escape(c.Column)}]").ToList();
+        var directKeyset = Keyset(directCols, afterValues, spec.Descending);
         var directJoin = spec.PredicateSql is null
             ? ""
             : $"\n                      INNER JOIN {ScopeTable(spec.Table)} AS {a} ON {string.Join(" AND ", spec.Table.KeyColumns.Select(k => $"{a}.[{Escape(k)}] = d.[{Escape(k)}]"))}";
-        var directBlock = $"""
-            UNION ALL
-            SELECT 2, -1, CAST(0 AS BIGINT), s.principal, s.role, q.rn, q.cnt, CAST(1 AS BIT), {string.Join(", ", order.Select((_, i) => $"q.c{i}"))}
-            FROM @StreamsT s
-            CROSS APPLY (
-                SELECT ROW_NUMBER() OVER (ORDER BY {outOrder}) AS rn, COUNT(*) OVER () AS cnt, z.*
-                FROM (SELECT TOP (s.f) {string.Join(", ", order.Select((c, i) => $"d.[{Escape(c.Column)}] AS c{i}"))}
-                      FROM {DirectTable(options, spec.Table)} d WITH (FORCESEEK ([{Escape(SqlOSFgaPageIndex.DirectIndexName(spec.Table, spec.IndexSuffix ?? "Key"))}] ([SubjectId], [RoleId]))){directJoin}
-                      WHERE d.SubjectId = s.principal AND d.RoleId = s.role AND d.Active = 1
-                        AND (@TypeSeq IS NULL OR d.TypeSeq = @TypeSeq)
-                        AND {Validity("d")}{predicate}
-                        AND (s.has_after = 0 OR {Keyset(directCols, afterValues, spec.Descending)})
-                      ORDER BY {string.Join(", ", directCols.Select(c => c + direction))}) z) q
-            WHERE s.kind = 2
-            """;
+        var directBlock = new StringBuilder();
+        foreach (var positioned in new[] { true, false })
+        {
+            var position = positioned ? $"\n                        AND {directKeyset}" : "";
+            var streams = positioned ? "s.has_after = 1" : "s.has_after = 0";
+            directBlock.AppendLine(CultureInfo.InvariantCulture, $"""
+                UNION ALL
+                SELECT 2, -1, CAST(0 AS BIGINT), s.principal, s.role, q.rn, q.cnt, CAST(1 AS BIT), {string.Join(", ", order.Select((_, i) => $"q.c{i}"))}
+                FROM @StreamsT s
+                CROSS APPLY (
+                    SELECT ROW_NUMBER() OVER (ORDER BY {outOrder}) AS rn, COUNT(*) OVER () AS cnt, z.*
+                    FROM (SELECT TOP (s.f) {string.Join(", ", order.Select((c, i) => $"d.[{Escape(c.Column)}] AS c{i}"))}
+                          FROM {DirectTable(options, spec.Table)} d WITH (FORCESEEK ([{Escape(SqlOSFgaPageIndex.DirectIndexName(spec.Table, spec.IndexSuffix ?? "Key"))}] ([SubjectId], [RoleId]))){directJoin}
+                          WHERE d.SubjectId = s.principal AND d.RoleId = s.role AND d.Active = 1
+                            AND (@TypeSeq IS NULL OR d.TypeSeq = @TypeSeq)
+                            AND {Validity("d")}{predicate}{position}
+                          ORDER BY {string.Join(", ", directCols.Select(c => c + direction))}) z) q
+                WHERE s.kind = 2 AND {streams}
+                """);
+        }
 
         // The streams of the round go into a table variable first. SQL Server inlines a common table expression
         // at every reference, and the stream set is referenced by every level's blocks: evaluated there, the

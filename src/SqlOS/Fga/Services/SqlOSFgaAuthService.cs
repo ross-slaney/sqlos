@@ -1,6 +1,7 @@
 using System.Linq.Expressions;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -379,6 +380,7 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
     {
         EnsureRelational();
         EnsureProtectedEntity<T>();
+        EnsureSqlOSQueryExecution();
         var subjectIds = await ResolveSubjectIdsAsync(subjectId);
         if (subjectIds.Count == 0)
         {
@@ -403,26 +405,25 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
             return entity => false;
         }
 
-        // The caller's access roots, read once: the resources their live subjects hold a current grant on
-        // with a role that includes the permission. The filter compares each row's scope at a root's level with
-        // the root. Grants are read when the filter is built, as group membership is; build the filter per
-        // request.
-        var provider = SqlOSDatabase.Resolve(_context.Database);
-        var subjectIdsJson = JsonSerializer.Serialize(subjectIds);
-        var roots = await _context.Set<SqlOSFgaAccessRoot>()
-            .FromSqlRaw(provider.BuildAccessRootsQuerySql(_options), subjectIdsJson, permission.Id)
-            .AsNoTracking()
-            .ToListAsync();
-        if (roots.Count == 0)
-        {
-            return entity => false;
-        }
+        // The filter names who the rows are for (the caller's live subjects, resolved now as group membership
+        // is, and the permission) and reads no grant: the query that uses it reads what it needs when it runs.
+        // A page over it is walked from the caller's grants; any other query gets the predicate over the
+        // caller's access roots, read at that moment (SqlOSFgaQueryCompiler). Build the filter per request.
+        return SqlOSFgaAccess.Filter<T>(new SqlOSFgaAccessToken(subjectIds, JsonSerializer.Serialize(subjectIds), permission.Id, permissionKey, permission.TypeSeq, _options));
+    }
 
-        // The filter carries who it is for: a page over it (Where(filter), an order, Take) on the context
-        // registered with SqlOS is then walked rather than planned by the optimizer (SqlOSFgaQueryCompiler).
-        var filter = SqlOSFgaFilterBuilder.Build<T>(roots, subjectIdsJson, permission.TypeSeq, SqlOSFgaLineage.Levels(_options));
-        SqlOSFgaFilterRegistry.Register(filter, new SqlOSFgaAccessToken(subjectIds, subjectIdsJson, permission.Id, permissionKey));
-        return filter;
+    /// <summary>
+    /// A filter is evaluated by SqlOS's query execution, which <c>AddSqlOS</c> configures on the context it
+    /// registers; a context without it could not run a query over the filter at all, so say so here.
+    /// </summary>
+    private void EnsureSqlOSQueryExecution()
+    {
+        if (_context is DbContext db && db.GetService<IDbContextOptions>().FindExtension<SqlOSFgaOptionsExtension>() is null)
+        {
+            throw new InvalidOperationException(
+                "Filters from BuildFilterAsync run on a context with SqlOS's query execution. AddSqlOS configures the context it registers; "
+                + "a context built by hand calls UseSqlOSFga() on its DbContextOptionsBuilder.");
+        }
     }
 
     /// <summary>The grant that decides a point check (fn_IsResourceAccessible), or null when it is denied.</summary>

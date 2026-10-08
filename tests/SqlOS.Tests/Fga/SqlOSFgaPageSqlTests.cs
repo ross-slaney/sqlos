@@ -121,6 +121,10 @@ public class SqlOSFgaPageSqlTests
         round.Should().Contain("WITH (FORCESEEK ([IX_SqlOSFgaDirect_app_Items_Price] ([SubjectId], [RoleId])))");
         round.Should().NotContain("s.[level] = 3");
         round.Should().Contain("ORDER BY c0, c1");
+
+        // A positioned stream's keyset is a range the index serves, never behind an OR on the position's presence.
+        round.Should().Contain("AND s.has_after = 1").And.Contain("AND s.has_after = 0").And.NotContain("has_after = 0 OR");
+        round.Should().Contain("(i.[Price] >= s.a0 AND (i.[Price] > s.a0 OR i.[Id] > s.a1))");
     }
 
     [TestMethod]
@@ -147,6 +151,10 @@ public class SqlOSFgaPageSqlTests
 
         round.Should().NotContain("s.level = 3");
         round.Should().Contain("ORDER BY c0, c1");
+
+        // A positioned stream's keyset is a range the index serves, never behind an OR on the position's presence.
+        round.Should().Contain("AND s.has_after").And.Contain("AND NOT s.has_after").And.NotContain("NOT s.has_after OR");
+        round.Should().Contain("(i.\"Price\" >= s.a0 AND (i.\"Price\" > s.a0 OR i.\"Id\" > s.a1))");
     }
 
     [TestMethod]
@@ -166,8 +174,8 @@ public class SqlOSFgaPageSqlTests
         postgres.Should().Contain("ORDER BY c0 DESC, c1 DESC");
         postgres.Should().Contain("ORDER BY i.\"Price\" DESC, i.\"Id\" DESC");
         postgres.Should().Contain("ORDER BY d.\"Price\" DESC, d.\"Id\" DESC");
-        postgres.Should().Contain("(i.\"Price\", i.\"Id\") < (s.a0, s.a1)");
-        postgres.Should().NotContain(") > (s.a0");
+        postgres.Should().Contain("(i.\"Price\" <= s.a0 AND (i.\"Price\" < s.a0 OR i.\"Id\" < s.a1))", "the keyset seeks before the position");
+        postgres.Should().NotContain(" > s.a").And.NotContain(" >= s.a");
 
         // Ascending is the default, unchanged.
         var ascending = SqlServerDatabaseProvider.Instance.BuildPageRoundSql(options, spec with { Descending = false });

@@ -45,11 +45,10 @@ internal static class SqlOSFgaPagePlanner
     private static readonly ConcurrentDictionary<string, byte> Warned = new();
     private static readonly MethodInfo BuildMethod = typeof(SqlOSFgaPagePlanner).GetMethod(nameof(Build), BindingFlags.NonPublic | BindingFlags.Static)!;
 
-    public static ISqlOSFgaPagePlan? TryPlan(Expression query, DbContext context, SqlOSFgaOptions options, ILogger logger)
+    public static ISqlOSFgaPagePlan? TryPlan(Expression query, DbContext context, ILogger logger)
     {
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
         if (Walking.Value)
         {
@@ -66,7 +65,7 @@ internal static class SqlOSFgaPagePlanner
         Walking.Value = true;
         try
         {
-            return (ISqlOSFgaPagePlan?)BuildMethod.MakeGenericMethod(shape.EntityType).Invoke(null, [shape, context, options, logger]);
+            return (ISqlOSFgaPagePlan?)BuildMethod.MakeGenericMethod(shape.EntityType).Invoke(null, [shape, context, logger]);
         }
         catch (TargetInvocationException ex) when (ex.InnerException is InvalidOperationException reason)
         {
@@ -89,11 +88,11 @@ internal static class SqlOSFgaPagePlanner
         }
     }
 
-    private static ISqlOSFgaPagePlan Build<T>(PageShape shape, DbContext context, SqlOSFgaOptions options, ILogger logger)
+    private static ISqlOSFgaPagePlan Build<T>(PageShape shape, DbContext context, ILogger logger)
         where T : class, IHasResourceId
     {
         var query = SqlOSFgaPageQuery<T>.Create(context, shape.Filters, shape.Order, shape.Materialization);
-        return new Plan<T>(shape, query, context, options, logger);
+        return new Plan<T>(shape, query, context, shape.Token.Options, logger);
     }
 
     private sealed class Plan<T>(PageShape shape, SqlOSFgaPageQuery<T> query, DbContext context, SqlOSFgaOptions options, ILogger logger) : ISqlOSFgaPagePlan
@@ -335,7 +334,7 @@ internal static class SqlOSFgaPagePlanner
         private void AddFilter(LambdaExpression filter, ref bool sawFilter)
         {
             _overRows.Add(filter);
-            if (!sawFilter && SqlOSFgaFilterRegistry.Find(filter) is { } token)
+            if (!sawFilter && SqlOSFgaAccess.TokenOf(filter) is { } token)
             {
                 Token = token;
                 sawFilter = true;

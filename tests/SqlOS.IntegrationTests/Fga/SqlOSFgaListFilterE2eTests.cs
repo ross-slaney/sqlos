@@ -427,6 +427,9 @@ public class SqlOSFgaListFilterE2eTests
     {
         public DbSet<ManualTicket> Tickets => Set<ManualTicket>();
 
+        // SqlOS's query execution evaluates the filters BuildFilterAsync returns; AddSqlOS applies it to the
+        // context it registers, a context built by hand applies it itself (the test provider does, like
+        // UseSqlOSFga() in an application).
         public static ManualFgaDbContext Create(string connectionString)
             => new(new DbContextOptionsBuilder<ManualFgaDbContext>().UseTestProvider(connectionString).Options);
 

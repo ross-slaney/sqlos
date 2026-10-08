@@ -93,15 +93,12 @@ else
 
 var planCapture = new PlanCapture(options.Provider);
 plainOptions.AddInterceptors(planCapture);
-var builtPlainOptions = plainOptions.Options;
-BenchDbContext CreateContext() => new(builtPlainOptions);
 
-// The same options with SqlOS's query execution, as AddSqlOS applies it to the registered context: a page
-// over the filter (Where(filter), an order, Take) is walked instead of planned by the optimizer.
-var pageOptions = new DbContextOptionsBuilder<BenchDbContext>(builtPlainOptions);
-pageOptions.UseSqlOSFga(fga);
-var builtPageOptions = pageOptions.Options;
-BenchDbContext CreatePageContext() => new(builtPageOptions);
+// SqlOS's query execution, as AddSqlOS applies it to the context it registers: a page over the filter is
+// walked; every other query over it gets the predicate over the caller's access roots, read when it runs.
+plainOptions.UseSqlOSFga();
+var builtOptions = plainOptions.Options;
+BenchDbContext CreateContext() => new(builtOptions);
 
 // The schema, indexes, functions, lineage triggers, scope column, and core seed exactly as SqlOS creates them
 // for an application.
@@ -127,7 +124,7 @@ var dataset = new DatasetShape(
     MaxDepth: 10,
     options.Seed,
     string.Create(CultureInfo.InvariantCulture,
-        $"The shipped schema, indexes, resource lineage, `fn_AccessRoots`, and `fn_IsResourceAccessible`, queried on a product table two ways: every page as one statement the optimizer plans (`list.*`: `BuildFilterAsync`'s filter as a predicate, the lineage read from the row's own scope column) and the same LINQ on a context with SqlOS's query execution (`page.*`, `UseSqlOSFga`: the adaptive walk over the grant counts, the per-level indexes, and the direct index). The tree: {chains} retail chains ({chains - 1} at D = 5, one at D = 10) with {tree.Stores.Count:N0} stores and {tree.Nodes.Count + 1:N0} organizational nodes. Store sizes are log-normal, and products are spread through the id range the way rows arrive over time. {managedScopes:N0} managers hold grants on their store, region, or chain. One person holds {BenchmarkModel.HundredStoreGrants} store grants across the chains; two more hold 10,000 and 100,000 grants on single products, spread through the catalog. The people measured each resolve to 3 subjects (M = 3)."));
+        $"The shipped schema, indexes, resource lineage, `fn_AccessRoots`, and `fn_IsResourceAccessible`, queried on a product table two ways, both over `BuildFilterAsync`'s filter on the context SqlOS registers: every page as one statement the optimizer plans (`list.*`: the page written as a projection ordered after `Select`, which SqlOS leaves to the optimizer; the caller's access roots are read when the statement runs, and the lineage from the row's own scope column) and the same page as written (`page.*`: walked by SqlOS over the grant counts, the per-level indexes, and the direct index, reading no root). The tree: {chains} retail chains ({chains - 1} at D = 5, one at D = 10) with {tree.Stores.Count:N0} stores and {tree.Nodes.Count + 1:N0} organizational nodes. Store sizes are log-normal, and products are spread through the id range the way rows arrive over time. {managedScopes:N0} managers hold grants on their store, region, or chain. One person holds {BenchmarkModel.HundredStoreGrants} store grants across the chains; two more hold 10,000 and 100,000 grants on single products, spread through the catalog. The people measured each resolve to 3 subjects (M = 3)."));
 
 // Leave room for the CI runner's own logs and the uploaded results.
 long? FreeBytes() => options.DataDirectory is { } directory ? new DriveInfo(Path.GetFullPath(directory)).AvailableFreeSpace : null;
@@ -174,7 +171,7 @@ var report = new BenchmarkReport
 };
 log.Info($"Engine: {report.Engine}");
 
-var runner = new ScenarioRunner(CreateContext, CreatePageContext, options.Provider, fga, tree, Path.Combine(outputDirectory, "plans"), options.ScenarioBudgetSeconds, log);
+var runner = new ScenarioRunner(CreateContext, options.Provider, fga, tree, Path.Combine(outputDirectory, "plans"), options.ScenarioBudgetSeconds, log);
 var extraGates = new List<GateResult>();
 long loaded = 0;
 long lastSize = 0;

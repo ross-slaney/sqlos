@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Linq.Expressions;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -15,12 +16,13 @@ namespace SqlOS.Benchmarks.Scenarios;
 
 /// <summary>
 /// Runs each scenario the way an application request would: a fresh context, the public FGA service, and the
-/// query EF Core builds from it. Only the authorized query itself is timed. Every result is checked against
-/// ground truth computed independently from the dataset generator, so a fast wrong answer fails the run.
+/// query EF Core builds from it. Three timings per page: <c>BuildFilterAsync</c> (the caller's principals and
+/// the permission; it reads no grant), the query alone (what the gates hold), and the whole request. Every
+/// result is checked against ground truth computed independently from the dataset generator, so a fast wrong
+/// answer fails the run.
 /// </summary>
 internal sealed class ScenarioRunner(
     Func<BenchDbContext> createContext,
-    Func<BenchDbContext> createPageContext,
     DatabaseProvider provider,
     SqlOSFgaOptions fga,
     RetailTree tree,
@@ -58,7 +60,7 @@ internal sealed class ScenarioRunner(
 
     private async Task<ScenarioResult> RunAsync(Scenario scenario, long productCount, CancellationToken cancellationToken)
     {
-        // The first execution is untimed: its answer is the one verified, and for filter pages the same command
+        // The first execution is untimed: its answer is the one verified, and for planned pages the same command
         // is run once more under EXPLAIN ANALYZE / STATISTICS XML for rows examined and server time. A walked
         // page is several statements, so it reports the executor's own counters (rounds, statements, rows
         // fetched) instead of a plan.
@@ -82,9 +84,11 @@ internal sealed class ScenarioRunner(
         // A query that already took more than half the budget is not run again: one more run could exceed the
         // budget and costs up to ten minutes. Its single verified run is the measurement.
         double[] timings;
+        double[] prepares;
         if (estimate > budgetSeconds * 1_000d / 2)
         {
             timings = [estimate];
+            prepares = [first.PrepareMs];
         }
         else
         {
@@ -100,14 +104,16 @@ internal sealed class ScenarioRunner(
                 // length, and each run costs minutes of CI time on SQL Server.
                 var iterations = estimate switch { < 250 => 25, < 2_000 => 7, < 10_000 => 3, _ => 1 };
                 timings = new double[iterations];
+                prepares = new double[iterations];
                 for (var i = 0; i < iterations; i++)
                 {
                     var run = await ExecuteAsync(scenario, cancellationToken);
                     timings[i] = run.Elapsed.TotalMilliseconds;
-                    if (run.Counters is not null)
+                    prepares[i] = run.PrepareMs;
+                    if (run.Counters is not null || run.RootsFetched is not null)
                     {
                         // The breakdown of a warm execution, the last one; the counts are the same on every run.
-                        first = first with { Counters = run.Counters };
+                        first = first with { Counters = run.Counters, RootsFetched = run.RootsFetched, RootsMs = run.RootsMs };
                     }
                 }
             }
@@ -118,7 +124,10 @@ internal sealed class ScenarioRunner(
         }
 
         var iterationsRun = timings.Length;
+        var requests = timings.Zip(prepares, (query, prepare) => query + prepare).ToArray();
         Array.Sort(timings);
+        Array.Sort(prepares);
+        Array.Sort(requests);
 
         var counters = first.Counters;
         var result = new ScenarioResult(
@@ -142,6 +151,10 @@ internal sealed class ScenarioRunner(
             plan?.File)
         {
             StoreFiltered = scenario.StoreId is not null,
+            PrepareMs = scenario.IsPage ? Percentile(prepares, 0.50) : null,
+            RequestMs = scenario.IsPage ? Percentile(requests, 0.50) : null,
+            RootsFetched = first.RootsFetched,
+            RootsMs = first.RootsMs,
             Rounds = counters?.Rounds,
             Statements = counters?.Statements,
             RowsFetched = counters?.RowsFetched,
@@ -153,6 +166,8 @@ internal sealed class ScenarioRunner(
 
         log.Info(
             $"  {scenario.Id,-44} p50 {result.MedianMs,9:F2} ms  p95 {result.P95Ms,9:F2} ms  n={iterationsRun,2}" +
+            (result.RequestMs is { } request ? $"  request {request:F2} ms (prepare {result.PrepareMs:F2})" : "") +
+            (result.RootsFetched is { } roots ? $"  roots {roots:N0} ({result.RootsMs:F2} ms)" : "") +
             (plan?.RowsExamined is { } examined ? $"  examined {examined:N0}" : "") +
             (plan?.PlanningMs is { } planning ? $"  plan {planning:F2} ms" : "") +
             (plan?.ExecutionMs is { } execution ? $"  exec {execution:F2} ms" : "") +
@@ -209,9 +224,7 @@ internal sealed class ScenarioRunner(
 
     private async Task<Execution> ExecuteAsync(Scenario scenario, CancellationToken cancellationToken, CapturedPlan? capture = null)
     {
-        // The same context an application registers, in one of its two configurations: plain EF Core, or
-        // with SqlOS's query execution (UseSqlOSFga), where a page over the filter is walked.
-        await using var db = scenario.Kind == ScenarioKind.Page ? createPageContext() : createContext();
+        await using var db = createContext();
         db.Database.SetCommandTimeout(TimeSpan.FromSeconds(budgetSeconds));
         var service = new SqlOSFgaAuthService(db, Options.Create(fga), NullLogger<SqlOSFgaAuthService>.Instance);
         switch (scenario.Kind)
@@ -219,14 +232,21 @@ internal sealed class ScenarioRunner(
             case ScenarioKind.List:
             case ScenarioKind.Page:
             {
-                // The one query an application writes, either way: Where(filter), the store filter, the cursor,
-                // the order, Take(k + 1). Building the filter (principal resolution, the access roots) is a
-                // request's cost before the query and is reported beside it, not inside the clock.
-                var resolve = Stopwatch.StartNew();
-                var query = await BuildListQueryAsync(db, service, scenario);
-                resolve.Stop();
+                // The whole request, as an application pays it: BuildFilterAsync (the caller's principals and
+                // the permission), then the query. What each path reads before its rows is recorded by SqlOS:
+                // the access roots a planned statement resolves when it runs, the walk's own counters.
+                SqlOSFgaPageDiagnostics.Collect();
+                var prepare = Stopwatch.StartNew();
+                var filter = await service.BuildFilterAsync<Product>(scenario.Principal.SubjectId, BenchmarkModel.ProductView);
+                prepare.Stop();
+                if (SqlOSFgaPageDiagnostics.RootsResolved is { } early)
+                {
+                    throw new InvalidOperationException($"{scenario.Id}: BuildFilterAsync read {early} access roots; it must read none.");
+                }
 
-                // Armed only now, after BuildFilterAsync's own lookups, so the plan is the list query's.
+                var query = BuildQuery(db, filter, scenario);
+
+                // Armed only now, after BuildFilterAsync's own lookups, so the plan is the page statement's.
                 if (capture is not null)
                 {
                     PlanCapture.Arm(capture);
@@ -234,11 +254,11 @@ internal sealed class ScenarioRunner(
 
                 try
                 {
-                    SqlOSFgaPageDiagnostics.Collect();
                     var clock = Stopwatch.StartNew();
                     var page = await query.ToListAsync(cancellationToken);
                     clock.Stop();
                     var counters = SqlOSFgaPageDiagnostics.LastCounters;
+                    var roots = SqlOSFgaPageDiagnostics.RootsResolved;
                     if (scenario.Kind == ScenarioKind.Page)
                     {
                         if (counters is null)
@@ -246,14 +266,25 @@ internal sealed class ScenarioRunner(
                             throw new InvalidOperationException($"{scenario.Id} ran as a plain query: SqlOS did not walk it.");
                         }
 
-                        counters.ResolveMs = resolve.Elapsed.TotalMilliseconds;
+                        if (roots is not null)
+                        {
+                            throw new InvalidOperationException($"{scenario.Id}: a walked page read {roots} access roots; it must read none.");
+                        }
+
+                        counters.ResolveMs = prepare.Elapsed.TotalMilliseconds;
                     }
                     else if (counters is not null)
                     {
-                        throw new InvalidOperationException($"{scenario.Id} was walked on the plain context.");
+                        throw new InvalidOperationException($"{scenario.Id} was walked; it is the planned statement.");
                     }
 
-                    return new Execution(clock.Elapsed, page, Allowed: null) { Counters = counters };
+                    return new Execution(clock.Elapsed, page, Allowed: null)
+                    {
+                        Counters = counters,
+                        PrepareMs = prepare.Elapsed.TotalMilliseconds,
+                        RootsFetched = roots,
+                        RootsMs = SqlOSFgaPageDiagnostics.RootsMs,
+                    };
                 }
                 finally
                 {
@@ -287,26 +318,34 @@ internal sealed class ScenarioRunner(
 
     /// <summary>
     /// The page an application asks for: authorized, optionally store-scoped, in key order after a cursor or
-    /// in price order, k + 1 rows. On the plain context the optimizer plans it as one statement; on the
-    /// SqlOS context the keyset predicate is where every stream of the walk starts.
+    /// in price order, k + 1 rows, projected to the columns the harness verifies. Written as the page
+    /// (<c>page.*</c>), SqlOS walks it; written as a projection ordered after <c>Select</c> (<c>list.*</c>),
+    /// it is not a page SqlOS walks and the optimizer plans it as one statement over the predicate, the same
+    /// statement every query that is not a page gets.
     /// </summary>
-    private static async Task<IQueryable<Product>> BuildListQueryAsync(BenchDbContext db, SqlOSFgaAuthService service, Scenario scenario)
+    private static IQueryable<ProductRow> BuildQuery(BenchDbContext db, Expression<Func<Product, bool>> filter, Scenario scenario)
     {
-        var authorized = await service.BuildFilterAsync<Product>(scenario.Principal.SubjectId, BenchmarkModel.ProductView);
-        IQueryable<Product> query = db.Products.AsNoTracking().Where(authorized);
-
+        var rows = db.Products.AsNoTracking().Where(filter);
         if (scenario.StoreId is { } storeId)
         {
-            query = query.Where(p => p.StoreId == storeId);
+            rows = rows.Where(p => p.StoreId == storeId);
         }
 
-        if (scenario.Order == PageOrder.Price)
+        if (scenario.Order == PageOrder.Id)
         {
-            return query.OrderBy(p => p.Price).ThenBy(p => p.Id).Take(scenario.PageSize + 1);
+            var cursor = scenario.Cursor;
+            rows = rows.Where(p => p.Id > cursor);
         }
 
-        var cursor = scenario.Cursor;
-        return query.Where(p => p.Id > cursor).OrderBy(p => p.Id).Take(scenario.PageSize + 1);
+        if (scenario.Kind == ScenarioKind.Page)
+        {
+            var ordered = scenario.Order == PageOrder.Price ? rows.OrderBy(p => p.Price).ThenBy(p => p.Id) : rows.OrderBy(p => p.Id);
+            return ordered.Take(scenario.PageSize + 1).Select(p => new ProductRow { Id = p.Id, StoreId = p.StoreId, ResourceId = p.ResourceId, Price = p.Price });
+        }
+
+        var projected = rows.Select(p => new ProductRow { Id = p.Id, StoreId = p.StoreId, ResourceId = p.ResourceId, Price = p.Price });
+        var planned = scenario.Order == PageOrder.Price ? projected.OrderBy(r => r.Price).ThenBy(r => r.Id) : projected.OrderBy(r => r.Id);
+        return planned.Take(scenario.PageSize + 1);
     }
 
     private async Task<PlanSummary?> SavePlanAsync(Scenario scenario, CapturedPlan plan, long productCount, CancellationToken cancellationToken)
@@ -401,13 +440,34 @@ internal sealed class ScenarioRunner(
         return sorted[low] + (sorted[high] - sorted[low]) * (rank - low);
     }
 
-    private sealed record Execution(TimeSpan Elapsed, List<Product>? Page, bool? Allowed)
+    private sealed record Execution(TimeSpan Elapsed, List<ProductRow>? Page, bool? Allowed)
     {
         /// <summary>For a walked page: what the executor did, in its own units.</summary>
         public SqlOSFgaPageCounters? Counters { get; init; }
+
+        /// <summary>Milliseconds in BuildFilterAsync, before the query.</summary>
+        public double PrepareMs { get; init; }
+
+        /// <summary>For a planned statement: the access roots it read before running, as rows transferred; null when it read none.</summary>
+        public int? RootsFetched { get; init; }
+
+        /// <summary>Milliseconds spent reading those roots.</summary>
+        public double? RootsMs { get; init; }
     }
 
     private sealed record PlanSummary(long? RowsExamined, double? PlanningMs, double? ExecutionMs, string File);
+}
+
+/// <summary>A page's row as the harness verifies it: the key, the store, the resource and the price (initializers, so an order over the projection translates).</summary>
+internal sealed class ProductRow
+{
+    public int Id { get; init; }
+
+    public int StoreId { get; init; }
+
+    public string ResourceId { get; init; } = string.Empty;
+
+    public decimal Price { get; init; }
 }
 
 /// <param name="RowsExamined">Product rows the plan read, produced or discarded, summed over loops.</param>
@@ -437,6 +497,18 @@ internal sealed record ScenarioResult(
     /// <summary>The page was filtered to one store as well, so it touches that store's rows through its own index.</summary>
     public bool StoreFiltered { get; init; }
 
+    /// <summary>For a page: median milliseconds of BuildFilterAsync (the caller's principals and the permission; no grant is read).</summary>
+    public double? PrepareMs { get; init; }
+
+    /// <summary>For a page: median milliseconds of the whole request, BuildFilterAsync and the query.</summary>
+    public double? RequestMs { get; init; }
+
+    /// <summary>For a planned statement: the caller's access roots it read when it ran, as rows transferred before the statement; null for a walked page, which reads none.</summary>
+    public int? RootsFetched { get; init; }
+
+    /// <summary>Milliseconds spent reading those roots, inside the query's timing.</summary>
+    public double? RootsMs { get; init; }
+
     /// <summary>For a walked page: round trips the executor made.</summary>
     public int? Rounds { get; init; }
 
@@ -449,7 +521,7 @@ internal sealed record ScenarioResult(
     /// <summary>For a walked page: streams opened (one seek each).</summary>
     public int? Streams { get; init; }
 
-    /// <summary>For a walked page: milliseconds building the filter (the caller's principals, the permission, the access roots), outside the timed query.</summary>
+    /// <summary>For a walked page: milliseconds of BuildFilterAsync on its last timed execution (the same cost as PrepareMs, for the breakdown).</summary>
     public double? ResolveMs { get; init; }
 
     /// <summary>For a walked page, on its last timed execution: milliseconds in the walk (prelude and rounds).</summary>

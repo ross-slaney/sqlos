@@ -446,14 +446,17 @@ internal sealed partial class PostgreSqlDatabaseProvider
         var afterTyped = string.Join(", ", order.Select((c, i) => $"a{i} {c.StoreType}"));
         // A descending page reads the same indexes backwards: the order, the merge and the keyset all flip.
         var direction = spec.Descending ? " DESC" : "";
-        var beyond = spec.Descending ? "<" : ">";
-        var orderCols = string.Join(", ", order.Select(c => $"{a}.{QuoteIdentifier(c.Column)}"));
         var orderBy = string.Join(", ", order.Select(c => $"{a}.{QuoteIdentifier(c.Column)}{direction}"));
         var outOrder = string.Join(", ", order.Select((c, i) => $"c{i}{direction}"));
         var selectCols = string.Join(", ", order.Select((c, i) => $"{a}.{QuoteIdentifier(c.Column)} AS c{i}"));
         var predicate = spec.PredicateSql is null ? "" : $"\n              AND ({spec.PredicateSql})";
         var typeFilter = spec.Typed ? $"\n              AND SUBSTRING({scope}, {SqlOSFgaLineage.ScopeTypeOffset}, 4) = @Type" : "";
-        var keyset = $"(NOT s.has_after OR ({orderCols}) {beyond} ({string.Join(", ", order.Select((_, i) => $"s.a{i}"))}))";
+
+        // A stream with a position seeks straight to it: a range on the order's first column (which the index
+        // serves), the rest nested, written only in the blocks for positioned streams. Wrapped in "no position
+        // OR …" it is no range at all, and a root stream would read every row before the position.
+        var afterValues = order.Select((_, i) => $"s.a{i}").ToList();
+        var keyset = Keyset(order.Select(c => $"{a}.{QuoteIdentifier(c.Column)}").ToList(), afterValues, spec.Descending);
 
         var afterColumns = string.Join(", ", order.Select((_, i) => $"o.a{i}"));
         var afterFromN = string.Join(", ", order.Select((_, i) => $"n.a{i}"));
@@ -517,61 +520,70 @@ internal sealed partial class PostgreSqlDatabaseProvider
             SELECT req, node, level, active, granted, has_children, thr, cutg, fetch_n FROM opened ORDER BY req, node;
             """;
 
+        // Two blocks per stream kind and level: one for the streams that have a position (the keyset written
+        // as a range the index serves), one for those that have none.
         var blocks = new StringBuilder();
         for (var level = 0; level < levels; level++)
         {
             var seek = $"SUBSTRING({scope}, {SqlOSFgaPageIndex.Offset(level)}, 8) = int8send(s.seq) AND {scope} >= '\\x{level:x2}'::bytea";
-            blocks.AppendLine(CultureInfo.InvariantCulture, $"""
-                UNION ALL
-                SELECT 0 AS kind, s.level, s.seq, NULL::varchar AS principal, NULL::varchar AS role, q.rn, q.cnt, TRUE AS granted, {string.Join(", ", order.Select((_, i) => $"q.c{i}"))}
-                FROM streams s
-                CROSS JOIN LATERAL (
-                    SELECT row_number() OVER (ORDER BY {outOrder}) AS rn, count(*) OVER () AS cnt, z.*
-                    FROM (SELECT {selectCols}
-                          FROM {ScopeTable(spec.Table)} AS {a}
-                          WHERE {seek}{typeFilter}{predicate}
-                            AND {keyset}
-                          ORDER BY {orderBy}
-                          LIMIT s.f) z) q
-                WHERE s.kind = 0 AND s.level = {level}
-                UNION ALL
-                SELECT 1, s.level, s.seq, NULL, NULL, q.rn, q.cnt, q.granted, {string.Join(", ", order.Select((_, i) => $"q.c{i}"))}
-                FROM streams s
-                CROSS JOIN LATERAL (
-                    SELECT row_number() OVER (ORDER BY {outOrder}) AS rn, count(*) OVER () AS cnt, z.*
-                    FROM (SELECT {selectCols}, {RowTest(options, spec, level, levels)} AS granted
-                          FROM {ScopeTable(spec.Table)} AS {a}
-                          WHERE {seek}{predicate}
-                            AND {keyset}
-                          ORDER BY {orderBy}
-                          LIMIT s.f) z) q
-                WHERE s.kind = 1 AND s.level = {level}
-                """);
+            foreach (var positioned in new[] { true, false })
+            {
+                var position = positioned ? $"\n                            AND {keyset}" : "";
+                var streams = positioned ? "s.has_after" : "NOT s.has_after";
+                blocks.AppendLine(CultureInfo.InvariantCulture, $"""
+                    UNION ALL
+                    SELECT 0 AS kind, s.level, s.seq, NULL::varchar AS principal, NULL::varchar AS role, q.rn, q.cnt, TRUE AS granted, {string.Join(", ", order.Select((_, i) => $"q.c{i}"))}
+                    FROM streams s
+                    CROSS JOIN LATERAL (
+                        SELECT row_number() OVER (ORDER BY {outOrder}) AS rn, count(*) OVER () AS cnt, z.*
+                        FROM (SELECT {selectCols}
+                              FROM {ScopeTable(spec.Table)} AS {a}
+                              WHERE {seek}{typeFilter}{predicate}{position}
+                              ORDER BY {orderBy}
+                              LIMIT s.f) z) q
+                    WHERE s.kind = 0 AND s.level = {level} AND {streams}
+                    UNION ALL
+                    SELECT 1, s.level, s.seq, NULL, NULL, q.rn, q.cnt, q.granted, {string.Join(", ", order.Select((_, i) => $"q.c{i}"))}
+                    FROM streams s
+                    CROSS JOIN LATERAL (
+                        SELECT row_number() OVER (ORDER BY {outOrder}) AS rn, count(*) OVER () AS cnt, z.*
+                        FROM (SELECT {selectCols}, {RowTest(options, spec, level, levels)} AS granted
+                              FROM {ScopeTable(spec.Table)} AS {a}
+                              WHERE {seek}{predicate}{position}
+                              ORDER BY {orderBy}
+                              LIMIT s.f) z) q
+                    WHERE s.kind = 1 AND s.level = {level} AND {streams}
+                    """);
+            }
         }
 
         var directColumns = string.Join(", ", order.Select((c, i) => $"d.{QuoteIdentifier(c.Column)} AS c{i}"));
-        var directOrder = string.Join(", ", order.Select(c => $"d.{QuoteIdentifier(c.Column)}"));
         var directOrderBy = string.Join(", ", order.Select(c => $"d.{QuoteIdentifier(c.Column)}{direction}"));
-        var directKeyset = $"(NOT s.has_after OR ({directOrder}) {beyond} ({string.Join(", ", order.Select((_, i) => $"s.a{i}"))}))";
+        var directKeyset = Keyset(order.Select(c => $"d.{QuoteIdentifier(c.Column)}").ToList(), afterValues, spec.Descending);
         var directJoin = spec.PredicateSql is null
             ? ""
             : $"\n                          INNER JOIN {ScopeTable(spec.Table)} AS {a} ON {string.Join(" AND ", spec.Table.KeyColumns.Select(k => $"{a}.{QuoteIdentifier(k)} = d.{QuoteIdentifier(k)}"))}";
-        var directBlock = $"""
-            UNION ALL
-            SELECT 2, -1, 0, s.principal, s.role, q.rn, q.cnt, TRUE, {string.Join(", ", order.Select((_, i) => $"q.c{i}"))}
-            FROM streams s
-            CROSS JOIN LATERAL (
-                SELECT row_number() OVER (ORDER BY {outOrder}) AS rn, count(*) OVER () AS cnt, z.*
-                FROM (SELECT {directColumns}
-                      FROM {DirectTable(options, spec.Table)} d{directJoin}
-                      WHERE d."SubjectId" = s.principal AND d."RoleId" = s.role AND d."Active"
-                        AND (@TypeSeq IS NULL OR d."TypeSeq" = @TypeSeq)
-                        AND {Validity("d")}{predicate}
-                        AND {directKeyset}
-                      ORDER BY {directOrderBy}
-                      LIMIT s.f) z) q
-            WHERE s.kind = 2
-            """;
+        var directBlock = new StringBuilder();
+        foreach (var positioned in new[] { true, false })
+        {
+            var position = positioned ? $"\n                        AND {directKeyset}" : "";
+            var streams = positioned ? "s.has_after" : "NOT s.has_after";
+            directBlock.AppendLine(CultureInfo.InvariantCulture, $"""
+                UNION ALL
+                SELECT 2, -1, 0, s.principal, s.role, q.rn, q.cnt, TRUE, {string.Join(", ", order.Select((_, i) => $"q.c{i}"))}
+                FROM streams s
+                CROSS JOIN LATERAL (
+                    SELECT row_number() OVER (ORDER BY {outOrder}) AS rn, count(*) OVER () AS cnt, z.*
+                    FROM (SELECT {directColumns}
+                          FROM {DirectTable(options, spec.Table)} d{directJoin}
+                          WHERE d."SubjectId" = s.principal AND d."RoleId" = s.role AND d."Active"
+                            AND (@TypeSeq IS NULL OR d."TypeSeq" = @TypeSeq)
+                            AND {Validity("d")}{predicate}{position}
+                          ORDER BY {directOrderBy}
+                          LIMIT s.f) z) q
+                WHERE s.kind = 2 AND {streams}
+                """);
+        }
 
         var second = $"""
             {common},
@@ -592,6 +604,27 @@ internal sealed partial class PostgreSqlDatabaseProvider
             """;
 
         return first + "\n" + second;
+    }
+
+    /// <summary>
+    /// A keyset comparison the planner seeks on: the first column as a range, the rest nested
+    /// (<c>c0 >= a0 AND (c0 > a0 OR (c1 >= a1 AND (c1 > a1 OR …)))</c>); mirrored for a descending order.
+    /// </summary>
+    private static string Keyset(IReadOnlyList<string> columns, IReadOnlyList<string> values, bool descending)
+    {
+        var beyond = descending ? "<" : ">";
+        var orEqual = descending ? "<=" : ">=";
+        string Rest(int i)
+        {
+            if (i == columns.Count - 1)
+            {
+                return $"{columns[i]} {beyond} {values[i]}";
+            }
+
+            return $"({columns[i]} {orEqual} {values[i]} AND ({columns[i]} {beyond} {values[i]} OR {Rest(i + 1)}))";
+        }
+
+        return Rest(0);
     }
 
     /// <summary>

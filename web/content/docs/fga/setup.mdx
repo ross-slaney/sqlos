@@ -119,6 +119,15 @@ await db.SaveChangesAsync();
 
 `UseSqlOS` applies SqlOS's auth and FGA model and configures the `FgaScope` column of every entity configured before it, so call it last. The two interfaces need nothing beyond what `DbContext` already has.
 
+A context you build yourself (not through `AddSqlOS`) also needs SqlOS's query execution on its options, which is what evaluates the filters `BuildFilterAsync` returns:
+
+```csharp
+var options = new DbContextOptionsBuilder<AppDbContext>()
+    .UseSqlServer(connectionString)
+    .UseSqlOSFga(loggerFactory)   // the walk for pages, the predicate for everything else
+    .Options;
+```
+
 Keep every protected entity in the context you register with `AddSqlOS`: SqlOS maintains the tables of that context's model. `BuildFilterAsync` names an entity it does not maintain in its error instead of returning rows nobody keeps current.
 
 ## Register SqlOS on SQL Server or PostgreSQL
@@ -178,7 +187,7 @@ var page = await db.Projects
     .ToListAsync(cancellationToken);
 ```
 
-Page in an order you declared an index for, ended by the key, as above: SqlOS mirrors each such index per level of the resource tree, so the page is one index seek. A page sorted by a column you declared no index for still returns the right rows; it reads the caller's whole scope to sort them, and SqlOS logs a warning naming the entity, the order, and the index to declare — once per query shape, so a hot page does not flood the log. (`AddSqlOS` puts the warning on your context; a context built by hand gets it with `optionsBuilder.AddInterceptors(new SqlOSFgaUnindexedOrderInterceptor(loggerFactory))`.) See [List filtering](/docs/fga/list-filter) for how the filter works and what it costs.
+Page in an order you declared an index for, ended by the key, as above: SqlOS mirrors each such index per level of the resource tree, so the page is one index seek. A page sorted by a column you declared no index for still returns the right rows; it reads the caller's whole scope to sort them, and SqlOS logs a warning naming the entity, the order, and the index to declare — once per query shape, so a hot page does not flood the log. (`AddSqlOS` configures the context it registers; a context built by hand calls `optionsBuilder.UseSqlOSFga(loggerFactory)`, which is also what evaluates the filter: without it, a query over a filter from `BuildFilterAsync` cannot run.) See [List filtering](/docs/fga/list-filter) for how the filter works and what it costs.
 
 ## Upgrading from a version without FgaScope
 

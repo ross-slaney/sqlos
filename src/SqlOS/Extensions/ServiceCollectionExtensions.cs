@@ -145,7 +145,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<SqlOSScimService>();
         services.AddScoped<ISqlOSFgaAuthService, SqlOSFgaAuthService>();
         services.ConfigureDbContext<TContext>((provider, builder) =>
-            builder.UseSqlOSFga(options.Fga, provider.GetRequiredService<ILoggerFactory>()));
+            builder.UseSqlOSFga(provider.GetRequiredService<ILoggerFactory>()));
         services.AddScoped<ISqlOSFgaSubjectService, SqlOSFgaSubjectService>();
         services.AddScoped<SqlOSFgaSeedService>();
         services.AddScoped<SqlOSFgaFunctionInitializer>();

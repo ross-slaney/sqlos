@@ -21,14 +21,15 @@ using SqlOS.IntegrationTests.Infrastructure;
 namespace SqlOS.IntegrationTests.Fga;
 
 /// <summary>
-/// One API: <c>BuildFilterAsync</c>, composed into the query the application writes anyway. On the context
-/// SqlOS registers, a page over the filter (<c>Where(filter)</c>, an order, <c>Take</c>) is walked by SqlOS;
-/// the same query without <c>Take</c>, or on a plain context, runs as EF Core would. These tests hold the two
-/// to the same rows in the same order for every shape of access (one grant, several, direct row grants,
-/// grants behind an inactive node, unusable grants, overlapping principals), through every page of a keyset
-/// walk, ascending and descending, with filters and a non-key order; for every query shape a page can take
-/// (Skip, First, Single, Select, sync); and as grants, rows and the tree change, with the grant counts and
-/// direct index that make the walk cheap staying exact.
+/// One API: <c>BuildFilterAsync</c>, composed into the query the application writes anyway. Building the
+/// filter reads no grant. On the context SqlOS registers, a page over the filter (<c>Where(filter)</c>, an
+/// order, <c>Take</c>) is walked by SqlOS, which reads no access root either; the same query without
+/// <c>Take</c> runs as EF Core would, over the predicate whose roots are read when it runs. These tests hold
+/// the two to the same rows in the same order for every shape of access (one grant, several, direct row
+/// grants, grants behind an inactive node, unusable grants, overlapping principals), through every page of a
+/// keyset walk, ascending and descending, with filters and a non-key order; for every query shape a page can
+/// take (Skip, First, Single, Select, sync); and as grants, rows and the tree change, with the grant counts
+/// and direct index that make the walk cheap staying exact.
 /// </summary>
 [TestClass]
 public class SqlOSFgaPageIntegrationTests
@@ -200,19 +201,26 @@ public class SqlOSFgaPageIntegrationTests
         db.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant { Id = "c_b", SubjectId = alice, ResourceId = Tree.Folder(2, 4), RoleId = ReaderRoleId });
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
-        var filter = await fga.BuildFilterAsync<PageItem>(alice, Read);
 
-        // Ground truth: the filter in a query that is not a page (no Take), which EF Core runs as written.
+        // Building the filter resolves the caller's principals and the permission, and reads no grant.
+        SqlOSFgaPageDiagnostics.Collect();
+        var filter = await fga.BuildFilterAsync<PageItem>(alice, Read);
+        SqlOSFgaPageDiagnostics.RootsResolved.Should().BeNull("BuildFilterAsync reads no access root");
+
+        // Ground truth: the filter in a query that is not a page (no Take), which EF Core runs as written,
+        // over the predicate whose roots are read when the query runs.
         SqlOSFgaPageDiagnostics.Collect();
         var truth = await db.Items.AsNoTracking().Where(filter).OrderBy(i => i.Rank).ToListAsync();
         SqlOSFgaPageDiagnostics.LastCounters.Should().BeNull("a query without Take is not a page");
+        SqlOSFgaPageDiagnostics.RootsResolved.Should().Be(2, "Alice's two grants are the roots of the planned statement, read when it ran");
         truth.Should().HaveCountGreaterThan(20);
         var ids = truth.Select(i => i.Id).ToList();
 
-        // Skip and Take: the walk fetches skip + take rows and drops the first skip.
+        // Skip and Take: the walk fetches skip + take rows and drops the first skip, and reads no root.
         SqlOSFgaPageDiagnostics.Collect();
         var skipped = await db.Items.AsNoTracking().Where(filter).OrderBy(i => i.Rank).Skip(5).Take(5).ToListAsync();
         SqlOSFgaPageDiagnostics.LastCounters.Should().NotBeNull();
+        SqlOSFgaPageDiagnostics.RootsResolved.Should().BeNull("a walked page reads no access root");
         skipped.Select(i => i.Id).Should().Equal(ids.Skip(5).Take(5));
 
         // Single-row methods, with their own semantics.
@@ -256,10 +264,19 @@ public class SqlOSFgaPageIntegrationTests
         (await db.Items.AsNoTracking().Where(filter).OrderBy(i => i.Rank).Take(3).ToListAsync()).Should().HaveCount(3);
         db.ChangeTracker.Entries().Should().BeEmpty();
 
-        // Not pages: counts, no Take, an order no index covers, an order of mixed directions. They run as EF
-        // Core would, the filter as a predicate, and return the same rows.
+        // Not pages: counts, no Take, an order no index covers, an order of mixed directions, an order over a
+        // projection. They run as EF Core would, the filter as a predicate over the roots read then, and return
+        // the same rows.
         SqlOSFgaPageDiagnostics.Collect();
         (await db.Items.Where(filter).CountAsync()).Should().Be(truth.Count);
+        SqlOSFgaPageDiagnostics.LastCounters.Should().BeNull();
+        SqlOSFgaPageDiagnostics.RootsResolved.Should().Be(2);
+        SqlOSFgaPageDiagnostics.Collect();
+        (await db.Items.AsNoTracking().Where(filter).Select(i => new { i.Id, i.Rank }).OrderBy(r => r.Rank).Take(5).ToListAsync()).Select(r => r.Id).Should().Equal(ids.Take(5));
+        SqlOSFgaPageDiagnostics.LastCounters.Should().BeNull("an order over a projection is not a page");
+        SqlOSFgaPageDiagnostics.RootsResolved.Should().Be(2);
+        SqlOSFgaPageDiagnostics.Collect();
+        db.Items.AsNoTracking().Where(filter).OrderBy(i => i.Rank).Take(5).ToQueryString().Should().Contain("FgaScope", "the query string is the planned statement's");
         SqlOSFgaPageDiagnostics.LastCounters.Should().BeNull();
         SqlOSFgaPageDiagnostics.Collect();
         (await db.Items.AsNoTracking().Where(filter).OrderBy(i => i.Price).ThenBy(i => i.Id).Take(5).ToListAsync()).Select(i => i.Id)
@@ -269,14 +286,22 @@ public class SqlOSFgaPageIntegrationTests
         (await db.Items.AsNoTracking().Where(filter).OrderBy(i => i.Rank).ThenByDescending(i => i.Id).Take(5).ToListAsync()).Select(i => i.Id).Should().Equal(ids.Take(5));
         SqlOSFgaPageDiagnostics.LastCounters.Should().BeNull("an order of mixed directions is not walked");
 
-        // The same page on a plain context (no UseSqlOSFga) is the same rows, through the optimizer.
+        // A context without SqlOS's query execution cannot evaluate the filter, and says so when it is built.
         var plainOptions = new DbContextOptionsBuilder<PageDbContext>();
-        plainOptions.UseTestProvider(host.ConnectionString);
+        if (TestDatabase.IsPostgreSql)
+        {
+            plainOptions.UseNpgsql(host.ConnectionString);
+        }
+        else
+        {
+            plainOptions.UseSqlServer(host.ConnectionString);
+        }
+
         await using (var plain = new PageDbContext(plainOptions.Options))
         {
-            SqlOSFgaPageDiagnostics.Collect();
-            (await plain.Items.AsNoTracking().Where(filter).OrderBy(i => i.Rank).Take(5).ToListAsync()).Select(i => i.Id).Should().Equal(ids.Take(5));
-            SqlOSFgaPageDiagnostics.LastCounters.Should().BeNull();
+            var elsewhere = new SqlOSFgaAuthService(plain, Microsoft.Extensions.Options.Options.Create(new SqlOS.Fga.Configuration.SqlOSFgaOptions()), NullLogger<SqlOSFgaAuthService>.Instance);
+            var build = () => elsewhere.BuildFilterAsync<PageItem>(alice, Read);
+            (await build.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().Contain("UseSqlOSFga");
         }
 
         // Nothing visible: the filter is false, the page empty.
@@ -330,6 +355,7 @@ public class SqlOSFgaPageIntegrationTests
             if (walked)
             {
                 SqlOSFgaPageDiagnostics.LastCounters.Should().NotBeNull($"shape {shape.Name} must run through SqlOS's walk");
+                SqlOSFgaPageDiagnostics.RootsResolved.Should().BeNull($"shape {shape.Name}: a walked page reads no access root");
             }
 
             var more = page.Count > shape.PageSize;

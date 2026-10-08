@@ -195,7 +195,8 @@ internal static class ReportWriter
         }
 
         text.AppendLine();
-        text.AppendLine("**Filter vs. walk** · the same query as one statement the optimizer plans (filter) and walked by SqlOS on a `UseSqlOSFga` context (page), median ms");
+        text.AppendLine(CultureInfo.InvariantCulture,
+            $"**Filter vs. walk** · the same page over `BuildFilterAsync`'s filter, as one statement the optimizer plans (filter: the page written as a projection ordered after `Select`, the caller's access roots read when it runs) and as the page SqlOS walks (page). Median ms of the query alone per scale; at {RetailTree.Count(largest.Products)}, the whole request (BuildFilterAsync + query) and what each path read before its rows");
         text.AppendLine();
         text.Append("| Page | σ |");
         foreach (var step in steps)
@@ -203,25 +204,33 @@ internal static class ReportWriter
             text.Append(CultureInfo.InvariantCulture, $" {RetailTree.Count(step.Products)} filter | {RetailTree.Count(step.Products)} page |");
         }
 
-        text.AppendLine(CultureInfo.InvariantCulture, $" page call @ {RetailTree.Count(largest.Products)}: rounds / statements / rows fetched / streams · ms resolve + walk + load (first run) |");
+        text.AppendLine(" request: filter (prepare + query) · page (prepare + query) | before the rows: filter roots read (ms) · page rounds / statements / rows fetched / streams · ms walk + load |");
         text.Append("|---|---:|");
         text.Append(string.Concat(Enumerable.Repeat("---:|", steps.Count * 2)));
-        text.AppendLine("---|");
+        text.AppendLine("---|---|");
 
         foreach (var page in pages)
         {
-            var twin = "list." + page.Id["page.".Length..];
+            var twinId = "list." + page.Id["page.".Length..];
+            var twin = largest.Scenarios.FirstOrDefault(s => s.Id == twinId);
             text.Append(CultureInfo.InvariantCulture, $"| {page.Title} | {Selectivity(page.Selectivity)} |");
             foreach (var step in steps)
             {
-                text.Append(CultureInfo.InvariantCulture, $" {Cell(step.Scenarios.FirstOrDefault(s => s.Id == twin))} | {Cell(step.Scenarios.FirstOrDefault(s => s.Id == page.Id))} |");
+                text.Append(CultureInfo.InvariantCulture, $" {Cell(step.Scenarios.FirstOrDefault(s => s.Id == twinId))} | {Cell(step.Scenarios.FirstOrDefault(s => s.Id == page.Id))} |");
             }
 
+            text.Append(CultureInfo.InvariantCulture, $" {Request(twin)} · {Request(page)} |");
+            text.Append(CultureInfo.InvariantCulture, $" {(twin?.RootsFetched is { } roots ? string.Create(CultureInfo.InvariantCulture, $"{roots:N0} roots ({twin.RootsMs:F1} ms)") : "–")} · ");
             text.AppendLine(page.Rounds is null
-                ? " – |"
-                : string.Create(CultureInfo.InvariantCulture, $" {page.Rounds} / {page.Statements} / {page.RowsFetched:N0} / {page.Streams} · {page.ResolveMs:F1} + {page.WalkMs:F1} + {page.LoadMs:F1} |"));
+                ? "– |"
+                : string.Create(CultureInfo.InvariantCulture, $"{page.Rounds} / {page.Statements} / {page.RowsFetched:N0} / {page.Streams} · {page.WalkMs:F1} + {page.LoadMs:F1} |"));
         }
     }
+
+    private static string Request(ScenarioResult? result)
+        => result is { RequestMs: { } request, PrepareMs: { } prepare } && !result.TimedOut
+            ? string.Create(CultureInfo.InvariantCulture, $"{Milliseconds(request)} ({prepare:F1} + {Milliseconds(result.MedianMs)})")
+            : "–";
 
     private static string Cell(ScenarioResult? result)
     {

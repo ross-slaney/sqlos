@@ -27,8 +27,9 @@ internal sealed class PlanCapture(DatabaseProvider provider) : DbCommandIntercep
         CancellationToken cancellationToken = default)
     {
         // EF runs the command in a child flow, which cannot clear the caller's AsyncLocal; the flag makes the
-        // capture happen once even if the query issues more than one command.
-        if (Pending.Value is { Done: false } plan)
+        // capture happen once even if the query issues more than one command. The command captured is the one
+        // over the relation: a planned statement first reads the caller's access roots in a command of its own.
+        if (Pending.Value is { Done: false } plan && command.CommandText.Contains(plan.Relation, StringComparison.Ordinal))
         {
             plan.Done = true;
             try
