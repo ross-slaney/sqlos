@@ -132,6 +132,11 @@ public class SqlOSFgaPageSqlTests
         round.Should().NotContain("s.[level] = 3");
         round.Should().Contain("ORDER BY c0, c1");
 
+        // The rows of earlier rounds the executor holds come back typed by the order columns and are merged by
+        // the same ORDER BY as the round's own rows: the database orders every row of the page, never .NET.
+        round.Should().Contain("FROM OPENJSON(@Retained) WITH (kind INT '$.kind', [level] INT '$.level', seq BIGINT '$.seq', principal NVARCHAR(450) '$.principal', role NVARCHAR(450) '$.role', rn BIGINT '$.rn', cnt INT '$.cnt', granted BIT '$.granted', c0 decimal(10,2) '$.c0', c1 int '$.c1') r");
+        round.IndexOf("OPENJSON(@Retained)", StringComparison.Ordinal).Should().BeLessThan(round.LastIndexOf("ORDER BY c0, c1", StringComparison.Ordinal), "the held rows are part of the merge");
+
         // A positioned stream's keyset is a range the index serves, never behind an OR on the position's presence.
         round.Should().Contain("AND s.has_after = 1").And.Contain("AND s.has_after = 0").And.NotContain("has_after = 0 OR");
         round.Should().Contain("(i.[Price] >= s.a0 AND (i.[Price] > s.a0 OR i.[Id] > s.a1))");
@@ -166,6 +171,8 @@ public class SqlOSFgaPageSqlTests
 
         round.Should().NotContain("s.level = 3");
         round.Should().Contain("ORDER BY c0, c1");
+        round.Should().Contain("FROM jsonb_to_recordset(@Retained::jsonb) AS r(kind int, level int, seq bigint, principal varchar(450), role varchar(450), rn bigint, cnt bigint, granted boolean, c0 decimal(10,2), c1 int)");
+        round.IndexOf("@Retained::jsonb", StringComparison.Ordinal).Should().BeLessThan(round.LastIndexOf("ORDER BY c0, c1", StringComparison.Ordinal), "the held rows are part of the merge");
 
         // A positioned stream's keyset is a range the index serves, never behind an OR on the position's presence.
         round.Should().Contain("AND s.has_after").And.Contain("AND NOT s.has_after").And.NotContain("NOT s.has_after OR");

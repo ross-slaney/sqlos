@@ -87,16 +87,19 @@ public class SqlOSFgaPageIntegrationTests
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
 
+        var held = 0;
         foreach (var (name, subject) in users)
         {
             var filter = await fga.BuildFilterAsync<PageItem>(subject, Read);
             foreach (var shape in Shapes())
             {
                 var expected = await Truth(db, filter, shape);
-                var actual = await PageAll(db, filter, shape, walked: name != "nobody");
+                var actual = await PageAll(db, filter, shape, walked: name != "nobody", counters => held += counters.RowsRetained);
                 actual.Should().Equal(expected, $"user {name}, shape {shape.Name}: the walked pages must return exactly what the filter returns");
             }
         }
+
+        held.Should().BePositive("pages merging several streams hold rows between rounds, and those rows went through the database's merge in every type the orders use");
     }
 
     [TestMethod]
@@ -391,7 +394,7 @@ public class SqlOSFgaPageIntegrationTests
         await Tree.CreateAsync(db);
         var subjects = new SqlOSFgaSubjectService(db, NullLogger<SqlOSFgaSubjectService>.Instance);
         var later = (await subjects.CreateUserAsync("Later", $"later-{Guid.NewGuid():N}@example.test")).SubjectId;
-        var opensAt = DateTime.UtcNow.AddSeconds(2);
+        var opensAt = DateTime.UtcNow.AddSeconds(4);
         db.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant { Id = "w_later", SubjectId = later, ResourceId = Tree.Folder(0, 1), RoleId = ReaderRoleId, EffectiveFrom = opensAt });
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
@@ -410,7 +413,13 @@ public class SqlOSFgaPageIntegrationTests
         // The window opens as the clock moves, which no trigger sees; the hosted refresh is asleep (it woke at
         // start, when no window was pending, and sleeps an hour). The point check and a planned statement read
         // the grant itself and see the rows; so must the page, rebuilding the caller's counts first.
-        await Task.Delay(opensAt.AddSeconds(1) - DateTime.UtcNow);
+        var untilOpen = opensAt.AddSeconds(1) - DateTime.UtcNow;
+        if (untilOpen > TimeSpan.Zero)
+        {
+            // (A slow engine may already be past the window: then there is nothing to wait for.)
+            await Task.Delay(untilOpen);
+        }
+
         (await fga.Allows(later, Read, Tree.ItemResource(item))).Should().BeTrue();
         var filter = await fga.BuildFilterAsync<PageItem>(later, Read);
         (await db.Items.Where(filter).CountAsync()).Should().Be(Tree.ItemsPerFolder);
@@ -455,7 +464,7 @@ public class SqlOSFgaPageIntegrationTests
     }
 
     /// <summary>Every page of a keyset walk, concatenated: k + 1 rows asked for, the last one telling whether a next page exists.</summary>
-    private static async Task<List<string>> PageAll(PageDbContext db, Expression<Func<PageItem, bool>> filter, Shape shape, bool walked)
+    private static async Task<List<string>> PageAll(PageDbContext db, Expression<Func<PageItem, bool>> filter, Shape shape, bool walked, Action<SqlOSFgaPageCounters>? observe = null)
     {
         var all = new List<string>();
         PageItem? last = null;
@@ -473,6 +482,7 @@ public class SqlOSFgaPageIntegrationTests
             {
                 SqlOSFgaPageDiagnostics.LastCounters.Should().NotBeNull($"shape {shape.Name} must run through SqlOS's walk");
                 SqlOSFgaPageDiagnostics.RootsResolved.Should().BeNull($"shape {shape.Name}: a walked page reads no access root");
+                observe?.Invoke(SqlOSFgaPageDiagnostics.LastCounters!);
             }
 
             var more = page.Count > shape.PageSize;

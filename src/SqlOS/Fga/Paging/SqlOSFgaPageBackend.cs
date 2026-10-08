@@ -121,7 +121,7 @@ internal sealed class SqlOSFgaPageBackend<T>(
         return _live.Count > 0 && _roles.Count > 0 && _root >= 0;
     }
 
-    public async Task<SqlOSFgaRound> RoundAsync(IReadOnlyList<SqlOSFgaOpenRequest> opens, IReadOnlyList<SqlOSFgaStream> streams, CancellationToken cancellationToken)
+    public async Task<SqlOSFgaRound> RoundAsync(IReadOnlyList<SqlOSFgaOpenRequest> opens, IReadOnlyList<SqlOSFgaStream> streams, IReadOnlyList<SqlOSFgaFetchedRow> retained, CancellationToken cancellationToken)
     {
         _roundSql ??= provider.BuildPageRoundSql(options, new SqlOSFgaPageSpec(
             query.Table,
@@ -147,6 +147,7 @@ internal sealed class SqlOSFgaPageBackend<T>(
 
             command.Parameters.Add(Parameter(command, "@Opens", Json(w => WriteOpens(w, opens)), DbType.String));
             command.Parameters.Add(Parameter(command, "@Streams", Json(w => WriteStreams(w, streams)), DbType.String));
+            command.Parameters.Add(Parameter(command, "@Retained", Json(w => WriteRetained(w, retained)), DbType.String));
             command.Parameters.Add(Parameter(command, "@Live", JsonSerializer.Serialize(_live), DbType.String));
             command.Parameters.Add(Parameter(command, "@Roles", JsonSerializer.Serialize(_roles), DbType.String));
             command.Parameters.Add(Parameter(command, "@Type", _typeSeq is { } seq ? SqlOSFgaScope.Bytes(seq) : DBNull.Value, DbType.Binary));
@@ -299,7 +300,30 @@ internal sealed class SqlOSFgaPageBackend<T>(
             if (s.Principal is null) { writer.WriteNull("principal"); } else { writer.WriteString("principal", s.Principal); }
             if (s.Role is null) { writer.WriteNull("role"); } else { writer.WriteString("role", s.Role); }
             writer.WriteNumber("f", s.Fetch);
-            WritePosition(writer, s.After);
+            WritePosition(writer, s.ReadFrom);
+            writer.WriteEndObject();
+        }
+    }
+
+    /// <summary>Rows of earlier rounds the executor holds, sent back to be merged with the round's: the stream, the batch ordinals, the verdict, the position.</summary>
+    private void WriteRetained(Utf8JsonWriter writer, IReadOnlyList<SqlOSFgaFetchedRow> rows)
+    {
+        foreach (var r in rows)
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber("kind", (int)r.Kind);
+            writer.WriteNumber("level", r.Level);
+            writer.WriteNumber("seq", r.Node);
+            if (r.Principal is null) { writer.WriteNull("principal"); } else { writer.WriteString("principal", r.Principal); }
+            if (r.Role is null) { writer.WriteNull("role"); } else { writer.WriteString("role", r.Role); }
+            writer.WriteNumber("rn", r.Ordinal);
+            writer.WriteNumber("cnt", r.Count);
+            writer.WriteBoolean("granted", r.Granted);
+            for (var i = 0; i < query.OrderColumns.Count; i++)
+            {
+                WriteValue(writer, "c" + i.ToString(CultureInfo.InvariantCulture), r.Position[i]);
+            }
+
             writer.WriteEndObject();
         }
     }

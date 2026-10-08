@@ -158,6 +158,7 @@ internal sealed class ScenarioRunner(
             Rounds = counters?.Rounds,
             Statements = counters?.Statements,
             RowsFetched = counters?.RowsFetched,
+            RowsRetained = counters?.RowsRetained,
             Streams = counters?.StreamsOpened,
             ResolveMs = counters?.ResolveMs,
             WalkMs = counters?.WalkMs,
@@ -171,7 +172,7 @@ internal sealed class ScenarioRunner(
             (plan?.RowsExamined is { } examined ? $"  examined {examined:N0}" : "") +
             (plan?.PlanningMs is { } planning ? $"  plan {planning:F2} ms" : "") +
             (plan?.ExecutionMs is { } execution ? $"  exec {execution:F2} ms" : "") +
-            (counters is null ? "" : $"  rounds {counters.Rounds} stmts {counters.Statements} fetched {counters.RowsFetched} streams {counters.StreamsOpened}") +
+            (counters is null ? "" : $"  rounds {counters.Rounds} stmts {counters.Statements} fetched {counters.RowsFetched} retained {counters.RowsRetained} streams {counters.StreamsOpened}") +
             (correct ? "" : $"  WRONG: {detail}") +
             (fullPage ? "" : "  (partial page)"));
         return result;
@@ -515,8 +516,11 @@ internal sealed record ScenarioResult(
     /// <summary>For a walked page: statements it ran (the prelude and every round).</summary>
     public int? Statements { get; init; }
 
-    /// <summary>For a walked page: index rows the rounds fetched, the page's rows and the ones judged or discarded.</summary>
+    /// <summary>For a walked page: index rows the rounds fetched, each once: the page's rows and the ones judged, held, or discarded.</summary>
     public int? RowsFetched { get; init; }
+
+    /// <summary>For a walked page: rows held between rounds and sent back to be merged with the next round's, summed over rounds.</summary>
+    public int? RowsRetained { get; init; }
 
     /// <summary>For a walked page: streams opened (one seek each).</summary>
     public int? Streams { get; init; }

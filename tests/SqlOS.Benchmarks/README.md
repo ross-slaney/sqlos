@@ -34,7 +34,8 @@ one grant or a hundred thousand. Point checks measure `fn_IsResourceAccessible` 
   planned statement with the roots it reads when it runs, for `page.*` the walk's round trips and loading
   the page's rows), and the whole request (`request`, both). What each path transferred before its rows is
   reported too: the access roots a planned statement read (`roots`), the walk's rounds, statements, index
-  rows fetched and streams. Warm cache; median and p95 over up to 25 runs. The harness fails a `page.*`
+  rows fetched (each once; the rows held between rounds are counted as `retained`) and streams. Warm cache;
+  median and p95 over up to 25 runs. The harness fails a `page.*`
   scenario that ran as a plain query or read a root, and a `list.*` one that was walked.
 - **Every answer is checked against ground truth.** The exact page (k + 1 rows after the cursor, or the first
   k + 1 rows by price) and every allow or deny are recomputed from the dataset generator, so a fast wrong

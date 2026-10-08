@@ -658,6 +658,10 @@ internal sealed partial class PostgreSqlDatabaseProvider
                 """);
         }
 
+        // The rows of earlier rounds the executor still holds come back as input and are merged with the
+        // round's own rows by the same ORDER BY: one order, the database's, across the whole page.
+        var retainedTyped = string.Join(", ", order.Select((c, i) => $"c{i} {c.StoreType}"));
+        var retainedColumns = string.Join(", ", order.Select((_, i) => $"r.c{i}"));
         var second = $"""
             {common},
             streams AS (
@@ -672,6 +676,9 @@ internal sealed partial class PostgreSqlDatabaseProvider
                 WHERE FALSE
                 {blocks}
                 {directBlock}
+                UNION ALL
+                SELECT r.kind, r.level, r.seq, r.principal, r.role, r.rn, r.cnt, r.granted, {retainedColumns}
+                FROM jsonb_to_recordset(@Retained::jsonb) AS r(kind int, level int, seq bigint, principal varchar(450), role varchar(450), rn bigint, cnt bigint, granted boolean, {retainedTyped})
             ) u
             ORDER BY {outOrder};
             """;

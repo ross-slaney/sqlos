@@ -653,6 +653,7 @@ internal sealed partial class SqlServerDatabaseProvider
         // The streams of the round go into a table variable first. SQL Server inlines a common table expression
         // at every reference, and the stream set is referenced by every level's blocks: evaluated there, the
         // opened nodes (the JSON, the recursive descent, the lookups) would be computed twenty times a round.
+        // The rows of earlier rounds the executor still holds (@Retained) are merged in by the same ORDER BY.
         var second = $"""
             DECLARE @StreamsT TABLE (sid INT NOT NULL, kind INT NOT NULL, [level] INT NOT NULL, seq BIGINT NOT NULL, principal NVARCHAR(450) COLLATE DATABASE_DEFAULT NULL, role NVARCHAR(450) COLLATE DATABASE_DEFAULT NULL, f INT NOT NULL, has_after BIT NOT NULL, {string.Join(", ", order.Select((c, i) => $"a{i} {c.StoreType} NULL"))});
             {common}
@@ -667,6 +668,9 @@ internal sealed partial class SqlServerDatabaseProvider
                 WHERE 1 = 0
                 {blocks}
                 {directBlock}
+                UNION ALL
+                SELECT r.kind, r.[level], r.seq, r.principal, r.role, r.rn, r.cnt, r.granted, {string.Join(", ", order.Select((_, i) => $"r.c{i}"))}
+                FROM OPENJSON(@Retained) WITH (kind INT '$.kind', [level] INT '$.level', seq BIGINT '$.seq', principal NVARCHAR(450) '$.principal', role NVARCHAR(450) '$.role', rn BIGINT '$.rn', cnt INT '$.cnt', granted BIT '$.granted', {string.Join(", ", order.Select((c, i) => $"c{i} {c.StoreType} '$.c{i}'"))}) r
             ) u
             ORDER BY {outOrder};
             """;
