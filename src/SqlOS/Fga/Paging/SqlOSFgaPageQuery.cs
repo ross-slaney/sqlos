@@ -1,23 +1,23 @@
 using System.Data.Common;
+using System.Globalization;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
-using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.EntityFrameworkCore.Storage;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
-using SqlOS.Pagination;
 
 namespace SqlOS.Fga.Paging;
 
 /// <summary>
-/// What a page query asks for, read off the LINQ query the application wrote: the entity and its table, the
-/// filters (as the SQL EF Core translates them to, so any filter EF Core can translate works), the order (which
-/// must be one the application declared an index for, so each stream of the page is one index seek), and the
-/// query to materialize the page's rows with (the application's query without its filters and order, so
-/// <c>Include</c>, <c>AsNoTracking</c> and the like still apply).
+/// What a page asks for, read off the LINQ query the application wrote: the entity and its table, the position
+/// the page starts after (a keyset predicate in the query, when it has one), the other filters (as the SQL EF
+/// Core translates them to, so any filter EF Core can translate works), the order (one the application
+/// declared an index for, so each stream of the page is one index seek), and the query to materialize the
+/// page's rows with (the application's query without its filters, order and page, so <c>Include</c>,
+/// <c>AsNoTracking</c> and the like still apply).
 /// </summary>
 internal sealed class SqlOSFgaPageQuery<T> where T : class, IHasResourceId
 {
@@ -28,21 +28,23 @@ internal sealed class SqlOSFgaPageQuery<T> where T : class, IHasResourceId
         SqlOSFgaScopeTable table,
         string? indexSuffix,
         IReadOnlyList<SqlOSFgaPageColumn> orderColumns,
+        bool descending,
+        object?[]? after,
         string tableAlias,
         string? predicateSql,
         IReadOnlyList<DbParameter> predicateParameters,
-        IQueryable<T> materialization,
-        string fingerprint)
+        IQueryable<T> materialization)
     {
         EntityType = entityType;
         Table = table;
         IndexSuffix = indexSuffix;
         OrderColumns = orderColumns;
+        Descending = descending;
+        After = after;
         TableAlias = tableAlias;
         PredicateSql = predicateSql;
         PredicateParameters = predicateParameters;
         Materialization = materialization;
-        Fingerprint = fingerprint;
     }
 
     public IEntityType EntityType { get; }
@@ -58,6 +60,12 @@ internal sealed class SqlOSFgaPageQuery<T> where T : class, IHasResourceId
 
     public SqlOSFgaPageColumn Key => OrderColumns[^1];
 
+    /// <summary>Whether the order runs backwards (every column descending).</summary>
+    public bool Descending { get; }
+
+    /// <summary>The position the page starts after (the order's values, key last), from a keyset predicate in the query; null for the first page.</summary>
+    public object?[]? After { get; }
+
     /// <summary>The alias EF Core gave the table in the filter SQL; the page's statements use the same one.</summary>
     public string TableAlias { get; }
 
@@ -66,19 +74,24 @@ internal sealed class SqlOSFgaPageQuery<T> where T : class, IHasResourceId
 
     public IReadOnlyList<DbParameter> PredicateParameters { get; }
 
-    /// <summary>The application's query without its filters and order, to load the page's rows by key.</summary>
+    /// <summary>The application's query without its filters, order and page, to load the page's rows by key.</summary>
     public IQueryable<T> Materialization { get; }
 
-    /// <summary>Binds a cursor to this query shape: the entity, the order, the filters and the permission.</summary>
-    public string Fingerprint { get; }
-
-    public string SortKey => $"{EntityType.Name}:{string.Join(",", OrderColumns.Select(c => c.Column))}";
-
-    /// <summary>Reads the query. Throws <see cref="InvalidOperationException"/> with the fix when the query is not a page query SqlOS can run.</summary>
-    public static SqlOSFgaPageQuery<T> Analyze(IQueryable<T> query, DbContext context, string permissionKey)
+    /// <summary>
+    /// Reads the page's parts. Throws <see cref="InvalidOperationException"/> saying what to change when the
+    /// query is one SqlOS cannot walk (an order no declared index covers, a filter that is not a predicate
+    /// over the entity's own table); such a page runs as a plain query.
+    /// </summary>
+    public static SqlOSFgaPageQuery<T> Create(
+        DbContext context,
+        IReadOnlyList<LambdaExpression> filters,
+        IReadOnlyList<(string Property, bool Descending)> order,
+        Expression materialization)
     {
-        ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(filters);
+        ArgumentNullException.ThrowIfNull(order);
+        ArgumentNullException.ThrowIfNull(materialization);
         var model = context.Model;
         var entityType = model.FindEntityType(typeof(T))
             ?? throw new InvalidOperationException($"{typeof(T).Name} is not an entity of {context.GetType().Name}.");
@@ -86,9 +99,6 @@ internal sealed class SqlOSFgaPageQuery<T> where T : class, IHasResourceId
             ?? throw new InvalidOperationException(
                 $"{typeof(T).Name} is not a protected entity of {context.GetType().Name}: it has no {SqlOSFgaLineage.ScopeColumn} column SqlOS maintains. "
                 + "Map it in the context registered with SqlOS; pages only work on its entities.");
-
-        var shape = new Shape();
-        shape.Read(query.Expression);
         var store = StoreObjectIdentifier.Table(table.Table, table.Schema);
 
         var key = entityType.FindPrimaryKey()!;
@@ -97,8 +107,16 @@ internal sealed class SqlOSFgaPageQuery<T> where T : class, IHasResourceId
             throw new InvalidOperationException($"{typeof(T).Name} has a composite key; SqlOS pages need a single-column key.");
         }
 
-        var order = new List<SqlOSFgaPageColumn>();
-        foreach (var name in shape.OrderProperties)
+        var descending = order.Count > 0 && order[0].Descending;
+        if (order.Any(o => o.Descending != descending))
+        {
+            throw new InvalidOperationException(
+                $"The order of this page over {typeof(T).Name} mixes directions ({string.Join(", ", order.Select(o => o.Property + (o.Descending ? " desc" : " asc")))}). "
+                + "A page's order is all ascending or all descending: the index that serves it is read one way.");
+        }
+
+        var orderColumns = new List<SqlOSFgaPageColumn>();
+        foreach (var (name, _) in order)
         {
             var property = entityType.FindProperty(name)
                 ?? throw new InvalidOperationException($"{typeof(T).Name}.{name} is not a mapped property; a page can only sort by mapped columns.");
@@ -108,16 +126,16 @@ internal sealed class SqlOSFgaPageQuery<T> where T : class, IHasResourceId
                     $"{typeof(T).Name}.{name} is nullable. A page sorts by non-nullable columns (NULLs have no single place in a keyset order); sort by a non-nullable column or make it required.");
             }
 
-            order.Add(Column(property, store));
+            orderColumns.Add(Column(property, store));
         }
 
         var keyProperty = key.Properties[0];
-        if (order.All(c => c.Property != keyProperty))
+        if (orderColumns.All(c => c.Property != keyProperty))
         {
-            order.Add(Column(keyProperty, store));
+            orderColumns.Add(Column(keyProperty, store));
         }
 
-        var columns = order.Select(c => c.Column).ToList();
+        var columns = orderColumns.Select(c => c.Column).ToList();
         string? suffix;
         if (columns.SequenceEqual(table.KeyColumns, StringComparer.Ordinal))
         {
@@ -127,19 +145,42 @@ internal sealed class SqlOSFgaPageQuery<T> where T : class, IHasResourceId
         {
             var declared = table.Orders.FirstOrDefault(o => o.Columns.SequenceEqual(columns, StringComparer.Ordinal))
                 ?? throw new InvalidOperationException(
-                    $"No declared index on {typeof(T).Name} covers the order ({string.Join(", ", columns)}). A page is one index seek per access root, "
-                    + $"so the order must be one the entity declares an index for: declare HasIndex({string.Join(", ", order.Where(c => c.Property != keyProperty).Select(c => c.Property.Name))}) "
+                    $"No declared index on {typeof(T).Name} covers the order ({string.Join(", ", columns)}). A page is one index seek per place the caller is granted, "
+                    + $"so the order must be one the entity declares an index for: declare HasIndex({string.Join(", ", orderColumns.Where(c => c.Property != keyProperty).Select(c => c.Property.Name))}) "
                     + "(SqlOS mirrors each declared index per level of the resource tree), or sort by the key.");
             suffix = declared.Suffix;
         }
 
-        // The filters, as SQL: EF Core translates them in a query of the same table alone, and the page's
-        // statements take the WHERE clause as written. Anything that needs another table in FROM (a join
-        // through a navigation, say) is refused rather than guessed at; subqueries inside the WHERE are fine.
+        // A keyset predicate over the page's order is the position the page starts after, which every stream
+        // of the page seeks to. Any other filter is a predicate the streams test.
+        object?[]? after = null;
+        var predicates = new List<LambdaExpression>();
+        var orderNames = orderColumns.Select(c => c.Property.Name).ToList();
+        foreach (var filter in filters)
+        {
+            if (after is null && SqlOSFgaKeyset.TryRead(filter, orderNames, descending, out var position))
+            {
+                after = Position(position, orderColumns);
+                continue;
+            }
+
+            predicates.Add(filter);
+        }
+
+        // The filters, as SQL: EF Core translates them in a query of the same table alone (the entity's global
+        // query filters included, unless the query ignores them), and the page's statements take the WHERE
+        // clause as written. Anything that needs another table in FROM (a join through a navigation, say) is
+        // refused rather than guessed at; subqueries inside the WHERE are fine.
         string alias;
         string? predicate = null;
         var parameters = new List<DbParameter>();
-        var filtered = shape.Filters.Aggregate((IQueryable<T>)context.Set<T>(), (q, filter) => q.Where((Expression<Func<T, bool>>)filter));
+        var set = (IQueryable<T>)context.Set<T>();
+        if (MethodSearch.Found(materialization, nameof(EntityFrameworkQueryableExtensions.IgnoreQueryFilters)))
+        {
+            set = set.IgnoreQueryFilters();
+        }
+
+        var filtered = predicates.Aggregate(set, (q, filter) => q.Where((Expression<Func<T, bool>>)filter));
         var keyLambda = KeyLambda(keyProperty);
         var projected = (IQueryable)typeof(Queryable).GetMethods()
             .Single(m => m.Name == nameof(Queryable.Select) && m.GetParameters()[1].ParameterType.GetGenericArguments()[0].GetGenericArguments().Length == 2)
@@ -157,14 +198,8 @@ internal sealed class SqlOSFgaPageQuery<T> where T : class, IHasResourceId
             }
         }
 
-        var materialization = query.Provider.CreateQuery<T>(shape.Materialization(query.Expression));
-        var fingerprint = SqlOSCursorCodec.Fingerprint(
-            typeof(T).FullName,
-            permissionKey,
-            string.Join(",", columns),
-            predicate,
-            string.Join("|", parameters.Select(p => $"{p.ParameterName}={FormatForFingerprint(p.Value)}")));
-        return new SqlOSFgaPageQuery<T>(entityType, table, suffix, order, alias, predicate, parameters, materialization, fingerprint);
+        var load = set.Provider.CreateQuery<T>(materialization);
+        return new SqlOSFgaPageQuery<T>(entityType, table, suffix, orderColumns, descending, after, alias, predicate, parameters, load);
     }
 
     private static SqlOSFgaPageColumn Column(IProperty property, StoreObjectIdentifier store)
@@ -176,14 +211,28 @@ internal sealed class SqlOSFgaPageQuery<T> where T : class, IHasResourceId
         return Expression.Lambda(Expression.Call(EFPropertyMethod.MakeGenericMethod(key.ClrType), e, Expression.Constant(key.Name)), e);
     }
 
-    private static string FormatForFingerprint(object? value)
-        => value switch
+    /// <summary>The keyset's values as the database holds them: through the property's value converter, enums as their underlying number.</summary>
+    private static object?[] Position(object?[] values, IReadOnlyList<SqlOSFgaPageColumn> columns)
+    {
+        var position = new object?[columns.Count];
+        for (var i = 0; i < columns.Count; i++)
         {
-            null or DBNull => "null",
-            IFormattable f => f.ToString(null, System.Globalization.CultureInfo.InvariantCulture) ?? "",
-            byte[] bytes => Convert.ToHexString(bytes),
-            _ => value.ToString() ?? "",
-        };
+            var value = values[i];
+            var converter = columns[i].Property.GetValueConverter();
+            if (converter is not null)
+            {
+                value = converter.ConvertToProvider(value);
+            }
+            else if (value is Enum number)
+            {
+                value = Convert.ChangeType(number, Enum.GetUnderlyingType(number.GetType()), CultureInfo.InvariantCulture);
+            }
+
+            position[i] = value;
+        }
+
+        return position;
+    }
 
     /// <summary>
     /// EF Core writes a single-table query as <c>SELECT …</c>, then <c>FROM table AS alias</c>, then optionally
@@ -226,102 +275,31 @@ internal sealed class SqlOSFgaPageQuery<T> where T : class, IHasResourceId
 
     private static InvalidOperationException Unsupported(string entityName, string sql)
         => new(
-            $"The filters of this page query over {entityName} translate to SQL that is not a WHERE clause over the entity's table alone "
+            $"The filters of this page over {entityName} translate to SQL that is not a WHERE clause over the entity's table alone "
             + "(a join through a navigation, or a grouping). A page filters by the entity's own columns, with subqueries allowed; "
             + $"move other conditions into the page's rows after they load. EF Core produced:\n{sql}");
 
-    /// <summary>
-    /// The calls a page query is made of: <c>Where</c> (kept as filters), <c>OrderBy</c>/<c>ThenBy</c> (the order),
-    /// and calls that shape materialization without changing which rows qualify (<c>Include</c>, <c>AsNoTracking</c>,
-    /// <c>IgnoreQueryFilters</c>, <c>TagWith</c>…), over the entity's query root. Anything else is refused.
-    /// </summary>
-    private sealed class Shape : ExpressionVisitor
+    /// <summary>Whether a query expression calls a method of the given name anywhere.</summary>
+    private sealed class MethodSearch(string name) : ExpressionVisitor
     {
-        private static readonly HashSet<string> Passthrough =
-        [
-            nameof(EntityFrameworkQueryableExtensions.Include), nameof(EntityFrameworkQueryableExtensions.ThenInclude),
-            nameof(EntityFrameworkQueryableExtensions.AsNoTracking), nameof(EntityFrameworkQueryableExtensions.AsNoTrackingWithIdentityResolution),
-            nameof(EntityFrameworkQueryableExtensions.AsTracking), nameof(EntityFrameworkQueryableExtensions.IgnoreQueryFilters),
-            nameof(EntityFrameworkQueryableExtensions.IgnoreAutoIncludes), nameof(EntityFrameworkQueryableExtensions.TagWith),
-            nameof(EntityFrameworkQueryableExtensions.TagWithCallSite), nameof(RelationalQueryableExtensions.AsSplitQuery),
-            nameof(RelationalQueryableExtensions.AsSingleQuery),
-        ];
+        private bool _found;
 
-        public List<LambdaExpression> Filters { get; } = [];
-        public List<string> OrderProperties { get; } = [];
-
-        public void Read(Expression expression)
+        public static bool Found(Expression expression, string name)
         {
-            var orders = new List<string>();
-            var current = expression;
-            while (current is MethodCallExpression call)
-            {
-                var method = call.Method;
-                if (method.DeclaringType == typeof(Queryable) && method.Name == nameof(Queryable.Where) && call.Arguments.Count == 2
-                    && Unquote(call.Arguments[1]) is LambdaExpression { Parameters.Count: 1 } filter)
-                {
-                    Filters.Insert(0, filter);
-                }
-                else if (method.DeclaringType == typeof(Queryable) && method.Name is nameof(Queryable.OrderBy) or nameof(Queryable.ThenBy) && call.Arguments.Count == 2)
-                {
-                    orders.Insert(0, OrderProperty(call));
-                }
-                else if (method.DeclaringType == typeof(Queryable) && method.Name is nameof(Queryable.OrderByDescending) or nameof(Queryable.ThenByDescending))
-                {
-                    throw new InvalidOperationException("A SqlOS page sorts ascending; descending orders are not supported yet.");
-                }
-                else if ((method.DeclaringType == typeof(EntityFrameworkQueryableExtensions) || method.DeclaringType == typeof(RelationalQueryableExtensions)) && Passthrough.Contains(method.Name))
-                {
-                    // Kept for materialization.
-                }
-                else
-                {
-                    throw new InvalidOperationException(
-                        $"A SqlOS page query is Where and OrderBy/ThenBy over the entity (with Include, AsNoTracking and the like); "
-                        + $"{method.Name} is not supported in it. Apply it to the page's rows after they load.");
-                }
-
-                current = call.Arguments[0];
-            }
-
-            if (current is not QueryRootExpression root || root.ElementType != typeof(T))
-            {
-                throw new InvalidOperationException($"A SqlOS page query must start from the context's set of {typeof(T).Name}.");
-            }
-
-            OrderProperties.AddRange(orders);
+            var search = new MethodSearch(name);
+            search.Visit(expression);
+            return search._found;
         }
-
-        /// <summary>The expression with the filters and the order removed.</summary>
-        public Expression Materialization(Expression expression) => Visit(expression);
 
         protected override Expression VisitMethodCall(MethodCallExpression node)
         {
-            if (node.Method.DeclaringType == typeof(Queryable)
-                && node.Method.Name is nameof(Queryable.Where) or nameof(Queryable.OrderBy) or nameof(Queryable.ThenBy))
+            if (node.Method.Name == name)
             {
-                return Visit(node.Arguments[0]);
+                _found = true;
             }
 
             return base.VisitMethodCall(node);
         }
-
-        private static string OrderProperty(MethodCallExpression call)
-        {
-            if (Unquote(call.Arguments[1]) is LambdaExpression lambda)
-            {
-                var body = lambda.Body is UnaryExpression { NodeType: ExpressionType.Convert } convert ? convert.Operand : lambda.Body;
-                if (body is MemberExpression { Expression: ParameterExpression parameter } member && parameter == lambda.Parameters[0])
-                {
-                    return member.Member.Name;
-                }
-            }
-
-            throw new InvalidOperationException("A SqlOS page sorts by properties of the entity (e => e.Property); other key selectors are not supported.");
-        }
-
-        private static Expression Unquote(Expression expression)
-            => expression is UnaryExpression { NodeType: ExpressionType.Quote } quote ? quote.Operand : expression;
     }
 }
 

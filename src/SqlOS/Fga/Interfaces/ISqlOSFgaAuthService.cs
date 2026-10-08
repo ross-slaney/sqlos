@@ -69,21 +69,4 @@ public interface ISqlOSFgaAuthService
     Task<Expression<Func<T, bool>>> BuildFilterAsync<T>(
         string subjectId,
         string permissionKey) where T : IHasResourceId;
-
-    /// <summary>
-    /// The next page of the rows the subject may see with <paramref name="permissionKey"/>: the first
-    /// <paramref name="pageSize"/> rows of <paramref name="query"/>'s order after <paramref name="cursor"/>
-    /// (null for the first page), and the cursor of the page after it. The query is the application's
-    /// <c>Where</c> and <c>OrderBy</c>/<c>ThenBy</c> over the entity's set; the order must be one the entity
-    /// declares an index for (the key is appended when it does not end the order). The database does about a
-    /// page's worth of work for any caller, however sparse their access or many their grants, with one
-    /// exception: a page across many separately granted containers costs about one lookup per container.
-    /// </summary>
-    Task<SqlOS.Pagination.SqlOSCursorPage<T>> PageAsync<T>(
-        IQueryable<T> query,
-        string subjectId,
-        string permissionKey,
-        string? cursor,
-        int pageSize,
-        CancellationToken cancellationToken = default) where T : class, IHasResourceId;
 }

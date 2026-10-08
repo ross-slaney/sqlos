@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using FluentAssertions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -11,21 +12,23 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS;
 using SqlOS.Extensions;
 using SqlOS.Fga;
-using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
+using SqlOS.Fga.Paging;
 using SqlOS.Fga.Services;
 using SqlOS.IntegrationTests.Infrastructure;
-using SqlOS.Pagination;
 
 namespace SqlOS.IntegrationTests.Fga;
 
 /// <summary>
-/// <c>PageAsync</c> on the engine under test, against <c>BuildFilterAsync</c> as ground truth: the same rows in
-/// the same order for every shape of access (one grant, several, direct row grants, grants behind an inactive
-/// node, unusable grants, overlapping principals), through every page of a cursor walk, with filters and a
-/// non-key order; and the grant counts and direct index that make it cheap stay exact as grants, rows and the
-/// tree change.
+/// One API: <c>BuildFilterAsync</c>, composed into the query the application writes anyway. On the context
+/// SqlOS registers, a page over the filter (<c>Where(filter)</c>, an order, <c>Take</c>) is walked by SqlOS;
+/// the same query without <c>Take</c>, or on a plain context, runs as EF Core would. These tests hold the two
+/// to the same rows in the same order for every shape of access (one grant, several, direct row grants,
+/// grants behind an inactive node, unusable grants, overlapping principals), through every page of a keyset
+/// walk, ascending and descending, with filters and a non-key order; for every query shape a page can take
+/// (Skip, First, Single, Select, sync); and as grants, rows and the tree change, with the grant counts and
+/// direct index that make the walk cheap staying exact.
 /// </summary>
 [TestClass]
 public class SqlOSFgaPageIntegrationTests
@@ -39,15 +42,14 @@ public class SqlOSFgaPageIntegrationTests
     private const string OtherRoleId = "role_page_other";
 
     [TestMethod]
-    public async Task EveryAccessShape_PagesTheRowsTheFilterReturns()
+    public async Task EveryAccessShape_WalksTheRowsTheFilterReturns()
     {
         await using var host = await HostedApp.StartAsync();
         await using var scope = host.App.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<PageDbContext>();
         var fga = scope.ServiceProvider.GetRequiredService<ISqlOSFgaAuthService>();
-        var tree = await Tree.CreateAsync(db);
+        await Tree.CreateAsync(db);
 
-        var random = new Random(11);
         var users = new Dictionary<string, string>();
         async Task<string> User(string name)
         {
@@ -86,11 +88,12 @@ public class SqlOSFgaPageIntegrationTests
 
         foreach (var (name, subject) in users)
         {
-            foreach (var shape in Shapes(db))
+            var filter = await fga.BuildFilterAsync<PageItem>(subject, Read);
+            foreach (var shape in Shapes())
             {
-                var expected = await Truth(shape.Query, fga, subject);
-                var actual = await PageAll(shape.Query, fga, subject, shape.PageSize);
-                actual.Should().Equal(expected, $"user {name}, shape {shape.Name}: the page must return exactly what the filter returns");
+                var expected = await Truth(db, filter, shape);
+                var actual = await PageAll(db, filter, shape, walked: name != "nobody");
+                actual.Should().Equal(expected, $"user {name}, shape {shape.Name}: the walked pages must return exactly what the filter returns");
             }
         }
     }
@@ -102,7 +105,7 @@ public class SqlOSFgaPageIntegrationTests
         await using var scope = host.App.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<PageDbContext>();
         var fga = scope.ServiceProvider.GetRequiredService<ISqlOSFgaAuthService>();
-        var tree = await Tree.CreateAsync(db);
+        await Tree.CreateAsync(db);
         var subjects = new SqlOSFgaSubjectService(db, NullLogger<SqlOSFgaSubjectService>.Instance);
         var alice = (await subjects.CreateUserAsync("Alice", $"alice-{Guid.NewGuid():N}@example.test")).SubjectId;
         var bob = (await subjects.CreateUserAsync("Bob", $"bob-{Guid.NewGuid():N}@example.test")).SubjectId;
@@ -111,9 +114,12 @@ public class SqlOSFgaPageIntegrationTests
         {
             foreach (var subject in new[] { alice, bob })
             {
-                foreach (var shape in Shapes(db))
+                // The filter is built per request, as an application builds it: it carries the grants of now.
+                var filter = await fga.BuildFilterAsync<PageItem>(subject, Read);
+                foreach (var shape in Shapes())
                 {
-                    (await PageAll(shape.Query, fga, subject, shape.PageSize)).Should().Equal(await Truth(shape.Query, fga, subject), $"{because}; shape {shape.Name}");
+                    var expected = await Truth(db, filter, shape);
+                    (await PageAll(db, filter, shape, walked: expected.Count > 0)).Should().Equal(expected, $"{because}; shape {shape.Name}");
                 }
             }
 
@@ -181,7 +187,7 @@ public class SqlOSFgaPageIntegrationTests
     }
 
     [TestMethod]
-    public async Task Cursors_AndQueryShapes()
+    public async Task EveryQueryShape_OnePageOrPlain_ReturnsWhatEfCoreWould()
     {
         await using var host = await HostedApp.StartAsync();
         await using var scope = host.App.Services.CreateAsyncScope();
@@ -190,83 +196,158 @@ public class SqlOSFgaPageIntegrationTests
         await Tree.CreateAsync(db);
         var subjects = new SqlOSFgaSubjectService(db, NullLogger<SqlOSFgaSubjectService>.Instance);
         var alice = (await subjects.CreateUserAsync("Alice", $"alice-{Guid.NewGuid():N}@example.test")).SubjectId;
-        db.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant { Id = "c_a", SubjectId = alice, ResourceId = "root", RoleId = ReaderRoleId });
+        db.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant { Id = "c_a", SubjectId = alice, ResourceId = Tree.Workspace(1), RoleId = ReaderRoleId });
+        db.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant { Id = "c_b", SubjectId = alice, ResourceId = Tree.Folder(2, 4), RoleId = ReaderRoleId });
         await db.SaveChangesAsync();
-
-        // A page's cursor is bound to its query: another order or filter refuses it.
-        var first = await db.Items.OrderBy(i => i.Rank).ToAccessiblePageAsync(fga, alice, Read, null, 5);
-        first.Data.Should().HaveCount(5);
-        first.NextCursor.Should().NotBeNull();
-        var second = await db.Items.OrderBy(i => i.Rank).ToAccessiblePageAsync(fga, alice, Read, first.NextCursor, 5);
-        var lastRank = first.Data[^1].Rank;
-        second.Data.Select(i => i.Rank).Should().OnlyContain(r => r > lastRank);
-        var act = () => db.Items.OrderBy(i => i.Id).ToAccessiblePageAsync(fga, alice, Read, first.NextCursor, 5);
-        await act.Should().ThrowAsync<SqlOSCursorException>();
-        var filtered = () => db.Items.Where(i => i.Status == 1).OrderBy(i => i.Rank).ToAccessiblePageAsync(fga, alice, Read, first.NextCursor, 5);
-        await filtered.Should().ThrowAsync<SqlOSCursorException>();
-
-        // The rows load through the application's query: Include-free here, but AsNoTracking is honored.
         db.ChangeTracker.Clear();
-        var untracked = await db.Items.AsNoTracking().OrderBy(i => i.Rank).ToAccessiblePageAsync(fga, alice, Read, null, 3);
-        db.ChangeTracker.Entries().Should().BeEmpty();
-        untracked.Data.Should().HaveCount(3);
-        var tracked = await db.Items.OrderBy(i => i.Rank).ToAccessiblePageAsync(fga, alice, Read, null, 3);
+        var filter = await fga.BuildFilterAsync<PageItem>(alice, Read);
+
+        // Ground truth: the filter in a query that is not a page (no Take), which EF Core runs as written.
+        SqlOSFgaPageDiagnostics.Collect();
+        var truth = await db.Items.AsNoTracking().Where(filter).OrderBy(i => i.Rank).ToListAsync();
+        SqlOSFgaPageDiagnostics.LastCounters.Should().BeNull("a query without Take is not a page");
+        truth.Should().HaveCountGreaterThan(20);
+        var ids = truth.Select(i => i.Id).ToList();
+
+        // Skip and Take: the walk fetches skip + take rows and drops the first skip.
+        SqlOSFgaPageDiagnostics.Collect();
+        var skipped = await db.Items.AsNoTracking().Where(filter).OrderBy(i => i.Rank).Skip(5).Take(5).ToListAsync();
+        SqlOSFgaPageDiagnostics.LastCounters.Should().NotBeNull();
+        skipped.Select(i => i.Id).Should().Equal(ids.Skip(5).Take(5));
+
+        // Single-row methods, with their own semantics.
+        SqlOSFgaPageDiagnostics.Collect();
+        (await db.Items.AsNoTracking().Where(filter).OrderBy(i => i.Rank).FirstAsync()).Id.Should().Be(ids[0]);
+        SqlOSFgaPageDiagnostics.LastCounters.Should().NotBeNull();
+        (await db.Items.AsNoTracking().Where(filter).OrderBy(i => i.Rank).FirstOrDefaultAsync(i => i.Status == 2))!.Id.Should().Be(truth.First(i => i.Status == 2).Id);
+        var one = truth[3];
+        SqlOSFgaPageDiagnostics.Collect();
+        (await db.Items.AsNoTracking().Where(filter).Where(i => i.Id == one.Id).OrderBy(i => i.Rank).SingleAsync()).Id.Should().Be(one.Id);
+        SqlOSFgaPageDiagnostics.LastCounters.Should().NotBeNull();
+        (await db.Items.AsNoTracking().Where(filter).Where(i => i.Id == "no such item").OrderBy(i => i.Rank).FirstOrDefaultAsync()).Should().BeNull();
+        var several = () => db.Items.AsNoTracking().Where(filter).OrderBy(i => i.Rank).SingleAsync();
+        await several.Should().ThrowAsync<InvalidOperationException>();
+
+        // A projection on the way out, before or after Take.
+        SqlOSFgaPageDiagnostics.Collect();
+        var projected = await db.Items.AsNoTracking().Where(filter).OrderBy(i => i.Rank).Take(4).Select(i => new { i.Id, Doubled = i.Rank * 2 }).ToListAsync();
+        SqlOSFgaPageDiagnostics.LastCounters.Should().NotBeNull();
+        projected.Select(p => (p.Id, p.Doubled)).Should().Equal(truth.Take(4).Select(i => (i.Id, i.Rank * 2)));
+        SqlOSFgaPageDiagnostics.Collect();
+        var scalars = await db.Items.Where(filter).OrderBy(i => i.Rank).Select(i => i.Id).Take(4).ToListAsync();
+        SqlOSFgaPageDiagnostics.LastCounters.Should().NotBeNull();
+        scalars.Should().Equal(ids.Take(4));
+
+        // Synchronous execution, and the filter composed after the order.
+        SqlOSFgaPageDiagnostics.Collect();
+        db.Items.AsNoTracking().Where(filter).OrderBy(i => i.Rank).Take(3).ToList().Select(i => i.Id).Should().Equal(ids.Take(3));
+        SqlOSFgaPageDiagnostics.LastCounters.Should().NotBeNull();
+        SqlOSFgaPageDiagnostics.Collect();
+        (await db.Items.AsNoTracking().OrderBy(i => i.Rank).Where(filter).Take(3).ToListAsync()).Select(i => i.Id).Should().Equal(ids.Take(3));
+        SqlOSFgaPageDiagnostics.LastCounters.Should().NotBeNull();
+
+        // The rows load through the application's query: tracking is honored either way.
+        db.ChangeTracker.Clear();
+        SqlOSFgaPageDiagnostics.Collect();
+        (await db.Items.Where(filter).OrderBy(i => i.Rank).Take(3).ToListAsync()).Should().HaveCount(3);
+        SqlOSFgaPageDiagnostics.LastCounters.Should().NotBeNull();
         db.ChangeTracker.Entries<PageItem>().Should().HaveCount(3);
-        tracked.Data.Should().HaveCount(3);
+        db.ChangeTracker.Clear();
+        (await db.Items.AsNoTracking().Where(filter).OrderBy(i => i.Rank).Take(3).ToListAsync()).Should().HaveCount(3);
+        db.ChangeTracker.Entries().Should().BeEmpty();
 
-        // Shapes a page cannot take say what to do instead.
-        var unindexed = () => db.Items.OrderBy(i => i.Price).ToAccessiblePageAsync(fga, alice, Read, null, 5);
-        (await unindexed.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().Contain("declare HasIndex(Price)");
-        var projected = () => fga.PageAsync(db.Items.Select(i => i).OrderBy(i => i.Rank), alice, Read, null, 5);
-        (await projected.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().Contain("Select");
-        var descending = () => db.Items.OrderByDescending(i => i.Rank).ToAccessiblePageAsync(fga, alice, Read, null, 5);
-        await descending.Should().ThrowAsync<InvalidOperationException>();
+        // Not pages: counts, no Take, an order no index covers, an order of mixed directions. They run as EF
+        // Core would, the filter as a predicate, and return the same rows.
+        SqlOSFgaPageDiagnostics.Collect();
+        (await db.Items.Where(filter).CountAsync()).Should().Be(truth.Count);
+        SqlOSFgaPageDiagnostics.LastCounters.Should().BeNull();
+        SqlOSFgaPageDiagnostics.Collect();
+        (await db.Items.AsNoTracking().Where(filter).OrderBy(i => i.Price).ThenBy(i => i.Id).Take(5).ToListAsync()).Select(i => i.Id)
+            .Should().Equal(truth.OrderBy(i => i.Price).ThenBy(i => i.Id, StringComparer.Ordinal).Take(5).Select(i => i.Id));
+        SqlOSFgaPageDiagnostics.LastCounters.Should().BeNull("Price has no declared index, so the page is not walked");
+        SqlOSFgaPageDiagnostics.Collect();
+        (await db.Items.AsNoTracking().Where(filter).OrderBy(i => i.Rank).ThenByDescending(i => i.Id).Take(5).ToListAsync()).Select(i => i.Id).Should().Equal(ids.Take(5));
+        SqlOSFgaPageDiagnostics.LastCounters.Should().BeNull("an order of mixed directions is not walked");
 
-        // Nothing visible: an empty page, no cursor.
+        // The same page on a plain context (no UseSqlOSFga) is the same rows, through the optimizer.
+        var plainOptions = new DbContextOptionsBuilder<PageDbContext>();
+        plainOptions.UseTestProvider(host.ConnectionString);
+        await using (var plain = new PageDbContext(plainOptions.Options))
+        {
+            SqlOSFgaPageDiagnostics.Collect();
+            (await plain.Items.AsNoTracking().Where(filter).OrderBy(i => i.Rank).Take(5).ToListAsync()).Select(i => i.Id).Should().Equal(ids.Take(5));
+            SqlOSFgaPageDiagnostics.LastCounters.Should().BeNull();
+        }
+
+        // Nothing visible: the filter is false, the page empty.
         var bob = (await subjects.CreateUserAsync("Bob", $"bob-{Guid.NewGuid():N}@example.test")).SubjectId;
-        var empty = await db.Items.OrderBy(i => i.Rank).ToAccessiblePageAsync(fga, bob, Read, null, 5);
-        empty.Data.Should().BeEmpty();
-        empty.NextCursor.Should().BeNull();
+        var nothing = await fga.BuildFilterAsync<PageItem>(bob, Read);
+        (await db.Items.AsNoTracking().Where(nothing).OrderBy(i => i.Rank).Take(5).ToListAsync()).Should().BeEmpty();
     }
 
-    /// <summary>The query shapes every scenario is checked in.</summary>
-    private static IEnumerable<(string Name, IQueryable<PageItem> Query, int PageSize)> Shapes(PageDbContext db)
+    /// <summary>A query shape every scenario is checked in: the application's own filter, its order, and the keyset predicate it writes for the next page.</summary>
+    private sealed record Shape(
+        string Name,
+        int PageSize,
+        Func<IQueryable<PageItem>, IQueryable<PageItem>> Filter,
+        Func<IQueryable<PageItem>, IOrderedQueryable<PageItem>> Order,
+        Func<IQueryable<PageItem>, PageItem, IQueryable<PageItem>> After);
+
+    private static IEnumerable<Shape> Shapes()
     {
-        yield return ("key order", db.Items.OrderBy(i => i.Id), 7);
-        yield return ("rank order", db.Items.OrderBy(i => i.Rank), 5);
-        yield return ("rank order, served filter", db.Items.Where(i => i.Status == 1).OrderBy(i => i.Rank), 4);
-        yield return ("rank order, residual filter", db.Items.Where(i => i.Price > 60).OrderBy(i => i.Rank), 6);
-        yield return ("key order, both filters", db.Items.Where(i => i.Status == 2 && i.Price < 80).OrderBy(i => i.Id), 3);
+        yield return new("key order", 7, q => q, q => q.OrderBy(i => i.Id), (q, l) => q.Where(i => string.Compare(i.Id, l.Id) > 0));
+        yield return new("rank order, key implied", 5, q => q, q => q.OrderBy(i => i.Rank), (q, l) => q.Where(i => i.Rank > l.Rank || (i.Rank == l.Rank && string.Compare(i.Id, l.Id) > 0)));
+        yield return new("rank order, served filter", 4, q => q.Where(i => i.Status == 1), q => q.OrderBy(i => i.Rank).ThenBy(i => i.Id), (q, l) => q.Where(i => i.Rank > l.Rank || (i.Rank == l.Rank && i.Id.CompareTo(l.Id) > 0)));
+        yield return new("rank order, residual filter", 6, q => q.Where(i => i.Price > 60), q => q.OrderBy(i => i.Rank).ThenBy(i => i.Id), (q, l) => q.Where(i => i.Rank > l.Rank || (i.Rank == l.Rank && string.Compare(i.Id, l.Id) > 0)));
+        yield return new("key order, both filters", 3, q => q.Where(i => i.Status == 2 && i.Price < 80), q => q.OrderBy(i => i.Id), (q, l) => q.Where(i => string.Compare(i.Id, l.Id) > 0));
+        yield return new("rank descending", 5, q => q, q => q.OrderByDescending(i => i.Rank).ThenByDescending(i => i.Id), (q, l) => q.Where(i => i.Rank < l.Rank || (i.Rank == l.Rank && string.Compare(i.Id, l.Id) < 0)));
     }
 
-    /// <summary>Ground truth: the PR's filter, through EF Core.</summary>
-    private static async Task<List<string>> Truth(IQueryable<PageItem> query, ISqlOSFgaAuthService fga, string subject)
+    /// <summary>Ground truth: the same filter and order in a query that is not a page (no Take), run by EF Core as written.</summary>
+    private static async Task<List<string>> Truth(PageDbContext db, Expression<Func<PageItem, bool>> filter, Shape shape)
     {
-        var filter = await fga.BuildFilterAsync<PageItem>(subject, Read);
-        return await query.AsNoTracking().Where(filter).Select(i => i.Id).ToListAsync();
+        SqlOSFgaPageDiagnostics.Collect();
+        var ids = await shape.Order(shape.Filter(db.Items.AsNoTracking().Where(filter))).Select(i => i.Id).ToListAsync();
+        SqlOSFgaPageDiagnostics.LastCounters.Should().BeNull("a query without Take runs as EF Core would");
+        return ids;
     }
 
-    /// <summary>Every page of the cursor walk, concatenated.</summary>
-    private static async Task<List<string>> PageAll(IQueryable<PageItem> query, ISqlOSFgaAuthService fga, string subject, int pageSize)
+    /// <summary>Every page of a keyset walk, concatenated: k + 1 rows asked for, the last one telling whether a next page exists.</summary>
+    private static async Task<List<string>> PageAll(PageDbContext db, Expression<Func<PageItem, bool>> filter, Shape shape, bool walked)
     {
         var all = new List<string>();
-        string? cursor = null;
+        PageItem? last = null;
         for (var pages = 0; pages < 1_000; pages++)
         {
-            var page = await query.AsNoTracking().ToAccessiblePageAsync(fga, subject, Read, cursor, pageSize);
-            page.Data.Count.Should().BeLessThanOrEqualTo(pageSize);
-            all.AddRange(page.Data.Select(i => i.Id));
-            if (page.NextCursor is null)
+            var rows = db.Items.AsNoTracking().Where(filter);
+            if (last is not null)
             {
-                page.Data.Count.Should().BeLessThanOrEqualTo(pageSize);
+                rows = shape.After(rows, last);
+            }
+
+            SqlOSFgaPageDiagnostics.Collect();
+            var page = await shape.Order(shape.Filter(rows)).Take(shape.PageSize + 1).ToListAsync();
+            if (walked)
+            {
+                SqlOSFgaPageDiagnostics.LastCounters.Should().NotBeNull($"shape {shape.Name} must run through SqlOS's walk");
+            }
+
+            var more = page.Count > shape.PageSize;
+            if (more)
+            {
+                page.RemoveAt(shape.PageSize);
+            }
+
+            all.AddRange(page.Select(i => i.Id));
+            if (!more)
+            {
                 return all;
             }
 
-            page.Data.Should().HaveCount(pageSize, "a page with a next cursor is full");
-            cursor = page.NextCursor;
+            last = page[^1];
         }
 
-        throw new InvalidOperationException("The cursor walk did not end.");
+        throw new InvalidOperationException("The keyset walk did not end.");
     }
 
     /// <summary>The maintained grant counts and direct index equal a rebuild from scratch.</summary>
@@ -419,13 +500,17 @@ public class SqlOSFgaPageIntegrationTests
     {
         private readonly string _database;
 
-        private HostedApp(WebApplication app, string database)
+        private HostedApp(WebApplication app, string database, string connectionString)
         {
             App = app;
             _database = database;
+            ConnectionString = connectionString;
         }
 
         public WebApplication App { get; }
+
+        /// <summary>The test database's connection string, for a context built by hand beside the hosted one.</summary>
+        public string ConnectionString { get; }
 
         public static async Task<HostedApp> StartAsync()
         {
@@ -459,7 +544,7 @@ public class SqlOSFgaPageIntegrationTests
             }
 
             await app.StartAsync();
-            return new HostedApp(app, database);
+            return new HostedApp(app, database, connectionString);
         }
 
         public async ValueTask DisposeAsync()

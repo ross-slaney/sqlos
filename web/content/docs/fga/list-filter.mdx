@@ -8,7 +8,7 @@ order: 1
 
 `BuildFilterAsync` returns a filter for `Where(...)`. Lists only rows the subject may see. Use it wherever authorization has to sit inside a query of your own: counts, joins, aggregates, offset pages, search.
 
-For a paged list, use the page call instead: `ToAccessiblePageAsync` takes your query's filters and order and returns the next page the caller may see with its cursor, with about a page's worth of work for any caller, whether they see three rows in a million or everything, through one grant or ten thousand. [Paginating authorized lists](/docs/guides/paginating-authorized-lists) covers both.
+A paged list is the same filter with an order and a `Take`. On the context registered with SqlOS, that query is walked by SqlOS rather than planned by the optimizer: about a page's worth of work for any caller, whether they see three rows in a million or everything, through one grant or ten thousand. [Paginating authorized lists](/docs/guides/paginating-authorized-lists) covers it.
 
 This is a read-side helper. Lifecycle-managed domain rows normally implement `ISqlOSResourceEntity`; the filter only needs the inherited `ResourceId` contract to tie application rows to their FGA resources.
 
@@ -80,7 +80,7 @@ For a caller whose access comes from a few grants, a page in an order you declar
 - a sort by a column you declared no index for;
 - a page for a caller with many grants, which tests every row against all of them.
 
-For pages, `ToAccessiblePageAsync` answers all four: it needs no count to know whether a next page exists, takes a cursor instead of an offset, requires a declared index for its order, and reads a caller's grants one seek each. The [pagination guide](/docs/guides/paginating-authorized-lists) shows it.
+For pages, the walk answers all four: a page (`Where(filter)`, an order, `Take`) needs no count to know whether a next page exists (ask for one row more), takes a keyset predicate instead of an offset, needs a declared index for its order, and reads a caller's grants one seek each. The [pagination guide](/docs/guides/paginating-authorized-lists) shows it.
 
 ## Composing with plain EF
 

@@ -535,10 +535,6 @@ public sealed class SqlOSErgonomicsExtensionsTests
         public Task<Expression<Func<T, bool>>> BuildFilterAsync<T>(string subjectId, string permissionKey)
             where T : IHasResourceId
             => throw new NotImplementedException();
-
-        public Task<SqlOS.Pagination.SqlOSCursorPage<T>> PageAsync<T>(IQueryable<T> query, string subjectId, string permissionKey, string? cursor, int pageSize, CancellationToken cancellationToken = default)
-            where T : class, IHasResourceId
-            => throw new NotImplementedException();
     }
 
     private sealed class ManualDepthFgaDbContext(DbContextOptions<ManualDepthFgaDbContext> options)

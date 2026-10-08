@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text.Json;
@@ -420,25 +421,49 @@ app.MapGet("/api/todos", async (
     }
 
     var todoContext = authResult.Context!;
+    var size = Math.Clamp(pageSize ?? 50, 1, 200);
 
-    // An authorized page: the query declares the order (one the entity has an index for) and how rows load;
-    // SqlOS finds the rows the caller may see with about a page's worth of work, and returns the cursor of
-    // the next page. BuildFilterAsync remains the tool for counts, joins and other non-page queries.
-    SqlOSCursorPage<TodoItem> page;
-    try
+    // One query, written the way any EF Core list is: the authorization filter, the keyset cursor, the order
+    // (one the entity declares an index for, newest first) and the page size. On the context SqlOS registers,
+    // that is a page SqlOS walks: about a page's worth of work for any caller, whatever they may see. A count
+    // or a join composes the same filter and runs as EF Core would.
+    var canRead = await fgaAuthService.BuildFilterAsync<TodoItem>(todoContext.SubjectId, TodoFgaService.TodoReadPermission);
+    var todos = dbContext.TodoItems.AsNoTracking().Where(canRead);
+    if (cursor is not null)
     {
-        page = await dbContext.TodoItems
-            .AsNoTracking()
-            .OrderBy(x => x.IsCompleted)
-            .ThenBy(x => x.CreatedAt)
-            .ToAccessiblePageAsync(fgaAuthService, todoContext.SubjectId, TodoFgaService.TodoReadPermission, cursor, Math.Clamp(pageSize ?? 50, 1, 200), cancellationToken);
-    }
-    catch (SqlOSCursorException ex)
-    {
-        return Results.BadRequest(new { error = ex.Message });
+        DateTime afterCreatedAt;
+        Guid afterId;
+        try
+        {
+            var position = SqlOSCursorCodec.Decode(cursor, TodoListCursor.SortKey, TodoListCursor.Fingerprint);
+            afterCreatedAt = DateTime.Parse(position[0], CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+            afterId = Guid.Parse(position[1]);
+        }
+        catch (Exception ex) when (ex is SqlOSCursorException or FormatException or ArgumentOutOfRangeException)
+        {
+            return Results.BadRequest(new { error = "The cursor is not one this list issued." });
+        }
+
+        // Newest first: the next page is what comes before the last row seen.
+        todos = todos.Where(x => x.CreatedAt < afterCreatedAt || (x.CreatedAt == afterCreatedAt && x.Id.CompareTo(afterId) < 0));
     }
 
-    var items = page.Data
+    // One row more than the page tells whether a next page exists, without a count.
+    var rows = await todos
+        .OrderByDescending(x => x.CreatedAt)
+        .ThenByDescending(x => x.Id)
+        .Take(size + 1)
+        .ToListAsync(cancellationToken);
+    var hasNextPage = rows.Count > size;
+    if (hasNextPage)
+    {
+        rows.RemoveAt(size);
+    }
+
+    var nextCursor = hasNextPage
+        ? SqlOSCursorCodec.Encode(TodoListCursor.SortKey, TodoListCursor.Fingerprint, [rows[^1].CreatedAt.ToString("O", CultureInfo.InvariantCulture), rows[^1].Id.ToString("D")])
+        : null;
+    var items = rows
         .Select(x => new
         {
             x.Id,
@@ -457,8 +482,8 @@ app.MapGet("/api/todos", async (
         subjectId = todoContext.SubjectId,
         organizationId = todoContext.ValidatedToken.OrganizationId,
         items,
-        nextCursor = page.NextCursor,
-        hasNextPage = page.HasNextPage
+        nextCursor,
+        hasNextPage
     });
 });
 
@@ -739,6 +764,13 @@ static string GetDisplayName(ClaimsPrincipal principal, string subjectId)
 
 static string? GetClaimValue(ClaimsPrincipal principal, string claimType)
     => principal.Claims.FirstOrDefault(x => x.Type == claimType)?.Value;
+
+/// <summary>The opaque cursor of the Todo list: the last row's creation time and id, bound to this list's order.</summary>
+static class TodoListCursor
+{
+    public const string SortKey = "todos.createdAt.desc";
+    public static readonly string Fingerprint = SqlOSCursorCodec.Fingerprint();
+}
 
 public sealed record CreateTodoRequest(string Title);
 public sealed record TodoRequestContext(SqlOSValidatedToken ValidatedToken, string SubjectId, string TenantResourceId);

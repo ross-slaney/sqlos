@@ -20,6 +20,7 @@ namespace SqlOS.Benchmarks.Scenarios;
 /// </summary>
 internal sealed class ScenarioRunner(
     Func<BenchDbContext> createContext,
+    Func<BenchDbContext> createPageContext,
     DatabaseProvider provider,
     SqlOSFgaOptions fga,
     RetailTree tree,
@@ -58,9 +59,9 @@ internal sealed class ScenarioRunner(
     private async Task<ScenarioResult> RunAsync(Scenario scenario, long productCount, CancellationToken cancellationToken)
     {
         // The first execution is untimed: its answer is the one verified, and for filter pages the same command
-        // is run once more under EXPLAIN ANALYZE / STATISTICS XML for rows examined and server time. A page call
-        // is several statements, so it reports the executor's own counters (rounds, statements, rows fetched)
-        // instead of a plan.
+        // is run once more under EXPLAIN ANALYZE / STATISTICS XML for rows examined and server time. A walked
+        // page is several statements, so it reports the executor's own counters (rounds, statements, rows
+        // fetched) instead of a plan.
         var capture = scenario.Kind == ScenarioKind.List ? new CapturedPlan { Relation = "Products" } : null;
         Execution first;
         try
@@ -208,14 +209,22 @@ internal sealed class ScenarioRunner(
 
     private async Task<Execution> ExecuteAsync(Scenario scenario, CancellationToken cancellationToken, CapturedPlan? capture = null)
     {
-        await using var db = createContext();
+        // The same context an application registers, in one of its two configurations: plain EF Core, or
+        // with SqlOS's query execution (UseSqlOSFga), where a page over the filter is walked.
+        await using var db = scenario.Kind == ScenarioKind.Page ? createPageContext() : createContext();
         db.Database.SetCommandTimeout(TimeSpan.FromSeconds(budgetSeconds));
         var service = new SqlOSFgaAuthService(db, Options.Create(fga), NullLogger<SqlOSFgaAuthService>.Instance);
         switch (scenario.Kind)
         {
             case ScenarioKind.List:
+            case ScenarioKind.Page:
             {
+                // The one query an application writes, either way: Where(filter), the store filter, the cursor,
+                // the order, Take(k + 1). Building the filter (principal resolution, the access roots) is a
+                // request's cost before the query and is reported beside it, not inside the clock.
+                var resolve = Stopwatch.StartNew();
                 var query = await BuildListQueryAsync(db, service, scenario);
+                resolve.Stop();
 
                 // Armed only now, after BuildFilterAsync's own lookups, so the plan is the list query's.
                 if (capture is not null)
@@ -225,27 +234,31 @@ internal sealed class ScenarioRunner(
 
                 try
                 {
+                    SqlOSFgaPageDiagnostics.Collect();
                     var clock = Stopwatch.StartNew();
                     var page = await query.ToListAsync(cancellationToken);
                     clock.Stop();
-                    return new Execution(clock.Elapsed, page, Allowed: null);
+                    var counters = SqlOSFgaPageDiagnostics.LastCounters;
+                    if (scenario.Kind == ScenarioKind.Page)
+                    {
+                        if (counters is null)
+                        {
+                            throw new InvalidOperationException($"{scenario.Id} ran as a plain query: SqlOS did not walk it.");
+                        }
+
+                        counters.ResolveMs = resolve.Elapsed.TotalMilliseconds;
+                    }
+                    else if (counters is not null)
+                    {
+                        throw new InvalidOperationException($"{scenario.Id} was walked on the plain context.");
+                    }
+
+                    return new Execution(clock.Elapsed, page, Allowed: null) { Counters = counters };
                 }
                 finally
                 {
                     PlanCapture.Disarm();
                 }
-            }
-
-            case ScenarioKind.Page:
-            {
-                // The application's call: the query declares the filter and the order; SqlOS finds the rows the
-                // caller may see and returns the page with its cursor. Everything, principal resolution
-                // included, is inside the clock, as a request would pay it.
-                var query = BuildPageQuery(db, scenario);
-                var clock = Stopwatch.StartNew();
-                var page = await service.PageAsync(query, scenario.Principal.SubjectId, BenchmarkModel.ProductView, cursor: null, scenario.PageSize, cancellationToken);
-                clock.Stop();
-                return new Execution(clock.Elapsed, page.Data.ToList(), Allowed: null) { HasNextPage = page.HasNextPage, Counters = service.LastPageCounters };
             }
 
             case ScenarioKind.PointFunction:
@@ -274,7 +287,8 @@ internal sealed class ScenarioRunner(
 
     /// <summary>
     /// The page an application asks for: authorized, optionally store-scoped, in key order after a cursor or
-    /// in price order, k + 1 rows.
+    /// in price order, k + 1 rows. On the plain context the optimizer plans it as one statement; on the
+    /// SqlOS context the keyset predicate is where every stream of the walk starts.
     /// </summary>
     private static async Task<IQueryable<Product>> BuildListQueryAsync(BenchDbContext db, SqlOSFgaAuthService service, Scenario scenario)
     {
@@ -293,32 +307,6 @@ internal sealed class ScenarioRunner(
 
         var cursor = scenario.Cursor;
         return query.Where(p => p.Id > cursor).OrderBy(p => p.Id).Take(scenario.PageSize + 1);
-    }
-
-    /// <summary>
-    /// The same page as a page call: the application's filters and the order, nothing else. A page from the
-    /// middle of the table is the application's own predicate on the key, which the per-level seeks serve.
-    /// </summary>
-    private static IQueryable<Product> BuildPageQuery(BenchDbContext db, Scenario scenario)
-    {
-        IQueryable<Product> query = db.Products.AsNoTracking();
-        if (scenario.StoreId is { } storeId)
-        {
-            query = query.Where(p => p.StoreId == storeId);
-        }
-
-        if (scenario.Order == PageOrder.Price)
-        {
-            return query.OrderBy(p => p.Price).ThenBy(p => p.Id);
-        }
-
-        if (scenario.Cursor > 0)
-        {
-            var cursor = scenario.Cursor;
-            query = query.Where(p => p.Id > cursor);
-        }
-
-        return query.OrderBy(p => p.Id);
     }
 
     private async Task<PlanSummary?> SavePlanAsync(Scenario scenario, CapturedPlan plan, long productCount, CancellationToken cancellationToken)
@@ -378,22 +366,7 @@ internal sealed class ScenarioRunner(
 
         var page = execution.Page!;
         var actual = page.Select(p => p.Id).ToList();
-        if (scenario.Kind == ScenarioKind.Page)
-        {
-            // The page call returns k rows and says whether a next page exists; the filter page returns k + 1.
-            var wanted = expected.Take(scenario.PageSize).ToList();
-            if (!actual.SequenceEqual(wanted))
-            {
-                return (false, false, $"page [{Preview(actual)}] != expected [{Preview(wanted)}]");
-            }
-
-            var more = expected.Count > scenario.PageSize;
-            if (execution.HasNextPage != more)
-            {
-                return (false, false, $"hasNextPage {execution.HasNextPage}, expected {more}");
-            }
-        }
-        else if (!actual.SequenceEqual(expected))
+        if (!actual.SequenceEqual(expected))
         {
             return (false, false, $"page [{Preview(actual)}] != expected [{Preview(expected)}]");
         }
@@ -430,10 +403,7 @@ internal sealed class ScenarioRunner(
 
     private sealed record Execution(TimeSpan Elapsed, List<Product>? Page, bool? Allowed)
     {
-        /// <summary>For a page call: whether it reported a next page.</summary>
-        public bool HasNextPage { get; init; }
-
-        /// <summary>For a page call: what the executor did, in its own units.</summary>
+        /// <summary>For a walked page: what the executor did, in its own units.</summary>
         public SqlOSFgaPageCounters? Counters { get; init; }
     }
 
@@ -467,25 +437,25 @@ internal sealed record ScenarioResult(
     /// <summary>The page was filtered to one store as well, so it touches that store's rows through its own index.</summary>
     public bool StoreFiltered { get; init; }
 
-    /// <summary>For a page call: round trips the executor made.</summary>
+    /// <summary>For a walked page: round trips the executor made.</summary>
     public int? Rounds { get; init; }
 
-    /// <summary>For a page call: statements it ran (the prelude and every round).</summary>
+    /// <summary>For a walked page: statements it ran (the prelude and every round).</summary>
     public int? Statements { get; init; }
 
-    /// <summary>For a page call: index rows the rounds fetched, the page's rows and the ones judged or discarded.</summary>
+    /// <summary>For a walked page: index rows the rounds fetched, the page's rows and the ones judged or discarded.</summary>
     public int? RowsFetched { get; init; }
 
-    /// <summary>For a page call: streams opened (one seek each).</summary>
+    /// <summary>For a walked page: streams opened (one seek each).</summary>
     public int? Streams { get; init; }
 
-    /// <summary>For a page call, on its first (verified) execution: milliseconds resolving the caller's principals and the permission.</summary>
+    /// <summary>For a walked page: milliseconds building the filter (the caller's principals, the permission, the access roots), outside the timed query.</summary>
     public double? ResolveMs { get; init; }
 
-    /// <summary>For a page call, on its first execution: milliseconds in the walk (prelude and rounds).</summary>
+    /// <summary>For a walked page, on its last timed execution: milliseconds in the walk (prelude and rounds).</summary>
     public double? WalkMs { get; init; }
 
-    /// <summary>For a page call, on its first execution: milliseconds loading the page's rows through the application's query.</summary>
+    /// <summary>For a walked page, on its last timed execution: milliseconds loading the page's rows through the application's query.</summary>
     public double? LoadMs { get; init; }
 
     /// <summary>

@@ -195,7 +195,7 @@ internal static class ReportWriter
         }
 
         text.AppendLine();
-        text.AppendLine("**Filter vs. page call** · the same page through `BuildFilterAsync` (filter) and through `ToAccessiblePageAsync` (page), median ms");
+        text.AppendLine("**Filter vs. walk** · the same query as one statement the optimizer plans (filter) and walked by SqlOS on a `UseSqlOSFga` context (page), median ms");
         text.AppendLine();
         text.Append("| Page | σ |");
         foreach (var step in steps)

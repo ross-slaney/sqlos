@@ -103,7 +103,8 @@ internal sealed class SqlOSFgaPageBackend<T>(
             query.OrderColumns.Select(c => new SqlOSFgaScopeColumn(c.Column, c.Mapping.StoreType, c.Property.IsNullable)).ToList(),
             query.IndexSuffix,
             query.PredicateSql,
-            _typeSeq is not null));
+            _typeSeq is not null,
+            query.Descending));
 
         var (connection, opened) = await OpenAsync(cancellationToken);
         try

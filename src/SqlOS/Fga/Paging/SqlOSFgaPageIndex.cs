@@ -78,7 +78,7 @@ internal static class SqlOSFgaPageIndex
 
 /// <summary>
 /// What a page's statements are built for: the table, the alias EF Core gave it in the filter, the order (the
-/// key last), the filter, and whether the permission restricts the resource type.
+/// key last) and its direction, the filter, and whether the permission restricts the resource type.
 /// </summary>
 internal sealed record SqlOSFgaPageSpec(
     SqlOSFgaScopeTable Table,
@@ -86,4 +86,5 @@ internal sealed record SqlOSFgaPageSpec(
     IReadOnlyList<SqlOSFgaScopeColumn> Order,
     string? IndexSuffix,
     string? PredicateSql,
-    bool Typed);
+    bool Typed,
+    bool Descending = false);

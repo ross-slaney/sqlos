@@ -4,12 +4,12 @@ namespace SqlOS.Benchmarks.Scenarios;
 
 internal enum ScenarioKind
 {
-    /// <summary>A cursor page of products through <c>BuildFilterAsync</c>: the lineage read from the row's scope column.</summary>
+    /// <summary>A cursor page of products as one statement the optimizer plans: <c>BuildFilterAsync</c>'s filter as a predicate, the lineage read from the row's scope column.</summary>
     List,
 
     /// <summary>
-    /// The same page through <c>ToAccessiblePageAsync</c>: the library owns the access path (the adaptive walk
-    /// over the grant counts, the per-level indexes, and the direct index) and returns the page and its cursor.
+    /// The same LINQ on a context with SqlOS's query execution (<c>UseSqlOSFga</c>): SqlOS owns the access
+    /// path (the adaptive walk over the grant counts, the per-level indexes, and the direct index).
     /// </summary>
     Page,
 
@@ -46,7 +46,7 @@ internal sealed record Scenario(
 {
     public bool IsPage => Kind is ScenarioKind.List or ScenarioKind.Page;
 
-    /// <summary>The same page through the library-owned page call (<c>page.*</c> beside <c>list.*</c>).</summary>
+    /// <summary>The same query walked by SqlOS (<c>page.*</c> beside <c>list.*</c>).</summary>
     public Scenario AsPage() => this with { Id = "page." + Id["list.".Length..], Kind = ScenarioKind.Page };
 }
 
@@ -59,8 +59,8 @@ internal static class ScenarioCatalog
         var otherChainProduct = tree.FirstProduct(l => l.Chain == 2, productCount);
         double Share(Principal p) => p.ShareOf(tree);
 
-        // Every page shape, through BuildFilterAsync. Each is measured once more below through
-        // ToAccessiblePageAsync, as page.<same id>.
+        // Every page shape, as the optimizer plans it. Each is measured once more below walked by SqlOS, as
+        // page.<same id>.
         var pages = new List<Scenario>
         {
             new("list.admin.first-page", "Company admin, first page (k = 20)", ScenarioKind.List, people.Admin, 1.0, "4 and 9"),
@@ -80,7 +80,7 @@ internal static class ScenarioCatalog
         };
 
         // People holding thousands of single-product grants, the way per-item sharing accumulates: the same
-        // predicate, with all of their roots in one list parameter; the page call reads them from the direct index.
+        // predicate, with all of their roots in one list parameter; the walk reads them from the direct index.
         foreach (var person in people.ManyGrants.Where(p => p.GrantedProducts > 0))
         {
             var share = (double)person.GrantedProducts / productCount;

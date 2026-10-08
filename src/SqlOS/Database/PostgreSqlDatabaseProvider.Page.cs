@@ -444,12 +444,16 @@ internal sealed partial class PostgreSqlDatabaseProvider
         var order = spec.Order;
         var after = string.Join(", ", order.Select((_, i) => $"a{i}"));
         var afterTyped = string.Join(", ", order.Select((c, i) => $"a{i} {c.StoreType}"));
+        // A descending page reads the same indexes backwards: the order, the merge and the keyset all flip.
+        var direction = spec.Descending ? " DESC" : "";
+        var beyond = spec.Descending ? "<" : ">";
         var orderCols = string.Join(", ", order.Select(c => $"{a}.{QuoteIdentifier(c.Column)}"));
-        var outCols = string.Join(", ", order.Select((c, i) => $"c{i}"));
+        var orderBy = string.Join(", ", order.Select(c => $"{a}.{QuoteIdentifier(c.Column)}{direction}"));
+        var outOrder = string.Join(", ", order.Select((c, i) => $"c{i}{direction}"));
         var selectCols = string.Join(", ", order.Select((c, i) => $"{a}.{QuoteIdentifier(c.Column)} AS c{i}"));
         var predicate = spec.PredicateSql is null ? "" : $"\n              AND ({spec.PredicateSql})";
         var typeFilter = spec.Typed ? $"\n              AND SUBSTRING({scope}, {SqlOSFgaLineage.ScopeTypeOffset}, 4) = @Type" : "";
-        var keyset = $"(NOT s.has_after OR ({orderCols}) > ({string.Join(", ", order.Select((_, i) => $"s.a{i}"))}))";
+        var keyset = $"(NOT s.has_after OR ({orderCols}) {beyond} ({string.Join(", ", order.Select((_, i) => $"s.a{i}"))}))";
 
         var afterColumns = string.Join(", ", order.Select((_, i) => $"o.a{i}"));
         var afterFromN = string.Join(", ", order.Select((_, i) => $"n.a{i}"));
@@ -522,24 +526,24 @@ internal sealed partial class PostgreSqlDatabaseProvider
                 SELECT 0 AS kind, s.level, s.seq, NULL::varchar AS principal, NULL::varchar AS role, q.rn, q.cnt, TRUE AS granted, {string.Join(", ", order.Select((_, i) => $"q.c{i}"))}
                 FROM streams s
                 CROSS JOIN LATERAL (
-                    SELECT row_number() OVER (ORDER BY {outCols}) AS rn, count(*) OVER () AS cnt, z.*
+                    SELECT row_number() OVER (ORDER BY {outOrder}) AS rn, count(*) OVER () AS cnt, z.*
                     FROM (SELECT {selectCols}
                           FROM {ScopeTable(spec.Table)} AS {a}
                           WHERE {seek}{typeFilter}{predicate}
                             AND {keyset}
-                          ORDER BY {orderCols}
+                          ORDER BY {orderBy}
                           LIMIT s.f) z) q
                 WHERE s.kind = 0 AND s.level = {level}
                 UNION ALL
                 SELECT 1, s.level, s.seq, NULL, NULL, q.rn, q.cnt, q.granted, {string.Join(", ", order.Select((_, i) => $"q.c{i}"))}
                 FROM streams s
                 CROSS JOIN LATERAL (
-                    SELECT row_number() OVER (ORDER BY {outCols}) AS rn, count(*) OVER () AS cnt, z.*
+                    SELECT row_number() OVER (ORDER BY {outOrder}) AS rn, count(*) OVER () AS cnt, z.*
                     FROM (SELECT {selectCols}, {RowTest(options, spec, level, levels)} AS granted
                           FROM {ScopeTable(spec.Table)} AS {a}
                           WHERE {seek}{predicate}
                             AND {keyset}
-                          ORDER BY {orderCols}
+                          ORDER BY {orderBy}
                           LIMIT s.f) z) q
                 WHERE s.kind = 1 AND s.level = {level}
                 """);
@@ -547,7 +551,8 @@ internal sealed partial class PostgreSqlDatabaseProvider
 
         var directColumns = string.Join(", ", order.Select((c, i) => $"d.{QuoteIdentifier(c.Column)} AS c{i}"));
         var directOrder = string.Join(", ", order.Select(c => $"d.{QuoteIdentifier(c.Column)}"));
-        var directKeyset = $"(NOT s.has_after OR ({directOrder}) > ({string.Join(", ", order.Select((_, i) => $"s.a{i}"))}))";
+        var directOrderBy = string.Join(", ", order.Select(c => $"d.{QuoteIdentifier(c.Column)}{direction}"));
+        var directKeyset = $"(NOT s.has_after OR ({directOrder}) {beyond} ({string.Join(", ", order.Select((_, i) => $"s.a{i}"))}))";
         var directJoin = spec.PredicateSql is null
             ? ""
             : $"\n                          INNER JOIN {ScopeTable(spec.Table)} AS {a} ON {string.Join(" AND ", spec.Table.KeyColumns.Select(k => $"{a}.{QuoteIdentifier(k)} = d.{QuoteIdentifier(k)}"))}";
@@ -556,14 +561,14 @@ internal sealed partial class PostgreSqlDatabaseProvider
             SELECT 2, -1, 0, s.principal, s.role, q.rn, q.cnt, TRUE, {string.Join(", ", order.Select((_, i) => $"q.c{i}"))}
             FROM streams s
             CROSS JOIN LATERAL (
-                SELECT row_number() OVER (ORDER BY {outCols}) AS rn, count(*) OVER () AS cnt, z.*
+                SELECT row_number() OVER (ORDER BY {outOrder}) AS rn, count(*) OVER () AS cnt, z.*
                 FROM (SELECT {directColumns}
                       FROM {DirectTable(options, spec.Table)} d{directJoin}
                       WHERE d."SubjectId" = s.principal AND d."RoleId" = s.role AND d."Active"
                         AND (@TypeSeq IS NULL OR d."TypeSeq" = @TypeSeq)
                         AND {Validity("d")}{predicate}
                         AND {directKeyset}
-                      ORDER BY {directOrder}
+                      ORDER BY {directOrderBy}
                       LIMIT s.f) z) q
             WHERE s.kind = 2
             """;
@@ -583,7 +588,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
                 {blocks}
                 {directBlock}
             ) u
-            ORDER BY {outCols};
+            ORDER BY {outOrder};
             """;
 
         return first + "\n" + second;

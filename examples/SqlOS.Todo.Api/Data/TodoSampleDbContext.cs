@@ -21,9 +21,10 @@ public sealed class TodoSampleDbContext(DbContextOptions<TodoSampleDbContext> op
             entity.HasIndex(x => x.OwnerSubjectId);
             entity.HasIndex(x => new { x.OwnerSubjectId, x.IsCompleted });
 
-            // The order the list pages in. SqlOS mirrors it per level of the resource tree, so an authorized
-            // page (ToAccessiblePageAsync) in this order is one index seek per place the caller is granted.
-            entity.HasIndex(x => new { x.IsCompleted, x.CreatedAt }).HasDatabaseName("IX_TodoItems_IsCompleted_CreatedAt");
+            // The order the list pages in (newest first, the key as the tiebreaker). SqlOS mirrors it per level
+            // of the resource tree, so an authorized page in this order is one index seek per place the caller
+            // is granted.
+            entity.HasIndex(x => new { x.CreatedAt, x.Id }).HasDatabaseName("IX_TodoItems_CreatedAt");
         });
     }
 }

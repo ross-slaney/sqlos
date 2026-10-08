@@ -406,19 +406,21 @@ internal sealed partial class SqlServerDatabaseProvider
     }
 
     /// <summary>
-    /// A keyset comparison SQL Server's optimizer seeks on: the first column as a range, the rest nested.
-    /// (<c>c0 >= a0 AND (c0 > a0 OR (c1 >= a1 AND (c1 > a1 OR …)))</c>).
+    /// A keyset comparison SQL Server's optimizer seeks on: the first column as a range, the rest nested
+    /// (<c>c0 >= a0 AND (c0 > a0 OR (c1 >= a1 AND (c1 > a1 OR …)))</c>); mirrored for a descending order.
     /// </summary>
-    private static string Keyset(IReadOnlyList<string> columns, IReadOnlyList<string> values)
+    private static string Keyset(IReadOnlyList<string> columns, IReadOnlyList<string> values, bool descending)
     {
+        var beyond = descending ? "<" : ">";
+        var orEqual = descending ? "<=" : ">=";
         string Rest(int i)
         {
             if (i == columns.Count - 1)
             {
-                return $"{columns[i]} > {values[i]}";
+                return $"{columns[i]} {beyond} {values[i]}";
             }
 
-            return $"({columns[i]} >= {values[i]} AND ({columns[i]} > {values[i]} OR {Rest(i + 1)}))";
+            return $"({columns[i]} {orEqual} {values[i]} AND ({columns[i]} {beyond} {values[i]} OR {Rest(i + 1)}))";
         }
 
         return Rest(0);
@@ -438,13 +440,16 @@ internal sealed partial class SqlServerDatabaseProvider
         var order = spec.Order;
         var afterJson = string.Join(", ", order.Select((c, i) => $"a{i} {c.StoreType} '$.a{i}'"));
         var afterList = string.Join(", ", order.Select((_, i) => $"a{i}"));
+        // A descending page reads the same indexes backwards: the order, the merge and the keyset all flip.
+        var direction = spec.Descending ? " DESC" : "";
         var orderCols = order.Select(c => $"{a}.[{Escape(c.Column)}]").ToList();
-        var outCols = string.Join(", ", order.Select((_, i) => $"c{i}"));
+        var orderBy = string.Join(", ", orderCols.Select(c => c + direction));
+        var outOrder = string.Join(", ", order.Select((_, i) => $"c{i}{direction}"));
         var selectCols = string.Join(", ", order.Select((c, i) => $"{a}.[{Escape(c.Column)}] AS c{i}"));
         var afterValues = order.Select((_, i) => $"s.a{i}").ToList();
         var predicate = spec.PredicateSql is null ? "" : $"\n              AND ({spec.PredicateSql})";
         var typeFilter = spec.Typed ? $"\n              AND SUBSTRING({scope}, {SqlOSFgaLineage.ScopeTypeOffset}, 4) = @Type" : "";
-        var keyset = $"(s.has_after = 0 OR {Keyset(orderCols, afterValues)})";
+        var keyset = $"(s.has_after = 0 OR {Keyset(orderCols, afterValues, spec.Descending)})";
 
         var header = $"""
             DECLARE @LiveT TABLE (SubjectId NVARCHAR(450) COLLATE DATABASE_DEFAULT NOT NULL PRIMARY KEY);
@@ -537,23 +542,23 @@ internal sealed partial class SqlServerDatabaseProvider
                 SELECT 0 AS kind, s.[level], s.seq, CAST(NULL AS NVARCHAR(450)) AS principal, CAST(NULL AS NVARCHAR(450)) AS role, q.rn, q.cnt, CAST(1 AS BIT) AS granted, {string.Join(", ", order.Select((_, i) => $"q.c{i}"))}
                 FROM @StreamsT s
                 CROSS APPLY (
-                    SELECT ROW_NUMBER() OVER (ORDER BY {outCols}) AS rn, COUNT(*) OVER () AS cnt, z.*
+                    SELECT ROW_NUMBER() OVER (ORDER BY {outOrder}) AS rn, COUNT(*) OVER () AS cnt, z.*
                     FROM (SELECT TOP (s.f) {selectCols}
                           FROM {ScopeTable(spec.Table)} AS {a} {hint}
                           WHERE {seek}{typeFilter}{predicate}
                             AND {keyset}
-                          ORDER BY {string.Join(", ", orderCols)}) z) q
+                          ORDER BY {orderBy}) z) q
                 WHERE s.kind = 0 AND s.[level] = {level}
                 UNION ALL
                 SELECT 1, s.[level], s.seq, NULL, NULL, q.rn, q.cnt, q.granted, {string.Join(", ", order.Select((_, i) => $"q.c{i}"))}
                 FROM @StreamsT s
                 CROSS APPLY (
-                    SELECT ROW_NUMBER() OVER (ORDER BY {outCols}) AS rn, COUNT(*) OVER () AS cnt, z.*
+                    SELECT ROW_NUMBER() OVER (ORDER BY {outOrder}) AS rn, COUNT(*) OVER () AS cnt, z.*
                     FROM (SELECT TOP (s.f) {selectCols}, CAST(CASE WHEN {RowTest(options, spec, level, levels)} THEN 1 ELSE 0 END AS BIT) AS granted
                           FROM {ScopeTable(spec.Table)} AS {a} {hint}
                           WHERE {seek}{predicate}
                             AND {keyset}
-                          ORDER BY {string.Join(", ", orderCols)}) z) q
+                          ORDER BY {orderBy}) z) q
                 WHERE s.kind = 1 AND s.[level] = {level}
                 """);
         }
@@ -567,14 +572,14 @@ internal sealed partial class SqlServerDatabaseProvider
             SELECT 2, -1, CAST(0 AS BIGINT), s.principal, s.role, q.rn, q.cnt, CAST(1 AS BIT), {string.Join(", ", order.Select((_, i) => $"q.c{i}"))}
             FROM @StreamsT s
             CROSS APPLY (
-                SELECT ROW_NUMBER() OVER (ORDER BY {outCols}) AS rn, COUNT(*) OVER () AS cnt, z.*
+                SELECT ROW_NUMBER() OVER (ORDER BY {outOrder}) AS rn, COUNT(*) OVER () AS cnt, z.*
                 FROM (SELECT TOP (s.f) {string.Join(", ", order.Select((c, i) => $"d.[{Escape(c.Column)}] AS c{i}"))}
                       FROM {DirectTable(options, spec.Table)} d WITH (FORCESEEK ([{Escape(SqlOSFgaPageIndex.DirectIndexName(spec.Table, spec.IndexSuffix ?? "Key"))}] ([SubjectId], [RoleId]))){directJoin}
                       WHERE d.SubjectId = s.principal AND d.RoleId = s.role AND d.Active = 1
                         AND (@TypeSeq IS NULL OR d.TypeSeq = @TypeSeq)
                         AND {Validity("d")}{predicate}
-                        AND (s.has_after = 0 OR {Keyset(directCols, afterValues)})
-                      ORDER BY {string.Join(", ", directCols)}) z) q
+                        AND (s.has_after = 0 OR {Keyset(directCols, afterValues, spec.Descending)})
+                      ORDER BY {string.Join(", ", directCols.Select(c => c + direction))}) z) q
             WHERE s.kind = 2
             """;
 
@@ -596,7 +601,7 @@ internal sealed partial class SqlServerDatabaseProvider
                 {blocks}
                 {directBlock}
             ) u
-            ORDER BY {outCols};
+            ORDER BY {outOrder};
             """;
 
         return first + "\n" + second;

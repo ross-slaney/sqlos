@@ -148,4 +148,29 @@ public class SqlOSFgaPageSqlTests
         round.Should().NotContain("s.level = 3");
         round.Should().Contain("ORDER BY c0, c1");
     }
+
+    [TestMethod]
+    public void RoundSql_Descending_ReadsTheSameIndexesBackwards()
+    {
+        var options = new SqlOSFgaOptions { MaxResourceHierarchyDepth = 2 };
+        var spec = new SqlOSFgaPageSpec(Items, "i", [Items.Columns[1], Items.Columns[0]], "Price", null, Typed: false, Descending: true);
+
+        var sqlServer = SqlServerDatabaseProvider.Instance.BuildPageRoundSql(options, spec);
+        sqlServer.Should().Contain("ORDER BY c0 DESC, c1 DESC", "the merge runs backwards");
+        sqlServer.Should().Contain("ORDER BY i.[Price] DESC, i.[Id] DESC", "every stream reads its index backwards");
+        sqlServer.Should().Contain("ORDER BY d.[Price] DESC, d.[Id] DESC", "the direct index too");
+        sqlServer.Should().Contain("(i.[Price] <= s.a0 AND (i.[Price] < s.a0 OR i.[Id] < s.a1))", "the keyset seeks before the position");
+        sqlServer.Should().NotContain(" > s.a").And.NotContain(" >= s.a");
+
+        var postgres = PostgreSqlDatabaseProvider.Instance.BuildPageRoundSql(options, spec);
+        postgres.Should().Contain("ORDER BY c0 DESC, c1 DESC");
+        postgres.Should().Contain("ORDER BY i.\"Price\" DESC, i.\"Id\" DESC");
+        postgres.Should().Contain("ORDER BY d.\"Price\" DESC, d.\"Id\" DESC");
+        postgres.Should().Contain("(i.\"Price\", i.\"Id\") < (s.a0, s.a1)");
+        postgres.Should().NotContain(") > (s.a0");
+
+        // Ascending is the default, unchanged.
+        var ascending = SqlServerDatabaseProvider.Instance.BuildPageRoundSql(options, spec with { Descending = false });
+        ascending.Should().Contain("ORDER BY c0, c1").And.Contain("(i.[Price] >= s.a0 AND (i.[Price] > s.a0 OR i.[Id] > s.a1))").And.NotContain("DESC");
+    }
 }
