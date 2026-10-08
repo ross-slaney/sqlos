@@ -360,6 +360,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
                 -- 4. The grant counts and the direct indexes, from the grants and the new lineage.
                 PERFORM {Qualify(options.Schema, "fn_" + SqlOSFgaPageIndex.RebuildRoutine)}();
                 DROP TABLE {nodes};
+                UPDATE {Qualify(options.Schema, "SqlOSFgaSchema")} SET "LineageBuilt" = true;
             END
             $sqlos$;
             """;
@@ -681,9 +682,8 @@ internal sealed partial class PostgreSqlDatabaseProvider
         ArgumentNullException.ThrowIfNull(options);
         return $"""
             SELECT CASE WHEN EXISTS (
-                SELECT 1 FROM {Qualify(options.Schema, options.TableNames.Resources)}
-                WHERE "ParentId" IS NULL AND "Depth" IS NULL)
-            THEN 1 ELSE 0 END AS "Value"
+                SELECT 1 FROM {Qualify(options.Schema, "SqlOSFgaSchema")} WHERE "LineageBuilt")
+            THEN 0 ELSE 1 END AS "Value"
             """;
     }
 

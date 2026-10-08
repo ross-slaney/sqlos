@@ -304,8 +304,9 @@ internal sealed partial class SqlServerDatabaseProvider
         // The whole table, in ranges of the key: the internal nodes (every resource that is some row's parent;
         // few next to the leaves) get their lineage level by level in a temp table, then every range of the
         // table takes its rows' lineage in one transaction: the nodes' from the temp table, the leaves' from
-        // their parent node, and the scope columns of the range's application rows. A failed rebuild leaves
-        // some ranges written and the routines' hash unstored, so the next startup runs it again.
+        // their parent node, and the scope columns of the range's application rows. LineageBuilt is cleared
+        // before the first range and set after the last, so a rebuild that fails part-way leaves it clear and
+        // the next startup runs it again.
         var nodeColumns = string.Join(", ", new[] { "Depth", "Reach" }.Concat(Enumerable.Range(0, levels).Select(SqlOSFgaLineage.AncestorColumn)));
         var copyNode = string.Join(", ", new[] { "Depth", "Reach" }.Concat(Enumerable.Range(0, levels).Select(SqlOSFgaLineage.AncestorColumn)).Select(c => $"{c} = n.{c}"));
         var rebuildProcedure = $"""
@@ -316,6 +317,8 @@ internal sealed partial class SqlServerDatabaseProvider
                 SET NOCOUNT ON;
                 SET XACT_ABORT ON;
                 {WithSessionLineageLock(options, $"""
+
+                UPDATE [{schema}].[SqlOSFgaSchema] SET [LineageBuilt] = 0;
 
                 -- 1. The internal nodes, level by level.
                 CREATE TABLE #SqlOSLineageNodes (
@@ -379,6 +382,7 @@ internal sealed partial class SqlServerDatabaseProvider
                 DROP TABLE #SqlOSLineageNodes;
                 -- 3. The grant counts and the direct indexes, from the grants and the new lineage.
                 EXEC [{schema}].[sp_{SqlOSFgaPageIndex.RebuildRoutine}];
+                UPDATE [{schema}].[SqlOSFgaSchema] SET [LineageBuilt] = 1;
                 """)}
             END
             """;
@@ -595,15 +599,14 @@ internal sealed partial class SqlServerDatabaseProvider
         ];
     }
 
-    /// <summary>Returns 1 when the lineage was never built: a root (no parent) without a depth.</summary>
+    /// <summary>Returns 1 until a rebuild has finished every range (see <c>LineageBuilt</c>).</summary>
     public string BuildLineageNeedsBuildSql(SqlOSFgaOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
         return $"""
             SELECT CASE WHEN EXISTS (
-                SELECT 1 FROM [{Escape(options.Schema)}].[{Escape(options.TableNames.Resources)}]
-                WHERE ParentId IS NULL AND Depth IS NULL)
-            THEN 1 ELSE 0 END AS [Value]
+                SELECT 1 FROM [{Escape(options.Schema)}].[SqlOSFgaSchema] WHERE [LineageBuilt] = 1)
+            THEN 0 ELSE 1 END AS [Value]
             """;
     }
 

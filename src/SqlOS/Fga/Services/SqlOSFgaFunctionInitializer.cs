@@ -233,8 +233,9 @@ public class SqlOSFgaFunctionInitializer
     }
 
     /// <summary>
-    /// The first startup after the lineage migration finds an existing tree whose roots have no depth. Build
-    /// it once; from then on the triggers keep it current.
+    /// The lineage has not been built in full: never built, or a rebuild stopped part-way (it clears
+    /// <c>LineageBuilt</c> before its first range and sets it after its last). Build it; from then on the
+    /// triggers keep it current.
     /// </summary>
     private async Task<bool> LineageNeedsBuildAsync(ISqlOSDatabaseProvider provider, CancellationToken cancellationToken)
     {

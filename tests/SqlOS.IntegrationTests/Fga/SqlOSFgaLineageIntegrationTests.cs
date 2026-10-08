@@ -526,6 +526,61 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
             await Context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite($"UPDATE [dbo].[SqlOSFgaResources] SET [Depth] = NULL, [Reach] = NULL, {ancestors}"));
             await Context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("UPDATE [LifecycleProtectedEntities] SET [FgaScope] = NULL"));
             await Context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("UPDATE [dbo].[SqlOSFgaSchema] SET [RoutinesHash] = NULL"));
+            await ClearLineageBuiltAsync();
+
+            await new SqlOSFgaFunctionInitializer(Context, Options.Create(new SqlOSFgaOptions()), NullLogger<SqlOSFgaFunctionInitializer>.Instance)
+                .EnsureFunctionsExistAsync();
+
+            (await ReadResourcesAsync()).Should().BeEquivalentTo(maintained);
+            (await ReadEntitiesAsync()).Should().BeEquivalentTo(maintainedEntities);
+        }
+        finally
+        {
+            await DeleteEntityAsync(entityId);
+            await DeleteAsync(ids);
+        }
+    }
+
+    [TestMethod]
+    public async Task AnInterruptedRebuild_IsFinishedByTheNextStart()
+    {
+        // SQL Server commits the rebuild range by range. One that fails after the ranges holding the roots have
+        // committed leaves the later rows without a lineage, and the next start must finish it rather than take
+        // the built roots for a finished build. (PostgreSQL rebuilds in one transaction: a failure leaves the
+        // previous lineage, and nothing half done.)
+        if (TestDatabase.IsPostgreSql)
+        {
+            return;
+        }
+
+        // "zz" sorts after every other id, so this chain's last resource lies in the last range.
+        var ids = await CreateChainAsync("zz_interrupted", "agency", "team", "project");
+        var entityId = await CreateEntityAsync(ids[2]);
+        try
+        {
+            var maintained = await ReadResourcesAsync();
+            var maintainedEntities = await ReadEntitiesAsync();
+
+            // A database before its first build, whose build then fails in its last range.
+            var ancestors = string.Join(", ", Enumerable.Range(0, Levels).Select(l => $"[Ancestor{l}] = NULL"));
+            var clearLineage = $"UPDATE [dbo].[SqlOSFgaResources] SET [Depth] = NULL, [Reach] = NULL, {ancestors}";
+            var failInTheLastRange = $"ALTER TABLE [dbo].[SqlOSFgaResources] WITH NOCHECK ADD CONSTRAINT [CK_Test_InterruptRebuild] CHECK ([Id] <> N'{ids[2]}' OR [Depth] IS NULL)";
+            await Context.Database.ExecuteSqlRawAsync(clearLineage);
+            await Context.Database.ExecuteSqlRawAsync("UPDATE [LifecycleProtectedEntities] SET [FgaScope] = NULL");
+            await Context.Database.ExecuteSqlRawAsync("UPDATE [dbo].[SqlOSFgaSchema] SET [RoutinesHash] = NULL");
+            await Context.Database.ExecuteSqlRawAsync(failInTheLastRange);
+            try
+            {
+                var rebuild = () => Context.Database.ExecuteSqlRawAsync("EXEC [dbo].[sp_SqlOSFgaResources_LineageRebuild] @RangeRows = 3");
+                await rebuild.Should().ThrowAsync<Exception>();
+            }
+            finally
+            {
+                await Context.Database.ExecuteSqlRawAsync("ALTER TABLE [dbo].[SqlOSFgaResources] DROP CONSTRAINT [CK_Test_InterruptRebuild]");
+            }
+
+            (await ReadResourcesAsync()).Single(r => r.Id == "root").Depth.Should().Be(0, "the first ranges committed");
+            (await ReadResourcesAsync()).Single(r => r.Id == ids[2]).Depth.Should().BeNull("the last range did not");
 
             await new SqlOSFgaFunctionInitializer(Context, Options.Create(new SqlOSFgaOptions()), NullLogger<SqlOSFgaFunctionInitializer>.Instance)
                 .EnsureFunctionsExistAsync();
@@ -879,6 +934,12 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
         Context.ChangeTracker.Clear();
         return id;
     }
+
+    /// <summary>The flag a database has before its lineage is first built.</summary>
+    private static Task ClearLineageBuiltAsync()
+        => Context.Database.ExecuteSqlRawAsync(TestDatabase.IsPostgreSql
+            ? "UPDATE \"dbo\".\"SqlOSFgaSchema\" SET \"LineageBuilt\" = false"
+            : "UPDATE [dbo].[SqlOSFgaSchema] SET [LineageBuilt] = 0");
 
     private static Task DeleteEntityAsync(string id)
         => Context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("DELETE FROM [LifecycleProtectedEntities] WHERE [Id] = {0}"), id);

@@ -56,7 +56,7 @@ internal interface ISqlOSDatabaseProvider
     /// </summary>
     IReadOnlyList<string> BuildLineageMaintenanceSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables);
 
-    /// <summary>A scalar query: 1 when the lineage was never built (a root without a depth), else 0.</summary>
+    /// <summary>A scalar query: 1 until a rebuild has finished in full (<c>LineageBuilt</c>), else 0.</summary>
     string BuildLineageNeedsBuildSql(SqlOSFgaOptions options);
 
     string BuildLineageRebuildSql(SqlOSFgaOptions options);
