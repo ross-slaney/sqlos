@@ -12,7 +12,7 @@ order: 6
   href="/docs/fga/list-filter"
   actionLabel="List filtering"
 >
-  `BuildFilterAsync` is the whole API. Compose its filter into any query. When the query is a page (the filter, an order, a `Take`), SqlOS finds the rows itself with about a page's worth of work for any caller; when it is anything else, the filter is a predicate and the query runs as EF Core would.
+  `BuildFilterAsync` is the whole API. Compose its filter into any query. For a supported page (the filter, a declared indexed order, a `Take`), SqlOS finds and merges authorized rows without first loading every grant. Other shapes use a SQL predicate and run as EF Core would. Independent granted branches and the query's filters still affect the cost.
 </Banner>
 
 ## A page
@@ -33,12 +33,12 @@ var hasNextPage = rows.Count > pageSize;
 if (hasNextPage) rows.RemoveAt(pageSize);
 ```
 
-That is an ordinary EF Core query. On the context registered with `AddSqlOS` it is also a page, and SqlOS runs it: instead of one statement the optimizer plans over the filter, SqlOS walks the caller's granted branches of the resource tree, merges their rows in the query's order and stops when the page is full. The rows come back as the query asked for them (`AsNoTracking`, `Include`, a `Select` all apply). Nothing about the query says so; the filter carries who it is for, and SqlOS recognizes the page. `BuildFilterAsync` itself resolves the caller's principals and the permission and reads no grant: a request that pages pays for its page and nothing else, whether the caller holds one grant or a hundred thousand.
+That is an ordinary EF Core query. On the context registered with `AddSqlOS` it is also a page, and SqlOS runs it: instead of one statement the optimizer plans over the filter, SqlOS walks the caller's granted branches of the resource tree, merges their rows in the query's order and stops when the page is full. The rows come back as the query asked for them (`AsNoTracking`, `Include`, a `Select` all apply). Nothing about the query says so; the filter carries who it is for, and SqlOS recognizes the page. `BuildFilterAsync` itself resolves the caller's principals and the permission and reads no grant: a recognized page avoids that up-front grant enumeration. It still pays for principal resolution, branch discovery, index work, and any overdue grant-count refresh.
 
 A query is a page when it has:
 
 - **The filter**, composed as `Where(canView)` with the object `BuildFilterAsync` returned, anywhere in the chain. A filter you combined with another expression is not recognized; add the other condition as its own `Where`.
-- **Other filters** (`Where`) over the entity's own columns, subqueries included. They run inside every index seek the page makes, so a condition the order's index serves costs nothing extra, and one it does not serve is tested row by row as rows arrive in order. A condition that needs another table in `FROM` (a join through a navigation) makes the query not a page.
+- **Other filters** (`Where`) over the entity's own columns, subqueries included. They run inside every index seek the page makes, where useful indexes can reduce the work. A condition the index cannot narrow is tested as candidates arrive and can require examining many rows to fill a page. A condition that needs another table in `FROM` (a join through a navigation) makes the query not a page.
 - **The order** (`OrderBy`/`ThenBy`, or `OrderByDescending`/`ThenByDescending`; all one direction), ending with the key or with the key appended: either the key alone, or the columns of an index you declared on the entity (`HasIndex(x => new { x.Name, x.Id })`). SqlOS mirrors every declared index per level of the resource tree, which is what makes a page one seek per place the caller is granted.
 - **The page**: `Take(k)`, or `First`, `FirstOrDefault`, `Single`, `SingleOrDefault`; `Skip(n)` before `Take` works (SqlOS walks `n + k` rows and drops the first `n`, so keep offsets small and use a keyset for deep pages).
 - Optionally a **`Select`** after the order, applied when the rows load. `Include`, `AsNoTracking`, `IgnoreQueryFilters`, `TagWith` and `AsSplitQuery` pass through.
@@ -56,20 +56,24 @@ The next page is a keyset predicate over the order, the one EF Core keyset pagin
 
 SqlOS reads it as the position the page starts after, and every stream of the walk seeks straight to it. The forms it reads: a strict comparison on the only order column (`i.Id > lastId`); the tiebreaking form above over all the columns, nested for three or more (`A > a || (A == a && (B > b || (B == b && C > c)))`); the `>=`-then-`>` form (`A >= a && (A > a || B > b)`); `string.Compare(x, y) > 0` or `x.CompareTo(y) > 0` for any comparison; and `<` throughout for a descending order. A keyset written another way is still correct, but it is a predicate: each stream then starts at its beginning and discards rows up to the cursor.
 
-Encode the last row's order values as an opaque cursor for the client to send back; `SqlOSCursorCodec` does that (the Todo sample's list endpoint shows it end to end). Because the cursor is a keyset, a row that became visible between two requests appears on its page and a revoked one disappears; no page is skipped or repeated.
+Encode the last row's order values as an opaque cursor for the client to send back; `SqlOSCursorCodec` does that (the Todo sample's list endpoint shows it end to end). A fresh request uses current grants and seeks after the supplied key. It is not a retained snapshot: a newly visible row before the cursor will not appear unless the list is restarted, and concurrent sort-key changes can move rows across the boundary. Use the cursor to resume the current ordering, not as a change feed.
 
 ### What it costs
 
-The walk reads the rows the caller may see from where they are, instead of testing rows the caller may not see:
+For a supported order and an efficiently served filter, the executor can seek into an authorized branch instead of walking unrelated rows in the whole application table:
 
-- a caller granted on one node of the tree (a tenant, a folder, a region) pays one index seek at that node's level, plus the page's rows, at any table size;
-- a caller granted on a hundred nodes pays about a hundred seeks for the first page and far fewer for later ones (the cursor skips the nodes already behind it);
-- a caller granted on single rows, ten thousand of them, pays one seek of the direct index, where each grant's own rows sit in the page's order;
-- a caller who can see everything pays the same as the first case.
+- A caller granted on one workspace, department, or root reads through that branch's index after the required tree navigation.
+- A caller granted on many independent branches pays to discover and merge those branches. This work belongs to the caller's grants, including their groups, and can recur on later pages and empty results.
+- Grants directly on the resources attached to the queried rows use a direct-grant index, with streams per resolved principal and applicable role, rather than an up-front enumeration of individual grants.
+- Ordinary index lookup costs, additional filters, overlap between grants, and principal resolution still contribute. This is not a universal bound of one page's worth of database work.
 
-A page is a few round trips, not one: SqlOS opens the caller's grants level by level and merges their rows in the page's order, stopping as soon as the page is full. Each round fetches a batch from the branches that need one; the rows a round fetched and did not use are held and merged, by the database, with the next round's rows, so no row is fetched twice for one page. Everything it does is counted and logged at debug level (`rounds`, `statements`, `fetched`, `retained`), so you can see what a page cost. The fixed cost per page is a few milliseconds; a query the optimizer plans well is cheaper for a caller who can see everything, and the walk is what keeps a sparse caller, or one with many grants, at the same cost.
+A page uses several SQL statements. SqlOS opens branches and retains unused candidate keys and sort values in application memory for the duration of that page. The database merges retained candidates with each round's new candidates under its own `ORDER BY`. A stream refills after its retained candidates are consumed, reducing repeated index reads. Splitting a stream can discard its buffer, and retained candidates are sent back over the wire in later rounds. This is temporary per-page state, not a cache of all rows a principal may access or a session needed for the next page.
 
-SqlOS keeps two structures for this, created at startup and maintained by triggers: per subject, how many grants on resources with children sit on and below each resource (`SqlOSFgaGrantCounts`), and per protected table, the rows granted directly on their own resource with their key and sort columns (`SqlOSFgaDirect_<Table>`). Grants that take effect or expire on a schedule are folded in as their window opens or closes: a hosted service does it ahead of time, and a page whose caller's counts fell behind the clock rebuilds them first, so a grant that just became effective is on the very next page. Both structures are rebuilt from the grants and the rows at every start, so a bulk load that bypassed the triggers is caught up at the next start.
+The executor logs `rounds`, `statements`, `fetched`, and `retained` at debug level. Use those alongside database plans: fewer fetched candidates need not mean fewer round trips, and fetching few candidates does not prove the database examined few rows to satisfy an additional filter. A simple query the optimizer already handles well may have lower fixed overhead than the coordinated page.
+
+SqlOS maintains grant counts (`SqlOSFgaGrantCounts`) that identify grant-bearing branches, and direct-grant tables (`SqlOSFgaDirect_<Table>`) carrying keys and declared sort columns for rows attached directly to granted resources. Triggers maintain them as grants and rows change. Scheduled grants are refreshed in the background; if a caller's counts are overdue, their page refreshes them before walking, adding work to that request. Startup rebuilds derived structures when their definitions change or a rebuild is required; do not assume a routine restart repairs every bulk change that bypassed triggers.
+
+[Designing your resource tree](/docs/fga/designing-your-resource-tree) explains why workspace grants, groups, stable hierarchy boundaries, and deliberate page indexes work well with these tradeoffs.
 
 ## The filter, for everything else
 
@@ -103,7 +107,7 @@ Keyset (cursor/seek) pagination works with any library that composes on `IQuerya
 
 ### What the filter costs
 
-For a caller whose access comes from one grant, a statement over the predicate in an order you declared an index for is one index seek plus the rows asked for, the same as the walk. A caller granted on many nodes, or on many single rows, pays for every statement the optimizer plans: SqlOS reads all of the caller's roots when the statement runs, and the predicate tests each row's scope against that list. That is the case the walk exists for, and why a page is walked.
+For a caller whose access comes from one grant, a suitable indexed query over the predicate can seek into that branch. The actual plan also depends on filters, joins, and ordering. A caller granted on many nodes, or on many single rows, pays for every statement the optimizer plans: SqlOS reads all of the caller's roots when the statement runs, and the predicate tests each row's scope against that list. That is the case the walk exists for, and why a page is walked.
 
 ### What the filter captures
 
