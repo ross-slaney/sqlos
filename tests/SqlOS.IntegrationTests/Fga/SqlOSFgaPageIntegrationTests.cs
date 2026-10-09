@@ -92,13 +92,24 @@ public class SqlOSFgaPageIntegrationTests
             // nevertheless preserve exactly what the application stored, for keys as well as sort values.
             await db.Database.ExecuteSqlRawAsync("UPDATE [PageItems] SET [Id] = UPPER([Id]), [Label] = N'ORIGINAL '");
             await AssertScopeProjectionAsync(db);
+            await db.Database.ExecuteSqlRawAsync("UPDATE [PageItems] SET [Status] = [Status] + 1");
+            await AssertScopeProjectionAsync(db); // the computed sort value changes without being in SET
+            // A migration changes the computation without changing the column's name or SQL type.
+            await db.Database.ExecuteSqlRawAsync("""
+                DROP INDEX [IX_PageItems_ComputedStatus] ON [PageItems];
+                ALTER TABLE [PageItems] DROP COLUMN [ComputedStatus];
+                ALTER TABLE [PageItems] ADD [ComputedStatus] AS [Status] * 3 PERSISTED;
+                CREATE INDEX [IX_PageItems_ComputedStatus] ON [PageItems] ([ComputedStatus]);
+                """);
+            await initializer.EnsureFunctionsExistAsync();
+            await AssertScopeProjectionAsync(db);
         }
     }
 
     private static async Task AssertScopeProjectionAsync(PageDbContext db)
     {
         // Compare with the source rows, not with another query that uses the same authorization index.
-        const string projection = "Id, Label, Rank, Stamp, CONVERT(varchar(max), FgaScope, 2) AS ScopeBytes";
+        const string projection = "Id, Label, Rank, Stamp, ComputedStatus, CONVERT(varchar(max), FgaScope, 2) AS ScopeBytes";
         (await ReadAsync(db, $"SELECT {projection} FROM dbo.SqlOSFgaScopeIndex_PageItems ORDER BY Id"))
             .Should().Equal(await ReadAsync(db, $"SELECT {projection} FROM PageItems ORDER BY Id"),
                 "the private projection must equal the application rows, including every scope byte");
@@ -802,6 +813,11 @@ public class SqlOSFgaPageIntegrationTests
                 item.HasIndex(i => i.Label);
                 item.HasIndex(i => i.Rank).HasDatabaseName("IX_PageItems_Rank");
                 item.HasIndex(i => i.Stamp).HasDatabaseName("IX_PageItems_Stamp");
+                if (TestDatabase.IsSqlServer)
+                {
+                    item.Property<int>("ComputedStatus").HasComputedColumnSql("[Status] * 2", stored: true);
+                    item.HasIndex("ComputedStatus");
+                }
                 if (TestDatabase.IsPostgreSql)
                 {
                     // An instant column. (Under the library's timestamp compatibility switch, Npgsql maps DateTime

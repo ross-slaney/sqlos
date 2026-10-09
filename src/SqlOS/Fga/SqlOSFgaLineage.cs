@@ -170,4 +170,4 @@ internal sealed record SqlOSFgaScopeTable(
 internal sealed record SqlOSFgaScopeOrder(string Suffix, IReadOnlyList<string> Columns);
 
 /// <summary>A key or order column of an application table: its name, its store type (<c>int</c>, <c>nvarchar(200)</c>…), and whether it is nullable.</summary>
-internal sealed record SqlOSFgaScopeColumn(string Column, string StoreType, bool IsNullable);
+internal sealed record SqlOSFgaScopeColumn(string Column, string StoreType, bool IsNullable, bool ChangesOnUpdate = false);

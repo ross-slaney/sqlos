@@ -117,7 +117,8 @@ internal static class SqlOSFgaScopeColumns
                 .ToList();
             var columns = entityType.GetProperties()
                 .Where(p => p.GetColumnName(store) is not null)
-                .Select(p => new SqlOSFgaScopeColumn(p.GetColumnName(store)!, p.GetColumnType(store), p.IsNullable))
+                .Select(p => new SqlOSFgaScopeColumn(p.GetColumnName(store)!, p.GetColumnType(store), p.IsNullable,
+                    p.GetComputedColumnSql(store) is not null || p.ValueGenerated is ValueGenerated.OnAddOrUpdate or ValueGenerated.OnUpdate))
                 .ToList();
             tables.Add(new SqlOSFgaScopeTable(schema, table, resourceId.GetColumnName(store)!, key, orders, columns));
         }

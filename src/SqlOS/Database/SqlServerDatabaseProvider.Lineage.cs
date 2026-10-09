@@ -554,8 +554,14 @@ internal sealed partial class SqlServerDatabaseProvider
             LEFT JOIN {resources} r ON r.Id = t.[{Escape(table.ResourceIdColumn)}]
             LEFT JOIN {resourceTypes} rt ON rt.Id = r.ResourceTypeId;
             """;
-        var directColumns = SqlOSFgaPageIndex.DirectColumns(table).Select(c => c.Column).Append(table.ResourceIdColumn).Distinct().ToList();
-        var anyDirectChange = string.Join(" OR ", directColumns.Select(c => $"UPDATE([{Escape(c)}])"));
+        var projectedColumns = SqlOSFgaPageIndex.DirectColumns(table);
+        var directColumns = projectedColumns.Select(c => c.Column).Append(table.ResourceIdColumn).Distinct().ToList();
+        // A computed sort value can change when another column is updated. Compare transition values for
+        // generated orders: an unrelated field update must not fan out through unchanged direct grants.
+        var changedValues = string.Join(", ", directColumns.Select(c => $"CONVERT(varbinary(max), [{Escape(c)}])"));
+        var anyDirectChange = projectedColumns.Any(c => c.ChangesOnUpdate)
+            ? $"EXISTS (SELECT {changedValues} FROM inserted EXCEPT SELECT {changedValues} FROM deleted)"
+            : string.Join(" OR ", directColumns.Select(c => $"UPDATE([{Escape(c)}])"));
         return
         [
             $"""

@@ -20,8 +20,9 @@ internal sealed partial class SqlServerDatabaseProvider
         // the projection even when its C# property and CLR type did not change.
         return $"""
             CONVERT(nvarchar(64), HASHBYTES('SHA2_256', CONCAT(N'{shape}',
-                (SELECT c.name, c.system_type_id, c.max_length, c.precision, c.scale, c.is_nullable, c.collation_name
-                 FROM sys.columns c WHERE c.object_id = {ObjectOf(table)} AND c.name IN ({NameList(columns.Select(c => c.Column))})
+                (SELECT c.name, c.system_type_id, c.max_length, c.precision, c.scale, c.is_nullable, c.collation_name, cc.definition, cc.is_persisted
+                 FROM sys.columns c LEFT JOIN sys.computed_columns cc ON cc.object_id = c.object_id AND cc.column_id = c.column_id
+                 WHERE c.object_id = {ObjectOf(table)} AND c.name IN ({NameList(columns.Select(c => c.Column))})
                  ORDER BY c.name FOR XML RAW))), 2)
             """;
     }
