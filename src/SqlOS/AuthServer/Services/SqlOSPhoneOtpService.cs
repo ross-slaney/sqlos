@@ -15,6 +15,9 @@ public sealed class SqlOSPhoneOtpService
 {
     private const string PublicInvalidMessage = "The sign-in code is invalid or expired.";
     private const string PublicStartMessage = "If an account exists for that phone number, check your messages for a sign-in code.";
+    // A rejected check invalidates the challenge and an approved one spends it, so one provider
+    // check is all a challenge ever needs.
+    private const int MaxProviderChecksPerChallenge = 1;
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSAdminService _adminService;
     private readonly SqlOSCryptoService _cryptoService;
@@ -334,12 +337,17 @@ public sealed class SqlOSPhoneOtpService
             throw new InvalidOperationException(PublicInvalidMessage);
         }
 
-        var challenge = await VerifyChallengeAsync(
+        // Callers verify before they open the sign-up transaction, so a rejected code stays recorded
+        // (and the challenge invalidated) when that transaction rolls back. The challenge is spent
+        // later, inside the transaction, together with the sign-up token (ConsumeSignupTokenAsync).
+        var challenge = await CheckChallengeCodeAsync(
             new SqlOSPhoneOtpVerifyRequest(rawChallengeToken, request.Code),
             expectedAuthorizationRequestId,
             requireAuthorizationRequestMatch,
             expectedPurpose: "signup",
             cancellationToken);
+        await _context.SaveChangesAsync(cancellationToken);
+        await RecordVerifySucceededAsync(challenge, cancellationToken);
 
         if (challenge.User != null)
         {
@@ -365,14 +373,39 @@ public sealed class SqlOSPhoneOtpService
             payload.CustomFields);
     }
 
+    /// <summary>
+    /// Spends the sign-up token and the code challenge it is bound to. Call it inside the sign-up
+    /// transaction, after <see cref="VerifySignupAsync"/> succeeded outside it.
+    /// </summary>
     public async Task ConsumeSignupTokenAsync(
         string signupToken,
         CancellationToken cancellationToken = default)
     {
         var rawSignupToken = signupToken?.Trim()
             ?? throw new InvalidOperationException(PublicInvalidMessage);
-        _ = await _cryptoService.ConsumeTemporaryTokenAsync("phone_otp_signup", rawSignupToken, cancellationToken)
+        var token = await _cryptoService.ConsumeTemporaryTokenAsync("phone_otp_signup", rawSignupToken, cancellationToken)
             ?? throw new InvalidOperationException(PublicInvalidMessage);
+        var payload = _cryptoService.DeserializePayload<PhoneOtpSignupPayload>(token)
+            ?? throw new InvalidOperationException(PublicInvalidMessage);
+
+        var challenge = await _context.Set<SqlOSPhoneOtpChallenge>()
+            .FirstOrDefaultAsync(x => x.ChallengeTokenHash == payload.ChallengeTokenHash && x.ConsumedAt == null, cancellationToken)
+            ?? throw new InvalidOperationException(PublicInvalidMessage);
+        challenge.ConsumedAt = DateTime.UtcNow;
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            // A concurrent sign-up spent the challenge first.
+            foreach (var entry in ex.Entries)
+            {
+                entry.State = EntityState.Detached;
+            }
+
+            throw new InvalidOperationException(PublicInvalidMessage);
+        }
     }
 
     public async Task<SqlOSUserPhoneNumber> AddVerifiedPhoneNumberAsync(
@@ -427,6 +460,41 @@ public sealed class SqlOSPhoneOtpService
         string expectedPurpose,
         CancellationToken cancellationToken)
     {
+        var challenge = await CheckChallengeCodeAsync(
+            request,
+            expectedAuthorizationRequestId,
+            requireAuthorizationRequestMatch,
+            expectedPurpose,
+            cancellationToken);
+
+        challenge.ConsumedAt = DateTime.UtcNow;
+
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw new InvalidOperationException(PublicInvalidMessage);
+        }
+
+        await RecordVerifySucceededAsync(challenge, cancellationToken);
+        return challenge;
+    }
+
+    /// <summary>
+    /// Loads the challenge, admits its single provider check, and asks the provider. A rejected
+    /// code invalidates the challenge and is audited before this throws, independent of any
+    /// transaction the caller may roll back. An approved challenge is returned unconsumed, with its
+    /// provider status staged for the caller's save.
+    /// </summary>
+    private async Task<SqlOSPhoneOtpChallenge> CheckChallengeCodeAsync(
+        SqlOSPhoneOtpVerifyRequest request,
+        string? expectedAuthorizationRequestId,
+        bool requireAuthorizationRequestMatch,
+        string expectedPurpose,
+        CancellationToken cancellationToken)
+    {
         var rawChallengeToken = request.ChallengeToken?.Trim()
             ?? throw new InvalidOperationException(PublicInvalidMessage);
         var normalizedCode = NormalizeCode(request.Code);
@@ -467,6 +535,13 @@ public sealed class SqlOSPhoneOtpService
             throw new InvalidOperationException(PublicInvalidMessage);
         }
 
+        // The provider sees at most one code per challenge: the check is admitted before the call,
+        // so concurrent guesses cannot each get a provider check before the first rejection lands.
+        if (!await TryReserveProviderCheckAsync(challenge, cancellationToken))
+        {
+            throw new InvalidOperationException(PublicInvalidMessage);
+        }
+
         var phoneNumber = UnprotectPhoneNumber(challenge.PhoneNumberEncrypted);
         var check = await _deliveryChannel.CheckAsync(
             phoneNumber,
@@ -480,7 +555,6 @@ public sealed class SqlOSPhoneOtpService
                 challenge.ProviderChallengeId),
             cancellationToken);
 
-        challenge.AttemptCount++;
         challenge.ProviderStatus = check.ProviderStatus;
         if (!string.IsNullOrWhiteSpace(check.ProviderChallengeId))
         {
@@ -493,18 +567,45 @@ public sealed class SqlOSPhoneOtpService
             throw new InvalidOperationException(PublicInvalidMessage);
         }
 
-        challenge.ConsumedAt = DateTime.UtcNow;
+        return challenge;
+    }
 
-        try
+    /// <summary>
+    /// Admits the challenge's single provider check if it is still active. On a relational
+    /// database this is a single conditional update that commits on its own, so it must not run
+    /// inside a transaction: a rollback would make the challenge checkable again.
+    /// </summary>
+    private async Task<bool> TryReserveProviderCheckAsync(SqlOSPhoneOtpChallenge challenge, CancellationToken cancellationToken)
+    {
+        if (!_context.Database.IsRelational())
         {
+            // The in-memory provider (single-process tests) has no set-based updates.
+            challenge.AttemptCount++;
             await _context.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateConcurrencyException)
-        {
-            throw new InvalidOperationException(PublicInvalidMessage);
+            return true;
         }
 
-        await RecordPhoneOtpAuditAsync(
+        if (_context.Database.CurrentTransaction != null)
+        {
+            throw new InvalidOperationException(
+                "Phone OTP verification cannot run inside a database transaction: a rollback would erase the check it counts.");
+        }
+
+        var now = DateTime.UtcNow;
+        // Bypasses the change tracker on purpose, like the email-code reservation: the tracked
+        // AttemptCount stays unmodified and later saves of this challenge never write it.
+        var reserved = await _context.Set<SqlOSPhoneOtpChallenge>()
+            .Where(x => x.Id == challenge.Id
+                && x.ConsumedAt == null
+                && x.InvalidatedAt == null
+                && x.ExpiresAt > now
+                && x.AttemptCount < MaxProviderChecksPerChallenge)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.AttemptCount, x => x.AttemptCount + 1), cancellationToken);
+        return reserved == 1;
+    }
+
+    private async Task RecordVerifySucceededAsync(SqlOSPhoneOtpChallenge challenge, CancellationToken cancellationToken)
+        => await RecordPhoneOtpAuditAsync(
             "phone_otp.verify_succeeded",
             challenge.MaskedPhoneNumber,
             challenge.Purpose,
@@ -514,12 +615,9 @@ public sealed class SqlOSPhoneOtpService
                 challenge.UserId,
                 challenge.ClientApplicationId,
                 challenge.AuthorizationRequestId,
-                providerStatus = check.ProviderStatus
+                providerStatus = challenge.ProviderStatus
             },
             cancellationToken);
-
-        return challenge;
-    }
 
     private async Task RejectChallengeAsync(
         SqlOSPhoneOtpChallenge challenge,
@@ -832,7 +930,8 @@ public sealed class SqlOSPhoneOtpService
     private static bool IsChallengeActive(SqlOSPhoneOtpChallenge challenge)
         => challenge.ConsumedAt == null
             && challenge.InvalidatedAt == null
-            && challenge.ExpiresAt > DateTime.UtcNow;
+            && challenge.ExpiresAt > DateTime.UtcNow
+            && challenge.AttemptCount < MaxProviderChecksPerChallenge;
 
     private static string NormalizeCode(string? value)
     {
