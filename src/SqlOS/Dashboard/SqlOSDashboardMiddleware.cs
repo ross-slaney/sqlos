@@ -22,6 +22,7 @@ public sealed class SqlOSDashboardMiddleware
     private readonly string _pathPrefix;
     private readonly bool _isDevelopment;
     private readonly bool _scimEnabled;
+    private readonly string? _scimRelativePath;
     private readonly SqlOSDashboardOptions _options;
     private readonly SqlOSDashboardSessionService _sessionService;
     private readonly IFileProvider _fileProvider;
@@ -40,6 +41,9 @@ public sealed class SqlOSDashboardMiddleware
         _pathPrefix = pathPrefix.TrimEnd('/');
         _isDevelopment = environment.IsDevelopment();
         _scimEnabled = scimEnabled;
+        _scimRelativePath = scimEnabled
+            ? ResolveScimRelativePath(_pathPrefix, hostOptions.Value.AuthServer.ScimBasePath)
+            : null;
         _options = options;
         _sessionService = sessionService;
         _securityHeaders = new SqlOSBrowserSecurityHeaders(hostOptions);
@@ -379,6 +383,13 @@ public sealed class SqlOSDashboardMiddleware
 
     private bool ShouldPassThrough(string relativePath)
     {
+        // SCIM clients present a SCIM bearer token, never a dashboard session; the SCIM endpoints
+        // authenticate them and answer with SCIM errors.
+        if (_scimRelativePath != null && IsPathOrChild(relativePath, _scimRelativePath))
+        {
+            return true;
+        }
+
         if (IsPathOrChild(relativePath, "admin/fga"))
         {
             return IsPathOrChild(relativePath, "admin/fga/api")
@@ -512,6 +523,22 @@ public sealed class SqlOSDashboardMiddleware
 
     private static IFileProvider CreateFileProvider()
         => new ManifestEmbeddedFileProvider(typeof(SqlOSDashboardMiddleware).Assembly, "Dashboard/wwwroot");
+
+    /// <summary>
+    /// The SCIM base path relative to the dashboard root, or null when SCIM is mapped outside it.
+    /// Uses the SCIM route group's own normalization, so the pass-through and the routes agree.
+    /// </summary>
+    private static string? ResolveScimRelativePath(string dashboardPrefix, string? scimBasePath)
+    {
+        var scimPath = SqlOS.AuthServer.Extensions.EndpointRouteBuilderExtensions.NormalizeScimBasePath(scimBasePath);
+        if (!IsPathOrChild(scimPath, dashboardPrefix))
+        {
+            return null;
+        }
+
+        var relativePath = scimPath[dashboardPrefix.Length..].Trim('/');
+        return relativePath.Length == 0 ? null : relativePath;
+    }
 
     private static bool IsPathOrChild(string path, string prefix)
     {
