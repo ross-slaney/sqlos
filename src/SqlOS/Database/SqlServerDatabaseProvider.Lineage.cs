@@ -830,18 +830,6 @@ internal sealed partial class SqlServerDatabaseProvider
                 }
             }
 
-            // A fallback statement can walk an order across several granted branches. It needs the same
-            // ordinary order index the application table provided before the projection moved here; a
-            // (scope, order) index cannot supply that global order without sorting every matching branch.
-            foreach (var order in table.Orders)
-            {
-                var name = SqlOSFgaScopeIndex.OrderIndexName(table, order);
-                sql.AppendLine(CultureInfo.InvariantCulture, $"""
-                    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'{SqlLiteral(name)}' AND object_id = OBJECT_ID(N'{literal}'))
-                        CREATE NONCLUSTERED INDEX [{Escape(name)}] ON {target} ({string.Join(", ", order.Columns.Select(c => $"[{Escape(c)}]"))});
-                    """);
-            }
-
             batches.Add(sql.ToString());
         }
 
@@ -884,7 +872,7 @@ internal sealed partial class SqlServerDatabaseProvider
         => $"""
             SELECT N'DROP INDEX ' + QUOTENAME(i.name) + N' ON ' + QUOTENAME(OBJECT_SCHEMA_NAME(i.object_id)) + N'.' + QUOTENAME(OBJECT_NAME(i.object_id)) + N';' AS Statement
             FROM sys.indexes i
-            WHERE (i.name LIKE N'IX[_]%[_]{SqlOSFgaLineage.ScopeColumn}[0-9]%' OR i.name LIKE N'IX[_]%[_]{SqlOSFgaLineage.ScopeColumn}Missing' OR i.name LIKE N'IX[_]%[_]{SqlOSFgaLineage.ScopeColumn}Order[_]%')
+            WHERE (i.name LIKE N'IX[_]%[_]{SqlOSFgaLineage.ScopeColumn}[0-9]%' OR i.name LIKE N'IX[_]%[_]{SqlOSFgaLineage.ScopeColumn}Missing')
               AND OBJECTPROPERTY(i.object_id, 'IsUserTable') = 1
               AND ({Owned(options, scopeTables, "i.object_id")} OR ({Wanted(scopeTables, t => $"i.object_id = {ScopeIndexObject(options, t)}")}))
               AND NOT ({Wanted(scopeTables, t => $"(i.object_id = {ObjectOf(t)} AND i.name = N'{SqlLiteral(SqlOSFgaLineage.ScopeMissingIndexName(t.Table))}') OR (i.object_id = {ScopeIndexObject(options, t)} AND i.name IN ({NameList(SqlOSFgaScopeIndex.IndexNames(t, levels))}))")})

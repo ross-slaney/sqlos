@@ -84,6 +84,47 @@ public class SqlOSFgaTableShapesIntegrationTests
     }
 
     [TestMethod]
+    public async Task SqlServer_APlannedStatementReturnsTheRowsValues_NeverTheProjectionsCopy()
+    {
+        if (TestDatabase.IsPostgreSql)
+        {
+            // PostgreSQL reads the row; there is no copy to be stale.
+            return;
+        }
+
+        await using var host = await HostedApp.StartAsync();
+        await using var scope = host.App.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ShapeDbContext>();
+        var (alice, _) = await CreateFoldersUsersAndGrantAsync(db);
+        db.Documents.AddRange(
+            new ShapeDocument("a1", "folder_a") { Rank = 1 },
+            new ShapeDocument("a2", "folder_a") { Rank = 2 });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        // A write that bypasses SqlOS's triggers leaves the projection's copy of Rank (a declared order) behind.
+        // The projection decides which rows are visible; the values a statement returns are the row's.
+        await db.Database.ExecuteSqlRawAsync("ALTER TABLE [ShapeDocuments] DISABLE TRIGGER ALL;");
+        try
+        {
+            await db.Database.ExecuteSqlRawAsync("UPDATE [ShapeDocuments] SET [Rank] = 101 WHERE [Id] = N'a1';");
+        }
+        finally
+        {
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE [ShapeDocuments] ENABLE TRIGGER ALL;");
+        }
+
+        (await ReadAsync(db, "SELECT Rank FROM dbo.SqlOSFgaScopeIndex_ShapeDocuments WHERE Id = N'a1'")).Should().Equal(["1"], "the copy is stale, by construction");
+
+        var fga = scope.ServiceProvider.GetRequiredService<ISqlOSFgaAuthService>();
+        var filter = await fga.BuildFilterAsync<ShapeDocument>(alice, Read);
+        var planned = db.Documents.AsNoTracking().Where(filter).OrderBy(d => d.Rank).Select(d => new { d.Id, d.Rank });
+        planned.ToQueryString().Should().Contain("SqlOSFgaScopeIndex_ShapeDocuments", "a planned statement reads SqlOS's projection to decide what is visible");
+        (await planned.ToListAsync()).Select(r => (r.Id, r.Rank)).Should().Equal(new[] { ("a2", 2), ("a1", 101) }, "the values, and the order, are the row's");
+        (await db.Documents.AsNoTracking().Where(filter).OrderBy(d => d.Id).Select(d => d.Rank).ToListAsync()).Should().Equal(101, 2);
+    }
+
+    [TestMethod]
     public async Task SqlServer_TwoTransactionsInsertingAdjacentRows_DoNotWaitForEachOther()
     {
         if (TestDatabase.IsPostgreSql)
@@ -201,6 +242,7 @@ public class SqlOSFgaTableShapesIntegrationTests
         public string FolderResourceId { get; private set; } = string.Empty;
         public ShapeExtent Extent { get; set; } = new();
         public int Area { get; private set; }
+        public int Rank { get; set; }
 
         public override string ResourceTypeId => DocumentType;
         public override string ResourceName => Id;
@@ -245,6 +287,7 @@ public class SqlOSFgaTableShapesIntegrationTests
                 document.Property(d => d.ResourceId).HasMaxLength(128);
                 document.Property(d => d.FolderResourceId).HasMaxLength(128);
                 document.OwnsOne(d => d.Extent);
+                document.HasIndex(d => d.Rank).HasDatabaseName("IX_ShapeDocuments_Rank");
                 document.Property(d => d.Area).HasComputedColumnSql(
                     TestDatabase.IsPostgreSql ? "\"Extent_Width\" * \"Extent_Height\"" : "[Extent_Width] * [Extent_Height]",
                     stored: true);

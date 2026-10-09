@@ -115,15 +115,16 @@ internal sealed partial class SqlServerDatabaseProvider
         => $"DELETE d FROM {ScopeIndexTable(options, table)} d INNER JOIN deleted old ON {string.Join(" AND ", table.KeyColumns.Select(k => $"d.[{Escape(k)}] = old.[{Escape(k)}]"))};";
 
     /// <summary>
-    /// EF's fallback statements read the same projection as the walk. Project the indexed columns from
-    /// the private table so native predicates/orderings can seek its indexes; other application columns
-    /// still come from the application. The join and all filtering remain in SQL.
+    /// A planned statement reads the application's table through its projection: the scope from the
+    /// projection, whose per-level indexes serve the authorization predicate, and every other column from
+    /// the row itself, as on PostgreSQL. The projection decides which rows are visible and nothing more, so a
+    /// value it holds (a key, an order column) is never what the application sees, stale or not. The join and
+    /// all filtering remain in SQL.
     /// </summary>
     internal static string ScopeIndexQuery(SqlOSFgaOptions options, SqlOSFgaScopeTable table)
     {
-        var indexed = SqlOSFgaScopeIndex.Columns(table).Select(c => c.Column).ToHashSet(StringComparer.Ordinal);
         return $"""
-            SELECT {string.Join(", ", table.Columns.Select(c => $"{(indexed.Contains(c.Column) ? "s" : "a")}.[{Escape(c.Column)}] AS [{Escape(c.Column)}]"))}
+            SELECT {string.Join(", ", table.Columns.Select(c => $"{(c.Column == SqlOSFgaLineage.ScopeColumn ? "s" : "a")}.[{Escape(c.Column)}] AS [{Escape(c.Column)}]"))}
             FROM {ScopeIndexTable(options, table)} s
             INNER JOIN {ScopeTable(table)} a ON {string.Join(" AND ", table.KeyColumns.Select(k => $"a.[{Escape(k)}] = s.[{Escape(k)}]"))}
             """;

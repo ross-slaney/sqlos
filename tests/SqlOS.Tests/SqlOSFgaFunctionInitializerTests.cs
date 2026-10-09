@@ -114,7 +114,7 @@ public class SqlOSFgaFunctionInitializerTests
             sql.Should().Contain($"CREATE NONCLUSTERED INDEX [IX_Items_FgaScope{level}_Price] ON [dbo].[SqlOSFgaScopeIndex_app_Items] ([FgaScope{level}], [Price], [Id]) WHERE [FgaScope] >= 0x0{level};");
         }
 
-        sql.Should().Contain("CREATE NONCLUSTERED INDEX [IX_Items_FgaScopeOrder_Price] ON [dbo].[SqlOSFgaScopeIndex_app_Items] ([Price], [Id]);");
+        sql.Should().NotContain("FgaScopeOrder", "nothing orders by the projection's copied values: a planned statement reads them from the row");
         sql.Should().NotContain("FgaScope3");
         sql.Should().NotContain("ALTER TABLE [app].[Items] ADD", "helper columns must not appear on application tables");
 
@@ -124,6 +124,23 @@ public class SqlOSFgaFunctionInitializerTests
         sql.Should().Contain("CREATE STATISTICS [ST_Items_FgaScopeType] ON [dbo].[SqlOSFgaScopeIndex_app_Items] ([FgaScopeType]);");
         sql.Should().NotContain("INDEX [IX_Items_FgaScopeType");
         sql.Should().NotContain("DROP", "stale objects are the cleanup's");
+    }
+
+    [TestMethod]
+    public void ScopeIndexQuery_ReadsTheScopeFromTheProjection_AndEveryOtherColumnFromTheRow()
+    {
+        var options = new SqlOSFgaOptions();
+        var scope = new SqlOSFgaScopeTable("app", "Items", "ResourceId", ["Id"], [new SqlOSFgaScopeOrder("Price", ["Price", "Id"])],
+            [new SqlOSFgaScopeColumn("Id", "int", false), new SqlOSFgaScopeColumn("Price", "decimal(10,2)", false), new SqlOSFgaScopeColumn("Name", "nvarchar(200)", false), new SqlOSFgaScopeColumn("FgaScope", "varbinary(512)", true)]);
+
+        var sql = SqlServerDatabaseProvider.ScopeIndexQuery(options, scope);
+
+        // The projection decides which rows are visible (its per-level indexes serve the predicate on the
+        // scope); what the application sees, keys and order columns included, is the row's.
+        sql.Should().Contain("s.[FgaScope] AS [FgaScope]");
+        sql.Should().Contain("a.[Id] AS [Id]").And.Contain("a.[Price] AS [Price]").And.Contain("a.[Name] AS [Name]");
+        sql.Should().NotContain("s.[Id] AS").And.NotContain("s.[Price]");
+        sql.Should().Contain("FROM [dbo].[SqlOSFgaScopeIndex_app_Items] s").And.Contain("INNER JOIN [app].[Items] a ON a.[Id] = s.[Id]");
     }
 
     [TestMethod]
@@ -137,7 +154,7 @@ public class SqlOSFgaFunctionInitializerTests
         sql.Should().Contain("tr.name LIKE N'TR[_]%[_]SqlOSFgaScope[_]%'");
         sql.Should().Contain("tr.parent_id = ISNULL(OBJECT_ID(N'[app].[Items]'), 0) AND tr.name IN (N'TR_Items_SqlOSFgaScope_Insert', N'TR_Items_SqlOSFgaScope_Update', N'TR_Items_SqlOSFgaScope_Delete')");
         sql.Should().Contain("i.name LIKE N'IX[_]%[_]FgaScope[0-9]%' OR i.name LIKE N'IX[_]%[_]FgaScopeMissing'");
-        sql.Should().Contain("i.name IN (N'IX_Items_FgaScope0', N'IX_Items_FgaScope0_Price', N'IX_Items_FgaScope1', N'IX_Items_FgaScope1_Price', N'IX_Items_FgaScopeOrder_Price')");
+        sql.Should().Contain("i.name IN (N'IX_Items_FgaScope0', N'IX_Items_FgaScope0_Price', N'IX_Items_FgaScope1', N'IX_Items_FgaScope1_Price')");
         sql.Should().Contain("st.name LIKE N'ST[_]%[_]FgaScopeType'");
         sql.Should().Contain("c.name LIKE N'FgaScope[0-9]%' OR c.name = N'FgaScopeType'");
         sql.Should().Contain("DROP COLUMN");

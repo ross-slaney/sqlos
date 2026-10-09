@@ -23,13 +23,11 @@ internal static class SqlOSFgaScopeIndex
 
     public static string RebuildRoutine(SqlOSFgaScopeTable table) => "sp_" + Table(table) + "_Rebuild";
 
-    public static string OrderIndexName(SqlOSFgaScopeTable table, SqlOSFgaScopeOrder order)
-        => $"IX_{table.Table}_FgaScopeOrder_{order.Suffix}";
-
+    /// <summary>The projection's indexes: the per-level ones. The missing-rows index stays on the application table, where the rows without a scope are.</summary>
     public static IReadOnlyList<string> IndexNames(SqlOSFgaScopeTable table, int levels)
         => SqlOSFgaLineage.ScopeIndexNames(table, levels)
             .Where(n => n != SqlOSFgaLineage.ScopeMissingIndexName(table.Table))
-            .Concat(table.Orders.Select(o => OrderIndexName(table, o))).ToList();
+            .ToList();
 
     public static IReadOnlyList<SqlOSFgaScopeColumn> Columns(SqlOSFgaScopeTable table)
         => SqlOSFgaPageIndex.DirectColumns(table)
