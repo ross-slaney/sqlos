@@ -119,7 +119,7 @@ internal sealed class SqlOSFgaQueryCompiler(
             roots[token] = Roots(token);
         }
 
-        return SqlOSFgaAccess.Resolve(query, token => roots[token]);
+        return SqlOSFgaScopeIndexQueries.Rewrite(SqlOSFgaAccess.Resolve(query, token => roots[token]), currentContext.Context, tokens[0].Options);
     }
 
     private async Task<Expression> ResolveRootsAsync(Expression query, IReadOnlyList<SqlOSFgaAccessToken> tokens, CancellationToken cancellationToken)
@@ -130,7 +130,7 @@ internal sealed class SqlOSFgaQueryCompiler(
             roots[token] = await RootsAsync(token, cancellationToken).ConfigureAwait(false);
         }
 
-        return SqlOSFgaAccess.Resolve(query, token => roots[token]);
+        return SqlOSFgaScopeIndexQueries.Rewrite(SqlOSFgaAccess.Resolve(query, token => roots[token]), currentContext.Context, tokens[0].Options);
     }
 
     /// <summary>

@@ -4,10 +4,12 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS;
 using SqlOS.Extensions;
@@ -41,6 +43,90 @@ public class SqlOSFgaPageIntegrationTests
     private const string Other = "PAGE_OTHER";
     private const string ReaderRoleId = "role_page_reader";
     private const string OtherRoleId = "role_page_other";
+
+    [TestMethod]
+    public async Task BaseClass_LeavesApplicationColumnsEqualToTheEfModel_AndUpgradesLegacySqlServerHelpers()
+    {
+        await using var host = await HostedApp.StartAsync();
+        await using var scope = host.App.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<PageDbContext>();
+        await Tree.CreateAsync(db);
+        var store = StoreObjectIdentifier.Table("PageItems", null);
+        var expected = db.Model.FindEntityType(typeof(PageItem))!.GetProperties()
+            .Select(p => p.GetColumnName(store)!).Order(StringComparer.Ordinal).ToList();
+        var columnsSql = TestDatabase.IsSqlServer
+            ? "SELECT name FROM sys.columns WHERE object_id = OBJECT_ID(N'PageItems') ORDER BY name"
+            : "SELECT column_name FROM information_schema.columns WHERE table_name = 'PageItems' ORDER BY column_name";
+        (await ReadAsync(db, columnsSql)).Should().BeEquivalentTo(expected,
+            "extending SqlOSResourceEntity must not cause undeclared columns to appear on the application table");
+
+        if (TestDatabase.IsSqlServer)
+        {
+            await AssertScopeProjectionAsync(db);
+            var comparison = await EFCore.SchemaSync.SchemaSync.ApplyAsync(db, new EFCore.SchemaSync.SchemaSyncOptions { DryRun = true });
+            comparison.Changes.Should().BeEmpty("SqlOS's startup must not leave undeclared columns for the application's schema tool to remove");
+            // Reproduce the released v8 table shape, with application data already present. Startup must
+            // remove its old helpers and build the private projection without an application migration.
+            await db.Database.ExecuteSqlRawAsync("""
+                ALTER TABLE [PageItems] ADD [FgaScopeType] AS SUBSTRING([FgaScope], 2, 4);
+                ALTER TABLE [PageItems] ADD [FgaScope0] AS SUBSTRING([FgaScope], 6, 8);
+                CREATE STATISTICS [ST_PageItems_FgaScopeType] ON [PageItems] ([FgaScopeType]);
+                CREATE INDEX [IX_PageItems_FgaScope0] ON [PageItems] ([FgaScope0], [Id]) WHERE [FgaScope] >= 0x00;
+                DROP TABLE [dbo].[SqlOSFgaScopeIndex_PageItems];
+                """);
+            var initializer = new SqlOSFgaFunctionInitializer(db,
+                Options.Create(new SqlOS.Fga.Configuration.SqlOSFgaOptions()), NullLogger<SqlOSFgaFunctionInitializer>.Instance);
+            await initializer.EnsureFunctionsExistAsync();
+            (await ReadAsync(db, columnsSql)).Should().BeEquivalentTo(expected);
+            await AssertScopeProjectionAsync(db);
+            await initializer.EnsureFunctionsExistAsync();
+            await AssertScopeProjectionAsync(db);
+            (await EFCore.SchemaSync.SchemaSync.ApplyAsync(db)).Outcome.Should().Be(EFCore.SchemaSync.SchemaSyncOutcome.NoChangesNeeded);
+
+            // Raw/bulk statement changes use the same maintained projection, including primary-key changes.
+            await db.Database.ExecuteSqlRawAsync("UPDATE [PageItems] SET [Id] = N'renamed-' + [Id], [Rank] = [Rank] + 1 WHERE [Rank] < 3");
+            await AssertScopeProjectionAsync(db);
+            await db.Database.ExecuteSqlRawAsync("DELETE FROM [PageItems] WHERE [Id] LIKE N'renamed-%'");
+            await AssertScopeProjectionAsync(db);
+        }
+    }
+
+    private static async Task AssertScopeProjectionAsync(PageDbContext db)
+    {
+        // Compare with the source rows, not with another query that uses the same authorization index.
+        const string projection = "Id, Rank, Stamp, CONVERT(varchar(max), FgaScope, 2) AS ScopeBytes";
+        (await ReadAsync(db, $"SELECT {projection} FROM dbo.SqlOSFgaScopeIndex_PageItems ORDER BY Id"))
+            .Should().Equal(await ReadAsync(db, $"SELECT {projection} FROM PageItems ORDER BY Id"),
+                "the private projection must equal the application rows, including every scope byte");
+    }
+
+    [TestMethod]
+    public async Task AuthorizedSetBasedWrites_UpdateApplicationRows_AndMaintainTheirProjection()
+    {
+        await using var host = await HostedApp.StartAsync();
+        await using var scope = host.App.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<PageDbContext>();
+        await Tree.CreateAsync(db);
+        var subjects = new SqlOSFgaSubjectService(db, NullLogger<SqlOSFgaSubjectService>.Instance);
+        var alice = (await subjects.CreateUserAsync("Projection writer", $"writer-{Guid.NewGuid():N}@example.test")).SubjectId;
+        db.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant { Id = "projection_writer", SubjectId = alice, ResourceId = Tree.Workspace(1), RoleId = ReaderRoleId });
+        await db.SaveChangesAsync();
+        var fga = scope.ServiceProvider.GetRequiredService<ISqlOSFgaAuthService>();
+        var filter = await fga.BuildFilterAsync<PageItem>(alice, Read);
+        // The fixture gives every eleventh item a different resource type, outside this permission.
+        var perWorkspace = Tree.FoldersPerWorkspace * Tree.ItemsPerFolder;
+        var expected = Enumerable.Range(perWorkspace, perWorkspace).Count(n => n % 11 != 5);
+
+        (await db.Items.Where(filter).ExecuteUpdateAsync(set => set.SetProperty(i => i.Rank, i => i.Rank + 1000)))
+            .Should().Be(expected);
+        db.ChangeTracker.Clear();
+        (await db.Items.CountAsync(i => i.Rank >= 1000)).Should().Be(expected,
+            "ExecuteUpdate must target the application's table, not just its private index");
+        if (TestDatabase.IsSqlServer) await AssertScopeProjectionAsync(db);
+        (await db.Items.Where(filter).ExecuteDeleteAsync()).Should().Be(expected);
+        (await db.Items.CountAsync()).Should().Be(Tree.Items - expected);
+        if (TestDatabase.IsSqlServer) await AssertScopeProjectionAsync(db);
+    }
 
     [TestMethod]
     public async Task EveryAccessShape_WalksTheRowsTheFilterReturns()
@@ -570,9 +656,11 @@ public class SqlOSFgaPageIntegrationTests
             : "SELECT GrantId, SubjectId, RoleId, TypeSeq, Active, EffectiveFrom, EffectiveTo, Id, Rank FROM dbo.SqlOSFgaDirect_PageItems ORDER BY 1, 8";
         var maintainedCounts = await ReadAsync(db, counts);
         var maintainedDirect = await ReadAsync(db, direct);
+        if (TestDatabase.IsSqlServer) await AssertScopeProjectionAsync(db);
         await db.Database.ExecuteSqlRawAsync(provider.BuildPageIndexRebuildSql(new SqlOS.Fga.Configuration.SqlOSFgaOptions()));
         (await ReadAsync(db, counts)).Should().Equal(maintainedCounts, "the maintained grant counts must equal a rebuild");
         (await ReadAsync(db, direct)).Should().Equal(maintainedDirect, "the maintained direct index must equal a rebuild");
+        if (TestDatabase.IsSqlServer) await AssertScopeProjectionAsync(db);
     }
 
     private static async Task<List<string>> ReadAsync(DbContext db, string sql)

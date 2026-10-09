@@ -118,10 +118,12 @@ internal static class ReportWriter
             text.Append(CultureInfo.InvariantCulture, $"**Lineage maintenance** · at {RetailTree.Count(maintained.Products)}:");
             foreach (var result in maintained.Maintenance)
             {
-                var cost = result.Id.StartsWith("insert.single", StringComparison.Ordinal)
+                var cost = result.Id.StartsWith("insert.single", StringComparison.Ordinal) || result.Id.StartsWith("product.", StringComparison.Ordinal)
                     ? string.Create(CultureInfo.InvariantCulture, $"{result.MillisecondsPerRow:F2} ms each over {result.Rows:N0}")
                     : WithUnit(result.Milliseconds);
-                var lineage = result.Id.StartsWith("delete", StringComparison.Ordinal)
+                var lineage = result.Id.StartsWith("product.", StringComparison.Ordinal)
+                    ? "application rows; resource creation measured separately"
+                    : result.Id.StartsWith("delete", StringComparison.Ordinal)
                     ? string.Create(CultureInfo.InvariantCulture, $"{result.Rows:N0} rows removed")
                     : string.Create(CultureInfo.InvariantCulture, $"{result.LineageRows:N0} lineages computed");
                 text.Append(CultureInfo.InvariantCulture, $" {result.Title}: {cost}, {lineage};");

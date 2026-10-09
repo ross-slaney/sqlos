@@ -95,7 +95,7 @@ public class SqlOSFgaFunctionInitializerTests
     }
 
     [TestMethod]
-    public void ScopeIndexesSql_AddsComputedColumnsAndFilteredIndexesPerLevel()
+    public void ScopeIndexesSql_KeepsComputedColumnsAndPerLevelIndexesOnSqlOSOwnedTables()
     {
         var options = new SqlOSFgaOptions { MaxResourceHierarchyDepth = 2 };
         var scope = new SqlOSFgaScopeTable("app", "Items", "ResourceId", ["Id"], [new SqlOSFgaScopeOrder("Price", ["Price", "Id"])]);
@@ -109,17 +109,19 @@ public class SqlOSFgaFunctionInitializerTests
         for (var level = 0; level <= 2; level++)
         {
             var offset = SqlOSFgaLineage.ScopeAncestorOffset(level);
-            sql.Should().Contain($"ALTER TABLE [app].[Items] ADD [FgaScope{level}] AS SUBSTRING([FgaScope], {offset}, 8);");
-            sql.Should().Contain($"CREATE NONCLUSTERED INDEX [IX_Items_FgaScope{level}] ON [app].[Items] ([FgaScope{level}], [Id]) WHERE [FgaScope] >= 0x0{level};");
-            sql.Should().Contain($"CREATE NONCLUSTERED INDEX [IX_Items_FgaScope{level}_Price] ON [app].[Items] ([FgaScope{level}], [Price], [Id]) WHERE [FgaScope] >= 0x0{level};");
+            sql.Should().Contain($"ALTER TABLE [dbo].[SqlOSFgaScopeIndex_app_Items] ADD [FgaScope{level}] AS SUBSTRING([FgaScope], {offset}, 8);");
+            sql.Should().Contain($"CREATE NONCLUSTERED INDEX [IX_Items_FgaScope{level}] ON [dbo].[SqlOSFgaScopeIndex_app_Items] ([FgaScope{level}], [Id]) WHERE [FgaScope] >= 0x0{level};");
+            sql.Should().Contain($"CREATE NONCLUSTERED INDEX [IX_Items_FgaScope{level}_Price] ON [dbo].[SqlOSFgaScopeIndex_app_Items] ([FgaScope{level}], [Price], [Id]) WHERE [FgaScope] >= 0x0{level};");
         }
 
+        sql.Should().Contain("CREATE NONCLUSTERED INDEX [IX_Items_FgaScopeOrder_Price] ON [dbo].[SqlOSFgaScopeIndex_app_Items] ([Price], [Id]);");
         sql.Should().NotContain("FgaScope3");
+        sql.Should().NotContain("ALTER TABLE [app].[Items] ADD", "helper columns must not appear on application tables");
 
         // The type, as a computed column with statistics and no index: the optimizer estimates the type test
         // from data instead of guessing it is selective.
-        sql.Should().Contain("ALTER TABLE [app].[Items] ADD [FgaScopeType] AS SUBSTRING([FgaScope], 2, 4);");
-        sql.Should().Contain("CREATE STATISTICS [ST_Items_FgaScopeType] ON [app].[Items] ([FgaScopeType]);");
+        sql.Should().Contain("ALTER TABLE [dbo].[SqlOSFgaScopeIndex_app_Items] ADD [FgaScopeType] AS SUBSTRING([FgaScope], 2, 4);");
+        sql.Should().Contain("CREATE STATISTICS [ST_Items_FgaScopeType] ON [dbo].[SqlOSFgaScopeIndex_app_Items] ([FgaScopeType]);");
         sql.Should().NotContain("INDEX [IX_Items_FgaScopeType");
         sql.Should().NotContain("DROP", "stale objects are the cleanup's");
     }
@@ -135,7 +137,7 @@ public class SqlOSFgaFunctionInitializerTests
         sql.Should().Contain("tr.name LIKE N'TR[_]%[_]SqlOSFgaScope[_]%'");
         sql.Should().Contain("tr.parent_id = ISNULL(OBJECT_ID(N'[app].[Items]'), 0) AND tr.name IN (N'TR_Items_SqlOSFgaScope_Insert', N'TR_Items_SqlOSFgaScope_Update', N'TR_Items_SqlOSFgaScope_Delete')");
         sql.Should().Contain("i.name LIKE N'IX[_]%[_]FgaScope[0-9]%' OR i.name LIKE N'IX[_]%[_]FgaScopeMissing'");
-        sql.Should().Contain("i.name IN (N'IX_Items_FgaScope0', N'IX_Items_FgaScope0_Price', N'IX_Items_FgaScope1', N'IX_Items_FgaScope1_Price', N'IX_Items_FgaScopeMissing')");
+        sql.Should().Contain("i.name IN (N'IX_Items_FgaScope0', N'IX_Items_FgaScope0_Price', N'IX_Items_FgaScope1', N'IX_Items_FgaScope1_Price', N'IX_Items_FgaScopeOrder_Price')");
         sql.Should().Contain("st.name LIKE N'ST[_]%[_]FgaScopeType'");
         sql.Should().Contain("c.name LIKE N'FgaScope[0-9]%' OR c.name = N'FgaScopeType'");
         sql.Should().Contain("DROP COLUMN");
@@ -198,7 +200,7 @@ public class SqlOSFgaFunctionInitializerTests
         // The row triggers: the scope follows a changed resource id; the direct index (rows granted on their
         // own resource, with the key and every declared order's columns) follows any change to those columns
         // and every delete.
-        all.Should().Contain("IF NOT (UPDATE([Id]) OR UPDATE([ResourceId])) RETURN;");
+        all.Should().Contain("IF NOT (UPDATE([Id]) OR UPDATE([ResourceId]) OR UPDATE([FgaScope])) RETURN;");
         all.Should().Contain("IF UPDATE([ResourceId])");
         all.Should().Contain("CREATE OR ALTER TRIGGER [app].[TR_Items_SqlOSFgaScope_Delete] ON [app].[Items]");
         all.Should().Contain("[dbo].[SqlOSFgaDirect_app_Items]");
@@ -250,7 +252,7 @@ public class SqlOSFgaFunctionInitializerTests
     {
         var options = new SqlOSFgaOptions { Schema = "ten'ant", MaxResourceHierarchyDepth = 3 };
         options.TableNames.Resources = "res]ources";
-        var scope = new SqlOSFgaScopeTable("app", "Items", "ResourceId", ["Id"]);
+        var scope = new SqlOSFgaScopeTable("app", "Items", "ResourceId", ["Id"], [], [new SqlOSFgaScopeColumn("Id", "int", false)]);
 
         var hash = SqlServerDatabaseProvider.Instance.BuildSelectRoutinesHashSql(options, [scope]);
 
@@ -263,8 +265,8 @@ public class SqlOSFgaFunctionInitializerTests
         hash.Should().Contain("OBJECT_ID(N'[ten''ant].[TR_res]]ources_Lineage_Delete]', N'TR') IS NOT NULL");
         hash.Should().Contain("OBJECT_ID(N'[ten''ant].[sp_res]]ources_ScopeFill]', N'P') IS NOT NULL");
         hash.Should().Contain("(SELECT COUNT(*) FROM sys.triggers WHERE parent_id = ISNULL(OBJECT_ID(N'[app].[Items]'), 0) AND name IN (N'TR_Items_SqlOSFgaScope_Insert', N'TR_Items_SqlOSFgaScope_Update', N'TR_Items_SqlOSFgaScope_Delete')) = 3");
-        hash.Should().Contain("(SELECT COUNT(*) FROM sys.indexes WHERE object_id = ISNULL(OBJECT_ID(N'[app].[Items]'), 0) AND name IN (");
-        hash.Should().Contain("N'IX_Items_FgaScopeMissing')) = 5", "levels 0..3 and the missing-rows index");
+        hash.Should().Contain("(SELECT COUNT(*) FROM sys.indexes WHERE object_id = ISNULL(OBJECT_ID(N'[ten''ant].[SqlOSFgaScopeIndex_app_Items]'), 0) AND name IN (");
+        hash.Should().Contain("N'IX_Items_FgaScope3')) = 4", "levels 0..3 live on the private projection");
         hash.Should().Contain("NOT EXISTS (SELECT N'DROP TRIGGER '", "nothing stale anywhere");
         hash.Should().Contain("COL_LENGTH('[ten''ant].[res]]ources]', 'Ancestor3') IS NOT NULL");
     }

@@ -217,6 +217,7 @@ internal sealed partial class SqlServerDatabaseProvider
         var batches = new List<string> { countsRebuild, countsAdjust, countsRefresh };
         foreach (var table in scopeTables)
         {
+            batches.AddRange(ScopeIndexTableSql(options, table));
             batches.AddRange(DirectTableSql(options, table));
         }
 
@@ -287,6 +288,7 @@ internal sealed partial class SqlServerDatabaseProvider
             BEGIN
                 SET NOCOUNT ON;
                 EXEC {rebuildCounts};
+                {string.Concat(scopeTables.Select(t => $"EXEC [{schema}].[{Escape(SqlOSFgaScopeIndex.RebuildRoutine(t))}];\n    "))}
                 {string.Concat(scopeTables.Select(t => $"EXEC [{schema}].[sp_{Escape(SqlOSFgaPageIndex.DirectRebuildRoutine(t))}];\n    "))}
             END
             """);
@@ -489,16 +491,17 @@ internal sealed partial class SqlServerDatabaseProvider
         var grants = $"[{schema}].[{Escape(options.TableNames.Grants)}]";
         var counts = Counts(options);
         var a = spec.Alias;
-        var scope = $"{a}.[{SqlOSFgaLineage.ScopeColumn}]";
+        var scopeAlias = spec.PredicateSql is null ? a : "sqlos_scope";
+        var scope = $"{scopeAlias}.[{SqlOSFgaLineage.ScopeColumn}]";
         var order = spec.Order;
         var afterJson = string.Join(", ", order.Select((c, i) => $"a{i} {c.StoreType} '$.a{i}'"));
         var afterList = string.Join(", ", order.Select((_, i) => $"a{i}"));
         // A descending page reads the same indexes backwards: the order, the merge and the keyset all flip.
         var direction = spec.Descending ? " DESC" : "";
-        var orderCols = order.Select(c => $"{a}.[{Escape(c.Column)}]").ToList();
+        var orderCols = order.Select(c => $"{scopeAlias}.[{Escape(c.Column)}]").ToList();
         var orderBy = string.Join(", ", orderCols.Select(c => c + direction));
         var outOrder = string.Join(", ", order.Select((_, i) => $"c{i}{direction}"));
-        var selectCols = string.Join(", ", order.Select((c, i) => $"{a}.[{Escape(c.Column)}] AS c{i}"));
+        var selectCols = string.Join(", ", order.Select((c, i) => $"{scopeAlias}.[{Escape(c.Column)}] AS c{i}"));
         var afterValues = order.Select((_, i) => $"s.a{i}").ToList();
         var predicate = spec.PredicateSql is null ? "" : $"\n              AND ({spec.PredicateSql})";
         var typeFilter = spec.Typed ? $"\n              AND SUBSTRING({scope}, {SqlOSFgaLineage.ScopeTypeOffset}, 4) = @Type" : "";
@@ -595,6 +598,11 @@ internal sealed partial class SqlServerDatabaseProvider
         {
             var seek = $"SUBSTRING({scope}, {SqlOSFgaPageIndex.Offset(level)}, 8) = CAST(s.seq AS BINARY(8)) AND {scope} >= 0x{level:X2}";
             var hint = $"WITH (FORCESEEK ([{Escape(SqlOSFgaLineage.ScopeIndexName(spec.Table.Table, level, spec.IndexSuffix))}] ([{SqlOSFgaLineage.ScopeLevelColumn(level)}])))";
+            var from = $"{ScopeIndexTable(options, spec.Table)} AS {scopeAlias} {hint}";
+            if (spec.PredicateSql is not null)
+            {
+                from += $" INNER JOIN {ScopeTable(spec.Table)} AS {a} ON {string.Join(" AND ", spec.Table.KeyColumns.Select(k => $"{a}.[{Escape(k)}] = {scopeAlias}.[{Escape(k)}]"))}";
+            }
             foreach (var positioned in new[] { true, false })
             {
                 var position = positioned ? $"\n                            AND {keyset}" : "";
@@ -606,7 +614,7 @@ internal sealed partial class SqlServerDatabaseProvider
                     CROSS APPLY (
                         SELECT ROW_NUMBER() OVER (ORDER BY {outOrder}) AS rn, COUNT(*) OVER () AS cnt, z.*
                         FROM (SELECT TOP (s.f) {selectCols}
-                              FROM {ScopeTable(spec.Table)} AS {a} {hint}
+                              FROM {from}
                               WHERE {seek}{typeFilter}{predicate}{position}
                               ORDER BY {orderBy}) z) q
                     WHERE s.kind = 0 AND s.[level] = {level} AND {streams}
@@ -616,7 +624,7 @@ internal sealed partial class SqlServerDatabaseProvider
                     CROSS APPLY (
                         SELECT ROW_NUMBER() OVER (ORDER BY {outOrder}) AS rn, COUNT(*) OVER () AS cnt, z.*
                         FROM (SELECT TOP (s.f) {selectCols}, CAST(CASE WHEN {RowTest(options, spec, level, levels)} THEN 1 ELSE 0 END AS BIT) AS granted
-                              FROM {ScopeTable(spec.Table)} AS {a} {hint}
+                              FROM {from}
                               WHERE {seek}{predicate}{position}
                               ORDER BY {orderBy}) z) q
                     WHERE s.kind = 1 AND s.[level] = {level} AND {streams}

@@ -91,7 +91,7 @@ against SqlOS's rebuild.
 | `page.*` | Every `list.*` page above, the same query walked by SqlOS (`UseSqlOSFga`): the same person, filter, cursor, order, and page size. Held to the scale gate like any other page, the many-grants people included: the walk reads their rows from the direct index |
 | `point.function.*`, `point.api.*` | `fn_IsResourceAccessible` for one product at depth 4 and 9, a denial, the many-grants people, and `Allows` |
 | `density.*` | At the first scale only: the region page (both ways) and the denied check re-run while 100 other people hold grants on the root. Only the caller's own grants should matter. Reported, not gated |
-| maintenance | At the first scale only: 2,000 single-row inserts with the lineage triggers on and off, one 2,000-row insert, one 2,000-row delete, and reparent, deactivate and reactivate of a region subtree; then a rebuild from scratch, compared with the maintained lineage |
+| maintenance | At the first scale only: 2,000 single-row inserts with the lineage triggers on and off, one 2,000-row insert, one 2,000-row delete, and reparent, deactivate and reactivate of a region subtree; then a rebuild from scratch, compared with the maintained lineage. Also 200 single application-row inserts, non-indexed updates, indexed updates, and deletes, with their resources created outside the timed section |
 
 ## The run that replaced the tree walk
 

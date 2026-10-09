@@ -18,6 +18,8 @@ There are two ways to add SqlOS authorization to an EF Core application. Both gi
 
 Every protected entity carries two things: the id of its FGA resource, and the `FgaScope` column SqlOS keeps current. An entity that derives from `SqlOSResourceEntity` carries both already and declares nothing. An entity that spends its base class elsewhere implements the interface instead, and the compiler requires both members: an entity that implements `IHasResourceId` or `ISqlOSResourceEntity` without `FgaScope` does not build.
 
+Those are the only authorization columns on your application tables. SQL Server's additional computed columns belong to SqlOS-owned index tables, outside your application's model. There are no per-level properties, helper-column mappings, or schema-tool exclusion patterns for an application developer to maintain.
+
 ```csharp
 public string ResourceId { get; set; } = "";
 public byte[]? FgaScope { get; private set; }   // SqlOS fills and maintains it; never set it

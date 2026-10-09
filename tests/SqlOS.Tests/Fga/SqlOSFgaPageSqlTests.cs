@@ -125,7 +125,8 @@ public class SqlOSFgaPageSqlTests
 
             // Every stream seeks the level's mirror of the page's order, by hint: the optimizer must not read
             // the table in key order and filter the level, which costs rows in proportion to the table.
-            round.Should().Contain($"[app].[Items] AS i WITH (FORCESEEK ([IX_Items_FgaScope{level}_Price] ([FgaScope{level}])))");
+            round.Should().Contain($"[dbo].[SqlOSFgaScopeIndex_app_Items] AS sqlos_scope WITH (FORCESEEK ([IX_Items_FgaScope{level}_Price] ([FgaScope{level}])))");
+            round.Should().Contain("INNER JOIN [app].[Items] AS i ON i.[Id] = sqlos_scope.[Id]");
         }
 
         round.Should().Contain("WITH (FORCESEEK ([IX_SqlOSFgaDirect_app_Items_Price] ([SubjectId], [RoleId])))");
@@ -139,7 +140,7 @@ public class SqlOSFgaPageSqlTests
 
         // A positioned stream's keyset is a range the index serves, never behind an OR on the position's presence.
         round.Should().Contain("AND s.has_after = 1").And.Contain("AND s.has_after = 0").And.NotContain("has_after = 0 OR");
-        round.Should().Contain("(i.[Price] >= s.a0 AND (i.[Price] > s.a0 OR i.[Id] > s.a1))");
+        round.Should().Contain("(sqlos_scope.[Price] >= s.a0 AND (sqlos_scope.[Price] > s.a0 OR sqlos_scope.[Id] > s.a1))");
     }
 
     [TestMethod]

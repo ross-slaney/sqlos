@@ -567,6 +567,7 @@ internal sealed partial class SqlServerDatabaseProvider
                 IF NOT EXISTS (SELECT 1 FROM inserted) RETURN;
                 {LineageLock(options, "Shared")}
                 {copy}
+                {ScopeIndexRefreshRows(options, table)}
                 {DirectInsertFromRows(options, table, "inserted")}
             END
             """,
@@ -576,15 +577,24 @@ internal sealed partial class SqlServerDatabaseProvider
             AS
             BEGIN
                 SET NOCOUNT ON;
-                IF NOT ({anyDirectChange}) RETURN;
+                IF NOT ({anyDirectChange} OR UPDATE([{SqlOSFgaLineage.ScopeColumn}])) RETURN;
                 IF NOT EXISTS (SELECT 1 FROM inserted) RETURN;
                 {LineageLock(options, "Shared")}
                 IF UPDATE([{Escape(table.ResourceIdColumn)}])
                 BEGIN
                     {copy}
                 END
-                {DirectDeleteRows(options, table, "inserted")}
-                {DirectInsertFromRows(options, table, "inserted")}
+                -- A changed primary key removes the old projection; a scope-only refresh leaves the
+                -- direct-grant index alone, just as it did before the projection moved off this table.
+                DELETE d FROM {ScopeIndexTable(options, table)} d
+                INNER JOIN deleted old ON {string.Join(" AND ", table.KeyColumns.Select(k => $"d.[{Escape(k)}] = old.[{Escape(k)}]"))}
+                WHERE NOT EXISTS (SELECT 1 FROM inserted i WHERE {string.Join(" AND ", table.KeyColumns.Select(k => $"i.[{Escape(k)}] = old.[{Escape(k)}]"))});
+                {ScopeIndexRefreshRows(options, table)}
+                IF {anyDirectChange}
+                BEGIN
+                    {DirectDeleteRows(options, table, "deleted")}
+                    {DirectInsertFromRows(options, table, "inserted")}
+                END
             END
             """,
             $"""
@@ -593,6 +603,7 @@ internal sealed partial class SqlServerDatabaseProvider
             AS
             BEGIN
                 SET NOCOUNT ON;
+                {ScopeIndexDeleteRows(options, table)}
                 {DirectDeleteRows(options, table, "deleted")}
             END
             """,
@@ -707,10 +718,14 @@ internal sealed partial class SqlServerDatabaseProvider
         {
             // Every object of the table exists: an application migration may have dropped some (a column a
             // mirrored index used, say) without changing anything SqlOS's definitions are hashed from.
-            var indexes = SqlOSFgaLineage.ScopeIndexNames(table, levels);
+            var indexes = SqlOSFgaScopeIndex.IndexNames(table, levels);
             conditions.Add($"(SELECT COUNT(*) FROM sys.triggers WHERE parent_id = {ObjectOf(table)} AND name IN ({NameList(SqlOSFgaLineage.ScopeTriggerNames(table.Table))})) = 3");
-            conditions.Add($"(SELECT COUNT(*) FROM sys.indexes WHERE object_id = {ObjectOf(table)} AND name IN ({NameList(indexes)})) = {indexes.Count.ToString(CultureInfo.InvariantCulture)}");
-            conditions.Add($"EXISTS (SELECT 1 FROM sys.stats WHERE object_id = {ObjectOf(table)} AND name = N'{SqlLiteral(SqlOSFgaLineage.ScopeTypeStatisticsName(table.Table))}')");
+            conditions.Add(Exists(options.Schema, SqlOSFgaScopeIndex.Table(table), "U"));
+            conditions.Add(Exists(options.Schema, SqlOSFgaScopeIndex.RebuildRoutine(table), "P"));
+            conditions.Add($"EXISTS (SELECT 1 FROM sys.extended_properties WHERE major_id = {ScopeIndexObject(options, table)} AND minor_id = 0 AND name = N'SqlOSProjection' AND CONVERT(nvarchar(64), value) = {ScopeIndexSignature(table)})");
+            conditions.Add($"(SELECT COUNT(*) FROM sys.indexes WHERE object_id = {ScopeIndexObject(options, table)} AND name IN ({NameList(indexes)})) = {indexes.Count.ToString(CultureInfo.InvariantCulture)}");
+            conditions.Add($"EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = {ObjectOf(table)} AND name = N'{SqlLiteral(SqlOSFgaLineage.ScopeMissingIndexName(table.Table))}')");
+            conditions.Add($"EXISTS (SELECT 1 FROM sys.stats WHERE object_id = {ScopeIndexObject(options, table)} AND name = N'{SqlLiteral(SqlOSFgaLineage.ScopeTypeStatisticsName(table.Table))}')");
             var direct = SqlOSFgaPageIndex.DirectTable(table);
             var directIndexes = SqlOSFgaPageIndex.DirectIndexNames(table).Append(SqlOSFgaPageIndex.DirectIndexName(table, "Key")).Append(SqlOSFgaPageIndex.DirectIndexName(table, "Row")).ToList();
             conditions.Add(Exists(options.Schema, direct, "U"));
@@ -719,7 +734,7 @@ internal sealed partial class SqlServerDatabaseProvider
         }
 
         // And nothing stale anywhere.
-        foreach (var stale in new[] { StaleTriggers(options, scopeTables), StaleIndexes(options, scopeTables, levels), StaleStatistics(options, scopeTables), StaleComputedColumns(options, scopeTables), StaleDirectTables(options, scopeTables), StaleDirectProcedures(options, scopeTables) })
+        foreach (var stale in new[] { StaleTriggers(options, scopeTables), StaleIndexes(options, scopeTables, levels), StaleStatistics(options, scopeTables), StaleComputedColumns(options, scopeTables), StaleDirectTables(options, scopeTables), StaleDirectProcedures(options, scopeTables), StaleScopeIndexTables(options, scopeTables), StaleScopeIndexProcedures(options, scopeTables) })
         {
             conditions.Add($"NOT EXISTS ({stale})");
         }
@@ -763,8 +778,8 @@ internal sealed partial class SqlServerDatabaseProvider
         => $"[{SqlOSFgaLineage.ScopeColumn}] = {ScopeValue(levels, r, rt)}";
 
     /// <summary>
-    /// The indexes of one application table, per level: a computed column reading the level's ancestor out of
-    /// the scope column (no storage; the optimizer matches a query that spells out the same expression), then
+    /// The scope indexes for an application table, on its SqlOS-owned projection: a computed column reading
+    /// the level's ancestor (the optimizer matches a query that spells out the same expression), then
     /// an index on it followed by the primary key, and one more per order the application declared, each
     /// filtered on the depth byte to the rows at or below the level. Also a computed column over the type with
     /// statistics on it, so the type test in every query is estimated from data, and a filtered index on the
@@ -779,7 +794,7 @@ internal sealed partial class SqlServerDatabaseProvider
         var batches = new List<string>();
         foreach (var table in scopeTables)
         {
-            var target = ScopeTable(table);
+            var target = ScopeIndexTable(options, table);
             var literal = SqlLiteral(target);
             var key = string.Join(", ", table.KeyColumns.Select(k => $"[{Escape(k)}]"));
             var sql = new StringBuilder();
@@ -788,8 +803,8 @@ internal sealed partial class SqlServerDatabaseProvider
                     ALTER TABLE {target} ADD [{SqlOSFgaLineage.ScopeTypeColumn}] AS SUBSTRING([{SqlOSFgaLineage.ScopeColumn}], {SqlOSFgaLineage.ScopeTypeOffset}, 4);
                 IF NOT EXISTS (SELECT 1 FROM sys.stats WHERE name = '{SqlLiteral(SqlOSFgaLineage.ScopeTypeStatisticsName(table.Table))}' AND object_id = OBJECT_ID(N'{literal}'))
                     CREATE STATISTICS [{Escape(SqlOSFgaLineage.ScopeTypeStatisticsName(table.Table))}] ON {target} ([{SqlOSFgaLineage.ScopeTypeColumn}]);
-                IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = '{SqlLiteral(SqlOSFgaLineage.ScopeMissingIndexName(table.Table))}' AND object_id = OBJECT_ID(N'{literal}'))
-                    CREATE NONCLUSTERED INDEX [{Escape(SqlOSFgaLineage.ScopeMissingIndexName(table.Table))}] ON {target} ([{Escape(table.ResourceIdColumn)}]) WHERE [{SqlOSFgaLineage.ScopeColumn}] IS NULL;
+                IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = '{SqlLiteral(SqlOSFgaLineage.ScopeMissingIndexName(table.Table))}' AND object_id = {ObjectOf(table)})
+                    CREATE NONCLUSTERED INDEX [{Escape(SqlOSFgaLineage.ScopeMissingIndexName(table.Table))}] ON {ScopeTable(table)} ([{Escape(table.ResourceIdColumn)}]) WHERE [{SqlOSFgaLineage.ScopeColumn}] IS NULL;
                 """);
             for (var level = 0; level < levels; level++)
             {
@@ -807,6 +822,18 @@ internal sealed partial class SqlServerDatabaseProvider
                             CREATE NONCLUSTERED INDEX [{Escape(name)}] ON {target} ([{column}], {columns}) WHERE {filter};
                         """);
                 }
+            }
+
+            // A fallback statement can walk an order across several granted branches. It needs the same
+            // ordinary order index the application table provided before the projection moved here; a
+            // (scope, order) index cannot supply that global order without sorting every matching branch.
+            foreach (var order in table.Orders)
+            {
+                var name = SqlOSFgaScopeIndex.OrderIndexName(table, order);
+                sql.AppendLine(CultureInfo.InvariantCulture, $"""
+                    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'{SqlLiteral(name)}' AND object_id = OBJECT_ID(N'{literal}'))
+                        CREATE NONCLUSTERED INDEX [{Escape(name)}] ON {target} ({string.Join(", ", order.Columns.Select(c => $"[{Escape(c)}]"))});
+                    """);
             }
 
             batches.Add(sql.ToString());
@@ -851,10 +878,10 @@ internal sealed partial class SqlServerDatabaseProvider
         => $"""
             SELECT N'DROP INDEX ' + QUOTENAME(i.name) + N' ON ' + QUOTENAME(OBJECT_SCHEMA_NAME(i.object_id)) + N'.' + QUOTENAME(OBJECT_NAME(i.object_id)) + N';' AS Statement
             FROM sys.indexes i
-            WHERE (i.name LIKE N'IX[_]%[_]{SqlOSFgaLineage.ScopeColumn}[0-9]%' OR i.name LIKE N'IX[_]%[_]{SqlOSFgaLineage.ScopeColumn}Missing')
+            WHERE (i.name LIKE N'IX[_]%[_]{SqlOSFgaLineage.ScopeColumn}[0-9]%' OR i.name LIKE N'IX[_]%[_]{SqlOSFgaLineage.ScopeColumn}Missing' OR i.name LIKE N'IX[_]%[_]{SqlOSFgaLineage.ScopeColumn}Order[_]%')
               AND OBJECTPROPERTY(i.object_id, 'IsUserTable') = 1
-              AND {Owned(options, scopeTables, "i.object_id")}
-              AND NOT ({Wanted(scopeTables, t => $"i.object_id = {ObjectOf(t)} AND i.name IN ({NameList(SqlOSFgaLineage.ScopeIndexNames(t, levels))})")})
+              AND ({Owned(options, scopeTables, "i.object_id")} OR ({Wanted(scopeTables, t => $"i.object_id = {ScopeIndexObject(options, t)}")}))
+              AND NOT ({Wanted(scopeTables, t => $"(i.object_id = {ObjectOf(t)} AND i.name = N'{SqlLiteral(SqlOSFgaLineage.ScopeMissingIndexName(t.Table))}') OR (i.object_id = {ScopeIndexObject(options, t)} AND i.name IN ({NameList(SqlOSFgaScopeIndex.IndexNames(t, levels))}))")})
             """;
 
     private static string StaleStatistics(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
@@ -863,7 +890,6 @@ internal sealed partial class SqlServerDatabaseProvider
             FROM sys.stats st
             WHERE st.user_created = 1 AND st.name LIKE N'ST[_]%[_]{SqlOSFgaLineage.ScopeTypeColumn}'
               AND {Owned(options, scopeTables, "st.object_id")}
-              AND NOT ({Wanted(scopeTables, t => $"st.object_id = {ObjectOf(t)} AND st.name = N'{SqlLiteral(SqlOSFgaLineage.ScopeTypeStatisticsName(t.Table))}'")})
             """;
 
     private static string StaleComputedColumns(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
@@ -873,7 +899,6 @@ internal sealed partial class SqlServerDatabaseProvider
             WHERE (c.name LIKE N'{SqlOSFgaLineage.ScopeColumn}[0-9]%' OR c.name = N'{SqlOSFgaLineage.ScopeTypeColumn}')
               AND OBJECTPROPERTY(c.object_id, 'IsUserTable') = 1
               AND {Owned(options, scopeTables, "c.object_id")}
-              AND NOT ({Wanted(scopeTables, t => $"c.object_id = {ObjectOf(t)}")})
             """;
 
     /// <summary>A direct index of a table SqlOS no longer maintains (renamed, or no longer protected).</summary>
@@ -905,7 +930,7 @@ internal sealed partial class SqlServerDatabaseProvider
         ArgumentNullException.ThrowIfNull(scopeTables);
         var levels = SqlOSFgaLineage.Levels(options);
         var sql = new StringBuilder("DECLARE @sqlosStale NVARCHAR(MAX);\n");
-        foreach (var stale in new[] { StaleTriggers(options, scopeTables), StaleIndexes(options, scopeTables, levels), StaleStatistics(options, scopeTables), StaleComputedColumns(options, scopeTables), StaleDirectTables(options, scopeTables), StaleDirectProcedures(options, scopeTables) })
+        foreach (var stale in new[] { StaleTriggers(options, scopeTables), StaleIndexes(options, scopeTables, levels), StaleStatistics(options, scopeTables), StaleComputedColumns(options, scopeTables), StaleDirectTables(options, scopeTables), StaleDirectProcedures(options, scopeTables), StaleScopeIndexTables(options, scopeTables), StaleScopeIndexProcedures(options, scopeTables) })
         {
             sql.AppendLine(CultureInfo.InvariantCulture, $"""
                 SET @sqlosStale = N'';

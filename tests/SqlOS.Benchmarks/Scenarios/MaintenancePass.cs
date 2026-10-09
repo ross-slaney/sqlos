@@ -55,6 +55,58 @@ internal sealed class MaintenancePass(
         results.Add(await ReparentAsync("reparent.back", "Reparent it back", region, RetailTree.ChainId(1), subtree, cancellationToken));
         results.Add(await SetActiveAsync("deactivate", "Deactivate the region (cuts the reach of everything beneath it)", region, false, subtree, cancellationToken));
         results.Add(await SetActiveAsync("reactivate", "Reactivate the region", region, true, subtree, cancellationToken));
+        results.AddRange(await ProductWritesAsync(parent, cancellationToken));
+        return results;
+    }
+
+    // Measure the application table's triggers as well as resource lineage. Resource-only inserts do not
+    // exercise scope copying, declared-order indexes, or SQL Server's owned scope projection.
+    private async Task<List<MaintenanceResult>> ProductWritesAsync(string parent, CancellationToken cancellationToken)
+    {
+        const int count = 200;
+        const string prefix = Prefix + "product::";
+        await using var db = createContext();
+        var store = await db.Stores.FirstAsync(s => s.ResourceId == parent, cancellationToken);
+        db.Set<SqlOSFgaResource>().AddRange(Enumerable.Range(0, count).Select(i => new SqlOSFgaResource
+        {
+            Id = prefix + i, ParentId = parent, Name = "Product write benchmark", ResourceTypeId = "product",
+        }));
+        await db.SaveChangesAsync(cancellationToken);
+        db.ChangeTracker.Clear();
+
+        var results = new List<MaintenanceResult>();
+        async Task Measure(string id, string title, Func<int, Task> operation)
+        {
+            var clock = Stopwatch.StartNew();
+            for (var i = 0; i < count; i++) await operation(i);
+            results.Add(Report(id, title, count, 0, clock.Elapsed));
+        }
+
+        await Measure("product.insert.single", "Application-row inserts (200 single-row statements)", async i =>
+        {
+            db.Products.Add(new Product { Id = int.MinValue + i, StoreId = store.Id, ResourceId = prefix + i, Name = "Product write benchmark", Price = i });
+            await db.SaveChangesAsync(cancellationToken);
+            db.ChangeTracker.Clear();
+        });
+        await Measure("product.update.plain", "Non-indexed application-field updates (200 single-row statements)", async i =>
+        {
+            var key = int.MinValue + i;
+            var rows = await db.Products.Where(p => p.Id == key).ExecuteUpdateAsync(s => s.SetProperty(p => p.Name, "Changed"), cancellationToken);
+            if (rows != 1) throw new InvalidOperationException("The application update did not affect one row.");
+        });
+        await Measure("product.update.indexed", "Indexed application-field updates (200 single-row statements)", async i =>
+        {
+            var key = int.MinValue + i;
+            var rows = await db.Products.Where(p => p.Id == key).ExecuteUpdateAsync(s => s.SetProperty(p => p.Price, p => p.Price + 1), cancellationToken);
+            if (rows != 1) throw new InvalidOperationException("The indexed update did not affect one row.");
+        });
+        await Measure("product.delete.single", "Application-row deletes (200 single-row statements)", async i =>
+        {
+            var key = int.MinValue + i;
+            if (await db.Products.Where(p => p.Id == key).ExecuteDeleteAsync(cancellationToken) != 1)
+                throw new InvalidOperationException("The application delete did not affect one row.");
+        });
+        await db.Set<SqlOSFgaResource>().Where(r => r.Id.StartsWith(prefix)).ExecuteDeleteAsync(cancellationToken);
         return results;
     }
 
