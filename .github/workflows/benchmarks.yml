@@ -42,7 +42,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  DOTNET_VERSION: "9.0.x"
+  DOTNET_VERSION: "10.0.x"
   # The full tier: the moment `benchmark-full` is added to a pull request, or a manual run that asks for 50M.
   FULL_RUN: ${{ (github.event.action == 'labeled' && github.event.label.name == 'benchmark-full') || (github.event_name == 'workflow_dispatch' && contains(inputs.scales, '50m')) }}
 

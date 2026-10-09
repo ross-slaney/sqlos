@@ -32,7 +32,7 @@ public class SqlOSFgaFilterBuilderTests
         // The caller's subjects travel as a parameter (SQLite prints its value in a .param line), so every caller
         // shares the query's plan.
         sql.Should().MatchRegex(@"fn_ActiveSubjects""\((@\w+)\)");
-        sql.Should().Contain(".param set @__p_0 '[\"u\"]'");
+        sql.Should().Contain(".param set @p '[\"u\"]'");
         sql.Should().Contain($"SUBSTRING(\"i\".\"FgaScope\", {SqlOSFgaLineage.ScopeAncestorOffset(1)}, 8) = @", "level 1");
         sql.Should().Contain($"SUBSTRING(\"i\".\"FgaScope\", {SqlOSFgaLineage.ScopeAncestorOffset(3)}, 8) = @", "level 3");
         sql.Should().Contain("\"i\".\"FgaScope\" >= X'01'", "the depth byte selects the level's filtered index");
@@ -52,7 +52,7 @@ public class SqlOSFgaFilterBuilderTests
         // The roots travel as one collection parameter the level's bytes are tested against (SQLite spells the
         // test with json_each; SQL Server with OPENJSON).
         sql.Should().Contain($"SUBSTRING(\"i\".\"FgaScope\", {SqlOSFgaLineage.ScopeAncestorOffset(2)}, 8)");
-        sql.Should().Contain("json_each(@__p_1)");
+        sql.Should().Contain("json_each(@p1)");
         sql.Should().Contain("\"i\".\"FgaScope\" >= X'02'");
         sql.Should().NotContain($"SUBSTRING(\"i\".\"FgaScope\", {SqlOSFgaLineage.ScopeTypeOffset}, 4)", "the permission applies to every type");
     }
@@ -67,7 +67,7 @@ public class SqlOSFgaFilterBuilderTests
         var sql = context.Set<Item>().Where(filter).ToQueryString();
 
         sql.Should().Contain($"SUBSTRING(\"i\".\"FgaScope\", {SqlOSFgaLineage.ScopeAncestorOffset(4)}, 8)");
-        sql.Should().Contain("json_each(@__p_");
+        sql.Should().Contain("json_each(@p");
         sql.Should().Contain($"SUBSTRING(\"i\".\"FgaScope\", {SqlOSFgaLineage.ScopeAncestorOffset(1)}, 8) = @", "one root at level 1");
         sql.Should().Contain("fn_ActiveSubjects");
         sql.Should().NotContain("fn_IsResourceAccessible");

@@ -24,7 +24,7 @@ Login and signup screens default to in-app headless login/password/email-code/or
 
 Prerequisites for the backend:
 
-- .NET 9 SDK
+- .NET 10 SDK
 - Docker Desktop or another Docker-compatible runtime
 - free local ports used by the [full AppHost](../SqlOS.Example.AppHost/README.md)
 

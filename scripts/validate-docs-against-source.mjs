@@ -6,6 +6,7 @@ import { readHeadlessContract } from "../packages/headless/scripts/contract-sour
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), "..");
 const projectPath = path.join(repoRoot, "src", "SqlOS", "SqlOS.csproj");
+const buildPropsPath = path.join(repoRoot, "Directory.Build.props");
 const referenceRoot = path.join(repoRoot, "web", "content", "docs", "reference");
 const staleBlogPath = path.join(
   repoRoot,
@@ -28,14 +29,15 @@ function requireMatch(content, pattern, message, errors) {
 const errors = [];
 const project = fs.readFileSync(projectPath, "utf8");
 const packageVersion = project.match(/<Version>([^<]+)<\/Version>/)?.[1];
-const targetFramework = project.match(/<TargetFramework>([^<]+)<\/TargetFramework>/)?.[1];
+const buildProps = fs.readFileSync(buildPropsPath, "utf8");
+const targetFramework = buildProps.match(/<TargetFramework>([^<]+)<\/TargetFramework>/)?.[1];
 
 if (!packageVersion) {
   errors.push("src/SqlOS/SqlOS.csproj: could not read <Version>.");
 }
 
 if (!targetFramework) {
-  errors.push("src/SqlOS/SqlOS.csproj: could not read <TargetFramework>.");
+  errors.push("Directory.Build.props: could not read <TargetFramework>.");
 }
 
 requireMatch(

@@ -5,7 +5,7 @@ on:
     branches: [main]
 
 env:
-  DOTNET_VERSION: "9.0.x"
+  DOTNET_VERSION: "10.0.x"
   NODE_VERSION: "20"
 
 jobs:
@@ -244,7 +244,7 @@ jobs:
         if: failure()
         with:
           name: headless-e2e-failure-screenshots
-          path: examples/SqlOS.Example.E2eTests/bin/Release/net9.0/TestResults/**
+          path: examples/SqlOS.Example.E2eTests/bin/Release/net10.0/TestResults/**
 
   e2e:
     name: Sign in with X E2E
@@ -272,7 +272,7 @@ jobs:
         continue-on-error: true
       - run: dotnet build examples/SqlOS.SignInWithX.E2eTests --configuration Release
       - name: Install Playwright Chromium
-        run: pwsh examples/SqlOS.SignInWithX.E2eTests/bin/Release/net9.0/playwright.ps1 install --with-deps chromium
+        run: pwsh examples/SqlOS.SignInWithX.E2eTests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
       - run: dotnet test examples/SqlOS.SignInWithX.E2eTests --configuration Release --no-build --logger "console;verbosity=normal"
         env:
           ASPIRE_ALLOW_UNSECURED_TRANSPORT: "true"
@@ -281,7 +281,7 @@ jobs:
         if: failure()
         with:
           name: e2e-failure-screenshots
-          path: examples/SqlOS.SignInWithX.E2eTests/bin/Release/net9.0/TestResults/**
+          path: examples/SqlOS.SignInWithX.E2eTests/bin/Release/net10.0/TestResults/**
 
   todo-e2e:
     name: Todo Web + CLI E2E (PostgreSQL)
@@ -307,4 +307,4 @@ jobs:
         if: always()
         with:
           name: todo-e2e-screenshots
-          path: examples/SqlOS.Todo.E2eTests/bin/Release/net9.0/TestResults/**
+          path: examples/SqlOS.Todo.E2eTests/bin/Release/net10.0/TestResults/**

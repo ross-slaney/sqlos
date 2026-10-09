@@ -19,7 +19,7 @@ The AppHost does **not** start the [Expo app](../SqlOS.Example.ExpoApp/README.md
 
 ## Prerequisites
 
-- .NET 9 SDK
+- .NET 10 SDK
 - Docker Desktop or another Docker-compatible runtime
 - Node.js and npm
 - free local ports `1434`, `3010`, `4200`, `5062`, `5080`, `5090`, `18888`, and `18889`

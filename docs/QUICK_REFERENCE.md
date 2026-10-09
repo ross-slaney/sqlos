@@ -17,7 +17,7 @@ Both use the same users, sessions, organizations, FGA services, and dashboard. A
 
 ### Add it to a project
 
-Use .NET 9, EF Core 9, and an accessible SQL Server or PostgreSQL database. The currently published package version is:
+Use .NET 10, EF Core 10, and an accessible SQL Server or PostgreSQL database. The currently published package version is:
 
 ```bash
 dotnet add package SqlOS --version 7.2.1

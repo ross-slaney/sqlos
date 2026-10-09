@@ -102,6 +102,37 @@ public sealed class SqlOSPipelineStartupFilterTests
     [TestMethod]
     public void Configure_PublicThrottleWithOnlyLoopbackForwardingTrust_EmitsSafetyWarning()
     {
+        var messages = ConfigurePublicThrottleWithForwardingTrust(forwarded =>
+        {
+            forwarded.KnownProxies.Add(IPAddress.Loopback);
+            forwarded.KnownIPNetworks.Add(System.Net.IPNetwork.Parse("127.0.0.0/8"));
+        });
+
+        messages.Should().Contain(message =>
+            message.Contains("no non-loopback KnownProxies or KnownIPNetworks", StringComparison.Ordinal)
+            && message.Contains("rate-limit buckets", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void Configure_PublicThrottleWithNonLoopbackKnownIPNetwork_EmitsNoSafetyWarning()
+    {
+        var messages = ConfigurePublicThrottleWithForwardingTrust(forwarded =>
+            forwarded.KnownIPNetworks.Add(System.Net.IPNetwork.Parse("10.0.0.0/8")));
+
+        messages.Should().NotContain(message => message.Contains("rate-limit buckets", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void Configure_PublicThrottleWithNonLoopbackKnownProxy_EmitsNoSafetyWarning()
+    {
+        var messages = ConfigurePublicThrottleWithForwardingTrust(forwarded =>
+            forwarded.KnownProxies.Add(IPAddress.Parse("10.0.0.10")));
+
+        messages.Should().NotContain(message => message.Contains("rate-limit buckets", StringComparison.Ordinal));
+    }
+
+    private static IReadOnlyList<string> ConfigurePublicThrottleWithForwardingTrust(Action<ForwardedHeadersOptions> trust)
+    {
         var options = new SqlOSOptions();
         options.Dashboard.AuthMode = SqlOSDashboardAuthMode.Password;
         options.Dashboard.Password = "test-password";
@@ -116,8 +147,8 @@ public sealed class SqlOSPipelineStartupFilterTests
         {
             forwarded.ForwardedHeaders = ForwardedHeaders.XForwardedFor;
             forwarded.KnownProxies.Clear();
-            forwarded.KnownNetworks.Clear();
-            forwarded.KnownProxies.Add(IPAddress.Loopback);
+            forwarded.KnownIPNetworks.Clear();
+            trust(forwarded);
         });
 
         using var provider = services.BuildServiceProvider();
@@ -126,9 +157,7 @@ public sealed class SqlOSPipelineStartupFilterTests
 
         new SqlOSPipelineStartupFilter(logger).Configure(_ => { })(appBuilder);
 
-        logger.Messages.Should().Contain(message =>
-            message.Contains("no non-loopback KnownProxies or KnownNetworks", StringComparison.Ordinal)
-            && message.Contains("rate-limit buckets", StringComparison.Ordinal));
+        return logger.Messages.ToList();
     }
 
     [TestMethod]

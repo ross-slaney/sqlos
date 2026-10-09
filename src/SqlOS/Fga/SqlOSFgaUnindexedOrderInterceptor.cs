@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.Logging;
 using SqlOS.Fga.Configuration;
@@ -18,31 +19,53 @@ namespace SqlOS.Fga;
 /// the application's context; a context built by hand adds it with
 /// <c>optionsBuilder.AddInterceptors(new SqlOSFgaUnindexedOrderInterceptor(loggerFactory))</c>.
 /// </summary>
-public sealed class SqlOSFgaUnindexedOrderInterceptor(ILoggerFactory loggerFactory) : IQueryExpressionInterceptor
+public sealed class SqlOSFgaUnindexedOrderInterceptor : IQueryExpressionInterceptor
 {
     private static readonly MethodInfo EFPropertyMethod = typeof(EF).GetMethod(nameof(EF.Property))!;
     private static readonly ConditionalWeakTable<IModel, IReadOnlyList<SqlOSFgaScopeTable>> TablesByModel = new();
 
-    private readonly ILogger _logger = loggerFactory.CreateLogger<SqlOSFgaUnindexedOrderInterceptor>();
+    /// <summary>
+    /// The instance <c>UseSqlOSFga</c> registers: it logs through the logger factory each context's options
+    /// carry. EF Core 10 builds an internal service provider per distinct query expression interceptor
+    /// instance, so one instance per host would build one per host and fail after twenty.
+    /// </summary>
+    internal static readonly SqlOSFgaUnindexedOrderInterceptor FromContextOptions = new(logger: null);
+
+    private readonly ILogger? _logger;
+
+    /// <summary>Creates the interceptor for a context built by hand, warning through <paramref name="loggerFactory"/>.</summary>
+    /// <param name="loggerFactory">Where the warnings go.</param>
+    public SqlOSFgaUnindexedOrderInterceptor(ILoggerFactory loggerFactory)
+        : this(loggerFactory.CreateLogger<SqlOSFgaUnindexedOrderInterceptor>())
+    {
+    }
+
+    private SqlOSFgaUnindexedOrderInterceptor(ILogger? logger) => _logger = logger;
 
     Expression IQueryExpressionInterceptor.QueryCompilationStarting(Expression queryExpression, QueryExpressionEventData eventData)
     {
         // Compilation happens once per query shape (the roots travel as parameters, so a page's shape is
         // shared across callers); everything here, including the warning, runs that once.
-        if (eventData.Context?.Model is { } model && _logger.IsEnabled(LogLevel.Warning))
+        if (eventData.Context is { } context
+            && (_logger ?? LoggerFromOptions(context)) is { } logger
+            && logger.IsEnabled(LogLevel.Warning))
         {
             var search = new Search();
             search.Visit(queryExpression);
             foreach (var (entityClrType, properties) in search.Chains())
             {
-                WarnIfUnindexed(model, entityClrType, properties);
+                WarnIfUnindexed(logger, context.Model, entityClrType, properties);
             }
         }
 
         return queryExpression;
     }
 
-    private void WarnIfUnindexed(IModel model, Type entityClrType, IReadOnlyList<string> properties)
+    private static ILogger? LoggerFromOptions(DbContext context)
+        => context.GetService<IDbContextOptions>().FindExtension<SqlOSFgaOptionsExtension>()?.LoggerFactory
+            ?.CreateLogger<SqlOSFgaUnindexedOrderInterceptor>();
+
+    private static void WarnIfUnindexed(ILogger logger, IModel model, Type entityClrType, IReadOnlyList<string> properties)
     {
         if (model.FindEntityType(entityClrType) is not { } entityType
             || entityType.FindProperty(SqlOSFgaLineage.ScopeColumn) is null
@@ -84,7 +107,7 @@ public sealed class SqlOSFgaUnindexedOrderInterceptor(ILoggerFactory loggerFacto
 
         var suggested = strip > 0 && strip < properties.Count ? properties.Take(properties.Count - strip).ToList() : properties;
 
-        _logger.LogWarning(
+        logger.LogWarning(
             "A filtered query over {Entity} sorts by ({Order}) and no declared index covers that order. The page "
             + "returns the right rows, but it reads the caller's whole scope instead of one index seek per access "
             + "root. Declare an index on ({Index}) — SqlOS mirrors each declared index per level — or sort by an "

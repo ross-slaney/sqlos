@@ -91,6 +91,27 @@ public class SqlOSFgaUnindexedOrderInterceptorTests
         warnings.Should().BeEmpty();
     }
 
+    [TestMethod]
+    public void UseSqlOSFga_PerHostLoggerFactories_ShareOneServiceProviderAndWarnThroughEachHostsLogger()
+    {
+        // Each host passes its own logger factory. EF Core 10 throws once a process builds more than twenty
+        // internal service providers, so the interceptor UseSqlOSFga registers must not differ per host.
+        var hosts = Enumerable.Range(0, 25).Select(_ => CreateWithUseSqlOSFga<GHosts>()).ToList();
+        try
+        {
+            hosts[0].Context.Set<Item>().Where(Filter()).OrderBy(i => i.Name).ToQueryString();
+            hosts[24].Context.Set<Item>().Where(Filter()).OrderBy(i => i.Name).ThenBy(i => i.ResourceId).ToQueryString();
+
+            hosts[0].Warnings.Should().ContainSingle().Which.Should().Contain("(Name)");
+            hosts[24].Warnings.Should().ContainSingle().Which.Should().Contain("Name, ResourceId");
+            hosts.Skip(1).Take(23).Should().OnlyContain(host => host.Warnings.Count == 0);
+        }
+        finally
+        {
+            hosts.ForEach(host => host.Context.Dispose());
+        }
+    }
+
     private static System.Linq.Expressions.Expression<Func<Item, bool>> Filter()
         => SqlOSFgaFilterBuilder.Build<Item>([new SqlOSFgaAccessRoot { ResourceSeq = 5, Depth = 1 }], "[\"u\"]", typeSeq: 7, levels: 11);
 
@@ -107,6 +128,19 @@ public class SqlOSFgaUnindexedOrderInterceptorTests
         return (context, warnings);
     }
 
+    private static (InterceptedDbContext<TMarker> Context, List<string> Warnings) CreateWithUseSqlOSFga<TMarker>()
+    {
+        var warnings = new List<string>();
+        var connection = new SqliteConnection("Data Source=:memory:");
+        connection.Open();
+        var context = new InterceptedDbContext<TMarker>(new DbContextOptionsBuilder<InterceptedDbContext<TMarker>>()
+            .UseSqlite(connection)
+            .UseSqlOSFga(new CapturingLoggerFactory(warnings))
+            .Options);
+        _ = context.Model;
+        return (context, warnings);
+    }
+
     private sealed class AUndeclared;
 
     private sealed class BOnce;
@@ -118,6 +152,8 @@ public class SqlOSFgaUnindexedOrderInterceptorTests
     private sealed class EUnfiltered;
 
     private sealed class FOpaque;
+
+    private sealed class GHosts;
 
     private sealed class InterceptedDbContext<TMarker>(DbContextOptions<InterceptedDbContext<TMarker>> options) : DbContext(options), ISqlOSFgaDbContext
     {
