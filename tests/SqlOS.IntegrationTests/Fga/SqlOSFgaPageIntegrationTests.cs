@@ -45,7 +45,7 @@ public class SqlOSFgaPageIntegrationTests
     private const string OtherRoleId = "role_page_other";
 
     [TestMethod]
-    public async Task BaseClass_LeavesApplicationColumnsEqualToTheEfModel_AndUpgradesLegacySqlServerHelpers()
+    public async Task BaseClass_LeavesApplicationColumnsEqualToTheEfModel_AndUpgradesTheEarlierLayout()
     {
         await using var host = await HostedApp.StartAsync();
         await using var scope = host.App.Services.CreateAsyncScope();
@@ -60,38 +60,62 @@ public class SqlOSFgaPageIntegrationTests
         (await ReadAsync(db, columnsSql)).Should().BeEquivalentTo(expected,
             "extending SqlOSResourceEntity must not cause undeclared columns to appear on the application table");
 
+        await AssertScopeProjectionAsync(db);
         if (TestDatabase.IsSqlServer)
         {
-            await AssertScopeProjectionAsync(db);
             var comparison = await EFCore.SchemaSync.SchemaSync.ApplyAsync(db, new EFCore.SchemaSync.SchemaSyncOptions { DryRun = true });
             comparison.Changes.Should().BeEmpty("SqlOS's startup must not leave undeclared columns for the application's schema tool to remove");
-            // Reproduce the released v8 table shape, with application data already present. Startup must
-            // remove its old helpers and build the private projection without an application migration.
-            await db.Database.ExecuteSqlRawAsync("""
-                ALTER TABLE [PageItems] ADD [FgaScopeType] AS SUBSTRING([FgaScope], 2, 4);
-                ALTER TABLE [PageItems] ADD [FgaScope0] AS SUBSTRING([FgaScope], 6, 8);
-                CREATE STATISTICS [ST_PageItems_FgaScopeType] ON [PageItems] ([FgaScopeType]);
-                CREATE INDEX [IX_PageItems_FgaScope0] ON [PageItems] ([FgaScope0], [Id]) WHERE [FgaScope] >= 0x00;
-                DROP TABLE [dbo].[SqlOSFgaScopeIndex_PageItems];
-                """);
-            var initializer = new SqlOSFgaFunctionInitializer(db,
-                Options.Create(new SqlOS.Fga.Configuration.SqlOSFgaOptions()), NullLogger<SqlOSFgaFunctionInitializer>.Instance);
-            await initializer.EnsureFunctionsExistAsync();
-            (await ReadAsync(db, columnsSql)).Should().BeEquivalentTo(expected);
-            await AssertScopeProjectionAsync(db);
-            await initializer.EnsureFunctionsExistAsync();
-            await AssertScopeProjectionAsync(db);
-            (await EFCore.SchemaSync.SchemaSync.ApplyAsync(db)).Outcome.Should().Be(EFCore.SchemaSync.SchemaSyncOutcome.NoChangesNeeded);
+        }
 
-            // Raw/bulk statement changes use the same maintained projection, including primary-key changes.
-            await db.Database.ExecuteSqlRawAsync("UPDATE [PageItems] SET [Id] = N'renamed-' + [Id], [Rank] = [Rank] + 1 WHERE [Rank] < 3");
-            await AssertScopeProjectionAsync(db);
-            await db.Database.ExecuteSqlRawAsync("DELETE FROM [PageItems] WHERE [Id] LIKE N'renamed-%'");
-            await AssertScopeProjectionAsync(db);
-            // SQL equality ignores case/trailing spaces under the default collation; a projection must
-            // nevertheless preserve exactly what the application stored, for keys as well as sort values.
-            await db.Database.ExecuteSqlRawAsync("UPDATE [PageItems] SET [Id] = UPPER([Id]), [Label] = N'ORIGINAL '");
-            await AssertScopeProjectionAsync(db);
+        // Reproduce the released v8 table shape, with application data already present: the per-level indexes on
+        // the application table (on SQL Server over computed columns). Startup must remove them and build the
+        // projection without an application migration.
+        await db.Database.ExecuteSqlRawAsync(TestDatabase.IsSqlServer
+            ? """
+              ALTER TABLE [PageItems] ADD [FgaScopeType] AS SUBSTRING([FgaScope], 2, 4);
+              ALTER TABLE [PageItems] ADD [FgaScope0] AS SUBSTRING([FgaScope], 6, 8);
+              CREATE STATISTICS [ST_PageItems_FgaScopeType] ON [PageItems] ([FgaScopeType]);
+              CREATE INDEX [IX_PageItems_FgaScope0] ON [PageItems] ([FgaScope0], [Id]) WHERE [FgaScope] >= 0x00;
+              DROP TABLE [dbo].[SqlOSFgaScopeIndex_PageItems];
+              """
+            : """
+              CREATE INDEX "IX_PageItems_FgaScope0" ON "PageItems" ((SUBSTRING("FgaScope", 6, 8)), "Id") WHERE "FgaScope" >= '\x00'::bytea;
+              CREATE STATISTICS "ST_PageItems_FgaScopeType" ON ((SUBSTRING("FgaScope", 2, 4))) FROM "PageItems";
+              DROP TABLE "dbo"."SqlOSFgaScopeIndex_PageItems";
+              """);
+        var initializer = new SqlOSFgaFunctionInitializer(db,
+            Options.Create(new SqlOS.Fga.Configuration.SqlOSFgaOptions()), NullLogger<SqlOSFgaFunctionInitializer>.Instance);
+        await initializer.EnsureFunctionsExistAsync();
+        (await ReadAsync(db, columnsSql)).Should().BeEquivalentTo(expected);
+        (await ReadAsync(db, TestDatabase.IsSqlServer
+                ? "SELECT name FROM sys.indexes WHERE object_id = OBJECT_ID(N'PageItems') AND name LIKE 'IX[_]PageItems[_]FgaScope%'"
+                : "SELECT indexname FROM pg_indexes WHERE tablename = 'PageItems' AND indexname LIKE 'IX\\_PageItems\\_FgaScope%'"))
+            .Should().Equal(["IX_PageItems_FgaScopeMissing"], "the application table keeps only the index on rows without a scope");
+        await AssertScopeProjectionAsync(db);
+        await initializer.EnsureFunctionsExistAsync();
+        await AssertScopeProjectionAsync(db);
+        if (TestDatabase.IsSqlServer)
+        {
+            (await EFCore.SchemaSync.SchemaSync.ApplyAsync(db)).Outcome.Should().Be(EFCore.SchemaSync.SchemaSyncOutcome.NoChangesNeeded);
+        }
+
+        // Raw/bulk statement changes use the same maintained projection, including primary-key changes.
+        await db.Database.ExecuteSqlRawAsync(TestDatabase.IsSqlServer
+            ? "UPDATE [PageItems] SET [Id] = N'renamed-' + [Id], [Rank] = [Rank] + 1 WHERE [Rank] < 3"
+            : "UPDATE \"PageItems\" SET \"Id\" = 'renamed-' || \"Id\", \"Rank\" = \"Rank\" + 1 WHERE \"Rank\" < 3");
+        await AssertScopeProjectionAsync(db);
+        await db.Database.ExecuteSqlRawAsync(TestDatabase.IsSqlServer
+            ? "DELETE FROM [PageItems] WHERE [Id] LIKE N'renamed-%'"
+            : "DELETE FROM \"PageItems\" WHERE \"Id\" LIKE 'renamed-%'");
+        await AssertScopeProjectionAsync(db);
+        // SQL Server's equality ignores case/trailing spaces under the default collation; a projection must
+        // nevertheless preserve exactly what the application stored, for keys as well as sort values.
+        await db.Database.ExecuteSqlRawAsync(TestDatabase.IsSqlServer
+            ? "UPDATE [PageItems] SET [Id] = UPPER([Id]), [Label] = N'ORIGINAL '"
+            : "UPDATE \"PageItems\" SET \"Id\" = UPPER(\"Id\"), \"Label\" = 'ORIGINAL '");
+        await AssertScopeProjectionAsync(db);
+        if (TestDatabase.IsSqlServer)
+        {
             await db.Database.ExecuteSqlRawAsync("UPDATE [PageItems] SET [Status] = [Status] + 1");
             await AssertScopeProjectionAsync(db); // the computed sort value changes without being in SET
             // A migration changes the computation without changing the column's name or SQL type.
@@ -109,10 +133,12 @@ public class SqlOSFgaPageIntegrationTests
     private static async Task AssertScopeProjectionAsync(PageDbContext db)
     {
         // Compare with the source rows, not with another query that uses the same authorization index.
-        const string projection = "Id, Label, Rank, Stamp, ComputedStatus, CONVERT(varchar(max), FgaScope, 2) AS ScopeBytes";
-        (await ReadAsync(db, $"SELECT {projection} FROM dbo.SqlOSFgaScopeIndex_PageItems ORDER BY Id"))
-            .Should().Equal(await ReadAsync(db, $"SELECT {projection} FROM PageItems ORDER BY Id"),
-                "the private projection must equal the application rows, including every scope byte");
+        var (projection, source, copy, order) = TestDatabase.IsSqlServer
+            ? ("Id, Label, Rank, Stamp, ComputedStatus, CONVERT(varchar(max), FgaScope, 2) AS ScopeBytes", "PageItems", "dbo.SqlOSFgaScopeIndex_PageItems", "ORDER BY Id")
+            : ("\"Id\", \"Label\", \"Rank\", \"Stamp\", encode(\"FgaScope\", 'hex') AS \"ScopeBytes\"", "\"PageItems\"", "\"dbo\".\"SqlOSFgaScopeIndex_PageItems\"", "ORDER BY \"Id\"");
+        (await ReadAsync(db, $"SELECT {projection} FROM {copy} {order}"))
+            .Should().Equal(await ReadAsync(db, $"SELECT {projection} FROM {source} {order}"),
+                "the projection must equal the application rows, including every scope byte");
     }
 
     [TestMethod]
@@ -137,10 +163,10 @@ public class SqlOSFgaPageIntegrationTests
         db.ChangeTracker.Clear();
         (await db.Items.CountAsync(i => i.Rank >= 1000)).Should().Be(expected,
             "ExecuteUpdate must target the application's table, not just its private index");
-        if (TestDatabase.IsSqlServer) await AssertScopeProjectionAsync(db);
+        await AssertScopeProjectionAsync(db);
         (await db.Items.Where(filter).ExecuteDeleteAsync()).Should().Be(expected);
         (await db.Items.CountAsync()).Should().Be(Tree.Items - expected);
-        if (TestDatabase.IsSqlServer) await AssertScopeProjectionAsync(db);
+        await AssertScopeProjectionAsync(db);
     }
 
     [TestMethod]
@@ -671,11 +697,11 @@ public class SqlOSFgaPageIntegrationTests
             : "SELECT GrantId, SubjectId, RoleId, TypeSeq, Active, EffectiveFrom, EffectiveTo, Id, Rank FROM dbo.SqlOSFgaDirect_PageItems ORDER BY 1, 8";
         var maintainedCounts = await ReadAsync(db, counts);
         var maintainedDirect = await ReadAsync(db, direct);
-        if (TestDatabase.IsSqlServer) await AssertScopeProjectionAsync(db);
+        await AssertScopeProjectionAsync(db);
         await db.Database.ExecuteSqlRawAsync(provider.BuildPageIndexRebuildSql(new SqlOS.Fga.Configuration.SqlOSFgaOptions()));
         (await ReadAsync(db, counts)).Should().Equal(maintainedCounts, "the maintained grant counts must equal a rebuild");
         (await ReadAsync(db, direct)).Should().Equal(maintainedDirect, "the maintained direct index must equal a rebuild");
-        if (TestDatabase.IsSqlServer) await AssertScopeProjectionAsync(db);
+        await AssertScopeProjectionAsync(db);
     }
 
     private static async Task<List<string>> ReadAsync(DbContext db, string sql)

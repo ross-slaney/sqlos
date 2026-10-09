@@ -608,6 +608,13 @@ internal sealed partial class PostgreSqlDatabaseProvider
         // the scope fires it again, and a nested call must not disturb the outer one).
         var changedKeys = $"(SELECT {directList} FROM new_rows EXCEPT SELECT {directList} FROM old_rows)";
         var changedRows = $"(SELECT n.* FROM new_rows n WHERE EXISTS (SELECT 1 FROM {changedKeys} c WHERE {string.Join(" AND ", table.KeyColumns.Select(k => $"c.{QuoteIdentifier(k)} = n.{QuoteIdentifier(k)}"))}))";
+        // The old versions of those rows: the direct entries to remove are the old key's, which a key change leaves behind otherwise.
+        var changedOldRows = $"(SELECT {directList} FROM old_rows EXCEPT SELECT {directList} FROM new_rows)";
+        // The rows whose projection changed: the above, or the scope (this function's own update, the lineage
+        // refresh, the fill); the projection follows every one of them.
+        var projectedList = string.Join(", ", SqlOSFgaPageIndex.DirectColumns(table).Select(c => c.Column).Append(table.ResourceIdColumn).Append(SqlOSFgaLineage.ScopeColumn).Distinct().Select(QuoteIdentifier));
+        var changedProjection = $"(SELECT {projectedList} FROM new_rows EXCEPT SELECT {projectedList} FROM old_rows)";
+        var newKeys = string.Join(" AND ", table.KeyColumns.Select(k => $"n.{QuoteIdentifier(k)} = o.{QuoteIdentifier(k)}"));
         return $"""
             CREATE OR REPLACE FUNCTION {onInsert}()
             RETURNS trigger
@@ -621,6 +628,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
                 LEFT JOIN {resources} r ON r."Id" = n.{resourceId}
                 LEFT JOIN {resourceTypes} rt ON rt."Id" = r."ResourceTypeId"
                 WHERE {keys};
+                {ScopeIndexMerge(options, table, "new_rows")}
                 {DirectInsertFromRows(options, table, "new_rows")}
                 RETURN NULL;
             END
@@ -631,9 +639,10 @@ internal sealed partial class PostgreSqlDatabaseProvider
             AS $sqlos$
             BEGIN
                 -- Statement triggers fire for every update of the table, this function's own included and
-                -- statements that touched no row: leave unless some row's resource id, key, or sort column changed.
-                -- The changed rows come from EXCEPT, a hashed set operation, never from a join of the transition tables.
-                IF NOT EXISTS (SELECT 1 FROM {changedKeys} c) THEN
+                -- statements that touched no row: leave unless some row's resource id, key, sort column or scope
+                -- changed. The changed rows come from EXCEPT, a hashed set operation, never from a join of the
+                -- transition tables.
+                IF NOT EXISTS (SELECT 1 FROM {changedProjection} c) THEN
                     RETURN NULL;
                 END IF;
 
@@ -648,8 +657,16 @@ internal sealed partial class PostgreSqlDatabaseProvider
                 LEFT JOIN {resources} r ON r."Id" = n.{resourceId}
                 LEFT JOIN {resourceTypes} rt ON rt."Id" = r."ResourceTypeId"
                 WHERE {keys};
-                {DirectDeleteRows(options, table, changedKeys)}
-                {DirectInsertFromRows(options, table, changedRows)}
+                -- A changed key removes the old projection entry; the rest are refreshed in place.
+                DELETE FROM {ScopeIndexTable(options, table)} d
+                USING old_rows o
+                WHERE {string.Join(" AND ", table.KeyColumns.Select(k => $"d.{QuoteIdentifier(k)} = o.{QuoteIdentifier(k)}"))}
+                  AND NOT EXISTS (SELECT 1 FROM new_rows n WHERE {newKeys});
+                {ScopeIndexMerge(options, table, $"(SELECT n.* FROM new_rows n WHERE EXISTS (SELECT 1 FROM {changedProjection} c WHERE {string.Join(" AND ", table.KeyColumns.Select(k => $"c.{QuoteIdentifier(k)} = n.{QuoteIdentifier(k)}"))}))")}
+                IF EXISTS (SELECT 1 FROM {changedKeys} c) THEN
+                    {DirectDeleteRows(options, table, changedOldRows)}
+                    {DirectInsertFromRows(options, table, changedRows)}
+                END IF;
                 RETURN NULL;
             END
             $sqlos$;
@@ -658,6 +675,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
             LANGUAGE plpgsql
             AS $sqlos$
             BEGIN
+                {ScopeIndexDeleteRows(options, table, "old_rows")}
                 {DirectDeleteRows(options, table, "old_rows")}
                 RETURN NULL;
             END
@@ -755,24 +773,30 @@ internal sealed partial class PostgreSqlDatabaseProvider
         var levels = SqlOSFgaLineage.Levels(options);
         foreach (var table in scopeTables)
         {
-            // Every object of the table exists (see the SQL Server provider).
-            var indexes = SqlOSFgaLineage.ScopeIndexNames(table, levels);
+            // Every object of the table and of its projection exists (see the SQL Server provider).
+            var indexes = SqlOSFgaScopeIndex.IndexNames(table, levels);
+            var projection = SqlLiteral(SqlOSFgaScopeIndex.Table(table));
             conditions.Add(Routine(ScopeFunctionName(table, "Insert")));
             conditions.Add(Routine(ScopeFunctionName(table, "Update")));
             conditions.Add(Routine(ScopeFunctionName(table, "Delete")));
             conditions.Add(Routine("fn_" + SqlOSFgaPageIndex.DirectRebuildRoutine(table)));
+            conditions.Add(Routine("fn_" + SqlOSFgaScopeIndex.RebuildRoutine(table)));
             conditions.AddRange(SqlOSFgaLineage.ScopeTriggerNames(table.Table).Select(t => Trigger(table.Schema, table.Table, t)));
+            conditions.Add(ScopeIndexExists(options, table));
+            conditions.Add($"{ScopeIndexStoredSignature(options, table)} = {ScopeIndexSignature(table)}");
             conditions.Add(
-                $"(SELECT count(*) FROM pg_indexes WHERE schemaname = {ScopeSchemaLiteral(table)} AND tablename = '{SqlLiteral(table.Table)}' AND indexname IN ({NameList(indexes)})) = {indexes.Count.ToString(CultureInfo.InvariantCulture)}");
+                $"(SELECT count(*) FROM pg_indexes WHERE schemaname = '{schema}' AND tablename = '{projection}' AND indexname IN ({NameList(indexes)})) = {indexes.Count.ToString(CultureInfo.InvariantCulture)}");
             conditions.Add(
-                $"EXISTS (SELECT 1 FROM pg_statistic_ext s INNER JOIN pg_namespace n ON n.oid = s.stxnamespace WHERE n.nspname = {ScopeSchemaLiteral(table)} AND s.stxname = '{SqlLiteral(SqlOSFgaLineage.ScopeTypeStatisticsName(table.Table))}')");
+                $"EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = {ScopeSchemaLiteral(table)} AND tablename = '{SqlLiteral(table.Table)}' AND indexname = '{SqlLiteral(SqlOSFgaLineage.ScopeMissingIndexName(table.Table))}')");
+            conditions.Add(
+                $"EXISTS (SELECT 1 FROM pg_statistic_ext s INNER JOIN pg_namespace n ON n.oid = s.stxnamespace INNER JOIN pg_class c ON c.oid = s.stxrelid WHERE n.nspname = '{schema}' AND c.relname = '{projection}' AND s.stxname = '{SqlLiteral(SqlOSFgaLineage.ScopeTypeStatisticsName(table.Table))}')");
             var directIndexes = SqlOSFgaPageIndex.DirectIndexNames(table).Append(SqlOSFgaPageIndex.DirectIndexName(table, "Key")).Append(SqlOSFgaPageIndex.DirectIndexName(table, "Row")).ToList();
             conditions.Add(
                 $"(SELECT count(*) FROM pg_indexes WHERE schemaname = '{schema}' AND tablename = '{SqlLiteral(SqlOSFgaPageIndex.DirectTable(table))}' AND indexname IN ({NameList(directIndexes)})) = {directIndexes.Count.ToString(CultureInfo.InvariantCulture)}");
         }
 
         // And nothing stale anywhere.
-        foreach (var stale in new[] { StaleTriggers(options, scopeTables), StaleFunctions(options, scopeTables), StaleIndexes(options, scopeTables, levels), StaleStatistics(options, scopeTables), StaleDirectTables(options, scopeTables) })
+        foreach (var stale in new[] { StaleTriggers(options, scopeTables), StaleFunctions(options, scopeTables), StaleIndexes(options, scopeTables, levels), StaleStatistics(options, scopeTables), StaleDirectTables(options, scopeTables), StaleScopeIndexTables(options, scopeTables) })
         {
             conditions.Add($"NOT EXISTS ({stale})");
         }
@@ -826,13 +850,13 @@ internal sealed partial class PostgreSqlDatabaseProvider
         => table.Schema is null ? "current_schema()" : $"'{SqlLiteral(table.Schema)}'";
 
     /// <summary>
-    /// The indexes of one application table, per level: an expression index on the level's eight bytes of the
-    /// scope column followed by the primary key, and one more per order the application declared, each
-    /// filtered on the depth byte to the rows at or below the level; and a partial index on the rows that have
-    /// no scope yet, which keeps the fill an index scan. Also extended statistics on the type bytes, analyzed at
-    /// once: without them the planner guesses the type test is selective and sorts the caller's whole scope
-    /// instead of walking the level's index. Idempotent. Objects no longer wanted are dropped by
-    /// <see cref="BuildScopeCleanupSql"/>.
+    /// The indexes of one application table's projection, per level: an expression index on the level's eight
+    /// bytes of the scope column followed by the primary key, and one more per order the application declared,
+    /// each filtered on the depth byte to the rows at or below the level; and on the application table itself a
+    /// partial index on the rows that have no scope yet, which keeps the fill an index scan. Also extended
+    /// statistics on the projection's type bytes, analyzed at once: without them the planner guesses the type
+    /// test is selective and sorts the caller's whole scope instead of walking the level's index. Idempotent.
+    /// Objects no longer wanted are dropped by <see cref="BuildScopeCleanupSql"/>.
     /// </summary>
     public IReadOnlyList<string> BuildEnsureScopeIndexesSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
     {
@@ -842,12 +866,12 @@ internal sealed partial class PostgreSqlDatabaseProvider
         var batches = new List<string>();
         foreach (var table in scopeTables)
         {
-            var target = ScopeTable(table);
+            var target = ScopeIndexTable(options, table);
             var scope = QuoteIdentifier(SqlOSFgaLineage.ScopeColumn);
             var key = string.Join(", ", table.KeyColumns.Select(QuoteIdentifier));
             var sql = new StringBuilder();
             sql.AppendLine(CultureInfo.InvariantCulture, $"""
-                CREATE INDEX IF NOT EXISTS {QuoteIdentifier(SqlOSFgaLineage.ScopeMissingIndexName(table.Table))} ON {target} ({QuoteIdentifier(table.ResourceIdColumn)}) WHERE {scope} IS NULL;
+                CREATE INDEX IF NOT EXISTS {QuoteIdentifier(SqlOSFgaLineage.ScopeMissingIndexName(table.Table))} ON {ScopeTable(table)} ({QuoteIdentifier(table.ResourceIdColumn)}) WHERE {scope} IS NULL;
                 """);
             for (var level = 0; level < levels; level++)
             {
@@ -863,7 +887,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
             }
 
             sql.AppendLine(CultureInfo.InvariantCulture, $"""
-                CREATE STATISTICS IF NOT EXISTS {QuoteIdentifier(SqlOSFgaLineage.ScopeTypeStatisticsName(table.Table))} ON ((SUBSTRING({scope}, {SqlOSFgaLineage.ScopeTypeOffset}, 4))) FROM {target};
+                CREATE STATISTICS IF NOT EXISTS {Qualify(options.Schema, SqlOSFgaLineage.ScopeTypeStatisticsName(table.Table))} ON ((SUBSTRING({scope}, {SqlOSFgaLineage.ScopeTypeOffset}, 4))) FROM {target};
                 ANALYZE {target};
                 """);
             batches.Add(sql.ToString());
@@ -874,7 +898,8 @@ internal sealed partial class PostgreSqlDatabaseProvider
 
     // SqlOS's objects on application tables carry names no application object has (see the SQL Server
     // provider); on PostgreSQL also the trigger functions fn_SqlOSFgaScope_* in SqlOS's schema. Any of them not
-    // belonging to a table SqlOS maintains now, under its current name, is stale.
+    // belonging to a table SqlOS maintains now, under its current name, is stale. The per-level indexes and the
+    // type statistics of an earlier version lived on the application table itself; they are stale wherever found.
 
     private static string NameList(IEnumerable<string> names) => string.Join(", ", names.Select(n => $"'{SqlLiteral(n)}'"));
 
@@ -908,8 +933,8 @@ internal sealed partial class PostgreSqlDatabaseProvider
             FROM pg_proc p
             INNER JOIN pg_namespace n ON n.oid = p.pronamespace
             WHERE n.nspname = '{SqlLiteral(options.Schema)}'
-              AND (p.proname LIKE 'fn\_{SqlOSFgaLineage.ScopePrefix}Scope\_%' OR p.proname LIKE 'fn\_{SqlOSFgaPageIndex.DirectPrefix.Replace("_", "\\_", StringComparison.Ordinal)}%')
-              AND p.proname NOT IN ({(scopeTables.Count == 0 ? "''" : NameList(scopeTables.SelectMany(t => new[] { ScopeFunctionName(t, "Insert"), ScopeFunctionName(t, "Update"), ScopeFunctionName(t, "Delete"), "fn_" + SqlOSFgaPageIndex.DirectRebuildRoutine(t) })))})
+              AND (p.proname LIKE 'fn\_{SqlOSFgaLineage.ScopePrefix}Scope\_%' OR p.proname LIKE 'fn\_{SqlOSFgaPageIndex.DirectPrefix.Replace("_", "\\_", StringComparison.Ordinal)}%' OR p.proname LIKE 'fn\_{SqlOSFgaScopeIndex.Prefix.Replace("_", "\\_", StringComparison.Ordinal)}%')
+              AND p.proname NOT IN ({(scopeTables.Count == 0 ? "''" : NameList(scopeTables.SelectMany(t => new[] { ScopeFunctionName(t, "Insert"), ScopeFunctionName(t, "Update"), ScopeFunctionName(t, "Delete"), "fn_" + SqlOSFgaPageIndex.DirectRebuildRoutine(t), "fn_" + SqlOSFgaScopeIndex.RebuildRoutine(t) })))})
             """;
 
     /// <summary>A direct index of a table SqlOS no longer maintains (renamed, or no longer protected).</summary>
@@ -927,8 +952,8 @@ internal sealed partial class PostgreSqlDatabaseProvider
             SELECT format('DROP INDEX %I.%I', i.schemaname, i.indexname) AS statement
             FROM pg_indexes i
             WHERE i.indexname ~ '^IX_.*_{SqlOSFgaLineage.ScopeColumn}([0-9]|Missing)'
-              AND {Owned(options, scopeTables, "i.schemaname", "i.tablename")}
-              AND NOT ({Wanted(scopeTables, t => $"i.schemaname = {ScopeSchemaLiteral(t)} AND i.tablename = '{SqlLiteral(t.Table)}' AND i.indexname IN ({NameList(SqlOSFgaLineage.ScopeIndexNames(t, levels))})")})
+              AND ({Owned(options, scopeTables, "i.schemaname", "i.tablename")} OR ({Wanted(scopeTables, t => $"i.schemaname = '{SqlLiteral(options.Schema)}' AND i.tablename = '{SqlLiteral(SqlOSFgaScopeIndex.Table(t))}'")}))
+              AND NOT ({Wanted(scopeTables, t => $"(i.schemaname = {ScopeSchemaLiteral(t)} AND i.tablename = '{SqlLiteral(t.Table)}' AND i.indexname = '{SqlLiteral(SqlOSFgaLineage.ScopeMissingIndexName(t.Table))}') OR (i.schemaname = '{SqlLiteral(options.Schema)}' AND i.tablename = '{SqlLiteral(SqlOSFgaScopeIndex.Table(t))}' AND i.indexname IN ({NameList(SqlOSFgaScopeIndex.IndexNames(t, levels))}))")})
             """;
 
     private static string StaleStatistics(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
@@ -940,7 +965,6 @@ internal sealed partial class PostgreSqlDatabaseProvider
             INNER JOIN pg_namespace tn ON tn.oid = c.relnamespace
             WHERE s.stxname LIKE 'ST\_%\_{SqlOSFgaLineage.ScopeTypeColumn}'
               AND {Owned(options, scopeTables, "tn.nspname", "c.relname")}
-              AND NOT ({Wanted(scopeTables, t => $"n.nspname = {ScopeSchemaLiteral(t)} AND c.relname = '{SqlLiteral(t.Table)}' AND s.stxname = '{SqlLiteral(SqlOSFgaLineage.ScopeTypeStatisticsName(t.Table))}'")})
             """;
 
     /// <summary>
@@ -954,7 +978,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
         ArgumentNullException.ThrowIfNull(scopeTables);
         var levels = SqlOSFgaLineage.Levels(options);
         var loops = new StringBuilder();
-        foreach (var stale in new[] { StaleTriggers(options, scopeTables), StaleFunctions(options, scopeTables), StaleIndexes(options, scopeTables, levels), StaleStatistics(options, scopeTables), StaleDirectTables(options, scopeTables) })
+        foreach (var stale in new[] { StaleTriggers(options, scopeTables), StaleFunctions(options, scopeTables), StaleIndexes(options, scopeTables, levels), StaleStatistics(options, scopeTables), StaleDirectTables(options, scopeTables), StaleScopeIndexTables(options, scopeTables) })
         {
             loops.AppendLine(CultureInfo.InvariantCulture, $"""
                 FOR stale IN {stale}

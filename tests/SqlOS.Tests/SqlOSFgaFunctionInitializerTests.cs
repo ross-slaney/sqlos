@@ -133,7 +133,7 @@ public class SqlOSFgaFunctionInitializerTests
         var scope = new SqlOSFgaScopeTable("app", "Items", "ResourceId", ["Id"], [new SqlOSFgaScopeOrder("Price", ["Price", "Id"])],
             [new SqlOSFgaScopeColumn("Id", "int", false), new SqlOSFgaScopeColumn("Price", "decimal(10,2)", false), new SqlOSFgaScopeColumn("Name", "nvarchar(200)", false), new SqlOSFgaScopeColumn("FgaScope", "varbinary(512)", true)]);
 
-        var sql = SqlServerDatabaseProvider.ScopeIndexQuery(options, scope);
+        var sql = SqlServerDatabaseProvider.Instance.BuildScopeIndexQuerySql(options, scope);
 
         // The projection decides which rows are visible (its per-level indexes serve the predicate on the
         // scope); what the application sees, keys and order columns included, is the row's.

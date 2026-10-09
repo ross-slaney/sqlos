@@ -6,9 +6,11 @@ using SqlOS.Fga.Paging;
 namespace SqlOS.Fga;
 
 /// <summary>
-/// SQL Server's private projection of an application table. It carries one entry per application row,
-/// independent of principals: the key, declared order columns and scope. SQL Server's computed columns
-/// and per-level indexes belong here, not on the application's table or in its EF model.
+/// SqlOS's projection of an application table, the same on both engines. It carries one entry per
+/// application row, independent of principals: the key, the declared order columns and the scope. The
+/// per-level indexes (and on SQL Server the computed columns they are built on) belong here, not on the
+/// application's table or in its EF model: a planned statement reads the projection to decide which rows
+/// are visible and the row for everything else, and a page's streams seek the projection.
 /// </summary>
 internal static class SqlOSFgaScopeIndex
 {
@@ -21,7 +23,8 @@ internal static class SqlOSFgaScopeIndex
         return name[..96] + "_" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(name)))[..12];
     }
 
-    public static string RebuildRoutine(SqlOSFgaScopeTable table) => "sp_" + Table(table) + "_Rebuild";
+    /// <summary>The rebuild routine's name without the engine's prefix (<c>sp_</c> on SQL Server, <c>fn_</c> on PostgreSQL).</summary>
+    public static string RebuildRoutine(SqlOSFgaScopeTable table) => Table(table) + "_Rebuild";
 
     /// <summary>The projection's indexes: the per-level ones. The missing-rows index stays on the application table, where the rows without a scope are.</summary>
     public static IReadOnlyList<string> IndexNames(SqlOSFgaScopeTable table, int levels)

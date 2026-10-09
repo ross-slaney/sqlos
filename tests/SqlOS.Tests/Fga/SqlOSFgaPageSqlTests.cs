@@ -77,6 +77,8 @@ public class SqlOSFgaPageSqlTests
         all.Should().Contain("CREATE OR REPLACE FUNCTION \"dbo\".\"fn_SqlOSFgaPageIndex_Rebuild\"");
         all.Should().Contain("\"dbo\".\"SqlOSFgaDirect_app_Items\"");
         all.Should().Contain("CREATE OR REPLACE FUNCTION \"dbo\".\"fn_SqlOSFgaDirect_app_Items_Rebuild\"");
+        all.Should().Contain("\"dbo\".\"SqlOSFgaScopeIndex_app_Items\"", "the projection, as on SQL Server");
+        all.Should().Contain("CREATE OR REPLACE FUNCTION \"dbo\".\"fn_SqlOSFgaScopeIndex_app_Items_Rebuild\"");
         all.Should().Contain("\"IX_SqlOSFgaDirect_app_Items_Price\"");
 
         // The row index answers the triggers' equality lookups only: a B-tree on the key alone would also
@@ -175,7 +177,9 @@ public class SqlOSFgaPageSqlTests
         round.Should().Contain("LIMIT st.f");
         for (var level = 0; level <= 2; level++)
         {
-            round.Should().Contain($"SUBSTRING(i.\"FgaScope\", {SqlOSFgaPageIndex.Offset(level)}, 8) = int8send(st.seq)");
+            // Every stream seeks the projection; with a residual filter the row is joined under EF Core's alias.
+            round.Should().Contain($"SUBSTRING(sqlos_scope.\"FgaScope\", {SqlOSFgaPageIndex.Offset(level)}, 8) = int8send(st.seq)");
+            round.Should().Contain("FROM \"dbo\".\"SqlOSFgaScopeIndex_app_Items\" AS sqlos_scope INNER JOIN \"app\".\"Items\" AS i ON i.\"Id\" = sqlos_scope.\"Id\"");
             round.Should().Contain($"st.level = {level}");
         }
 
@@ -186,13 +190,13 @@ public class SqlOSFgaPageSqlTests
 
         // A positioned stream's keyset is a range the index serves, never behind an OR on the position's presence.
         round.Should().Contain("AND st.has_after").And.Contain("AND NOT st.has_after").And.NotContain("NOT st.has_after OR");
-        round.Should().Contain("(i.\"Price\" >= st.a0 AND (i.\"Price\" > st.a0 OR i.\"Id\" > st.a1))");
+        round.Should().Contain("(sqlos_scope.\"Price\" >= st.a0 AND (sqlos_scope.\"Price\" > st.a0 OR sqlos_scope.\"Id\" > st.a1))");
 
-        round.Should().Contain("ORDER BY i.\"Price\", i.\"Id\"").And.Contain("ORDER BY di.\"Price\", di.\"Id\"");
+        round.Should().Contain("ORDER BY sqlos_scope.\"Price\", sqlos_scope.\"Id\"").And.Contain("ORDER BY di.\"Price\", di.\"Id\"");
 
         // The same on PostgreSQL: the application's table may be aliased "s" or "d".
         var shadowed = PostgreSqlDatabaseProvider.Instance.BuildPageRoundSql(options, spec with { Alias = "s", PredicateSql = "s.\"Status\" = @__status_0" });
-        shadowed.Should().Contain("FROM \"app\".\"Items\" AS s").And.Contain("s.\"Status\" = @__status_0");
+        shadowed.Should().Contain("INNER JOIN \"app\".\"Items\" AS s ON s.\"Id\" = sqlos_scope.\"Id\"").And.Contain("s.\"Status\" = @__status_0");
         shadowed.Should().NotContain("s.seq").And.NotContain("s.f)").And.NotContain("s.has_after").And.NotContain("s.kind").And.NotContain("s.level").And.NotContain("s.a0");
         var direct = PostgreSqlDatabaseProvider.Instance.BuildPageRoundSql(options, spec with { Alias = "d", PredicateSql = "d.\"Status\" = @__status_0" });
         direct.Should().Contain("INNER JOIN \"app\".\"Items\" AS d ON d.\"Id\" = di.\"Id\"").And.NotContain("d.\"SubjectId\"").And.NotContain("d.\"Active\"");

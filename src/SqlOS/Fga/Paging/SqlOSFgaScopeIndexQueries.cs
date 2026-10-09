@@ -11,16 +11,23 @@ namespace SqlOS.Fga.Paging;
 #pragma warning disable EF1001 // Same EF query-root integration boundary as SqlOSFgaQueryCompiler.
 
 /// <summary>
-/// In SQL Server fallback queries, expose the private scope projection through a composable SQL join.
-/// EF still translates the whole application query: Where, joins, aggregates and ordering stay in SQL.
-/// Ordinary queries without an authorization filter do not pass through this visitor.
+/// In a planned statement (a filtered query that is not a page), read each protected table through its
+/// projection: the scope from the projection, whose per-level indexes serve the authorization predicate,
+/// every other column from the row. The same on both engines. EF Core still translates the whole query:
+/// Where, joins, aggregates and ordering stay in SQL. Queries without an authorization filter never pass
+/// through this visitor.
 /// </summary>
-internal sealed class SqlOSFgaScopeIndexQueries(DbContext context, SqlOSFgaOptions options) : ExpressionVisitor
+internal sealed class SqlOSFgaScopeIndexQueries(DbContext context, SqlOSFgaOptions options, ISqlOSDatabaseProvider provider) : ExpressionVisitor
 {
     private readonly IReadOnlyList<SqlOSFgaScopeTable> _tables = SqlOSFgaScopeColumns.Tables(context.Model);
 
     public static Expression Rewrite(Expression query, DbContext context, SqlOSFgaOptions options)
-        => context.Database.IsSqlServer() ? new SqlOSFgaScopeIndexQueries(context, options).Visit(query) : query;
+    {
+        var providerName = context.Database.ProviderName;
+        return SqlOSDatabase.IsSqlServer(providerName) || SqlOSDatabase.IsPostgreSql(providerName)
+            ? new SqlOSFgaScopeIndexQueries(context, options, SqlOSDatabase.Resolve(providerName)).Visit(query)
+            : query;
+    }
 
     protected override Expression VisitExtension(Expression node)
     {
@@ -31,10 +38,10 @@ internal sealed class SqlOSFgaScopeIndexQueries(DbContext context, SqlOSFgaOptio
                 && t.Schema == (root.EntityType.GetSchema() ?? context.Model.GetDefaultSchema()));
             if (table is not null)
             {
-                var sql = SqlServerDatabaseProvider.ScopeIndexQuery(options, table);
+                var sql = provider.BuildScopeIndexQuerySql(options, table);
                 var arguments = Expression.Constant(Array.Empty<object>());
-                return root.QueryProvider is { } provider
-                    ? new FromSqlQueryRootExpression(provider, root.EntityType, sql, arguments)
+                return root.QueryProvider is { } queryProvider
+                    ? new FromSqlQueryRootExpression(queryProvider, root.EntityType, sql, arguments)
                     : new FromSqlQueryRootExpression(root.EntityType, sql, arguments);
             }
         }

@@ -21,9 +21,10 @@ namespace SqlOS.IntegrationTests.Fga;
 /// <summary>
 /// A protected table that holds more than the root entity type's own properties (a hierarchy and an owned
 /// type), read through every statement shape; and two transactions writing adjacent rows of a protected
-/// table at once. On SQL Server the planned statements read SqlOS's projection of the table joined to the
+/// table at once. On both engines the planned statements read SqlOS's projection of the table joined to the
 /// row, and the row triggers keep that projection current: neither may assume the table holds exactly the
-/// root type's properties, and neither may make a writer wait for another writer's open transaction.
+/// root type's properties, neither may serve a value from the projection, and neither may make a writer wait
+/// for another writer's open transaction.
 /// </summary>
 [TestClass]
 public class SqlOSFgaTableShapesIntegrationTests
@@ -55,10 +56,7 @@ public class SqlOSFgaTableShapesIntegrationTests
         // SqlOS's projection of the table joined to the row, and it must return every column of the table:
         // the derived type's, the owned type's, the discriminator, the computed column.
         var list = db.Documents.AsNoTracking().Where(filter).OrderBy(d => d.Id);
-        if (TestDatabase.IsSqlServer)
-        {
-            list.ToQueryString().Should().Contain("SqlOSFgaScopeIndex_ShapeDocuments", "a planned statement reads SqlOS's projection of the table");
-        }
+        list.ToQueryString().Should().Contain("SqlOSFgaScopeIndex_ShapeDocuments", "a planned statement reads SqlOS's projection of the table");
 
         var rows = await list.ToListAsync();
         rows.Select(r => r.Id).Should().Equal("a1", "a2");
@@ -84,14 +82,8 @@ public class SqlOSFgaTableShapesIntegrationTests
     }
 
     [TestMethod]
-    public async Task SqlServer_APlannedStatementReturnsTheRowsValues_NeverTheProjectionsCopy()
+    public async Task APlannedStatementReturnsTheRowsValues_NeverTheProjectionsCopy()
     {
-        if (TestDatabase.IsPostgreSql)
-        {
-            // PostgreSQL reads the row; there is no copy to be stale.
-            return;
-        }
-
         await using var host = await HostedApp.StartAsync();
         await using var scope = host.App.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<ShapeDbContext>();
@@ -104,17 +96,18 @@ public class SqlOSFgaTableShapesIntegrationTests
 
         // A write that bypasses SqlOS's triggers leaves the projection's copy of Rank (a declared order) behind.
         // The projection decides which rows are visible; the values a statement returns are the row's.
-        await db.Database.ExecuteSqlRawAsync("ALTER TABLE [ShapeDocuments] DISABLE TRIGGER ALL;");
+        await db.Database.ExecuteSqlRawAsync(TestDatabase.IsSqlServer ? "ALTER TABLE [ShapeDocuments] DISABLE TRIGGER ALL;" : "ALTER TABLE \"ShapeDocuments\" DISABLE TRIGGER USER;");
         try
         {
-            await db.Database.ExecuteSqlRawAsync("UPDATE [ShapeDocuments] SET [Rank] = 101 WHERE [Id] = N'a1';");
+            await db.Database.ExecuteSqlRawAsync(TestDatabase.IsSqlServer ? "UPDATE [ShapeDocuments] SET [Rank] = 101 WHERE [Id] = N'a1';" : "UPDATE \"ShapeDocuments\" SET \"Rank\" = 101 WHERE \"Id\" = 'a1';");
         }
         finally
         {
-            await db.Database.ExecuteSqlRawAsync("ALTER TABLE [ShapeDocuments] ENABLE TRIGGER ALL;");
+            await db.Database.ExecuteSqlRawAsync(TestDatabase.IsSqlServer ? "ALTER TABLE [ShapeDocuments] ENABLE TRIGGER ALL;" : "ALTER TABLE \"ShapeDocuments\" ENABLE TRIGGER USER;");
         }
 
-        (await ReadAsync(db, "SELECT Rank FROM dbo.SqlOSFgaScopeIndex_ShapeDocuments WHERE Id = N'a1'")).Should().Equal(["1"], "the copy is stale, by construction");
+        (await ReadAsync(db, TestDatabase.IsSqlServer ? "SELECT Rank FROM dbo.SqlOSFgaScopeIndex_ShapeDocuments WHERE Id = N'a1'" : "SELECT \"Rank\" FROM \"dbo\".\"SqlOSFgaScopeIndex_ShapeDocuments\" WHERE \"Id\" = 'a1'"))
+            .Should().Equal(["1"], "the copy is stale, by construction");
 
         var fga = scope.ServiceProvider.GetRequiredService<ISqlOSFgaAuthService>();
         var filter = await fga.BuildFilterAsync<ShapeDocument>(alice, Read);
@@ -125,14 +118,8 @@ public class SqlOSFgaTableShapesIntegrationTests
     }
 
     [TestMethod]
-    public async Task SqlServer_TwoTransactionsInsertingAdjacentRows_DoNotWaitForEachOther()
+    public async Task TwoTransactionsInsertingAdjacentRows_DoNotWaitForEachOther()
     {
-        if (TestDatabase.IsPostgreSql)
-        {
-            // PostgreSQL keeps no projection of the table: its triggers write the row alone.
-            return;
-        }
-
         await using var host = await HostedApp.StartAsync();
         await using var scope = host.App.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<ShapeDbContext>();
@@ -164,8 +151,11 @@ public class SqlOSFgaTableShapesIntegrationTests
         await insert.Should().NotThrowAsync("a writer of one key must not wait on another key's open transaction");
         await open.CommitAsync();
 
-        (await ReadAsync(db, "SELECT Id, CONVERT(varchar(max), FgaScope, 2) FROM dbo.SqlOSFgaScopeIndex_ShapeTickets ORDER BY Id"))
-            .Should().Equal(await ReadAsync(db, "SELECT Id, CONVERT(varchar(max), FgaScope, 2) FROM ShapeTickets ORDER BY Id"), "both rows reached the projection with their scope");
+        var (projection, copy, source) = TestDatabase.IsSqlServer
+            ? ("Id, CONVERT(varchar(max), FgaScope, 2)", "dbo.SqlOSFgaScopeIndex_ShapeTickets ORDER BY Id", "ShapeTickets ORDER BY Id")
+            : ("\"Id\", encode(\"FgaScope\", 'hex')", "\"dbo\".\"SqlOSFgaScopeIndex_ShapeTickets\" ORDER BY \"Id\"", "\"ShapeTickets\" ORDER BY \"Id\"");
+        (await ReadAsync(db, $"SELECT {projection} FROM {copy}"))
+            .Should().Equal(await ReadAsync(db, $"SELECT {projection} FROM {source}"), "both rows reached the projection with their scope");
     }
 
     /// <summary>Two folders under the root, two users, and a reader grant for the first user on the first folder.</summary>

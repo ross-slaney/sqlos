@@ -216,6 +216,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
         var batches = new List<string> { countsRebuild, countsAdjust, countsRefresh };
         foreach (var table in scopeTables)
         {
+            batches.AddRange(ScopeIndexTableSql(options, table));
             batches.Add(DirectTableSql(options, table));
         }
 
@@ -308,6 +309,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
             AS $sqlos$
             BEGIN
                 PERFORM {rebuildCounts}(NULL);
+                {string.Concat(scopeTables.Select(t => $"PERFORM {Qualify(schema, "fn_" + SqlOSFgaScopeIndex.RebuildRoutine(t))}();\n    "))}
                 {string.Concat(scopeTables.Select(t => $"PERFORM {Qualify(schema, "fn_" + SqlOSFgaPageIndex.DirectRebuildRoutine(t))}();\n    "))}
             END
             $sqlos$;
@@ -508,15 +510,18 @@ internal sealed partial class PostgreSqlDatabaseProvider
         var grants = Qualify(options.Schema, options.TableNames.Grants);
         var counts = Counts(options);
         var a = spec.Alias;
-        var scope = $"{a}.{QuoteIdentifier(SqlOSFgaLineage.ScopeColumn)}";
+        // The streams seek the projection. With a residual filter, the row is joined under the alias EF Core
+        // translated the filter against; without one, the projection takes that alias itself.
+        var scopeAlias = spec.PredicateSql is null ? a : "sqlos_scope";
+        var scope = $"{scopeAlias}.{QuoteIdentifier(SqlOSFgaLineage.ScopeColumn)}";
         var order = spec.Order;
         var after = string.Join(", ", order.Select((_, i) => $"a{i}"));
         var afterTyped = string.Join(", ", order.Select((c, i) => $"a{i} {c.StoreType}"));
         // A descending page reads the same indexes backwards: the order, the merge and the keyset all flip.
         var direction = spec.Descending ? " DESC" : "";
-        var orderBy = string.Join(", ", order.Select(c => $"{a}.{QuoteIdentifier(c.Column)}{direction}"));
+        var orderBy = string.Join(", ", order.Select(c => $"{scopeAlias}.{QuoteIdentifier(c.Column)}{direction}"));
         var outOrder = string.Join(", ", order.Select((c, i) => $"c{i}{direction}"));
-        var selectCols = string.Join(", ", order.Select((c, i) => $"{a}.{QuoteIdentifier(c.Column)} AS c{i}"));
+        var selectCols = string.Join(", ", order.Select((c, i) => $"{scopeAlias}.{QuoteIdentifier(c.Column)} AS c{i}"));
         var predicate = spec.PredicateSql is null ? "" : $"\n              AND ({spec.PredicateSql})";
         var typeFilter = spec.Typed ? $"\n              AND SUBSTRING({scope}, {SqlOSFgaLineage.ScopeTypeOffset}, 4) = @Type" : "";
 
@@ -524,7 +529,9 @@ internal sealed partial class PostgreSqlDatabaseProvider
         // serves), the rest nested, written only in the blocks for positioned streams. Wrapped in "no position
         // OR …" it is no range at all, and a root stream would read every row before the position.
         var afterValues = order.Select((_, i) => $"st.a{i}").ToList();
-        var keyset = Keyset(order.Select(c => $"{a}.{QuoteIdentifier(c.Column)}").ToList(), afterValues, spec.Descending);
+        var keyset = Keyset(order.Select(c => $"{scopeAlias}.{QuoteIdentifier(c.Column)}").ToList(), afterValues, spec.Descending);
+        var from = $"{ScopeIndexTable(options, spec.Table)} AS {scopeAlias}"
+            + (spec.PredicateSql is null ? "" : $" INNER JOIN {ScopeTable(spec.Table)} AS {a} ON {string.Join(" AND ", spec.Table.KeyColumns.Select(k => $"{a}.{QuoteIdentifier(k)} = {scopeAlias}.{QuoteIdentifier(k)}"))}");
 
         var afterColumns = string.Join(", ", order.Select((_, i) => $"o.a{i}"));
         var afterFromN = string.Join(", ", order.Select((_, i) => $"n.a{i}"));
@@ -613,7 +620,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
                     CROSS JOIN LATERAL (
                         SELECT row_number() OVER (ORDER BY {outOrder}) AS rn, count(*) OVER () AS cnt, z.*
                         FROM (SELECT {selectCols}
-                              FROM {ScopeTable(spec.Table)} AS {a}
+                              FROM {from}
                               WHERE {seek}{typeFilter}{predicate}{position}
                               ORDER BY {orderBy}
                               LIMIT st.f) z) q
@@ -624,7 +631,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
                     CROSS JOIN LATERAL (
                         SELECT row_number() OVER (ORDER BY {outOrder}) AS rn, count(*) OVER () AS cnt, z.*
                         FROM (SELECT {selectCols}, {RowTest(options, spec, level, levels)} AS granted
-                              FROM {ScopeTable(spec.Table)} AS {a}
+                              FROM {from}
                               WHERE {seek}{predicate}{position}
                               ORDER BY {orderBy}
                               LIMIT st.f) z) q

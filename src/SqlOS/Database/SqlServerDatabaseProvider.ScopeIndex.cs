@@ -64,7 +64,7 @@ internal sealed partial class SqlServerDatabaseProvider
             """;
 
         var rebuild = $"""
-            CREATE OR ALTER PROCEDURE [{Escape(options.Schema)}].[{Escape(SqlOSFgaScopeIndex.RebuildRoutine(table))}]
+            CREATE OR ALTER PROCEDURE [{Escape(options.Schema)}].[sp_{Escape(SqlOSFgaScopeIndex.RebuildRoutine(table))}]
             AS
             BEGIN
                 SET NOCOUNT ON;
@@ -117,12 +117,14 @@ internal sealed partial class SqlServerDatabaseProvider
     /// <summary>
     /// A planned statement reads the application's table through its projection: the scope from the
     /// projection, whose per-level indexes serve the authorization predicate, and every other column from
-    /// the row itself, as on PostgreSQL. The projection decides which rows are visible and nothing more, so a
+    /// the row itself, the same on both engines. The projection decides which rows are visible and nothing more, so a
     /// value it holds (a key, an order column) is never what the application sees, stale or not. The join and
     /// all filtering remain in SQL.
     /// </summary>
-    internal static string ScopeIndexQuery(SqlOSFgaOptions options, SqlOSFgaScopeTable table)
+    public string BuildScopeIndexQuerySql(SqlOSFgaOptions options, SqlOSFgaScopeTable table)
     {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(table);
         return $"""
             SELECT {string.Join(", ", table.Columns.Select(c => $"{(c.Column == SqlOSFgaLineage.ScopeColumn ? "s" : "a")}.[{Escape(c.Column)}] AS [{Escape(c.Column)}]"))}
             FROM {ScopeIndexTable(options, table)} s
@@ -143,6 +145,6 @@ internal sealed partial class SqlServerDatabaseProvider
             SELECT N'DROP PROCEDURE ' + QUOTENAME(OBJECT_SCHEMA_NAME(p.object_id)) + N'.' + QUOTENAME(p.name) + N';' AS Statement
             FROM sys.procedures p
             WHERE OBJECT_SCHEMA_NAME(p.object_id) = N'{SqlLiteral(options.Schema)}' AND p.name LIKE N'sp[_]{SqlOSFgaScopeIndex.Prefix.Replace("_", "[_]", StringComparison.Ordinal)}%'
-              AND p.name NOT IN ({(tables.Count == 0 ? "N''" : NameList(tables.Select(SqlOSFgaScopeIndex.RebuildRoutine)))})
+              AND p.name NOT IN ({(tables.Count == 0 ? "N''" : NameList(tables.Select(t => "sp_" + SqlOSFgaScopeIndex.RebuildRoutine(t))))})
             """;
 }

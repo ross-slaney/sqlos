@@ -116,14 +116,14 @@ internal sealed class PlanCapture(DatabaseProvider provider) : DbCommandIntercep
         }
     }
 
-    /// <summary>Rows the scans of <paramref name="relation"/> produced or discarded, summed over loops.</summary>
+    /// <summary>Rows the scans of <paramref name="relation"/> or of its SqlOS projection produced or discarded, summed over loops; the largest of them, as for an index scan followed by row fetches.</summary>
     internal static long? PostgresRows(string json, string relation)
     {
         using var document = JsonDocument.Parse(json);
         long? best = null;
         void Visit(JsonElement node)
         {
-            if (node.TryGetProperty("Relation Name", out var name) && name.GetString() == relation)
+            if (node.TryGetProperty("Relation Name", out var name) && name.GetString() is { } read && (read == relation || read == "SqlOSFgaScopeIndex_" + relation))
             {
                 var rows = node.GetProperty("Actual Rows").GetDouble();
                 if (node.TryGetProperty("Rows Removed by Filter", out var removed))

@@ -727,7 +727,7 @@ internal sealed partial class SqlServerDatabaseProvider
             var indexes = SqlOSFgaScopeIndex.IndexNames(table, levels);
             conditions.Add($"(SELECT COUNT(*) FROM sys.triggers WHERE parent_id = {ObjectOf(table)} AND name IN ({NameList(SqlOSFgaLineage.ScopeTriggerNames(table.Table))})) = 3");
             conditions.Add(Exists(options.Schema, SqlOSFgaScopeIndex.Table(table), "U"));
-            conditions.Add(Exists(options.Schema, SqlOSFgaScopeIndex.RebuildRoutine(table), "P"));
+            conditions.Add(Exists(options.Schema, "sp_" + SqlOSFgaScopeIndex.RebuildRoutine(table), "P"));
             conditions.Add($"EXISTS (SELECT 1 FROM sys.extended_properties WHERE major_id = {ScopeIndexObject(options, table)} AND minor_id = 0 AND name = N'SqlOSProjection' AND CONVERT(nvarchar(64), value) = {ScopeIndexSignature(table)})");
             conditions.Add($"(SELECT COUNT(*) FROM sys.indexes WHERE object_id = {ScopeIndexObject(options, table)} AND name IN ({NameList(indexes)})) = {indexes.Count.ToString(CultureInfo.InvariantCulture)}");
             conditions.Add($"EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = {ObjectOf(table)} AND name = N'{SqlLiteral(SqlOSFgaLineage.ScopeMissingIndexName(table.Table))}')");

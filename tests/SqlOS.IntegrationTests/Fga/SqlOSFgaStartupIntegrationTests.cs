@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SqlOS.Fga;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
@@ -226,13 +227,8 @@ public class SqlOSFgaStartupIntegrationTests
     }
 
     [TestMethod]
-    public async Task SqlServer_ADefinitionThatOutlastsTheContextsCommandTimeout_StillApplies()
+    public async Task ADefinitionThatOutlastsTheContextsCommandTimeout_StillApplies()
     {
-        if (TestDatabase.IsPostgreSql)
-        {
-            return;
-        }
-
         await using var db = await FreshDatabase.CreateAsync();
         await using var app = db.Open<DocsContext>();
         await SetUpAsync(app);
@@ -242,11 +238,14 @@ public class SqlOSFgaStartupIntegrationTests
         // The next start builds SqlOS's projection of StDocs again, as an upgrade from 8.0.0 does: one statement
         // that takes the lineage lock, then copies every row. On a large table the copy takes minutes; here
         // another session holds the lock for longer than the command timeout the application configured.
-        await app.Database.ExecuteSqlRawAsync("DROP TABLE [dbo].[SqlOSFgaScopeIndex_StDocs];");
+        var lockKey = SqlOSFgaLineage.LineageLockKey(new SqlOSFgaOptions()).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        await app.Database.ExecuteSqlRawAsync(TestDatabase.IsPostgreSql ? "DROP TABLE \"dbo\".\"SqlOSFgaScopeIndex_StDocs\";" : "DROP TABLE [dbo].[SqlOSFgaScopeIndex_StDocs];");
         app.Database.SetCommandTimeout(TimeSpan.FromSeconds(1));
         await using var other = TestDatabase.CreateConnection(db.ConnectionString);
         await other.OpenAsync();
-        await ExecuteAsync(other, "EXEC sp_getapplock @Resource = 'SqlOS:FgaLineage:dbo.SqlOSFgaResources', @LockMode = 'Shared', @LockOwner = 'Session';");
+        await ExecuteAsync(other, TestDatabase.IsPostgreSql
+            ? $"SELECT pg_advisory_lock_shared({lockKey});"
+            : "EXEC sp_getapplock @Resource = 'SqlOS:FgaLineage:dbo.SqlOSFgaResources', @LockMode = 'Shared', @LockOwner = 'Session';");
         var start = StartAsync(app);
         try
         {
@@ -255,11 +254,15 @@ public class SqlOSFgaStartupIntegrationTests
         }
         finally
         {
-            await ExecuteAsync(other, "EXEC sp_releaseapplock @Resource = 'SqlOS:FgaLineage:dbo.SqlOSFgaResources', @LockOwner = 'Session';");
+            await ExecuteAsync(other, TestDatabase.IsPostgreSql
+                ? $"SELECT pg_advisory_unlock_shared({lockKey});"
+                : "EXEC sp_releaseapplock @Resource = 'SqlOS:FgaLineage:dbo.SqlOSFgaResources', @LockOwner = 'Session';");
         }
 
         await start;
-        (await app.Database.SqlQueryRaw<int>("SELECT COUNT(*) AS [Value] FROM [dbo].[SqlOSFgaScopeIndex_StDocs]").SingleAsync()).Should().Be(2);
+        (await app.Database.SqlQueryRaw<int>(TestDatabase.IsPostgreSql
+                ? "SELECT count(*)::int AS \"Value\" FROM \"dbo\".\"SqlOSFgaScopeIndex_StDocs\""
+                : "SELECT COUNT(*) AS [Value] FROM [dbo].[SqlOSFgaScopeIndex_StDocs]").SingleAsync()).Should().Be(2);
         (await VisibleAsync(app, await AliceAsync(app))).Should().Equal("a1");
     }
 

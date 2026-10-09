@@ -139,7 +139,10 @@ public class SqlOSDatabaseProviderTests
         all.Should().Contain("CREATE OR REPLACE FUNCTION \"ten\"\"ant\".\"fn_SqlOSFgaScope_app_Items_Update\"()");
         all.Should().Contain("SELECT \"Id\", \"ParentId\", \"IsActive\" FROM new_rows\n        EXCEPT\n        SELECT \"Id\", \"ParentId\", \"IsActive\" FROM old_rows", "changed rows come from a hashed set operation");
         System.Text.RegularExpressions.Regex.IsMatch(all, "SELECT \"Id\", \"ResourceId\" FROM new_rows\\s+EXCEPT\\s+SELECT \"Id\", \"ResourceId\" FROM old_rows").Should().BeTrue();
-        all.Should().Contain("IF NOT EXISTS (SELECT 1 FROM (SELECT \"Id\", \"ResourceId\" FROM new_rows EXCEPT SELECT \"Id\", \"ResourceId\" FROM old_rows) c) THEN", "the rows whose key, order columns, or resource id changed drive the direct index");
+        all.Should().Contain("IF NOT EXISTS (SELECT 1 FROM (SELECT \"Id\", \"ResourceId\", \"FgaScope\" FROM new_rows EXCEPT SELECT \"Id\", \"ResourceId\", \"FgaScope\" FROM old_rows) c) THEN", "the rows whose key, order columns, resource id or scope changed drive the projection");
+        all.Should().Contain("IF EXISTS (SELECT 1 FROM (SELECT \"Id\", \"ResourceId\" FROM new_rows EXCEPT SELECT \"Id\", \"ResourceId\" FROM old_rows) c) THEN", "the rows whose key, order columns, or resource id changed drive the direct index");
+        all.Should().Contain("INSERT INTO \"ten\"\"ant\".\"SqlOSFgaScopeIndex_app_Items\" AS d (\"Id\", \"FgaScope\")").And.Contain("ON CONFLICT (\"Id\") DO UPDATE SET \"Id\" = EXCLUDED.\"Id\", \"FgaScope\" = EXCLUDED.\"FgaScope\"", "the projection follows every row the triggers see");
+        System.Text.RegularExpressions.Regex.IsMatch(all, "DELETE FROM \"ten\"\"ant\"\\.\"SqlOSFgaScopeIndex_app_Items\" d\\s+USING old_rows x").Should().BeTrue("a deleted row leaves the projection");
         all.Should().NotContain("TEMP TABLE \"SqlOSScopeChanged\"", "this function's own update fires it again, and a nested call must not disturb the outer one");
         all.Should().Contain("CREATE OR REPLACE FUNCTION \"ten\"\"ant\".\"fn_SqlOSFgaScope_app_Items_Delete\"()");
         all.Should().Contain("AFTER DELETE ON \"app\".\"Items\"");
@@ -154,23 +157,36 @@ public class SqlOSDatabaseProviderTests
         all.Should().Contain($"PERFORM pg_advisory_xact_lock({key});");
         all.Should().Contain("IF current_setting('transaction_isolation') = 'repeatable read' THEN");
 
-        // Per level: an expression index on the level's eight bytes, over the key and over each declared order,
-        // filtered on the depth byte to the rows at or below the level; stale mirrors dropped.
+        // Per level, on the table's projection: an expression index on the level's eight bytes, over the key and
+        // over each declared order, filtered on the depth byte to the rows at or below the level. On the table
+        // itself only the index on rows without a scope. Stale mirrors dropped.
         var indexes = PostgreSqlDatabaseProvider.Instance.BuildEnsureScopeIndexesSql(options, [scope with { Orders = [new SqlOSFgaScopeOrder("Price", ["Price", "Id"])] }]).Single();
         indexes.Should().Contain("CREATE INDEX IF NOT EXISTS \"IX_Items_FgaScopeMissing\" ON \"app\".\"Items\" (\"ResourceId\") WHERE \"FgaScope\" IS NULL;");
-        indexes.Should().Contain($"CREATE INDEX IF NOT EXISTS \"IX_Items_FgaScope4\" ON \"app\".\"Items\" ((SUBSTRING(\"FgaScope\", {SqlOSFgaLineage.ScopeAncestorOffset(4)}, 8)), \"Id\") WHERE \"FgaScope\" >= '\\x04'::bytea;");
-        indexes.Should().Contain("CREATE INDEX IF NOT EXISTS \"IX_Items_FgaScope0_Price\" ON \"app\".\"Items\" ((SUBSTRING(\"FgaScope\", 6, 8)), \"Price\", \"Id\") WHERE \"FgaScope\" >= '\\x00'::bytea;");
+        indexes.Should().Contain($"CREATE INDEX IF NOT EXISTS \"IX_Items_FgaScope4\" ON \"ten\"\"ant\".\"SqlOSFgaScopeIndex_app_Items\" ((SUBSTRING(\"FgaScope\", {SqlOSFgaLineage.ScopeAncestorOffset(4)}, 8)), \"Id\") WHERE \"FgaScope\" >= '\\x04'::bytea;");
+        indexes.Should().Contain("CREATE INDEX IF NOT EXISTS \"IX_Items_FgaScope0_Price\" ON \"ten\"\"ant\".\"SqlOSFgaScopeIndex_app_Items\" ((SUBSTRING(\"FgaScope\", 6, 8)), \"Price\", \"Id\") WHERE \"FgaScope\" >= '\\x00'::bytea;");
+        indexes.Should().NotContain("ON \"app\".\"Items\" ((SUBSTRING", "no expression index on the application table: the per-level indexes are its projection's");
         indexes.Should().NotContain("FgaScope5\"");
-        indexes.Should().Contain("CREATE STATISTICS IF NOT EXISTS \"ST_Items_FgaScopeType\" ON ((SUBSTRING(\"FgaScope\", 2, 4))) FROM \"app\".\"Items\";");
-        indexes.Should().Contain("ANALYZE \"app\".\"Items\";");
+        indexes.Should().Contain("CREATE STATISTICS IF NOT EXISTS \"ten\"\"ant\".\"ST_Items_FgaScopeType\" ON ((SUBSTRING(\"FgaScope\", 2, 4))) FROM \"ten\"\"ant\".\"SqlOSFgaScopeIndex_app_Items\";");
+        indexes.Should().Contain("ANALYZE \"ten\"\"ant\".\"SqlOSFgaScopeIndex_app_Items\";");
         indexes.Should().NotContain("DROP", "stale objects are the cleanup's");
+
+        // The projection: created from the application's own columns (types and collations carry over), keyed
+        // like the table, signed with what it was built from, rebuilt in place by its routine.
+        var page = string.Join("\n", PostgreSqlDatabaseProvider.Instance.BuildPageIndexSql(options, [scope]));
+        page.Should().Contain("CREATE TABLE \"ten\"\"ant\".\"SqlOSFgaScopeIndex_app_Items\" AS SELECT t.\"Id\", t.\"FgaScope\" FROM \"app\".\"Items\" t WITH NO DATA;");
+        page.Should().Contain("ADD CONSTRAINT \"PK_SqlOSFgaScopeIndex_app_Items\" PRIMARY KEY (\"Id\")");
+        page.Should().Contain("COMMENT ON TABLE").And.Contain("obj_description(").And.Contain("information_schema.columns");
+        page.Should().Contain("CREATE OR REPLACE FUNCTION \"ten\"\"ant\".\"fn_SqlOSFgaScopeIndex_app_Items_Rebuild\"()");
+        page.Should().Contain("DELETE FROM \"ten\"\"ant\".\"SqlOSFgaScopeIndex_app_Items\" d WHERE NOT EXISTS (SELECT 1 FROM \"app\".\"Items\" t WHERE t.\"Id\" = d.\"Id\");", "a rebuild drops the entries of rows that are gone");
+        page.Should().Contain("PERFORM \"ten\"\"ant\".\"fn_SqlOSFgaScopeIndex_app_Items_Rebuild\"();", "the page index rebuild rebuilds the projection too");
 
         // The cleanup finds SqlOS's objects on every table by name and keeps the ones of maintained tables.
         var cleanup = PostgreSqlDatabaseProvider.Instance.BuildScopeCleanupSql(options, [scope]);
         cleanup.Should().Contain("t.tgname LIKE 'TR\\_%\\_SqlOSFgaScope\\_%'");
         cleanup.Should().Contain("n.nspname = 'app' AND c.relname = 'Items' AND t.tgname IN ('TR_Items_SqlOSFgaScope_Insert', 'TR_Items_SqlOSFgaScope_Update', 'TR_Items_SqlOSFgaScope_Delete')");
         cleanup.Should().Contain("p.proname LIKE 'fn\\_SqlOSFgaScope\\_%'");
-        cleanup.Should().Contain("p.proname NOT IN ('fn_SqlOSFgaScope_app_Items_Insert', 'fn_SqlOSFgaScope_app_Items_Update', 'fn_SqlOSFgaScope_app_Items_Delete', 'fn_SqlOSFgaDirect_app_Items_Rebuild')");
+        cleanup.Should().Contain("p.proname NOT IN ('fn_SqlOSFgaScope_app_Items_Insert', 'fn_SqlOSFgaScope_app_Items_Update', 'fn_SqlOSFgaScope_app_Items_Delete', 'fn_SqlOSFgaDirect_app_Items_Rebuild', 'fn_SqlOSFgaScopeIndex_app_Items_Rebuild')");
+        cleanup.Should().Contain("c.relname LIKE 'SqlOSFgaScopeIndex\\_%'").And.Contain("c.relname NOT IN ('SqlOSFgaScopeIndex_app_Items')", "the projection of a table no longer protected goes");
         cleanup.Should().Contain("i.indexname ~ '^IX_.*_FgaScope([0-9]|Missing)'");
         cleanup.Should().Contain("s.stxname LIKE 'ST\\_%\\_FgaScopeType'");
         cleanup.Should().Contain("EXECUTE stale.statement;");
@@ -188,7 +204,28 @@ public class SqlOSDatabaseProviderTests
         hash.Should().Contain("column_name = 'Ancestor4'");
         hash.Should().Contain("p.proname = 'fn_res\"ources_ScopeFill'");
         hash.Should().Contain("indexname IN (");
+        hash.Should().Contain("tablename = 'SqlOSFgaScopeIndex_app_Items' AND indexname IN ('IX_Items_FgaScope0'", "the per-level indexes are the projection's");
+        hash.Should().Contain("tablename = 'Items' AND indexname = 'IX_Items_FgaScopeMissing'", "the missing-rows index is the table's");
+        hash.Should().Contain("p.proname = 'fn_SqlOSFgaScopeIndex_app_Items_Rebuild'");
+        hash.Should().Contain("c.relname = 'SqlOSFgaScopeIndex_app_Items' AND c.relkind = 'r'").And.Contain("obj_description(", "the projection exists and was built from the current columns");
         hash.Should().Contain("NOT EXISTS (SELECT format('DROP TRIGGER");
+    }
+
+    [TestMethod]
+    public void PostgreSqlScopeIndexQuery_ReadsTheScopeFromTheProjection_AndEveryOtherColumnFromTheRow()
+    {
+        var options = new SqlOSFgaOptions();
+        var scope = new SqlOSFgaScopeTable("app", "Items", "ResourceId", ["Id"], [new SqlOSFgaScopeOrder("Price", ["Price", "Id"])],
+            [new SqlOSFgaScopeColumn("Id", "integer", false), new SqlOSFgaScopeColumn("Price", "numeric(10,2)", false), new SqlOSFgaScopeColumn("Name", "varchar(200)", false), new SqlOSFgaScopeColumn("FgaScope", "bytea", true)]);
+
+        var sql = PostgreSqlDatabaseProvider.Instance.BuildScopeIndexQuerySql(options, scope);
+
+        // The same statement as SQL Server's: the projection decides which rows are visible, the row supplies
+        // every value the application sees.
+        sql.Should().Contain("s.\"FgaScope\" AS \"FgaScope\"");
+        sql.Should().Contain("a.\"Id\" AS \"Id\"").And.Contain("a.\"Price\" AS \"Price\"").And.Contain("a.\"Name\" AS \"Name\"");
+        sql.Should().NotContain("s.\"Id\" AS").And.NotContain("s.\"Price\"");
+        sql.Should().Contain("FROM \"dbo\".\"SqlOSFgaScopeIndex_app_Items\" s").And.Contain("INNER JOIN \"app\".\"Items\" a ON a.\"Id\" = s.\"Id\"");
     }
 
     [TestMethod]

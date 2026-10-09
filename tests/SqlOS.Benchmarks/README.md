@@ -41,9 +41,9 @@ one grant or a hundred thousand. Point checks measure `fn_IsResourceAccessible` 
   k + 1 rows by price) and every allow or deny are recomputed from the dataset generator, so a fast wrong
   answer fails the run.
 - **The actual plan is captured** for each filter page (`EXPLAIN (ANALYZE, BUFFERS)` or `SET STATISTICS
-  XML`). From it the report takes product rows read, server execution time, and server planning time. On
-  SQL Server, rows read is the largest input over either the application table or its SqlOS-owned scope
-  index (summed over threads); it is not just the final application-row lookups. The plans are uploaded
+  XML`). From it the report takes product rows read, server execution time, and server planning time. Rows
+  read is the largest input over either the application table or its SqlOS projection (summed over threads
+  or loops); it is not just the final application-row lookups. The plans are uploaded
   with the results. A walked page is several statements, so it reports the executor's own
   counters instead: round trips, statements, index rows fetched, streams opened (one seek each).
 - **The lineage is verified.** At the first scale, the lineage and scope values the loader generated are

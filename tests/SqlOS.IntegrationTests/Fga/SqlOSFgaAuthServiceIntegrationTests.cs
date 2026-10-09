@@ -35,9 +35,9 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
             "TEST_VIEW");
         var sql = Context.Set<LifecycleProtectedEntity>().Where(filter).ToQueryString();
 
-        // One statement tests the scope at the agency admin's level (1) and checks caller liveness.
-        // SQL Server reads its owned scope projection joined to the application row; PostgreSQL reads
-        // the row's scope directly. Neither walks resource rows or invokes a point check per candidate.
+        // One statement tests the scope at the agency admin's level (1) and checks caller liveness. On both
+        // engines it reads SqlOS's projection of the table joined to the row. It neither walks resource rows
+        // nor invokes a point check per candidate.
         StringAssert.Contains(sql, $"{SqlOSFgaLineage.ScopeAncestorOffset(1)}, 8)");
         StringAssert.Contains(sql, "SUBSTRING(");
         StringAssert.Contains(sql, "FgaScope");
@@ -47,7 +47,7 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
         var applicationTable = TestDatabase.IsSqlServer ? "[LifecycleProtectedEntities]" : "\"LifecycleProtectedEntities\"";
         Assert.AreEqual(1, Regex.Matches(sql, Regex.Escape(applicationTable), RegexOptions.IgnoreCase).Count,
             $"One reference to the application table, not a correlated application scan. SQL:{Environment.NewLine}{sql}");
-        if (TestDatabase.IsSqlServer) StringAssert.Contains(sql, "[SqlOSFgaScopeIndex_LifecycleProtectedEntities]");
+        StringAssert.Contains(sql, "SqlOSFgaScopeIndex_LifecycleProtectedEntities");
     }
 
     [TestMethod]

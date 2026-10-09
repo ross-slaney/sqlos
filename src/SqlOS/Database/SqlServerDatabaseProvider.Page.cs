@@ -288,7 +288,7 @@ internal sealed partial class SqlServerDatabaseProvider
             BEGIN
                 SET NOCOUNT ON;
                 EXEC {rebuildCounts};
-                {string.Concat(scopeTables.Select(t => $"EXEC [{schema}].[{Escape(SqlOSFgaScopeIndex.RebuildRoutine(t))}];\n    "))}
+                {string.Concat(scopeTables.Select(t => $"EXEC [{schema}].[sp_{Escape(SqlOSFgaScopeIndex.RebuildRoutine(t))}];\n    "))}
                 {string.Concat(scopeTables.Select(t => $"EXEC [{schema}].[sp_{Escape(SqlOSFgaPageIndex.DirectRebuildRoutine(t))}];\n    "))}
             END
             """);

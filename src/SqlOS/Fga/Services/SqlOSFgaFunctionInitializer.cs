@@ -220,8 +220,8 @@ public class SqlOSFgaFunctionInitializer
         }
         else
         {
-            // A new definition rebuilds the grant counts and direct indexes, and on SQL Server reconciles
-            // the shared scope projections with their application rows. This is startup/administrative work.
+            // A new definition rebuilds the grant counts and the direct indexes, and reconciles each table's
+            // projection with its rows. This is startup/administrative work.
             _logger.LogInformation("Rebuilding the FGA grant counts and maintained indexes...");
             await ExecuteNonQueryAsync(provider.BuildPageIndexRebuildSql(_options), cancellationToken);
         }

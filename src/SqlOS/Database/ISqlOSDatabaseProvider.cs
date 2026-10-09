@@ -71,8 +71,9 @@ internal interface ISqlOSDatabaseProvider
     string BuildScopeCleanupSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables);
 
     /// <summary>
-    /// Idempotent batches creating, per application table, the per-level indexes on the scope column (and on
-    /// SQL Server the computed columns they are built on), the type statistics, and the index on rows without a scope.
+    /// Idempotent batches creating, per application table, the per-level indexes on its projection's scope
+    /// column (and on SQL Server the computed columns they are built on), the type statistics, and on the
+    /// application table itself the index on rows without a scope.
     /// </summary>
     IReadOnlyList<string> BuildEnsureScopeIndexesSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables);
 
@@ -92,8 +93,14 @@ internal interface ISqlOSDatabaseProvider
     /// </summary>
     IReadOnlyList<string> BuildPageIndexSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables);
 
-    /// <summary>Rebuilds the grant counts and every direct index from the grants, the lineage and the rows.</summary>
+    /// <summary>Rebuilds the grant counts, every projection and every direct index from the grants, the lineage and the rows.</summary>
     string BuildPageIndexRebuildSql(SqlOSFgaOptions options);
+
+    /// <summary>
+    /// The query a planned statement reads an application table through: its projection joined to the row,
+    /// the scope from the projection and every other column from the row (see <see cref="SqlOS.Fga.SqlOSFgaScopeIndex"/>).
+    /// </summary>
+    string BuildScopeIndexQuerySql(SqlOSFgaOptions options, SqlOSFgaScopeTable table);
 
     /// <summary>Rebuilds the counts of the principals whose grants crossed a validity boundary in <c>(@From, @To]</c>; returns how many.</summary>
     string BuildCountsRefreshSql(SqlOSFgaOptions options);

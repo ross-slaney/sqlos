@@ -40,7 +40,7 @@ The endpoint needs no `where tenantId` or `where userId` to discover authorized 
 
 SqlOS uses temporary application memory for candidate keys and sort values while building a page; SQL Server or PostgreSQL performs the comparisons and filtering. There is no external policy service or full-table application-side filtering.
 
-Derive protected entities from `SqlOSResourceEntity`: the base class supplies `ResourceId` and the managed `FgaScope` property. SqlOS adds no other columns to your application tables. SQL Server's supporting scope indexes live in SqlOS-owned tables; PostgreSQL uses expression indexes. Your normal EF model and application migrations remain the definition of your application columns.
+Derive protected entities from `SqlOSResourceEntity`: the base class supplies `ResourceId` and the managed `FgaScope` property. SqlOS adds no other columns to your application tables: the per-level scope indexes live in a SqlOS-owned projection of each protected table, on SQL Server and PostgreSQL alike. Your normal EF model and application migrations remain the definition of your application columns.
 
 → **[Designing your resource tree and its tradeoffs](https://sqlos.dev/docs/fga/designing-your-resource-tree)** · [Authorize EF Core queries](https://sqlos.dev/docs/quickstarts/ef-authorization) · [Page shapes and indexes](https://sqlos.dev/docs/guides/paginating-authorized-lists)
 

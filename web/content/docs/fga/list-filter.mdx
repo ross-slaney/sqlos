@@ -52,8 +52,7 @@ The compiler requires it: `IHasResourceId` (and `ISqlOSResourceEntity`, which ex
 
 What SqlOS creates and maintains itself at startup, outside your migrations:
 
-- per level of the tree, an index on that level's part of the scope column followed by your primary key, and one more per index you declared on the table (the orders you page in), filtered to rows at or below the level. PostgreSQL uses expression indexes on the application table. SQL Server keeps one projection row per application row in a `SqlOSFgaScopeIndex_*` table in SqlOS's schema: the primary key, declared sorting columns, and scope. Its computed columns, statistics and per-level indexes live there. SqlOS does not add computed columns to application tables;
-- statistics on the type part of the column to help the optimizer estimate the type filter;
+- a projection of the table in SqlOS's schema, `SqlOSFgaScopeIndex_*`, one row per application row: the primary key, the declared sorting columns, and the scope. Per level of the tree it carries an index on that level's part of the scope column followed by your primary key, and one more per index you declared on the table (the orders you page in), filtered to rows at or below the level; and statistics on the type part of the column. The same on SQL Server and PostgreSQL. SqlOS adds nothing to the application table but the index on rows without a scope;
 - triggers on your table that set a row's scope and maintain the supporting indexes on inserts, relevant updates, and deletes, and the resource table's triggers that keep it current when resources move, are deactivated, retyped, or deleted;
 - at every start, the scope of rows that have none (a new table's rows, rows a bulk load wrote without triggers), set through an index on those rows.
 
@@ -63,9 +62,9 @@ Declare an index for each order you page in and end it with the key, as the [pag
 
 The price is storage and index maintenance: one index per level per declared order, over the rows at or below that level. The page executor also uses grant counts and direct-grant tables; [the modeling guide](/docs/fga/designing-your-resource-tree#what-sqlos-maintains-for-you) explains their storage and write implications. These are indexes for declared orders, not every possible sorting permutation.
 
-On SQL Server, both the page executor and ordinary filtered statements use the private scope projection to decide which rows are visible; the values a statement returns, keys and order columns included, are always the row's. Filtering, ordering, and aggregates still execute in the database. Its maintenance adds one shared projection entry per row, not one per principal. PostgreSQL's storage and query path are unchanged.
+Both the page executor and ordinary filtered statements use the projection to decide which rows are visible; the values a statement returns, keys and order columns included, are always the row's. Filtering, ordering, and aggregates still execute in the database. Its maintenance adds one shared projection entry per row, not one per principal.
 
-**Upgrading a SQL Server database from 8.0.0:** SqlOS builds and fills its scope projections and removes its old `FgaScopeType` / `FgaScope0…` helper columns automatically at startup. Existing entities and EF migrations need no changes. Allow time for the one-time copy and index build on a large database, and restart instances on the new version together: the old version references indexes that the upgrade removes.
+**Upgrading from 8.0.0:** SqlOS builds and fills the projections at startup and removes the per-level indexes it used to keep on the application tables themselves (on SQL Server, the `FgaScopeType` / `FgaScope0…` computed columns too). Existing entities and EF migrations need no changes. Allow time for the one-time copy and index build on a large database, and restart instances on the new version together: the old version references indexes that the upgrade removes.
 
 **Upgrading**: add `public byte[]? FgaScope { get; private set; }` to every entity that implements `IHasResourceId` (the build lists them), add and apply one migration per context, and start the application. A context that uses `EnsureCreated` gets the column with its tables.
 
