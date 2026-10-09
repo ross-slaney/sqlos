@@ -35,17 +35,19 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
             "TEST_VIEW");
         var sql = Context.Set<LifecycleProtectedEntity>().Where(filter).ToQueryString();
 
-        // The predicate reads the row's own scope column at the agency admin's level (1), with the root as a
-        // parameter, joins nothing, and checks the caller's liveness once per query. On SQL Server the level is
-        // The same SQL on both engines: the level's eight bytes compared with a parameter, under the depth-byte
-        // filter of the level's index.
+        // One statement tests the scope at the agency admin's level (1) and checks caller liveness.
+        // SQL Server reads its owned scope projection joined to the application row; PostgreSQL reads
+        // the row's scope directly. Neither walks resource rows or invokes a point check per candidate.
         StringAssert.Contains(sql, $"{SqlOSFgaLineage.ScopeAncestorOffset(1)}, 8)");
         StringAssert.Contains(sql, "SUBSTRING(");
         StringAssert.Contains(sql, "FgaScope");
         StringAssert.Contains(sql, "fn_ActiveSubjects");
         Assert.IsFalse(sql.Contains("fn_IsResourceAccessible", StringComparison.OrdinalIgnoreCase), sql);
         Assert.IsFalse(sql.Contains("SqlOSFgaResources", StringComparison.OrdinalIgnoreCase), sql);
-        Assert.AreEqual(1, Regex.Matches(sql, "LifecycleProtectedEntities", RegexOptions.IgnoreCase).Count, $"One query over the table. SQL:{Environment.NewLine}{sql}");
+        var applicationTable = TestDatabase.IsSqlServer ? "[LifecycleProtectedEntities]" : "\"LifecycleProtectedEntities\"";
+        Assert.AreEqual(1, Regex.Matches(sql, Regex.Escape(applicationTable), RegexOptions.IgnoreCase).Count,
+            $"One reference to the application table, not a correlated application scan. SQL:{Environment.NewLine}{sql}");
+        if (TestDatabase.IsSqlServer) StringAssert.Contains(sql, "[SqlOSFgaScopeIndex_LifecycleProtectedEntities]");
     }
 
     [TestMethod]
