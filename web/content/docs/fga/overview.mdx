@@ -7,14 +7,22 @@ order: 0
 
 <Banner
   eyebrow="Hierarchical authorization"
-  title="Model access as a tree and push the filtering work into SQL"
-  href="../getting-started"
-  actionLabel="Start building"
+  title="One resource tree. One query. The right data for each caller."
+  href="/docs/fga/designing-your-resource-tree"
+  actionLabel="Design your resource tree"
 >
   FGA is the authorization half of SqlOS. Roles and grants live on resources, child resources inherit access, and EF queries get translated into SQL-backed authorization filters instead of post-processing rows in memory.
 </Banner>
 
-FGA models resources as a tree. You grant roles on a node. Child nodes inherit access. EF sends filters to SQL Server. You do not load everything and filter in memory.
+FGA models resources as a tree. You grant roles on a node, and access flows to descendants through active resources. SQL Server or PostgreSQL filters and orders the data; SqlOS coordinates supported pages without loading the whole dataset into application memory.
+
+![A team grant on Workspace A reaches Documents A and B. The same document query returns all four documents for a root administrator, A and B for the team, and only D for a guest with a direct grant.](/docs/fga-resource-tree.png)
+
+For a document editor, grant the owner access to a workspace and place their documents beneath it. New documents inherit access without a grant per document. A team → inspection → item hierarchy works the same way. These are access boundaries, not special resource types required by SqlOS.
+
+<Callout type="info" title="Modeling decisions are part of the design">
+  Grant at the highest node that matches the intended access, use groups for shared responsibilities, and keep large subtree moves deliberate. Pages spanning many independently granted branches still pay to discover and merge those branches. Declared indexes trade storage and write maintenance for efficient reads; arbitrary filters and aggregates retain their normal database costs. Read [Designing your resource tree](/docs/fga/designing-your-resource-tree) before choosing your hierarchy.
+</Callout>
 
 ## How it works
 
@@ -62,7 +70,7 @@ Define resources (projects, chains, stores), roles (admin, viewer), and permissi
         .ToListAsync();
     ```
 
-    Users only see rows they may access. Under the hood that becomes a SQL predicate over the resource lineage, in the same query as your sorting and paging.
+    Users only see rows they may access. This unpaged query uses a SQL predicate over the resource lineage. Add a supported indexed order and `Take` and SqlOS can coordinate an authorized page using several SQL statements; see [Paginating authorized lists](/docs/guides/paginating-authorized-lists).
   </TabsContent>
 
   <TabsContent value="checks">
@@ -120,7 +128,7 @@ var app = builder.Build();
 
 ## Deep dives
 
-- [Model FGA for multi-tenant apps](/docs/fga/overview)
+- [Design your resource tree and understand the tradeoffs](/docs/fga/designing-your-resource-tree)
 - [Turn AuthServer memberships into FGA access](/docs/guides/authserver-to-fga)
 - [Set up FGA on SQL Server or PostgreSQL](/docs/fga/setup)
 - [Filter EF queries with FGA](/docs/fga/list-filter)

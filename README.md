@@ -10,7 +10,54 @@ SqlOS gives your application hosted sign-in, enterprise SSO, organizations, sess
 
 Working copies of the one-app host, MCP + authorization, branding, and identity-provider setups are in the [hosting quick reference](docs/QUICK_REFERENCE.md).
 
-## What's in the box
+## Build one screen for every role
+
+A company administrator, a team member, and an outside collaborator can use the same endpoint and see different records. SqlOS's **scoped hierarchical role-based access control (SHRBAC)** models resources as a tree and gives `BuildFilterAsync` the job of finding the rows each caller may access.
+
+![An application root contains Workspace A and Workspace B. A team grant on A reaches its two documents. The same query shows all four documents to a root administrator, A and B to the team, and only D to a guest granted that document.](web/public/docs/fga-resource-tree.png)
+
+For a document editor, create a workspace when someone signs up and grant them a role containing `document.read` on it. Place their documents underneath. New documents inherit access automatically; you do not create another grant for every document. Grant a team access through a group, or share an individual document with a guest. Users, groups, service accounts, and agents use the same model.
+
+```csharp
+var canRead = await authorization.BuildFilterAsync<Document>(subjectId, "document.read");
+var documents = await db.Documents
+    .Where(canRead)
+    .OrderBy(d => d.Name).ThenBy(d => d.Id)
+    .Take(21)
+    .ToListAsync();
+```
+
+The endpoint needs no `where tenantId` or `where userId` to discover authorized records across the caller's grants. Add those conditions when the screen itself is scoped to a tenant or owner. Declare the page's compound index (`HasIndex(d => new { d.Name, d.Id })`); SqlOS uses database filtering and ordering while coordinating the authorized page. Point checks protect individual actions and writes.
+
+### Design the hierarchy around access
+
+- **Grant where access belongs.** Workspace → document, team → inspection → item, or department → case → record. Choose the highest node that matches the intended access. A grant covers the relevant descendants, including new ones; do not broaden access just to make queries faster.
+- **Use groups for shared responsibilities.** One group grant replaces duplicate grants for its members. Use direct grants for individual shares. Membership or ownership alone does not grant access.
+- **A caller's independent branches still matter.** Reading across 100 separately granted projects requires discovering and merging those branches. That cost follows this caller's access, including their groups, rather than scanning all unrelated application rows. A root grant or one workspace grant has a very different shape.
+- **Indexes buy faster reads with storage and write work.** SqlOS maintains ancestry, grant counts, direct-grant indexes, and an index per tree level for each declared page order. It does not store every sorting permutation or every caller's complete visible dataset. Updating a directly shared row's indexed fields also updates its direct-grant entries.
+- **Keep large reorganizations deliberate.** Moving or deactivating a branch changes inheritance and refreshes descendant state. Large subtree changes can block concurrent writes.
+- **One API does not mean every query has the same cost.** Supported indexed pages avoid loading the complete grant list first. Counts, joins, unsupported page shapes, unindexed sorts, and selective filters retain their normal database costs; the predicate fallback resolves access roots. There is no universal page-sized-work guarantee for arbitrary queries.
+
+SqlOS uses temporary application memory for candidate keys and sort values while building a page; SQL Server or PostgreSQL performs the comparisons and filtering. There is no external policy service or full-table application-side filtering.
+
+→ **[Designing your resource tree and its tradeoffs](https://sqlos.dev/docs/fga/designing-your-resource-tree)** · [Authorize EF Core queries](https://sqlos.dev/docs/quickstarts/ef-authorization) · [Page shapes and indexes](https://sqlos.dev/docs/guides/paginating-authorized-lists)
+
+The retail sample uses the same endpoints for both callers:
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <p><strong>Company Admin</strong> — five chains visible</p>
+      <img src="https://sqlos.dev/docs/retail-app-admin-dashboard.png" alt="Retail app as Company Admin with five chains and multi-store inventory" />
+    </td>
+    <td width="50%" valign="top">
+      <p><strong>Store Clerk</strong> — one store, filtered in SQL</p>
+      <img src="https://sqlos.dev/docs/retail-app-clerk-dashboard.png" alt="Retail app as Store Clerk with zero chains and one store visible" />
+    </td>
+  </tr>
+</table>
+
+## Authentication and identity
 
 ### 1. An auth server
 
@@ -38,33 +85,7 @@ Login, signup, OTP entry, MFA, organization selection, and consent ship as hoste
 
 → [Brand hosted auth and email](https://sqlos.dev/docs/guides/auth-branding) · [Hosted vs. headless](https://sqlos.dev/docs/authserver/hosted-vs-headless)
 
-### 3. SHRBAC — authorization inside your EF Core queries
-
-SqlOS's hierarchical role-based access control models your resources as a tree (org → workspace → project), defines permissions and roles, and grants them to users, groups, service accounts, or agents. Point checks answer "can this user do X to this resource?", and — the part that changes how you write code — list queries get an authorization filter that runs **in SQL**, so users only ever receive rows they're allowed to see:
-
-```csharp
-var filter = await authorization.BuildFilterAsync<Project>(userId, "project.read");
-var projects = await db.Projects.Where(filter).ToListAsync();
-```
-
-No sidecar, no policy service round-trips, no post-filtering in memory. The same grants shape product UI — a company admin and a store clerk hit the same endpoints and see different rows:
-
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <p><strong>Company Admin</strong> — five chains visible</p>
-      <img src="https://sqlos.dev/docs/retail-app-admin-dashboard.png" alt="Retail app as Company Admin with five chains and multi-store inventory" />
-    </td>
-    <td width="50%" valign="top">
-      <p><strong>Store Clerk</strong> — one store, filtered in SQL</p>
-      <img src="https://sqlos.dev/docs/retail-app-clerk-dashboard.png" alt="Retail app as Store Clerk with zero chains and one store visible" />
-    </td>
-  </tr>
-</table>
-
-→ [Authorize EF Core queries](https://sqlos.dev/docs/quickstarts/ef-authorization) · [Model your FGA](https://sqlos.dev/docs/fga/overview) · [EF query filters](https://sqlos.dev/docs/fga/list-filter)
-
-### 4. Headless auth — bring your own UI
+### 3. Headless auth — bring your own UI
 
 If the hosted pages don't fit your product, keep SqlOS as the protocol engine and draw every screen yourself: `app.Headless("/auth/authorize")` in the one-call setup, or `AuthServer.UseHeadlessAuthPage` on a multi-app host. Your frontend talks to a typed state machine — login, signup, OTP, MFA, consent — while SqlOS still owns OAuth, PKCE, sessions, and tokens. Extra signup fields, A/B tests, and native-feeling popups all become your UI's decisions.
 

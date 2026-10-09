@@ -6,7 +6,9 @@ group: "model"
 order: 4
 ---
 
-Resources are a tree. One parent per node; root has none. For access checks, FGA walks **up** from the target node to root and looks for grants.
+Resources are a tree. One parent per node; a root has none. Access checks look for a usable grant on the target or its ancestors using the maintained lineage.
+
+Start with [Designing your resource tree](/docs/fga/designing-your-resource-tree) for workspace, department, and team examples, plus the read/write tradeoffs that should guide your model. This page explains how SqlOS represents and maintains that hierarchy.
 
 ## Tree structure
 
@@ -85,16 +87,16 @@ An inactive resource cuts the chain: a grant above it does not reach anything be
 
 ## The lineage
 
-SqlOS does not walk the tree at query time. Every resource carries its **lineage**: its ancestor at each level of the tree (`Ancestor0` is the top of its tree, `Ancestor1` the next level down, and so on, up to the configured `MaxResourceHierarchyDepth`), its `Depth`, and its `Reach`, the highest level from which access flows down to it through active resources only. A resource that is inactive, lies in a cycle, or sits deeper than the configured depth has no reach, and is denied.
+Point checks use stored ancestry rather than recursively traversing parents. The page executor can navigate grant-bearing branches using that maintained state. Every resource carries its **lineage**: its ancestor at each level of the tree (`Ancestor0` is the top of its tree, `Ancestor1` the next level down, and so on, up to the configured `MaxResourceHierarchyDepth`), its `Depth`, and its `Reach`, the highest level from which access flows down to it through active resources only. A resource that is inactive, lies in a cycle, or sits deeper than the configured depth has no reach, and is denied.
 
-With the lineage, "is `workspace::1` under a grant on `org::acme`" is one comparison: `workspace::1`'s ancestor at level 1 is `org::acme`, and its reach includes level 1. That is what [`BuildFilterAsync`](/docs/fga/list-filter) evaluates for every row of a list, and what [`CheckAccessAsync`](/docs/fga/checking-a-permission) evaluates for one resource, in one query, looking for a grant on the resources access flows down to it from.
+With the lineage, "is `workspace::1` under a grant on `org::acme`" is one comparison: `workspace::1`'s ancestor at level 1 is `org::acme`, and its reach includes level 1. That relationship supports both the SQL predicate used by [`BuildFilterAsync`](/docs/fga/list-filter) and the indexed branch seeks used by its page executor. [`CheckAccessAsync`](/docs/fga/checking-a-permission) uses the lineage to check one resource in one query.
 
-Triggers on the resources table keep the lineage exact. The cost of each operation:
+Triggers on the resources table keep the lineage exact. The following table describes **lineage maintenance only**; grant counts and direct-grant indexes add the [page-index maintenance costs](/docs/fga/designing-your-resource-tree#what-sqlos-maintains-for-you). It is not a total-cost bound for each operation:
 
 | Operation | What SqlOS does | Cost |
 |---|---|---|
 | Create a resource | Computes its lineage from its parent | One row |
-| Grant or revoke | Nothing: grants are not part of the lineage | Nothing |
+| Grant or revoke | No lineage change; page grant counts and direct indexes are maintained separately | No lineage work |
 | Change a resource's type | Updates the scope column of its application rows | Its rows |
 | Move a resource to another parent | Recomputes the subtree beneath it, level by level | The subtree |
 | Deactivate or reactivate a resource | Recomputes the reach of the subtree beneath it | The subtree |
