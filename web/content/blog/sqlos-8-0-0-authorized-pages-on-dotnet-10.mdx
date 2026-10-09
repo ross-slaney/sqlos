@@ -1,0 +1,80 @@
+---
+title: "SqlOS 8.0.0: Authorized pages on .NET 10"
+description: "SqlOS now runs authorized list pages without first loading the caller's grants, targets .NET 10 and EF Core 10, and fixes sign-up code limits, headless organization selection, and SCIM behind the dashboard."
+date: "2026-10-08"
+author: "Ross Slaney"
+tags: ["FGA", "EF Core", "AuthServer", "SCIM", "Security", "SqlOS"]
+---
+
+SqlOS 8.0.0 is a major release:
+
+- An authorized list page no longer has to read every grant the caller holds first.
+- SqlOS now targets .NET 10 and EF Core 10.
+- Three sign-in and provisioning defects are fixed.
+
+Two changes break the build or the schema: the `net10.0` target, and a new `FgaScope` column on every protected table. See [Upgrade notes](#upgrade-notes).
+
+## One API for authorized data
+
+`BuildFilterAsync` is still the whole API. You compose its filter into the query you were going to write anyway:
+
+```csharp
+var canView = await fga.BuildFilterAsync<Product>(subjectId, "product.view");
+
+var rows = await db.Products
+    .AsNoTracking()
+    .Where(canView)
+    .Where(p => p.Id > lastId)
+    .OrderBy(p => p.Id)
+    .Take(pageSize + 1)
+    .ToListAsync();
+```
+
+What changed is how that query runs.
+
+- **Building the filter reads no grants.** It resolves the caller's principals and the permission, so its cost doesn't depend on how many grants the caller holds.
+- **A page is walked.** A page is the filter, an order covered by the key or a declared index, and a `Take`. SqlOS answers it from the resource tree: each protected row records where it sits in the tree, grant counts are kept per principal, and direct grants have their own index. Nothing loads the caller's whole grant list first. A caller with 100,000 single-row grants gets the first page from the direct-grant index. On the CI benchmark runner, at one million products on PostgreSQL, that page takes about 5 ms. The same caller's query as a plain predicate takes about half a second, most of it spent reading 100,000 access roots.
+- **Everything else is a predicate.** Counts, joins, `GroupBy`, queries without `Take`, and orders that no index covers run as EF Core would. The filter becomes a SQL predicate over the caller's access roots, read when the query runs. Authorization is the same either way, though the cost is not.
+
+A page still has a cost: a caller whose access is spread over many separate branches of the tree pays to find and merge them. When SqlOS can't serve a page efficiently because of something you can fix, such as sorting by a column with no declared index, it logs a warning once per query shape and names the index to declare.
+
+To use the new paging well, design the resource tree around how your callers list data. [Designing your resource tree](/docs/fga/designing-your-resource-tree) is the new guide for that. [List filtering](/docs/fga/list-filter) and [Paginating authorized lists](/docs/guides/paginating-authorized-lists) give the exact rules for which queries are walked and what each shape costs.
+
+## .NET 10 and EF Core 10
+
+SqlOS 8 targets `net10.0` and builds on EF Core 10.0 and Npgsql 10.0. .NET 10 is the current long-term support release, and .NET 9 support ends in November 2026.
+
+## Fixes
+
+- **Sign-up codes respect their attempt limit.** Before this release, a wrong sign-up code's failed attempt was counted inside the sign-up transaction and then rolled back with it. Someone who started a sign-up with another person's email address could keep guessing the code until it expired. Failed attempts are now recorded before the transaction, the attempt limit holds under concurrent guesses, and a rejected phone code ends the challenge. This covers the hosted forms, the headless API, and `SqlOSAuthService`, for both email and phone sign-up.
+- **Headless organization selection finishes sign-in.** A user in more than one organization who picked one in a headless UI got a 400, although the authorization code had already been issued. Selection now returns the redirect to the client, or the next step when MFA is required. See [Hosted vs. headless](/docs/authserver/hosted-vs-headless).
+- **SCIM works at its default URL.** The dashboard middleware answered requests to `/sqlos/scim/v2` itself, so directories saw 404s, login redirects or 401s, and no sync happened. SCIM requests under the dashboard path now reach SCIM and its own bearer authentication. See [SCIM directory sync](/docs/guides/scim-directory-sync).
+
+## Upgrade notes
+
+```bash
+dotnet add package SqlOS --version 8.0.0
+npm install @sqlos/headless@8.0.0              # if you render your own login UI
+```
+
+**Move the host to .NET 10.** Target `net10.0`, and move your EF Core and provider packages to 10.x so they match SqlOS. Hosts that must stay on .NET 9 should stay on SqlOS 7.x.
+
+**Add the scope column to protected entities.** `IHasResourceId` now has an `FgaScope` member, so the build lists every entity that needs it:
+
+1. Derive each entity from `SqlOSResourceEntity`, or add `public byte[]? FgaScope { get; private set; }` to each one.
+2. On a context of your own, delete its `IsResourceAccessible` method. Change `modelBuilder.UseSqlOS(GetType())` to `modelBuilder.UseSqlOS(Database.ProviderName)`.
+3. Add and apply one migration per context. It adds the column, plus an index on `ResourceId` where you declared none.
+4. Start the application. SqlOS builds the resource lineage and fills every `FgaScope` column once. On a large database, that first start takes a few minutes per million resources, and other instances wait for it.
+
+The full steps are in [FGA setup](/docs/fga/setup#upgrading-from-a-version-without-fgascope).
+
+**A context built by hand calls `UseSqlOSFga`.** `AddSqlOS` applies it to the context it registers. Any other context that runs a `BuildFilterAsync` filter needs `optionsBuilder.UseSqlOSFga(loggerFactory)`. Without it, `BuildFilterAsync` throws and says so.
+
+**Behavior to know about:**
+
+- A page query now runs as several statements on the same connection and transaction. It returns the same rows in the same order.
+- `Skip(n).Take(k)` walks `n + k` rows, so use keyset pagination for deep lists.
+- A filter can't be evaluated in memory, and compiled queries (`EF.CompileAsyncQuery`) can't use it.
+- Sorting by a column with no declared index returns the right rows but logs a warning. Declare the index it names.
+
+**Schema.** The FGA schema moves from version 10 to 15. SqlOS applies it at startup on SQL Server and PostgreSQL, together with its per-table direct-grant tables, triggers, and a new hosted service that keeps grant counts current as grant windows open and close.
