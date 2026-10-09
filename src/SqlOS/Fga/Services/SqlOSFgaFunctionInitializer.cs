@@ -206,7 +206,9 @@ public class SqlOSFgaFunctionInitializer
         _logger.LogDebug("Creating or updating the FGA routines, the resource lineage columns, and the lineage triggers...");
         foreach (var batch in batches)
         {
-            await _context.Database.ExecuteSqlRawAsync(batch, cancellationToken);
+            // Without the context's command timeout: a definition can carry data, such as the one-time copy of
+            // an application table into SqlOS's projection of it, which takes minutes on a large table.
+            await ExecuteNonQueryAsync(batch, cancellationToken);
         }
 
         _logger.LogInformation("The SqlOS FGA routines, triggers, and indexes are ready.");

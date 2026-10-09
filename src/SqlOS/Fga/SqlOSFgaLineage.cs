@@ -146,7 +146,7 @@ internal static class SqlOSFgaLineage
 /// <param name="ResourceIdColumn">The column holding the resource id.</param>
 /// <param name="KeyColumns">The primary key columns, used to join a statement's rows back to the table.</param>
 /// <param name="Orders">The orders the application declared indexes for, each mirrored per level.</param>
-/// <param name="Columns">The store types of the key and order columns, for the direct index and the page statements.</param>
+/// <param name="Columns">Every column of the table (name, store type, nullability), for the direct index, the page statements, and SQL Server's projection of the table.</param>
 internal sealed record SqlOSFgaScopeTable(
     string? Schema,
     string Table,

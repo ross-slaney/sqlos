@@ -131,6 +131,25 @@ public class SqlOSFgaScopeColumnsTests
     }
 
     [TestMethod]
+    public void Tables_ListEveryColumnOfTheTable_NotOnlyTheRootEntityTypesOwnProperties()
+    {
+        using var context = new ShapesDbContext(new DbContextOptionsBuilder<ShapesDbContext>()
+            .UseSqlServer("Server=unused;Database=unused;TrustServerCertificate=True").Options);
+
+        var table = SqlOSFgaScopeColumns.Tables(context.Model).Single();
+
+        // The derived type is not a protected table of its own; its columns, the owned type's, the
+        // discriminator and the computed column are the table's. SQL Server's planned statements read the
+        // table through SqlOS's projection of it, which must return every one of them.
+        table.Table.Should().Be("Shapes");
+        table.Columns.Select(c => c.Column).Should().BeEquivalentTo(["Id", "ResourceId", "FgaScope", "Kind", "Subject", "Extent_Width", "Extent_Height", "Area"]);
+        table.Columns.Single(c => c.Column == "Area").ChangesOnUpdate.Should().BeTrue("a computed column changes with the columns it reads");
+        table.Columns.Single(c => c.Column == "Subject").IsNullable.Should().BeTrue("a derived type's column is null on the other types' rows");
+        table.Columns.Single(c => c.Column == "Id").StoreType.Should().Be("nvarchar(64)");
+        table.KeyColumns.Should().Equal("Id");
+    }
+
+    [TestMethod]
     public void ADepthBeyondTheColumnsRoom_Fails()
     {
         var act = () => new ScopeModelDbContext<TooDeep>(Options<ScopeModelDbContext<TooDeep>>(SqlOSDatabase.SqlServerProviderName), SqlOSDatabase.SqlServerProviderName, depth: 70).Model;
@@ -273,5 +292,45 @@ public class SqlOSFgaScopeColumnsTests
 
         public int Id { get; set; }
         public string ResourceId { get; set; } = string.Empty;
+    }
+
+    // A hierarchy with an owned type and a computed column: one table, more than the root's own properties.
+    private sealed class ShapesDbContext(DbContextOptions<ShapesDbContext> options) : DbContext(options)
+    {
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<Shape>(shape =>
+            {
+                shape.ToTable("Shapes");
+                shape.HasKey(s => s.Id);
+                shape.Property(s => s.Id).HasMaxLength(64);
+                shape.Property(s => s.ResourceId).HasMaxLength(128);
+                shape.OwnsOne(s => s.Extent);
+                shape.Property(s => s.Area).HasComputedColumnSql("[Extent_Width] * [Extent_Height]", stored: true);
+                shape.HasDiscriminator<string>("Kind").HasValue<Shape>("shape").HasValue<Memo>("memo");
+            });
+            modelBuilder.Entity<Memo>(memo => memo.Property(m => m.Subject).HasMaxLength(200));
+            modelBuilder.UseSqlOS(SqlOSDatabase.SqlServerProviderName, new SqlOSFgaOptions { MaxResourceHierarchyDepth = 2 });
+        }
+    }
+
+    private sealed class ShapeExtent
+    {
+        public int Width { get; set; }
+        public int Height { get; set; }
+    }
+
+    private class Shape : IHasResourceId
+    {
+        public string Id { get; set; } = string.Empty;
+        public string ResourceId { get; set; } = string.Empty;
+        public byte[]? FgaScope { get; private set; }
+        public ShapeExtent Extent { get; set; } = new();
+        public int Area { get; private set; }
+    }
+
+    private sealed class Memo : Shape
+    {
+        public string Subject { get; set; } = string.Empty;
     }
 }

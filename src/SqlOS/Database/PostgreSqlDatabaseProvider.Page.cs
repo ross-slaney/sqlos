@@ -523,7 +523,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
         // A stream with a position seeks straight to it: a range on the order's first column (which the index
         // serves), the rest nested, written only in the blocks for positioned streams. Wrapped in "no position
         // OR …" it is no range at all, and a root stream would read every row before the position.
-        var afterValues = order.Select((_, i) => $"s.a{i}").ToList();
+        var afterValues = order.Select((_, i) => $"st.a{i}").ToList();
         var keyset = Keyset(order.Select(c => $"{a}.{QuoteIdentifier(c.Column)}").ToList(), afterValues, spec.Descending);
 
         var afterColumns = string.Join(", ", order.Select((_, i) => $"o.a{i}"));
@@ -591,6 +591,9 @@ internal sealed partial class PostgreSqlDatabaseProvider
             SELECT req, node, level, active, granted, has_children, thr, cutg, fetch_n FROM opened ORDER BY req, node;
             """;
 
+        // The streams are aliased st (the direct index di, the row test's resources and grants rx and rg):
+        // names EF Core never gives the application's table, whose own alias (one letter) is in scope in
+        // every seek beside them.
         // Two blocks per stream kind and level: one for the streams that have a position (the keyset written
         // as a range the index serves), one for those that have none. The only index that can answer a
         // stream's ORDER BY past its position without a sort is the level's own (the direct index's row index
@@ -598,63 +601,63 @@ internal sealed partial class PostgreSqlDatabaseProvider
         var blocks = new StringBuilder();
         for (var level = 0; level < levels; level++)
         {
-            var seek = $"SUBSTRING({scope}, {SqlOSFgaPageIndex.Offset(level)}, 8) = int8send(s.seq) AND {scope} >= '\\x{level:x2}'::bytea";
+            var seek = $"SUBSTRING({scope}, {SqlOSFgaPageIndex.Offset(level)}, 8) = int8send(st.seq) AND {scope} >= '\\x{level:x2}'::bytea";
             foreach (var positioned in new[] { true, false })
             {
                 var position = positioned ? $"\n                            AND {keyset}" : "";
-                var streams = positioned ? "s.has_after" : "NOT s.has_after";
+                var streams = positioned ? "st.has_after" : "NOT st.has_after";
                 blocks.AppendLine(CultureInfo.InvariantCulture, $"""
                     UNION ALL
-                    SELECT 0 AS kind, s.level, s.seq, NULL::varchar AS principal, NULL::varchar AS role, q.rn, q.cnt, TRUE AS granted, {string.Join(", ", order.Select((_, i) => $"q.c{i}"))}
-                    FROM streams s
+                    SELECT 0 AS kind, st.level, st.seq, NULL::varchar AS principal, NULL::varchar AS role, q.rn, q.cnt, TRUE AS granted, {string.Join(", ", order.Select((_, i) => $"q.c{i}"))}
+                    FROM streams st
                     CROSS JOIN LATERAL (
                         SELECT row_number() OVER (ORDER BY {outOrder}) AS rn, count(*) OVER () AS cnt, z.*
                         FROM (SELECT {selectCols}
                               FROM {ScopeTable(spec.Table)} AS {a}
                               WHERE {seek}{typeFilter}{predicate}{position}
                               ORDER BY {orderBy}
-                              LIMIT s.f) z) q
-                    WHERE s.kind = 0 AND s.level = {level} AND {streams}
+                              LIMIT st.f) z) q
+                    WHERE st.kind = 0 AND st.level = {level} AND {streams}
                     UNION ALL
-                    SELECT 1, s.level, s.seq, NULL, NULL, q.rn, q.cnt, q.granted, {string.Join(", ", order.Select((_, i) => $"q.c{i}"))}
-                    FROM streams s
+                    SELECT 1, st.level, st.seq, NULL, NULL, q.rn, q.cnt, q.granted, {string.Join(", ", order.Select((_, i) => $"q.c{i}"))}
+                    FROM streams st
                     CROSS JOIN LATERAL (
                         SELECT row_number() OVER (ORDER BY {outOrder}) AS rn, count(*) OVER () AS cnt, z.*
                         FROM (SELECT {selectCols}, {RowTest(options, spec, level, levels)} AS granted
                               FROM {ScopeTable(spec.Table)} AS {a}
                               WHERE {seek}{predicate}{position}
                               ORDER BY {orderBy}
-                              LIMIT s.f) z) q
-                    WHERE s.kind = 1 AND s.level = {level} AND {streams}
+                              LIMIT st.f) z) q
+                    WHERE st.kind = 1 AND st.level = {level} AND {streams}
                     """);
             }
         }
 
-        var directColumns = string.Join(", ", order.Select((c, i) => $"d.{QuoteIdentifier(c.Column)} AS c{i}"));
-        var directOrderBy = string.Join(", ", order.Select(c => $"d.{QuoteIdentifier(c.Column)}{direction}"));
-        var directKeyset = Keyset(order.Select(c => $"d.{QuoteIdentifier(c.Column)}").ToList(), afterValues, spec.Descending);
+        var directColumns = string.Join(", ", order.Select((c, i) => $"di.{QuoteIdentifier(c.Column)} AS c{i}"));
+        var directOrderBy = string.Join(", ", order.Select(c => $"di.{QuoteIdentifier(c.Column)}{direction}"));
+        var directKeyset = Keyset(order.Select(c => $"di.{QuoteIdentifier(c.Column)}").ToList(), afterValues, spec.Descending);
         var directJoin = spec.PredicateSql is null
             ? ""
-            : $"\n                          INNER JOIN {ScopeTable(spec.Table)} AS {a} ON {string.Join(" AND ", spec.Table.KeyColumns.Select(k => $"{a}.{QuoteIdentifier(k)} = d.{QuoteIdentifier(k)}"))}";
+            : $"\n                          INNER JOIN {ScopeTable(spec.Table)} AS {a} ON {string.Join(" AND ", spec.Table.KeyColumns.Select(k => $"{a}.{QuoteIdentifier(k)} = di.{QuoteIdentifier(k)}"))}";
         var directBlock = new StringBuilder();
         foreach (var positioned in new[] { true, false })
         {
             var position = positioned ? $"\n                        AND {directKeyset}" : "";
-            var streams = positioned ? "s.has_after" : "NOT s.has_after";
+            var streams = positioned ? "st.has_after" : "NOT st.has_after";
             directBlock.AppendLine(CultureInfo.InvariantCulture, $"""
                 UNION ALL
-                SELECT 2, -1, 0, s.principal, s.role, q.rn, q.cnt, TRUE, {string.Join(", ", order.Select((_, i) => $"q.c{i}"))}
-                FROM streams s
+                SELECT 2, -1, 0, st.principal, st.role, q.rn, q.cnt, TRUE, {string.Join(", ", order.Select((_, i) => $"q.c{i}"))}
+                FROM streams st
                 CROSS JOIN LATERAL (
                     SELECT row_number() OVER (ORDER BY {outOrder}) AS rn, count(*) OVER () AS cnt, z.*
                     FROM (SELECT {directColumns}
-                          FROM {DirectTable(options, spec.Table)} d{directJoin}
-                          WHERE d."SubjectId" = s.principal AND d."RoleId" = s.role AND d."Active"
-                            AND (@TypeSeq IS NULL OR d."TypeSeq" = @TypeSeq)
-                            AND {Validity("d")}{predicate}{position}
+                          FROM {DirectTable(options, spec.Table)} di{directJoin}
+                          WHERE di."SubjectId" = st.principal AND di."RoleId" = st.role AND di."Active"
+                            AND (@TypeSeq IS NULL OR di."TypeSeq" = @TypeSeq)
+                            AND {Validity("di")}{predicate}{position}
                           ORDER BY {directOrderBy}
-                          LIMIT s.f) z) q
-                WHERE s.kind = 2 AND {streams}
+                          LIMIT st.f) z) q
+                WHERE st.kind = 2 AND {streams}
                 """);
         }
 
@@ -665,8 +668,8 @@ internal sealed partial class PostgreSqlDatabaseProvider
         var second = $"""
             {common},
             streams AS (
-                SELECT s.sid, s.kind, s.level, s.seq, s.principal, s.role, s.f, s.has_after, {after}
-                FROM jsonb_to_recordset(@Streams::jsonb) AS s(sid int, kind int, level int, seq bigint, principal varchar(450), role varchar(450), f int, has_after boolean, {afterTyped})
+                SELECT st.sid, st.kind, st.level, st.seq, st.principal, st.role, st.f, st.has_after, {after}
+                FROM jsonb_to_recordset(@Streams::jsonb) AS st(sid int, kind int, level int, seq bigint, principal varchar(450), role varchar(450), f int, has_after boolean, {afterTyped})
                 UNION ALL
                 SELECT -1, kind, level, node, NULL, NULL, fetch_n, has_after, {after}
                 FROM opened WHERE kind IN (0, 1)
@@ -727,10 +730,10 @@ internal sealed partial class PostgreSqlDatabaseProvider
             ({type}EXISTS (
                         SELECT 1
                         FROM (VALUES {ancestors}) AS lv(anc)
-                        INNER JOIN {Qualify(options.Schema, options.TableNames.Resources)} x ON x."Seq" = ('x' || encode(lv.anc, 'hex'))::bit(64)::bigint
-                        CROSS JOIN LATERAL {GrantsOn(Qualify(options.Schema, options.TableNames.Grants), "x.\"Id\"")} g
+                        INNER JOIN {Qualify(options.Schema, options.TableNames.Resources)} rx ON rx."Seq" = ('x' || encode(lv.anc, 'hex'))::bit(64)::bigint
+                        CROSS JOIN LATERAL {GrantsOn(Qualify(options.Schema, options.TableNames.Grants), "rx.\"Id\"")} rg
                         WHERE octet_length(lv.anc) = 8 AND lv.anc <> {ZeroAncestor}
-                          AND g."SubjectId" = ANY ({LiveArray}) AND g."RoleId" = ANY ({RolesArray}) AND {Validity("g")}))
+                          AND rg."SubjectId" = ANY ({LiveArray}) AND rg."RoleId" = ANY ({RolesArray}) AND {Validity("rg")}))
             """;
     }
 

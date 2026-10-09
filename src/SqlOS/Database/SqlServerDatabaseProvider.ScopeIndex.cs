@@ -81,7 +81,13 @@ internal sealed partial class SqlServerDatabaseProvider
         return [ddl, rebuild];
     }
 
-    /// <summary>Refresh only changed projection values; an ordinary row change never fans out by principal.</summary>
+    /// <summary>
+    /// Refresh only changed projection values; an ordinary row change never fans out by principal. A plain
+    /// MERGE, not a serializable one (HOLDLOCK): the writers of one key are already serialized by the
+    /// application table's own primary key, and the rebuild runs under the exclusive lineage lock. A
+    /// serializable merge would range-lock the key's neighbourhood until the transaction ends, so a second
+    /// transaction inserting an adjacent key would wait for the first to commit, or deadlock with it.
+    /// </summary>
     private static string ScopeIndexMerge(SqlOSFgaOptions options, SqlOSFgaScopeTable table, string source, bool removeMissing = false)
     {
         var columns = SqlOSFgaScopeIndex.Columns(table).Select(c => c.Column).ToList();
@@ -92,7 +98,7 @@ internal sealed partial class SqlServerDatabaseProvider
         // with normal SQL equality still identifies the row; updating them preserves their stored spelling.
         var changes = columns;
         return $"""
-            MERGE {ScopeIndexTable(options, table)} WITH (HOLDLOCK) AS d
+            MERGE {ScopeIndexTable(options, table)} AS d
             USING (SELECT {list} FROM {source}) AS s
             ON {string.Join(" AND ", table.KeyColumns.Select(k => $"d.[{Escape(k)}] = s.[{Escape(k)}]"))}
             WHEN MATCHED AND EXISTS (SELECT {string.Join(", ", changes.Select(c => $"CONVERT(varbinary(max), d.[{Escape(c)}])"))} EXCEPT SELECT {string.Join(", ", changes.Select(c => $"CONVERT(varbinary(max), s.[{Escape(c)}])"))})

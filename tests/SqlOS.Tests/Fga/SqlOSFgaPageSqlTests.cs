@@ -118,10 +118,10 @@ public class SqlOSFgaPageSqlTests
         round.Should().Contain("fetch_n");
         round.Should().Contain("[i].[Status] = @__status_0", "the application's filter runs inside every seek");
         round.Should().Contain("[dbo].[SqlOSFgaDirect_app_Items]");
-        round.Should().Contain("TOP (s.f)");
+        round.Should().Contain("TOP (st.f)");
         for (var level = 0; level <= 2; level++)
         {
-            round.Should().Contain($"s.[level] = {level}");
+            round.Should().Contain($"st.[level] = {level}");
 
             // Every stream seeks the level's mirror of the page's order, by hint: the optimizer must not read
             // the table in key order and filter the level, which costs rows in proportion to the table.
@@ -130,7 +130,7 @@ public class SqlOSFgaPageSqlTests
         }
 
         round.Should().Contain("WITH (FORCESEEK ([IX_SqlOSFgaDirect_app_Items_Price] ([SubjectId], [RoleId])))");
-        round.Should().NotContain("s.[level] = 3");
+        round.Should().NotContain("st.[level] = 3");
         round.Should().Contain("ORDER BY c0, c1");
 
         // The rows of earlier rounds the executor holds come back typed by the order columns and are merged by
@@ -139,8 +139,17 @@ public class SqlOSFgaPageSqlTests
         round.IndexOf("OPENJSON(@Retained)", StringComparison.Ordinal).Should().BeLessThan(round.LastIndexOf("ORDER BY c0, c1", StringComparison.Ordinal), "the held rows are part of the merge");
 
         // A positioned stream's keyset is a range the index serves, never behind an OR on the position's presence.
-        round.Should().Contain("AND s.has_after = 1").And.Contain("AND s.has_after = 0").And.NotContain("has_after = 0 OR");
-        round.Should().Contain("(sqlos_scope.[Price] >= s.a0 AND (sqlos_scope.[Price] > s.a0 OR sqlos_scope.[Id] > s.a1))");
+        round.Should().Contain("AND st.has_after = 1").And.Contain("AND st.has_after = 0").And.NotContain("has_after = 0 OR");
+        round.Should().Contain("(sqlos_scope.[Price] >= st.a0 AND (sqlos_scope.[Price] > st.a0 OR sqlos_scope.[Id] > st.a1))");
+
+        // EF Core aliases the application's table by its first letter, so it can be "s" (Stores, Shipments…) or
+        // "d" (Documents…), and that alias is in scope in every seek. The round's own tables carry names EF Core
+        // never produces, so the application's never shadows them.
+        var shadowed = SqlServerDatabaseProvider.Instance.BuildPageRoundSql(options, spec with { Alias = "s", PredicateSql = "[s].[Status] = @__status_0" });
+        shadowed.Should().Contain("INNER JOIN [app].[Items] AS s ON s.[Id] = sqlos_scope.[Id]").And.Contain("[s].[Status] = @__status_0");
+        shadowed.Should().NotContain("s.seq").And.NotContain("s.f)").And.NotContain("s.has_after").And.NotContain("s.kind").And.NotContain("s.a0");
+        var direct = SqlServerDatabaseProvider.Instance.BuildPageRoundSql(options, spec with { Alias = "d", PredicateSql = "[d].[Status] = @__status_0" });
+        direct.Should().Contain("INNER JOIN [app].[Items] AS d ON d.[Id] = di.[Id]").And.NotContain("d.SubjectId").And.NotContain("d.[Price]");
     }
 
     [TestMethod]
@@ -163,23 +172,30 @@ public class SqlOSFgaPageSqlTests
         round.Should().Contain("fetch_n");
         round.Should().Contain("i.\"Status\" = @__status_0", "the application's filter runs inside every seek");
         round.Should().Contain("\"dbo\".\"SqlOSFgaDirect_app_Items\"");
-        round.Should().Contain("LIMIT s.f");
+        round.Should().Contain("LIMIT st.f");
         for (var level = 0; level <= 2; level++)
         {
-            round.Should().Contain($"SUBSTRING(i.\"FgaScope\", {SqlOSFgaPageIndex.Offset(level)}, 8) = int8send(s.seq)");
-            round.Should().Contain($"s.level = {level}");
+            round.Should().Contain($"SUBSTRING(i.\"FgaScope\", {SqlOSFgaPageIndex.Offset(level)}, 8) = int8send(st.seq)");
+            round.Should().Contain($"st.level = {level}");
         }
 
-        round.Should().NotContain("s.level = 3");
+        round.Should().NotContain("st.level = 3");
         round.Should().Contain("ORDER BY c0, c1");
         round.Should().Contain("FROM jsonb_to_recordset(@Retained::jsonb) AS r(kind int, level int, seq bigint, principal varchar(450), role varchar(450), rn bigint, cnt bigint, granted boolean, c0 decimal(10,2), c1 int)");
         round.IndexOf("@Retained::jsonb", StringComparison.Ordinal).Should().BeLessThan(round.LastIndexOf("ORDER BY c0, c1", StringComparison.Ordinal), "the held rows are part of the merge");
 
         // A positioned stream's keyset is a range the index serves, never behind an OR on the position's presence.
-        round.Should().Contain("AND s.has_after").And.Contain("AND NOT s.has_after").And.NotContain("NOT s.has_after OR");
-        round.Should().Contain("(i.\"Price\" >= s.a0 AND (i.\"Price\" > s.a0 OR i.\"Id\" > s.a1))");
+        round.Should().Contain("AND st.has_after").And.Contain("AND NOT st.has_after").And.NotContain("NOT st.has_after OR");
+        round.Should().Contain("(i.\"Price\" >= st.a0 AND (i.\"Price\" > st.a0 OR i.\"Id\" > st.a1))");
 
-        round.Should().Contain("ORDER BY i.\"Price\", i.\"Id\"").And.Contain("ORDER BY d.\"Price\", d.\"Id\"");
+        round.Should().Contain("ORDER BY i.\"Price\", i.\"Id\"").And.Contain("ORDER BY di.\"Price\", di.\"Id\"");
+
+        // The same on PostgreSQL: the application's table may be aliased "s" or "d".
+        var shadowed = PostgreSqlDatabaseProvider.Instance.BuildPageRoundSql(options, spec with { Alias = "s", PredicateSql = "s.\"Status\" = @__status_0" });
+        shadowed.Should().Contain("FROM \"app\".\"Items\" AS s").And.Contain("s.\"Status\" = @__status_0");
+        shadowed.Should().NotContain("s.seq").And.NotContain("s.f)").And.NotContain("s.has_after").And.NotContain("s.kind").And.NotContain("s.level").And.NotContain("s.a0");
+        var direct = PostgreSqlDatabaseProvider.Instance.BuildPageRoundSql(options, spec with { Alias = "d", PredicateSql = "d.\"Status\" = @__status_0" });
+        direct.Should().Contain("INNER JOIN \"app\".\"Items\" AS d ON d.\"Id\" = di.\"Id\"").And.NotContain("d.\"SubjectId\"").And.NotContain("d.\"Active\"");
     }
 
     [TestMethod]
@@ -191,19 +207,19 @@ public class SqlOSFgaPageSqlTests
         var sqlServer = SqlServerDatabaseProvider.Instance.BuildPageRoundSql(options, spec);
         sqlServer.Should().Contain("ORDER BY c0 DESC, c1 DESC", "the merge runs backwards");
         sqlServer.Should().Contain("ORDER BY i.[Price] DESC, i.[Id] DESC", "every stream reads its index backwards");
-        sqlServer.Should().Contain("ORDER BY d.[Price] DESC, d.[Id] DESC", "the direct index too");
-        sqlServer.Should().Contain("(i.[Price] <= s.a0 AND (i.[Price] < s.a0 OR i.[Id] < s.a1))", "the keyset seeks before the position");
-        sqlServer.Should().NotContain(" > s.a").And.NotContain(" >= s.a");
+        sqlServer.Should().Contain("ORDER BY di.[Price] DESC, di.[Id] DESC", "the direct index too");
+        sqlServer.Should().Contain("(i.[Price] <= st.a0 AND (i.[Price] < st.a0 OR i.[Id] < st.a1))", "the keyset seeks before the position");
+        sqlServer.Should().NotContain(" > st.a").And.NotContain(" >= st.a");
 
         var postgres = PostgreSqlDatabaseProvider.Instance.BuildPageRoundSql(options, spec);
         postgres.Should().Contain("ORDER BY c0 DESC, c1 DESC");
         postgres.Should().Contain("ORDER BY i.\"Price\" DESC, i.\"Id\" DESC");
-        postgres.Should().Contain("ORDER BY d.\"Price\" DESC, d.\"Id\" DESC");
-        postgres.Should().Contain("(i.\"Price\" <= s.a0 AND (i.\"Price\" < s.a0 OR i.\"Id\" < s.a1))", "the keyset seeks before the position");
-        postgres.Should().NotContain(" > s.a").And.NotContain(" >= s.a");
+        postgres.Should().Contain("ORDER BY di.\"Price\" DESC, di.\"Id\" DESC");
+        postgres.Should().Contain("(i.\"Price\" <= st.a0 AND (i.\"Price\" < st.a0 OR i.\"Id\" < st.a1))", "the keyset seeks before the position");
+        postgres.Should().NotContain(" > st.a").And.NotContain(" >= st.a");
 
         // Ascending is the default, unchanged.
         var ascending = SqlServerDatabaseProvider.Instance.BuildPageRoundSql(options, spec with { Descending = false });
-        ascending.Should().Contain("ORDER BY c0, c1").And.Contain("(i.[Price] >= s.a0 AND (i.[Price] > s.a0 OR i.[Id] > s.a1))").And.NotContain("DESC");
+        ascending.Should().Contain("ORDER BY c0, c1").And.Contain("(i.[Price] >= st.a0 AND (i.[Price] > st.a0 OR i.[Id] > st.a1))").And.NotContain("DESC");
     }
 }

@@ -115,10 +115,12 @@ internal static class SqlOSFgaScopeColumns
                     i.Properties.Select(p => p.GetColumnName(store)!).Concat(key).Distinct().ToList()))
                 .OrderBy(o => o.Suffix, StringComparer.Ordinal)
                 .ToList();
-            var columns = entityType.GetProperties()
-                .Where(p => p.GetColumnName(store) is not null)
-                .Select(p => new SqlOSFgaScopeColumn(p.GetColumnName(store)!, p.GetColumnType(store), p.IsNullable,
-                    p.GetComputedColumnSql(store) is not null || p.ValueGenerated is ValueGenerated.OnAddOrUpdate or ValueGenerated.OnUpdate))
+            // Every column of the table, not only the root entity type's own properties: a derived type of a
+            // hierarchy, an owned type, or the other entity of a split table map to the same table, and SQL
+            // Server's planned statements read the whole table through SqlOS's projection of it.
+            var columns = model.GetRelationalModel().FindTable(table, schema)!.Columns
+                .Select(c => new SqlOSFgaScopeColumn(c.Name, c.StoreType, c.IsNullable,
+                    c.ComputedColumnSql is not null || c.PropertyMappings.Any(m => m.Property.ValueGenerated is ValueGenerated.OnAddOrUpdate or ValueGenerated.OnUpdate)))
                 .ToList();
             tables.Add(new SqlOSFgaScopeTable(schema, table, resourceId.GetColumnName(store)!, key, orders, columns));
         }

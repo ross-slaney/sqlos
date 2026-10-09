@@ -226,6 +226,44 @@ public class SqlOSFgaStartupIntegrationTests
     }
 
     [TestMethod]
+    public async Task SqlServer_ADefinitionThatOutlastsTheContextsCommandTimeout_StillApplies()
+    {
+        if (TestDatabase.IsPostgreSql)
+        {
+            return;
+        }
+
+        await using var db = await FreshDatabase.CreateAsync();
+        await using var app = db.Open<DocsContext>();
+        await SetUpAsync(app);
+        await CreateFoldersAndAliceAsync(app);
+        await AddDocsAsync(app, ("a1", "folder_a"), ("b1", "folder_b"));
+
+        // The next start builds SqlOS's projection of StDocs again, as an upgrade from 8.0.0 does: one statement
+        // that takes the lineage lock, then copies every row. On a large table the copy takes minutes; here
+        // another session holds the lock for longer than the command timeout the application configured.
+        await app.Database.ExecuteSqlRawAsync("DROP TABLE [dbo].[SqlOSFgaScopeIndex_StDocs];");
+        app.Database.SetCommandTimeout(TimeSpan.FromSeconds(1));
+        await using var other = TestDatabase.CreateConnection(db.ConnectionString);
+        await other.OpenAsync();
+        await ExecuteAsync(other, "EXEC sp_getapplock @Resource = 'SqlOS:FgaLineage:dbo.SqlOSFgaResources', @LockMode = 'Shared', @LockOwner = 'Session';");
+        var start = StartAsync(app);
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(4));
+            start.IsCompleted.Should().BeFalse("the definitions wait for the lineage lock instead of failing on the context's command timeout");
+        }
+        finally
+        {
+            await ExecuteAsync(other, "EXEC sp_releaseapplock @Resource = 'SqlOS:FgaLineage:dbo.SqlOSFgaResources', @LockOwner = 'Session';");
+        }
+
+        await start;
+        (await app.Database.SqlQueryRaw<int>("SELECT COUNT(*) AS [Value] FROM [dbo].[SqlOSFgaScopeIndex_StDocs]").SingleAsync()).Should().Be(2);
+        (await VisibleAsync(app, await AliceAsync(app))).Should().Equal("a1");
+    }
+
+    [TestMethod]
     public async Task SqlServer_ASnapshotTransaction_CannotChangeTheTree()
     {
         if (TestDatabase.IsPostgreSql)

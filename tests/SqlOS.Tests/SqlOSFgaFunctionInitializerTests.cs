@@ -205,6 +205,13 @@ public class SqlOSFgaFunctionInitializerTests
         all.Should().Contain("CREATE OR ALTER TRIGGER [app].[TR_Items_SqlOSFgaScope_Delete] ON [app].[Items]");
         all.Should().Contain("[dbo].[SqlOSFgaDirect_app_Items]");
 
+        // The projection is refreshed by a plain MERGE. A serializable (HOLDLOCK) merge would hold a range lock
+        // on the key's neighbourhood until the transaction ends, so a second transaction inserting an adjacent
+        // key would wait for the first to commit, or deadlock with it; the application table's own primary key
+        // already serializes the writers of one key.
+        all.Should().Contain("MERGE [dbo].[SqlOSFgaScopeIndex_app_Items] AS d");
+        all.Should().NotContain("HOLDLOCK");
+
         // Every maintaining trigger takes the lineage lock for its transaction before reading anything: inserts
         // shared, tree changes exclusive; the rebuild holds it for the whole session.
         all.Should().Contain("sys.sp_getapplock @Resource = N'SqlOS:FgaLineage:dbo.SqlOSFgaResources', @LockMode = 'Shared', @LockOwner = 'Transaction'");
