@@ -203,12 +203,21 @@ public class SqlOSFgaStartupIntegrationTests
 
             var logger = new ListLogger();
             var start = new SqlOSFgaFunctionInitializer(app, Options.Create(new SqlOSFgaOptions()), logger).EnsureFunctionsExistAsync();
-            await Task.Delay(TimeSpan.FromSeconds(3));
-            start.IsCompleted.Should().BeFalse("the other instance holds the lock");
-            logger.Messages.Should().Contain(m => m.Contains("waits for it to finish", StringComparison.Ordinal));
-
-            await other.CloseAsync();
-            await start;
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(3));
+                start.IsCompleted.Should().BeFalse("the other instance holds the lock");
+                logger.Messages.Should().Contain(m => m.Contains("waits for it to finish", StringComparison.Ordinal));
+            }
+            finally
+            {
+                // Closing a pooled connection need not end its server session immediately. Simulate the
+                // other initializer finishing by releasing its lock, even if an assertion above failed.
+                await ExecuteAsync(other, TestDatabase.IsPostgreSql
+                    ? "SELECT pg_advisory_unlock(('x' || substr(md5('SqlOS:FgaFunctionInitializer'), 1, 8))::bit(32)::int, ('x' || substr(md5('SqlOS:FgaFunctionInitializer'), 9, 8))::bit(32)::int);"
+                    : "EXEC sp_releaseapplock @Resource = 'SqlOS:FgaFunctionInitializer', @LockOwner = 'Session';");
+                await start;
+            }
         }
         finally
         {
