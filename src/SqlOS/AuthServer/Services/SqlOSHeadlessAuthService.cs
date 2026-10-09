@@ -1533,7 +1533,12 @@ public sealed class SqlOSHeadlessAuthService
             request.OrganizationId,
             httpContext,
             cancellationToken);
-        if (string.IsNullOrWhiteSpace(completion.AuthorizationRequestId))
+
+        // A selection that issued the code also completed the authorization request, so the
+        // request can no longer be read as active. Hand the client redirect back, as the hosted
+        // chooser does; only a selection that needs another step re-reads the request for its view.
+        if (string.IsNullOrWhiteSpace(completion.AuthorizationRequestId)
+            || (!completion.RequiresMfa && !completion.RequiresConsent && !completion.RequiresOrganizationSelection))
         {
             return Redirect(completion.RedirectUrl!);
         }
