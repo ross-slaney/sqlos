@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <!-- Every project in the repository builds for the one framework SqlOS ships for. -->
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+</Project>

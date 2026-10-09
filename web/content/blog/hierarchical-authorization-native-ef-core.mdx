@@ -121,12 +121,12 @@ Keys, relationships, migrations, change tracking, and business predicates remain
 
 ## A complete runnable API host
 
-The following `Program.cs` is a complete .NET 9 minimal API host. It creates workspaces, grants the creator a role at the workspace, creates child projects after checking the parent permission, and lists only projects visible to the signed-in subject. SQL Server and an access token are explicit prerequisites; this is not a standalone browser client.
+The following `Program.cs` is a complete .NET 10 minimal API host. It creates workspaces, grants the creator a role at the workspace, creates child projects after checking the parent permission, and lists only projects visible to the signed-in subject. SQL Server and an access token are explicit prerequisites; this is not a standalone browser client.
 
 Create the host and install the same package version used to compile this article:
 
 ```bash
-dotnet new web --framework net9.0 --name HierarchicalEf
+dotnet new web --framework net10.0 --name HierarchicalEf
 cd HierarchicalEf
 dotnet add package SqlOS --version 7.2.1
 ```

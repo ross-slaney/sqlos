@@ -40,7 +40,7 @@ public static class SqlOSFgaDbContextOptionsExtensions
 #pragma warning restore EF1001
         if (loggerFactory is not null)
         {
-            builder.AddInterceptors(new SqlOSFgaUnindexedOrderInterceptor(loggerFactory));
+            builder.AddInterceptors(SqlOSFgaUnindexedOrderInterceptor.FromContextOptions);
         }
 
         return builder;

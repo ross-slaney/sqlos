@@ -208,7 +208,8 @@ public sealed class SqlOSSurfaceProtectionTests
     public async Task ConventionalStartupHost_RequireAuthorization_UsesSqlOSScheme()
     {
         var databaseName = Guid.NewGuid().ToString("N");
-        using var server = new TestServer(new WebHostBuilder().UseEnvironment("Development")
+        using var host = await new HostBuilder().UseEnvironment("Development").ConfigureWebHost(web => web
+            .UseTestServer()
             .ConfigureServices(services =>
             {
                 services.AddLogging();
@@ -228,8 +229,8 @@ public sealed class SqlOSSurfaceProtectionTests
                     endpoints.MapGet("/api/me", () => "private").RequireAuthorization();
                     endpoints.MapGet("/public", () => "public");
                 });
-            }));
-        using var client = server.CreateClient();
+            })).StartAsync();
+        using var client = host.GetTestClient();
         (await client.GetAsync("/api/me")).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         (await client.GetAsync("/public")).StatusCode.Should().Be(HttpStatusCode.OK);
         (await client.GetAsync("/sqlos/auth/.well-known/openid-configuration")).StatusCode.Should().Be(HttpStatusCode.OK);

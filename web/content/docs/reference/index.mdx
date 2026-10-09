@@ -21,8 +21,8 @@ order: 0
 | Package | `SqlOS` |
 | Current source version | `7.2.1` |
 | Assembly | `SqlOS.dll` |
-| Target framework | `net9.0` |
-| EF Core provider | SQL Server or PostgreSQL, EF Core 9 |
+| Target framework | `net10.0` |
+| EF Core provider | SQL Server or PostgreSQL, EF Core 10 |
 | ASP.NET Core | Framework reference supplied by the package |
 
 The package now emits and packs `SqlOS.xml` for IDE help and generated-reference tooling. Missing-member warning `CS1591` is temporarily suppressed because XML comments are not yet complete across every public implementation type; overloaded-member `cref` warning `CS0419` is also suppressed until member-level docs are generated. The curated pages below therefore describe the supported application integration surface; they do not claim that every public class in the assembly is a recommended extension point.

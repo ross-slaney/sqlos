@@ -1,6 +1,6 @@
 # SqlOS Todo CLI
 
-This .NET 9 console application is a complete OAuth device-authorization client for the SqlOS Todo sample. It discovers the server configuration, starts device login, opens or prints the verification URL, polls according to the protocol, stores the resulting tokens, refreshes expired access tokens, and calls the protected Todo API.
+This .NET 10 console application is a complete OAuth device-authorization client for the SqlOS Todo sample. It discovers the server configuration, starts device login, opens or prints the verification URL, polls according to the protocol, stores the resulting tokens, refreshes expired access tokens, and calls the protected Todo API.
 
 It is intentionally separate from Aspire. Neither AppHost launches the CLI.
 
@@ -19,7 +19,7 @@ It is intentionally separate from Aspire. Neither AppHost launches the CLI.
 
 Prerequisites:
 
-- .NET 9 SDK
+- .NET 10 SDK
 - Docker Desktop or another Docker-compatible runtime
 - free ports `5080`, `18890`, and `18891` (plus `1435` when you opt into SQL Server)
 

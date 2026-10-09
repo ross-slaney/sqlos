@@ -19,7 +19,7 @@ dotnet build "$project" --configuration Release
 
 # CI runners have pwsh; the tests also self-install Chromium on first launch.
 if command -v pwsh >/dev/null 2>&1; then
-  pwsh "$project/bin/Release/net9.0/playwright.ps1" install --with-deps chromium
+  pwsh "$project/bin/Release/net10.0/playwright.ps1" install --with-deps chromium
 fi
 
 ASPIRE_ALLOW_UNSECURED_TRANSPORT=true \

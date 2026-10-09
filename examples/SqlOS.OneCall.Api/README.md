@@ -33,7 +33,7 @@ Like the other SqlOS examples, this host is bearer-only. Clients (a browser SPA,
 
 ## Run
 
-Use .NET 9 and a SQL Server or PostgreSQL database. From the repository root, supply the connection through your environment or secret store:
+Use .NET 10 and a SQL Server or PostgreSQL database. From the repository root, supply the connection through your environment or secret store:
 
 ```bash
 export ConnectionStrings__DefaultConnection="Server=localhost,1434;Database=sqlos-notes;User Id=sa;Password=<your-password>;TrustServerCertificate=True"

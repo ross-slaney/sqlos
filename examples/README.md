@@ -34,7 +34,7 @@ The relying-party applications continue to use Auth.js, `angular-oauth2-oidc`, A
 
 Prerequisites:
 
-- .NET 9 SDK
+- .NET 10 SDK
 - Docker Desktop or another Docker-compatible runtime
 - Node.js and npm
 - available local ports listed below

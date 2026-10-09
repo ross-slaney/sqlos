@@ -18,3 +18,7 @@ else
 }
 
 builder.Build().Run();
+
+// Test projects reference this AppHost alongside an example API's public Program. Declaring it
+// internal stops ASP.NET Core 10's generator from making it public and ambiguous there.
+internal partial class Program { }

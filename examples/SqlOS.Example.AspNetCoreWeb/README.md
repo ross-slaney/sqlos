@@ -18,7 +18,7 @@ The sample proves the complete lifecycle:
 
 Prerequisites:
 
-- .NET 9 SDK;
+- .NET 10 SDK;
 - Docker Desktop or another Docker-compatible runtime;
 - free local ports `5080`, `5090`, `18890`, and `18891` (plus `1435` when you opt into SQL Server).
 

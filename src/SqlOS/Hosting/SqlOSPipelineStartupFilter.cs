@@ -70,7 +70,7 @@ internal sealed class SqlOSPipelineStartupFilter : IStartupFilter
             && !HasNonLoopbackTrustedProxy(forwardedHeaders))
         {
             _logger.LogWarning(
-                "SqlOS public throttling is enabled while X-Forwarded-For has no non-loopback KnownProxies or KnownNetworks. " +
+                "SqlOS public throttling is enabled while X-Forwarded-For has no non-loopback KnownProxies or KnownIPNetworks. " +
                 "Configure trusted proxy boundaries or disable X-Forwarded-For processing; untrusted forwarded client addresses can bypass or collapse rate-limit buckets.");
         }
 
@@ -160,5 +160,5 @@ internal sealed class SqlOSPipelineStartupFilter : IStartupFilter
 
     private static bool HasNonLoopbackTrustedProxy(ForwardedHeadersOptions options)
         => options.KnownProxies.Any(address => !IPAddress.IsLoopback(address))
-           || options.KnownNetworks.Any(network => !IPAddress.IsLoopback(network.Prefix));
+           || options.KnownIPNetworks.Any(network => !IPAddress.IsLoopback(network.BaseAddress));
 }

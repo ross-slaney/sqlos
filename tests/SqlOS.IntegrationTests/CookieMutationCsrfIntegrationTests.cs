@@ -331,7 +331,7 @@ public sealed class CookieMutationCsrfIntegrationTests
                 {
                     options.ForwardedHeaders = ForwardedHeaders.XForwardedHost | ForwardedHeaders.XForwardedProto;
                     options.KnownProxies.Clear();
-                    options.KnownNetworks.Clear();
+                    options.KnownIPNetworks.Clear();
                     options.KnownProxies.Add(proxyAddress);
                 });
                 // Registered before AddSqlOS so this middleware runs before UseForwardedHeaders.
