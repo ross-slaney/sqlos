@@ -86,12 +86,15 @@ internal sealed partial class SqlServerDatabaseProvider
         var columns = SqlOSFgaScopeIndex.Columns(table).Select(c => c.Column).ToList();
         var list = string.Join(", ", columns.Select(c => $"[{Escape(c)}]"));
         var values = string.Join(", ", columns.Select(c => $"s.[{Escape(c)}]"));
-        var changes = columns.Where(c => !table.KeyColumns.Contains(c)).ToList();
+        // SQL text equality can ignore case and trailing spaces. The projection also supplies values to
+        // EF, so it must copy exact bytes, even a case-only change to a string primary key. Comparing keys
+        // with normal SQL equality still identifies the row; updating them preserves their stored spelling.
+        var changes = columns;
         return $"""
             MERGE {ScopeIndexTable(options, table)} WITH (HOLDLOCK) AS d
             USING (SELECT {list} FROM {source}) AS s
             ON {string.Join(" AND ", table.KeyColumns.Select(k => $"d.[{Escape(k)}] = s.[{Escape(k)}]"))}
-            WHEN MATCHED AND EXISTS (SELECT {string.Join(", ", changes.Select(c => $"d.[{Escape(c)}]"))} EXCEPT SELECT {string.Join(", ", changes.Select(c => $"s.[{Escape(c)}]"))})
+            WHEN MATCHED AND EXISTS (SELECT {string.Join(", ", changes.Select(c => $"CONVERT(varbinary(max), d.[{Escape(c)}])"))} EXCEPT SELECT {string.Join(", ", changes.Select(c => $"CONVERT(varbinary(max), s.[{Escape(c)}])"))})
                 THEN UPDATE SET {string.Join(", ", changes.Select(c => $"[{Escape(c)}] = s.[{Escape(c)}]"))}
             WHEN NOT MATCHED BY TARGET THEN INSERT ({list}) VALUES ({values})
             {(removeMissing ? "WHEN NOT MATCHED BY SOURCE THEN DELETE" : "")};

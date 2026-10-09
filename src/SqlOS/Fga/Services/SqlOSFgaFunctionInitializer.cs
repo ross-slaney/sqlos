@@ -218,9 +218,9 @@ public class SqlOSFgaFunctionInitializer
         }
         else
         {
-            // A new definition (a new table, order or version) rebuilds the grant counts and the direct
-            // indexes from the grants and the rows: seconds, proportional to the grants.
-            _logger.LogInformation("Rebuilding the FGA grant counts and direct indexes...");
+            // A new definition rebuilds the grant counts and direct indexes, and on SQL Server reconciles
+            // the shared scope projections with their application rows. This is startup/administrative work.
+            _logger.LogInformation("Rebuilding the FGA grant counts and maintained indexes...");
             await ExecuteNonQueryAsync(provider.BuildPageIndexRebuildSql(_options), cancellationToken);
         }
 

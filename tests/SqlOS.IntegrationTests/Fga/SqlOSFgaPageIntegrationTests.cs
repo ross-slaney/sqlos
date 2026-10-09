@@ -88,13 +88,17 @@ public class SqlOSFgaPageIntegrationTests
             await AssertScopeProjectionAsync(db);
             await db.Database.ExecuteSqlRawAsync("DELETE FROM [PageItems] WHERE [Id] LIKE N'renamed-%'");
             await AssertScopeProjectionAsync(db);
+            // SQL equality ignores case/trailing spaces under the default collation; a projection must
+            // nevertheless preserve exactly what the application stored, for keys as well as sort values.
+            await db.Database.ExecuteSqlRawAsync("UPDATE [PageItems] SET [Id] = UPPER([Id]), [Label] = N'ORIGINAL '");
+            await AssertScopeProjectionAsync(db);
         }
     }
 
     private static async Task AssertScopeProjectionAsync(PageDbContext db)
     {
         // Compare with the source rows, not with another query that uses the same authorization index.
-        const string projection = "Id, Rank, Stamp, CONVERT(varchar(max), FgaScope, 2) AS ScopeBytes";
+        const string projection = "Id, Label, Rank, Stamp, CONVERT(varchar(max), FgaScope, 2) AS ScopeBytes";
         (await ReadAsync(db, $"SELECT {projection} FROM dbo.SqlOSFgaScopeIndex_PageItems ORDER BY Id"))
             .Should().Equal(await ReadAsync(db, $"SELECT {projection} FROM PageItems ORDER BY Id"),
                 "the private projection must equal the application rows, including every scope byte");
@@ -767,6 +771,7 @@ public class SqlOSFgaPageIntegrationTests
         public int Rank { get; set; }
         public int Status { get; set; }
         public int Price { get; set; }
+        public string Label { get; set; } = "Original";
 
         /// <summary>An instant (UTC), the declared order of the timestamp page: <c>timestamp with time zone</c> on PostgreSQL, <c>datetime2</c> on SQL Server.</summary>
         public DateTime Stamp { get; set; } = Tree.Epoch;
@@ -793,6 +798,8 @@ public class SqlOSFgaPageIntegrationTests
                 item.Property(i => i.ResourceId).HasMaxLength(128);
                 item.Property(i => i.FolderResourceId).HasMaxLength(128);
                 item.Property(i => i.TypeId).HasMaxLength(64);
+                item.Property(i => i.Label).HasMaxLength(80);
+                item.HasIndex(i => i.Label);
                 item.HasIndex(i => i.Rank).HasDatabaseName("IX_PageItems_Rank");
                 item.HasIndex(i => i.Stamp).HasDatabaseName("IX_PageItems_Stamp");
                 if (TestDatabase.IsPostgreSql)
