@@ -153,17 +153,23 @@ internal sealed class PlanCapture(DatabaseProvider provider) : DbCommandIntercep
         return best;
     }
 
-    /// <summary>Rows the operators over <c>[relation]</c> read (<c>ActualRowsRead</c>, else <c>ActualRows</c>).</summary>
+    /// <summary>
+    /// Rows the operators over the entity or its owned scope index read (ActualRowsRead, else ActualRows).
+    /// Count the largest input, as for a nonclustered seek followed by key lookups; counting only the final
+    /// application-table lookup would hide work done while finding candidates in the scope index.
+    /// </summary>
     internal static long? SqlServerRows(string xml, string relation)
     {
         XNamespace ns = "http://schemas.microsoft.com/sqlserver/2004/07/showplan";
         var table = $"[{relation}]";
+        // Benchmark application tables use the default schema, without a schema prefix in the index name.
+        var scopeIndex = $"[SqlOSFgaScopeIndex_{relation}]";
         long? best = null;
         foreach (var relOp in XDocument.Parse(xml).Descendants(ns + "RelOp"))
         {
             var readsRelation = relOp.Elements()
                 .SelectMany(operation => operation.Elements(ns + "Object"))
-                .Any(o => (string?)o.Attribute("Table") == table);
+                .Any(o => (string?)o.Attribute("Table") is { } name && (name == table || name == scopeIndex));
             if (!readsRelation)
             {
                 continue;
