@@ -211,6 +211,32 @@ internal sealed partial class SqlServerDatabaseProvider
             """;
     }
 
+    /// <summary>
+    /// <c>fn_CheckRow(@ResourceId, @SubjectIds, @PermissionId)</c>: one row when the point check allows the
+    /// resource, none otherwise. The "check each row" filter reads it for each row the query reads. It is the
+    /// point check under a name of SqlOS's own: an application that maps <c>fn_IsResourceAccessible</c> in its
+    /// own model (EF Core allows one mapping per function) keeps working.
+    /// </summary>
+    public string BuildCheckRowFunctionSql(SqlOSFgaOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var schema = Escape(options.Schema);
+        return $"""
+            CREATE OR ALTER FUNCTION [{schema}].fn_CheckRow(
+                @ResourceId NVARCHAR(450),
+                @SubjectIds NVARCHAR(MAX),
+                @PermissionId NVARCHAR(450)
+            )
+            RETURNS TABLE
+            AS
+            RETURN
+            (
+                SELECT CAST(1 AS BIT) AS Allowed
+                FROM [{schema}].fn_IsResourceAccessible(@ResourceId, @SubjectIds, @PermissionId)
+            )
+            """;
+    }
+
     /// <summary>The query over <c>fn_ListFirst</c>: <c>{0}</c> subject ids JSON, <c>{1}</c> permission id, <c>{2}</c> type id, <c>{3}</c> the table's quoted name.</summary>
     public string BuildListFirstQuerySql(SqlOSFgaOptions options)
     {
@@ -577,6 +603,7 @@ internal sealed partial class SqlServerDatabaseProvider
             Exists("fn_VisibleSet", "TF"),
             Exists("fn_ListFirst", "IF"),
             Exists("fn_IsResourceAccessible", "IF"),
+            Exists("fn_CheckRow", "IF"),
             Exists("sp_" + SqlOSFgaLineage.RefreshRoutineName(resourcesTable), "P"),
             Exists("sp_" + SqlOSFgaLineage.RebuildRoutineName(resourcesTable), "P"),
         };

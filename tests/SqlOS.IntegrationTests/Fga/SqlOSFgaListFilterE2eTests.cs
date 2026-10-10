@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -253,6 +254,14 @@ public class SqlOSFgaListFilterE2eTests
             db.Tickets.Add(new ManualTicket { Id = "a4", ResourceId = "doc::a4" });
             await db.SaveChangesAsync();
             (await PageAsync(db.Tickets, fga, alice)).Should().Equal("a1", "a2", "a3", "a4");
+
+            // The application maps the point check in its own model (PointCheck below), and a filter that checks
+            // each row composes on the same model: SqlOS's row check has a name of its own (fn_CheckRow).
+            var rowCheck = new SqlOSFgaAuthService(db, options, NullLogger<SqlOSFgaAuthService>.Instance) { ListFirstOverride = false };
+            (await PageAsync(db.Tickets, rowCheck, alice)).Should().Equal("a1", "a2", "a3", "a4");
+            (await PageAsync(db.Tickets, rowCheck, bob)).Should().BeEmpty();
+            (await db.PointCheck("doc::a1", JsonSerializer.Serialize(new[] { alice }), "perm_e2e_read").AnyAsync()).Should().BeTrue();
+            (await db.PointCheck("doc::b1", JsonSerializer.Serialize(new[] { alice }), "perm_e2e_read").AnyAsync()).Should().BeFalse();
         }
         finally
         {
@@ -409,9 +418,23 @@ public class SqlOSFgaListFilterE2eTests
         public string ResourceId { get; set; } = string.Empty;
     }
 
+    /// <summary>A row of fn_IsResourceAccessible as an application maps it for its own use.</summary>
+    public sealed class ManualAccessRow
+    {
+        public string Id { get; set; } = string.Empty;
+        public string GrantId { get; set; } = string.Empty;
+        public string SubjectId { get; set; } = string.Empty;
+        public string RoleId { get; set; } = string.Empty;
+        public int Level { get; set; }
+    }
+
     public sealed class ManualFgaDbContext(DbContextOptions<ManualFgaDbContext> options) : DbContext(options), ISqlOSFgaDbContext
     {
         public DbSet<ManualTicket> Tickets => Set<ManualTicket>();
+
+        /// <summary>The point check, mapped by the application itself.</summary>
+        public IQueryable<ManualAccessRow> PointCheck(string resourceId, string subjectIds, string permissionId)
+            => FromExpression(() => PointCheck(resourceId, subjectIds, permissionId));
 
         public static ManualFgaDbContext Create(string connectionString)
             => new(new DbContextOptionsBuilder<ManualFgaDbContext>().UseTestProvider(connectionString).Options);
@@ -427,6 +450,8 @@ public class SqlOSFgaListFilterE2eTests
                 ticket.Property(t => t.Id).HasMaxLength(64);
                 ticket.Property(t => t.ResourceId).HasMaxLength(128);
             });
+            modelBuilder.Entity<ManualAccessRow>().HasNoKey().ToView(null);
+            modelBuilder.HasDbFunction(typeof(ManualFgaDbContext).GetMethod(nameof(PointCheck))!).HasName("fn_IsResourceAccessible").HasSchema("dbo");
         }
     }
 }

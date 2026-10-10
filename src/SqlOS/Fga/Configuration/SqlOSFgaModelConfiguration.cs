@@ -210,6 +210,13 @@ public static class SqlOSFgaModelConfiguration
             entity.ToView(null);
         });
 
+        // RowCheck (keyless - fn_CheckRow result): the point check's answer for one row.
+        modelBuilder.Entity<SqlOSFgaRowCheck>(entity =>
+        {
+            entity.HasNoKey();
+            entity.ToView(null);
+        });
+
         // VisibleResource (keyless - fn_VisibleSet result): a resource the caller may see.
         modelBuilder.Entity<SqlOSFgaVisibleResource>(entity =>
         {

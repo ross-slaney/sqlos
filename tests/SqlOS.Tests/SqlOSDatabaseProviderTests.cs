@@ -140,6 +140,11 @@ public class SqlOSDatabaseProviderTests
         listFirst.Should().Contain("FROM (SELECT 1 FROM \"dbo\".\"fn_ListVisible\"(p_subject_ids, p_permission_id, p_type_id) LIMIT c.cap) t");
         listFirst.Should().Contain("SELECT v.visible < c.cap");
 
+        var checkRow = provider.BuildCheckRowFunctionSql(options);
+        checkRow.Should().Contain("CREATE OR REPLACE FUNCTION \"dbo\".\"fn_CheckRow\"(");
+        checkRow.Should().Contain("LANGUAGE sql\nSTABLE");
+        checkRow.Should().Contain("SELECT TRUE FROM \"dbo\".\"fn_IsResourceAccessible\"(p_resource_id, p_subject_ids, p_permission_id)");
+
         provider.BuildListFirstQuerySql(options).Should().Be(
             "SELECT f.\"ListFirst\" AS \"Value\" FROM \"dbo\".\"fn_ListFirst\"(CAST({0} AS text), CAST({1} AS varchar(450)), CAST({2} AS varchar(450)), CAST({3} AS text)) AS f");
     }
@@ -186,6 +191,7 @@ public class SqlOSDatabaseProviderTests
         hash.Should().Contain("p.proname = 'fn_ListVisible'");
         hash.Should().Contain("p.proname = 'fn_VisibleSet'");
         hash.Should().Contain("p.proname = 'fn_ListFirst'");
+        hash.Should().Contain("p.proname = 'fn_CheckRow'");
         hash.Should().Contain("p.proname = 'fn_res\"ources_LineageRebuild'");
         hash.Should().Contain("t.tgname = 'TR_res\"ources_Lineage_Update'");
         hash.Should().Contain("column_name = 'Ancestor4'");

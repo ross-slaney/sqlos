@@ -188,7 +188,6 @@ public sealed class Project : ISqlOSResourceEntity
 {
     public Guid Id { get; set; }
     public string ResourceId { get; set; } = string.Empty;
-    public byte[]? FgaScope { get; private set; }
     public string Name { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; }
 
@@ -202,7 +201,7 @@ public sealed class Project : ISqlOSResourceEntity
 public sealed record CreateProjectRequest(string Name);
 ```
 
-Create the `Projects` table with your normal EF migration workflow. SqlOS owns its own tables; your application migration owns `Projects`, including its `FgaScope` column. At startup SqlOS adds the indexes and triggers that keep `FgaScope` current; they are not part of your migration.
+Create the `Projects` table with your normal EF migration workflow. SqlOS owns its own tables; your application migration owns `Projects`. SqlOS puts nothing on that table beyond an index on `ResourceId` when you declared none (the snippet above declares one), and runs nothing against it at startup.
 
 ## How the write works
 

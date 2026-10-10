@@ -7,14 +7,18 @@ It is the maintained successor to the harness behind the paper's Section 7 (kept
 which ran a hand-copied version of the schema and function at 1.2M–1.5M resources on SQL Server only.
 
 Every page (`list.*`) is the LINQ query an application writes (`Where(filter)`, the cursor, the order,
-`Take(k + 1)`) with the `BuildFilterAsync` predicate, which composes as one EXISTS over `fn_Visible`, so
-the engine plans the whole statement and takes the probe or the expand plan from its statistics. Point
-checks measure `fn_IsResourceAccessible` and `Allows` (`CheckAccessAsync`), which applications call.
+`Take(k + 1)`) with the filter `BuildFilterAsync` returns. `BuildFilterAsync` first asks the database
+(`fn_ListFirst`) whether the caller sees fewer rows than the table's cap, 8·√rows; below it the filter lists
+the caller's rows first (`fn_VisibleSet`), at or above it the query reads the table in order and checks each
+row with the point check (`fn_CheckRow`, which is `fn_IsResourceAccessible`). The summary shows which filter each caller got and the
+time `BuildFilterAsync` took. Point checks measure `fn_IsResourceAccessible` and `Allows`
+(`CheckAccessAsync`), which applications call.
 
 ## What is measured
 
 - **The shipped artifacts.** The FGA schema scripts, their indexes, the lineage columns with their per-level
-  indexes and triggers, `fn_ActiveSubjects`, `fn_AccessRoots`, `fn_Visible`, `fn_IsResourceAccessible`, and
+  indexes and triggers, `fn_ActiveSubjects`, `fn_AccessRoots`, `fn_ListVisible`, `fn_VisibleSet`,
+  `fn_ListFirst`, `fn_IsResourceAccessible`, `fn_CheckRow`, and
   the core seed are created by SqlOS's own initializers (`SqlOSFgaSchemaInitializer`,
   `SqlOSFgaFunctionInitializer`, `SqlOSFgaSeedService`) from an application context. A change to any of
   them is what gets measured.
@@ -78,6 +82,9 @@ rebuild.
 | maintenance | At the first scale only: 2,000 single-row inserts with the lineage triggers on and off, one 2,000-row insert, one 2,000-row delete, and reparent, deactivate and reactivate of a region subtree; then a rebuild from scratch, compared with the maintained lineage |
 
 ## The run that replaced the tree walk
+
+History: this section records the 8.0 scope-column design (a column on every protected table), which 9.0
+removed; nothing below describes the current filters. Their numbers are in the latest run's summary.
 
 Run 36964060038 (2026-10-02, hosted `ubuntu-latest`, 4 vCPU, 17 GB, 8 GB to the engine), 1M → 10M → 50M on
 both engines, measured the scope column against the function it replaced, which walked up the tree from
@@ -181,15 +188,16 @@ the application's own `StoreId` index; every other page reads the page's rows an
 - **correctness**: every scenario returned exactly the authorized answer.
 - **lineage**: the loaded lineage, the same after the maintenance pass, and SqlOS's rebuild are identical
   (counts and hashes).
-- **scale**: per-page cost must follow the work the paper predicts, not N. The median at the largest scale
-  may be at most `maxRatio` (2.0) times the median at the smallest, times the growth of the rows the page has
-  to touch, plus `slackMilliseconds`. A page through the filter touches k rows at any N, so it has no growth
-  term; a page filtered to a store touches that store's σN rows through its own index. The many-grants
-  pages are exempt: their cost follows the caller's grants, not N.
+- **scale**: per-page cost must follow the work the filter it got predicts, not N. The median at the largest
+  scale may be at most `maxRatio` (2.0) times the median at the smallest, times the growth of the rows the page
+  has to touch, plus `slackMilliseconds`. A caller listed first touches their own σN rows; a caller whose rows
+  are checked one by one touches about k/σ rows, the same at any N. The many-grants pages are exempt: their
+  cost follows the caller's grants, not N.
 - **regression**: every scenario's median against the constant set for it and the engine in
   `regressionMilliseconds`: what the scenario costs today, with headroom for runner noise (several times the
   values CI reports). A change that makes any page or point check slower than its limit fails the run. Raise
-  a limit only with an explanation. The gated timing is the query alone.
+  a limit only with an explanation. For a page the gated timing is the whole request: `BuildFilterAsync`
+  (with `fn_ListFirst`'s count) and the query.
 
 ## Run it
 

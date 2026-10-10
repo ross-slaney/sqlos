@@ -16,24 +16,17 @@ There are two ways to add SqlOS authorization to an EF Core application. Both gi
 
 ## What every protected entity declares
 
-Every protected entity carries two things: the id of its FGA resource, and the `FgaScope` column SqlOS keeps current. An entity that derives from `SqlOSResourceEntity` carries both already and declares nothing. An entity that spends its base class elsewhere implements the interface instead, and the compiler requires both members: an entity that implements `IHasResourceId` or `ISqlOSResourceEntity` without `FgaScope` does not build.
+Every protected entity carries one thing: the id of its FGA resource. An entity that derives from `SqlOSResourceEntity` carries it already and declares nothing. An entity that spends its base class elsewhere implements the interface instead:
 
 ```csharp
 public string ResourceId { get; set; } = "";
-public byte[]? FgaScope { get; private set; }   // SqlOS fills and maintains it; never set it
 ```
 
-Your code never reads `FgaScope`, so keep it out of your API's responses: return DTOs, as the examples below do. If you prefer it off the class's public surface, implement it explicitly, as `SqlOSResourceEntity` itself does. SqlOS maps the column either way:
-
-```csharp
-byte[]? IHasResourceId.FgaScope => null;   // the column is SqlOS's; the entity never holds it
-```
-
-`FgaScope` holds the row's resource type and the ancestors access flows down from. `BuildFilterAsync` reads it, so a page of a list costs the same whether the table holds a thousand rows or fifty million, and whether the caller can see all of it or a sliver. It is a byte string on both databases (`varbinary(512)` on SQL Server, `bytea` on PostgreSQL), so nothing about it depends on which one you use.
+That column, and an index on it, is all the filter needs from your table. If you declare no index on `ResourceId`, SqlOS adds one to the EF model (`IX_{Table}_SqlOSFgaResourceId`), so your migration creates it. Nothing else of SqlOS's is on your table: no column, no trigger, no index of its own. Everything `BuildFilterAsync` reads lives on SqlOS's resources table, which holds the tree's closure. A page of a list costs about the page for a caller who sees most of the table and about the caller's rows for one who sees a sliver, whether the table holds a thousand rows or fifty million; for callers in between, the worst page grows with the square root of the table, not with the table. [List filtering](/docs/fga/list-filter) explains how, and the one case that costs more.
 
 ## Option 1: SqlOSDbContext and SqlOSResourceEntity
 
-The entity describes its resource; SqlOS creates and maintains it. Derive from `SqlOSResourceEntity` and override what describes the resource — the resource id and the scope column come with the base class, and the members you override are never columns of your table:
+The entity describes its resource; SqlOS creates and maintains it. Derive from `SqlOSResourceEntity` and override what describes the resource — the resource id comes with the base class, and the members you override are never columns of your table:
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
@@ -70,7 +63,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
 
 Saving a `Project` creates its FGA resource under its workspace in the same `SaveChanges`.
 
-An entity whose base class is already spoken for implements `ISqlOSResourceEntity` itself and declares the two members from [above](#what-every-protected-entity-declares); SqlOS treats both forms the same. Map the entities, never the base class: a `DbSet<SqlOSResourceEntity>` fails at model building with an error saying so.
+An entity whose base class is already spoken for implements `ISqlOSResourceEntity` itself and declares `ResourceId` as [above](#what-every-protected-entity-declares); SqlOS treats both forms the same. Map the entities, never the base class: a `DbSet<SqlOSResourceEntity>` fails at model building with an error saying so.
 
 ## Option 2: your own DbContext and IHasResourceId
 
@@ -86,7 +79,6 @@ public sealed class Ticket : IHasResourceId
 {
     public Guid Id { get; set; }
     public string ResourceId { get; set; } = "";
-    public byte[]? FgaScope { get; private set; }
     public string Title { get; set; } = "";
 }
 
@@ -117,18 +109,9 @@ db.Tickets.Add(new Ticket { Id = id, ResourceId = $"ticket::{id:D}", Title = "Pr
 await db.SaveChangesAsync();
 ```
 
-`UseSqlOS` applies SqlOS's auth and FGA model and configures the `FgaScope` column of every entity configured before it, so call it last. The two interfaces need nothing beyond what `DbContext` already has.
+`UseSqlOS` applies SqlOS's auth and FGA model and adds the `ResourceId` index to every entity configured before it that declared none, so call it last. The two interfaces need nothing beyond what `DbContext` already has. A context you build yourself (not through `AddSqlOS`) needs nothing more: the filter is a predicate over a function in SqlOS's model, and any provider options that reach SQL Server or PostgreSQL run it.
 
-A context you build yourself (not through `AddSqlOS`) also needs SqlOS's query execution on its options, which is what evaluates the filters `BuildFilterAsync` returns:
-
-```csharp
-var options = new DbContextOptionsBuilder<AppDbContext>()
-    .UseSqlServer(connectionString)
-    .UseSqlOSFga(loggerFactory)   // the walk for pages, the predicate for everything else
-    .Options;
-```
-
-Keep every protected entity in the context you register with `AddSqlOS`: SqlOS maintains the tables of that context's model. `BuildFilterAsync` names an entity it does not maintain in its error instead of returning rows nobody keeps current.
+Keep every protected entity in the context you register with `AddSqlOS`: the filter is built for that context's model. `BuildFilterAsync` names an entity outside it in its error.
 
 ## Register SqlOS on SQL Server or PostgreSQL
 
@@ -154,23 +137,12 @@ builder.AddSqlOS<AppDbContext>(
 
 ## Create the tables, then start
 
-1. Add a migration for your context (`dotnet ef migrations add AddProjects`) and apply it, or call `EnsureCreated` in development. The migration carries your tables with their `FgaScope` column, and an index on `ResourceId` if you declared none.
-2. Start the application. SqlOS creates its own tables, then, for every table with an `FgaScope` column, its per-level indexes and the triggers that keep the column current, and fills the column for existing rows. None of that is in your migrations.
+1. Add a migration for your context (`dotnet ef migrations add AddProjects`) and apply it, or call `EnsureCreated` in development. The migration carries your tables, with an index on `ResourceId` if you declared none.
+2. Start the application. SqlOS creates or upgrades its own tables, then the ancestor columns of its resources table with one index per level, its seven functions (`fn_ActiveSubjects`, `fn_AccessRoots`, `fn_ListVisible`, `fn_VisibleSet`, `fn_ListFirst`, `fn_IsResourceAccessible`, `fn_CheckRow`), the two lineage procedures and the two triggers on the resources table, and builds the lineage once if it was never built. None of that is in your migrations, and none of it touches your tables.
 
-If SqlOS starts before your migration has added a table's `FgaScope` column (the order the [production guide](/docs/guides/production-readiness#6-roll-schema-changes-forward-through-one-instance) gives an application whose migrations reference SqlOS's tables), it logs a warning naming the table and protects the table at its next start. The hosted service starts SqlOS again when the application starts, after your migrations.
+The two steps run in either order. Nothing of SqlOS's depends on your tables, so SqlOS can start before your migrations (the order the [production guide](/docs/guides/production-readiness#6-roll-schema-changes-forward-through-one-instance) gives an application whose migrations reference SqlOS's tables), and there is no per-start pass over your tables afterwards. A row is visible as soon as its resource is, however it was written: through EF Core, `ExecuteUpdate`, raw SQL or a bulk load.
 
-From then on SqlOS keeps every row's `FgaScope` current through every change: inserts, moves, deactivations, retypes, deletes, bulk `ExecuteUpdate`/`ExecuteDelete`, raw SQL, and transactions running at the same time. See [Resource hierarchy](/docs/fga/resource-hierarchy#changes-made-at-the-same-time) for the one isolation rule: write resources in `READ COMMITTED` (the default) or `SERIALIZABLE` transactions. SqlOS refuses `REPEATABLE READ` on PostgreSQL and `SNAPSHOT` on SQL Server with a clear error.
-
-## Rows written without the triggers
-
-A bulk load that skips triggers (`SqlBulkCopy` without `FireTriggers`, a disabled trigger) writes rows without a scope, and nobody sees them. SqlOS fills them at its next start. To fill them right away, run the fill routine from the job that loaded them:
-
-```sql
-EXEC [dbo].[sp_SqlOSFgaResources_ScopeFill];            -- SQL Server
-SELECT "dbo"."fn_SqlOSFgaResources_ScopeFill"();        -- PostgreSQL
-```
-
-It sets only the rows that have no scope, through an index on them, so it costs nothing when there are none.
+SqlOS keeps the resource tree's closure current through every change: inserts, moves, deactivations, and transactions running at the same time. See [Resource hierarchy](/docs/fga/resource-hierarchy#changes-made-at-the-same-time) for the one isolation rule: change resources in `READ COMMITTED` (the default) or `SERIALIZABLE` transactions. SqlOS refuses `REPEATABLE READ` on PostgreSQL and `SNAPSHOT` on SQL Server with a clear error.
 
 ## Filter a list
 
@@ -187,11 +159,8 @@ var page = await db.Projects
     .ToListAsync(cancellationToken);
 ```
 
-Page in an order you declared an index for, ended by the key, as above: SqlOS mirrors each such index per level of the resource tree, so the page is one index seek. A page sorted by a column you declared no index for still returns the right rows; it reads the caller's whole scope to sort them, and SqlOS logs a warning naming the entity, the order, and the index to declare — once per query shape, so a hot page does not flood the log. (`AddSqlOS` configures the context it registers; a context built by hand calls `optionsBuilder.UseSqlOSFga(loggerFactory)`, which is also what evaluates the filter: without it, a query over a filter from `BuildFilterAsync` cannot run.) See [List filtering](/docs/fga/list-filter) for how the filter works and what it costs.
+Page in an order you declared an index for, ended by the key, as above. `BuildFilterAsync` asks the database how many rows the caller sees, up to a cap. For a caller who sees many, the database walks that index from the cursor, checks each row, and stops when the page is full. For a caller who sees few, it lists their rows through the resources table's per-level indexes and sorts them. A page sorted by a column you declared no index for still returns the right rows; the database sorts every row the filter passes, which for a caller who sees many rows means checking the whole table. The filter is a predicate; it runs on any instance of the context, from `AddSqlOS`, a factory or a pool. See [List filtering](/docs/fga/list-filter) for how the filter works and what it costs.
 
-## Upgrading from a version without FgaScope
+## Upgrading from 8.0
 
-1. Derive each resource entity from `SqlOSResourceEntity` (dropping its own `ResourceId` and the interface members the base class carries), or add `public byte[]? FgaScope { get; private set; }` to every entity that implements `IHasResourceId` or `ISqlOSResourceEntity`. The build lists every one that needs it.
-2. On a context of your own: delete its `IsResourceAccessible` method, and change `modelBuilder.UseSqlOS(GetType())` to `modelBuilder.UseSqlOS(Database.ProviderName)` (or `ApplySqlOSFgaModel(GetType())` to `ApplySqlOSFgaModel()`). The build points at both.
-3. Add and apply one migration for each context. It adds the `FgaScope` column, and an index on `ResourceId` where you declared none.
-4. Start the application. SqlOS builds the resource lineage and fills every `FgaScope` column once; on a large database that first start takes a few minutes per million resources, and other instances wait for it.
+Not supported in place; there are no compatibility shims. Either recreate the database, or remove what 8.0 put on your tables by hand: delete the `FgaScope` property from every entity (nothing declares it now), add and apply an EF migration that drops the column, and drop 8.0's per-table objects (triggers `TR_*_SqlOSFgaScope_*`, indexes `IX_*_FgaScope*`, computed columns `FgaScope*`, statistics `ST_*_FgaScopeType`) and its tables in SqlOS's schema (`SqlOSFgaDirect_*`, `SqlOSFgaGrantCounts`, `SqlOSFgaScopeTables`). SqlOS neither creates nor looks for any of them.

@@ -265,8 +265,8 @@ internal sealed class ScenarioRunner(
 
     /// <summary>
     /// The page an application asks for: authorized, optionally store-scoped, in key order after a cursor or
-    /// in price order, k + 1 rows, projected to the columns the harness verifies. The predicate composes as
-    /// one EXISTS over <c>fn_Visible</c>, so the engine plans the whole statement.
+    /// in price order, k + 1 rows, projected to the columns the harness verifies. The filter composes as one
+    /// EXISTS, over <c>fn_VisibleSet</c> or <c>fn_CheckRow</c>, whichever <c>fn_ListFirst</c> chose.
     /// </summary>
     private static IQueryable<ProductRow> BuildQuery(BenchDbContext db, Expression<Func<Product, bool>> filter, Scenario scenario)
     {

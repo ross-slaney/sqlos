@@ -16,8 +16,8 @@ namespace SqlOS.Fga.Services;
 /// <summary>
 /// Creates the SHRBAC enforcement routines in the database: the ancestor columns of the configured depth
 /// and the index of each level, <c>fn_ActiveSubjects</c>, <c>fn_AccessRoots</c>, <c>fn_ListVisible</c>,
-/// <c>fn_VisibleSet</c>, <c>fn_ListFirst</c>, <c>fn_IsResourceAccessible</c>, and the routines and triggers
-/// that keep the resource lineage exact. The
+/// <c>fn_VisibleSet</c>, <c>fn_ListFirst</c>, <c>fn_IsResourceAccessible</c>, <c>fn_CheckRow</c>, and the routines
+/// and triggers that keep the resource lineage exact. The
 /// definitions' hash is stored with the schema version, so a startup that finds the same hash and every
 /// object present changes nothing; a new definition (a new SqlOS version, a changed option) is applied under
 /// an exclusive lock, one batch per transaction. Builds the lineage once when it is empty but the resource
@@ -137,6 +137,7 @@ public class SqlOSFgaFunctionInitializer
         batches.Add(provider.BuildVisibleSetFunctionSql(_options));
         batches.Add(provider.BuildListFirstFunctionSql(_options));
         batches.Add(provider.BuildIsResourceAccessibleFunctionSql(_options));
+        batches.Add(provider.BuildCheckRowFunctionSql(_options));
         batches.AddRange(provider.BuildLineageMaintenanceSql(_options));
         var hash = Hash(batches);
 

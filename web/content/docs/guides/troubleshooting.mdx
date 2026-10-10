@@ -70,16 +70,15 @@ Use **Send test delivery** only with an operator-controlled destination. A test 
 - Confirm resources were created for domain rows and grants exist for the subject.
 - Permission key in code must match seeded permission keys exactly.
 - Use the access tester in `/sqlos/admin/fga/` to reproduce the check.
-- Rows a bulk load wrote without triggers have no scope until SqlOS's next start. Run the [scope fill](/docs/fga/setup#rows-written-without-the-triggers) from the job to make them visible at once.
-- A table the startup log names as having no `FgaScope` column yet is protected at the next start after its migration is applied.
+- Nothing of SqlOS's is on your tables, so there is no column to fill and no trigger to fire: a row is visible as soon as its `ResourceId` names a resource the caller may see, however the row was written. A row whose `ResourceId` names no resource, or an inactive one, is not returned.
 
 ## FGA errors
 
 | Message | What to do |
 | --- | --- |
-| `... is not a protected entity of AppDbContext, the DbContext registered with SqlOS` | Map the entity in the context you pass to `AddSqlOS`; SqlOS maintains that context's tables. |
+| `... is not a protected entity of AppDbContext, the DbContext registered with SqlOS` | Map the entity in the context you pass to `AddSqlOS`; the filter is built for that context's model. |
 | `SqlOS authorization checks and list filters run in the database` | Use SQL Server or PostgreSQL. In tests, run authorization against a real database; an in-memory provider cannot. |
-| `SqlOS FGA: change resources and protected rows in a READ COMMITTED or SERIALIZABLE transaction` | The write ran in `REPEATABLE READ` (PostgreSQL) or `SNAPSHOT` (SQL Server). Use the default isolation level for writes. |
+| `SqlOS FGA: change resources in a READ COMMITTED or SERIALIZABLE transaction` | The tree change ran in `REPEATABLE READ` (PostgreSQL) or `SNAPSHOT` (SQL Server). Use the default isolation level for resource writes. |
 | `SqlOS FGA: the change would create a cycle, or place a resource deeper than the configured maximum hierarchy depth` | The move or insert was rejected; fix the parent, or raise `Fga.MaxResourceHierarchyDepth`. |
 
 ## Still stuck?

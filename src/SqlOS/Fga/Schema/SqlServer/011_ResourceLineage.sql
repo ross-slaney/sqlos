@@ -122,7 +122,7 @@ GO
 
 -- 4. The ancestor columns of the default depth (levels 0..10). A larger configured depth adds the columns
 --    above level 10 through SqlOSFgaFunctionInitializer. SqlOSFgaFunctionInitializer also
---    creates the index on each level, which fn_Visible seeks for the rows beneath a root.
+--    creates the index on each level, which fn_ListVisible reads for the rows beneath a root.
 IF COL_LENGTH('[{Schema}].[{Resources}]', 'Ancestor0') IS NULL
 BEGIN
     ALTER TABLE [{Schema}].[{Resources}] ADD [Ancestor0] BIGINT NULL;

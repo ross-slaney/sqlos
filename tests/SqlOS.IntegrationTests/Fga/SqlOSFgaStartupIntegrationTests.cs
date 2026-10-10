@@ -223,8 +223,9 @@ public class SqlOSFgaStartupIntegrationTests
     [TestMethod]
     public async Task PostgreSql_TheListAndTheRowCheckAreInlined_AndTheSetIsNot()
     {
-        // fn_ListVisible, fn_AccessRoots and fn_IsResourceAccessible are SQL functions the planner inlines into the
-        // statement that uses them; fn_VisibleSet is PL/pgSQL on purpose, a small set the statement starts from.
+        // fn_ListVisible, fn_AccessRoots, fn_CheckRow and fn_IsResourceAccessible are SQL functions the planner
+        // inlines into the statement that uses them; fn_VisibleSet is PL/pgSQL on purpose, a small set the
+        // statement starts from.
         if (!TestDatabase.IsPostgreSql)
         {
             return;
@@ -241,7 +242,7 @@ public class SqlOSFgaStartupIntegrationTests
         count.Should().NotContain("Function Scan", count);
         count.Should().Contain("SqlOSFgaGrants", "the roots are planned as part of the statement");
 
-        var rowCheck = await ExplainAsync(db, """SELECT d."Id" FROM "StDocs" d WHERE EXISTS (SELECT 1 FROM "dbo"."fn_IsResourceAccessible"(d."ResourceId", @subjects, @permission) f) ORDER BY d."Id" LIMIT 20""", subjects);
+        var rowCheck = await ExplainAsync(db, """SELECT d."Id" FROM "StDocs" d WHERE EXISTS (SELECT 1 FROM "dbo"."fn_CheckRow"(d."ResourceId", @subjects, @permission) f) ORDER BY d."Id" LIMIT 20""", subjects);
         rowCheck.Should().NotContain("Function Scan", rowCheck);
 
         var listed = await ExplainAsync(db, """SELECT d."Id" FROM "StDocs" d WHERE EXISTS (SELECT 1 FROM "dbo"."fn_VisibleSet"(@subjects, @permission, @type) v WHERE v."ResourceId" = d."ResourceId") ORDER BY d."Id" LIMIT 20""", subjects);

@@ -18,8 +18,8 @@ internal static class SqlOSFgaFunctions
     internal static readonly MethodInfo VisibleSetMethod = typeof(SqlOSFgaFunctions)
         .GetMethod(nameof(VisibleSet), BindingFlags.Static | BindingFlags.NonPublic)!;
 
-    internal static readonly MethodInfo IsResourceAccessibleMethod = typeof(SqlOSFgaFunctions)
-        .GetMethod(nameof(IsResourceAccessible), BindingFlags.Static | BindingFlags.NonPublic)!;
+    internal static readonly MethodInfo CheckRowMethod = typeof(SqlOSFgaFunctions)
+        .GetMethod(nameof(CheckRow), BindingFlags.Static | BindingFlags.NonPublic)!;
 
     /// <summary>
     /// <c>fn_ActiveSubjects(@SubjectIds)</c>: the caller's subjects that are alive now, none unless the caller
@@ -37,11 +37,11 @@ internal static class SqlOSFgaFunctions
         => throw new InvalidOperationException("This method is translated to SQL by SqlOS and cannot be called directly.");
 
     /// <summary>
-    /// <c>fn_IsResourceAccessible(@ResourceId, @SubjectIds, @PermissionId)</c>: the point check, the grant that
-    /// decides whether the caller may use the permission on the resource. The filter for a caller who sees many
-    /// rows: each row the query reads, in its order, is checked.
+    /// <c>fn_CheckRow(@ResourceId, @SubjectIds, @PermissionId)</c>: the point check (<c>fn_IsResourceAccessible</c>)
+    /// for one resource, a row when it allows. The filter for a caller who sees many rows: each row the query
+    /// reads, in its order, is checked. Its own name, so an application may map <c>fn_IsResourceAccessible</c> too.
     /// </summary>
-    internal static IQueryable<SqlOSFgaAccessMatch> IsResourceAccessible(string resourceId, string subjectIds, string permissionId)
+    internal static IQueryable<SqlOSFgaRowCheck> CheckRow(string resourceId, string subjectIds, string permissionId)
         => throw new InvalidOperationException("This method is translated to SQL by SqlOS and cannot be called directly.");
 
     /// <summary>Maps the functions in the model, in the schema SqlOS creates them in.</summary>
@@ -49,6 +49,6 @@ internal static class SqlOSFgaFunctions
     {
         modelBuilder.HasDbFunction(ActiveSubjectsMethod).HasName("fn_ActiveSubjects").HasSchema(schema);
         modelBuilder.HasDbFunction(VisibleSetMethod).HasName("fn_VisibleSet").HasSchema(schema);
-        modelBuilder.HasDbFunction(IsResourceAccessibleMethod).HasName("fn_IsResourceAccessible").HasSchema(schema);
+        modelBuilder.HasDbFunction(CheckRowMethod).HasName("fn_CheckRow").HasSchema(schema);
     }
 }

@@ -12,13 +12,13 @@ namespace SqlOS.Benchmarks.Reporting;
 /// <item><b>correctness</b>: every scenario returned exactly the authorized answer.</item>
 /// <item><b>lineage</b>: the lineage the loader wrote, the same after the maintenance pass, and the same as
 /// SqlOS rebuilds from the resources alone (count and hash).</item>
-/// <item><b>scale</b>: per-page cost must follow the work the paper predicts, not N. The median at the
-/// largest scale may be at most <c>maxRatio</c> times the median at the smallest, times the growth of the
-/// rows the page has to touch, plus <c>slackMilliseconds</c> for sub-millisecond noise. A page through the
-/// filter touches k rows at any N, so it has no growth term; a page filtered to a store touches that
-/// store's σN rows through its own index.</item>
+/// <item><b>scale</b>: per-page cost must follow the work the filter it got predicts, not N. The median at
+/// the largest scale may be at most <c>maxRatio</c> times the median at the smallest, times the growth of the
+/// rows the page has to touch, plus <c>slackMilliseconds</c> for sub-millisecond noise. A caller listed first
+/// touches their own σN rows; a caller whose rows are checked touches about k/σ rows, the same at any N.</item>
 /// <item><b>regression</b>: every scenario's median against the constant set for it and the engine in
-/// <c>regressionMilliseconds</c>: what the scenario costs today, with headroom for runner noise. A change
+/// <c>regressionMilliseconds</c>: what the scenario costs today, with headroom for runner noise. For a page
+/// it is the whole request, <c>BuildFilterAsync</c> (with <c>fn_ListFirst</c>'s count) and the query. A change
 /// that makes any page or point check slower than that fails the run.</item>
 /// </list>
 /// </summary>
@@ -112,11 +112,12 @@ internal static class GateEvaluator
                         continue;
                     }
 
+                    var measured = scenario.RequestMs ?? scenario.MedianMs;
                     results.Add(new GateResult(
                         "regression",
                         $"{scenario.Id} @ {RetailTree.Count(step.Products)}",
-                        scenario.MedianMs <= limit,
-                        string.Create(CultureInfo.InvariantCulture, $"{scenario.MedianMs:F2} ms (limit {limit:F0} ms)")));
+                        measured <= limit,
+                        string.Create(CultureInfo.InvariantCulture, $"{measured:F2} ms{(scenario.RequestMs is null ? "" : " request")} (limit {limit:F0} ms)")));
                 }
             }
         }
@@ -125,8 +126,9 @@ internal static class GateEvaluator
     }
 
     /// <summary>
-    /// The rows a page has to touch at a catalog of <paramref name="products"/> rows, from the paper: a page
-    /// through the filter k, a page filtered to one store that store's σN rows. Point checks touch one row.
+    /// The rows a page has to touch at a catalog of <paramref name="products"/> rows, by the filter it got: listed
+    /// first, the caller's σN rows (at least the page); each row checked, about k/σ rows read in order (at most
+    /// the table). Point checks touch one row.
     /// </summary>
     internal static double ExpectedRows(ScenarioResult scenario, long products)
     {
@@ -136,6 +138,9 @@ internal static class GateEvaluator
         }
 
         var k = scenario.PageSize + 1d;
-        return scenario.StoreFiltered ? Math.Max(k, scenario.Selectivity * products) : k;
+        var visible = Math.Max(scenario.Selectivity * products, 1d);
+        return scenario.Shape == "list first"
+            ? Math.Max(k, visible)
+            : Math.Min(products, k * products / visible);
     }
 }

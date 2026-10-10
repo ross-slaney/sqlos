@@ -6,29 +6,18 @@ group: "model"
 order: 6
 ---
 
-`IHasResourceId` is the contract authorization filters use. It exposes the row's FGA resource ID and its scope column, which `BuildFilterAsync` reads to return only the rows a subject may see. See [Set up FGA](/docs/fga/setup) for both ways to add it to an application.
+`IHasResourceId` is the contract authorization filters use. It exposes the row's FGA resource ID, which `BuildFilterAsync` checks against the resources the subject may see. See [Set up FGA](/docs/fga/setup) for both ways to add it to an application.
 
 ```csharp
 public interface IHasResourceId
 {
     string ResourceId { get; }
-    byte[]? FgaScope { get; }
 }
 ```
 
-`ResourceId` holds the row's FGA resource; map it as an ordinary property. `FgaScope` is the column SqlOS fills and maintains so list filters stay fast at any table size. Declare it with a private setter; your code never sets or reads it:
+`ResourceId` holds the row's FGA resource; map it as an ordinary property and set it before the row is saved. It is the only thing the filter needs from your table, and the only column SqlOS touches there: if you declared no index on it, SqlOS adds one to the EF model (`IX_{Table}_SqlOSFgaResourceId`) and your migration creates it.
 
-```csharp
-public byte[]? FgaScope { get; private set; }
-```
-
-Keep it out of API responses by returning DTOs. To keep it off the class's public surface altogether, implement it explicitly; SqlOS maps the column either way:
-
-```csharp
-byte[]? IHasResourceId.FgaScope => null;
-```
-
-For protected domain entities whose resource lifecycle should be managed by SqlOS, derive from `SqlOSResourceEntity` (or implement `ISqlOSResourceEntity`, which it implements for you). It extends `IHasResourceId` with resource metadata used by `SqlOSDbContext<TContext>` during `SaveChanges` / `SaveChangesAsync`, and the base class carries `ResourceId` and the scope column so the entity declares neither:
+For protected domain entities whose resource lifecycle should be managed by SqlOS, derive from `SqlOSResourceEntity` (or implement `ISqlOSResourceEntity`, which it implements for you). It extends `IHasResourceId` with resource metadata used by `SqlOSDbContext<TContext>` during `SaveChanges` / `SaveChangesAsync`, and the base class carries `ResourceId` so the entity declares nothing:
 
 ```csharp
 public sealed class Workspace : SqlOSResourceEntity

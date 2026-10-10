@@ -4,7 +4,7 @@ namespace SqlOS.Benchmarks.Scenarios;
 
 internal enum ScenarioKind
 {
-    /// <summary>A cursor page of products: the LINQ query with <c>BuildFilterAsync</c>'s predicate, which composes as one EXISTS over <c>fn_Visible</c>, so the engine plans the whole statement.</summary>
+    /// <summary>A cursor page of products: the LINQ query with the filter <c>BuildFilterAsync</c> returns, one EXISTS over <c>fn_VisibleSet</c> or <c>fn_CheckRow</c>.</summary>
     List,
 
     /// <summary><c>fn_IsResourceAccessible</c> for one resource, the enforcement primitive the paper measures.</summary>

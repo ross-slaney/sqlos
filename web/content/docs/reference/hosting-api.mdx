@@ -45,7 +45,7 @@ protected SqlOSDbContext(DbContextOptions<TContext> options)
 | --- | --- | --- |
 | `options` | `DbContextOptions<TContext>` | EF Core options registered for the derived application context. |
 
-The base context registers SqlOS auth, email, calendar, and FGA entities in the EF model. Its sealed `OnModelCreating` implementation invokes `OnApplicationModelCreating` for application-owned mappings, and afterwards configures the `FgaScope` column of every application entity that implements `IHasResourceId`.
+The base context registers SqlOS auth, email, calendar, and FGA entities in the EF model. Its sealed `OnModelCreating` implementation invokes `OnApplicationModelCreating` for application-owned mappings, and afterwards adds an index on `ResourceId` to every application entity that implements `IHasResourceId` and declared none.
 
 A context of your own derives from `DbContext`, declares `ISqlOSAuthServerDbContext` and `ISqlOSFgaDbContext` (both need nothing beyond `DbContext`), and calls `modelBuilder.UseSqlOS(Database.ProviderName)` last in `OnModelCreating`. See [Set up FGA](/docs/fga/setup).
 

@@ -402,8 +402,8 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
         // is) and the permission. The database answers one question first (fn_ListFirst): does this caller see
         // fewer rows of T's table than its cap? Then the filter is one EXISTS either way, and both are exact:
         // - few rows: over fn_VisibleSet, so the query starts from the caller's rows, listed from their roots;
-        // - many rows: over fn_IsResourceAccessible for each row, so the query reads the table in its own order
-        //   and checks the rows it reads with the point check, until it has the page.
+        // - many rows: over fn_CheckRow (the point check, fn_IsResourceAccessible) for each row, so the query
+        //   reads the table in its own order and checks the rows it reads, until it has the page.
         // No grant, root or row leaves the database. Build the filter per request.
         var subjectIdsJson = JsonSerializer.Serialize(subjectIds);
         var permissionId = permission.Id;
@@ -413,7 +413,7 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
             return entity => SqlOSFgaFunctions.VisibleSet(subjectIdsJson, permissionId, typeId).Any(v => v.ResourceId == entity.ResourceId);
         }
 
-        return entity => SqlOSFgaFunctions.IsResourceAccessible(entity.ResourceId, subjectIdsJson, permissionId).Any();
+        return entity => SqlOSFgaFunctions.CheckRow(entity.ResourceId, subjectIdsJson, permissionId).Any();
     }
 
     /// <summary>Tests only: build this service's filters in one shape instead of asking <c>fn_ListFirst</c>.</summary>

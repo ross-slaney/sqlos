@@ -68,7 +68,7 @@ if (!canEdit)
 
 ### BuildFilterAsync
 
-Produce a LINQ expression that filters an `IQueryable<T>` to only entities the subject can access. The expression translates to a SQL predicate over the resource lineage at query time (see [List filtering](/docs/fga/list-filter#how-the-filter-works)). This is the entire query-side API: pagination, sorting, search, and projection are plain EF Core composed on the same query (see [Paginating authorized lists](/docs/guides/paginating-authorized-lists)).
+Produce a LINQ expression that filters an `IQueryable<T>` to only entities the subject can access. It asks the database whether the subject sees fewer resources of the permission's type than the cap of `T`'s table, and returns the filter that fits; the expression translates to a SQL `EXISTS` that reads the grants and the resource lineage at query time (see [List filtering](/docs/fga/list-filter#how-the-filter-works)). This is the entire query-side API: pagination, sorting, search, and projection are plain EF Core composed on the same query (see [Paginating authorized lists](/docs/guides/paginating-authorized-lists)).
 
 ```csharp
 var filter = await authService
@@ -87,15 +87,15 @@ var chains = await dbContext.Chains
 | `subjectId` | `string` | The subject to filter for. |
 | `permissionKey` | `string` | The permission key that determines which resources are visible. |
 
-**Type constraint**: `T : IHasResourceId`: the entity exposes its `ResourceId` and declares the `FgaScope` column SqlOS maintains. It must be mapped in the context registered with `AddSqlOS`; another entity throws, naming it. Protected domain entities should usually implement `ISqlOSResourceEntity`, which extends `IHasResourceId` and lets `SqlOSDbContext<TContext>` sync backing resource rows during EF saves.
+**Type constraint**: `T : IHasResourceId`: the entity exposes its `ResourceId`. It must be mapped in the context registered with `AddSqlOS`; another entity throws, naming it. Protected domain entities should usually implement `ISqlOSResourceEntity`, which extends `IHasResourceId` and lets `SqlOSDbContext<TContext>` sync backing resource rows during EF saves.
 
 **Returns**
 
 `Task<Expression<Func<T, bool>>>` — an EF Core-compatible expression you pass to `.Where()`.
 
-**Filter lifetime**: the subject's principal set (the subject plus its active group memberships) and their grants are resolved when the task is awaited; the caller's own lifecycle is rechecked when the query runs. Build the filter once per request and compose it into that request's queries, on any instance of the context; do not cache it in statics or reuse it across requests.
+**Filter lifetime**: the subject's principal set (the subject plus its active group memberships) and the permission are resolved when the task is awaited, and the database answers the question that picks the filter then. Grants are read again when each query runs, and the caller's own lifecycle is rechecked then; either filter is exact, so the choice affects only speed. Build the filter once per request and compose it into that request's queries, on any instance of the context; do not cache it in statics or reuse it across requests.
 
-**The scope column**: the predicate reads the entity's own `FgaScope` column (`IHasResourceId.FgaScope`) and joins nothing; see [List filtering](/docs/fga/list-filter#the-scope-column).
+**The filter**: one `EXISTS` either way. When the subject sees fewer resources than the cap (`8·√N` for a table of N rows, at least 1,000), it is over `fn_VisibleSet`, the resources the subject may see, listed first and matched to the entity's `ResourceId`. Otherwise it is over `fn_CheckRow`, the point check (`fn_IsResourceAccessible`) under SqlOS's own name, run on each row the query reads. See [List filtering](/docs/fga/list-filter#how-the-filter-works).
 
 ### Lifecycle enforcement
 
@@ -144,7 +144,6 @@ public sealed class Workspace : ISqlOSResourceEntity
 {
     public Guid Id { get; set; }
     public string ResourceId { get; set; } = "";
-    public byte[]? FgaScope { get; private set; }
     public string OrganizationId { get; set; } = "";
     public string Name { get; set; } = "";
 
@@ -258,17 +257,16 @@ public interface ISqlOSResourceEntity : IHasResourceId
 
 ## IHasResourceId
 
-Lower-level filter contract that exposes an entity's FGA resource ID and declares its scope column. Required for `BuildFilterAsync` and `AuthorizedDetailAsync`. `ISqlOSResourceEntity` extends this interface and is the recommended contract for normal protected domain rows.
+Lower-level filter contract that exposes an entity's FGA resource ID. Required for `BuildFilterAsync` and `AuthorizedDetailAsync`. `ISqlOSResourceEntity` extends this interface and is the recommended contract for normal protected domain rows.
 
 ```csharp
 public interface IHasResourceId
 {
     string ResourceId { get; }
-    byte[]? FgaScope { get; }
 }
 ```
 
-Declare `FgaScope` as `public byte[]? FgaScope { get; private set; }`, or explicitly as `byte[]? IHasResourceId.FgaScope => null;`. SqlOS maps and maintains the column either way; application code never sets or reads it.
+`ResourceId` is the only column the filter needs from the table. SqlOS adds an index on it to the EF model when the entity declares none (`IX_{Table}_SqlOSFgaResourceId`); the application's migration creates it. Nothing else of SqlOS's is on the table.
 
 **Lower-level implementation**
 
@@ -277,7 +275,6 @@ public class Chain : IHasResourceId
 {
     public string Id { get; set; } = Guid.NewGuid().ToString();
     public string ResourceId { get; set; } = "";
-    public byte[]? FgaScope { get; private set; }
     public string Name { get; set; } = "";
 }
 ```

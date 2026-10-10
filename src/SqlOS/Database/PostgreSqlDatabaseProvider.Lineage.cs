@@ -195,6 +195,29 @@ internal sealed partial class PostgreSqlDatabaseProvider
             """;
     }
 
+    /// <summary>
+    /// <c>fn_CheckRow</c>: one row when the point check allows the resource (see the SQL Server provider). A SQL
+    /// function of one SELECT, inlined, and <c>fn_IsResourceAccessible</c> inlined within it.
+    /// </summary>
+    public string BuildCheckRowFunctionSql(SqlOSFgaOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var schema = QuoteIdentifier(options.Schema);
+        return $"""
+            CREATE OR REPLACE FUNCTION {schema}."fn_CheckRow"(
+                p_resource_id varchar(450),
+                p_subject_ids text,
+                p_permission_id varchar(450)
+            )
+            RETURNS TABLE("Allowed" boolean)
+            LANGUAGE sql
+            STABLE
+            AS $sqlos$
+            SELECT TRUE FROM {schema}."fn_IsResourceAccessible"(p_resource_id, p_subject_ids, p_permission_id)
+            $sqlos$;
+            """;
+    }
+
     /// <summary>The query over <c>fn_ListFirst</c> (see the SQL Server provider); the type id is cast so a null still resolves the function.</summary>
     public string BuildListFirstQuerySql(SqlOSFgaOptions options)
     {
@@ -573,6 +596,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
             Routine("fn_VisibleSet"),
             Routine("fn_ListFirst"),
             Routine("fn_IsResourceAccessible"),
+            Routine("fn_CheckRow"),
             Routine("fn_" + SqlOSFgaLineage.RefreshRoutineName(resourcesTable)),
             Routine("fn_" + SqlOSFgaLineage.RebuildRoutineName(resourcesTable)),
             Column(SqlOSFgaLineage.AncestorColumn(SqlOSFgaLineage.MaxLevel(options))),

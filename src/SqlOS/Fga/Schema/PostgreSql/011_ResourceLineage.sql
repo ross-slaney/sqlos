@@ -61,7 +61,7 @@ ALTER TABLE "{Schema}"."{Resources}" ADD COLUMN IF NOT EXISTS "Reach" smallint N
 
 -- 4. The ancestor columns of the default depth (levels 0..10). A larger configured depth adds the columns
 --    above level 10 through SqlOSFgaFunctionInitializer. SqlOSFgaFunctionInitializer also
---    creates the index on each level, which fn_Visible seeks for the rows beneath a root.
+--    creates the index on each level, which fn_ListVisible reads for the rows beneath a root.
 ALTER TABLE "{Schema}"."{Resources}" ADD COLUMN IF NOT EXISTS "Ancestor0" bigint NULL;
 ALTER TABLE "{Schema}"."{Resources}" ADD COLUMN IF NOT EXISTS "Ancestor1" bigint NULL;
 ALTER TABLE "{Schema}"."{Resources}" ADD COLUMN IF NOT EXISTS "Ancestor2" bigint NULL;

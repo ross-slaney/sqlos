@@ -48,11 +48,11 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
         var sql = Context.Set<LifecycleProtectedEntity>().Where(filter).ToQueryString();
 
         // One statement: the application's query with one EXISTS. The agency admin sees a handful of rows, so the
-        // database lists them first (fn_VisibleSet); forced the other way, each row is checked
-        // (fn_IsResourceAccessible). Either way the grants and roots are read inside the function when the
-        // statement runs; the parameters are the caller's subjects and the permission.
-        var expected = ListFirst == false ? "fn_IsResourceAccessible" : "fn_VisibleSet";
-        var other = ListFirst == false ? "fn_VisibleSet" : "fn_IsResourceAccessible";
+        // database lists them first (fn_VisibleSet); forced the other way, each row is checked (fn_CheckRow,
+        // the point check). Either way the grants and roots are read inside the function when the statement
+        // runs; the parameters are the caller's subjects and the permission.
+        var expected = ListFirst == false ? "fn_CheckRow" : "fn_VisibleSet";
+        var other = ListFirst == false ? "fn_VisibleSet" : "fn_CheckRow";
         StringAssert.Contains(sql, expected);
         StringAssert.Contains(sql, "EXISTS");
         Assert.IsFalse(sql.Contains(other, StringComparison.OrdinalIgnoreCase), sql);
@@ -138,7 +138,7 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
             var filter = await _authService.BuildFilterAsync<LifecycleProtectedEntity>(user.SubjectId, "TEST_VIEW");
             var query = Context.Set<LifecycleProtectedEntity>().AsNoTracking().Where(e => e.Id.EndsWith(suffix)).Where(filter);
             var sql = query.ToQueryString();
-            StringAssert.Contains(sql, ListFirst == true ? "fn_VisibleSet" : "fn_IsResourceAccessible");
+            StringAssert.Contains(sql, ListFirst == true ? "fn_VisibleSet" : "fn_CheckRow");
             var visible = await query.Select(e => e.Id).ToListAsync();
             CollectionAssert.AreEquivalent(new[] { $"manyrow_a_{suffix}", $"manyrow_b_{suffix}" }, visible);
         }

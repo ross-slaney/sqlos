@@ -55,6 +55,9 @@ internal interface ISqlOSDatabaseProvider
     /// <summary>A SELECT of <c>Value</c> over <c>fn_ListFirst({0}, {1}, {2}, {3})</c>: subject ids JSON, permission id, type id, quoted table name.</summary>
     string BuildListFirstQuerySql(SqlOSFgaOptions options);
 
+    /// <summary><c>fn_CheckRow</c>: the point check under SqlOS's own name; the "check each row" filter is an EXISTS over it.</summary>
+    string BuildCheckRowFunctionSql(SqlOSFgaOptions options);
+
     /// <summary>Idempotent batches adding the ancestor columns of the configured depth and the index of each level.</summary>
     IReadOnlyList<string> BuildEnsureLineageColumnsSql(SqlOSFgaOptions options);
 

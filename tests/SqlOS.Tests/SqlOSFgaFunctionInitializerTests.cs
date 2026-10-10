@@ -124,6 +124,12 @@ public class SqlOSFgaFunctionInitializerTests
         listFirst.Should().Contain("CAST(CASE WHEN v.Visible < c.Cap THEN 1 ELSE 0 END AS BIT) AS ListFirst");
 
         provider.BuildListFirstQuerySql(options).Should().Be("SELECT f.ListFirst AS [Value] FROM [dbo].fn_ListFirst({0}, {1}, {2}, {3}) AS f");
+
+        // The row check is the point check under SqlOS's own name, so an application's own mapping of
+        // fn_IsResourceAccessible never meets SqlOS's in one EF model.
+        var checkRow = provider.BuildCheckRowFunctionSql(options);
+        checkRow.Should().Contain("CREATE OR ALTER FUNCTION [dbo].fn_CheckRow(");
+        checkRow.Should().Contain("SELECT CAST(1 AS BIT) AS Allowed\n    FROM [dbo].fn_IsResourceAccessible(@ResourceId, @SubjectIds, @PermissionId)");
     }
 
     [TestMethod]
@@ -214,7 +220,8 @@ public class SqlOSFgaFunctionInitializerTests
                 provider.BuildEnsureLineageColumnsSql(options)
                     .Concat([
                         provider.BuildActiveSubjectsFunctionSql(options), provider.BuildAccessRootsFunctionSql(options), provider.BuildListVisibleFunctionSql(options),
-                        provider.BuildVisibleSetFunctionSql(options), provider.BuildListFirstFunctionSql(options), provider.BuildIsResourceAccessibleFunctionSql(options)])
+                        provider.BuildVisibleSetFunctionSql(options), provider.BuildListFirstFunctionSql(options), provider.BuildIsResourceAccessibleFunctionSql(options),
+                        provider.BuildCheckRowFunctionSql(options)])
                     .Concat(provider.BuildLineageMaintenanceSql(options)));
 
         var baseline = HashFor(new SqlOSFgaOptions());
@@ -237,6 +244,7 @@ public class SqlOSFgaFunctionInitializerTests
         hash.Should().Contain("OBJECT_ID(N'[ten''ant].[fn_ListVisible]', N'IF') IS NOT NULL");
         hash.Should().Contain("OBJECT_ID(N'[ten''ant].[fn_VisibleSet]', N'TF') IS NOT NULL");
         hash.Should().Contain("OBJECT_ID(N'[ten''ant].[fn_ListFirst]', N'IF') IS NOT NULL");
+        hash.Should().Contain("OBJECT_ID(N'[ten''ant].[fn_CheckRow]', N'IF') IS NOT NULL");
         hash.Should().Contain("OBJECT_ID(N'[ten''ant].[fn_IsResourceAccessible]', N'IF') IS NOT NULL");
         hash.Should().Contain("OBJECT_ID(N'[ten''ant].[sp_res]]ources_LineageRefresh]', N'P') IS NOT NULL");
         hash.Should().Contain("OBJECT_ID(N'[ten''ant].[sp_res]]ources_LineageRebuild]', N'P') IS NOT NULL");
@@ -269,6 +277,8 @@ public class SqlOSFgaFunctionInitializerTests
         }
 
         context.Model.FindEntityType(typeof(SqlOSFgaVisibleResource))!.FindPrimaryKey().Should().BeNull("the visible resources are a query result");
+        context.Model.FindEntityType(typeof(SqlOSFgaRowCheck))!.FindPrimaryKey().Should().BeNull("a row check is a query result");
+        context.Model.GetDbFunctions().Select(f => f.Name).Should().BeEquivalentTo(["fn_ActiveSubjects", "fn_VisibleSet", "fn_CheckRow"], "fn_IsResourceAccessible stays free for applications to map");
         context.Model.FindEntityType(typeof(SqlOSFgaAccessMatch))!.FindPrimaryKey().Should().BeNull("the point check's grant is a query result");
     }
 }

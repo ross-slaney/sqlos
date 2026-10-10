@@ -3,10 +3,12 @@
 Companion note to *SHRBAC* (COMPSAC 2026). That paper's row filter decides each row by walking up the
 resource tree and probing the grants at every ancestor; Theorem 3 there bounds a page by the rows the engine
 must examine, which for a caller who sees a fraction σ of the table is about k/σ rows for a page of k. This
-note replaces the walk with a precomputed **lineage** on the resources table (schema v11), proves the filter it supports
-equals Definition 1 of the paper, proves the triggers keep the lineage exact, and gives the cost of a page
-under the two forms the filter takes. The implementation is `SqlOSFgaLineage`, the two database providers'
-`*.Lineage.cs` files, and `SqlOSFgaFilterBuilder`.
+note replaces the walk with a precomputed **lineage** on the resources table (the tree's closure, schema v11
+and later), proves that both filters built on it equal Definition 1 of the paper, proves the triggers keep
+the lineage exact, and gives the rule that picks a filter for each caller and the cost of a page under
+each. The implementation is `SqlOSFgaLineage`, the two database providers (`fn_IsResourceAccessible`, and in
+their `*.Lineage.cs` files `fn_AccessRoots`, `fn_ListVisible`, `fn_VisibleSet`, `fn_ListFirst`, `fn_CheckRow`,
+the lineage routines and triggers), and `SqlOSFgaAuthService.BuildFilterAsync`.
 
 ## 1. Definitions
 
@@ -33,7 +35,7 @@ from its least element.
 of active, well-formed resources on which a subject in S holds a current grant whose role includes P, each
 with its depth. `fn_AccessRoots` returns it.
 
-## 2. The filter equals the paper's rule
+## 2. The lineage condition equals the paper's rule
 
 **Lemma 1.** For well-formed x and a level ℓ ≤ depth(x): a_ℓ, …, a_d are all active if and only if x is
 active and Reach(x) ≤ ℓ.
@@ -52,10 +54,10 @@ grant on it, so (a_ℓ, ℓ) ∈ roots(S, P). Ancestor_ℓ(x) = a_ℓ by Definit
 Lemma 1, that x is active and a_ℓ…a_d are all active; (a, ℓ) ∈ roots(S, P) gives the grant. All of
 Definition 1 holds. ∎
 
-The predicate `SqlOSFgaFilterBuilder` emits is the disjunction over the caller's roots of
-`Scope_ℓ = a`, grouped by level, conjoined with the type condition, where Scope_ℓ is the application row's
-copy of Ancestor_ℓ held only where Reach ≤ ℓ (Section 4), so that one equality is the whole condition. The point check `fn_IsResourceAccessible` evaluates the same condition from the other side:
-for the one target x it enumerates the levels Reach(x)…d and probes the grants on each Ancestor_ℓ(x).
+SqlOS evaluates the right-hand side of Theorem 1 from both ends (Section 4). `fn_ListVisible` starts from
+the roots: for each root (a, ℓ) it lists the x with Ancestor_ℓ(x) = a and Reach(x) ≤ ℓ that meet the type
+condition. The point check `fn_IsResourceAccessible` starts from the target: for the one x it enumerates
+the levels Reach(x)…d and probes the grants on each Ancestor_ℓ(x).
 
 ## 3. The triggers keep the lineage exact
 
@@ -93,45 +95,152 @@ lineage. Inserted rows have no descendants, so their affected set is themselves;
 same waves over the inserted rows. ∎
 
 The cost of a statement is proportional to its affected set: constant for creating a row, the subtree for a
-move or a change of activity, and nothing for a grant or a revoke, which are not part of the lineage. The
+move or a change of activity, and nothing for a grant, a revoke, a retype or a delete, which are not part of
+the lineage (a resource with children cannot be deleted, so no other row's lineage depends on it). The
 rebuild (`…_LineageRebuild`) is the same recurrence run over every row, level by level.
 
-## 4. The scope column
+## 4. Two filters over the closure
 
-Every application table whose entity carries a `ResourceId` holds one column, the scope value of its row:
-the resource's type and, for each level ℓ, Scope_ℓ = Ancestor_ℓ if Reach ≤ ℓ ≤ d and NULL otherwise. On
-PostgreSQL it is an array indexed per level by an expression index; on SQL Server a byte string with a depth
-byte first, read per level through a computed column whose filtered index covers the rows at or below the
-level. The value is refreshed by the resources triggers for every affected resource (step 5 of the refresh,
-keyed by `ResourceId`), by the table's own insert trigger, and by its update trigger when a row's
-`ResourceId` changes; a deleted resource clears it. Each value is therefore a function of the lineage of the
-resource the row names at all times, or NULL when that resource does not exist, which denies the row.
-Theorem 1 then reads: x is visible iff Scope_ℓ(x) = a for some root (a, ℓ), since Scope_ℓ(x) = a already
-says Ancestor_ℓ(x) = a and Reach(x) ≤ ℓ.
+The lineage is the tree's closure written once per row: for every resource, the key (`Seq`) of its ancestor
+at every level, its depth and its reach. Nothing of it is copied to the application tables. An application
+row carries its `ResourceId` and an index on it, and both filters reach the closure through that column.
 
-## 5. The cost of a page
+Each level ℓ has an index on the resources table, `IX_…_Ancestor_ℓ` on (Ancestor_ℓ, ResourceTypeId)
+including Reach and Id, over the rows whose Ancestor_ℓ is not null. The resources of one type beneath a
+resource at level ℓ are one range of that index.
 
-Take a page of k rows in an order the application chose, for a caller whose roots cover a fraction σ of the
-table, N rows in all, and let S be the number of rows beneath the caller's roots (S = σN).
+**The functions.** S is the caller's subjects, P the permission, T its resource type (or none), t the
+application table.
 
-**Reading the lineage from the resources table** (the form the first version of this work measured, and
-SqlOS no longer ships), the predicate joins each candidate row to its resource. The optimizer has two plans:
+- `fn_AccessRoots(S, P)` returns roots(S, P) as rows (ResourceSeq, Depth): one per current grant of a live
+  subject of S whose role includes P, on an active, well-formed resource. It does not deduplicate (a
+  resource granted twice appears twice), so a statement that needs only its first rows stops reading
+  grants once it has them.
+- `fn_ListVisible(S, P, T)` lists the visible resources root by root, one branch per level:
 
-- *Scan*: read the table in the requested order and test each row with one primary-key lookup of its
-  resource. About k/σ rows are examined. This is the plan for a caller who sees most of the table.
-- *Drive*: read the caller's scope from the ancestor index at the root's level (S entries), join the rows by
-  `ResourceId`, sort, and take k. This is the plan for a caller who sees little of it.
+  ```sql
+  SELECT v.Id AS ResourceId
+  FROM fn_AccessRoots(@SubjectIds, @PermissionId) a
+  CROSS APPLY (
+      SELECT r.Id FROM SqlOSFgaResources r
+      WHERE a.Depth = 0 AND r.Ancestor0 = a.ResourceSeq AND r.Ancestor0 IS NOT NULL
+        AND r.Reach <= 0 AND (@TypeId IS NULL OR r.ResourceTypeId = @TypeId)
+      UNION ALL
+      …                                   -- the same for each level ℓ = 1 … D
+  ) v
+  ```
 
-The cost is min(k/σ, S) lookups plus a sort of at most S rows. Over all callers the worst case is a scope of
-about √(kN) rows, where both plans cost the same. S = σN grows with the table for a caller whose share of it
-is fixed: the benchmark's store manager sees 0.0065% of the catalog, 65 rows at 1M products and 3,250 at
-50M, and the *drive* plan read all of them for every page (2.4 ms at 1M, 39 ms at 50M on PostgreSQL).
+  For a root at level ℓ only the ℓ-th branch passes its startup predicate `a.Depth = ℓ`, and it reads one
+  range of the level-ℓ index. (`Ancestor_ℓ IS NOT NULL` follows from the equality; it is stated because SQL
+  Server matches a filtered index only to a predicate that states the filter.) A resource beneath two roots
+  is listed twice. The function is inlined into the statement that calls it on both engines: an inline
+  table-valued function on SQL Server, a `LANGUAGE sql` function over a lateral join on PostgreSQL.
+- `fn_VisibleSet(S, P, T)` returns the rows of `fn_ListVisible`, each once, materialized: on SQL Server a
+  multi-statement table function whose table variable has a primary key that ignores duplicates, on
+  PostgreSQL a PL/pgSQL function declared `ROWS 10`, which the planner never inlines. Either way the
+  statement that reads it sees a small opaque set and starts from it.
+- `fn_IsResourceAccessible(x, S, P)` is the point check. It reads x's row and, for each ℓ from Reach(x) to
+  depth(x), the resource whose `Seq` is Ancestor_ℓ(x) and its grants to a live subject of S whose role
+  includes P, provided P's type, if it has one, is x's. It returns the deciding grant (on the nearest such
+  ancestor) or no row: at most D + 1 grant lookups, each by resource, whatever |roots(S, P)| is.
+- `fn_ListFirst(S, P, T, t)` returns one boolean: whether `fn_ListVisible(S, P, T)` has fewer than C rows,
+  counting at most C of them (`TOP (C)`, `LIMIT C`). Here C = max(8·√N, 1000), with N the row count of t that
+  the engine keeps in its catalog (`sys.partitions`; `pg_class.reltuples`, read as 0 before the table's first
+  vacuum or analyze).
 
-**Reading the scope column**, for a caller with one root at level ℓ and an order the application declared
-an index for, the predicate is `Scope_ℓ = a` on the row itself, and the mirrored index (Scope_ℓ, order
-columns, key) answers the page with one seek followed by k entries: the cost does not depend on N or σ (the
-same page: 1.7 ms at either size). A caller with several roots reads one seek per root; the engine merges or
-sorts the streams, which costs at most S. There is no other form: a caller with thousands of roots gets the
-same predicate, with the roots at each level sent as one list parameter, and pays one seek per root.
+**Lemma 2.** `fn_ListVisible(S, P, T)` lists x (at least once) if and only if some (a, ℓ) ∈ roots(S, P)
+has Ancestor_ℓ(x) = a and Reach(x) ≤ ℓ, and the type condition holds.
 
-The benchmark harness (`tests/SqlOS.Benchmarks`) measures the scope column from 100K to 50M rows and holds every page and point check to a fixed limit per engine; its README keeps the run that measured the previous function beside it.
+*Proof.* `fn_AccessRoots` returns exactly roots(S, P), with repetitions. For a root (a, ℓ) only the branch
+of level ℓ passes `a.Depth = ℓ`, and it returns exactly the rows with Ancestor_ℓ = Seq(a), Reach ≤ ℓ and
+the type condition; `Reach ≤ ℓ` is false for a NULL reach, which carries the activity and well-formedness
+of x. Keys are unique, so Ancestor_ℓ = Seq(a) is Ancestor_ℓ(x) = a. ∎
+
+`BuildFilterAsync` resolves S and P, asks `fn_ListFirst` once, and returns one of two filters on t:
+
+- *List first*, when `fn_ListFirst(S, P, T, t)` holds:
+  `EXISTS (SELECT 1 FROM fn_VisibleSet(S, P, T) v WHERE v.ResourceId = t.ResourceId)`;
+- *Row check*, otherwise: `EXISTS (SELECT 1 FROM fn_CheckRow(t.ResourceId, S, P))`, where `fn_CheckRow(x, S, P)`
+  is one row exactly when `fn_IsResourceAccessible(x, S, P)` returns one (a name of SqlOS's own, so an
+  application's EF model may map `fn_IsResourceAccessible` as well).
+
+Their parameters are the caller's live subject ids and the permission (and, for list first, its type). No
+grant, root or row list leaves the engine; the count returns one scalar, and the statement reads the grants
+again when it runs.
+
+**Corollary 1 (both filters are exact).** Under either filter, a row of t whose resource is x passes if and
+only if x is visible under Definition 1.
+
+*Proof.* List first: `fn_VisibleSet` holds the resources `fn_ListVisible` lists, which by Lemma 2 are those
+meeting the right-hand side of Theorem 1, hence the visible ones. Row check: `fn_IsResourceAccessible(x)`
+returns a row iff x has a reach and, for some ℓ with Reach(x) ≤ ℓ ≤ depth(x), a live subject of S holds a
+current grant on a = Ancestor_ℓ(x) whose role includes P, and the type condition holds. Such an a is active
+(Lemma 1) and well formed (it lies on the path of a well-formed x), so (a, ℓ) ∈ roots(S, P): again the
+right-hand side of Theorem 1. ∎
+
+The row check is the point check itself, so it agrees with `CheckAccessAsync` by construction; the
+integration tests force each filter in turn and check both against the point check, row for row. The count
+decides only cost, never the answer: a stale catalog count, a count taken with multiplicity (a resource
+beneath two roots counts twice), or grants that change between the count and the statement can send a
+caller to the slower filter, not to a wrong one.
+
+**The cost of each filter.** Take a page of k rows in an order the application declared an index for, a
+table of N rows of which the caller may see V (V = σN), and a tree of depth D.
+
+- *The question* reads the roots one at a time, and each root's range, until it has counted C rows: at
+  most C index entries, plus, for each root it opens, the grant row, a lookup of the granted resource and
+  one seek. For a caller with one root it is one range; for a caller with m grants on single resources,
+  min(m, C) seeks. A root whose range holds no row of type T costs its seek and counts nothing, so a caller
+  with very many such roots is the one case in which the question opens more than C ranges.
+- *List first* (V < C) reads about V index entries across the roots' ranges (the question has read them
+  once already), keeps each once, looks the V ids up in t's `ResourceId` index and sorts them with a top-k
+  sort: about V seeks and V·log k comparisons, independent of N but for the depth of the indexes.
+- *Row check* (V ≥ C) reads t in the requested order from the keyset position and runs the point check on
+  each row until k pass. When the caller's rows are spread through the order, that is about k·N/V rows, each
+  at most D + 1 grant lookups. This is the paper's Theorem 3 with the per-row walk replaced by the lineage.
+  For a caller who sees most of the table (V ≈ N) it is about k rows, independent of N.
+
+**The cap.** Let c_l be the cost of a listed row (an index entry, a lookup in t, its share of the sort)
+and c_r the cost of a checked row (a row of t and its point check). Listing first costs about c_l·V and the
+row check about c_r·k·N/V. They are equal at V* = √(c·k·N), with c = c_r / c_l the ratio of the unit
+costs. Measured on both engines, c is near 3 for pages of 20 to 25 rows, which puts V* between 7.7·√N and
+8.7·√N; SqlOS takes C = 8·√N, with a floor of 1,000 for small or never-measured tables, where listing 1,000
+rows first costs milliseconds. A caller below C is listed first and costs less than c_l·C; a caller at or
+above C has the rows checked and costs at most c_r·k·N/C ≈ c_l·C. With the question's at most C entries,
+the worst page over all callers whose rows are spread through the order is Θ(√N), near the cap: C is 8,000
+at N = 10⁶, about 25,000 at N = 10⁷ and about 57,000 at N = 5·10⁷.
+
+**The worst case the cap does not cover.** The row check's k·N/V assumes the caller's rows are spread
+through the order. A caller with V ≥ C whose rows all sit at the far end of the requested order (the rows
+of a customer dormant for years, sorted newest first) has the N − V rows before them read, each with its
+point check: Θ(N). Listing first would cost V instead, which is the same order when V is a constant share
+of N; and the count does not see where in the order the caller's rows sit, so the rule cannot tell this
+caller from one whose rows are spread. Only an index on t ordered by who can see each row, then by the sort
+key, lets the engine start at the caller's rows, and SqlOS by design puts nothing on application tables.
+An application whose screen is scoped to the customer can declare that index itself, on its own column.
+
+A count, a join or a list without a limit evaluates the filter on every candidate: list first reads the
+caller's V rows once; the row check reads t, each row with its point check, as the same count would read t
+without the filter. The point check alone reads one row of the resources table and probes the grants at
+levels Reach(x)…d, as before.
+
+## 5. The cost of a page, measured
+
+The benchmark harness (`tests/SqlOS.Benchmarks`) measures each page and point check on both engines as the
+catalog grows, holds every one to a fixed limit per engine, checks every answer against ground truth, and
+records the filter `BuildFilterAsync` chose and the plan the engine ran. The figures for this design come
+from the benchmark run on the `fga-closure` pull request; the table below is filled from it. Each row is the
+first page in key order (k = 20); each cell gives the value at N = 1M / 10M / 50M products.
+`BuildFilterAsync` is the time to resolve the caller and answer the question; the query is the page's
+statement alone.
+
+| Caller | Sees | Filter chosen (1M / 10M / 50M) | `BuildFilterAsync` ms (1M / 10M / 50M) | Query ms (1M / 10M / 50M) |
+| --- | --- | --- | --- | --- |
+| Administrator | everything | (to be filled from the full run) | (to be filled from the full run) | (to be filled from the full run) |
+| Chain manager | about 7% | (to be filled from the full run) | (to be filled from the full run) | (to be filled from the full run) |
+| Region manager | about 1% | (to be filled from the full run) | (to be filled from the full run) | (to be filled from the full run) |
+| Store manager (sparse) | about 0.0065% | (to be filled from the full run) | (to be filled from the full run) | (to be filled from the full run) |
+| 100 store grants | 100 stores across every chain | (to be filled from the full run) | (to be filled from the full run) | (to be filled from the full run) |
+| 10,000 single-product grants | 10,000 products | (to be filled from the full run) | (to be filled from the full run) | (to be filled from the full run) |
+| 100,000 single-product grants | 100,000 products | (to be filled from the full run) | (to be filled from the full run) | (to be filled from the full run) |
+| Point check | one product | — | — | (to be filled from the full run) |
