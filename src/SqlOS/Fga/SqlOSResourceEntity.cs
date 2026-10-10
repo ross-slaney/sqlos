@@ -4,9 +4,9 @@ namespace SqlOS.Fga;
 
 /// <summary>
 /// The base class for entities whose backing FGA resource SqlOS synchronizes during saves: the one-line form
-/// of <see cref="ISqlOSResourceEntity"/>. Deriving from it brings the resource id and the scope column with
-/// it, so the entity declares only what describes its resource: the type it was seeded with, its display
-/// name, and (when access is inherited) its parent.
+/// of <see cref="ISqlOSResourceEntity"/>. Deriving from it brings the resource id with it, so the entity
+/// declares only what describes its resource: the type it was seeded with, its display name, and (when
+/// access is inherited) its parent.
 /// </summary>
 /// <remarks>
 /// An entity that already has a base class implements <see cref="ISqlOSResourceEntity"/> itself instead;
@@ -18,10 +18,6 @@ public abstract class SqlOSResourceEntity : ISqlOSResourceEntity
 {
     /// <summary>The stable identifier of the entity's backing FGA resource.</summary>
     public string ResourceId { get; set; } = string.Empty;
-
-    // SqlOS's scope column. Kept off the class's surface (and out of JSON); SqlOS maps it as a shadow
-    // property and the database fills it.
-    byte[]? IHasResourceId.FgaScope => null;
 
     /// <summary>The identifier of the seeded FGA resource type for this entity.</summary>
     public abstract string ResourceTypeId { get; }

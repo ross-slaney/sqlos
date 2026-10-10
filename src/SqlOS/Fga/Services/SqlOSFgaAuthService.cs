@@ -9,7 +9,6 @@ using SqlOS.Database;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
-using SqlOS.Fga.Paging;
 
 namespace SqlOS.Fga.Services;
 
@@ -380,7 +379,6 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
     {
         EnsureRelational();
         EnsureProtectedEntity<T>();
-        EnsureSqlOSQueryExecution();
         var subjectIds = await ResolveSubjectIdsAsync(subjectId);
         if (subjectIds.Count == 0)
         {
@@ -391,12 +389,7 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
         var permission = await _context.Set<SqlOSFgaPermission>()
             .AsNoTracking()
             .Where(p => p.Key == permissionKey)
-            .Select(p => new
-            {
-                p.Id,
-                p.ResourceTypeId,
-                TypeSeq = p.ResourceTypeId == null ? null : EF.Property<int?>(p.ResourceType!, SqlOSFgaLineage.SeqColumn),
-            })
+            .Select(p => new { p.Id, p.ResourceTypeId })
             .FirstOrDefaultAsync();
 
         if (permission == null)
@@ -406,24 +399,40 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
         }
 
         // The filter names who the rows are for (the caller's live subjects, resolved now as group membership
-        // is, and the permission) and reads no grant: the query that uses it reads what it needs when it runs.
-        // A page over it is walked from the caller's grants; any other query gets the predicate over the
-        // caller's access roots, read at that moment (SqlOSFgaQueryCompiler). Build the filter per request.
-        return SqlOSFgaAccess.Filter<T>(new SqlOSFgaAccessToken(subjectIds, JsonSerializer.Serialize(subjectIds), permission.Id, permissionKey, permission.TypeSeq, _options));
+        // is) and the permission. The database answers one question first (fn_ListFirst): does this caller see
+        // fewer rows of T's table than its cap? Then the filter is one EXISTS either way, and both are exact:
+        // - few rows: over fn_VisibleSet, so the query starts from the caller's rows, listed from their roots;
+        // - many rows: over fn_IsResourceAccessible for each row, so the query reads the table in its own order
+        //   and checks the rows it reads with the point check, until it has the page.
+        // No grant, root or row leaves the database. Build the filter per request.
+        var subjectIdsJson = JsonSerializer.Serialize(subjectIds);
+        var permissionId = permission.Id;
+        var typeId = permission.ResourceTypeId;
+        if (ListFirstOverride ?? await ListFirstAsync<T>(subjectIdsJson, permissionId, typeId))
+        {
+            return entity => SqlOSFgaFunctions.VisibleSet(subjectIdsJson, permissionId, typeId).Any(v => v.ResourceId == entity.ResourceId);
+        }
+
+        return entity => SqlOSFgaFunctions.IsResourceAccessible(entity.ResourceId, subjectIdsJson, permissionId).Any();
     }
 
+    /// <summary>Tests only: build this service's filters in one shape instead of asking <c>fn_ListFirst</c>.</summary>
+    internal bool? ListFirstOverride { get; set; }
+
     /// <summary>
-    /// A filter is evaluated by SqlOS's query execution, which <c>AddSqlOS</c> configures on the context it
-    /// registers; a context without it could not run a query over the filter at all, so say so here.
+    /// Whether the caller sees fewer resources of the permission's type than the cap of <typeparamref name="T"/>'s
+    /// table (<c>fn_ListFirst</c>): one scalar, read in the database, costing at most the cap.
     /// </summary>
-    private void EnsureSqlOSQueryExecution()
+    private async Task<bool> ListFirstAsync<T>(string subjectIdsJson, string permissionId, string? typeId)
     {
-        if (_context is DbContext db && db.GetService<IDbContextOptions>().FindExtension<SqlOSFgaOptionsExtension>() is null)
-        {
-            throw new InvalidOperationException(
-                "Filters from BuildFilterAsync run on a context with SqlOS's query execution. AddSqlOS configures the context it registers; "
-                + "a context built by hand calls UseSqlOSFga() on its DbContextOptionsBuilder.");
-        }
+        var provider = SqlOSDatabase.Resolve(_context.Database);
+        var entityType = (_context as DbContext)?.Model.FindEntityType(typeof(T));
+        var tableName = entityType?.GetTableName();
+        var schema = entityType?.GetSchema();
+        var table = tableName is null ? null : schema is null ? provider.QuoteIdentifier(tableName) : provider.Qualify(schema, tableName);
+        return await _context.Database
+            .SqlQueryRaw<bool>(provider.BuildListFirstQuerySql(_options), subjectIdsJson, permissionId, (object?)typeId ?? DBNull.Value, (object?)table ?? DBNull.Value)
+            .SingleAsync();
     }
 
     /// <summary>The grant that decides a point check (fn_IsResourceAccessible), or null when it is denied.</summary>
@@ -449,18 +458,18 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
     }
 
     /// <summary>
-    /// A filter is only correct on a table SqlOS keeps the scope column of: an entity of the context registered
-    /// with SqlOS. Say so instead of failing inside EF Core, or returning rows from a table nobody maintains.
+    /// A filter composes into a query over an entity of the context registered with SqlOS, whose resource id
+    /// is a mapped column. Say so instead of failing inside EF Core.
     /// </summary>
     private void EnsureProtectedEntity<T>()
     {
         var model = (_context as DbContext)?.Model;
         var entityType = model?.FindEntityType(typeof(T));
-        if (model != null && entityType?.FindProperty(SqlOSFgaLineage.ScopeColumn) == null)
+        if (model != null && entityType?.FindProperty(nameof(IHasResourceId.ResourceId)) == null)
         {
             throw new InvalidOperationException(
-                $"{typeof(T).Name} is not a protected entity of {_context.GetType().Name}, the DbContext registered with SqlOS. "
-                + "Map it in that context, so SqlOS keeps its FgaScope column current; list filters only work on its entities.");
+                $"{typeof(T).Name} is not an entity of {_context.GetType().Name}, the DbContext registered with SqlOS, with a mapped ResourceId. "
+                + "Map it in that context; list filters only work on its entities.");
         }
     }
 

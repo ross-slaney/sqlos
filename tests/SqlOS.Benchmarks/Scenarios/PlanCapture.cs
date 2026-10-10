@@ -6,10 +6,9 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 namespace SqlOS.Benchmarks.Scenarios;
 
 /// <summary>
-/// Captures actual execution plans: for the next query EF Core runs in the current async flow (by executing
+/// Captures the actual execution plan of the next query EF Core runs in the current async flow, by executing
 /// the exact command EF generated once more under <c>EXPLAIN (ANALYZE, BUFFERS)</c> or
-/// <c>SET STATISTICS XML ON</c>), or for a command the harness builds itself. Used for one untimed execution
-/// per scenario, never inside a measurement.
+/// <c>SET STATISTICS XML ON</c>. Used for one untimed execution per scenario, never inside a measurement.
 /// </summary>
 internal sealed class PlanCapture(DatabaseProvider provider) : DbCommandInterceptor
 {
@@ -28,7 +27,7 @@ internal sealed class PlanCapture(DatabaseProvider provider) : DbCommandIntercep
     {
         // EF runs the command in a child flow, which cannot clear the caller's AsyncLocal; the flag makes the
         // capture happen once even if the query issues more than one command. The command captured is the one
-        // over the relation: a planned statement first reads the caller's access roots in a command of its own.
+        // over the relation.
         if (Pending.Value is { Done: false } plan && command.CommandText.Contains(plan.Relation, StringComparison.Ordinal))
         {
             plan.Done = true;
@@ -43,22 +42,6 @@ internal sealed class PlanCapture(DatabaseProvider provider) : DbCommandIntercep
         }
 
         return result;
-    }
-
-    /// <summary>Explains a command the harness built itself (the page query runs outside EF Core).</summary>
-    public async Task<CapturedPlan> ExplainAsync(DbCommand command, string relation, CancellationToken cancellationToken)
-    {
-        var plan = new CapturedPlan { Relation = relation, Done = true };
-        try
-        {
-            await CaptureAsync(command, plan, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            plan.Error = ex.Message;
-        }
-
-        return plan;
     }
 
     private async Task CaptureAsync(DbCommand command, CapturedPlan plan, CancellationToken cancellationToken)

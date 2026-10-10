@@ -1,7 +1,6 @@
 using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
-using SqlOS.Fga;
 using SqlOS.Fga.Configuration;
 
 namespace SqlOS.Database;
@@ -41,78 +40,41 @@ internal interface ISqlOSDatabaseProvider
     /// <summary><c>fn_ActiveSubjects</c>: the caller's live principal set; the point check and the roots use it.</summary>
     string BuildActiveSubjectsFunctionSql(SqlOSFgaOptions options);
 
-    /// <summary><c>fn_AccessRoots</c>: the caller's access roots (compact key and level), for the row filter.</summary>
+    /// <summary><c>fn_AccessRoots</c>: the caller's access roots (compact key and level), one per grant; <c>fn_ListVisible</c> is built on it.</summary>
     string BuildAccessRootsFunctionSql(SqlOSFgaOptions options);
 
-    /// <summary>A SELECT of <c>ResourceSeq, Depth</c> over <c>fn_AccessRoots({0}, {1})</c>.</summary>
-    string BuildAccessRootsQuerySql(SqlOSFgaOptions options);
+    /// <summary><c>fn_ListVisible</c>: the resources the caller may see with a permission, listed root by root.</summary>
+    string BuildListVisibleFunctionSql(SqlOSFgaOptions options);
 
-    /// <summary>Idempotent batches adding the ancestor columns of the configured depth.</summary>
+    /// <summary><c>fn_VisibleSet</c>: the same resources, each once, materialized; the "list first" filter is an EXISTS over it.</summary>
+    string BuildVisibleSetFunctionSql(SqlOSFgaOptions options);
+
+    /// <summary><c>fn_ListFirst</c>: whether the caller sees fewer resources than a table's cap.</summary>
+    string BuildListFirstFunctionSql(SqlOSFgaOptions options);
+
+    /// <summary>A SELECT of <c>Value</c> over <c>fn_ListFirst({0}, {1}, {2}, {3})</c>: subject ids JSON, permission id, type id, quoted table name.</summary>
+    string BuildListFirstQuerySql(SqlOSFgaOptions options);
+
+    /// <summary>Idempotent batches adding the ancestor columns of the configured depth and the index of each level.</summary>
     IReadOnlyList<string> BuildEnsureLineageColumnsSql(SqlOSFgaOptions options);
 
-    /// <summary>
-    /// Idempotent batches creating the lineage refresh and rebuild routines, the triggers on the resources
-    /// table, and the triggers on each application table that carries the scope column.
-    /// </summary>
-    IReadOnlyList<string> BuildLineageMaintenanceSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables);
+    /// <summary>Idempotent batches creating the lineage refresh and rebuild routines and the triggers on the resources table.</summary>
+    IReadOnlyList<string> BuildLineageMaintenanceSql(SqlOSFgaOptions options);
 
     /// <summary>A scalar query: 1 until a rebuild has finished in full (<c>LineageBuilt</c>), else 0.</summary>
     string BuildLineageNeedsBuildSql(SqlOSFgaOptions options);
 
     string BuildLineageRebuildSql(SqlOSFgaOptions options);
 
-    /// <summary>Runs the scope fill routine: every application row without a scope gets its resource's.</summary>
-    string BuildScopeFillSql(SqlOSFgaOptions options);
-
-    /// <summary>A scalar query: 1 when the application table exists with its scope column, else 0.</summary>
-    string BuildScopeTableReadySql(SqlOSFgaScopeTable table);
-
-    /// <summary>One idempotent batch dropping SqlOS's stale objects (of renamed or no longer protected tables, or of orders no longer declared) from every table.</summary>
-    string BuildScopeCleanupSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables);
-
-    /// <summary>
-    /// Idempotent batches creating, per application table, the per-level indexes on the scope column (and on
-    /// SQL Server the computed columns they are built on), the type statistics, and the index on rows without a scope.
-    /// </summary>
-    IReadOnlyList<string> BuildEnsureScopeIndexesSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables);
-
     /// <summary>
     /// A scalar query: the hash of the enforcement routines last applied, or NULL when none is stored or any
-    /// routine, trigger, or ancestor column is missing.
+    /// routine, trigger, ancestor column, or ancestor index is missing.
     /// </summary>
-    string BuildSelectRoutinesHashSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables);
+    string BuildSelectRoutinesHashSql(SqlOSFgaOptions options);
 
     /// <summary>Stores the routines hash; parameter <c>@RoutinesHash</c>.</summary>
     string BuildStoreRoutinesHashSql(SqlOSFgaOptions options);
 
-    /// <summary>
-    /// Idempotent batches creating what a page needs beyond the lineage: the grant-count routines, the direct
-    /// index of each application table with its rebuild routine, the triggers on the grants table, and the
-    /// routine that rebuilds all of it (see <see cref="SqlOS.Fga.Paging.SqlOSFgaPageIndex"/>).
-    /// </summary>
-    IReadOnlyList<string> BuildPageIndexSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables);
-
-    /// <summary>Rebuilds the grant counts and every direct index from the grants, the lineage and the rows.</summary>
-    string BuildPageIndexRebuildSql(SqlOSFgaOptions options);
-
-    /// <summary>Rebuilds the counts of the principals whose grants crossed a validity boundary in <c>(@From, @To]</c>; returns how many.</summary>
-    string BuildCountsRefreshSql(SqlOSFgaOptions options);
-
-    /// <summary>Rebuilds the counts of the principals in <c>@Subjects</c> (a JSON array of subject ids).</summary>
-    string BuildCountsRebuildSql(SqlOSFgaOptions options);
-
-    /// <summary>A scalar query: the next moment after <c>@Now</c> a grant's window opens or closes, or NULL.</summary>
-    string BuildNextValidityBoundarySql(SqlOSFgaOptions options);
-
-    /// <summary>
-    /// Four result sets: the caller's live subjects, the roles carrying the permission, the permission's type
-    /// with the root's key, and the live subjects whose grant counts fell behind the clock (a grant's window
-    /// opened or closed since they were built). Parameters <c>@SubjectIds</c>, <c>@PermissionId</c>, <c>@RootId</c>.
-    /// </summary>
-    string BuildPagePreludeSql(SqlOSFgaOptions options);
-
-    /// <summary>The two statements of a page round (see the SQL Server provider).</summary>
-    string BuildPageRoundSql(SqlOSFgaOptions options, SqlOS.Fga.Paging.SqlOSFgaPageSpec spec);
     string BuildLockedSelectSql(string schema, string table, string whereSql, string? orderBySql = null);
 
     string BuildRateLimitIncrementSql(string schema);

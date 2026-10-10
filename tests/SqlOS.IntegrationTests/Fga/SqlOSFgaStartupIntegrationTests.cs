@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Data;
 using System.Data.Common;
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -9,6 +10,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SqlOS.Fga;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
@@ -19,10 +21,10 @@ using SqlOS.IntegrationTests.Infrastructure;
 namespace SqlOS.IntegrationTests.Fga;
 
 /// <summary>
-/// What SqlOS does at startup to the application's tables, on a fresh database of the engine under test, the
-/// way an application's life goes: SqlOS may start before the application's migrations run, rows may be
-/// written without SqlOS's triggers (a bulk load), and later migrations rename tables or stop protecting them.
-/// After every start the protected tables have exactly SqlOS's objects, and every row has its scope.
+/// What SqlOS does at startup, on a fresh database of the engine under test, the way an application's life
+/// goes: SqlOS may start before the application's migrations run, rows may be written without triggers (a bulk
+/// load), and later migrations rename tables or stop protecting them. SqlOS keeps everything of its own on its
+/// own tables: an application table carries nothing but its resource id, so none of this needs a start.
 /// </summary>
 [TestClass]
 public class SqlOSFgaStartupIntegrationTests
@@ -30,13 +32,14 @@ public class SqlOSFgaStartupIntegrationTests
     private const string FolderType = "st_folder";
     private const string DocumentType = "st_document";
     private const string Read = "ST_READ";
+    private const string ReadPermissionId = "perm_st_read";
     private const string ReaderRoleId = "role_st_reader";
 
     [TestMethod]
-    public async Task SqlOSStartsBeforeTheApplicationsMigrations_ThenTheNextStartProtectsTheTable()
+    public async Task SqlOSStartsBeforeTheApplicationsMigrations_AndTheFilterWorksWithoutAnotherStart()
     {
         // The documented order for an application whose migrations reference SqlOS's tables: SqlOS's bootstrap,
-        // then the application's migrations. The first start finds the protected table missing and leaves it.
+        // then the application's migrations. Nothing of SqlOS's depends on the application's tables existing.
         await using var db = await FreshDatabase.CreateAsync();
         await using var app = db.Open<DocsContext>();
         await SetUpSqlOSAsync(app);
@@ -45,19 +48,15 @@ public class SqlOSFgaStartupIntegrationTests
         await CreateApplicationTablesAsync(app);
         var (alice, _) = await CreateFoldersAndAliceAsync(app);
         await AddDocsAsync(app, ("a1", "folder_a"), ("b1", "folder_b"));
-        (await ScopedRowsAsync(app)).Should().Be(0, "SqlOS has not added the table's triggers yet");
-
-        // The next start (the hosted service, after the migrations) protects the table and fills its rows.
-        await StartAsync(app);
-        (await ScopedRowsAsync(app)).Should().Be(2);
         (await VisibleAsync(app, alice)).Should().Equal("a1");
 
         await AddDocsAsync(app, ("a2", "folder_a"));
         (await VisibleAsync(app, alice)).Should().Equal("a1", "a2");
+        (await TableObjectsAsync(app, "StDocs")).Should().BeEquivalentTo(["PK_StDocs", "IX_StDocs_Rank", "IX_StDocs_SqlOSFgaResourceId"], "the table carries only the application's own objects");
     }
 
     [TestMethod]
-    public async Task RowsWrittenWithoutTriggers_AreFilledByTheRoutineOrTheNextStart_AndOnlyThey()
+    public async Task RowsWrittenWithoutTriggers_AreVisibleAtOnce()
     {
         await using var db = await FreshDatabase.CreateAsync();
         await using var app = db.Open<DocsContext>();
@@ -65,27 +64,25 @@ public class SqlOSFgaStartupIntegrationTests
         var (alice, _) = await CreateFoldersAndAliceAsync(app);
         await AddDocsAsync(app, ("a1", "folder_a"));
 
-        // A bulk load that skips triggers writes rows without a scope: nobody sees them.
+        // A bulk load that skips triggers has nothing of SqlOS's to skip: the rows are visible as soon as they exist.
         await WithoutTriggersAsync(app, () => AddDocsAsync(app, ("a2", "folder_a")));
-        (await VisibleAsync(app, alice)).Should().Equal("a1");
-
-        // The job runs the fill routine and the rows are visible, without a restart.
-        await app.Database.ExecuteSqlRawAsync(TestDatabase.IsPostgreSql
-            ? "SELECT \"dbo\".\"fn_SqlOSFgaResources_ScopeFill\"();"
-            : "EXEC [dbo].[sp_SqlOSFgaResources_ScopeFill];");
         (await VisibleAsync(app, alice)).Should().Equal("a1", "a2");
-
-        // A start fills rows written without triggers too, and leaves every row that has a scope alone: the
-        // fill is an index seek on the rows without one, not a pass over the table.
-        await app.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("UPDATE [StDocs] SET [FgaScope] = {0} WHERE [Id] = 'a1'"), new byte[] { 0x0A });
-        await WithoutTriggersAsync(app, () => AddDocsAsync(app, ("a3", "folder_a")));
-        await StartAsync(app);
-        (await ScopeOfAsync(app, "a1")).Should().Equal(new byte[] { 0x0A });
-        (await ScopeOfAsync(app, "a3")).Should().NotBeNull();
     }
 
     [TestMethod]
-    public async Task AProtectedTableIsRenamed_TheNextStartMovesSqlOSObjectsToTheNewName()
+    public async Task TheResourcesTable_CarriesOneIndexPerLevel()
+    {
+        await using var db = await FreshDatabase.CreateAsync();
+        await using var app = db.Open<DocsContext>();
+        await SetUpAsync(app);
+
+        var levels = SqlOSFgaLineage.Levels(new SqlOSFgaOptions());
+        var indexes = (await TableObjectsAsync(app, "SqlOSFgaResources", "dbo")).Where(n => n.Contains("Ancestor", StringComparison.Ordinal));
+        indexes.Should().BeEquivalentTo(Enumerable.Range(0, levels).Select(l => SqlOSFgaLineage.AncestorIndexName("SqlOSFgaResources", l)));
+    }
+
+    [TestMethod]
+    public async Task AProtectedTableIsRenamed_NothingOfSqlOSsFollows_AndTheFilterWorks()
     {
         await using var db = await FreshDatabase.CreateAsync();
         await using (var app = db.Open<DocsContext>())
@@ -101,25 +98,20 @@ public class SqlOSFgaStartupIntegrationTests
             : "EXEC sp_rename 'dbo.StDocs', 'StDocsRenamed';");
         await StartAsync(renamed);
 
-        // Nothing named for the old table is left. (The application's own index keeps its name, IX_StDocs_Rank,
-        // through a table rename, so SqlOS's copies of it end with that name.)
-        (await SqlOSObjectsAsync(renamed)).Should().NotContain(
-            name => name.StartsWith("TR_StDocs_", StringComparison.Ordinal)
-                || name.StartsWith("IX_StDocs_FgaScope", StringComparison.Ordinal)
-                || name.StartsWith("ST_StDocs_", StringComparison.Ordinal));
-        (await SqlOSObjectsAsync(renamed)).Should().Contain(["TR_StDocsRenamed_SqlOSFgaScope_Insert", "IX_StDocsRenamed_FgaScope0", "IX_StDocsRenamed_FgaScopeMissing"]);
+        // The application's own objects, under the names its migrations gave them; nothing of SqlOS's to move.
+        (await TableObjectsAsync(renamed, "StDocsRenamed")).Should().BeEquivalentTo(["PK_StDocs", "IX_StDocs_Rank", "IX_StDocs_SqlOSFgaResourceId"]);
 
         var alice = await AliceAsync(renamed);
         await AddDocsAsync(renamed, ("a2", "folder_a"));
         (await VisibleAsync(renamed, alice)).Should().Equal("a1", "a2");
 
-        // The resource table's triggers address the table under its new name: a move updates its rows.
+        // A move changes the resource's lineage, which the filter reads; the table is not involved.
         await MoveAsync(renamed, "doc::a2", "folder_b");
         (await VisibleAsync(renamed, alice)).Should().Equal("a1");
     }
 
     [TestMethod]
-    public async Task AnEntityNoLongerHasAResourceId_TheNextStartRemovesSqlOSObjects_SoItsMigrationsWork()
+    public async Task AnEntityNoLongerHasAResourceId_ResourceWritesNeverTouchedItsTable()
     {
         await using var db = await FreshDatabase.CreateAsync();
         await using (var app = db.Open<DocsContext>())
@@ -131,25 +123,19 @@ public class SqlOSFgaStartupIntegrationTests
 
         await using var plain = db.Open<UnprotectedDocsContext>();
         await StartAsync(plain);
-        (await SqlOSObjectsAsync(plain)).Should().BeEmpty("the table is no longer SqlOS's to maintain");
-
-        // The application's own migrations can drop the column (SQL Server refuses while SqlOS's computed
-        // columns depend on it), and its rows are written without SqlOS.
-        await plain.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("ALTER TABLE [StDocs] DROP COLUMN [FgaScope]"));
         plain.Docs.Add(new StPlainDoc { Id = "p1", ResourceId = "doc::p1" });
         await plain.SaveChangesAsync();
 
-        // Resource writes no longer touch the table.
+        // Resource writes go on without the table.
         await MoveAsync(plain, "folder_a", "root");
         plain.Set<SqlOSFgaResource>().Remove(await plain.Set<SqlOSFgaResource>().SingleAsync(r => r.Id == "doc::a1"));
         await plain.SaveChangesAsync();
     }
 
     [TestMethod]
-    public async Task AnotherSqlOSInstallation_InTheSameDatabase_LeavesThisOnesTablesAlone()
+    public async Task AnotherSqlOSInstallation_InTheSameDatabase_LeavesThisOneAlone()
     {
-        // Two SqlOS installations, each in its own schema, share a database. The second protects none of the
-        // first's tables, and its start must not treat them as stale.
+        // Two SqlOS installations, each in its own schema, share a database.
         await using var db = await FreshDatabase.CreateAsync();
         await using var app = db.Open<DocsContext>();
         await SetUpAsync(app);
@@ -167,21 +153,14 @@ public class SqlOSFgaStartupIntegrationTests
         await new SqlOSFgaSeedService(other, otherOptions, NullLogger<SqlOSFgaSeedService>.Instance).SeedCoreAsync();
         await new SqlOSFgaFunctionInitializer(other, otherOptions, NullLogger<SqlOSFgaFunctionInitializer>.Instance).EnsureFunctionsExistAsync();
 
-        (await SqlOSObjectsAsync(app)).Should().Contain(["TR_StDocs_SqlOSFgaScope_Insert", "TR_StDocs_SqlOSFgaScope_Update", "IX_StDocs_FgaScope0"]);
-
-        // The triggers still keep the first installation's rows current: a row pointed at a resource Alice
-        // cannot see stops being visible to her.
+        // The first installation's filter reads its own resources: a row pointed at a resource Alice cannot see
+        // stops being visible to her.
+        (await VisibleAsync(app, alice)).Should().Equal("a1");
         var doc = await app.Set<StDoc>().SingleAsync(d => d.Id == "a1");
         doc.ResourceId = "doc::b1";
         await app.SaveChangesAsync();
         app.ChangeTracker.Clear();
         (await VisibleAsync(app, alice)).Should().BeEmpty();
-
-        // And the first installation's next start still finds its own stale objects: a table it no longer
-        // protects is cleaned up as before.
-        await using var plain = db.Open<UnprotectedDocsContext>();
-        await StartAsync(plain);
-        (await SqlOSObjectsAsync(plain)).Should().BeEmpty();
     }
 
     [TestMethod]
@@ -230,22 +209,62 @@ public class SqlOSFgaStartupIntegrationTests
         await CreateFoldersAndAliceAsync(app);
         await app.Database.ExecuteSqlRawAsync($"ALTER DATABASE [{db.Name}] SET ALLOW_SNAPSHOT_ISOLATION ON;");
 
-        foreach (var sql in new[]
-        {
-            "UPDATE [dbo].[SqlOSFgaResources] SET [IsActive] = 0 WHERE [Id] = 'folder_a';",
-            "INSERT INTO [StDocs] ([Id], [ResourceId], [Rank]) VALUES ('s1', 'folder_a', 0);",
-        })
-        {
-            await using var connection = TestDatabase.CreateConnection(db.ConnectionString);
-            await connection.OpenAsync();
-            await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.Snapshot);
-            await using var command = connection.CreateCommand();
-            command.Transaction = transaction;
-            command.CommandText = sql;
+        await using var connection = TestDatabase.CreateConnection(db.ConnectionString);
+        await connection.OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.Snapshot);
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "UPDATE [dbo].[SqlOSFgaResources] SET [IsActive] = 0 WHERE [Id] = 'folder_a';";
 
-            var act = () => command.ExecuteNonQueryAsync();
-            (await act.Should().ThrowAsync<DbException>()).Which.Message.Should().Contain("not SNAPSHOT");
+        var act = () => command.ExecuteNonQueryAsync();
+        (await act.Should().ThrowAsync<DbException>()).Which.Message.Should().Contain("not SNAPSHOT");
+    }
+
+    [TestMethod]
+    public async Task PostgreSql_TheListAndTheRowCheckAreInlined_AndTheSetIsNot()
+    {
+        // fn_ListVisible, fn_AccessRoots and fn_IsResourceAccessible are SQL functions the planner inlines into the
+        // statement that uses them; fn_VisibleSet is PL/pgSQL on purpose, a small set the statement starts from.
+        if (!TestDatabase.IsPostgreSql)
+        {
+            return;
         }
+
+        await using var db = await FreshDatabase.CreateAsync();
+        await using var app = db.Open<DocsContext>();
+        await SetUpAsync(app);
+        var (alice, _) = await CreateFoldersAndAliceAsync(app);
+        await AddDocsAsync(app, ("a1", "folder_a"), ("b1", "folder_b"));
+        var subjects = JsonSerializer.Serialize(new[] { alice });
+
+        var count = await ExplainAsync(db, """SELECT count(*) FROM (SELECT 1 FROM "dbo"."fn_ListVisible"(@subjects, @permission, @type) LIMIT 1000) c""", subjects);
+        count.Should().NotContain("Function Scan", count);
+        count.Should().Contain("SqlOSFgaGrants", "the roots are planned as part of the statement");
+
+        var rowCheck = await ExplainAsync(db, """SELECT d."Id" FROM "StDocs" d WHERE EXISTS (SELECT 1 FROM "dbo"."fn_IsResourceAccessible"(d."ResourceId", @subjects, @permission) f) ORDER BY d."Id" LIMIT 20""", subjects);
+        rowCheck.Should().NotContain("Function Scan", rowCheck);
+
+        var listed = await ExplainAsync(db, """SELECT d."Id" FROM "StDocs" d WHERE EXISTS (SELECT 1 FROM "dbo"."fn_VisibleSet"(@subjects, @permission, @type) v WHERE v."ResourceId" = d."ResourceId") ORDER BY d."Id" LIMIT 20""", subjects);
+        listed.Should().Contain("Function Scan on \"fn_VisibleSet\"", listed);
+    }
+
+    private static async Task<string> ExplainAsync(FreshDatabase db, string sql, string subjects)
+    {
+        await using var connection = TestDatabase.CreateConnection(db.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "EXPLAIN " + sql;
+        TestDatabase.AddParameter(command, "@subjects", subjects);
+        TestDatabase.AddParameter(command, "@permission", ReadPermissionId);
+        TestDatabase.AddParameter(command, "@type", DocumentType);
+        var plan = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            plan.Add(reader.GetString(0));
+        }
+
+        return string.Join("\n", plan);
     }
 
     // ---- The database and the application ----
@@ -291,7 +310,7 @@ public class SqlOSFgaStartupIntegrationTests
         await seed.SeedAuthorizationDataAsync(new SqlOSFgaSeedData
         {
             ResourceTypes = [new SqlOSFgaResourceType { Id = FolderType, Name = "Folder" }, new SqlOSFgaResourceType { Id = DocumentType, Name = "Document" }],
-            Permissions = [new SqlOSFgaPermission { Id = "perm_st_read", Key = Read, Name = "Read documents", ResourceTypeId = DocumentType }],
+            Permissions = [new SqlOSFgaPermission { Id = ReadPermissionId, Key = Read, Name = "Read documents", ResourceTypeId = DocumentType }],
             Roles = [new SqlOSFgaRole { Id = ReaderRoleId, Key = "st_reader", Name = "Reader" }],
             RolePermissions = [("st_reader", [Read])],
         });
@@ -375,12 +394,6 @@ public class SqlOSFgaStartupIntegrationTests
         return await app.Set<StDoc>().AsNoTracking().Where(filter).OrderBy(d => d.Id).Select(d => d.Id).ToListAsync();
     }
 
-    private static Task<int> ScopedRowsAsync(DbContext app)
-        => app.Set<StDoc>().AsNoTracking().CountAsync(d => d.FgaScope != null);
-
-    private static async Task<byte[]?> ScopeOfAsync(DbContext app, string id)
-        => await app.Set<StDoc>().AsNoTracking().Where(d => d.Id == id).Select(d => d.FgaScope).SingleAsync();
-
     private static async Task WithoutTriggersAsync(DbContext app, Func<Task> write)
     {
         await app.Database.ExecuteSqlRawAsync(TestDatabase.IsPostgreSql ? "ALTER TABLE \"StDocs\" DISABLE TRIGGER USER;" : "ALTER TABLE [StDocs] DISABLE TRIGGER ALL;");
@@ -394,20 +407,18 @@ public class SqlOSFgaStartupIntegrationTests
         }
     }
 
-    /// <summary>The names of SqlOS's objects on application tables: triggers, indexes, statistics, computed columns.</summary>
-    private static async Task<List<string>> SqlOSObjectsAsync(DbContext app)
+    /// <summary>The triggers and indexes of a table.</summary>
+    private static async Task<List<string>> TableObjectsAsync(DbContext app, string table, string? schema = null)
     {
         var sql = TestDatabase.IsPostgreSql
-            ? """
-              SELECT tgname::text FROM pg_trigger WHERE NOT tgisinternal AND tgname LIKE 'TR\_%\_SqlOSFgaScope\_%'
-              UNION ALL SELECT indexname::text FROM pg_indexes WHERE indexname ~ '^IX_.*_FgaScope'
-              UNION ALL SELECT stxname::text FROM pg_statistic_ext WHERE stxname LIKE 'ST\_%\_FgaScopeType'
+            ? $"""
+              SELECT t.tgname::text FROM pg_trigger t INNER JOIN pg_class c ON c.oid = t.tgrelid INNER JOIN pg_namespace n ON n.oid = c.relnamespace
+              WHERE NOT t.tgisinternal AND c.relname = '{table}' AND n.nspname = {(schema is null ? "current_schema()" : $"'{schema}'")}
+              UNION ALL SELECT indexname::text FROM pg_indexes WHERE tablename = '{table}' AND schemaname = {(schema is null ? "current_schema()" : $"'{schema}'")}
               """
-            : """
-              SELECT name FROM sys.triggers WHERE name LIKE 'TR[_]%[_]SqlOSFgaScope[_]%'
-              UNION ALL SELECT name FROM sys.indexes WHERE name LIKE 'IX[_]%[_]FgaScope%'
-              UNION ALL SELECT name FROM sys.stats WHERE user_created = 1 AND name LIKE 'ST[_]%[_]FgaScopeType'
-              UNION ALL SELECT name FROM sys.computed_columns WHERE name LIKE 'FgaScope%'
+            : $"""
+              SELECT name FROM sys.triggers WHERE parent_id = OBJECT_ID(N'{(schema is null ? "" : $"[{schema}].")}[{table}]')
+              UNION ALL SELECT name FROM sys.indexes WHERE object_id = OBJECT_ID(N'{(schema is null ? "" : $"[{schema}].")}[{table}]') AND name IS NOT NULL
               """;
         var names = new List<string>();
         var connection = app.Database.GetDbConnection();
@@ -457,7 +468,6 @@ public class SqlOSFgaStartupIntegrationTests
     {
         public string Id { get; set; } = string.Empty;
         public string ResourceId { get; set; } = string.Empty;
-        public byte[]? FgaScope { get; private set; }
         public int Rank { get; set; }
     }
 
@@ -504,7 +514,7 @@ public class SqlOSFgaStartupIntegrationTests
         }
     }
 
-    /// <summary>A second SqlOS installation in its own schema, protecting none of the first's tables.</summary>
+    /// <summary>A second SqlOS installation in its own schema.</summary>
     public sealed class OtherInstallationContext(DbContextOptions<OtherInstallationContext> options) : DbContext(options), ISqlOSFgaDbContext
     {
         public const string Schema = "sqlos_other";

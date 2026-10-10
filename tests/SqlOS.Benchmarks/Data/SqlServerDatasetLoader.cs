@@ -3,19 +3,16 @@ using System.Globalization;
 using Microsoft.Data.SqlClient;
 using SqlOS.Fga.Configuration;
 
-using SqlOS.Fga;
-
 namespace SqlOS.Benchmarks.Data;
 
 /// <summary>
 /// SQL Server: ordered <c>SqlBulkCopy</c> with a table lock into the clustered primary keys (minimally logged
 /// under the simple recovery model), nonclustered indexes disabled during the load and rebuilt afterwards.
-/// Bulk copy fires no triggers, so the lineage and scope value travel with the rows.
+/// Bulk copy fires no triggers, so the lineage travels with the rows.
 /// </summary>
 internal sealed class SqlServerDatasetLoader(string connectionString, SqlOSFgaOptions fga, long? diskBudgetBytes, Log log) : IDatasetLoader
 {
     private string Resources => $"[{fga.Schema}].[{fga.TableNames.Resources}]";
-    private string ResourceTypes => $"[{fga.Schema}].[{fga.TableNames.ResourceTypes}]";
     private string ResourceSequence => $"[{fga.Schema}].[{fga.TableNames.Resources}_Seq]";
     private const string Products = "[dbo].[Products]";
     private const string Stores = "[dbo].[Stores]";
@@ -61,22 +58,6 @@ internal sealed class SqlServerDatasetLoader(string connectionString, SqlOSFgaOp
         }
     }
 
-    public async Task<IReadOnlyDictionary<string, int>> ReadTypeSeqsAsync(CancellationToken cancellationToken)
-    {
-        var map = new Dictionary<string, int>(StringComparer.Ordinal);
-        await using var connection = new SqlConnection(connectionString);
-        await connection.OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT Id, Seq FROM {ResourceTypes}";
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            map[reader.GetString(0)] = reader.GetInt32(1);
-        }
-
-        return map;
-    }
-
     public async Task<long> ReadRootSeqAsync(string rootId, CancellationToken cancellationToken)
     {
         await using var connection = new SqlConnection(connectionString);
@@ -94,18 +75,17 @@ internal sealed class SqlServerDatasetLoader(string connectionString, SqlOSFgaOp
         await ExecuteAsync($"ALTER SEQUENCE {ResourceSequence} RESTART WITH {tree.ProductSeqOffset + 1}", cancellationToken);
     }
 
-    public async Task<LoadTiming> GrowProductsAsync(RetailTree tree, IReadOnlyDictionary<string, int> typeSeq, long from, long to, CancellationToken cancellationToken)
+    public async Task<LoadTiming> GrowProductsAsync(RetailTree tree, long from, long to, CancellationToken cancellationToken)
     {
         var disabled = await DisableNonclusteredIndexesAsync(cancellationToken);
 
         var rows = Stopwatch.StartNew();
-        var productType = typeSeq["product"];
         await Task.WhenAll(
             Task.Run(() => BulkCopyAsync(Resources, DatasetRows.Columns.Resources, DatasetRows.ProductResources(tree, from, to), orderedBy: ["Id"], cancellationToken), cancellationToken),
-            Task.Run(() => BulkCopyAsync(Products, DatasetRows.Columns.Products(typeof(byte[])), DatasetRows.Products(tree, productType, from, to, SqlOSFgaScope.Encode), orderedBy: ["Id"], cancellationToken), cancellationToken));
+            Task.Run(() => BulkCopyAsync(Products, DatasetRows.Columns.Products, DatasetRows.Products(tree, from, to), orderedBy: ["Id"], cancellationToken), cancellationToken));
         rows.Stop();
         await ExecuteAsync("CHECKPOINT;", cancellationToken);
-        log.Info($"  rows loaded in {rows.Elapsed.TotalSeconds:F1}s (lineage and scope column included)");
+        log.Info($"  rows loaded in {rows.Elapsed.TotalSeconds:F1}s (lineage included)");
         await LogFileSizesAsync("load", cancellationToken);
 
         var indexes = Stopwatch.StartNew();
@@ -136,9 +116,8 @@ internal sealed class SqlServerDatasetLoader(string connectionString, SqlOSFgaOp
     {
         static string Quote(string column) => $"[{column}]";
         static string Cast(string expression) => $"CONVERT(DECIMAL(38, 0), {expression})";
-        var resources = await ChecksumAsync(LineageSql.ResourcesChecksum(Resources, Quote, Cast), cancellationToken);
-        var products = await ChecksumAsync(LineageSql.ProductsChecksum(Products, postgres: false), cancellationToken);
-        return new LineageChecksum(resources, products);
+        var (rows, hash) = await ChecksumAsync(LineageSql.ResourcesChecksum(Resources, Quote, Cast), cancellationToken);
+        return new LineageChecksum(rows, hash);
     }
 
     private async Task<(long Rows, decimal Hash)> ChecksumAsync(string sql, CancellationToken cancellationToken)

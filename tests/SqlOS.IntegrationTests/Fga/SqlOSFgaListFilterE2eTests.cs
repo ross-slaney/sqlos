@@ -25,9 +25,9 @@ namespace SqlOS.IntegrationTests.Fga;
 
 /// <summary>
 /// The two ways an application adds SqlOS FGA, each on a fresh database of the engine under test
-/// (SQLOS_TEST_PROVIDER), the way an application starts: the entity declares its scope column, the
-/// application creates its tables, SqlOS initializes, and a list filtered by <c>BuildFilterAsync</c>
-/// returns exactly the rows the caller may see, including a row inserted after the grant.
+/// (SQLOS_TEST_PROVIDER), the way an application starts: the entity carries a resource id, the application
+/// creates its tables, SqlOS initializes, and a list filtered by <c>BuildFilterAsync</c> returns exactly the
+/// rows the caller may see, including a row inserted after the grant.
 /// </summary>
 [TestClass]
 public class SqlOSFgaListFilterE2eTests
@@ -59,26 +59,20 @@ public class SqlOSFgaListFilterE2eTests
         db.Documents.Add(new HostedDocument("a4", "folder_a"));
         await db.SaveChangesAsync();
         (await PageAsync(db.Documents, fga, alice)).Should().Equal("a1", "a2", "a3", "a4");
-
-        db.ChangeTracker.Clear();
-        (await db.Documents.AsNoTracking().ToListAsync()).Should().OnlyContain(d => d.FgaScope != null, "SqlOS fills every row's scope");
     }
 
     [TestMethod]
-    public async Task ExplicitScopeEntity_AndAFilterUsedOnAnotherContextInstance()
+    public async Task ExplicitInterfaceEntity_AndAFilterUsedOnAnotherContextInstance()
     {
         await using var host = await HostedApp.StartAsync();
         await using var scope = host.App.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<HostedFgaDbContext>();
         var (alice, bob) = await CreateFoldersUsersAndGrantAsync(db);
 
-        // HostedNote implements FgaScope explicitly (byte[]? IHasResourceId.FgaScope => null): SqlOS maps the
-        // column itself, keeps it current, and the list filter reads it.
+        // HostedNote implements ISqlOSResourceEntity explicitly, keeping the resource description off its surface.
         db.Notes.AddRange(new HostedNote("n1", "folder_a"), new HostedNote("n2", "folder_a"), new HostedNote("n3", "folder_b"));
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
-        (await db.Notes.AsNoTracking().CountAsync(n => EF.Property<byte[]>(n, nameof(IHasResourceId.FgaScope)) != null))
-            .Should().Be(3, "SqlOS fills the column of an explicit implementation too");
 
         // A filter built by this request's service composes into a query on another context instance, as a
         // context from IDbContextFactory or a pool would be: the filter carries no DbContext.
@@ -259,9 +253,6 @@ public class SqlOSFgaListFilterE2eTests
             db.Tickets.Add(new ManualTicket { Id = "a4", ResourceId = "doc::a4" });
             await db.SaveChangesAsync();
             (await PageAsync(db.Tickets, fga, alice)).Should().Equal("a1", "a2", "a3", "a4");
-
-            db.ChangeTracker.Clear();
-            (await db.Tickets.AsNoTracking().ToListAsync()).Should().OnlyContain(t => t.FgaScope != null, "SqlOS fills every row's scope");
         }
         finally
         {
@@ -316,7 +307,6 @@ public class SqlOSFgaListFilterE2eTests
 
         public string Id { get; private set; } = string.Empty;
         public string ResourceId { get; private set; } = string.Empty;
-        public byte[]? FgaScope { get; private set; }
         public string FolderResourceId { get; set; } = string.Empty;
         public string TypeId { get; set; } = DocumentType;
         public bool Active { get; set; } = true;
@@ -345,9 +335,6 @@ public class SqlOSFgaListFilterE2eTests
         public string ResourceId { get; private set; } = string.Empty;
         public string FolderResourceId { get; private set; } = string.Empty;
 
-        // SqlOS's column, kept off the class's public surface.
-        byte[]? IHasResourceId.FgaScope => null;
-
         string ISqlOSResourceEntity.ResourceTypeId => DocumentType;
         string ISqlOSResourceEntity.ResourceName => Id;
         string? ISqlOSResourceEntity.ParentResourceId => FolderResourceId;
@@ -355,7 +342,7 @@ public class SqlOSFgaListFilterE2eTests
         bool ISqlOSResourceEntity.ResourceIsActive => true;
     }
 
-    // The base-class form: the resource id and the scope column come from SqlOSResourceEntity.
+    // The base-class form: the resource id comes from SqlOSResourceEntity.
     public sealed class HostedFolder : SqlOSResourceEntity
     {
         private HostedFolder()
@@ -420,23 +407,18 @@ public class SqlOSFgaListFilterE2eTests
     {
         public string Id { get; set; } = string.Empty;
         public string ResourceId { get; set; } = string.Empty;
-        public byte[]? FgaScope { get; private set; }
     }
 
     public sealed class ManualFgaDbContext(DbContextOptions<ManualFgaDbContext> options) : DbContext(options), ISqlOSFgaDbContext
     {
         public DbSet<ManualTicket> Tickets => Set<ManualTicket>();
 
-        // SqlOS's query execution evaluates the filters BuildFilterAsync returns; AddSqlOS applies it to the
-        // context it registers, a context built by hand applies it itself (the test provider does, like
-        // UseSqlOSFga() in an application).
         public static ManualFgaDbContext Create(string connectionString)
             => new(new DbContextOptionsBuilder<ManualFgaDbContext>().UseTestProvider(connectionString).Options);
 
-
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
-            // Called first and without a provider name: neither matters, the column is the entity's own.
+            // Called first and without a provider name: neither matters.
             modelBuilder.ApplySqlOSFgaModel();
             modelBuilder.Entity<ManualTicket>(ticket =>
             {

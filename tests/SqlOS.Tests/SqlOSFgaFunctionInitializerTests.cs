@@ -71,90 +71,88 @@ public class SqlOSFgaFunctionInitializerTests
         var sql = SqlOSFgaFunctionInitializer.BuildAccessRootsFunctionSql(new SqlOSFgaOptions());
 
         sql.Should().Contain("CREATE OR ALTER FUNCTION [dbo].fn_AccessRoots");
-        sql.Should().Contain("SELECT DISTINCT r.Seq AS ResourceSeq, r.Depth");
+        sql.Should().Contain("SELECT r.Seq AS ResourceSeq, r.Depth");
+        sql.Should().NotContain("DISTINCT", "a count up to a cap reads only the first roots it needs");
         sql.Should().Contain("rp.PermissionId = @PermissionId");
         sql.Should().Contain("g.SubjectId IN (SELECT live.SubjectId FROM [dbo].fn_ActiveSubjects(@SubjectIds) live)");
-        sql.Should().Contain("r.IsActive = 1");
-        sql.Should().Contain("r.Depth IS NOT NULL");
+        sql.Should().Contain("CROSS APPLY (\n        SELECT TOP (1) x.Seq, x.Depth\n        FROM [dbo].[SqlOSFgaResources] x\n        WHERE x.Id = g.ResourceId AND x.IsActive = 1 AND x.Depth IS NOT NULL\n    ) r",
+            "each grant's resource is a lookup by key, never a pass over the resources");
         sql.Should().Contain("g.EffectiveFrom <= GETUTCDATE()");
         sql.Should().Contain("g.EffectiveTo >= GETUTCDATE()");
-
-        SqlServerDatabaseProvider.Instance.BuildAccessRootsQuerySql(new SqlOSFgaOptions())
-            .Should().Be("SELECT a.ResourceSeq, a.Depth FROM [dbo].fn_AccessRoots({0}, {1}) AS a");
     }
 
     [TestMethod]
-    public void LineageColumnsSql_AddsOneColumnPerLevel_AndNoIndexes()
+    public void ListVisibleSql_ListsEachRootsRowsFromTheIndexOfItsLevel()
     {
-        var sql = SqlServerDatabaseProvider.Instance.BuildEnsureLineageColumnsSql(new SqlOSFgaOptions { MaxResourceHierarchyDepth = 3 }).Single();
+        var sql = SqlOSFgaFunctionInitializer.BuildListVisibleFunctionSql(new SqlOSFgaOptions { MaxResourceHierarchyDepth = 3 });
 
-        sql.Should().Contain("ALTER TABLE [dbo].[SqlOSFgaResources] ADD [Ancestor0] BIGINT NULL");
-        sql.Should().Contain("ADD [Ancestor3] BIGINT NULL");
-        sql.Should().NotContain("Ancestor4");
-        sql.Should().NotContain("INDEX", "the ancestor columns are read by resource id or by Seq, never searched by value");
-    }
+        sql.Should().Contain("CREATE OR ALTER FUNCTION [dbo].fn_ListVisible(");
+        sql.Should().Contain("@TypeId NVARCHAR(450)");
+        sql.Should().Contain("SELECT v.Id AS ResourceId");
+        sql.Should().Contain("FROM [dbo].fn_AccessRoots(@SubjectIds, @PermissionId) a\n    CROSS APPLY (");
 
-    [TestMethod]
-    public void ScopeIndexesSql_AddsComputedColumnsAndFilteredIndexesPerLevel()
-    {
-        var options = new SqlOSFgaOptions { MaxResourceHierarchyDepth = 2 };
-        var scope = new SqlOSFgaScopeTable("app", "Items", "ResourceId", ["Id"], [new SqlOSFgaScopeOrder("Price", ["Price", "Id"])]);
-        var sql = SqlServerDatabaseProvider.Instance.BuildEnsureScopeIndexesSql(options, [scope]).Single();
-
-        // The rows that have no scope yet, which keeps the fill an index seek.
-        sql.Should().Contain("CREATE NONCLUSTERED INDEX [IX_Items_FgaScopeMissing] ON [app].[Items] ([ResourceId]) WHERE [FgaScope] IS NULL;");
-
-        // Per level 0..2: a computed column over the level's eight bytes, the key index and the Price mirror on
-        // it, filtered on the depth byte so a level no row reaches costs nothing.
-        for (var level = 0; level <= 2; level++)
+        // One branch per level 0..3, run only for the roots at that level (a startup filter on a.Depth), reading the
+        // rows under the root from the level's filtered index: the predicate states the index's filter.
+        for (var level = 0; level <= 3; level++)
         {
-            var offset = SqlOSFgaLineage.ScopeAncestorOffset(level);
-            sql.Should().Contain($"ALTER TABLE [app].[Items] ADD [FgaScope{level}] AS SUBSTRING([FgaScope], {offset}, 8);");
-            sql.Should().Contain($"CREATE NONCLUSTERED INDEX [IX_Items_FgaScope{level}] ON [app].[Items] ([FgaScope{level}], [Id]) WHERE [FgaScope] >= 0x0{level};");
-            sql.Should().Contain($"CREATE NONCLUSTERED INDEX [IX_Items_FgaScope{level}_Price] ON [app].[Items] ([FgaScope{level}], [Price], [Id]) WHERE [FgaScope] >= 0x0{level};");
+            sql.Should().Contain($"SELECT r.Id FROM [dbo].[SqlOSFgaResources] r WHERE a.Depth = {level} AND r.Ancestor{level} = a.ResourceSeq AND r.Ancestor{level} IS NOT NULL AND r.Reach <= {level} AND (@TypeId IS NULL OR r.ResourceTypeId = @TypeId)");
         }
 
-        sql.Should().NotContain("FgaScope3");
-
-        // The type, as a computed column with statistics and no index: the optimizer estimates the type test
-        // from data instead of guessing it is selective.
-        sql.Should().Contain("ALTER TABLE [app].[Items] ADD [FgaScopeType] AS SUBSTRING([FgaScope], 2, 4);");
-        sql.Should().Contain("CREATE STATISTICS [ST_Items_FgaScopeType] ON [app].[Items] ([FgaScopeType]);");
-        sql.Should().NotContain("INDEX [IX_Items_FgaScopeType");
-        sql.Should().NotContain("DROP", "stale objects are the cleanup's");
+        sql.Should().NotContain("Ancestor4");
+        sql.Should().NotContain("SqlOSFgaGrants", "the grants are the roots' business");
     }
 
     [TestMethod]
-    public void ScopeCleanupSql_DropsSqlOSObjectsOfTablesItNoLongerMaintains()
+    public void VisibleSet_IsTheListMaterializedOnce_AndListFirst_CountsUpToTheTablesCap()
     {
-        var options = new SqlOSFgaOptions { MaxResourceHierarchyDepth = 1 };
-        var scope = new SqlOSFgaScopeTable("app", "Items", "ResourceId", ["Id"], [new SqlOSFgaScopeOrder("Price", ["Price", "Id"])]);
-        var sql = SqlServerDatabaseProvider.Instance.BuildScopeCleanupSql(options, [scope]);
+        var provider = SqlServerDatabaseProvider.Instance;
+        var options = new SqlOSFgaOptions();
 
-        // Found by name on every table, kept when they belong to a maintained table under its current name.
-        sql.Should().Contain("tr.name LIKE N'TR[_]%[_]SqlOSFgaScope[_]%'");
-        sql.Should().Contain("tr.parent_id = ISNULL(OBJECT_ID(N'[app].[Items]'), 0) AND tr.name IN (N'TR_Items_SqlOSFgaScope_Insert', N'TR_Items_SqlOSFgaScope_Update', N'TR_Items_SqlOSFgaScope_Delete')");
-        sql.Should().Contain("i.name LIKE N'IX[_]%[_]FgaScope[0-9]%' OR i.name LIKE N'IX[_]%[_]FgaScopeMissing'");
-        sql.Should().Contain("i.name IN (N'IX_Items_FgaScope0', N'IX_Items_FgaScope0_Price', N'IX_Items_FgaScope1', N'IX_Items_FgaScope1_Price', N'IX_Items_FgaScopeMissing')");
-        sql.Should().Contain("st.name LIKE N'ST[_]%[_]FgaScopeType'");
-        sql.Should().Contain("c.name LIKE N'FgaScope[0-9]%' OR c.name = N'FgaScopeType'");
-        sql.Should().Contain("DROP COLUMN");
+        // A multi-statement function: the statement that reads it starts from its rows.
+        var set = provider.BuildVisibleSetFunctionSql(options);
+        set.Should().Contain("CREATE OR ALTER FUNCTION [dbo].fn_VisibleSet(");
+        set.Should().Contain("RETURNS @visible TABLE (ResourceId NVARCHAR(450) NOT NULL PRIMARY KEY WITH (IGNORE_DUP_KEY = ON))");
+        set.Should().Contain("SELECT l.ResourceId FROM [dbo].fn_ListVisible(@SubjectIds, @PermissionId, @TypeId) l;");
 
-        // Triggers, then indexes, then statistics, then the computed columns they were built on.
-        sql.IndexOf("DROP TRIGGER", StringComparison.Ordinal).Should().BeLessThan(sql.IndexOf("DROP INDEX", StringComparison.Ordinal));
-        sql.IndexOf("DROP INDEX", StringComparison.Ordinal).Should().BeLessThan(sql.IndexOf("DROP STATISTICS", StringComparison.Ordinal));
-        sql.IndexOf("DROP STATISTICS", StringComparison.Ordinal).Should().BeLessThan(sql.IndexOf("DROP COLUMN", StringComparison.Ordinal));
+        // The cap is 8·√(the table's rows), at least 1,000; the count reads fn_ListVisible up to it and stops.
+        var listFirst = SqlOSFgaFunctionInitializer.BuildListFirstFunctionSql(options);
+        listFirst.Should().Contain("CREATE OR ALTER FUNCTION [dbo].fn_ListFirst(");
+        listFirst.Should().Contain("@Table NVARCHAR(776)");
+        listFirst.Should().Contain("CASE WHEN 8 * SQRT(CAST(ISNULL(SUM(p.rows), 0) AS FLOAT)) > 1000 THEN 8 * SQRT(CAST(ISNULL(SUM(p.rows), 0) AS FLOAT)) ELSE 1000 END");
+        listFirst.Should().Contain("WHERE p.object_id = OBJECT_ID(@Table) AND p.index_id IN (0, 1)");
+        listFirst.Should().Contain("SELECT TOP (c.Cap) 1 AS One FROM [dbo].fn_ListVisible(@SubjectIds, @PermissionId, @TypeId)");
+        listFirst.Should().Contain("CAST(CASE WHEN v.Visible < c.Cap THEN 1 ELSE 0 END AS BIT) AS ListFirst");
 
-        // With no maintained table, everything SqlOS made on application tables is stale.
-        SqlServerDatabaseProvider.Instance.BuildScopeCleanupSql(options, []).Should().Contain("AND NOT (1 = 0)");
+        provider.BuildListFirstQuerySql(options).Should().Be("SELECT f.ListFirst AS [Value] FROM [dbo].fn_ListFirst({0}, {1}, {2}, {3}) AS f");
+    }
+
+    [TestMethod]
+    public void LineageColumnsSql_AddsOneColumnAndOneIndexPerLevel()
+    {
+        var batches = SqlServerDatabaseProvider.Instance.BuildEnsureLineageColumnsSql(new SqlOSFgaOptions { MaxResourceHierarchyDepth = 3 });
+
+        batches.Should().HaveCount(2, "the columns, then the indexes over them");
+        batches[0].Should().Contain("ALTER TABLE [dbo].[SqlOSFgaResources] ADD [Ancestor0] BIGINT NULL");
+        batches[0].Should().Contain("ADD [Ancestor3] BIGINT NULL");
+        batches[0].Should().NotContain("Ancestor4");
+        batches[0].Should().NotContain("INDEX");
+
+        // Per level: the ancestor and the type, covering what fn_ListVisible reads of a row beneath a root, over the
+        // rows that have an ancestor at the level.
+        for (var level = 0; level <= 3; level++)
+        {
+            batches[1].Should().Contain($"IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_SqlOSFgaResources_Ancestor{level}' AND object_id = OBJECT_ID(N'[dbo].[SqlOSFgaResources]'))");
+            batches[1].Should().Contain($"CREATE NONCLUSTERED INDEX [IX_SqlOSFgaResources_Ancestor{level}] ON [dbo].[SqlOSFgaResources] ([Ancestor{level}], [ResourceTypeId]) INCLUDE ([Reach], [Id]) WHERE [Ancestor{level}] IS NOT NULL;");
+        }
+
+        batches[1].Should().NotContain("Ancestor4");
     }
 
     [TestMethod]
     public void LineageMaintenanceSql_CreatesTheRoutinesTriggersAndGuards()
     {
         var options = new SqlOSFgaOptions { MaxResourceHierarchyDepth = 4 };
-        var scope = new SqlOSFgaScopeTable("app", "Items", "ResourceId", ["Id"], [], [new SqlOSFgaScopeColumn("Id", "int", false)]);
-        var batches = SqlServerDatabaseProvider.Instance.BuildLineageMaintenanceSql(options, [scope]);
+        var batches = SqlServerDatabaseProvider.Instance.BuildLineageMaintenanceSql(options);
         var all = string.Join("\n", batches);
 
         all.Should().Contain("CREATE OR ALTER PROCEDURE [dbo].[sp_SqlOSFgaResources_LineageRefresh]");
@@ -171,11 +169,15 @@ public class SqlOSFgaFunctionInitializerTests
         rebuild.Should().Contain("BEGIN TRANSACTION;");
         rebuild.Should().Contain("COMMIT TRANSACTION;");
         rebuild.IndexOf("BEGIN TRANSACTION;", StringComparison.Ordinal).Should().BeGreaterThan(rebuild.IndexOf("WHILE @n <= @ranges", StringComparison.Ordinal));
+        rebuild.Should().Contain("SET [LineageBuilt] = 0");
+        rebuild.Should().Contain("SET [LineageBuilt] = 1");
+
+        // Two triggers, on the resources table, and none anywhere else: a deleted resource is a leaf (a parent
+        // cannot be deleted) and in no other row's lineage.
         all.Should().Contain("CREATE OR ALTER TRIGGER [dbo].[TR_SqlOSFgaResources_Lineage_Insert] ON [dbo].[SqlOSFgaResources]");
         all.Should().Contain("CREATE OR ALTER TRIGGER [dbo].[TR_SqlOSFgaResources_Lineage_Update] ON [dbo].[SqlOSFgaResources]");
-        all.Should().Contain("CREATE OR ALTER TRIGGER [dbo].[TR_SqlOSFgaResources_Lineage_Delete] ON [dbo].[SqlOSFgaResources]");
-        all.Should().Contain("CREATE OR ALTER TRIGGER [app].[TR_Items_SqlOSFgaScope_Insert] ON [app].[Items]");
-        all.Should().Contain("CREATE OR ALTER TRIGGER [app].[TR_Items_SqlOSFgaScope_Update] ON [app].[Items]");
+        all.Should().NotContain("AFTER DELETE");
+        System.Text.RegularExpressions.Regex.Matches(all, "CREATE OR ALTER TRIGGER").Count.Should().Be(2);
 
         // The depth guards: a chain climbing past the limit, or a child of a row at the deepest level.
         all.Should().Contain("WHERE Steps > 4");
@@ -183,90 +185,67 @@ public class SqlOSFgaFunctionInitializerTests
         all.Should().Contain("maximum hierarchy depth of 4");
         all.Should().Contain("THROW 51012");
 
-        // The lineage: depth, reach, and the ancestor at every level 0..4.
+        // The lineage: depth, reach, and the ancestor at every level 0..4; nothing else is maintained.
         all.Should().Contain("Reach = CASE WHEN r.IsActive = 0 OR nd.Depth IS NULL THEN NULL WHEN r.ParentId IS NULL THEN 0 WHEN p.Reach IS NULL THEN nd.Depth ELSE p.Reach END");
         all.Should().Contain("Ancestor4 = CASE WHEN nd.Depth = 4 THEN r.Seq WHEN nd.Depth > 4 THEN p.Ancestor4 ELSE NULL END");
         all.Should().NotContain("Ancestor5");
-
-        // The scope value of the affected rows follows (depth, type, then each level's ancestor where access
-        // flows down from it), and is cleared when the resource goes.
-        all.Should().Contain("[FgaScope] = CASE WHEN r.Id IS NULL THEN NULL ELSE CAST(ISNULL(r.Depth, 0) AS BINARY(1)) + CAST(rt.Seq AS BINARY(4)) + CAST(ISNULL(CASE WHEN r.Reach <= 0 THEN r.Ancestor0 END, 0) AS BINARY(8))");
-        all.Should().Contain("CAST(ISNULL(CASE WHEN r.Reach <= 4 THEN r.Ancestor4 END, 0) AS BINARY(8)) END");
-        all.Should().Contain("INNER JOIN #SqlOSLineageAffected s ON s.Id = t.[ResourceId]");
-        all.Should().Contain("[FgaScope] = NULL");
-
-        // The row triggers: the scope follows a changed resource id; the direct index (rows granted on their
-        // own resource, with the key and every declared order's columns) follows any change to those columns
-        // and every delete.
-        all.Should().Contain("IF NOT (UPDATE([Id]) OR UPDATE([ResourceId])) RETURN;");
-        all.Should().Contain("IF UPDATE([ResourceId])");
-        all.Should().Contain("CREATE OR ALTER TRIGGER [app].[TR_Items_SqlOSFgaScope_Delete] ON [app].[Items]");
-        all.Should().Contain("[dbo].[SqlOSFgaDirect_app_Items]");
+        all.Should().NotContain("FgaScope", "nothing of SqlOS's is on an application table");
+        all.Should().NotContain("ResourceTypeId", "a retype changes no lineage");
 
         // Every maintaining trigger takes the lineage lock for its transaction before reading anything: inserts
         // shared, tree changes exclusive; the rebuild holds it for the whole session.
         all.Should().Contain("sys.sp_getapplock @Resource = N'SqlOS:FgaLineage:dbo.SqlOSFgaResources', @LockMode = 'Shared', @LockOwner = 'Transaction'");
         all.Should().Contain("sys.sp_getapplock @Resource = N'SqlOS:FgaLineage:dbo.SqlOSFgaResources', @LockMode = 'Exclusive', @LockOwner = 'Transaction'");
         all.Should().Contain("sys.sp_getapplock @Resource = N'SqlOS:FgaLineage:dbo.SqlOSFgaResources', @LockMode = 'Exclusive', @LockOwner = 'Session'");
-        var update = batches.Single(b => b.Contains("AFTER UPDATE", StringComparison.Ordinal) && b.Contains("UPDATE(ParentId)", StringComparison.Ordinal));
-        update.IndexOf("@LockMode = 'Exclusive'", StringComparison.Ordinal).Should().BeGreaterThan(update.IndexOf("UPDATE(ParentId)", StringComparison.Ordinal), "an update that changes no parent, activity, or type takes no lock");
+        var update = batches.Single(b => b.Contains("AFTER UPDATE", StringComparison.Ordinal));
+        update.Should().Contain("IF NOT (UPDATE(ParentId) OR UPDATE(IsActive)) RETURN;");
+        update.IndexOf("@LockMode = 'Exclusive'", StringComparison.Ordinal).Should().BeGreaterThan(update.IndexOf("UPDATE(ParentId)", StringComparison.Ordinal), "an update that changes no parent or activity takes no lock");
         all.Should().Contain("SELECT Id FROM (SELECT Id, ParentId, IsActive FROM inserted EXCEPT SELECT Id, ParentId, IsActive FROM deleted) changed");
         all.Should().NotContain("INNER JOIN deleted d ON d.Id = i.Id", "a join of inserted and deleted has nothing to plan by");
-    }
-
-    [TestMethod]
-    public void LineageMaintenanceSql_WithoutScopeTables_HasNoEmptyBlocks()
-    {
-        var all = string.Join("\n", SqlServerDatabaseProvider.Instance.BuildLineageMaintenanceSql(new SqlOSFgaOptions(), []));
-
         System.Text.RegularExpressions.Regex.IsMatch(all, @"BEGIN\s+END").Should().BeFalse("T-SQL rejects an empty block");
-        all.Should().NotContain("IF UPDATE(ResourceTypeId)", "there is nothing to propagate a type change to");
-        all.Should().NotContain("FgaScope");
-
-        var pg = string.Join("\n", PostgreSqlDatabaseProvider.Instance.BuildLineageMaintenanceSql(new SqlOSFgaOptions(), []));
-        System.Text.RegularExpressions.Regex.IsMatch(pg, @"IF v_types THEN\s+NULL;\s+END IF;").Should().BeTrue();
     }
 
     [TestMethod]
     public void RoutinesHash_ChangesWithAnyDefinitionOrOption()
     {
         var provider = SqlServerDatabaseProvider.Instance;
-        string HashFor(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scope)
+        string HashFor(SqlOSFgaOptions options)
             => SqlOSFgaFunctionInitializer.Hash(
                 provider.BuildEnsureLineageColumnsSql(options)
-                    .Concat([provider.BuildActiveSubjectsFunctionSql(options), provider.BuildAccessRootsFunctionSql(options), provider.BuildIsResourceAccessibleFunctionSql(options)])
-                    .Concat(provider.BuildLineageMaintenanceSql(options, scope)));
+                    .Concat([
+                        provider.BuildActiveSubjectsFunctionSql(options), provider.BuildAccessRootsFunctionSql(options), provider.BuildListVisibleFunctionSql(options),
+                        provider.BuildVisibleSetFunctionSql(options), provider.BuildListFirstFunctionSql(options), provider.BuildIsResourceAccessibleFunctionSql(options)])
+                    .Concat(provider.BuildLineageMaintenanceSql(options)));
 
-        var baseline = HashFor(new SqlOSFgaOptions(), []);
-        HashFor(new SqlOSFgaOptions(), []).Should().Be(baseline, "the same definitions hash the same");
-        HashFor(new SqlOSFgaOptions { MaxResourceHierarchyDepth = 11 }, []).Should().NotBe(baseline, "the depth changes the columns and the guards");
-        HashFor(new SqlOSFgaOptions { Schema = "other" }, []).Should().NotBe(baseline);
-        HashFor(new SqlOSFgaOptions(), [new SqlOSFgaScopeTable(null, "Items", "ResourceId", ["Id"], [], [new SqlOSFgaScopeColumn("Id", "int", false)])]).Should().NotBe(baseline, "a newly registered application table adds triggers");
+        var baseline = HashFor(new SqlOSFgaOptions());
+        HashFor(new SqlOSFgaOptions()).Should().Be(baseline, "the same definitions hash the same");
+        HashFor(new SqlOSFgaOptions { MaxResourceHierarchyDepth = 11 }).Should().NotBe(baseline, "the depth changes the columns, the indexes, the guards, and the list");
+        HashFor(new SqlOSFgaOptions { Schema = "other" }).Should().NotBe(baseline);
         baseline.Should().HaveLength(64);
     }
 
     [TestMethod]
-    public void RoutinesHashQuery_RequiresEveryRoutineTriggerAndColumn()
+    public void RoutinesHashQuery_RequiresEveryRoutineTriggerColumnAndIndex()
     {
         var options = new SqlOSFgaOptions { Schema = "ten'ant", MaxResourceHierarchyDepth = 3 };
         options.TableNames.Resources = "res]ources";
-        var scope = new SqlOSFgaScopeTable("app", "Items", "ResourceId", ["Id"]);
 
-        var hash = SqlServerDatabaseProvider.Instance.BuildSelectRoutinesHashSql(options, [scope]);
+        var hash = SqlServerDatabaseProvider.Instance.BuildSelectRoutinesHashSql(options);
 
         hash.Should().Contain("OBJECT_ID(N'[ten''ant].[fn_ActiveSubjects]', N'IF') IS NOT NULL");
         hash.Should().Contain("OBJECT_ID(N'[ten''ant].[fn_AccessRoots]', N'IF') IS NOT NULL");
+        hash.Should().Contain("OBJECT_ID(N'[ten''ant].[fn_ListVisible]', N'IF') IS NOT NULL");
+        hash.Should().Contain("OBJECT_ID(N'[ten''ant].[fn_VisibleSet]', N'TF') IS NOT NULL");
+        hash.Should().Contain("OBJECT_ID(N'[ten''ant].[fn_ListFirst]', N'IF') IS NOT NULL");
         hash.Should().Contain("OBJECT_ID(N'[ten''ant].[fn_IsResourceAccessible]', N'IF') IS NOT NULL");
         hash.Should().Contain("OBJECT_ID(N'[ten''ant].[sp_res]]ources_LineageRefresh]', N'P') IS NOT NULL");
         hash.Should().Contain("OBJECT_ID(N'[ten''ant].[sp_res]]ources_LineageRebuild]', N'P') IS NOT NULL");
         hash.Should().Contain("OBJECT_ID(N'[ten''ant].[TR_res]]ources_Lineage_Insert]', N'TR') IS NOT NULL");
-        hash.Should().Contain("OBJECT_ID(N'[ten''ant].[TR_res]]ources_Lineage_Delete]', N'TR') IS NOT NULL");
-        hash.Should().Contain("OBJECT_ID(N'[ten''ant].[sp_res]]ources_ScopeFill]', N'P') IS NOT NULL");
-        hash.Should().Contain("(SELECT COUNT(*) FROM sys.triggers WHERE parent_id = ISNULL(OBJECT_ID(N'[app].[Items]'), 0) AND name IN (N'TR_Items_SqlOSFgaScope_Insert', N'TR_Items_SqlOSFgaScope_Update', N'TR_Items_SqlOSFgaScope_Delete')) = 3");
-        hash.Should().Contain("(SELECT COUNT(*) FROM sys.indexes WHERE object_id = ISNULL(OBJECT_ID(N'[app].[Items]'), 0) AND name IN (");
-        hash.Should().Contain("N'IX_Items_FgaScopeMissing')) = 5", "levels 0..3 and the missing-rows index");
-        hash.Should().Contain("NOT EXISTS (SELECT N'DROP TRIGGER '", "nothing stale anywhere");
+        hash.Should().Contain("OBJECT_ID(N'[ten''ant].[TR_res]]ources_Lineage_Update]', N'TR') IS NOT NULL");
+        hash.Should().NotContain("Lineage_Delete");
         hash.Should().Contain("COL_LENGTH('[ten''ant].[res]]ources]', 'Ancestor3') IS NOT NULL");
+        hash.Should().Contain("(SELECT COUNT(*) FROM sys.indexes WHERE object_id = OBJECT_ID(N'[ten''ant].[res]]ources]') AND name IN (N'IX_res]ources_Ancestor0', N'IX_res]ources_Ancestor1', N'IX_res]ources_Ancestor2', N'IX_res]ources_Ancestor3')) = 4");
+        hash.Should().NotContain("FgaScope");
     }
 
     [TestMethod]
@@ -280,6 +259,7 @@ public class SqlOSFgaFunctionInitializerTests
 
         resources.GetDeclaredTriggers().Select(t => t.GetDatabaseName())
             .Should().BeEquivalentTo(SqlOSFgaLineage.TriggerNames("SqlOSFgaResources"));
+        context.Model.FindEntityType(typeof(SqlOSFgaGrant))!.GetDeclaredTriggers().Should().BeEmpty("a grant changes no stored structure; the filter reads grants when it runs");
 
         // Only SqlOS's SQL routines read the lineage, so the model leaves it out and does not depend on the
         // configured depth: nothing in an application's model or migrations changes when the depth does.
@@ -288,8 +268,7 @@ public class SqlOSFgaFunctionInitializerTests
             resources.FindProperty(name).Should().BeNull(name);
         }
 
-        context.Model.FindEntityType(typeof(SqlOSFgaResourceType))!.FindProperty("Seq").Should().NotBeNull("the filter reads a permission's type key");
-        context.Model.FindEntityType(typeof(SqlOSFgaAccessRoot))!.FindPrimaryKey().Should().BeNull("the roots are a query result");
+        context.Model.FindEntityType(typeof(SqlOSFgaVisibleResource))!.FindPrimaryKey().Should().BeNull("the visible resources are a query result");
         context.Model.FindEntityType(typeof(SqlOSFgaAccessMatch))!.FindPrimaryKey().Should().BeNull("the point check's grant is a query result");
     }
 }

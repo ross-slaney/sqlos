@@ -94,15 +94,12 @@ else
 var planCapture = new PlanCapture(options.Provider);
 plainOptions.AddInterceptors(planCapture);
 
-// SqlOS's query execution, as AddSqlOS applies it to the context it registers: a page over the filter is
-// walked; every other query over it gets the predicate over the caller's access roots, read when it runs.
-plainOptions.UseSqlOSFga();
 var builtOptions = plainOptions.Options;
 BenchDbContext CreateContext() => new(builtOptions);
 
-// The schema, indexes, functions, lineage triggers, scope column, and core seed exactly as SqlOS creates them
-// for an application.
-log.Info("Creating the SqlOS FGA schema, the lineage, fn_AccessRoots, fn_IsResourceAccessible, the triggers, the scope column, and the authorization model...");
+// The schema, indexes, functions, lineage triggers, and core seed exactly as SqlOS creates them for an
+// application.
+log.Info("Creating the SqlOS FGA schema, the lineage with its per-level indexes, fn_AccessRoots, fn_Visible, fn_IsResourceAccessible, the triggers, and the authorization model...");
 await using (var db = CreateContext())
 {
     await db.Database.EnsureCreatedAsync(cancellation);
@@ -124,7 +121,7 @@ var dataset = new DatasetShape(
     MaxDepth: 10,
     options.Seed,
     string.Create(CultureInfo.InvariantCulture,
-        $"The shipped schema, indexes, resource lineage, `fn_AccessRoots`, and `fn_IsResourceAccessible`, queried on a product table two ways, both over `BuildFilterAsync`'s filter on the context SqlOS registers: every page as one statement the optimizer plans (`list.*`: the page written as a projection ordered after `Select`, which SqlOS leaves to the optimizer; the caller's access roots are read when the statement runs, and the lineage from the row's own scope column) and the same page as written (`page.*`: walked by SqlOS over the grant counts, the per-level indexes, and the direct index, reading no root). The tree: {chains} retail chains ({chains - 1} at D = 5, one at D = 10) with {tree.Stores.Count:N0} stores and {tree.Nodes.Count + 1:N0} organizational nodes. Store sizes are log-normal, and products are spread through the id range the way rows arrive over time. {managedScopes:N0} managers hold grants on their store, region, or chain. One person holds {BenchmarkModel.HundredStoreGrants} store grants across the chains; two more hold 10,000 and 100,000 grants on single products, spread through the catalog. The people measured each resolve to 3 subjects (M = 3)."));
+        $"The shipped schema, the resource lineage with its per-level indexes, `fn_AccessRoots`, `fn_Visible`, and `fn_IsResourceAccessible`, queried on a product table through `BuildFilterAsync`'s predicate: it composes into the application's LINQ query as one EXISTS over `fn_Visible`, so the engine plans the whole statement and takes the probe or the expand plan from its statistics (`list.*`). The tree: {chains} retail chains ({chains - 1} at D = 5, one at D = 10) with {tree.Stores.Count:N0} stores and {tree.Nodes.Count + 1:N0} organizational nodes. Store sizes are log-normal, and products are spread through the id range the way rows arrive over time. {managedScopes:N0} managers hold grants on their store, region, or chain. One person holds {BenchmarkModel.HundredStoreGrants} store grants across the chains; two more hold 10,000 and 100,000 grants on single products, spread through the catalog. The people measured each resolve to 3 subjects (M = 3)."));
 
 // Leave room for the CI runner's own logs and the uploaded results.
 long? FreeBytes() => options.DataDirectory is { } directory ? new DriveInfo(Path.GetFullPath(directory)).AvailableFreeSpace : null;
@@ -135,7 +132,6 @@ IDatasetLoader loader = options.Provider == DatabaseProvider.PostgreSql
     : new SqlServerDatasetLoader(server.DatabaseConnectionString, fga, diskBudget, log);
 
 await loader.ConfigureDatabaseAsync(cancellation);
-var typeSeq = await loader.ReadTypeSeqsAsync(cancellation);
 tree.AssignSeqs(await loader.ReadRootSeqAsync(fga.RootResourceId, cancellation));
 log.Info($"Loading the hierarchy: {tree.Nodes.Count:N0} organizational nodes with their lineage, {tree.Stores.Count:N0} stores, {tree.Leaves.Count:N0} leaves...");
 await loader.LoadHierarchyAsync(tree, cancellation);
@@ -171,7 +167,7 @@ var report = new BenchmarkReport
 };
 log.Info($"Engine: {report.Engine}");
 
-var runner = new ScenarioRunner(CreateContext, options.Provider, fga, tree, Path.Combine(outputDirectory, "plans"), options.ScenarioBudgetSeconds, log);
+var runner = new ScenarioRunner(CreateContext, fga, tree, Path.Combine(outputDirectory, "plans"), options.ScenarioBudgetSeconds, log);
 var extraGates = new List<GateResult>();
 long loaded = 0;
 long lastSize = 0;
@@ -194,8 +190,8 @@ foreach (var target in options.Scales)
         }
     }
 
-    log.Info($"Growing the catalog to {RetailTree.Count(target)} products ({target - loaded:N0} new rows in each of two tables, lineage and scope columns included)...");
-    var timing = await loader.GrowProductsAsync(tree, typeSeq, loaded, target, cancellation);
+    log.Info($"Growing the catalog to {RetailTree.Count(target)} products ({target - loaded:N0} new rows in each of two tables, lineage included)...");
+    var timing = await loader.GrowProductsAsync(tree, loaded, target, cancellation);
     if (loaded == 0)
     {
         await using var db = CreateContext();
@@ -203,17 +199,6 @@ foreach (var target in options.Scales)
         log.Info($"Granted {granted:N0} single products to the many-grants people ({string.Join(", ", people.ManyGrants.Select(p => $"{p.Key}: {p.GrantedProducts:N0}"))}).");
     }
 
-    // The bulk load wrote the rows past the triggers (the harness supplies lineage and scope itself), so the
-    // grant counts and the direct indexes are rebuilt from the grants and the rows, as SqlOS does at every start.
-    var pageIndex = Stopwatch.StartNew();
-    await using (var db = CreateContext())
-    {
-        db.Database.SetCommandTimeout(0);
-        await db.Database.ExecuteSqlRawAsync(SqlOSDatabase.Resolve(db.Database).BuildPageIndexRebuildSql(fga), cancellation);
-    }
-
-    pageIndex.Stop();
-    log.Info($"  grant counts and direct indexes rebuilt in {pageIndex.Elapsed.TotalSeconds:F1}s");
     loaded = target;
 
     var size = await loader.DatabaseSizeBytesAsync(cancellation);
@@ -246,9 +231,9 @@ foreach (var target in options.Scales)
 
         log.Info("Lineage maintenance pass: single-row and multi-row inserts, a multi-row delete, and subtree updates...");
         var loadedLineage = await loader.LineageChecksumAsync(cancellation);
-        if (loadedLineage.Resources.Rows != tree.TotalResources(target) || loadedLineage.Products.Rows != target)
+        if (loadedLineage.Rows != tree.TotalResources(target))
         {
-            throw new InvalidOperationException($"The loaded lineage covers {loadedLineage}; the dataset has {tree.TotalResources(target):N0} resources and {target:N0} products.");
+            throw new InvalidOperationException($"The loaded lineage covers {loadedLineage}; the dataset has {tree.TotalResources(target):N0} resources.");
         }
 
         maintenance = await new MaintenancePass(CreateContext, options.Provider, fga, tree, log).RunAsync(people, target, cancellation);
@@ -280,7 +265,6 @@ foreach (var target in options.Scales)
         size,
         results)
     {
-        PageIndexSeconds = pageIndex.Elapsed.TotalSeconds,
         Density = density,
         Maintenance = maintenance,
         LineageCheck = lineageCheck,

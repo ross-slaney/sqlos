@@ -2,14 +2,16 @@ using System.Globalization;
 using System.Text;
 using SqlOS.Fga;
 using SqlOS.Fga.Configuration;
-using SqlOS.Fga.Paging;
 
 namespace SqlOS.Database;
 
 /// <summary>
 /// The SHRBAC enforcement artifacts around the row filter: the caller's live subjects and access roots, the
-/// resource lineage (each resource's ancestor at every level, depth, and reach) with the routines and
-/// triggers that keep it exact, and the scope columns that copy it onto application tables.
+/// resource lineage (each resource's ancestor at every level, depth, and reach: the tree's closure, one row
+/// per resource) with the index per level, the routines and triggers that keep it exact, and the functions
+/// a list filter is made of: <c>fn_ListVisible</c> (the caller's visible resources, root by root),
+/// <c>fn_VisibleSet</c> (the same, materialized) and <c>fn_ListFirst</c> (whether the caller sees few
+/// enough rows of a table to list them first).
 /// </summary>
 internal sealed partial class SqlServerDatabaseProvider
 {
@@ -68,11 +70,11 @@ internal sealed partial class SqlServerDatabaseProvider
     }
 
     /// <summary>
-    /// <c>fn_AccessRoots(@SubjectIds, @PermissionId)</c>: the caller's access roots, one row per resource on
-    /// which one of the caller's live subjects holds a current grant whose role includes the permission: the
-    /// resource's compact key and its level. <c>BuildFilterAsync</c> reads them once per query and compares
-    /// each row's ancestor at the root's level with them. Inactive or malformed resources are left out: no row
-    /// can reach them anyway.
+    /// <c>fn_AccessRoots(@SubjectIds, @PermissionId)</c>: the caller's access roots, one row per current grant
+    /// of one of the caller's live subjects whose role includes the permission: the granted resource's compact
+    /// key and its level. Not deduplicated, so a statement that needs only the first roots (a count up to a
+    /// cap) stops reading grants once it has them. Inactive or malformed resources are left out: no row can
+    /// reach them anyway.
     /// </summary>
     public string BuildAccessRootsFunctionSql(SqlOSFgaOptions options)
     {
@@ -91,60 +93,171 @@ internal sealed partial class SqlServerDatabaseProvider
             AS
             RETURN
             (
-                SELECT DISTINCT r.Seq AS ResourceSeq, r.Depth
+                SELECT r.Seq AS ResourceSeq, r.Depth
                 FROM [{schema}].[{grants}] g
                 INNER JOIN [{schema}].[{rolePermissions}] rp ON rp.RoleId = g.RoleId AND rp.PermissionId = @PermissionId
-                INNER JOIN [{schema}].[{resources}] r ON r.Id = g.ResourceId
+                -- Each grant's resource by its key: a lookup per grant, never a pass over the resources.
+                CROSS APPLY (
+                    SELECT TOP (1) x.Seq, x.Depth
+                    FROM [{schema}].[{resources}] x
+                    WHERE x.Id = g.ResourceId AND x.IsActive = 1 AND x.Depth IS NOT NULL
+                ) r
                 WHERE g.SubjectId IN (SELECT live.SubjectId FROM [{schema}].fn_ActiveSubjects(@SubjectIds) live)
-                  AND r.IsActive = 1
-                  AND r.Depth IS NOT NULL
                   AND (g.EffectiveFrom IS NULL OR g.EffectiveFrom <= GETUTCDATE())
                   AND (g.EffectiveTo IS NULL OR g.EffectiveTo >= GETUTCDATE())
             )
             """;
     }
 
-    /// <summary>The query over <c>fn_AccessRoots</c>; <c>{0}</c> is the subject ids JSON, <c>{1}</c> the permission id.</summary>
-    public string BuildAccessRootsQuerySql(SqlOSFgaOptions options)
+    /// <summary>
+    /// <c>fn_ListVisible(@SubjectIds, @PermissionId, @TypeId)</c>: the resources the caller may see with the
+    /// permission (of its type, when it has one), listed from the caller's roots: for each root, the rows of
+    /// the index of the root's level that hold the root as their ancestor there and whose reach extends up to
+    /// it (nothing inactive between). Each root reads one range of one index; the branch of every other
+    /// level is skipped by its startup filter. A resource under two roots is listed twice. The rule is the
+    /// one <c>fn_IsResourceAccessible</c> applies to one resource; they agree row for row. Each branch states
+    /// that the level's ancestor is not null: SQL Server uses a filtered index only for a predicate that
+    /// states its filter, and does not infer it from an equality with a value it doesn't know yet.
+    /// </summary>
+    public string BuildListVisibleFunctionSql(SqlOSFgaOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return $"SELECT a.ResourceSeq, a.Depth FROM [{Escape(options.Schema)}].fn_AccessRoots({{0}}, {{1}}) AS a";
+        var schema = Escape(options.Schema);
+        var resources = Escape(options.TableNames.Resources);
+        var branches = string.Join("\n        UNION ALL\n", Enumerable.Range(0, SqlOSFgaLineage.Levels(options)).Select(level =>
+        {
+            var l = level.ToString(CultureInfo.InvariantCulture);
+            var ancestor = "r." + SqlOSFgaLineage.AncestorColumn(level);
+            return $"        SELECT r.Id FROM [{schema}].[{resources}] r WHERE a.Depth = {l} AND {ancestor} = a.ResourceSeq AND {ancestor} IS NOT NULL AND r.Reach <= {l} AND (@TypeId IS NULL OR r.ResourceTypeId = @TypeId)";
+        }));
+        return $"""
+            CREATE OR ALTER FUNCTION [{schema}].fn_ListVisible(
+                @SubjectIds NVARCHAR(MAX),
+                @PermissionId NVARCHAR(450),
+                @TypeId NVARCHAR(450)
+            )
+            RETURNS TABLE
+            AS
+            RETURN
+            (
+                SELECT v.Id AS ResourceId
+                FROM [{schema}].fn_AccessRoots(@SubjectIds, @PermissionId) a
+                CROSS APPLY (
+            {branches}
+                ) v
+            )
+            """;
     }
 
     /// <summary>
-    /// Adds the ancestor columns the configured depth calls for. Idempotent; a deeper configuration adds
-    /// columns, never removes any. The columns carry no index: they are read by resource id or by Seq.
+    /// <c>fn_VisibleSet(@SubjectIds, @PermissionId, @TypeId)</c>: the rows of <c>fn_ListVisible</c>, each
+    /// once, materialized before the statement that reads it goes on. A multi-statement function: the
+    /// statement starts from it (its few rows, then the table's resource id index), instead of reading the
+    /// table in order and testing each row. Used only for a caller <c>fn_ListFirst</c> found to see few rows.
+    /// </summary>
+    public string BuildVisibleSetFunctionSql(SqlOSFgaOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var schema = Escape(options.Schema);
+        return $"""
+            CREATE OR ALTER FUNCTION [{schema}].fn_VisibleSet(
+                @SubjectIds NVARCHAR(MAX),
+                @PermissionId NVARCHAR(450),
+                @TypeId NVARCHAR(450)
+            )
+            RETURNS @visible TABLE (ResourceId NVARCHAR(450) NOT NULL PRIMARY KEY WITH (IGNORE_DUP_KEY = ON))
+            AS
+            BEGIN
+                INSERT INTO @visible (ResourceId)
+                SELECT l.ResourceId FROM [{schema}].fn_ListVisible(@SubjectIds, @PermissionId, @TypeId) l;
+                RETURN;
+            END
+            """;
+    }
+
+    /// <summary>
+    /// <c>fn_ListFirst(@SubjectIds, @PermissionId, @TypeId, @Table)</c>: one row, whether the caller sees
+    /// fewer resources than the table's cap: <see cref="SqlOSFgaLineage.ListFirstCapSql"/> of its row count, as
+    /// the engine keeps it in its catalog. Counts <c>fn_ListVisible</c> up to the cap and stops there, so it
+    /// costs at most the cap, whoever asks. Below the cap, listing the caller's rows first and sorting them
+    /// costs less than reading the table in order until a page of them turns up; above it, the reverse.
+    /// </summary>
+    public string BuildListFirstFunctionSql(SqlOSFgaOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var schema = Escape(options.Schema);
+        return $"""
+            CREATE OR ALTER FUNCTION [{schema}].fn_ListFirst(
+                @SubjectIds NVARCHAR(MAX),
+                @PermissionId NVARCHAR(450),
+                @TypeId NVARCHAR(450),
+                @Table NVARCHAR(776)
+            )
+            RETURNS TABLE
+            AS
+            RETURN
+            (
+                SELECT CAST(CASE WHEN v.Visible < c.Cap THEN 1 ELSE 0 END AS BIT) AS ListFirst
+                FROM (
+                    SELECT CAST({SqlOSFgaLineage.ListFirstCapSql("CAST(ISNULL(SUM(p.rows), 0) AS FLOAT)", "SQRT")} AS BIGINT) AS Cap
+                    FROM sys.partitions p
+                    WHERE p.object_id = OBJECT_ID(@Table) AND p.index_id IN (0, 1)
+                ) c
+                CROSS APPLY (
+                    SELECT COUNT_BIG(*) AS Visible
+                    FROM (SELECT TOP (c.Cap) 1 AS One FROM [{schema}].fn_ListVisible(@SubjectIds, @PermissionId, @TypeId)) t
+                ) v
+            )
+            """;
+    }
+
+    /// <summary>The query over <c>fn_ListFirst</c>: <c>{0}</c> subject ids JSON, <c>{1}</c> permission id, <c>{2}</c> type id, <c>{3}</c> the table's quoted name.</summary>
+    public string BuildListFirstQuerySql(SqlOSFgaOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return $"SELECT f.ListFirst AS [Value] FROM [{Escape(options.Schema)}].fn_ListFirst({{0}}, {{1}}, {{2}}, {{3}}) AS f";
+    }
+
+    /// <summary>
+    /// Adds the ancestor columns the configured depth calls for, and the index of each level: the ancestor
+    /// at that level and the type, covering what <c>fn_ListVisible</c> reads of a row beneath a root, over the
+    /// rows that have an ancestor at the level. Idempotent; a deeper configuration adds columns and indexes,
+    /// never removes any. Two batches: the indexes are compiled after the columns exist.
     /// </summary>
     public IReadOnlyList<string> BuildEnsureLineageColumnsSql(SqlOSFgaOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
         var table = $"[{Escape(options.Schema)}].[{Escape(options.TableNames.Resources)}]";
         var columns = new StringBuilder();
+        var indexes = new StringBuilder();
         for (var level = 0; level < SqlOSFgaLineage.Levels(options); level++)
         {
             var column = SqlOSFgaLineage.AncestorColumn(level);
+            var index = SqlOSFgaLineage.AncestorIndexName(options.TableNames.Resources, level);
             columns.AppendLine(CultureInfo.InvariantCulture, $"""
                 IF COL_LENGTH('{SqlLiteral(table)}', '{column}') IS NULL
                     ALTER TABLE {table} ADD [{column}] BIGINT NULL;
                 """);
+            indexes.AppendLine(CultureInfo.InvariantCulture, $"""
+                IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = '{SqlLiteral(index)}' AND object_id = OBJECT_ID(N'{SqlLiteral(table)}'))
+                    CREATE NONCLUSTERED INDEX [{Escape(index)}] ON {table} ([{column}], [ResourceTypeId]) INCLUDE ([{SqlOSFgaLineage.ReachColumn}], [Id]) WHERE [{column}] IS NOT NULL;
+                """);
         }
 
-        return [columns.ToString()];
+        return [columns.ToString(), indexes.ToString()];
     }
 
     /// <summary>
     /// The lineage maintenance: a refresh procedure (recompute the lineage of a set of changed resources and
     /// everything beneath them, rejecting a cycle or an over-deep row), a rebuild procedure (recompute every
-    /// row level by level), the three triggers on the resources table, and the two triggers on each
-    /// application table that carries the scope columns. Each batch is idempotent (<c>CREATE OR ALTER</c>).
+    /// row level by level), and the two triggers on the resources table. Each batch is idempotent
+    /// (<c>CREATE OR ALTER</c>).
     /// </summary>
-    public IReadOnlyList<string> BuildLineageMaintenanceSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
+    public IReadOnlyList<string> BuildLineageMaintenanceSql(SqlOSFgaOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(scopeTables);
         var schema = Escape(options.Schema);
         var resources = $"[{schema}].[{Escape(options.TableNames.Resources)}]";
-        var resourceTypes = $"[{schema}].[{Escape(options.TableNames.ResourceTypes)}]";
         var refresh = $"[{schema}].[sp_{Escape(SqlOSFgaLineage.RefreshRoutineName(options.TableNames.Resources))}]";
         var rebuild = $"[{schema}].[sp_{Escape(SqlOSFgaLineage.RebuildRoutineName(options.TableNames.Resources))}]";
         var triggers = SqlOSFgaLineage.TriggerNames(options.TableNames.Resources);
@@ -169,25 +282,6 @@ internal sealed partial class SqlServerDatabaseProvider
         }
 
         var nulls = string.Join(", ", new[] { "Depth = NULL", "Reach = NULL" }.Concat(Enumerable.Range(0, levels).Select(l => $"{SqlOSFgaLineage.AncestorColumn(l)} = NULL")));
-
-        // Copies the lineage of the resources in `source` (a table with an Id column) onto their rows in each
-        // scope table.
-        string Propagate(string source)
-        {
-            var sql = new StringBuilder();
-            foreach (var table in scopeTables)
-            {
-                sql.AppendLine(CultureInfo.InvariantCulture, $"""
-                    UPDATE t SET {ScopeAssignment(levels, "r", "rt")}
-                    FROM {ScopeTable(table)} t
-                    INNER JOIN {source} s ON s.Id = t.[{Escape(table.ResourceIdColumn)}]
-                    INNER JOIN {resources} r ON r.Id = s.Id
-                    INNER JOIN {resourceTypes} rt ON rt.Id = r.ResourceTypeId;
-                    """);
-            }
-
-            return sql.ToString();
-        }
 
         var refreshProcedure = $"""
             CREATE OR ALTER PROCEDURE {refresh}
@@ -290,13 +384,6 @@ internal sealed partial class SqlServerDatabaseProvider
                 FROM {resources} r
                 INNER JOIN #SqlOSLineageAffected a ON a.Id = r.Id
                 WHERE a.Wave IS NULL;
-
-                -- 5. The scope columns of the affected rows' application rows.
-                {Propagate("#SqlOSLineageAffected")}
-                -- 6. The grant counts of the principals holding grants on the affected resources (their chains
-                --    changed), and the activity and type of their rows' direct entries.
-                {CountsRefreshForResources(options, "#SqlOSLineageAffected")}
-                {string.Concat(scopeTables.Select(t => DirectRefresh(options, t, "#SqlOSLineageAffected") + "\n"))}
                 DROP TABLE #SqlOSLineageAffected;
             END
             """;
@@ -304,10 +391,8 @@ internal sealed partial class SqlServerDatabaseProvider
         // The whole table, in ranges of the key: the internal nodes (every resource that is some row's parent;
         // few next to the leaves) get their lineage level by level in a temp table, then every range of the
         // table takes its rows' lineage in one transaction: the nodes' from the temp table, the leaves' from
-        // their parent node, and the scope columns of the range's application rows. LineageBuilt is cleared
-        // before the first range and set after the last, so a rebuild that fails part-way leaves it clear and
-        // the next startup runs it again.
-        var nodeColumns = string.Join(", ", new[] { "Depth", "Reach" }.Concat(Enumerable.Range(0, levels).Select(SqlOSFgaLineage.AncestorColumn)));
+        // their parent node. LineageBuilt is cleared before the first range and set after the last, so a
+        // rebuild that fails part-way leaves it clear and the next startup runs it again.
         var copyNode = string.Join(", ", new[] { "Depth", "Reach" }.Concat(Enumerable.Range(0, levels).Select(SqlOSFgaLineage.AncestorColumn)).Select(c => $"{c} = n.{c}"));
         var rebuildProcedure = $"""
             CREATE OR ALTER PROCEDURE {rebuild}
@@ -354,7 +439,7 @@ internal sealed partial class SqlServerDatabaseProvider
                     SET @level += 1;
                 END
 
-                -- 2. Every range of the table: its nodes, its leaves, its application rows.
+                -- 2. Every range of the table: its nodes, then its leaves.
                 {RangeLoop(resources, "@RangeRows", $"""
                 UPDATE r SET {copyNode}
                 FROM {resources} r
@@ -377,11 +462,8 @@ internal sealed partial class SqlServerDatabaseProvider
                 WHERE r.Id >= @from AND r.Id <= @to
                   AND r.ParentId IS NULL
                   AND NOT EXISTS (SELECT 1 FROM #SqlOSLineageNodes n WHERE n.Id = r.Id);
-                {string.Concat(scopeTables.Select(t => ScopeFillRange(options, t, levels)))}
                 """)}
                 DROP TABLE #SqlOSLineageNodes;
-                -- 3. The grant counts and the direct indexes, from the grants and the new lineage.
-                EXEC [{schema}].[sp_{SqlOSFgaPageIndex.RebuildRoutine}];
                 UPDATE [{schema}].[SqlOSFgaSchema] SET [LineageBuilt] = 1;
                 """)}
             END
@@ -403,200 +485,30 @@ internal sealed partial class SqlServerDatabaseProvider
                 INSERT INTO #SqlOSLineageChanged (Id) SELECT Id FROM inserted;
                 EXEC {refresh} @RejectMalformed = 1, @WalkAll = 0;
                 DROP TABLE #SqlOSLineageChanged;
-                -- A parent that had no children before this statement is now a container: the grants on it
-                -- enter the grant counts (a childless resource's grants are served by the direct index alone).
-                {CountsRefreshForResources(options, $"(SELECT DISTINCT n.ParentId AS Id FROM inserted n WHERE n.ParentId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM {resources} c WHERE c.ParentId = n.ParentId AND NOT EXISTS (SELECT 1 FROM inserted x WHERE x.Id = c.Id)))")}
             END
             """;
 
-        // The parents that gained their first children or lost their last ones in an update: their grants
-        // enter or leave the grant counts. The moved rows come from EXCEPT, never from a join of inserted and deleted.
-        const string movedIn = "(SELECT Id, ParentId FROM inserted EXCEPT SELECT Id, ParentId FROM deleted)";
-        const string movedOut = "(SELECT Id, ParentId FROM deleted EXCEPT SELECT Id, ParentId FROM inserted)";
-        var transitionedParents = $"""
-            (SELECT m.ParentId AS Id FROM {movedIn} m
-             WHERE m.ParentId IS NOT NULL
-               AND NOT EXISTS (SELECT 1 FROM {resources} c WHERE c.ParentId = m.ParentId AND NOT EXISTS (SELECT 1 FROM {movedIn} y WHERE y.Id = c.Id))
-             UNION
-             SELECT o.ParentId FROM {movedOut} o
-             WHERE o.ParentId IS NOT NULL
-               AND NOT EXISTS (SELECT 1 FROM {resources} c WHERE c.ParentId = o.ParentId))
-            """;
-
         // Changed rows are found with EXCEPT, a hashed set operation: a join of inserted and deleted has no
-        // index or statistics to plan by, and a bulk update would pay for it quadratically.
-        var typeChanges = new StringBuilder();
-        foreach (var table in scopeTables)
-        {
-            typeChanges.AppendLine(CultureInfo.InvariantCulture, $"""
-                UPDATE t SET {ScopeAssignment(levels, "r", "rt")}
-                FROM {ScopeTable(table)} t
-                INNER JOIN (SELECT Id, ResourceTypeId FROM inserted EXCEPT SELECT Id, ResourceTypeId FROM deleted) i ON i.Id = t.[{Escape(table.ResourceIdColumn)}]
-                INNER JOIN {resources} r ON r.Id = i.Id
-                INNER JOIN {resourceTypes} rt ON rt.Id = r.ResourceTypeId;
-                {DirectRefresh(options, table, "(SELECT i.Id FROM (SELECT Id, ResourceTypeId FROM inserted EXCEPT SELECT Id, ResourceTypeId FROM deleted) i)")}
-                """);
-        }
-
+        // index or statistics to plan by, and a bulk update would pay for it quadratically. A deleted row
+        // needs no trigger: a resource with children cannot be deleted, and a leaf is in no other row's lineage.
         var updateTrigger = $"""
             CREATE OR ALTER TRIGGER [{schema}].[{Escape(triggers[1])}] ON {resources}
             AFTER UPDATE
             AS
             BEGIN
                 SET NOCOUNT ON;
-                IF NOT (UPDATE(ParentId) OR UPDATE(IsActive) OR UPDATE(ResourceTypeId)) RETURN;
+                IF NOT (UPDATE(ParentId) OR UPDATE(IsActive)) RETURN;
                 {LineageLock(options, "Exclusive")}
                 {changedTable}
                 INSERT INTO #SqlOSLineageChanged (Id)
                 SELECT Id FROM (SELECT Id, ParentId, IsActive FROM inserted EXCEPT SELECT Id, ParentId, IsActive FROM deleted) changed;
                 IF EXISTS (SELECT 1 FROM #SqlOSLineageChanged)
-                BEGIN
                     EXEC {refresh} @RejectMalformed = 1, @WalkAll = 1;
-                    {CountsRefreshForResources(options, transitionedParents)}
-                END
                 DROP TABLE #SqlOSLineageChanged;
-                {(typeChanges.Length == 0 ? "" : $"IF UPDATE(ResourceTypeId)\nBEGIN\n{typeChanges}END")}
             END
             """;
 
-        var clears = new StringBuilder();
-        foreach (var table in scopeTables)
-        {
-            clears.AppendLine(CultureInfo.InvariantCulture, $"""
-                UPDATE t SET [{SqlOSFgaLineage.ScopeColumn}] = NULL
-                FROM {ScopeTable(table)} t
-                INNER JOIN deleted d ON d.Id = t.[{Escape(table.ResourceIdColumn)}];
-                """);
-        }
-
-        var deleteTrigger = $"""
-            CREATE OR ALTER TRIGGER [{schema}].[{Escape(triggers[2])}] ON {resources}
-            AFTER DELETE
-            AS
-            BEGIN
-                SET NOCOUNT ON;
-                IF NOT EXISTS (SELECT 1 FROM deleted) RETURN;
-                {LineageLock(options, "Exclusive")}
-                {clears}
-                -- A parent left without children is a container no more: the grants on it leave the grant counts.
-                {CountsRefreshForResources(options, $"(SELECT DISTINCT o.ParentId AS Id FROM deleted o WHERE o.ParentId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM {resources} c WHERE c.ParentId = o.ParentId))")}
-            END
-            """;
-
-        // The rows of every application table that have no scope yet, in batches of rows each committed on its
-        // own. The lineage lock is held shared, as an insert takes it: inserts run beside the fill, and a change
-        // to the tree waits for it. Rows whose resource does not exist stay without one (and stay denied).
-        var fill = $"[{schema}].[sp_{Escape(SqlOSFgaLineage.ScopeFillRoutineName(options.TableNames.Resources))}]";
-        var fillBody = new StringBuilder();
-        foreach (var table in scopeTables)
-        {
-            fillBody.AppendLine(CultureInfo.InvariantCulture, $"""
-                WHILE 1 = 1
-                BEGIN
-                    UPDATE TOP ({SqlOSFgaLineage.ScopeFillBatchRows.ToString(CultureInfo.InvariantCulture)}) t SET {ScopeAssignment(levels, "r", "rt")}
-                    FROM {ScopeTable(table)} t
-                    INNER JOIN {resources} r ON r.Id = t.[{Escape(table.ResourceIdColumn)}]
-                    INNER JOIN {resourceTypes} rt ON rt.Id = r.ResourceTypeId
-                    WHERE t.[{SqlOSFgaLineage.ScopeColumn}] IS NULL AND rt.{SqlOSFgaLineage.SeqColumn} IS NOT NULL;
-                    IF @@ROWCOUNT < {SqlOSFgaLineage.ScopeFillBatchRows.ToString(CultureInfo.InvariantCulture)} BREAK;
-                END
-                """);
-        }
-
-        var lockName = SqlLiteral(SqlOSFgaLineage.LineageLockName(options));
-        var fillProcedure = $"""
-            CREATE OR ALTER PROCEDURE {fill}
-            AS
-            BEGIN
-                SET NOCOUNT ON;
-                SET XACT_ABORT ON;
-                DECLARE @sqlosLineageLock INT;
-                EXEC @sqlosLineageLock = sys.sp_getapplock @Resource = N'{lockName}', @LockMode = 'Shared', @LockOwner = 'Session', @LockTimeout = -1;
-                IF @sqlosLineageLock < 0 THROW 51014, 'SqlOS FGA: the resource lineage lock was not granted.', 1;
-                BEGIN TRY
-                    {fillBody}
-                    EXEC sys.sp_releaseapplock @Resource = N'{lockName}', @LockOwner = 'Session';
-                END TRY
-                BEGIN CATCH
-                    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
-                    EXEC sys.sp_releaseapplock @Resource = N'{lockName}', @LockOwner = 'Session';
-                    THROW;
-                END CATCH
-            END
-            """;
-
-        var batches = new List<string> { refreshProcedure, rebuildProcedure, fillProcedure, insertTrigger, updateTrigger, deleteTrigger };
-        foreach (var table in scopeTables)
-        {
-            batches.AddRange(ScopeTriggers(options, table, levels));
-        }
-
-        return batches;
-    }
-
-    /// <summary>
-    /// The three triggers on an application table: an inserted row, or one whose resource id changed, takes
-    /// the scope value of its resource (NULL when there is none, which denies it); the direct index follows
-    /// every row inserted, every row whose resource id or sort columns changed, and every row deleted.
-    /// </summary>
-    private IReadOnlyList<string> ScopeTriggers(SqlOSFgaOptions options, SqlOSFgaScopeTable table, int levels)
-    {
-        var schema = Escape(options.Schema);
-        var resources = $"[{schema}].[{Escape(options.TableNames.Resources)}]";
-        var resourceTypes = $"[{schema}].[{Escape(options.TableNames.ResourceTypes)}]";
-        var triggers = SqlOSFgaLineage.ScopeTriggerNames(table.Table);
-        var triggerSchema = table.Schema is null ? "" : $"[{Escape(table.Schema)}].";
-        var keys = string.Join(" AND ", table.KeyColumns.Select(k => $"i.[{Escape(k)}] = t.[{Escape(k)}]"));
-        var copy = $"""
-            UPDATE t SET {ScopeAssignment(levels, "r", "rt")}
-            FROM {ScopeTable(table)} t
-            INNER JOIN inserted i ON {keys}
-            LEFT JOIN {resources} r ON r.Id = t.[{Escape(table.ResourceIdColumn)}]
-            LEFT JOIN {resourceTypes} rt ON rt.Id = r.ResourceTypeId;
-            """;
-        var directColumns = SqlOSFgaPageIndex.DirectColumns(table).Select(c => c.Column).Append(table.ResourceIdColumn).Distinct().ToList();
-        var anyDirectChange = string.Join(" OR ", directColumns.Select(c => $"UPDATE([{Escape(c)}])"));
-        return
-        [
-            $"""
-            CREATE OR ALTER TRIGGER {triggerSchema}[{Escape(triggers[0])}] ON {ScopeTable(table)}
-            AFTER INSERT
-            AS
-            BEGIN
-                SET NOCOUNT ON;
-                IF NOT EXISTS (SELECT 1 FROM inserted) RETURN;
-                {LineageLock(options, "Shared")}
-                {copy}
-                {DirectInsertFromRows(options, table, "inserted")}
-            END
-            """,
-            $"""
-            CREATE OR ALTER TRIGGER {triggerSchema}[{Escape(triggers[1])}] ON {ScopeTable(table)}
-            AFTER UPDATE
-            AS
-            BEGIN
-                SET NOCOUNT ON;
-                IF NOT ({anyDirectChange}) RETURN;
-                IF NOT EXISTS (SELECT 1 FROM inserted) RETURN;
-                {LineageLock(options, "Shared")}
-                IF UPDATE([{Escape(table.ResourceIdColumn)}])
-                BEGIN
-                    {copy}
-                END
-                {DirectDeleteRows(options, table, "inserted")}
-                {DirectInsertFromRows(options, table, "inserted")}
-            END
-            """,
-            $"""
-            CREATE OR ALTER TRIGGER {triggerSchema}[{Escape(triggers[2])}] ON {ScopeTable(table)}
-            AFTER DELETE
-            AS
-            BEGIN
-                SET NOCOUNT ON;
-                {DirectDeleteRows(options, table, "deleted")}
-            END
-            """,
-        ];
+        return [refreshProcedure, rebuildProcedure, insertTrigger, updateTrigger];
     }
 
     /// <summary>Returns 1 until a rebuild has finished every range (see <c>LineageBuilt</c>).</summary>
@@ -614,20 +526,6 @@ internal sealed partial class SqlServerDatabaseProvider
     {
         ArgumentNullException.ThrowIfNull(options);
         return $"EXEC [{Escape(options.Schema)}].[sp_{Escape(SqlOSFgaLineage.RebuildRoutineName(options.TableNames.Resources))}];";
-    }
-
-    /// <summary>Runs the scope fill: every application row that has no scope gets its resource's.</summary>
-    public string BuildScopeFillSql(SqlOSFgaOptions options)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return $"EXEC [{Escape(options.Schema)}].[sp_{Escape(SqlOSFgaLineage.ScopeFillRoutineName(options.TableNames.Resources))}];";
-    }
-
-    /// <summary>1 when the application table exists and has its scope column (its migration is applied), else 0.</summary>
-    public string BuildScopeTableReadySql(SqlOSFgaScopeTable table)
-    {
-        ArgumentNullException.ThrowIfNull(table);
-        return $"SELECT CASE WHEN COL_LENGTH(N'{SqlLiteral(ScopeTable(table))}', N'{SqlOSFgaLineage.ScopeColumn}') IS NULL THEN 0 ELSE 1 END";
     }
 
     /// <summary>
@@ -661,68 +559,30 @@ internal sealed partial class SqlServerDatabaseProvider
             DROP TABLE #SqlOSLineageRanges;
             """;
 
-    /// <summary>The scope column of one application table's rows whose resource id lies in <c>@from</c>..<c>@to</c>.</summary>
-    private static string ScopeFillRange(SqlOSFgaOptions options, SqlOSFgaScopeTable table, int levels)
-    {
-        var schema = Escape(options.Schema);
-        var resourceId = $"t.[{Escape(table.ResourceIdColumn)}]";
-        return $"""
-
-            UPDATE t SET {ScopeAssignment(levels, "r", "rt")}
-            FROM {ScopeTable(table)} t
-            INNER JOIN [{schema}].[{Escape(options.TableNames.Resources)}] r ON r.Id = {resourceId}
-            INNER JOIN [{schema}].[{Escape(options.TableNames.ResourceTypes)}] rt ON rt.Id = r.ResourceTypeId
-            WHERE {resourceId} >= @from AND {resourceId} <= @to
-              AND r.Id >= @from AND r.Id <= @to;
-            """;
-    }
-
-    public string BuildSelectRoutinesHashSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
+    public string BuildSelectRoutinesHashSql(SqlOSFgaOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(scopeTables);
         var schema = Escape(options.Schema);
         var resourcesTable = options.TableNames.Resources;
-        string Exists(string schemaName, string name, string type)
-            => $"OBJECT_ID(N'{SqlLiteral($"[{Escape(schemaName)}].[{Escape(name)}]")}', N'{type}') IS NOT NULL";
+        var resources = $"[{schema}].[{Escape(resourcesTable)}]";
+        string Exists(string name, string type)
+            => $"OBJECT_ID(N'{SqlLiteral($"[{schema}].[{Escape(name)}]")}', N'{type}') IS NOT NULL";
 
+        var indexes = SqlOSFgaLineage.AncestorIndexNames(options);
         var conditions = new List<string>
         {
-            Exists(options.Schema, "fn_ActiveSubjects", "IF"),
-            Exists(options.Schema, "fn_AccessRoots", "IF"),
-            Exists(options.Schema, "fn_IsResourceAccessible", "IF"),
-            Exists(options.Schema, "sp_" + SqlOSFgaLineage.RefreshRoutineName(resourcesTable), "P"),
-            Exists(options.Schema, "sp_" + SqlOSFgaLineage.RebuildRoutineName(resourcesTable), "P"),
-            Exists(options.Schema, "sp_" + SqlOSFgaPageIndex.CountsRebuildRoutine, "P"),
-            Exists(options.Schema, "sp_" + SqlOSFgaPageIndex.CountsAdjustRoutine, "P"),
-            Exists(options.Schema, "sp_" + SqlOSFgaPageIndex.CountsRefreshRoutine, "P"),
-            Exists(options.Schema, "sp_" + SqlOSFgaPageIndex.RebuildRoutine, "P"),
+            Exists("fn_ActiveSubjects", "IF"),
+            Exists("fn_AccessRoots", "IF"),
+            Exists("fn_ListVisible", "IF"),
+            Exists("fn_VisibleSet", "TF"),
+            Exists("fn_ListFirst", "IF"),
+            Exists("fn_IsResourceAccessible", "IF"),
+            Exists("sp_" + SqlOSFgaLineage.RefreshRoutineName(resourcesTable), "P"),
+            Exists("sp_" + SqlOSFgaLineage.RebuildRoutineName(resourcesTable), "P"),
         };
-        conditions.Add(Exists(options.Schema, "sp_" + SqlOSFgaLineage.ScopeFillRoutineName(resourcesTable), "P"));
-        conditions.AddRange(SqlOSFgaLineage.TriggerNames(resourcesTable).Select(t => Exists(options.Schema, t, "TR")));
-        conditions.AddRange(SqlOSFgaPageIndex.GrantTriggerNames(options.TableNames.Grants).Select(t => Exists(options.Schema, t, "TR")));
-        conditions.Add($"COL_LENGTH('{SqlLiteral($"[{schema}].[{Escape(resourcesTable)}]")}', '{SqlOSFgaLineage.AncestorColumn(SqlOSFgaLineage.MaxLevel(options))}') IS NOT NULL");
-        var levels = SqlOSFgaLineage.Levels(options);
-        foreach (var table in scopeTables)
-        {
-            // Every object of the table exists: an application migration may have dropped some (a column a
-            // mirrored index used, say) without changing anything SqlOS's definitions are hashed from.
-            var indexes = SqlOSFgaLineage.ScopeIndexNames(table, levels);
-            conditions.Add($"(SELECT COUNT(*) FROM sys.triggers WHERE parent_id = {ObjectOf(table)} AND name IN ({NameList(SqlOSFgaLineage.ScopeTriggerNames(table.Table))})) = 3");
-            conditions.Add($"(SELECT COUNT(*) FROM sys.indexes WHERE object_id = {ObjectOf(table)} AND name IN ({NameList(indexes)})) = {indexes.Count.ToString(CultureInfo.InvariantCulture)}");
-            conditions.Add($"EXISTS (SELECT 1 FROM sys.stats WHERE object_id = {ObjectOf(table)} AND name = N'{SqlLiteral(SqlOSFgaLineage.ScopeTypeStatisticsName(table.Table))}')");
-            var direct = SqlOSFgaPageIndex.DirectTable(table);
-            var directIndexes = SqlOSFgaPageIndex.DirectIndexNames(table).Append(SqlOSFgaPageIndex.DirectIndexName(table, "Key")).Append(SqlOSFgaPageIndex.DirectIndexName(table, "Row")).ToList();
-            conditions.Add(Exists(options.Schema, direct, "U"));
-            conditions.Add(Exists(options.Schema, "sp_" + SqlOSFgaPageIndex.DirectRebuildRoutine(table), "P"));
-            conditions.Add($"(SELECT COUNT(*) FROM sys.indexes WHERE object_id = OBJECT_ID(N'{SqlLiteral($"[{schema}].[{Escape(direct)}]")}') AND name IN ({NameList(directIndexes)})) = {directIndexes.Count.ToString(CultureInfo.InvariantCulture)}");
-        }
-
-        // And nothing stale anywhere.
-        foreach (var stale in new[] { StaleTriggers(options, scopeTables), StaleIndexes(options, scopeTables, levels), StaleStatistics(options, scopeTables), StaleComputedColumns(options, scopeTables), StaleDirectTables(options, scopeTables), StaleDirectProcedures(options, scopeTables) })
-        {
-            conditions.Add($"NOT EXISTS ({stale})");
-        }
+        conditions.AddRange(SqlOSFgaLineage.TriggerNames(resourcesTable).Select(t => Exists(t, "TR")));
+        conditions.Add($"COL_LENGTH('{SqlLiteral(resources)}', '{SqlOSFgaLineage.AncestorColumn(SqlOSFgaLineage.MaxLevel(options))}') IS NOT NULL");
+        conditions.Add($"(SELECT COUNT(*) FROM sys.indexes WHERE object_id = OBJECT_ID(N'{SqlLiteral(resources)}') AND name IN ({string.Join(", ", indexes.Select(n => $"N'{SqlLiteral(n)}'"))})) = {indexes.Count.ToString(CultureInfo.InvariantCulture)}");
 
         return $"""
             SELECT TOP 1 [RoutinesHash]
@@ -735,195 +595,6 @@ internal sealed partial class SqlServerDatabaseProvider
     {
         ArgumentNullException.ThrowIfNull(options);
         return $"UPDATE [{Escape(options.Schema)}].[SqlOSFgaSchema] SET [RoutinesHash] = @RoutinesHash";
-    }
-
-    private static string ScopeTable(SqlOSFgaScopeTable table)
-        => table.Schema is null ? $"[{Escape(table.Table)}]" : $"[{Escape(table.Schema)}].[{Escape(table.Table)}]";
-
-    /// <summary>
-    /// The scope value of a row from its resource row <paramref name="r"/> (which may be NULL: the row then has
-    /// no scope and nobody sees it) and the resource's type row <paramref name="rt"/>: the depth byte, the four
-    /// type bytes, then eight bytes per level holding the ancestor where access flows down from that level and
-    /// zero elsewhere. <c>CAST(bigint AS BINARY(8))</c> is big-endian, which is how <c>SqlOSFgaScope.Bytes</c>
-    /// encodes a parameter.
-    /// </summary>
-    private static string ScopeValue(int levels, string r, string rt)
-    {
-        var parts = new StringBuilder();
-        parts.Append(CultureInfo.InvariantCulture, $"CAST(ISNULL({r}.{SqlOSFgaLineage.DepthColumn}, 0) AS BINARY(1)) + CAST({rt}.{SqlOSFgaLineage.SeqColumn} AS BINARY(4))");
-        for (var level = 0; level < levels; level++)
-        {
-            parts.Append(CultureInfo.InvariantCulture, $" + CAST(ISNULL(CASE WHEN {r}.{SqlOSFgaLineage.ReachColumn} <= {level} THEN {r}.{SqlOSFgaLineage.AncestorColumn(level)} END, 0) AS BINARY(8))");
-        }
-
-        return $"CASE WHEN {r}.Id IS NULL THEN NULL ELSE {parts} END";
-    }
-
-    private static string ScopeAssignment(int levels, string r, string rt)
-        => $"[{SqlOSFgaLineage.ScopeColumn}] = {ScopeValue(levels, r, rt)}";
-
-    /// <summary>
-    /// The indexes of one application table, per level: a computed column reading the level's ancestor out of
-    /// the scope column (no storage; the optimizer matches a query that spells out the same expression), then
-    /// an index on it followed by the primary key, and one more per order the application declared, each
-    /// filtered on the depth byte to the rows at or below the level. Also a computed column over the type with
-    /// statistics on it, so the type test in every query is estimated from data, and a filtered index on the
-    /// rows that have no scope yet, which keeps the fill an index seek. Idempotent. The table is ready (it has
-    /// its scope column); objects no longer wanted are dropped by <see cref="BuildScopeCleanupSql"/>.
-    /// </summary>
-    public IReadOnlyList<string> BuildEnsureScopeIndexesSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(scopeTables);
-        var levels = SqlOSFgaLineage.Levels(options);
-        var batches = new List<string>();
-        foreach (var table in scopeTables)
-        {
-            var target = ScopeTable(table);
-            var literal = SqlLiteral(target);
-            var key = string.Join(", ", table.KeyColumns.Select(k => $"[{Escape(k)}]"));
-            var sql = new StringBuilder();
-            sql.AppendLine(CultureInfo.InvariantCulture, $"""
-                IF COL_LENGTH('{literal}', '{SqlOSFgaLineage.ScopeTypeColumn}') IS NULL
-                    ALTER TABLE {target} ADD [{SqlOSFgaLineage.ScopeTypeColumn}] AS SUBSTRING([{SqlOSFgaLineage.ScopeColumn}], {SqlOSFgaLineage.ScopeTypeOffset}, 4);
-                IF NOT EXISTS (SELECT 1 FROM sys.stats WHERE name = '{SqlLiteral(SqlOSFgaLineage.ScopeTypeStatisticsName(table.Table))}' AND object_id = OBJECT_ID(N'{literal}'))
-                    CREATE STATISTICS [{Escape(SqlOSFgaLineage.ScopeTypeStatisticsName(table.Table))}] ON {target} ([{SqlOSFgaLineage.ScopeTypeColumn}]);
-                IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = '{SqlLiteral(SqlOSFgaLineage.ScopeMissingIndexName(table.Table))}' AND object_id = OBJECT_ID(N'{literal}'))
-                    CREATE NONCLUSTERED INDEX [{Escape(SqlOSFgaLineage.ScopeMissingIndexName(table.Table))}] ON {target} ([{Escape(table.ResourceIdColumn)}]) WHERE [{SqlOSFgaLineage.ScopeColumn}] IS NULL;
-                """);
-            for (var level = 0; level < levels; level++)
-            {
-                var column = SqlOSFgaLineage.ScopeLevelColumn(level);
-                var filter = $"[{SqlOSFgaLineage.ScopeColumn}] >= 0x{level:X2}";
-                sql.AppendLine(CultureInfo.InvariantCulture, $"""
-                    IF COL_LENGTH('{literal}', '{column}') IS NULL
-                        ALTER TABLE {target} ADD [{column}] AS SUBSTRING([{SqlOSFgaLineage.ScopeColumn}], {SqlOSFgaLineage.ScopeAncestorOffset(level)}, 8);
-                    """);
-                foreach (var (name, columns) in new[] { (SqlOSFgaLineage.ScopeIndexName(table.Table, level, null), key) }
-                    .Concat(table.Orders.Select(o => (SqlOSFgaLineage.ScopeIndexName(table.Table, level, o.Suffix), string.Join(", ", o.Columns.Select(c => $"[{Escape(c)}]"))))))
-                {
-                    sql.AppendLine(CultureInfo.InvariantCulture, $"""
-                        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = '{SqlLiteral(name)}' AND object_id = OBJECT_ID(N'{literal}'))
-                            CREATE NONCLUSTERED INDEX [{Escape(name)}] ON {target} ([{column}], {columns}) WHERE {filter};
-                        """);
-                }
-            }
-
-            batches.Add(sql.ToString());
-        }
-
-        return batches;
-    }
-
-    // SqlOS's objects on application tables carry names no application object has: triggers TR_{table}_
-    // SqlOSFgaScope_*, indexes IX_{table}_FgaScope{level}[_{order}] and IX_{table}_FgaScopeMissing, statistics
-    // ST_{table}_FgaScopeType, computed columns FgaScope{level} and FgaScopeType. Any of them that does not
-    // belong to a table SqlOS maintains now, under its current name, is stale: left by a table that was renamed,
-    // or whose entity no longer has a resource id, or by an order no longer declared.
-
-    private static string ObjectOf(SqlOSFgaScopeTable table) => $"ISNULL(OBJECT_ID(N'{SqlLiteral(ScopeTable(table))}'), 0)";
-
-    private static string Wanted(IReadOnlyList<SqlOSFgaScopeTable> scopeTables, Func<SqlOSFgaScopeTable, string> condition)
-        => scopeTables.Count == 0 ? "1 = 0" : string.Join(" OR ", scopeTables.Select(t => $"({condition(t)})"));
-
-    private static string NameList(IEnumerable<string> names) => string.Join(", ", names.Select(n => $"N'{SqlLiteral(n)}'"));
-
-    /// <summary>
-    /// The object id is one of this installation's tables: one it recorded (see <c>SqlOSFgaScopeTables</c>), or
-    /// one the model protects now (a renamed table carries objects named for its old name). Another SqlOS
-    /// installation's tables are neither, so its objects are never taken for stale.
-    /// </summary>
-    private static string Owned(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables, string objectId)
-        => $"{objectId} IN (SELECT OBJECT_ID(QUOTENAME(o.[TableSchema]) + N'.' + QUOTENAME(o.[TableName])) FROM [{Escape(options.Schema)}].[SqlOSFgaScopeTables] o"
-           + string.Concat(scopeTables.Select(t => $" UNION ALL SELECT {ObjectOf(t)}"))
-           + ")";
-
-    private static string StaleTriggers(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
-        => $"""
-            SELECT N'DROP TRIGGER ' + QUOTENAME(OBJECT_SCHEMA_NAME(tr.object_id)) + N'.' + QUOTENAME(tr.name) + N';' AS Statement
-            FROM sys.triggers tr
-            WHERE tr.parent_class = 1 AND tr.name LIKE N'TR[_]%[_]{SqlOSFgaLineage.ScopePrefix}Scope[_]%'
-              AND {Owned(options, scopeTables, "tr.parent_id")}
-              AND NOT ({Wanted(scopeTables, t => $"tr.parent_id = {ObjectOf(t)} AND tr.name IN ({NameList(SqlOSFgaLineage.ScopeTriggerNames(t.Table))})")})
-            """;
-
-    private static string StaleIndexes(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables, int levels)
-        => $"""
-            SELECT N'DROP INDEX ' + QUOTENAME(i.name) + N' ON ' + QUOTENAME(OBJECT_SCHEMA_NAME(i.object_id)) + N'.' + QUOTENAME(OBJECT_NAME(i.object_id)) + N';' AS Statement
-            FROM sys.indexes i
-            WHERE (i.name LIKE N'IX[_]%[_]{SqlOSFgaLineage.ScopeColumn}[0-9]%' OR i.name LIKE N'IX[_]%[_]{SqlOSFgaLineage.ScopeColumn}Missing')
-              AND OBJECTPROPERTY(i.object_id, 'IsUserTable') = 1
-              AND {Owned(options, scopeTables, "i.object_id")}
-              AND NOT ({Wanted(scopeTables, t => $"i.object_id = {ObjectOf(t)} AND i.name IN ({NameList(SqlOSFgaLineage.ScopeIndexNames(t, levels))})")})
-            """;
-
-    private static string StaleStatistics(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
-        => $"""
-            SELECT N'DROP STATISTICS ' + QUOTENAME(OBJECT_SCHEMA_NAME(st.object_id)) + N'.' + QUOTENAME(OBJECT_NAME(st.object_id)) + N'.' + QUOTENAME(st.name) + N';' AS Statement
-            FROM sys.stats st
-            WHERE st.user_created = 1 AND st.name LIKE N'ST[_]%[_]{SqlOSFgaLineage.ScopeTypeColumn}'
-              AND {Owned(options, scopeTables, "st.object_id")}
-              AND NOT ({Wanted(scopeTables, t => $"st.object_id = {ObjectOf(t)} AND st.name = N'{SqlLiteral(SqlOSFgaLineage.ScopeTypeStatisticsName(t.Table))}'")})
-            """;
-
-    private static string StaleComputedColumns(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
-        => $"""
-            SELECT N'ALTER TABLE ' + QUOTENAME(OBJECT_SCHEMA_NAME(c.object_id)) + N'.' + QUOTENAME(OBJECT_NAME(c.object_id)) + N' DROP COLUMN ' + QUOTENAME(c.name) + N';' AS Statement
-            FROM sys.computed_columns c
-            WHERE (c.name LIKE N'{SqlOSFgaLineage.ScopeColumn}[0-9]%' OR c.name = N'{SqlOSFgaLineage.ScopeTypeColumn}')
-              AND OBJECTPROPERTY(c.object_id, 'IsUserTable') = 1
-              AND {Owned(options, scopeTables, "c.object_id")}
-              AND NOT ({Wanted(scopeTables, t => $"c.object_id = {ObjectOf(t)}")})
-            """;
-
-    /// <summary>A direct index of a table SqlOS no longer maintains (renamed, or no longer protected).</summary>
-    private static string StaleDirectTables(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
-        => $"""
-            SELECT N'DROP TABLE ' + QUOTENAME(OBJECT_SCHEMA_NAME(t.object_id)) + N'.' + QUOTENAME(t.name) + N';' AS Statement
-            FROM sys.tables t
-            WHERE OBJECT_SCHEMA_NAME(t.object_id) = N'{SqlLiteral(options.Schema)}' AND t.name LIKE N'{SqlOSFgaPageIndex.DirectPrefix.Replace("_", "[_]", StringComparison.Ordinal)}%'
-              AND t.name NOT IN ({(scopeTables.Count == 0 ? "N''" : NameList(scopeTables.Select(SqlOSFgaPageIndex.DirectTable)))})
-            """;
-
-    private static string StaleDirectProcedures(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
-        => $"""
-            SELECT N'DROP PROCEDURE ' + QUOTENAME(OBJECT_SCHEMA_NAME(p.object_id)) + N'.' + QUOTENAME(p.name) + N';' AS Statement
-            FROM sys.procedures p
-            WHERE OBJECT_SCHEMA_NAME(p.object_id) = N'{SqlLiteral(options.Schema)}' AND p.name LIKE N'sp[_]{SqlOSFgaPageIndex.DirectPrefix.Replace("_", "[_]", StringComparison.Ordinal)}%'
-              AND p.name NOT IN ({(scopeTables.Count == 0 ? "N''" : NameList(scopeTables.Select(t => "sp_" + SqlOSFgaPageIndex.DirectRebuildRoutine(t))))})
-            """;
-
-    /// <summary>
-    /// Drops SqlOS's stale objects from this installation's tables (see <see cref="Owned"/> and the naming
-    /// above): triggers first, then indexes, then statistics, then the computed columns they were built on,
-    /// then the direct indexes of tables no longer maintained and their rebuild procedures. Then records the
-    /// tables the model protects now as this installation's. Idempotent.
-    /// </summary>
-    public string BuildScopeCleanupSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(scopeTables);
-        var levels = SqlOSFgaLineage.Levels(options);
-        var sql = new StringBuilder("DECLARE @sqlosStale NVARCHAR(MAX);\n");
-        foreach (var stale in new[] { StaleTriggers(options, scopeTables), StaleIndexes(options, scopeTables, levels), StaleStatistics(options, scopeTables), StaleComputedColumns(options, scopeTables), StaleDirectTables(options, scopeTables), StaleDirectProcedures(options, scopeTables) })
-        {
-            sql.AppendLine(CultureInfo.InvariantCulture, $"""
-                SET @sqlosStale = N'';
-                SELECT @sqlosStale += s.Statement FROM ({stale}) s;
-                EXEC (@sqlosStale);
-                """);
-        }
-
-        var registry = $"[{Escape(options.Schema)}].[SqlOSFgaScopeTables]";
-        sql.AppendLine(CultureInfo.InvariantCulture, $"DELETE FROM {registry};");
-        if (scopeTables.Count > 0)
-        {
-            sql.AppendLine($"INSERT INTO {registry} ([TableSchema], [TableName]) VALUES "
-                + string.Join(", ", scopeTables.Select(t => $"(ISNULL(OBJECT_SCHEMA_NAME({ObjectOf(t)}), SCHEMA_NAME()), N'{SqlLiteral(t.Table)}')"))
-                + ";");
-        }
-
-        return sql.ToString();
     }
 
     private static string SqlLiteral(string value)
@@ -939,15 +610,15 @@ internal sealed partial class SqlServerDatabaseProvider
     private static string LineageLock(SqlOSFgaOptions options, string mode)
         => $"""
             IF (SELECT transaction_isolation_level FROM sys.dm_exec_sessions WHERE session_id = @@SPID) = 5
-                THROW 51015, 'SqlOS FGA: change resources and protected rows in a READ COMMITTED or SERIALIZABLE transaction, not SNAPSHOT: a snapshot transaction can miss a concurrent change to the tree.', 1;
+                THROW 51015, 'SqlOS FGA: change resources in a READ COMMITTED or SERIALIZABLE transaction, not SNAPSHOT: a snapshot transaction can miss a concurrent change to the tree.', 1;
             DECLARE @sqlosLineageLock INT;
             EXEC @sqlosLineageLock = sys.sp_getapplock @Resource = N'{SqlLiteral(SqlOSFgaLineage.LineageLockName(options))}', @LockMode = '{mode}', @LockOwner = 'Transaction', @LockTimeout = -1;
             IF @sqlosLineageLock < 0 THROW 51014, 'SqlOS FGA: the resource lineage lock was not granted.', 1;
             """;
 
     /// <summary>
-    /// Runs <paramref name="body"/> holding the lineage lock exclusively for the session: the rebuild and the
-    /// one-time fill commit in ranges, and no change to the tree may land between two of them.
+    /// Runs <paramref name="body"/> holding the lineage lock exclusively for the session: the rebuild commits
+    /// in ranges, and no change to the tree may land between two of them.
     /// </summary>
     private static string WithSessionLineageLock(SqlOSFgaOptions options, string body)
     {

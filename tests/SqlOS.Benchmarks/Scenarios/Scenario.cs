@@ -4,14 +4,8 @@ namespace SqlOS.Benchmarks.Scenarios;
 
 internal enum ScenarioKind
 {
-    /// <summary>A cursor page of products as one statement the optimizer plans: <c>BuildFilterAsync</c>'s filter as a predicate, the lineage read from the row's scope column.</summary>
+    /// <summary>A cursor page of products: the LINQ query with <c>BuildFilterAsync</c>'s predicate, which composes as one EXISTS over <c>fn_Visible</c>, so the engine plans the whole statement.</summary>
     List,
-
-    /// <summary>
-    /// The same LINQ on a context with SqlOS's query execution (<c>UseSqlOSFga</c>): SqlOS owns the access
-    /// path (the adaptive walk over the grant counts, the per-level indexes, and the direct index).
-    /// </summary>
-    Page,
 
     /// <summary><c>fn_IsResourceAccessible</c> for one resource, the enforcement primitive the paper measures.</summary>
     PointFunction,
@@ -44,10 +38,7 @@ internal sealed record Scenario(
     bool ExpectAllowed = true,
     PageOrder Order = PageOrder.Id)
 {
-    public bool IsPage => Kind is ScenarioKind.List or ScenarioKind.Page;
-
-    /// <summary>The same query walked by SqlOS (<c>page.*</c> beside <c>list.*</c>).</summary>
-    public Scenario AsPage() => this with { Id = "page." + Id["list.".Length..], Kind = ScenarioKind.Page };
+    public bool IsPage => Kind is ScenarioKind.List;
 }
 
 internal static class ScenarioCatalog
@@ -59,9 +50,8 @@ internal static class ScenarioCatalog
         var otherChainProduct = tree.FirstProduct(l => l.Chain == 2, productCount);
         double Share(Principal p) => p.ShareOf(tree);
 
-        // Every page shape, as the optimizer plans it. Each is measured once more below walked by SqlOS, as
-        // page.<same id>.
-        var pages = new List<Scenario>
+        // Every page shape, each one statement the engine plans.
+        var scenarios = new List<Scenario>
         {
             new("list.admin.first-page", "Company admin, first page (k = 20)", ScenarioKind.List, people.Admin, 1.0, "4 and 9"),
             new("list.admin.k100", "Company admin, first page (k = 100)", ScenarioKind.List, people.Admin, 1.0, "4 and 9", PageSize: 100),
@@ -80,17 +70,15 @@ internal static class ScenarioCatalog
         };
 
         // People holding thousands of single-product grants, the way per-item sharing accumulates: the same
-        // predicate, with all of their roots in one list parameter; the walk reads them from the direct index.
+        // predicate, with their roots resolved by fn_AccessRoots inside the statement.
         foreach (var person in people.ManyGrants.Where(p => p.GrantedProducts > 0))
         {
             var share = (double)person.GrantedProducts / productCount;
             var grants = person.GrantedProducts.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
-            pages.Add(new($"list.{person.Key}.first-page", $"{grants} single-product grants, first page", ScenarioKind.List, person, share, "4 and 9"));
+            scenarios.Add(new($"list.{person.Key}.first-page", $"{grants} single-product grants, first page", ScenarioKind.List, person, share, "4 and 9"));
         }
 
-        var current = new List<Scenario>(pages);
-        current.AddRange(pages.Select(p => p.AsPage()));
-        current.AddRange(
+        scenarios.AddRange(
         [
             new("point.function.product", "fn_IsResourceAccessible, product at depth 4", ScenarioKind.PointFunction, people.Admin, 1.0, "4", ProductId: standardProduct),
             new("point.function.deep-product", "fn_IsResourceAccessible, product at depth 9", ScenarioKind.PointFunction, people.Admin, 1.0, "9", ProductId: deepProduct),
@@ -103,23 +91,23 @@ internal static class ScenarioCatalog
         {
             var share = (double)person.GrantedProducts / productCount;
             var grants = person.GrantedProducts.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
-            current.Add(new($"point.function.{person.Key}", $"fn_IsResourceAccessible, {grants} grants, a granted product", ScenarioKind.PointFunction, person, share, "4 or 9", ProductId: person.GrantedProductId(person.GrantedProducts - 1)));
+            scenarios.Add(new($"point.function.{person.Key}", $"fn_IsResourceAccessible, {grants} grants, a granted product", ScenarioKind.PointFunction, person, share, "4 or 9", ProductId: person.GrantedProductId(person.GrantedProducts - 1)));
             if (person.ProductStride > 1)
             {
-                current.Add(new($"point.function.{person.Key}.denied", $"fn_IsResourceAccessible, {grants} grants, an ungranted product", ScenarioKind.PointFunction, person, 0.0, "4 or 9", ProductId: 2, ExpectAllowed: false));
+                scenarios.Add(new($"point.function.{person.Key}.denied", $"fn_IsResourceAccessible, {grants} grants, an ungranted product", ScenarioKind.PointFunction, person, 0.0, "4 or 9", ProductId: 2, ExpectAllowed: false));
             }
         }
 
-        return current;
+        return scenarios;
     }
 
     /// <summary>
-    /// The grant-density pass: the region page (both ways) and the denied check, re-run while
+    /// The grant-density pass: the region page and the denied check, re-run while
     /// <see cref="BenchmarkModel.RootCrowdGrants"/> other people hold grants on the root.
     /// </summary>
     public static IReadOnlyList<Scenario> Density(IReadOnlyList<Scenario> scenarios)
         => scenarios
-            .Where(s => s.Id is "list.region.first-page" or "page.region.first-page" or "point.function.denied")
+            .Where(s => s.Id is "list.region.first-page" or "point.function.denied")
             .Select(s => s with
             {
                 Id = "density." + s.Id,

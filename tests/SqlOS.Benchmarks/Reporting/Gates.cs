@@ -10,13 +10,13 @@ namespace SqlOS.Benchmarks.Reporting;
 /// The gates, defined in <c>gates.json</c>:
 /// <list type="bullet">
 /// <item><b>correctness</b>: every scenario returned exactly the authorized answer.</item>
-/// <item><b>lineage</b>: the lineage and scope columns the loader wrote, the same after the maintenance pass,
-/// and the same as SqlOS rebuilds from the resources alone (count and hash).</item>
+/// <item><b>lineage</b>: the lineage the loader wrote, the same after the maintenance pass, and the same as
+/// SqlOS rebuilds from the resources alone (count and hash).</item>
 /// <item><b>scale</b>: per-page cost must follow the work the paper predicts, not N. The median at the
 /// largest scale may be at most <c>maxRatio</c> times the median at the smallest, times the growth of the
 /// rows the page has to touch, plus <c>slackMilliseconds</c> for sub-millisecond noise. A page through the
-/// scope column touches k rows at any N (one index seek), so it has no growth term; a page filtered to a
-/// store touches that store's σN rows through its own index.</item>
+/// filter touches k rows at any N, so it has no growth term; a page filtered to a store touches that
+/// store's σN rows through its own index.</item>
 /// <item><b>regression</b>: every scenario's median against the constant set for it and the engine in
 /// <c>regressionMilliseconds</c>: what the scenario costs today, with headroom for runner noise. A change
 /// that makes any page or point check slower than that fails the run.</item>
@@ -126,11 +126,11 @@ internal static class GateEvaluator
 
     /// <summary>
     /// The rows a page has to touch at a catalog of <paramref name="products"/> rows, from the paper: a page
-    /// through the scope column k, a page filtered to one store that store's σN rows. Point checks touch one row.
+    /// through the filter k, a page filtered to one store that store's σN rows. Point checks touch one row.
     /// </summary>
     internal static double ExpectedRows(ScenarioResult scenario, long products)
     {
-        if (scenario.Kind is not ("List" or "Page"))
+        if (scenario.Kind is not "List")
         {
             return 1;
         }
