@@ -73,7 +73,7 @@ internal sealed partial class SqlServerDatabaseProvider
     /// <c>fn_AccessRoots(@SubjectIds, @PermissionId)</c>: the caller's access roots, one row per current grant
     /// of one of the caller's live subjects whose role includes the permission: the granted resource's compact
     /// key and its level. Not deduplicated, so a statement that needs only the first roots (a count up to a
-    /// cap) stops reading grants once it has them. Inactive or malformed resources are left out: no row can
+    /// crossover) stops reading grants once it has them. Inactive or malformed resources are left out: no row can
     /// reach them anyway.
     /// </summary>
     public string BuildAccessRootsFunctionSql(SqlOSFgaOptions options)
@@ -177,9 +177,9 @@ internal sealed partial class SqlServerDatabaseProvider
 
     /// <summary>
     /// <c>fn_ListFirst(@SubjectIds, @PermissionId, @TypeId, @Table)</c>: one row, whether the caller sees
-    /// fewer resources than the table's cap: <see cref="SqlOSFgaLineage.ListFirstCapSql"/> of its row count, as
-    /// the engine keeps it in its catalog. Counts <c>fn_ListVisible</c> up to the cap and stops there, so it
-    /// costs at most the cap, whoever asks. Below the cap, listing the caller's rows first and sorting them
+    /// fewer resources than the table's crossover: <see cref="SqlOSFgaLineage.CrossoverSql"/> of its row count, as
+    /// the engine keeps it in its catalog. Counts <c>fn_ListVisible</c> up to the crossover and stops there, so it
+    /// costs at most the crossover, whoever asks. Below the crossover, listing the caller's rows first and sorting them
     /// costs less than reading the table in order until a page of them turns up; above it, the reverse.
     /// </summary>
     public string BuildListFirstFunctionSql(SqlOSFgaOptions options)
@@ -199,7 +199,7 @@ internal sealed partial class SqlServerDatabaseProvider
             (
                 SELECT CAST(CASE WHEN v.Visible < c.Cap THEN 1 ELSE 0 END AS BIT) AS ListFirst
                 FROM (
-                    SELECT CAST({SqlOSFgaLineage.ListFirstCapSql("CAST(ISNULL(SUM(p.rows), 0) AS FLOAT)", "SQRT")} AS BIGINT) AS Cap
+                    SELECT CAST({SqlOSFgaLineage.CrossoverSql("CAST(ISNULL(SUM(p.rows), 0) AS FLOAT)", "SQRT")} AS BIGINT) AS Cap
                     FROM sys.partitions p
                     WHERE p.object_id = OBJECT_ID(@Table) AND p.index_id IN (0, 1)
                 ) c

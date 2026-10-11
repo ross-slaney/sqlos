@@ -30,6 +30,13 @@ public abstract class SqlOSDbContext<TContext> : DbContext, ISqlOSAuthServerDbCo
         }
     }
 
+    /// <summary>Attaches SqlOS to the statements this context runs (<see cref="DbContextOptionsBuilderExtensions.UseSqlOS(DbContextOptionsBuilder)"/>).</summary>
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        base.OnConfiguring(optionsBuilder);
+        optionsBuilder.UseSqlOS();
+    }
+
     protected sealed override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);

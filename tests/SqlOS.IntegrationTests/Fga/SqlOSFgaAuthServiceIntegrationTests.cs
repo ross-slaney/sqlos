@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -474,6 +475,84 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
         var resourceId = await CreateProtectedResourceWithGrantAsync(victimSubjectId);
 
         await AssertPointAndFilterAsync(attackerSubjectId, resourceId, expected: false);
+    }
+
+    [TestMethod]
+    public async Task SqlServer_ACallerWithFewRows_IsNotServedThePlanCompiledForACallerWithMany()
+    {
+        // SQL Server plans a statement for whoever runs it first and reuses the plan. For the list filter the
+        // right plan depends on the list's length: a plan compiled for a caller who sees most of the table
+        // reads the table in order, and handed to a caller who sees two rows it reads the whole table. SqlOS
+        // marks every list statement OPTION (RECOMPILE), so each caller gets the plan for their list.
+        if (!TestDatabase.IsSqlServer || ListFirst == false)
+        {
+            return;
+        }
+
+        var subjectService = CreateSubjectService();
+        var many = await subjectService.CreateUserAsync("Many Rows", $"many-rows-{Guid.NewGuid():N}@example.com");
+        var few = await subjectService.CreateUserAsync("Few Rows", $"few-rows-{Guid.NewGuid():N}@example.com");
+        var suffix = Guid.NewGuid().ToString("N");
+        var manyNode = $"plan_many_{suffix}";
+        var fewNode = $"plan_few_{suffix}";
+        Context.ChangeTracker.Clear();
+        Context.Set<SqlOSFgaResource>().AddRange(
+            new SqlOSFgaResource { Id = manyNode, ParentId = FgaTestDataSeeder.TestAgencyResourceId, Name = manyNode, ResourceTypeId = "project" },
+            new SqlOSFgaResource { Id = fewNode, ParentId = FgaTestDataSeeder.TestAgencyResourceId, Name = fewNode, ResourceTypeId = "project" });
+        await Context.SaveChangesAsync();
+
+        // 900 rows under one node, 300 under another: both callers' lists are below the crossover's floor of
+        // 1,000, so both get the list filter and the same statement; one sees three quarters of the table,
+        // the other two rows.
+        for (var i = 0; i < 1_200; i++)
+        {
+            Context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource { Id = $"plan_r_{i}_{suffix}", ParentId = i < 900 ? manyNode : fewNode, Name = $"r{i}", ResourceTypeId = "project" });
+        }
+
+        await Context.SaveChangesAsync();
+        for (var i = 0; i < 1_200; i++)
+        {
+            Context.Set<LifecycleProtectedEntity>().Add(new LifecycleProtectedEntity { Id = $"plan_e_{i:D4}_{suffix}", ResourceId = $"plan_r_{i}_{suffix}" });
+        }
+
+        Context.Set<SqlOSFgaGrant>().AddRange(
+            new SqlOSFgaGrant { Id = $"plan_g_many_{suffix}", SubjectId = many.SubjectId, ResourceId = manyNode, RoleId = FgaTestDataSeeder.AgencyMemberRoleId },
+            new SqlOSFgaGrant { Id = $"plan_g_few_a_{suffix}", SubjectId = few.SubjectId, ResourceId = $"plan_r_1000_{suffix}", RoleId = FgaTestDataSeeder.AgencyMemberRoleId },
+            new SqlOSFgaGrant { Id = $"plan_g_few_b_{suffix}", SubjectId = few.SubjectId, ResourceId = $"plan_r_1100_{suffix}", RoleId = FgaTestDataSeeder.AgencyMemberRoleId });
+        await Context.SaveChangesAsync();
+        Context.ChangeTracker.Clear();
+
+        var capture = new RowsReadCapture("LifecycleProtectedEntities");
+        await using var attached = new TestSqlOSDbContext(new DbContextOptionsBuilder<TestSqlOSDbContext>().UseTestProvider(AspireFixture.SqlConnectionString).AddInterceptors(capture).Options);
+        await using var plain = new TestSqlOSDbContext(new DbContextOptionsBuilder<TestSqlOSDbContext>().UseSqlServer(AspireFixture.SqlConnectionString).AddInterceptors(capture).Options);
+        try
+        {
+            var manyFilter = await _authService.BuildFilterAsync<LifecycleProtectedEntity>(many.SubjectId, "TEST_VIEW");
+            var fewFilter = await _authService.BuildFilterAsync<LifecycleProtectedEntity>(few.SubjectId, "TEST_VIEW");
+            Task<List<string>> PageAsync(TestSqlOSDbContext db, System.Linq.Expressions.Expression<Func<LifecycleProtectedEntity, bool>> filter)
+                => db.Set<LifecycleProtectedEntity>().AsNoTracking().Where(e => e.Id.EndsWith(suffix)).Where(filter).OrderBy(e => e.Id).Take(20).Select(e => e.Id).ToListAsync();
+            StringAssert.Contains(attached.Set<LifecycleProtectedEntity>().Where(fewFilter).ToQueryString(), "fn_VisibleSet", "both callers are below the crossover");
+
+            // The hazard, on a context SqlOS is not attached to: the many-rows caller compiles the statement,
+            // then the few-rows caller runs it. Reported, not asserted: which plan SQL Server compiles first is
+            // its own choice.
+            await PageAsync(plain, manyFilter);
+            var inherited = await capture.MeasureAsync(() => PageAsync(plain, fewFilter));
+            Console.WriteLine($"Without SqlOS attached, the few-rows caller read {inherited} rows of the table after the many-rows caller compiled the statement.");
+
+            // With SqlOS attached: the same order, and the few-rows caller reads their rows.
+            (await PageAsync(attached, manyFilter)).Should().HaveCount(20);
+            var own = await capture.MeasureAsync(() => PageAsync(attached, fewFilter));
+            (await PageAsync(attached, fewFilter)).Should().Equal($"plan_e_1000_{suffix}", $"plan_e_1100_{suffix}");
+            own.Should().BeLessThanOrEqualTo(20, $"the few-rows caller's page is planned for their list; without SqlOS attached it read {inherited} rows");
+        }
+        finally
+        {
+            await Context.Set<LifecycleProtectedEntity>().Where(e => e.Id.EndsWith(suffix)).ExecuteDeleteAsync();
+            await Context.Set<SqlOSFgaGrant>().Where(g => g.Id.EndsWith(suffix)).ExecuteDeleteAsync();
+            await Context.Set<SqlOSFgaResource>().Where(r => r.Id.EndsWith(suffix) && r.Id.StartsWith("plan_r_")).ExecuteDeleteAsync();
+            await Context.Set<SqlOSFgaResource>().Where(r => r.Id == manyNode || r.Id == fewNode).ExecuteDeleteAsync();
+        }
     }
 
     [TestMethod]

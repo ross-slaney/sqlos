@@ -61,10 +61,6 @@ internal static class ScenarioCatalog
             new("list.region.first-page", "Region manager (D = 5)", ScenarioKind.List, people.RegionManager, Share(people.RegionManager), "4"),
             new("list.region.by-price", "Region manager, first page by price", ScenarioKind.List, people.RegionManager, Share(people.RegionManager), "4", Order: PageOrder.Price),
             new("list.deep-chain.first-page", "Chain manager (D = 10)", ScenarioKind.List, people.DeepChainManager, Share(people.DeepChainManager), "9"),
-            new("list.store.first-page", "Store manager, every visible product (sparse)", ScenarioKind.List, people.StoreManager, Share(people.StoreManager), "4"),
-            new("list.store.mid-cursor", "Store manager, page from the middle of the table (sparse)", ScenarioKind.List, people.StoreManager, Share(people.StoreManager), "4", Cursor: (int)(productCount / 2)),
-            new("list.store.by-price", "Store manager, first page by price (sparse)", ScenarioKind.List, people.StoreManager, Share(people.StoreManager), "4", Order: PageOrder.Price),
-            new("list.store.by-store", "Store manager, filtered to the store (StoreId index)", ScenarioKind.List, people.StoreManager, Share(people.StoreManager), "4", StoreId: people.StoreManagerStoreId),
             new("list.stores100.first-page", $"{people.HundredStores.ScopeResourceIds.Count} store grants across the chains, first page", ScenarioKind.List, people.HundredStores, Share(people.HundredStores), "4 and 9"),
             new("list.stores100.by-price", $"{people.HundredStores.ScopeResourceIds.Count} store grants across the chains, first page by price", ScenarioKind.List, people.HundredStores, Share(people.HundredStores), "4 and 9", Order: PageOrder.Price),
         };
@@ -77,6 +73,18 @@ internal static class ScenarioCatalog
             var grants = person.GrantedProducts.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
             scenarios.Add(new($"list.{person.Key}.first-page", $"{grants} single-product grants, first page", ScenarioKind.List, person, share, "4 and 9"));
         }
+
+        // The sparse caller runs last among the lists, after the callers with the longest lists at each scale
+        // (the region manager at 100K, the hundred stores at 1M, the ten thousand grants at 10M): a plan compiled
+        // for a long list would be handed to this caller if SQL Server were allowed to reuse it (it is not:
+        // SqlOSFgaListStatementInterceptor), and the gates would show it.
+        scenarios.AddRange(
+        [
+            new("list.store.first-page", "Store manager, every visible product (sparse)", ScenarioKind.List, people.StoreManager, Share(people.StoreManager), "4"),
+            new("list.store.mid-cursor", "Store manager, page from the middle of the table (sparse)", ScenarioKind.List, people.StoreManager, Share(people.StoreManager), "4", Cursor: (int)(productCount / 2)),
+            new("list.store.by-price", "Store manager, first page by price (sparse)", ScenarioKind.List, people.StoreManager, Share(people.StoreManager), "4", Order: PageOrder.Price),
+            new("list.store.by-store", "Store manager, filtered to the store (StoreId index)", ScenarioKind.List, people.StoreManager, Share(people.StoreManager), "4", StoreId: people.StoreManagerStoreId),
+        ]);
 
         scenarios.AddRange(
         [

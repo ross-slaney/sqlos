@@ -38,7 +38,7 @@ The endpoint needs no `where tenantId` or `where userId` to discover authorized 
 - **Keep large reorganizations deliberate.** Moving or deactivating a branch changes inheritance and rewrites the closure of its subtree. Large subtree changes block other tree changes meanwhile.
 - **One API does not mean every query has the same cost.** A page costs about the page for a caller who sees most of the table, whose rows are checked in the page's order, and about the caller's rows for one who sees few, whose rows are listed first. In between, the worst page grows with the square root of the table, not with the table, unless a caller who sees many rows has them all at the far end of the page's order. Counts, joins, unindexed sorts, and selective filters keep their normal database costs.
 
-`BuildFilterAsync` asks the database one question, how many rows this caller sees, counted up to a cap; then every query is one statement in which SQL Server or PostgreSQL reads the grants, the tree and the rows. There is no external policy service, no application-side filtering, and no grant list leaving the database.
+`BuildFilterAsync` asks the database one question, how many rows this caller sees, counted up to the crossover where listing and checking cost the same; then every query is one statement in which SQL Server or PostgreSQL reads the grants, the tree and the rows. There is no external policy service, no application-side filtering, and no grant list leaving the database.
 
 → **[Designing your resource tree and its tradeoffs](https://sqlos.dev/docs/fga/designing-your-resource-tree)** · [Authorize EF Core queries](https://sqlos.dev/docs/quickstarts/ef-authorization) · [Page shapes and indexes](https://sqlos.dev/docs/guides/paginating-authorized-lists)
 

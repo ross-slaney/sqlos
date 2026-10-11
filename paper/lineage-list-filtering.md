@@ -138,7 +138,10 @@ application table.
 - `fn_VisibleSet(S, P, T)` returns the rows of `fn_ListVisible`, each once, materialized: on SQL Server a
   multi-statement table function whose table variable has a primary key that ignores duplicates, on
   PostgreSQL a PL/pgSQL function declared `ROWS 10`, which the planner never inlines. Either way the
-  statement that reads it sees a small opaque set and starts from it.
+  statement that reads it sees a small opaque set and starts from it. On SQL Server every statement over it
+  carries `OPTION (RECOMPILE)`: SQL Server compiles a statement for the list of its first caller and reuses the
+  plan, and a plan compiled for a long list reads t in order for a short one; recompiling plans each statement
+  for its own caller. PostgreSQL plans the function by its declared row count.
 - `fn_IsResourceAccessible(x, S, P)` is the point check. It reads x's row and, for each ℓ from Reach(x) to
   depth(x), the resource whose `Seq` is Ancestor_ℓ(x) and its grants to a live subject of S whose role
   includes P, provided P's type, if it has one, is x's. It returns the deciding grant (on the nearest such
@@ -203,17 +206,17 @@ table of N rows of which the caller may see V (V = σN), and a tree of depth D.
   at most (D + 1)·|S| grant seeks. This is the paper's Theorem 3 with the per-row walk replaced by the lineage.
   For a caller who sees most of the table (V ≈ N) it is about k rows, independent of N.
 
-**The cap.** Let c_l be the cost of a listed row (an index entry, a lookup in t, its share of the sort)
+**The crossover.** Let c_l be the cost of a listed row (an index entry, a lookup in t, its share of the sort)
 and c_r the cost of a checked row (a row of t and its point check). Listing first costs about c_l·V and the
 row check about c_r·k·N/V. They are equal at V* = √(c·k·N), with c = c_r / c_l the ratio of the unit
 costs. Measured on both engines, c is near 3 for pages of 20 to 25 rows, which puts V* between 7.7·√N and
 8.7·√N; SqlOS takes C = 8·√N, with a floor of 1,000 for small or never-measured tables, where listing 1,000
 rows first costs milliseconds. A caller below C is listed first and costs less than c_l·C; a caller at or
 above C has the rows checked and costs at most c_r·k·N/C ≈ c_l·C. With the question's at most C entries,
-the worst page over all callers whose rows are spread through the order is Θ(√N), near the cap: C is 8,000
+the worst page over all callers whose rows are spread through the order is Θ(√N), near the crossover: C is 8,000
 at N = 10⁶, about 25,000 at N = 10⁷ and about 57,000 at N = 5·10⁷.
 
-**The worst case the cap does not cover.** The row check's k·N/V assumes the caller's rows are spread
+**The worst case the crossover does not cover.** The row check's k·N/V assumes the caller's rows are spread
 through the order. A caller with V ≥ C whose rows all sit at the far end of the requested order (the rows
 of a customer dormant for years, sorted newest first) has the N − V rows before them read, each with its
 point check: Θ(N). Listing first would cost V instead, which is the same order when V is a constant share

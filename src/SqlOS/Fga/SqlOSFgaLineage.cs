@@ -89,24 +89,26 @@ internal static class SqlOSFgaLineage
     /// </summary>
     public static string ResourceIdIndexName(string table) => $"IX_{table}_SqlOSFgaResourceId";
 
-    // How a list filter is chosen (fn_ListFirst). A page of k rows costs, listed first, about one index read
-    // per row the caller sees (V), then a sort; read in the table's order and checked row by row, about k·N/V
-    // row checks, N the table's rows, each check a few index reads. The two meet near V = √(c·k·N), c the
-    // ratio of their unit costs: measured at about 3 on both engines for pages of 20 to 25 rows, which puts
-    // the meeting point near 8·√N. Below it the caller's rows are listed first; at or above it they are
-    // checked in order. Either way a page costs at most about the cap's worth of index reads, plus the count.
+    // The crossover between the two filters (fn_ListFirst). A page of k rows costs, with the caller's rows
+    // listed first, about one index read per row the caller sees (V) and a sort; with the table read in its
+    // order and each row checked, about k·N/V checks, N the table's rows, each check a few index reads. The
+    // first grows with V, the second shrinks with it, and they are equal at V = √(c·k·N), where c is the cost of
+    // a check over the cost of a listed row. For pages of 20 to 25 rows, c measures about 3 on both engines, so
+    // the crossover is near 8·√N. Below it a page costs less listed first; at or above it, checked. Either way
+    // a page costs at most about the crossover's worth of index reads, and the count that finds the side costs
+    // at most the crossover too. Nothing in it is tuned: change k or c and the formula moves with them.
 
-    /// <summary>The cap's factor: a caller who sees fewer than <c>8·√N</c> rows of an N-row table has them listed first.</summary>
-    public const int ListFirstFactor = 8;
+    /// <summary>The crossover's factor, √(c·k) for k = 20 and c = 3: a caller who sees fewer than <c>8·√N</c> rows of an N-row table is listed first.</summary>
+    public const int CrossoverFactor = 8;
 
-    /// <summary>The smallest cap, for small or never-measured tables: listing 1,000 rows first costs milliseconds.</summary>
-    public const int ListFirstMinimum = 1_000;
+    /// <summary>The crossover's floor: below a thousand rows either filter costs milliseconds, so small or never-measured tables list first.</summary>
+    public const int CrossoverMinimum = 1_000;
 
-    /// <summary>The cap for a table of <paramref name="rows"/> rows (an expression), in SQL both engines read the same way.</summary>
-    public static string ListFirstCapSql(string rows, string sqrt)
+    /// <summary>The crossover for a table of <paramref name="rows"/> rows (an expression), in SQL both engines read the same way.</summary>
+    public static string CrossoverSql(string rows, string sqrt)
     {
-        var factor = ListFirstFactor.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        var minimum = ListFirstMinimum.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var factor = CrossoverFactor.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var minimum = CrossoverMinimum.ToString(System.Globalization.CultureInfo.InvariantCulture);
         return $"CASE WHEN {factor} * {sqrt}({rows}) > {minimum} THEN {factor} * {sqrt}({rows}) ELSE {minimum} END";
     }
 }

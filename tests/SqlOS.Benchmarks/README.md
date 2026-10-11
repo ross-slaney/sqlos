@@ -8,7 +8,8 @@ which ran a hand-copied version of the schema and function at 1.2M–1.5M resour
 
 Every page (`list.*`) is the LINQ query an application writes (`Where(filter)`, the cursor, the order,
 `Take(k + 1)`) with the filter `BuildFilterAsync` returns. `BuildFilterAsync` first asks the database
-(`fn_ListFirst`) whether the caller sees fewer rows than the table's cap, 8·√rows; below it the filter lists
+(`fn_ListFirst`) whether the caller sees fewer rows than the table's crossover, 8·√rows, where listing and
+checking cost the same; below it the filter lists
 the caller's rows first (`fn_VisibleSet`), at or above it the query reads the table in order and checks each
 row with the point check (`fn_CheckRow`, which is `fn_IsResourceAccessible`). The summary shows which filter each caller got and the
 time `BuildFilterAsync` took. Point checks measure `fn_IsResourceAccessible` and `Allows`
@@ -75,6 +76,11 @@ rebuild.
 | `list.deep-chain.first-page` | The same at D = 10 |
 | `list.store.first-page`, `list.store.mid-cursor` | Sparse access (σ ≈ 0.0065%), from the start and from the middle of the table |
 | `list.store.by-store` | The same person listing their store with `WHERE StoreId = …`: the application narrowed the page itself |
+
+The store manager's pages run after the callers with the longest lists at each scale (the region manager at
+100K, the hundred stores at 1M, the ten thousand grants at 10M). SQL Server compiles a statement for its
+first caller's list and reuses the plan; this order would hand the sparse caller a plan compiled for a long
+list if SqlOS let SQL Server reuse it, and the gates would show it.
 | `list.stores100.first-page`, `list.stores100.by-price` | A hundred roots: one person granted 100 stores across every chain, in key order and by price |
 | `list.grants10k.first-page`, `list.grants100k.first-page` | Thousands of roots: one person with 10,000 and 100,000 grants on single products. Callers with tens of thousands of single-resource grants are outside the filter's intended shape (access flows down a hierarchy); these pages are measured and held to their own limits, not expected to be flat |
 | `point.function.*`, `point.api.*` | `fn_IsResourceAccessible` for one product at depth 4 and 9, a denial, the many-grants people, and `Allows` |
@@ -191,8 +197,8 @@ the application's own `StoreId` index; every other page reads the page's rows an
 - **scale**: per-page cost must follow the work the filter it got predicts, not N. The median at the largest
   scale may be at most `maxRatio` (2.0) times the median at the smallest, times the growth of the rows the page
   has to touch, plus `slackMilliseconds`. A caller listed first touches their own σN rows; a caller whose rows
-  are checked one by one touches about k/σ rows, the same at any N. A caller who crosses the cap between the
-  two scales is not compared (the two pages read rows differently). The many-grants pages are exempt: their
+  are checked one by one touches about k/σ rows, the same at any N. A caller who passes the crossover between
+  the two scales is not compared (the two pages read rows differently). The many-grants pages are exempt: their
   cost follows the caller's grants, not N.
 - **regression**: every scenario's median against the constant set for it and the engine in
   `regressionMilliseconds`: what the scenario costs today, with headroom for runner noise (several times the

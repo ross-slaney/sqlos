@@ -81,7 +81,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
             AS $sqlos$
             -- The caller's current grants first, found by subject, then their resources by primary key. The CTE is
             -- materialized so the planner cannot start from the resource table; it is read as far as the
-            -- statement needs (a count up to a cap stops early), so nothing here deduplicates.
+            -- statement needs (a count up to a crossover stops early), so nothing here deduplicates.
             WITH g AS MATERIALIZED (
                 SELECT g."ResourceId"
                 FROM {grants} g
@@ -169,7 +169,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
     }
 
     /// <summary>
-    /// <c>fn_ListFirst</c>: whether the caller sees fewer resources than the table's cap (see the SQL Server
+    /// <c>fn_ListFirst</c>: whether the caller sees fewer resources than the table's crossover (see the SQL Server
     /// provider). The table's row count is the planner's (<c>pg_class.reltuples</c>; -1, never analyzed, reads as 0).
     /// Without JIT, for the reason <c>fn_VisibleSet</c> is: the count is over-costed and would compile for longer
     /// than it runs.
@@ -192,7 +192,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
             SET jit = off
             AS $sqlos$
             SELECT v.visible < c.cap
-            FROM (SELECT CAST({SqlOSFgaLineage.ListFirstCapSql(rows, "sqrt")} AS bigint) AS cap) c
+            FROM (SELECT CAST({SqlOSFgaLineage.CrossoverSql(rows, "sqrt")} AS bigint) AS cap) c
             CROSS JOIN LATERAL (
                 SELECT count(*) AS visible
                 FROM (SELECT 1 FROM {schema}."fn_ListVisible"(p_subject_ids, p_permission_id, p_type_id) LIMIT c.cap) t

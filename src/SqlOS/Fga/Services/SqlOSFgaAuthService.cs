@@ -379,6 +379,7 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
     {
         EnsureRelational();
         EnsureProtectedEntity<T>();
+        EnsureStatementsArePlannedPerCaller();
         var subjectIds = await ResolveSubjectIdsAsync(subjectId);
         if (subjectIds.Count == 0)
         {
@@ -400,7 +401,7 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
 
         // The filter names who the rows are for (the caller's live subjects, resolved now as group membership
         // is) and the permission. The database answers one question first (fn_ListFirst): does this caller see
-        // fewer rows of T's table than its cap? Then the filter is one EXISTS either way, and both are exact:
+        // fewer rows of T's table than its crossover? Then the filter is one EXISTS either way, and both are exact:
         // - few rows: over fn_VisibleSet, so the query starts from the caller's rows, listed from their roots;
         // - many rows: over fn_CheckRow (the point check, fn_IsResourceAccessible) for each row, so the query
         //   reads the table in its own order and checks the rows it reads, until it has the page.
@@ -419,9 +420,36 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
     /// <summary>Tests only: build this service's filters in one shape instead of asking <c>fn_ListFirst</c>.</summary>
     internal bool? ListFirstOverride { get; set; }
 
+    private bool _statementsChecked;
+
     /// <summary>
-    /// Whether the caller sees fewer resources of the permission's type than the cap of <typeparamref name="T"/>'s
-    /// table (<c>fn_ListFirst</c>): one scalar, read in the database, costing at most the cap.
+    /// On SQL Server the list filter's statements must carry <see cref="SqlOSFgaListStatementInterceptor"/>'s
+    /// hint, or a caller with few rows can inherit a plan compiled for one with many and read the whole table.
+    /// A context SqlOS is not attached to gets no filter and a message that says what to call, not a slow page.
+    /// </summary>
+    private void EnsureStatementsArePlannedPerCaller()
+    {
+        if (_statementsChecked)
+        {
+            return;
+        }
+
+        if (_context is DbContext db && SqlOSDatabase.IsSqlServer(db.Database.ProviderName))
+        {
+            var interceptors = db.GetService<IDbContextOptions>().FindExtension<CoreOptionsExtension>()?.Interceptors;
+            if (interceptors is null || !interceptors.Any(i => i is SqlOSFgaListStatementInterceptor))
+            {
+                throw new InvalidOperationException(
+                    "SqlOS is not attached to this context's options. Call UseSqlOS() on its DbContextOptionsBuilder (AddSqlOS does this for the context it registers, and SqlOSDbContext for itself). On SQL Server, a statement that reads a caller's visible resources must be planned for that caller.");
+            }
+        }
+
+        _statementsChecked = true;
+    }
+
+    /// <summary>
+    /// Whether the caller sees fewer resources of the permission's type than the crossover of <typeparamref name="T"/>'s
+    /// table (<c>fn_ListFirst</c>): one scalar, read in the database, costing at most the crossover.
     /// </summary>
     private async Task<bool> ListFirstAsync<T>(string subjectIdsJson, string permissionId, string? typeId)
     {

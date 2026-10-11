@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Npgsql;
 using SqlOS.Database;
+using SqlOS.Extensions;
 using SqlOS.Fga;
 
 namespace SqlOS.IntegrationTests.Infrastructure;
@@ -29,6 +30,7 @@ internal static class TestDatabase
         string connectionString,
         Action<SqlServerDbContextOptionsBuilder>? sqlServer = null)
     {
+        builder.UseSqlOS();
         if (IsPostgreSql)
         {
             SqlOSDatabase.EnablePostgreSqlTimestampCompatibility();

@@ -49,7 +49,7 @@ internal interface ISqlOSDatabaseProvider
     /// <summary><c>fn_VisibleSet</c>: the same resources, each once, materialized; the "list first" filter is an EXISTS over it.</summary>
     string BuildVisibleSetFunctionSql(SqlOSFgaOptions options);
 
-    /// <summary><c>fn_ListFirst</c>: whether the caller sees fewer resources than a table's cap.</summary>
+    /// <summary><c>fn_ListFirst</c>: whether the caller sees fewer resources than a table's crossover.</summary>
     string BuildListFirstFunctionSql(SqlOSFgaOptions options);
 
     /// <summary>A SELECT of <c>Value</c> over <c>fn_ListFirst({0}, {1}, {2}, {3})</c>: subject ids JSON, permission id, type id, quoted table name.</summary>

@@ -10,6 +10,7 @@ using SqlOS.Benchmarks;
 using SqlOS.Benchmarks.Data;
 using SqlOS.Benchmarks.Infrastructure;
 using SqlOS.Benchmarks.Reporting;
+using SqlOS.Extensions;
 using SqlOS.Benchmarks.Scenarios;
 using SqlOS.Database;
 using SqlOS.Fga;
@@ -93,6 +94,7 @@ else
 
 var planCapture = new PlanCapture(options.Provider);
 plainOptions.AddInterceptors(planCapture);
+plainOptions.UseSqlOS();
 
 var builtOptions = plainOptions.Options;
 BenchDbContext CreateContext() => new(builtOptions);
