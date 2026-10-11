@@ -1,0 +1,53 @@
+---
+title: "SqlOS 9.0.0: Authorized lists are a SQL predicate"
+description: "BuildFilterAsync composes into the EF query again. SqlOS 9.0.0 withdraws the 8.0 page executor and returns list filtering to the authorization TVF."
+date: "2026-10-11"
+author: "Ross Slaney"
+tags: ["FGA", "EF Core", "SqlOS"]
+---
+
+SqlOS 9.0.0 puts authorized lists back inside the query you write. `BuildFilterAsync` returns a predicate. EF Core composes it with your `Where`, `OrderBy`, and `Take`, and SQL Server or PostgreSQL evaluates the authorization TVF in that statement.
+
+[SqlOS 8.0.0](/blog/sqlos-8-0-0-authorized-pages-on-dotnet-10) answered a page from stored lineage, per-principal grant counts, and a compiler that replaced EF's. That contract is withdrawn. A page can examine many denied rows, including the rest of the table when the result is empty or short. [List filtering](/docs/fga/list-filter) and [Paginating authorized lists](/docs/guides/paginating-authorized-lists) describe that cost.
+
+.NET 10, EF Core 10, and the 8.0 sign-in fixes stay.
+
+## The call you already write
+
+```csharp
+var canView = await fga.BuildFilterAsync<Product>(subjectId, "product.view");
+
+var rows = await db.Products
+    .Where(canView)
+    .Where(p => p.Id > lastId)
+    .OrderBy(p => p.Id)
+    .Take(pageSize + 1)
+    .ToListAsync();
+```
+
+Awaiting the filter resolves the caller's principals, including active groups. The TVF checks grants when the query runs. Build the filter once per request. Place grants on the resource tree so a role covers the descendants that should inherit access. [Designing your resource tree](/docs/fga/designing-your-resource-tree) is the guide for that shape.
+
+## What stays from 8.0.0
+
+- **.NET 10 and EF Core 10.** SqlOS targets `net10.0`. Hosts that stay on .NET 9 stay on SqlOS 7.x.
+- **Sign-up codes respect their attempt limit.** Failed attempts are recorded outside the sign-up transaction, on the hosted forms, the headless API, and `SqlOSAuthService`.
+- **Headless organization selection finishes sign-in.** The response is the client redirect, or the next step when MFA is required. See [Hosted vs. headless](/docs/authserver/hosted-vs-headless).
+- **SCIM works at its default URL.** Requests under `/sqlos/scim/v2` reach SCIM and its bearer authentication. See [SCIM directory sync](/docs/guides/scim-directory-sync).
+
+## Upgrade notes
+
+```bash
+dotnet add package SqlOS --version 9.0.0
+npm install @sqlos/headless@9.0.0              # if you render your own login UI
+```
+
+**From 7.x.** Move the host to `net10.0` and EF Core 10. List filtering is the TVF you already call. Leave `FgaScope` off your entities. `SqlOSDbContext<TContext>` registers the model and synchronizes `ISqlOSResourceEntity` rows on save.
+
+**From 8.0.0.** Remove the types and calls 8.0 added, then start from a fresh database.
+
+- Remove `FgaScope` from every entity. `IHasResourceId` is `ResourceId` again.
+- Implement `ISqlOSResourceEntity` on the entity and declare `ResourceId` there. `SqlOSResourceEntity` is gone. See [IHasResourceId](/docs/fga/i-has-resource-id).
+- Restore `IsResourceAccessible` on a context you own, and call `modelBuilder.UseSqlOS(GetType(), Database.ProviderName)`. A context that derives from `SqlOSDbContext<TContext>` already does both.
+- Remove `UseSqlOSFga` from context options you build by hand. `AddSqlOS` registers the model.
+
+**Schema.** Start from a fresh database. 9.0.0 installs FGA schema through version 10. Databases created by 8.0.0, already at schema version 11–15, keep their lineage tables, grant-count tables, scope columns, and triggers. Startup treats that higher version as current. That database is not a supported upgrade.
