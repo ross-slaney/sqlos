@@ -148,7 +148,7 @@ Other costs are the query's own:
 - A `Count()`, a join or a list without `Take` reads every row the caller may see: their rows when they are listed first, and the whole table, each row checked, when they are many. That is what counting costs.
 - A large `Skip(...)` reads the skipped rows; use a keyset for deep lists.
 - A condition your order's index cannot narrow is tested as rows are read, so checking each row reads more rows to fill a page. Declare an index for the order you page in, ended by the key, and give a selective condition its own index, as you would for any query.
-- An order with no index makes the database read every row the filter passes before it sorts: the caller's rows when they are listed first, the whole table when each row is checked.
+- An order with no index makes the database read every row the filter passes before it sorts: the caller's rows when they are listed first, the whole table when each row is checked. SqlOS logs a warning the first time such a query is compiled, naming the entity, the order and the `HasIndex` to declare.
 
 One API preserves authorization semantics across these shapes; it does not make them equally cheap.
 
