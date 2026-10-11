@@ -424,7 +424,6 @@ public sealed class Organization : ISqlOSResourceEntity
 {
     public Guid Id { get; set; }
     public string ResourceId { get; set; } = string.Empty;
-    public byte[]? FgaScope { get; private set; }
     public string Name { get; set; } = string.Empty;
 
     public string ResourceTypeId => "organization";
@@ -439,7 +438,6 @@ public sealed class Workspace : ISqlOSResourceEntity
     public Guid Id { get; set; }
     public Guid OrganizationId { get; set; }
     public string ResourceId { get; set; } = string.Empty;
-    public byte[]? FgaScope { get; private set; }
     public string Name { get; set; } = string.Empty;
 
     public string ResourceTypeId => "workspace";
@@ -454,7 +452,6 @@ public sealed class Project : ISqlOSResourceEntity
     public Guid Id { get; set; }
     public Guid WorkspaceId { get; set; }
     public string ResourceId { get; set; } = string.Empty;
-    public byte[]? FgaScope { get; private set; }
     public string Name { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; }
 

@@ -4,7 +4,6 @@ namespace SqlOS.Example.Api.FgaRetail.Models;
 
 public class InventoryItem : IHasResourceId
 {
-
     public string Id { get; set; } = Guid.NewGuid().ToString();
     public string ResourceId { get; set; } = string.Empty;
     public string LocationId { get; set; } = string.Empty;

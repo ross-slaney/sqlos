@@ -17,224 +17,48 @@ namespace SqlOS.Example.Api.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "9.0.1")
-                .HasAnnotation("Relational:MaxIdentifierLength", 128)
-                .HasAnnotation("SqlOS:Fga:MaxResourceHierarchyDepth", 10);
+                .HasAnnotation("ProductVersion", "9.0.0")
+                .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSApplicationAssignment", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("Access")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<string>("ClientApplicationId")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("ConfigurationFingerprint")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<DateTime?>("ConfigurationOrphanedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("ConfigurationOwner")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.Property<string>("ConfigurationSourceKey")
-                        .HasMaxLength(160)
-                        .HasColumnType("nvarchar(160)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedByActorId")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<string>("CreatedByActorType")
-                        .HasMaxLength(80)
-                        .HasColumnType("nvarchar(80)");
-
-                    b.Property<DateTime?>("LastReconciledAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("OrganizationId")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("PrincipalId")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<string>("PrincipalType")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.Property<string>("Reason")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<DateTime?>("RevokedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("RevokedByActorId")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<string>("RevokedByActorType")
-                        .HasMaxLength(80)
-                        .HasColumnType("nvarchar(80)");
-
-                    b.Property<string>("RoleKey")
-                        .HasMaxLength(80)
-                        .HasColumnType("nvarchar(80)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ClientApplicationId", "RevokedAt");
-
-                    b.HasIndex("OrganizationId", "RevokedAt");
-
-                    b.HasIndex("ClientApplicationId", "ConfigurationOwner", "ConfigurationSourceKey")
-                        .IsUnique()
-                        .HasDatabaseName("UX_SqlOSApplicationAssignments_Client_Owner_SourceKey")
-                        .HasFilter("[ConfigurationSourceKey] IS NOT NULL");
-
-                    b.HasIndex("ClientApplicationId", "PrincipalType", "PrincipalId", "OrganizationId", "RoleKey", "RevokedAt")
-                        .HasDatabaseName("IX_SqlOSApplicationAssignments_Target");
-
-                    b.ToTable("SqlOSApplicationAssignments", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
 
             modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSAuditEvent", b =>
                 {
                     b.Property<string>("Id")
                         .HasColumnType("nvarchar(450)");
 
-                    b.Property<string>("Action")
-                        .IsRequired()
-                        .HasMaxLength(160)
-                        .HasColumnType("nvarchar(160)");
-
-                    b.Property<string>("ActorDisplayName")
-                        .HasMaxLength(320)
-                        .HasColumnType("nvarchar(320)");
-
                     b.Property<string>("ActorId")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("ActorType")
                         .IsRequired()
                         .HasMaxLength(80)
                         .HasColumnType("nvarchar(80)");
 
-                    b.Property<string>("ApplicationId")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("ApplicationKey")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("ContextJson")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("CorrelationId")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
                     b.Property<string>("DataJson")
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("EventType")
                         .IsRequired()
-                        .HasMaxLength(160)
-                        .HasColumnType("nvarchar(160)");
-
-                    b.Property<string>("IdempotencyKeyHash")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<string>("IdempotencyScopeHash")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<DateTime>("IngestedAt")
-                        .HasColumnType("datetime2");
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
 
                     b.Property<string>("IpAddress")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("MetadataJson")
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTime>("OccurredAt")
                         .HasColumnType("datetime2");
 
                     b.Property<string>("OrganizationId")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("RequestId")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("SessionId")
                         .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Source")
-                        .IsRequired()
-                        .HasMaxLength(80)
-                        .HasColumnType("nvarchar(80)");
-
-                    b.Property<string>("TargetsJson")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("UserAgent")
-                        .HasMaxLength(512)
-                        .HasColumnType("nvarchar(512)");
 
                     b.Property<string>("UserId")
                         .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("IdempotencyKeyHash")
-                        .IsUnique()
-                        .HasFilter("[IdempotencyKeyHash] IS NOT NULL");
-
-                    b.HasIndex("IdempotencyScopeHash")
-                        .IsUnique()
-                        .HasFilter("[IdempotencyScopeHash] IS NOT NULL");
-
-                    b.HasIndex("OccurredAt");
-
-                    b.HasIndex("Action", "OccurredAt");
-
-                    b.HasIndex("ApplicationId", "OccurredAt");
-
-                    b.HasIndex("ApplicationKey", "OccurredAt");
-
-                    b.HasIndex("OrganizationId", "OccurredAt");
-
-                    b.HasIndex("Source", "OccurredAt");
-
-                    b.HasIndex("ActorType", "ActorId", "OccurredAt");
 
                     b.ToTable("SqlOSAuditEvents", "dbo", t =>
                         {
@@ -252,67 +76,7 @@ namespace SqlOS.Example.Api.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("nvarchar(32)");
 
-                    b.Property<string>("AuthPageConfigurationFingerprint")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<DateTime?>("AuthPageConfigurationOrphanedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("AuthPageConfigurationOwner")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.Property<string>("AuthPageConfigurationSourceKey")
-                        .HasMaxLength(160)
-                        .HasColumnType("nvarchar(160)");
-
-                    b.Property<DateTime?>("AuthPageLastReconciledAt")
-                        .HasColumnType("datetime2");
-
                     b.Property<string>("BackgroundColor")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("nvarchar(32)");
-
-                    b.Property<string>("EmailAccentColor")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("nvarchar(32)");
-
-                    b.Property<string>("EmailApplicationName")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("EmailBackgroundColor")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("nvarchar(32)");
-
-                    b.Property<string>("EmailConfigurationFingerprint")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<DateTime?>("EmailConfigurationOrphanedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("EmailConfigurationOwner")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.Property<string>("EmailConfigurationSourceKey")
-                        .HasMaxLength(160)
-                        .HasColumnType("nvarchar(160)");
-
-                    b.Property<DateTime?>("EmailLastReconciledAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("EmailLogoBase64")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("EmailPrimaryColor")
                         .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("nvarchar(32)");
@@ -363,9 +127,6 @@ namespace SqlOS.Example.Api.Migrations
                     b.Property<string>("Id")
                         .HasColumnType("nvarchar(450)");
 
-                    b.Property<DateTime?>("AuthTime")
-                        .HasColumnType("datetime2");
-
                     b.Property<string>("AuthenticationMethod")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -395,7 +156,6 @@ namespace SqlOS.Example.Api.Migrations
                         .HasColumnType("nvarchar(128)");
 
                     b.Property<DateTime?>("ConsumedAt")
-                        .IsConcurrencyToken()
                         .HasColumnType("datetime2");
 
                     b.Property<DateTime>("CreatedAt")
@@ -403,10 +163,6 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.Property<DateTime>("ExpiresAt")
                         .HasColumnType("datetime2");
-
-                    b.Property<string>("Nonce")
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
 
                     b.Property<string>("OrganizationId")
                         .HasColumnType("nvarchar(450)");
@@ -436,8 +192,7 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("AuthorizationRequestId")
-                        .IsUnique();
+                    b.HasIndex("AuthorizationRequestId");
 
                     b.HasIndex("ClientApplicationId");
 
@@ -460,7 +215,6 @@ namespace SqlOS.Example.Api.Migrations
                         .HasColumnType("nvarchar(450)");
 
                     b.Property<DateTime?>("CancelledAt")
-                        .IsConcurrencyToken()
                         .HasColumnType("datetime2");
 
                     b.Property<string>("ClientApplicationId")
@@ -478,7 +232,6 @@ namespace SqlOS.Example.Api.Migrations
                         .HasColumnType("nvarchar(32)");
 
                     b.Property<DateTime?>("CompletedAt")
-                        .IsConcurrencyToken()
                         .HasColumnType("datetime2");
 
                     b.Property<string>("ConnectionId")
@@ -487,22 +240,12 @@ namespace SqlOS.Example.Api.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
-                    b.Property<string>("DeviceAuthorizationId")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
                     b.Property<DateTime>("ExpiresAt")
                         .HasColumnType("datetime2");
-
-                    b.Property<string>("InvitationId")
-                        .HasColumnType("nvarchar(450)");
 
                     b.Property<string>("LoginHintEmail")
                         .HasMaxLength(320)
                         .HasColumnType("nvarchar(320)");
-
-                    b.Property<long?>("MaxAgeSeconds")
-                        .HasColumnType("bigint");
 
                     b.Property<string>("Nonce")
                         .HasMaxLength(256)
@@ -510,10 +253,6 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.Property<string>("OrganizationId")
                         .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("PendingConsentUserId")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
 
                     b.Property<string>("PresentationMode")
                         .IsRequired()
@@ -562,12 +301,6 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.HasIndex("ConnectionId");
 
-                    b.HasIndex("DeviceAuthorizationId")
-                        .IsUnique()
-                        .HasFilter("[DeviceAuthorizationId] IS NOT NULL");
-
-                    b.HasIndex("InvitationId");
-
                     b.HasIndex("OrganizationId");
 
                     b.ToTable("SqlOSAuthorizationRequests", "dbo", t =>
@@ -581,55 +314,24 @@ namespace SqlOS.Example.Api.Migrations
                     b.Property<string>("Id")
                         .HasColumnType("nvarchar(450)");
 
-                    b.Property<string>("AccessMode")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.Property<bool>("AllowDeviceAuthorization")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("AllowNativeHeadlessAuth")
-                        .HasColumnType("bit");
-
                     b.Property<string>("AllowedScopesJson")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Audience")
                         .IsRequired()
-                        .HasMaxLength(850)
-                        .HasColumnType("nvarchar(850)");
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<string>("ClientId")
                         .IsRequired()
-                        .HasMaxLength(850)
-                        .HasColumnType("nvarchar(850)");
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
 
                     b.Property<string>("ClientType")
                         .IsRequired()
                         .HasMaxLength(40)
                         .HasColumnType("nvarchar(40)");
-
-                    b.Property<string>("ClientUri")
-                        .HasMaxLength(850)
-                        .HasColumnType("nvarchar(850)");
-
-                    b.Property<string>("ConfigurationFingerprint")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<DateTime?>("ConfigurationOrphanedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("ConfigurationOwner")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.Property<string>("ConfigurationSourceKey")
-                        .HasMaxLength(160)
-                        .HasColumnType("nvarchar(160)");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
@@ -638,52 +340,11 @@ namespace SqlOS.Example.Api.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
-                    b.Property<DateTime?>("DisabledAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DisabledReason")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<string>("GrantTypesJson")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
 
                     b.Property<bool>("IsFirstParty")
                         .HasColumnType("bit");
-
-                    b.Property<DateTime?>("LastReconciledAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("LastSeenAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("LogoUri")
-                        .HasMaxLength(850)
-                        .HasColumnType("nvarchar(850)");
-
-                    b.Property<string>("MetadataDocumentUrl")
-                        .HasMaxLength(850)
-                        .HasColumnType("nvarchar(850)");
-
-                    b.Property<string>("MetadataEtag")
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<DateTime?>("MetadataExpiresAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("MetadataFetchedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("MetadataJson")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime?>("MetadataLastModifiedAt")
-                        .HasColumnType("datetime2");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -694,161 +355,15 @@ namespace SqlOS.Example.Api.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<string>("RegistrationSource")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
                     b.Property<bool>("RequirePkce")
                         .HasColumnType("bit");
 
-                    b.Property<string>("ResponseTypesJson")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("SoftwareId")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("SoftwareVersion")
-                        .HasMaxLength(120)
-                        .HasColumnType("nvarchar(120)");
-
-                    b.Property<string>("TokenEndpointAuthMethod")
-                        .IsRequired()
-                        .HasMaxLength(60)
-                        .HasColumnType("nvarchar(60)");
-
                     b.HasKey("Id");
-
-                    b.HasIndex("AccessMode");
 
                     b.HasIndex("ClientId")
                         .IsUnique();
 
-                    b.HasIndex("LastSeenAt");
-
-                    b.HasIndex("MetadataDocumentUrl");
-
-                    b.HasIndex("RegistrationSource");
-
-                    b.HasIndex("ConfigurationOwner", "ConfigurationSourceKey")
-                        .IsUnique()
-                        .HasFilter("[ConfigurationSourceKey] IS NOT NULL");
-
-                    b.HasIndex("IsActive", "RegistrationSource");
-
                     b.ToTable("SqlOSClientApplications", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSClientCredential", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("ClientApplicationId")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("ConfigurationOwner")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.Property<string>("ConfigurationSourceKey")
-                        .HasMaxLength(160)
-                        .HasColumnType("nvarchar(160)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DisplayName")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<DateTime?>("ExpiresAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("LastReconciledAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("LastUsedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("RevokedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("SecretHash")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ClientApplicationId", "ConfigurationOwner", "ConfigurationSourceKey")
-                        .IsUnique()
-                        .HasDatabaseName("UX_SqlOSClientCredentials_Client_Owner_SourceKey")
-                        .HasFilter("[ConfigurationSourceKey] IS NOT NULL");
-
-                    b.HasIndex("ClientApplicationId", "RevokedAt", "ExpiresAt");
-
-                    b.ToTable("SqlOSClientCredentials", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSConsentGrant", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("ClientApplicationId")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("ClientMetadataFingerprint")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<DateTime>("GrantedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("RevocationReason")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<DateTime?>("RevokedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Scope")
-                        .IsRequired()
-                        .HasMaxLength(4000)
-                        .HasColumnType("nvarchar(4000)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .IsConcurrencyToken()
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UserId")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ClientApplicationId");
-
-                    b.HasIndex("UserId", "ClientApplicationId")
-                        .IsUnique()
-                        .HasDatabaseName("UX_SqlOSConsentGrants_ActiveUserClient")
-                        .HasFilter("[RevokedAt] IS NULL");
-
-                    b.ToTable("SqlOSConsentGrants", "dbo", t =>
                         {
                             t.ExcludeFromMigrations();
                         });
@@ -889,215 +404,6 @@ namespace SqlOS.Example.Api.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("SqlOSCredentials", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSDeviceAuthorization", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<DateTime?>("ApprovedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("ApprovedOrganizationId")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("ApprovedUserId")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<DateTime?>("AuthTime")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("AuthenticationMethod")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<string>("ClientApplicationId")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<DateTime?>("ConsumedAt")
-                        .IsConcurrencyToken()
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("DeniedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeviceCodeHash")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<DateTime>("ExpiresAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("IpAddress")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<DateTime?>("LastPolledAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int>("PollCount")
-                        .HasColumnType("int");
-
-                    b.Property<int>("PollingIntervalSeconds")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Resource")
-                        .HasMaxLength(2048)
-                        .HasColumnType("nvarchar(2048)");
-
-                    b.Property<string>("Scope")
-                        .IsRequired()
-                        .HasMaxLength(1000)
-                        .HasColumnType("nvarchar(1000)");
-
-                    b.Property<int>("SlowDownCount")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("nvarchar(32)");
-
-                    b.Property<string>("UserAgent")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<string>("UserCode")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("nvarchar(32)");
-
-                    b.Property<string>("UserCodeHash")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(450)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ApprovedOrganizationId");
-
-                    b.HasIndex("ApprovedUserId");
-
-                    b.HasIndex("DeviceCodeHash")
-                        .IsUnique();
-
-                    b.HasIndex("ExpiresAt");
-
-                    b.HasIndex("UserCodeHash")
-                        .IsUnique();
-
-                    b.HasIndex("ClientApplicationId", "CreatedAt");
-
-                    b.HasIndex("IpAddress", "CreatedAt");
-
-                    b.HasIndex("ClientApplicationId", "Status", "ExpiresAt");
-
-                    b.ToTable("SqlOSDeviceAuthorizations", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSEmailOtpChallenge", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<int>("AttemptCount")
-                        .HasColumnType("int");
-
-                    b.Property<string>("AuthorizationRequestId")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("ChallengeTokenHash")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<string>("ClientApplicationId")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("CodeHash")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<DateTime?>("ConsumedAt")
-                        .IsConcurrencyToken()
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Email")
-                        .IsRequired()
-                        .HasMaxLength(320)
-                        .HasColumnType("nvarchar(320)");
-
-                    b.Property<DateTime>("ExpiresAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("InvalidatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("InvalidatedReason")
-                        .HasMaxLength(120)
-                        .HasColumnType("nvarchar(120)");
-
-                    b.Property<string>("IpAddress")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<DateTime>("LastSentAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int>("MaxAttempts")
-                        .HasColumnType("int");
-
-                    b.Property<string>("NormalizedEmail")
-                        .IsRequired()
-                        .HasMaxLength(320)
-                        .HasColumnType("nvarchar(320)");
-
-                    b.Property<string>("RequestedOrganizationId")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("UserAgent")
-                        .HasMaxLength(512)
-                        .HasColumnType("nvarchar(512)");
-
-                    b.Property<string>("UserEmailId")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("UserId")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AuthorizationRequestId");
-
-                    b.HasIndex("ChallengeTokenHash")
-                        .IsUnique();
-
-                    b.HasIndex("UserEmailId");
-
-                    b.HasIndex("UserId");
-
-                    b.HasIndex("ClientApplicationId", "CreatedAt");
-
-                    b.HasIndex("IpAddress", "CreatedAt");
-
-                    b.HasIndex("NormalizedEmail", "CreatedAt");
-
-                    b.ToTable("SqlOSEmailOtpChallenges", "dbo", t =>
                         {
                             t.ExcludeFromMigrations();
                         });
@@ -1146,157 +452,7 @@ namespace SqlOS.Example.Api.Migrations
                         .IsUnique()
                         .HasFilter("[ConnectionId] IS NOT NULL");
 
-                    b.HasIndex("SsoConnectionId", "UserId")
-                        .IsUnique()
-                        .HasFilter("[ConnectionId] IS NOT NULL");
-
                     b.ToTable("SqlOSExternalIdentities", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSInvitation", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<DateTime?>("AcceptedAt")
-                        .IsConcurrencyToken()
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("AcceptedByUserId")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("ClientApplicationId")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CustomFieldsJson")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime>("ExpiresAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("InvitedByUserId")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("InvitedEmail")
-                        .IsRequired()
-                        .HasMaxLength(320)
-                        .HasColumnType("nvarchar(320)");
-
-                    b.Property<string>("IpAddress")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<string>("LastSendError")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<DateTime?>("LastSentAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("NormalizedEmail")
-                        .IsRequired()
-                        .HasMaxLength(320)
-                        .HasColumnType("nvarchar(320)");
-
-                    b.Property<string>("OrganizationId")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("RedirectUri")
-                        .HasMaxLength(2048)
-                        .HasColumnType("nvarchar(2048)");
-
-                    b.Property<string>("Resource")
-                        .HasMaxLength(2048)
-                        .HasColumnType("nvarchar(2048)");
-
-                    b.Property<DateTime?>("RevokedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("RevokedReason")
-                        .HasMaxLength(120)
-                        .HasColumnType("nvarchar(120)");
-
-                    b.Property<string>("Role")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<string>("Scope")
-                        .HasMaxLength(1000)
-                        .HasColumnType("nvarchar(1000)");
-
-                    b.Property<string>("TokenHash")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<string>("UserAgent")
-                        .HasMaxLength(512)
-                        .HasColumnType("nvarchar(512)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AcceptedByUserId");
-
-                    b.HasIndex("ClientApplicationId");
-
-                    b.HasIndex("ExpiresAt");
-
-                    b.HasIndex("TokenHash")
-                        .IsUnique();
-
-                    b.HasIndex("InvitedByUserId", "CreatedAt");
-
-                    b.HasIndex("IpAddress", "CreatedAt");
-
-                    b.HasIndex("NormalizedEmail", "CreatedAt");
-
-                    b.HasIndex("OrganizationId", "NormalizedEmail", "CreatedAt");
-
-                    b.ToTable("SqlOSInvitations", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSIssuerSessionFamily", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("OrganizationId")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("RevocationReason")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<DateTime?>("RevokedAt")
-                        .IsConcurrencyToken()
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UserId")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(450)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("OrganizationId", "RevokedAt");
-
-                    b.HasIndex("UserId", "RevokedAt");
-
-                    b.ToTable("SqlOSAuthPageSessionFamilies", "dbo", t =>
                         {
                             t.ExcludeFromMigrations();
                         });
@@ -1331,161 +487,10 @@ namespace SqlOS.Example.Api.Migrations
                         });
                 });
 
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSMfaAttemptBucket", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<int>("AttemptCount")
-                        .HasColumnType("int");
-
-                    b.Property<string>("BucketKey")
-                        .IsRequired()
-                        .HasMaxLength(512)
-                        .HasColumnType("nvarchar(512)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Scope")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("WindowStartedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Scope", "BucketKey")
-                        .IsUnique();
-
-                    b.ToTable("SqlOSMfaAttemptBuckets", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSMfaAttemptReservation", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("ExpiresAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ExpiresAt");
-
-                    b.ToTable("SqlOSMfaAttemptReservations", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSMfaAttemptReservationBucket", b =>
-                {
-                    b.Property<string>("ReservationId")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("BucketId")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.HasKey("ReservationId", "BucketId");
-
-                    b.HasIndex("BucketId");
-
-                    b.ToTable("SqlOSMfaAttemptReservationBuckets", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSMfaSettings", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("AvailableFactorsJson")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("ConfigurationFingerprint")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<DateTime?>("ConfigurationOrphanedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("ConfigurationOwner")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.Property<string>("ConfigurationSourceKey")
-                        .HasMaxLength(160)
-                        .HasColumnType("nvarchar(160)");
-
-                    b.Property<bool>("Enabled")
-                        .HasColumnType("bit");
-
-                    b.Property<DateTime?>("LastReconciledAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<bool>("RecoveryCodesEnabled")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("RequireForAllUsers")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("RequireForOwnersAndAdmins")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("RequiredRolesJson")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("TotpEnabled")
-                        .HasColumnType("bit");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<bool>("UserSelfEnrollmentEnabled")
-                        .HasColumnType("bit");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("SqlOSMfaSettings", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
             modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSOidcConnection", b =>
                 {
                     b.Property<string>("Id")
                         .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("AcceptedAcrValuesJson")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("nvarchar(max)")
-                        .HasDefaultValue("[]");
-
-                    b.Property<string>("AcceptedAmrValuesJson")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("nvarchar(max)")
-                        .HasDefaultValue("[]");
 
                     b.Property<string>("AllowedCallbackUrisJson")
                         .IsRequired()
@@ -1523,22 +528,6 @@ namespace SqlOS.Example.Api.Migrations
                     b.Property<string>("ClientSecretEncrypted")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<string>("ConfigurationFingerprint")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<DateTime?>("ConfigurationOrphanedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("ConfigurationOwner")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.Property<string>("ConfigurationSourceKey")
-                        .HasMaxLength(160)
-                        .HasColumnType("nvarchar(160)");
-
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -1562,20 +551,9 @@ namespace SqlOS.Example.Api.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
-                    b.Property<DateTime?>("LastReconciledAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("LogoDataUrl")
-                        .HasColumnType("nvarchar(max)");
-
                     b.Property<string>("MicrosoftTenant")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("Protocol")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
 
                     b.Property<string>("ProviderType")
                         .IsRequired()
@@ -1589,9 +567,6 @@ namespace SqlOS.Example.Api.Migrations
                     b.Property<string>("TokenEndpoint")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
-
-                    b.Property<bool>("TrustUpstreamMfa")
-                        .HasColumnType("bit");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2");
@@ -1607,10 +582,6 @@ namespace SqlOS.Example.Api.Migrations
                         .HasColumnType("nvarchar(1000)");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("ConfigurationOwner", "ConfigurationSourceKey")
-                        .IsUnique()
-                        .HasFilter("[ConfigurationSourceKey] IS NOT NULL");
 
                     b.ToTable("SqlOSAuthOidcConnections", "dbo", t =>
                         {
@@ -1658,387 +629,12 @@ namespace SqlOS.Example.Api.Migrations
                         });
                 });
 
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSOrganizationDomain", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedByUserId")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("Domain")
-                        .IsRequired()
-                        .HasMaxLength(320)
-                        .HasColumnType("nvarchar(320)");
-
-                    b.Property<DateTime?>("LastCheckedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("LastError")
-                        .HasMaxLength(1000)
-                        .HasColumnType("nvarchar(1000)");
-
-                    b.Property<string>("OrganizationId")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<DateTime?>("RevokedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("VerificationToken")
-                        .HasMaxLength(160)
-                        .HasColumnType("nvarchar(160)");
-
-                    b.Property<DateTime?>("VerifiedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Domain", "Status");
-
-                    b.HasIndex("OrganizationId", "Domain")
-                        .IsUnique()
-                        .HasFilter("[RevokedAt] IS NULL");
-
-                    b.HasIndex("OrganizationId", "Status");
-
-                    b.ToTable("SqlOSOrganizationDomains", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSOrganizationMfaPolicy", b =>
-                {
-                    b.Property<string>("OrganizationId")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("AvailableFactorsJson")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("IsEnabled")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("RecoveryCodesEnabled")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("RequireMfaForAllUsers")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("RequireMfaForOwnersAndAdmins")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("RequiredRolesJson")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<bool>("UserSelfEnrollmentEnabled")
-                        .HasColumnType("bit");
-
-                    b.HasKey("OrganizationId");
-
-                    b.ToTable("SqlOSOrganizationMfaPolicies", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSPasswordLoginBucket", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("BucketKey")
-                        .IsRequired()
-                        .HasMaxLength(512)
-                        .HasColumnType("nvarchar(512)");
-
-                    b.Property<string>("ClientKey")
-                        .HasMaxLength(850)
-                        .HasColumnType("nvarchar(850)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int>("FailureCount")
-                        .HasColumnType("int");
-
-                    b.Property<string>("IpAddress")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<DateTime?>("LastFailureAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("LastSuccessAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("LockedUntil")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("LockoutReason")
-                        .HasMaxLength(120)
-                        .HasColumnType("nvarchar(120)");
-
-                    b.Property<string>("NormalizedEmail")
-                        .HasMaxLength(320)
-                        .HasColumnType("nvarchar(320)");
-
-                    b.Property<string>("Scope")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UserAgentHash")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<string>("UserId")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<DateTime?>("WindowStartedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("LockedUntil");
-
-                    b.HasIndex("IpAddress", "UpdatedAt");
-
-                    b.HasIndex("NormalizedEmail", "UpdatedAt");
-
-                    b.HasIndex("Scope", "BucketKey")
-                        .IsUnique();
-
-                    b.HasIndex("UserId", "UpdatedAt");
-
-                    b.ToTable("SqlOSPasswordLoginBuckets", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSPasswordLoginReservation", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("ExpiresAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ExpiresAt");
-
-                    b.ToTable("SqlOSPasswordLoginReservations", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSPasswordLoginReservationBucket", b =>
-                {
-                    b.Property<string>("ReservationId")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("BucketId")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.HasKey("ReservationId", "BucketId");
-
-                    b.HasIndex("BucketId");
-
-                    b.ToTable("SqlOSPasswordLoginReservationBuckets", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSPhoneOtpChallenge", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<int>("AttemptCount")
-                        .HasColumnType("int");
-
-                    b.Property<string>("AuthorizationRequestId")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("ChallengeTokenHash")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<string>("ClientApplicationId")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<DateTime?>("ConsumedAt")
-                        .IsConcurrencyToken()
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("ExpiresAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("InvalidatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("InvalidatedReason")
-                        .HasMaxLength(120)
-                        .HasColumnType("nvarchar(120)");
-
-                    b.Property<string>("IpAddress")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<DateTime>("LastSentAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("MaskedPhoneNumber")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("nvarchar(32)");
-
-                    b.Property<string>("PhoneNumberEncrypted")
-                        .IsRequired()
-                        .HasMaxLength(2048)
-                        .HasColumnType("nvarchar(2048)");
-
-                    b.Property<string>("PhoneNumberHash")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<string>("Provider")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.Property<string>("ProviderChallengeId")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<bool>("ProviderStarted")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("ProviderStatus")
-                        .HasMaxLength(80)
-                        .HasColumnType("nvarchar(80)");
-
-                    b.Property<string>("Purpose")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("nvarchar(32)");
-
-                    b.Property<string>("RequestedOrganizationId")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("UserAgent")
-                        .HasMaxLength(512)
-                        .HasColumnType("nvarchar(512)");
-
-                    b.Property<string>("UserId")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("UserPhoneNumberId")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AuthorizationRequestId");
-
-                    b.HasIndex("ChallengeTokenHash")
-                        .IsUnique();
-
-                    b.HasIndex("UserPhoneNumberId");
-
-                    b.HasIndex("ClientApplicationId", "CreatedAt");
-
-                    b.HasIndex("IpAddress", "CreatedAt");
-
-                    b.HasIndex("PhoneNumberHash", "CreatedAt");
-
-                    b.HasIndex("UserId", "CreatedAt");
-
-                    b.ToTable("SqlOSPhoneOtpChallenges", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSRecoveryCode", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("CodeHash")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<DateTime?>("ConsumedAt")
-                        .IsConcurrencyToken()
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("RevokedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UserId")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CodeHash")
-                        .IsUnique();
-
-                    b.HasIndex("UserId", "ConsumedAt", "RevokedAt");
-
-                    b.ToTable("SqlOSRecoveryCodes", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
             modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSRefreshToken", b =>
                 {
                     b.Property<string>("Id")
                         .HasColumnType("nvarchar(450)");
 
                     b.Property<DateTime?>("ConsumedAt")
-                        .IsConcurrencyToken()
                         .HasColumnType("datetime2");
 
                     b.Property<DateTime>("CreatedAt")
@@ -2053,16 +649,6 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.Property<string>("ReplacedByTokenId")
                         .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime?>("ReplacementAccessTokenExpiresAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("ReplacementOrganizationId")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("ReplacementTokenResponse")
-                        .HasColumnType("nvarchar(max)")
-                        .HasColumnName("ReplacementAccessToken");
 
                     b.Property<DateTime?>("RevokedAt")
                         .HasColumnType("datetime2");
@@ -2088,523 +674,12 @@ namespace SqlOS.Example.Api.Migrations
                         });
                 });
 
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSSamlReplay", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("AssertionId")
-                        .IsRequired()
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("ConnectionId")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<DateTime>("ConsumedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("ExpiresAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("ResponseId")
-                        .IsRequired()
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ExpiresAt");
-
-                    b.HasIndex("ConnectionId", "AssertionId")
-                        .IsUnique();
-
-                    b.HasIndex("ConnectionId", "ResponseId")
-                        .IsUnique();
-
-                    b.ToTable("SqlOSSamlReplays", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSScimConnection", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("ConfigurationFingerprint")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<DateTime?>("ConfigurationOrphanedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("ConfigurationOwner")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.Property<string>("ConfigurationSourceKey")
-                        .HasMaxLength(160)
-                        .HasColumnType("nvarchar(160)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DisplayName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("GrantBoundaryResourceId")
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<bool>("IsEnabled")
-                        .HasColumnType("bit");
-
-                    b.Property<DateTime?>("LastReconciledAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("LastSyncAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("OrganizationId")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("SeedKey")
-                        .HasMaxLength(160)
-                        .HasColumnType("nvarchar(160)");
-
-                    b.Property<string>("Source")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.Property<string>("TokenHash")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<DateTime?>("TokenLastUsedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("TokenPrefix")
-                        .HasMaxLength(24)
-                        .HasColumnType("nvarchar(24)");
-
-                    b.Property<DateTime?>("TokenRotatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("OrganizationId")
-                        .IsUnique()
-                        .HasDatabaseName("UX_SqlOSScimConnections_OneEnabledPerOrganization")
-                        .HasFilter("[IsEnabled] = 1");
-
-                    b.HasIndex("TokenHash")
-                        .IsUnique()
-                        .HasFilter("[TokenHash] IS NOT NULL");
-
-                    b.HasIndex("OrganizationId", "IsEnabled");
-
-                    b.HasIndex("OrganizationId", "SeedKey")
-                        .IsUnique()
-                        .HasFilter("[SeedKey] IS NOT NULL");
-
-                    b.HasIndex("OrganizationId", "ConfigurationOwner", "ConfigurationSourceKey")
-                        .IsUnique()
-                        .HasFilter("[ConfigurationSourceKey] IS NOT NULL");
-
-                    b.ToTable("SqlOSScimConnections", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSScimExternalId", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("ConnectionId")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DisplayName")
-                        .HasMaxLength(300)
-                        .HasColumnType("nvarchar(300)")
-                        .UseCollation("Latin1_General_100_CI_AS");
-
-                    b.Property<string>("EntityId")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<string>("ExternalId")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)")
-                        .UseCollation("Latin1_General_100_BIN2");
-
-                    b.Property<string>("FamilyName")
-                        .HasMaxLength(150)
-                        .HasColumnType("nvarchar(150)");
-
-                    b.Property<string>("FgaSubjectId")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<string>("FormattedName")
-                        .HasMaxLength(300)
-                        .HasColumnType("nvarchar(300)");
-
-                    b.Property<string>("GivenName")
-                        .HasMaxLength(150)
-                        .HasColumnType("nvarchar(150)");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<DateTime>("LastSyncedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<bool>("OwnsUserLifecycle")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("PrimaryEmail")
-                        .HasMaxLength(320)
-                        .HasColumnType("nvarchar(320)")
-                        .UseCollation("Latin1_General_100_CI_AS");
-
-                    b.Property<string>("ResourceType")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UserName")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)")
-                        .UseCollation("Latin1_General_100_CI_AS");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ConnectionId", "ResourceType", "EntityId")
-                        .IsUnique();
-
-                    b.HasIndex("ConnectionId", "ResourceType", "ExternalId")
-                        .IsUnique()
-                        .HasFilter("[ExternalId] IS NOT NULL");
-
-                    b.HasIndex("ConnectionId", "ResourceType", "UserName")
-                        .IsUnique()
-                        .HasFilter("[UserName] IS NOT NULL");
-
-                    b.ToTable("SqlOSScimExternalIds", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSScimGroupMapping", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("ConnectionId")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<string>("GroupDisplayName")
-                        .HasMaxLength(300)
-                        .HasColumnType("nvarchar(300)");
-
-                    b.Property<string>("GroupExternalId")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("GroupPattern")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<bool>("IsEnabled")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("MatchType")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.Property<string>("ResourceId")
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<string>("ResourceIdTemplate")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<string>("RoleKey")
-                        .IsRequired()
-                        .HasMaxLength(120)
-                        .HasColumnType("nvarchar(120)");
-
-                    b.Property<string>("Source")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.Property<string>("SourceKey")
-                        .HasMaxLength(300)
-                        .HasColumnType("nvarchar(300)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ConnectionId", "IsEnabled");
-
-                    b.HasIndex("ConnectionId", "SourceKey")
-                        .IsUnique()
-                        .HasFilter("[SourceKey] IS NOT NULL");
-
-                    b.ToTable("SqlOSScimGroupMappings", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSScimManagedGrant", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("ConnectionId")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("FgaGroupId")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<string>("FgaGroupSubjectId")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<string>("GrantId")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<string>("GroupExternalId")
-                        .IsRequired()
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("MappingId")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("ResourceId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<DateTime?>("RevokedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("RoleId")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("GrantId");
-
-                    b.HasIndex("MappingId");
-
-                    b.HasIndex("ConnectionId", "MappingId", "GroupExternalId", "ResourceId", "RoleId")
-                        .HasDatabaseName("IX_SqlOSScimManagedGrants_Reconcile");
-
-                    b.ToTable("SqlOSScimManagedGrants", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSScimOperationCommit", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<DateTime>("OccurredAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("OccurredAt");
-
-                    b.ToTable("SqlOSScimOperationCommits", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSScimSyncEvent", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("Action")
-                        .IsRequired()
-                        .HasMaxLength(80)
-                        .HasColumnType("nvarchar(80)");
-
-                    b.Property<string>("ConnectionId")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("DataJson")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Error")
-                        .HasMaxLength(1000)
-                        .HasColumnType("nvarchar(1000)");
-
-                    b.Property<string>("ExternalId")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<DateTime>("OccurredAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("OrganizationId")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("RequestId")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<string>("ResourceId")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<string>("ResourceType")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<string>("Result")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ConnectionId", "OccurredAt");
-
-                    b.HasIndex("OrganizationId", "OccurredAt");
-
-                    b.ToTable("SqlOSScimSyncEvents", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSScopeDisplayName", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("ConfigurationFingerprint")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<DateTime?>("ConfigurationOrphanedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("ConfigurationOwner")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.Property<string>("ConfigurationSourceKey")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)")
-                        .UseCollation("Latin1_General_100_BIN2");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(1000)
-                        .HasColumnType("nvarchar(1000)");
-
-                    b.Property<string>("DisplayName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<DateTime?>("LastReconciledAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Scope")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)")
-                        .UseCollation("Latin1_General_100_BIN2");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Scope")
-                        .IsUnique();
-
-                    b.ToTable("SqlOSScopeDisplayNames", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
             modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSSession", b =>
                 {
                     b.Property<string>("Id")
                         .HasColumnType("nvarchar(450)");
 
                     b.Property<DateTime>("AbsoluteExpiresAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("AuthenticatedAt")
                         .HasColumnType("datetime2");
 
                     b.Property<string>("AuthenticationMethod")
@@ -2617,10 +692,6 @@ namespace SqlOS.Example.Api.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
-                    b.Property<string>("EffectiveAudience")
-                        .HasMaxLength(2048)
-                        .HasColumnType("nvarchar(2048)");
-
                     b.Property<DateTime>("IdleExpiresAt")
                         .HasColumnType("datetime2");
 
@@ -2630,24 +701,11 @@ namespace SqlOS.Example.Api.Migrations
                     b.Property<DateTime>("LastSeenAt")
                         .HasColumnType("datetime2");
 
-                    b.Property<string>("OrganizationId")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("Resource")
-                        .HasMaxLength(2048)
-                        .HasColumnType("nvarchar(2048)");
-
                     b.Property<string>("RevocationReason")
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTime?>("RevokedAt")
-                        .IsConcurrencyToken()
                         .HasColumnType("datetime2");
-
-                    b.Property<string>("Scope")
-                        .HasMaxLength(1000)
-                        .HasColumnType("nvarchar(1000)");
 
                     b.Property<string>("UserAgent")
                         .HasColumnType("nvarchar(max)");
@@ -2659,8 +717,6 @@ namespace SqlOS.Example.Api.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ClientApplicationId");
-
-                    b.HasIndex("OrganizationId");
 
                     b.HasIndex("UserId");
 
@@ -2674,9 +730,6 @@ namespace SqlOS.Example.Api.Migrations
                 {
                     b.Property<string>("Id")
                         .HasColumnType("nvarchar(450)");
-
-                    b.Property<int>("RefreshTokenGraceWindowSeconds")
-                        .HasColumnType("int");
 
                     b.Property<int>("RefreshTokenLifetimeMinutes")
                         .HasColumnType("int");
@@ -2728,14 +781,14 @@ namespace SqlOS.Example.Api.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
 
-                    b.Property<string>("KeyReference")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
                     b.Property<string>("Kid")
                         .IsRequired()
                         .HasMaxLength(120)
                         .HasColumnType("nvarchar(120)");
+
+                    b.Property<string>("KeyReference")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("PublicKeyPem")
                         .IsRequired()
@@ -2746,12 +799,12 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("Kid")
+                        .IsUnique();
+
                     b.HasIndex("IsActive")
                         .IsUnique()
                         .HasFilter("[IsActive] = 1");
-
-                    b.HasIndex("Kid")
-                        .IsUnique();
 
                     b.ToTable("SqlOSSigningKeys", "dbo", t =>
                         {
@@ -2766,33 +819,11 @@ namespace SqlOS.Example.Api.Migrations
                     b.Property<string>("Id")
                         .HasColumnType("nvarchar(450)");
 
-                    b.Property<string>("AcceptedAuthnContextClassRefsJson")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("nvarchar(max)")
-                        .HasDefaultValue("[]");
-
                     b.Property<bool>("AutoLinkByEmail")
                         .HasColumnType("bit");
 
                     b.Property<bool>("AutoProvisionUsers")
                         .HasColumnType("bit");
-
-                    b.Property<string>("ConfigurationFingerprint")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<DateTime?>("ConfigurationOrphanedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("ConfigurationOwner")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.Property<string>("ConfigurationSourceKey")
-                        .HasMaxLength(160)
-                        .HasColumnType("nvarchar(160)");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
@@ -2812,8 +843,7 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.Property<string>("IdentityProviderEntityId")
                         .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<bool>("IsEnabled")
                         .HasColumnType("bit");
@@ -2821,9 +851,6 @@ namespace SqlOS.Example.Api.Migrations
                     b.Property<string>("LastNameAttributeName")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime?>("LastReconciledAt")
-                        .HasColumnType("datetime2");
 
                     b.Property<string>("NameIdFormat")
                         .HasColumnType("nvarchar(max)");
@@ -2834,11 +861,7 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.Property<string>("SingleSignOnUrl")
                         .IsRequired()
-                        .HasMaxLength(2000)
-                        .HasColumnType("nvarchar(2000)");
-
-                    b.Property<bool>("TrustUpstreamMfa")
-                        .HasColumnType("bit");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2");
@@ -2851,105 +874,7 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.HasIndex("OrganizationId");
 
-                    b.HasIndex("ConfigurationOwner", "ConfigurationSourceKey")
-                        .IsUnique()
-                        .HasFilter("[ConfigurationSourceKey] IS NOT NULL");
-
                     b.ToTable("SqlOSSsoConnections", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSSsoPortalSession", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("ActorType")
-                        .IsRequired()
-                        .HasMaxLength(80)
-                        .HasColumnType("nvarchar(80)");
-
-                    b.Property<string>("ConnectionId")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedByUserId")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime>("ExpiresAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("IpAddress")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<DateTime?>("LastSeenAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("LastTestMessage")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<string>("LastTestStatus")
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.Property<DateTime?>("LastTestedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("LinkTokenHash")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<DateTime?>("OpenedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("OrganizationId")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("Provider")
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.Property<string>("ReturnUrl")
-                        .HasMaxLength(1000)
-                        .HasColumnType("nvarchar(1000)");
-
-                    b.Property<DateTime?>("RevokedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("RevokedReason")
-                        .HasMaxLength(160)
-                        .HasColumnType("nvarchar(160)");
-
-                    b.Property<string>("SessionTokenHash")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("UserAgent")
-                        .HasMaxLength(512)
-                        .HasColumnType("nvarchar(512)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ConnectionId");
-
-                    b.HasIndex("LinkTokenHash")
-                        .IsUnique();
-
-                    b.HasIndex("SessionTokenHash")
-                        .IsUnique()
-                        .HasFilter("[SessionTokenHash] IS NOT NULL");
-
-                    b.HasIndex("OrganizationId", "CreatedAt");
-
-                    b.HasIndex("OrganizationId", "RevokedAt", "ExpiresAt");
-
-                    b.ToTable("SqlOSSsoPortalSessions", "dbo", t =>
                         {
                             t.ExcludeFromMigrations();
                         });
@@ -2964,7 +889,6 @@ namespace SqlOS.Example.Api.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTime?>("ConsumedAt")
-                        .IsConcurrencyToken()
                         .HasColumnType("datetime2");
 
                     b.Property<DateTime>("CreatedAt")
@@ -2973,16 +897,10 @@ namespace SqlOS.Example.Api.Migrations
                     b.Property<DateTime>("ExpiresAt")
                         .HasColumnType("datetime2");
 
-                    b.Property<string>("IssuerSessionFamilyId")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)")
-                        .HasColumnName("AuthPageSessionFamilyId");
-
                     b.Property<string>("OrganizationId")
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("PayloadJson")
-                        .IsConcurrencyToken()
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Purpose")
@@ -2998,8 +916,6 @@ namespace SqlOS.Example.Api.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("IssuerSessionFamilyId");
 
                     b.HasIndex("TokenHash")
                         .IsUnique();
@@ -3036,81 +952,6 @@ namespace SqlOS.Example.Api.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("SqlOSUsers", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSUserAuthenticator", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("Algorithm")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<DateTime?>("ConfirmedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int>("Digits")
-                        .HasColumnType("int");
-
-                    b.Property<string>("DisplayName")
-                        .IsRequired()
-                        .HasMaxLength(120)
-                        .HasColumnType("nvarchar(120)");
-
-                    b.Property<bool>("IsConfirmed")
-                        .HasColumnType("bit");
-
-                    b.Property<long?>("LastAcceptedTimeStep")
-                        .IsConcurrencyToken()
-                        .HasColumnType("bigint");
-
-                    b.Property<DateTime?>("LastUsedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int>("PeriodSeconds")
-                        .HasColumnType("int");
-
-                    b.Property<string>("RevocationReason")
-                        .HasMaxLength(120)
-                        .HasColumnType("nvarchar(120)");
-
-                    b.Property<DateTime?>("RevokedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("SecretProtected")
-                        .IsRequired()
-                        .HasMaxLength(2048)
-                        .HasColumnType("nvarchar(2048)");
-
-                    b.Property<int>("SecretVersion")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Type")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.Property<string>("UserId")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UserId", "IsConfirmed", "RevokedAt");
-
-                    b.HasIndex("UserId", "Type", "RevokedAt");
-
-                    b.ToTable("SqlOSUserAuthenticators", "dbo", t =>
                         {
                             t.ExcludeFromMigrations();
                         });
@@ -3160,466 +1001,6 @@ namespace SqlOS.Example.Api.Migrations
                         });
                 });
 
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSUserMfaPolicyOverride", b =>
-                {
-                    b.Property<string>("UserId")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<bool?>("RequireMfa")
-                        .HasColumnType("bit");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<bool?>("UserSelfEnrollmentEnabled")
-                        .HasColumnType("bit");
-
-                    b.HasKey("UserId");
-
-                    b.ToTable("SqlOSUserMfaPolicyOverrides", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSUserPhoneNumber", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DisplayValueEncrypted")
-                        .HasMaxLength(2048)
-                        .HasColumnType("nvarchar(2048)");
-
-                    b.Property<bool>("IsPrimary")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsVerified")
-                        .HasColumnType("bit");
-
-                    b.Property<DateTime?>("LastUsedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("PhoneNumber")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("nvarchar(32)");
-
-                    b.Property<string>("PhoneNumberHash")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<string>("RemovalReason")
-                        .HasMaxLength(120)
-                        .HasColumnType("nvarchar(120)");
-
-                    b.Property<DateTime?>("RemovedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UserId")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<DateTime?>("VerifiedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PhoneNumberHash")
-                        .IsUnique()
-                        .HasFilter("[RemovedAt] IS NULL");
-
-                    b.HasIndex("UserId", "RemovedAt");
-
-                    b.ToTable("SqlOSUserPhoneNumbers", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
-            modelBuilder.Entity("SqlOS.Calendar.Models.SqlOSCalendarConnection", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("AccessTokenEncrypted")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime?>("AccessTokenExpiresAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DisplayName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("LastError")
-                        .HasMaxLength(1000)
-                        .HasColumnType("nvarchar(1000)");
-
-                    b.Property<DateTime?>("LastErrorAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("LastSyncAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Mode")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.Property<string>("OidcConnectionId")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("OrganizationId")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("ProviderAccountEmail")
-                        .HasMaxLength(320)
-                        .HasColumnType("nvarchar(320)");
-
-                    b.Property<string>("ProviderAccountSubject")
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<string>("ProviderType")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.Property<string>("RefreshTokenEncrypted")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime?>("RevokedAt")
-                        .IsConcurrencyToken()
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("RevokedReason")
-                        .HasMaxLength(160)
-                        .HasColumnType("nvarchar(160)");
-
-                    b.Property<string>("ScopesJson")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UserId")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("OidcConnectionId");
-
-                    b.HasIndex("Mode", "Status");
-
-                    b.HasIndex("OrganizationId", "RevokedAt");
-
-                    b.HasIndex("UserId", "RevokedAt");
-
-                    b.ToTable("SqlOSCalendarConnections", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
-            modelBuilder.Entity("SqlOS.Calendar.Models.SqlOSCalendarEvent", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("CalendarConnectionId")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("EndsAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<bool>("IsAllDay")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("Location")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<string>("Origin")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<string>("ProviderCalendarId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<string>("ProviderEventId")
-                        .IsRequired()
-                        .HasMaxLength(512)
-                        .HasColumnType("nvarchar(512)");
-
-                    b.Property<string>("ShowAs")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<DateTime>("StartsAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<string>("Subject")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CalendarConnectionId", "StartsAtUtc");
-
-                    b.HasIndex("CalendarConnectionId", "ProviderCalendarId", "ProviderEventId")
-                        .IsUnique()
-                        .HasDatabaseName("IX_SqlOSCalendarEvents_ProviderEvent");
-
-                    b.ToTable("SqlOSCalendarEvents", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
-            modelBuilder.Entity("SqlOS.Calendar.Models.SqlOSCalendarSyncState", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("CalendarConnectionId")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DisplayName")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<int>("EventCount")
-                        .HasColumnType("int");
-
-                    b.Property<bool>("IsSyncEnabled")
-                        .HasColumnType("bit");
-
-                    b.Property<DateTime?>("LastSyncCompletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("LastSyncError")
-                        .HasMaxLength(1000)
-                        .HasColumnType("nvarchar(1000)");
-
-                    b.Property<DateTime?>("LastSyncStartedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("LastSyncStatus")
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.Property<string>("ProviderCalendarId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<string>("SyncCursor")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CalendarConnectionId", "ProviderCalendarId")
-                        .IsUnique();
-
-                    b.ToTable("SqlOSCalendarSyncStates", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
-            modelBuilder.Entity("SqlOS.Email.Models.SqlOSEmailDelivery", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("FailedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("IdempotencyKey")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("ProviderMessageId")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("RenderedHtmlPreview")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("RenderedSubject")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<string>("RenderedTextPreview")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("SanitizedError")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<DateTime?>("SentAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("nvarchar(32)");
-
-                    b.Property<string>("TemplateId")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("TemplateKey")
-                        .IsRequired()
-                        .HasMaxLength(120)
-                        .HasColumnType("nvarchar(120)");
-
-                    b.Property<int>("TemplateVersion")
-                        .HasColumnType("int");
-
-                    b.Property<string>("To")
-                        .IsRequired()
-                        .HasMaxLength(320)
-                        .HasColumnType("nvarchar(320)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CreatedAt");
-
-                    b.HasIndex("IdempotencyKey")
-                        .IsUnique()
-                        .HasFilter("[IdempotencyKey] IS NOT NULL");
-
-                    b.HasIndex("TemplateId");
-
-                    b.HasIndex("Status", "CreatedAt");
-
-                    b.HasIndex("TemplateKey", "CreatedAt");
-
-                    b.HasIndex("To", "CreatedAt");
-
-                    b.ToTable("SqlOSEmailDeliveries", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
-            modelBuilder.Entity("SqlOS.Email.Models.SqlOSEmailTemplate", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DisplayName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("HtmlBodyTemplate")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("Key")
-                        .IsRequired()
-                        .HasMaxLength(120)
-                        .HasColumnType("nvarchar(120)");
-
-                    b.Property<string>("SubjectTemplate")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<string>("TextBodyTemplate")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("VariablesJson")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<int>("Version")
-                        .HasColumnType("int");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Key")
-                        .IsUnique();
-
-                    b.ToTable("SqlOSEmailTemplates", "dbo", t =>
-                        {
-                            t.ExcludeFromMigrations();
-                        });
-                });
-
             modelBuilder.Entity("SqlOS.Example.Api.FgaRetail.Models.Chain", b =>
                 {
                     b.Property<string>("Id")
@@ -3650,8 +1031,6 @@ namespace SqlOS.Example.Api.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ResourceId");
-
-                    b.HasIndex(new[] { "ResourceId" }, "IX_Chains_SqlOSFgaResourceId");
 
                     b.ToTable("Chains");
                 });
@@ -3701,8 +1080,6 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.HasIndex("ResourceId");
 
-                    b.HasIndex(new[] { "ResourceId" }, "IX_InventoryItems_SqlOSFgaResourceId");
-
                     b.ToTable("InventoryItems");
                 });
 
@@ -3751,8 +1128,6 @@ namespace SqlOS.Example.Api.Migrations
                     b.HasIndex("ChainId");
 
                     b.HasIndex("ResourceId");
-
-                    b.HasIndex(new[] { "ResourceId" }, "IX_Locations_SqlOSFgaResourceId");
 
                     b.ToTable("Locations");
                 });
@@ -3835,40 +1210,12 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.HasIndex("ResourceId");
 
-                    b.HasIndex(new[] { "ResourceId" }, "IX_Workspaces_SqlOSFgaResourceId");
-
                     b.ToTable("Workspaces");
                 });
 
-            modelBuilder.Entity("SqlOS.Fga.Models.SqlOSFgaAccessMatch", b =>
+            modelBuilder.Entity("SqlOS.Fga.Models.SqlOSFgaAccessibleResource", b =>
                 {
-                    b.Property<string>("GrantId")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
                     b.Property<string>("Id")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<int>("Level")
-                        .HasColumnType("int");
-
-                    b.Property<string>("RoleId")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("SubjectId")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.ToTable((string)null);
-
-                    b.ToView(null, (string)null);
-                });
-
-            modelBuilder.Entity("SqlOS.Fga.Models.SqlOSFgaActiveSubject", b =>
-                {
-                    b.Property<string>("SubjectId")
-                        .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
                     b.ToTable((string)null);
@@ -3957,34 +1304,6 @@ namespace SqlOS.Example.Api.Migrations
                         });
                 });
 
-            modelBuilder.Entity("SqlOS.Fga.Models.SqlOSFgaPathNode", b =>
-                {
-                    b.Property<bool>("InReach")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<int>("Level")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("ResourceId")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("ResourceTypeId")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.ToTable((string)null);
-
-                    b.ToView(null, (string)null);
-                });
-
             modelBuilder.Entity("SqlOS.Fga.Models.SqlOSFgaPermission", b =>
                 {
                     b.Property<string>("Id")
@@ -3995,8 +1314,7 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.Property<string>("Key")
                         .IsRequired()
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -4006,9 +1324,6 @@ namespace SqlOS.Example.Api.Migrations
                         .HasColumnType("nvarchar(450)");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("Key")
-                        .IsUnique();
 
                     b.HasIndex("ResourceTypeId");
 
@@ -4055,13 +1370,7 @@ namespace SqlOS.Example.Api.Migrations
                     b.ToTable("SqlOSFgaResources", "dbo", t =>
                         {
                             t.ExcludeFromMigrations();
-
-                            t.HasTrigger("TR_SqlOSFgaResources_Lineage_Insert");
-
-                            t.HasTrigger("TR_SqlOSFgaResources_Lineage_Update");
                         });
-
-                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("SqlOS.Fga.Models.SqlOSFgaResourceType", b =>
@@ -4075,9 +1384,6 @@ namespace SqlOS.Example.Api.Migrations
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
-
-                    b.Property<int?>("Seq")
-                        .HasColumnType("int");
 
                     b.HasKey("Id");
 
@@ -4139,28 +1445,11 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.Property<string>("ClientId")
                         .IsRequired()
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("ClientSecretHash")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("ConfigurationFingerprint")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<DateTime?>("ConfigurationOrphanedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("ConfigurationOwner")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("nvarchar(32)");
-
-                    b.Property<string>("ConfigurationSourceKey")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
@@ -4169,9 +1458,6 @@ namespace SqlOS.Example.Api.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTime?>("ExpiresAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("LastReconciledAt")
                         .HasColumnType("datetime2");
 
                     b.Property<DateTime?>("LastUsedAt")
@@ -4186,15 +1472,8 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ClientId")
-                        .IsUnique();
-
                     b.HasIndex("SubjectId")
                         .IsUnique();
-
-                    b.HasIndex("ConfigurationOwner", "ConfigurationSourceKey")
-                        .IsUnique()
-                        .HasFilter("[ConfigurationSourceKey] IS NOT NULL");
 
                     b.ToTable("SqlOSFgaServiceAccounts", "dbo", t =>
                         {
@@ -4306,9 +1585,6 @@ namespace SqlOS.Example.Api.Migrations
                     b.Property<string>("GroupType")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -4350,35 +1626,6 @@ namespace SqlOS.Example.Api.Migrations
                         {
                             t.ExcludeFromMigrations();
                         });
-                });
-
-            modelBuilder.Entity("SqlOS.Fga.Models.SqlOSFgaVisibleResource", b =>
-                {
-                    b.Property<string>("ResourceId")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.ToTable((string)null);
-
-                    b.ToView(null, (string)null);
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSApplicationAssignment", b =>
-                {
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSClientApplication", "ClientApplication")
-                        .WithMany("ApplicationAssignments")
-                        .HasForeignKey("ClientApplicationId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSOrganization", "Organization")
-                        .WithMany("ApplicationAssignments")
-                        .HasForeignKey("OrganizationId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("ClientApplication");
-
-                    b.Navigation("Organization");
                 });
 
             modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSAuthorizationCode", b =>
@@ -4428,16 +1675,6 @@ namespace SqlOS.Example.Api.Migrations
                         .HasForeignKey("ConnectionId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSDeviceAuthorization", "DeviceAuthorization")
-                        .WithMany()
-                        .HasForeignKey("DeviceAuthorizationId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSInvitation", "Invitation")
-                        .WithMany()
-                        .HasForeignKey("InvitationId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("SqlOS.AuthServer.Models.SqlOSOrganization", "Organization")
                         .WithMany()
                         .HasForeignKey("OrganizationId")
@@ -4447,41 +1684,7 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.Navigation("Connection");
 
-                    b.Navigation("DeviceAuthorization");
-
-                    b.Navigation("Invitation");
-
                     b.Navigation("Organization");
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSClientCredential", b =>
-                {
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSClientApplication", "ClientApplication")
-                        .WithMany("ClientCredentials")
-                        .HasForeignKey("ClientApplicationId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("ClientApplication");
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSConsentGrant", b =>
-                {
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSClientApplication", "ClientApplication")
-                        .WithMany()
-                        .HasForeignKey("ClientApplicationId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSUser", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("ClientApplication");
-
-                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSCredential", b =>
@@ -4493,62 +1696,6 @@ namespace SqlOS.Example.Api.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSDeviceAuthorization", b =>
-                {
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSOrganization", "ApprovedOrganization")
-                        .WithMany()
-                        .HasForeignKey("ApprovedOrganizationId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSUser", "ApprovedUser")
-                        .WithMany()
-                        .HasForeignKey("ApprovedUserId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSClientApplication", "ClientApplication")
-                        .WithMany()
-                        .HasForeignKey("ClientApplicationId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("ApprovedOrganization");
-
-                    b.Navigation("ApprovedUser");
-
-                    b.Navigation("ClientApplication");
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSEmailOtpChallenge", b =>
-                {
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSAuthorizationRequest", "AuthorizationRequest")
-                        .WithMany()
-                        .HasForeignKey("AuthorizationRequestId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSClientApplication", "ClientApplication")
-                        .WithMany()
-                        .HasForeignKey("ClientApplicationId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSUserEmail", "UserEmail")
-                        .WithMany()
-                        .HasForeignKey("UserEmailId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSUser", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("AuthorizationRequest");
-
-                    b.Navigation("ClientApplication");
-
-                    b.Navigation("User");
-
-                    b.Navigation("UserEmail");
                 });
 
             modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSExternalIdentity", b =>
@@ -4576,56 +1723,6 @@ namespace SqlOS.Example.Api.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSInvitation", b =>
-                {
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSUser", "AcceptedByUser")
-                        .WithMany()
-                        .HasForeignKey("AcceptedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSClientApplication", "ClientApplication")
-                        .WithMany()
-                        .HasForeignKey("ClientApplicationId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSUser", "InvitedByUser")
-                        .WithMany()
-                        .HasForeignKey("InvitedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSOrganization", "Organization")
-                        .WithMany()
-                        .HasForeignKey("OrganizationId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("AcceptedByUser");
-
-                    b.Navigation("ClientApplication");
-
-                    b.Navigation("InvitedByUser");
-
-                    b.Navigation("Organization");
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSIssuerSessionFamily", b =>
-                {
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSOrganization", "Organization")
-                        .WithMany()
-                        .HasForeignKey("OrganizationId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSUser", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Organization");
-
-                    b.Navigation("User");
-                });
-
             modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSMembership", b =>
                 {
                     b.HasOne("SqlOS.AuthServer.Models.SqlOSOrganization", "Organization")
@@ -4645,118 +1742,6 @@ namespace SqlOS.Example.Api.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSMfaAttemptReservationBucket", b =>
-                {
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSMfaAttemptBucket", "Bucket")
-                        .WithMany("Reservations")
-                        .HasForeignKey("BucketId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSMfaAttemptReservation", "Reservation")
-                        .WithMany("Buckets")
-                        .HasForeignKey("ReservationId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Bucket");
-
-                    b.Navigation("Reservation");
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSOrganizationDomain", b =>
-                {
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSOrganization", "Organization")
-                        .WithMany("Domains")
-                        .HasForeignKey("OrganizationId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Organization");
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSOrganizationMfaPolicy", b =>
-                {
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSOrganization", "Organization")
-                        .WithOne("MfaPolicy")
-                        .HasForeignKey("SqlOS.AuthServer.Models.SqlOSOrganizationMfaPolicy", "OrganizationId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Organization");
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSPasswordLoginBucket", b =>
-                {
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSUser", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("User");
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSPasswordLoginReservationBucket", b =>
-                {
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSPasswordLoginBucket", "Bucket")
-                        .WithMany("Reservations")
-                        .HasForeignKey("BucketId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSPasswordLoginReservation", "Reservation")
-                        .WithMany("Buckets")
-                        .HasForeignKey("ReservationId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Bucket");
-
-                    b.Navigation("Reservation");
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSPhoneOtpChallenge", b =>
-                {
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSAuthorizationRequest", "AuthorizationRequest")
-                        .WithMany()
-                        .HasForeignKey("AuthorizationRequestId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSClientApplication", "ClientApplication")
-                        .WithMany()
-                        .HasForeignKey("ClientApplicationId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSUser", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSUserPhoneNumber", "UserPhoneNumber")
-                        .WithMany()
-                        .HasForeignKey("UserPhoneNumberId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("AuthorizationRequest");
-
-                    b.Navigation("ClientApplication");
-
-                    b.Navigation("User");
-
-                    b.Navigation("UserPhoneNumber");
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSRecoveryCode", b =>
-                {
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSUser", "User")
-                        .WithMany("RecoveryCodes")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("User");
-                });
-
             modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSRefreshToken", b =>
                 {
                     b.HasOne("SqlOS.AuthServer.Models.SqlOSSession", "Session")
@@ -4768,87 +1753,11 @@ namespace SqlOS.Example.Api.Migrations
                     b.Navigation("Session");
                 });
 
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSScimConnection", b =>
-                {
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSOrganization", "Organization")
-                        .WithMany("ScimConnections")
-                        .HasForeignKey("OrganizationId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Organization");
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSScimExternalId", b =>
-                {
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSScimConnection", "Connection")
-                        .WithMany("ExternalIds")
-                        .HasForeignKey("ConnectionId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Connection");
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSScimGroupMapping", b =>
-                {
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSScimConnection", "Connection")
-                        .WithMany("GroupMappings")
-                        .HasForeignKey("ConnectionId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Connection");
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSScimManagedGrant", b =>
-                {
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSScimConnection", "Connection")
-                        .WithMany()
-                        .HasForeignKey("ConnectionId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSScimGroupMapping", "Mapping")
-                        .WithMany("ManagedGrants")
-                        .HasForeignKey("MappingId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Connection");
-
-                    b.Navigation("Mapping");
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSScimSyncEvent", b =>
-                {
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSScimConnection", "Connection")
-                        .WithMany("SyncEvents")
-                        .HasForeignKey("ConnectionId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSOrganization", "Organization")
-                        .WithMany()
-                        .HasForeignKey("OrganizationId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Connection");
-
-                    b.Navigation("Organization");
-                });
-
             modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSSession", b =>
                 {
                     b.HasOne("SqlOS.AuthServer.Models.SqlOSClientApplication", "ClientApplication")
                         .WithMany()
                         .HasForeignKey("ClientApplicationId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSOrganization", "Organization")
-                        .WithMany()
-                        .HasForeignKey("OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("SqlOS.AuthServer.Models.SqlOSUser", "User")
@@ -4858,8 +1767,6 @@ namespace SqlOS.Example.Api.Migrations
                         .IsRequired();
 
                     b.Navigation("ClientApplication");
-
-                    b.Navigation("Organization");
 
                     b.Navigation("User");
                 });
@@ -4875,45 +1782,6 @@ namespace SqlOS.Example.Api.Migrations
                     b.Navigation("Organization");
                 });
 
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSSsoPortalSession", b =>
-                {
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSSsoConnection", "Connection")
-                        .WithMany("PortalSessions")
-                        .HasForeignKey("ConnectionId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSOrganization", "Organization")
-                        .WithMany()
-                        .HasForeignKey("OrganizationId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Connection");
-
-                    b.Navigation("Organization");
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSTemporaryToken", b =>
-                {
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSIssuerSessionFamily", "IssuerSessionFamily")
-                        .WithMany("TemporaryTokens")
-                        .HasForeignKey("IssuerSessionFamilyId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("IssuerSessionFamily");
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSUserAuthenticator", b =>
-                {
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSUser", "User")
-                        .WithMany("Authenticators")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("User");
-                });
-
             modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSUserEmail", b =>
                 {
                     b.HasOne("SqlOS.AuthServer.Models.SqlOSUser", "User")
@@ -4923,85 +1791,6 @@ namespace SqlOS.Example.Api.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSUserMfaPolicyOverride", b =>
-                {
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSUser", "User")
-                        .WithOne("MfaPolicyOverride")
-                        .HasForeignKey("SqlOS.AuthServer.Models.SqlOSUserMfaPolicyOverride", "UserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("User");
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSUserPhoneNumber", b =>
-                {
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSUser", "User")
-                        .WithMany("PhoneNumbers")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("User");
-                });
-
-            modelBuilder.Entity("SqlOS.Calendar.Models.SqlOSCalendarConnection", b =>
-                {
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSOidcConnection", "OidcConnection")
-                        .WithMany()
-                        .HasForeignKey("OidcConnectionId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSOrganization", "Organization")
-                        .WithMany()
-                        .HasForeignKey("OrganizationId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("SqlOS.AuthServer.Models.SqlOSUser", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("OidcConnection");
-
-                    b.Navigation("Organization");
-
-                    b.Navigation("User");
-                });
-
-            modelBuilder.Entity("SqlOS.Calendar.Models.SqlOSCalendarEvent", b =>
-                {
-                    b.HasOne("SqlOS.Calendar.Models.SqlOSCalendarConnection", "CalendarConnection")
-                        .WithMany("Events")
-                        .HasForeignKey("CalendarConnectionId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("CalendarConnection");
-                });
-
-            modelBuilder.Entity("SqlOS.Calendar.Models.SqlOSCalendarSyncState", b =>
-                {
-                    b.HasOne("SqlOS.Calendar.Models.SqlOSCalendarConnection", "CalendarConnection")
-                        .WithMany("SyncStates")
-                        .HasForeignKey("CalendarConnectionId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("CalendarConnection");
-                });
-
-            modelBuilder.Entity("SqlOS.Email.Models.SqlOSEmailDelivery", b =>
-                {
-                    b.HasOne("SqlOS.Email.Models.SqlOSEmailTemplate", "Template")
-                        .WithMany()
-                        .HasForeignKey("TemplateId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.Navigation("Template");
                 });
 
             modelBuilder.Entity("SqlOS.Example.Api.FgaRetail.Models.InventoryItem", b =>
@@ -5174,28 +1963,6 @@ namespace SqlOS.Example.Api.Migrations
                     b.Navigation("UserGroup");
                 });
 
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSClientApplication", b =>
-                {
-                    b.Navigation("ApplicationAssignments");
-
-                    b.Navigation("ClientCredentials");
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSIssuerSessionFamily", b =>
-                {
-                    b.Navigation("TemporaryTokens");
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSMfaAttemptBucket", b =>
-                {
-                    b.Navigation("Reservations");
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSMfaAttemptReservation", b =>
-                {
-                    b.Navigation("Buckets");
-                });
-
             modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSOidcConnection", b =>
                 {
                     b.Navigation("ExternalIdentities");
@@ -5203,41 +1970,9 @@ namespace SqlOS.Example.Api.Migrations
 
             modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSOrganization", b =>
                 {
-                    b.Navigation("ApplicationAssignments");
-
-                    b.Navigation("Domains");
-
                     b.Navigation("Memberships");
 
-                    b.Navigation("MfaPolicy");
-
-                    b.Navigation("ScimConnections");
-
                     b.Navigation("SsoConnections");
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSPasswordLoginBucket", b =>
-                {
-                    b.Navigation("Reservations");
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSPasswordLoginReservation", b =>
-                {
-                    b.Navigation("Buckets");
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSScimConnection", b =>
-                {
-                    b.Navigation("ExternalIds");
-
-                    b.Navigation("GroupMappings");
-
-                    b.Navigation("SyncEvents");
-                });
-
-            modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSScimGroupMapping", b =>
-                {
-                    b.Navigation("ManagedGrants");
                 });
 
             modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSSession", b =>
@@ -5248,14 +1983,10 @@ namespace SqlOS.Example.Api.Migrations
             modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSSsoConnection", b =>
                 {
                     b.Navigation("ExternalIdentities");
-
-                    b.Navigation("PortalSessions");
                 });
 
             modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSUser", b =>
                 {
-                    b.Navigation("Authenticators");
-
                     b.Navigation("Credentials");
 
                     b.Navigation("Emails");
@@ -5264,20 +1995,7 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.Navigation("Memberships");
 
-                    b.Navigation("MfaPolicyOverride");
-
-                    b.Navigation("PhoneNumbers");
-
-                    b.Navigation("RecoveryCodes");
-
                     b.Navigation("Sessions");
-                });
-
-            modelBuilder.Entity("SqlOS.Calendar.Models.SqlOSCalendarConnection", b =>
-                {
-                    b.Navigation("Events");
-
-                    b.Navigation("SyncStates");
                 });
 
             modelBuilder.Entity("SqlOS.Example.Api.FgaRetail.Models.Chain", b =>

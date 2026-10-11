@@ -1,4 +1,3 @@
-using System.Data.Common;
 using FluentAssertions;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -30,9 +29,7 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
         await initializer.EnsureFunctionsExistAsync();
 
         var definition = await GetFunctionDefinitionAsync();
-        definition.Should().Contain("Reach");
-        definition.Should().Contain("fn_ActiveSubjects");
-        definition.Should().NotContain("CycleDetected");
+        definition.Should().Contain("CycleDetected");
     }
 
     [TestMethod]
@@ -49,9 +46,10 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
             await initializer.EnsureFunctionsExistAsync();
 
             var definition = await GetFunctionDefinitionAsync();
-            (definition.Contains("(3, x.Ancestor3)", StringComparison.Ordinal)
-                || definition.Contains("(3, x.\"Ancestor3\")", StringComparison.Ordinal)).Should().BeTrue("levels 0..3 are read");
-            definition.Should().NotContain("Ancestor4");
+            (definition.Contains("Depth < 3", StringComparison.Ordinal)
+                || definition.Contains("\"Depth\" < 3", StringComparison.Ordinal)).Should().BeTrue();
+            (definition.Contains("Depth = 3", StringComparison.Ordinal)
+                || definition.Contains("\"Depth\" = 3", StringComparison.Ordinal)).Should().BeTrue();
         }
         finally
         {
@@ -102,10 +100,11 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
                 FgaTestDataSeeder.SystemAdminSubjectId,
                 "TEST_VIEW",
                 level2.Id);
-            var sqlFilterVisible = await Context.FunctionAllowsAsync(
-                level2.Id,
-                JsonSerializer.Serialize(new[] { FgaTestDataSeeder.SystemAdminSubjectId }),
-                FgaTestDataSeeder.ViewPermissionId);
+            var sqlFilterVisible = await Context.IsResourceAccessible(
+                    level2.Id,
+                    JsonSerializer.Serialize(new[] { FgaTestDataSeeder.SystemAdminSubjectId }),
+                    FgaTestDataSeeder.ViewPermissionId)
+                .AnyAsync();
 
             pointCheck.Allowed.Should().BeTrue();
             sqlFilterVisible.Should().BeTrue();
@@ -126,45 +125,31 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
     public async Task EnsureFunctionsExist_EnforcesPrincipalAndResourceLifecycle()
     {
         var definition = await GetFunctionDefinitionAsync();
-        var subjects = await TestCatalog.GetFunctionDefinitionAsync(Context, "fn_ActiveSubjects");
-        var roots = await TestCatalog.GetFunctionDefinitionAsync(Context, "fn_AccessRoots");
-        var list = await TestCatalog.GetFunctionDefinitionAsync(Context, "fn_ListVisible");
-        var listFirst = await TestCatalog.GetFunctionDefinitionAsync(Context, "fn_ListFirst");
-
-        // fn_ListVisible lists from the roots: under each root, the rows whose ancestor at the root's level is
-        // the root and whose reach extends up to it. fn_ListFirst counts it up to the table's cap.
-        list.Should().Contain("fn_AccessRoots");
-        list.Should().Contain("Reach");
-        list.Should().Contain("Ancestor10");
-        list.Should().NotContain("Ancestor11");
-        listFirst.Should().Contain("fn_ListVisible");
 
         if (TestDatabase.IsPostgreSql)
         {
-            subjects.Should().Contain("u.\"IsActive\" = TRUE");
-            subjects.Should().Contain("sa.\"ExpiresAt\" > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')");
-            subjects.Should().Contain("ug.\"IsActive\" = TRUE");
-            subjects.Should().Contain("jsonb_array_elements_text");
-            subjects.Should().Contain("p_subject_ids::jsonb ->> 0");
-            definition.Should().Contain("x.\"Reach\" IS NOT NULL");
-            definition.Should().Contain("permission.\"ResourceTypeId\" IS NULL OR permission.\"ResourceTypeId\" = x.\"ResourceTypeId\"");
-            roots.Should().Contain("x.\"IsActive\" = TRUE");
+            definition.Should().Contain("\"IsActive\" = TRUE");
+            definition.Should().Contain("u.\"IsActive\" = TRUE");
+            definition.Should().Contain("sa.\"ExpiresAt\" > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')");
+            definition.Should().Contain("ug.\"IsActive\" = TRUE");
+            definition.Should().Contain("jsonb_array_elements_text");
+            definition.Should().Contain("p_subject_ids::jsonb ->> 0");
+            definition.Should().Contain("permission.\"ResourceTypeId\" IS NULL OR permission.\"ResourceTypeId\" = target.\"ResourceTypeId\"");
         }
         else
         {
-            subjects.Should().Contain("u.IsActive = 1");
-            subjects.Should().Contain("sa.ExpiresAt > GETUTCDATE()");
-            subjects.Should().Contain("ug.IsActive = 1");
-            subjects.Should().Contain("OPENJSON(@SubjectIds)");
-            subjects.Should().Contain("JSON_VALUE(@SubjectIds, '$[0]')");
-            definition.Should().Contain("x.Reach IS NOT NULL");
-            definition.Should().Contain("permission.ResourceTypeId IS NULL OR permission.ResourceTypeId = x.ResourceTypeId");
-            roots.Should().Contain("x.IsActive = 1");
+            definition.Should().Contain("IsActive = 1");
+            definition.Should().Contain("u.IsActive = 1");
+            definition.Should().Contain("sa.ExpiresAt > GETUTCDATE()");
+            definition.Should().Contain("ug.IsActive = 1");
+            definition.Should().Contain("OPENJSON(@SubjectIds)");
+            definition.Should().Contain("JSON_VALUE(@SubjectIds, '$[0]')");
+            definition.Should().Contain("permission.ResourceTypeId IS NULL OR permission.ResourceTypeId = target.ResourceTypeId");
         }
     }
 
     [TestMethod]
-    public async Task CyclicHierarchy_IsRejectedAtWriteTime()
+    public async Task CyclicHierarchy_FailsClosedWithoutSqlRecursionFailure()
     {
         var loggerFactory = LoggerFactory.Create(b => b.AddConsole());
         var initializer = new SqlOSFgaFunctionInitializer(
@@ -198,21 +183,20 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
             Context.Set<SqlOSFgaResource>().AddRange(first, second);
             Context.Set<SqlOSFgaGrant>().Add(grant);
             await Context.SaveChangesAsync();
-            var act = () => Context.Database.ExecuteSqlRawAsync(
+            await Context.Database.ExecuteSqlRawAsync(
                 TestDatabase.Rewrite("UPDATE [dbo].[SqlOSFgaResources] SET [ParentId] = {0} WHERE [Id] = {1}"),
                 second.Id,
                 first.Id);
-            (await act.Should().ThrowAsync<DbException>()).Which.Message.Should().Contain("cycle");
             Context.ChangeTracker.Clear();
             await initializer.EnsureFunctionsExistAsync();
 
-            // The statement was rolled back: first is still a root the admin holds a grant on, and second its child.
-            var visible = await Context.FunctionAllowsAsync(
-                second.Id,
-                JsonSerializer.Serialize(new[] { FgaTestDataSeeder.SystemAdminSubjectId }),
-                FgaTestDataSeeder.ViewPermissionId);
+            var visible = await Context.IsResourceAccessible(
+                    first.Id,
+                    JsonSerializer.Serialize(new[] { FgaTestDataSeeder.SystemAdminSubjectId }),
+                    FgaTestDataSeeder.ViewPermissionId)
+                .AnyAsync();
 
-            visible.Should().BeTrue();
+            visible.Should().BeFalse();
         }
         finally
         {
@@ -246,10 +230,6 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
             await startGate.Task;
             for (var i = 0; i < 5; i++)
             {
-                // Forget the stored definition hash, so every iteration re-creates the routines for real
-                // while the readers run; an unchanged definition is otherwise skipped.
-                await updater.Database.ExecuteSqlRawAsync(
-                    TestDatabase.Rewrite("UPDATE [dbo].[SqlOSFgaSchema] SET [RoutinesHash] = NULL"));
                 await initializer.EnsureFunctionsExistAsync();
             }
         }

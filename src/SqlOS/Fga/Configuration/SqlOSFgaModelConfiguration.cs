@@ -1,7 +1,5 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Metadata;
-using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using SqlOS.Fga;
+using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
 
 namespace SqlOS.Fga.Configuration;
@@ -12,7 +10,7 @@ namespace SqlOS.Fga.Configuration;
 /// </summary>
 public static class SqlOSFgaModelConfiguration
 {
-    public static void Configure(ModelBuilder modelBuilder, SqlOSFgaOptions options)
+    public static void Configure(ModelBuilder modelBuilder, SqlOSFgaOptions options, Type? contextType = null)
     {
         var schema = options.Schema;
         var tables = options.TableNames;
@@ -69,30 +67,13 @@ public static class SqlOSFgaModelConfiguration
         {
             entity.ToTable(tables.ResourceTypes, schema, t => t.ExcludeFromMigrations());
             entity.HasKey(e => e.Id);
-
-            // The compact key of the type (schema v11), assigned by the database.
-            DatabaseOwned(entity.Property<int?>(SqlOSFgaLineage.SeqColumn));
         });
 
         // Resource
         modelBuilder.Entity<SqlOSFgaResource>(entity =>
         {
-            entity.ToTable(tables.Resources, schema, t =>
-            {
-                t.ExcludeFromMigrations();
-
-                // The lineage triggers (SqlOSFgaFunctionInitializer). Declared so EF Core's SQL Server update
-                // pipeline does not emit OUTPUT without INTO, which SQL Server rejects on a table with triggers.
-                foreach (var trigger in SqlOSFgaLineage.TriggerNames(tables.Resources))
-                {
-                    t.HasTrigger(trigger);
-                }
-            });
+            entity.ToTable(tables.Resources, schema, t => t.ExcludeFromMigrations());
             entity.HasKey(e => e.Id);
-
-            // The lineage columns (Seq, Depth, Reach, and the ancestor at every level) are the database's: the
-            // triggers keep them exact and only SqlOS's SQL routines read them, so the EF model leaves them out
-            // and does not depend on the configured depth.
             entity.HasOne(e => e.Parent)
                 .WithMany(r => r.Children)
                 .HasForeignKey(e => e.ParentId)
@@ -106,15 +87,7 @@ public static class SqlOSFgaModelConfiguration
         // Grant
         modelBuilder.Entity<SqlOSFgaGrant>(entity =>
         {
-            entity.ToTable(tables.Grants, schema, t =>
-            {
-                t.ExcludeFromMigrations();
-
-                // The trigger that copies the resource's Seq onto the grant (SqlOSFgaFunctionInitializer),
-                // declared for the same reason as the lineage triggers. The column is the database's and is
-                // left out of the model.
-                t.HasTrigger(SqlOSFgaLineage.GrantTriggerName(tables.Grants));
-            });
+            entity.ToTable(tables.Grants, schema, t => t.ExcludeFromMigrations());
             entity.HasKey(e => e.Id);
             entity.HasOne(e => e.Subject)
                 .WithMany(s => s.Grants)
@@ -204,51 +177,28 @@ public static class SqlOSFgaModelConfiguration
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // AccessMatch (keyless - fn_IsResourceAccessible result): the grant that decides a point check.
-        modelBuilder.Entity<SqlOSFgaAccessMatch>(entity =>
+        // AccessibleResource (keyless - TVF result)
+        modelBuilder.Entity<SqlOSFgaAccessibleResource>(entity =>
         {
             entity.HasNoKey();
-            entity.ToView(null);
+            entity.ToView(null); // Not mapped to any table
         });
 
-        // PathNode (keyless): a resource on a target's path, read from its lineage to explain a decision.
-        modelBuilder.Entity<SqlOSFgaPathNode>(entity =>
+        // Register TVF using the concrete DbContext type's MethodInfo.
+        // EF Core requires the method to be on a DbContext subclass, not an interface.
+        // When contextType is null (e.g., InMemory tests), TVF registration is skipped.
+        if (contextType != null)
         {
-            entity.HasNoKey();
-            entity.ToView(null);
-        });
+            var tvfMethod = contextType.GetMethod(
+                nameof(ISqlOSFgaDbContext.IsResourceAccessible),
+                new[] { typeof(string), typeof(string), typeof(string) });
 
-        // RowCheck (keyless - fn_CheckRow result): the point check's answer for one row.
-        modelBuilder.Entity<SqlOSFgaRowCheck>(entity =>
-        {
-            entity.HasNoKey();
-            entity.ToView(null);
-        });
-
-        // VisibleResource (keyless - fn_VisibleSet result): a resource the caller may see.
-        modelBuilder.Entity<SqlOSFgaVisibleResource>(entity =>
-        {
-            entity.HasNoKey();
-            entity.ToView(null);
-        });
-
-        // ActiveSubject (keyless - fn_ActiveSubjects result): the caller's live subjects.
-        modelBuilder.Entity<SqlOSFgaActiveSubject>(entity =>
-        {
-            entity.HasNoKey();
-            entity.ToView(null);
-        });
-
-        // The functions the list filter composes into application queries. Mapped to static methods, so the
-        // filter carries no DbContext instance.
-        SqlOSFgaFunctions.Register(modelBuilder, schema);
-    }
-
-    /// <summary>A column the database fills and maintains: EF Core reads it and never includes it in a write.</summary>
-    internal static void DatabaseOwned(PropertyBuilder property)
-    {
-        property.ValueGeneratedNever();
-        property.Metadata.SetBeforeSaveBehavior(PropertySaveBehavior.Ignore);
-        property.Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Ignore);
+            if (tvfMethod != null)
+            {
+                modelBuilder.HasDbFunction(tvfMethod)
+                    .HasName("fn_IsResourceAccessible")
+                    .HasSchema(schema);
+            }
+        }
     }
 }

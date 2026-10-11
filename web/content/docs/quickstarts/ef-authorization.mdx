@@ -53,7 +53,7 @@ var dashboardPassword = builder.Configuration["SqlOS:Dashboard:Password"]
         "Configure SqlOS:Dashboard:Password with user secrets or your secret store.");
 
 builder.AddSqlOS<AppDbContext>(
-    db => db.UseSqlServer(connectionString),   // or db.UseNpgsql(connectionString) for PostgreSQL
+    db => db.UseSqlServer(connectionString),
     options =>
     {
         options.AuthServer.PublicOrigin = publicOrigin;
@@ -201,7 +201,7 @@ public sealed class Project : ISqlOSResourceEntity
 public sealed record CreateProjectRequest(string Name);
 ```
 
-Create the `Projects` table with your normal EF migration workflow. SqlOS owns its own tables; your application migration owns `Projects`. SqlOS puts nothing on that table beyond an index on `ResourceId` when you declared none (the snippet above declares one), and runs nothing against it at startup.
+Create the `Projects` table with your normal EF migration workflow. SqlOS owns its own tables; your application migration owns `Projects`.
 
 ## How the write works
 
