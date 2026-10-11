@@ -726,8 +726,7 @@ public sealed class SqlOSResourceEntitySyncTests
             CREATE TABLE SqlOSFgaResourceTypes (
                 Id TEXT NOT NULL PRIMARY KEY,
                 Name TEXT NOT NULL,
-                Description TEXT NULL,
-                Seq INTEGER NULL
+                Description TEXT NULL
             );
             """);
         await context.Database.ExecuteSqlRawAsync("""
@@ -740,20 +739,6 @@ public sealed class SqlOSResourceEntitySyncTests
                 IsActive INTEGER NOT NULL,
                 CreatedAt TEXT NOT NULL,
                 UpdatedAt TEXT NOT NULL,
-                Seq INTEGER NULL,
-                Depth INTEGER NULL,
-                Reach INTEGER NULL,
-                Ancestor0 INTEGER NULL,
-                Ancestor1 INTEGER NULL,
-                Ancestor2 INTEGER NULL,
-                Ancestor3 INTEGER NULL,
-                Ancestor4 INTEGER NULL,
-                Ancestor5 INTEGER NULL,
-                Ancestor6 INTEGER NULL,
-                Ancestor7 INTEGER NULL,
-                Ancestor8 INTEGER NULL,
-                Ancestor9 INTEGER NULL,
-                Ancestor10 INTEGER NULL,
                 FOREIGN KEY (ParentId) REFERENCES SqlOSFgaResources(Id) ON DELETE RESTRICT,
                 FOREIGN KEY (ResourceTypeId) REFERENCES SqlOSFgaResourceTypes(Id) ON DELETE RESTRICT
             );
@@ -817,6 +802,11 @@ public sealed class SqlOSResourceEntitySyncTests
     {
         public DbSet<ResourceBackedEntity> Resources => Set<ResourceBackedEntity>();
 
+        public IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessible(
+            string resourceId,
+            string subjectIds,
+            string permissionId)
+            => throw new NotSupportedException("TVFs are not supported for the in-memory test context.");
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -828,7 +818,6 @@ public sealed class SqlOSResourceEntitySyncTests
 
     private sealed class ResourceBackedEntity : ISqlOSResourceEntity
     {
-
         public string Id { get; set; } = string.Empty;
         public string? ResourceKey { get; set; }
         public string TypeId { get; set; } = "workspace";

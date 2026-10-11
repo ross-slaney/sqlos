@@ -1,10 +1,8 @@
 using System.Text.RegularExpressions;
-using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using SqlOS.Fga;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Models;
 using SqlOS.IntegrationTests.Fga.Infrastructure;
@@ -13,19 +11,10 @@ using SqlOS.IntegrationTests.Infrastructure;
 
 namespace SqlOS.IntegrationTests.Fga;
 
-/// <summary>
-/// The point check and the list filter. Every test here runs three times: with the filter's shape decided by
-/// the database (this class: the test data is small, so a caller is listed first unless they see the cap's
-/// worth of rows), and with each shape forced (<see cref="SqlOSFgaAuthServiceListFirstIntegrationTests"/>,
-/// <see cref="SqlOSFgaAuthServiceRowCheckIntegrationTests"/>), so both shapes meet every case.
-/// </summary>
 [TestClass]
 public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
 {
     private SqlOSFgaAuthService _authService = null!;
-
-    /// <summary>The filter's shape: decided by fn_ListFirst (null), listed first (true), or each row checked (false).</summary>
-    protected virtual bool? ListFirst => null;
 
     [TestInitialize]
     public void TestInit()
@@ -34,166 +23,22 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
         _authService = new SqlOSFgaAuthService(
             Context,
             Options.Create(new SqlOSFgaOptions()),
-            loggerFactory.CreateLogger<SqlOSFgaAuthService>())
-        {
-            ListFirstOverride = ListFirst,
-        };
+            loggerFactory.CreateLogger<SqlOSFgaAuthService>());
     }
 
     [TestMethod]
-    public async Task BuildFilterAsync_ComposesIntoOneQuery_AsOneExists()
+    public async Task BuildFilterAsync_ComposesIntoASingleSqlQuery()
     {
         var filter = await _authService.BuildFilterAsync<LifecycleProtectedEntity>(
-            FgaTestDataSeeder.AgencyAdminSubjectId,
+            FgaTestDataSeeder.SystemAdminSubjectId,
             "TEST_VIEW");
         var sql = Context.Set<LifecycleProtectedEntity>().Where(filter).ToQueryString();
 
-        // One statement: the application's query with one EXISTS. The agency admin sees a handful of rows, so the
-        // database lists them first (fn_VisibleSet); forced the other way, each row is checked (fn_CheckRow,
-        // the point check). Either way the grants and roots are read inside the function when the statement
-        // runs; the parameters are the caller's subjects and the permission.
-        var expected = ListFirst == false ? "fn_CheckRow" : "fn_VisibleSet";
-        var other = ListFirst == false ? "fn_VisibleSet" : "fn_CheckRow";
-        StringAssert.Contains(sql, expected);
-        StringAssert.Contains(sql, "EXISTS");
-        Assert.IsFalse(sql.Contains(other, StringComparison.OrdinalIgnoreCase), sql);
-        Assert.IsFalse(sql.Contains("SqlOSFgaGrants", StringComparison.OrdinalIgnoreCase), sql);
-        Assert.AreEqual(1, Regex.Matches(sql, "LifecycleProtectedEntities", RegexOptions.IgnoreCase).Count, $"One query over the table. SQL:{Environment.NewLine}{sql}");
-    }
-
-    [TestMethod]
-    public async Task TheFilter_AgreesWithThePointCheck()
-    {
-        var suffix = Guid.NewGuid().ToString("N");
-        foreach (var (resource, i) in new[] { FgaTestDataSeeder.TestAgencyResourceId, FgaTestDataSeeder.TestTeamResourceId, FgaTestDataSeeder.TestProjectResourceId, FgaTestDataSeeder.OtherAgencyResourceId, "root" }.Select((r, i) => (r, i)))
-        {
-            Context.Set<LifecycleProtectedEntity>().Add(new LifecycleProtectedEntity { Id = $"agree_{i}_{suffix}", ResourceId = resource, Rank = i });
-        }
-
-        await Context.SaveChangesAsync();
-        Context.ChangeTracker.Clear();
-
-        var subjects = new[]
-        {
-            FgaTestDataSeeder.SystemAdminSubjectId, FgaTestDataSeeder.AgencyAdminSubjectId, FgaTestDataSeeder.AgencyMemberSubjectId,
-            FgaTestDataSeeder.GroupMemberSubjectId, FgaTestDataSeeder.UnauthorizedSubjectId,
-        };
-        var rows = await Context.Set<LifecycleProtectedEntity>().AsNoTracking().Where(e => e.Id.EndsWith(suffix)).ToListAsync();
-        foreach (var subject in subjects)
-        {
-            foreach (var permission in new[] { "TEST_VIEW", "TEST_EDIT" })
-            {
-                var expected = new List<string>();
-                foreach (var row in rows)
-                {
-                    if ((await _authService.CheckAccessAsync(subject, permission, row.ResourceId)).Allowed)
-                    {
-                        expected.Add(row.Id);
-                    }
-                }
-
-                var visible = await Context.Set<LifecycleProtectedEntity>().AsNoTracking()
-                    .Where(e => e.Id.EndsWith(suffix))
-                    .Where(await _authService.BuildFilterAsync<LifecycleProtectedEntity>(subject, permission))
-                    .OrderBy(e => e.Rank)
-                    .Select(e => e.Id)
-                    .ToListAsync();
-
-                CollectionAssert.AreEqual(expected.OrderBy(id => id).ToList(), visible.OrderBy(id => id).ToList(), $"{subject} / {permission}");
-            }
-        }
-    }
-
-    [TestMethod]
-    public async Task ACallerWithThousandsOfGrants_IsFilteredExactly_AndHasEachRowChecked()
-    {
-        // 2,500 grants on single projects: more visible resources than the cap of a small table (1,000), so the
-        // database checks each row rather than listing them; the roots are counted inside the database, never
-        // passed to the statement. Either shape returns exactly the granted rows.
-        var subjectService = CreateSubjectService();
-        var user = await subjectService.CreateUserAsync("Many Grants User", $"many-grants-{Guid.NewGuid():N}@example.com");
-        var suffix = Guid.NewGuid().ToString("N");
-        var granted = Enumerable.Range(0, 2_500).Select(i => $"many_{i}_{suffix}").ToArray();
-        var ungranted = $"many_none_{suffix}";
-        Context.ChangeTracker.Clear();
-        foreach (var id in granted.Append(ungranted))
-        {
-            Context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource { Id = id, ParentId = FgaTestDataSeeder.TestAgencyResourceId, Name = id, ResourceTypeId = "project" });
-        }
-
-        await Context.SaveChangesAsync();
-        foreach (var id in granted)
-        {
-            Context.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant { Id = $"grant_{id}", SubjectId = user.SubjectId, ResourceId = id, RoleId = FgaTestDataSeeder.AgencyMemberRoleId });
-        }
-
-        Context.Set<LifecycleProtectedEntity>().AddRange(
-            new LifecycleProtectedEntity { Id = $"manyrow_a_{suffix}", ResourceId = granted[0] },
-            new LifecycleProtectedEntity { Id = $"manyrow_b_{suffix}", ResourceId = granted[^1] },
-            new LifecycleProtectedEntity { Id = $"manyrow_c_{suffix}", ResourceId = ungranted });
-        await Context.SaveChangesAsync();
-        Context.ChangeTracker.Clear();
-
-        try
-        {
-            var filter = await _authService.BuildFilterAsync<LifecycleProtectedEntity>(user.SubjectId, "TEST_VIEW");
-            var query = Context.Set<LifecycleProtectedEntity>().AsNoTracking().Where(e => e.Id.EndsWith(suffix)).Where(filter);
-            var sql = query.ToQueryString();
-            StringAssert.Contains(sql, ListFirst == true ? "fn_VisibleSet" : "fn_CheckRow");
-            var visible = await query.Select(e => e.Id).ToListAsync();
-            CollectionAssert.AreEquivalent(new[] { $"manyrow_a_{suffix}", $"manyrow_b_{suffix}" }, visible);
-        }
-        finally
-        {
-            // The database is shared by every suite: leave it as small as it was.
-            await Context.Set<LifecycleProtectedEntity>().Where(e => e.Id.EndsWith(suffix)).ExecuteDeleteAsync();
-            await Context.Set<SqlOSFgaGrant>().Where(g => g.SubjectId == user.SubjectId).ExecuteDeleteAsync();
-            await Context.Set<SqlOSFgaResource>().Where(r => r.Id.EndsWith(suffix)).ExecuteDeleteAsync();
-        }
-    }
-
-    [TestMethod]
-    public async Task IdsLongerThan128Characters_AreComparedInFull()
-    {
-        // Ids may be 450 characters. A routine that took them narrower would cut two ids sharing their first
-        // 128 characters down to the same value, and a grant on one would allow the other.
-        var subjectService = CreateSubjectService();
-        var user = await subjectService.CreateUserAsync("Long Id User", $"long-ids-{Guid.NewGuid():N}@example.com");
-        var prefix = ("long_" + Guid.NewGuid().ToString("N")).PadRight(128, 'x');
-        var granted = prefix;
-        var ungranted = prefix + "_private";
-        Context.ChangeTracker.Clear();
-        Context.Set<SqlOSFgaResource>().AddRange(
-            new SqlOSFgaResource { Id = granted, ParentId = FgaTestDataSeeder.TestAgencyResourceId, Name = "granted", ResourceTypeId = "project" },
-            new SqlOSFgaResource { Id = ungranted, ParentId = FgaTestDataSeeder.OtherAgencyResourceId, Name = "private", ResourceTypeId = "project" });
-
-        // Two permissions whose ids share their first 128 characters; the role holds only the first.
-        var allowedPermission = new SqlOSFgaPermission { Id = prefix + "_perm_a", Key = $"LONG_A_{prefix[5..37]}", Name = "Allowed" };
-        var otherPermission = new SqlOSFgaPermission { Id = prefix + "_perm_b", Key = $"LONG_B_{prefix[5..37]}", Name = "Other" };
-        var role = new SqlOSFgaRole { Id = $"role_{prefix[5..37]}", Key = $"ROLE_{prefix[5..37]}", Name = "Long id role" };
-        Context.Set<SqlOSFgaPermission>().AddRange(allowedPermission, otherPermission);
-        Context.Set<SqlOSFgaRole>().Add(role);
-        await Context.SaveChangesAsync();
-        Context.Set<SqlOSFgaRolePermission>().Add(new SqlOSFgaRolePermission { RoleId = role.Id, PermissionId = allowedPermission.Id });
-        Context.Set<SqlOSFgaGrant>().AddRange(
-            new SqlOSFgaGrant { Id = $"grant_view_{prefix[5..37]}", SubjectId = user.SubjectId, ResourceId = granted, RoleId = FgaTestDataSeeder.AgencyMemberRoleId },
-            new SqlOSFgaGrant { Id = $"grant_long_{prefix[5..37]}", SubjectId = user.SubjectId, ResourceId = granted, RoleId = role.Id });
-        Context.Set<LifecycleProtectedEntity>().AddRange(
-            new LifecycleProtectedEntity { Id = $"long_granted_{prefix[5..37]}", ResourceId = granted },
-            new LifecycleProtectedEntity { Id = $"long_private_{prefix[5..37]}", ResourceId = ungranted });
-        await Context.SaveChangesAsync();
-        Context.ChangeTracker.Clear();
-
-        Assert.IsTrue((await _authService.CheckAccessAsync(user.SubjectId, "TEST_VIEW", granted)).Allowed);
-        Assert.IsFalse((await _authService.CheckAccessAsync(user.SubjectId, "TEST_VIEW", ungranted)).Allowed, "a resource id is compared in full");
-        Assert.IsTrue((await _authService.CheckAccessAsync(user.SubjectId, allowedPermission.Key, granted)).Allowed);
-        Assert.IsFalse((await _authService.CheckAccessAsync(user.SubjectId, otherPermission.Key, granted)).Allowed, "a permission id is compared in full");
-
-        var filter = await _authService.BuildFilterAsync<LifecycleProtectedEntity>(user.SubjectId, otherPermission.Key);
-        Assert.IsFalse(await Context.Set<LifecycleProtectedEntity>().AsNoTracking()
-            .Where(e => e.ResourceId == granted || e.ResourceId == ungranted)
-            .Where(filter)
-            .AnyAsync(), "the list filter compares the permission id in full");
+        StringAssert.Contains(sql, "fn_IsResourceAccessible");
+        Assert.AreEqual(
+            1,
+            Regex.Matches(sql, "fn_IsResourceAccessible", RegexOptions.IgnoreCase).Count,
+            $"Authorization filter must compose to one SQL query. SQL:{Environment.NewLine}{sql}");
     }
 
     [TestMethod]
@@ -477,107 +322,6 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
         await AssertPointAndFilterAsync(attackerSubjectId, resourceId, expected: false);
     }
 
-    [TestMethod]
-    public async Task SqlServer_ACallerWithFewRows_IsNotServedThePlanCompiledForACallerWithMany()
-    {
-        // SQL Server plans a statement for whoever runs it first and reuses the plan. For the list filter the
-        // right plan depends on the list's length: a plan compiled for a caller who sees most of the table
-        // reads the table in order, and handed to a caller who sees two rows it reads the whole table. SqlOS
-        // marks every list statement OPTION (RECOMPILE), so each caller gets the plan for their list.
-        if (!TestDatabase.IsSqlServer || ListFirst == false)
-        {
-            return;
-        }
-
-        var subjectService = CreateSubjectService();
-        var many = await subjectService.CreateUserAsync("Many Rows", $"many-rows-{Guid.NewGuid():N}@example.com");
-        var few = await subjectService.CreateUserAsync("Few Rows", $"few-rows-{Guid.NewGuid():N}@example.com");
-        var suffix = Guid.NewGuid().ToString("N");
-        var manyNode = $"plan_many_{suffix}";
-        var fewNode = $"plan_few_{suffix}";
-        Context.ChangeTracker.Clear();
-        Context.Set<SqlOSFgaResource>().AddRange(
-            new SqlOSFgaResource { Id = manyNode, ParentId = FgaTestDataSeeder.TestAgencyResourceId, Name = manyNode, ResourceTypeId = "project" },
-            new SqlOSFgaResource { Id = fewNode, ParentId = FgaTestDataSeeder.TestAgencyResourceId, Name = fewNode, ResourceTypeId = "project" });
-        await Context.SaveChangesAsync();
-
-        // 900 rows under one node, 300 under another: both callers' lists are below the crossover's floor of
-        // 1,000, so both get the list filter and the same statement; one sees three quarters of the table,
-        // the other two rows.
-        for (var i = 0; i < 1_200; i++)
-        {
-            Context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource { Id = $"plan_r_{i}_{suffix}", ParentId = i < 900 ? manyNode : fewNode, Name = $"r{i}", ResourceTypeId = "project" });
-        }
-
-        await Context.SaveChangesAsync();
-        for (var i = 0; i < 1_200; i++)
-        {
-            Context.Set<LifecycleProtectedEntity>().Add(new LifecycleProtectedEntity { Id = $"plan_e_{i:D4}_{suffix}", ResourceId = $"plan_r_{i}_{suffix}" });
-        }
-
-        Context.Set<SqlOSFgaGrant>().AddRange(
-            new SqlOSFgaGrant { Id = $"plan_g_many_{suffix}", SubjectId = many.SubjectId, ResourceId = manyNode, RoleId = FgaTestDataSeeder.AgencyMemberRoleId },
-            new SqlOSFgaGrant { Id = $"plan_g_few_a_{suffix}", SubjectId = few.SubjectId, ResourceId = $"plan_r_1000_{suffix}", RoleId = FgaTestDataSeeder.AgencyMemberRoleId },
-            new SqlOSFgaGrant { Id = $"plan_g_few_b_{suffix}", SubjectId = few.SubjectId, ResourceId = $"plan_r_1100_{suffix}", RoleId = FgaTestDataSeeder.AgencyMemberRoleId });
-        await Context.SaveChangesAsync();
-        Context.ChangeTracker.Clear();
-
-        var capture = new RowsReadCapture("LifecycleProtectedEntities");
-        await using var attached = new TestSqlOSDbContext(new DbContextOptionsBuilder<TestSqlOSDbContext>().UseTestProvider(AspireFixture.SqlConnectionString).AddInterceptors(capture).Options);
-        await using var plain = new TestSqlOSDbContext(new DbContextOptionsBuilder<TestSqlOSDbContext>().UseSqlServer(AspireFixture.SqlConnectionString).AddInterceptors(capture).Options);
-        try
-        {
-            var manyFilter = await _authService.BuildFilterAsync<LifecycleProtectedEntity>(many.SubjectId, "TEST_VIEW");
-            var fewFilter = await _authService.BuildFilterAsync<LifecycleProtectedEntity>(few.SubjectId, "TEST_VIEW");
-            Task<List<string>> PageAsync(TestSqlOSDbContext db, System.Linq.Expressions.Expression<Func<LifecycleProtectedEntity, bool>> filter)
-                => db.Set<LifecycleProtectedEntity>().AsNoTracking().Where(e => e.Id.EndsWith(suffix)).Where(filter).OrderBy(e => e.Id).Take(20).Select(e => e.Id).ToListAsync();
-            StringAssert.Contains(attached.Set<LifecycleProtectedEntity>().Where(fewFilter).ToQueryString(), "fn_VisibleSet", "both callers are below the crossover");
-
-            // The hazard, on a context SqlOS is not attached to: the many-rows caller compiles the statement,
-            // then the few-rows caller runs it. Reported, not asserted: which plan SQL Server compiles first is
-            // its own choice.
-            await PageAsync(plain, manyFilter);
-            var inherited = await capture.MeasureAsync(() => PageAsync(plain, fewFilter));
-            Console.WriteLine($"Without SqlOS attached, the few-rows caller read {inherited} rows of the table after the many-rows caller compiled the statement.");
-
-            // With SqlOS attached: the same order, and the few-rows caller reads their rows.
-            (await PageAsync(attached, manyFilter)).Should().HaveCount(20);
-            var own = await capture.MeasureAsync(() => PageAsync(attached, fewFilter));
-            (await PageAsync(attached, fewFilter)).Should().Equal($"plan_e_1000_{suffix}", $"plan_e_1100_{suffix}");
-            own.Should().BeLessThanOrEqualTo(20, $"the few-rows caller's page is planned for their list; without SqlOS attached it read {inherited} rows");
-        }
-        finally
-        {
-            await Context.Set<LifecycleProtectedEntity>().Where(e => e.Id.EndsWith(suffix)).ExecuteDeleteAsync();
-            await Context.Set<SqlOSFgaGrant>().Where(g => g.Id.EndsWith(suffix)).ExecuteDeleteAsync();
-            await Context.Set<SqlOSFgaResource>().Where(r => r.Id.EndsWith(suffix) && r.Id.StartsWith("plan_r_")).ExecuteDeleteAsync();
-            await Context.Set<SqlOSFgaResource>().Where(r => r.Id == manyNode || r.Id == fewNode).ExecuteDeleteAsync();
-        }
-    }
-
-    [TestMethod]
-    public async Task AGrantWhoseSubjectIdDiffersOnlyInCase_CountsWhereTheCollationIgnoresCase()
-    {
-        // SQL Server's default collation calls 'abc' and 'ABC' equal, so its foreign key accepts a grant whose
-        // subject id differs from the subject's only in case. The point check seeks grants by a hash of the
-        // resource and subject ids, so the hash must agree with the collation: else the check, and the filter
-        // that checks each row with it, would miss a grant the list-first filter (which compares ids) finds.
-        if (!TestDatabase.IsSqlServer)
-        {
-            return; // PostgreSQL compares ids byte for byte: such a grant cannot exist.
-        }
-
-        var suffix = Guid.NewGuid().ToString("N");
-        var subjectId = $"subj_case_{suffix}";
-        Context.Set<SqlOSFgaSubject>().Add(new SqlOSFgaSubject { Id = subjectId, SubjectTypeId = "user", DisplayName = "Case" });
-        Context.Set<SqlOSFgaUser>().Add(new SqlOSFgaUser { Id = $"usr_case_{suffix}", SubjectId = subjectId, IsActive = true });
-        await Context.SaveChangesAsync();
-        var resourceId = await CreateProtectedResourceWithGrantAsync(subjectId.ToUpperInvariant());
-        Context.ChangeTracker.Clear();
-
-        await AssertPointAndFilterAsync(subjectId, resourceId, expected: true);
-    }
-
     private SqlOSFgaSubjectService CreateSubjectService()
     {
         var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
@@ -621,18 +365,4 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
             .AnyAsync();
         Assert.AreEqual(expected, listed, "EF authorization filter did not match the point authorization result.");
     }
-}
-
-/// <summary>Every list filter in <see cref="SqlOSFgaAuthServiceIntegrationTests"/> built to list the caller's rows first.</summary>
-[TestClass]
-public class SqlOSFgaAuthServiceListFirstIntegrationTests : SqlOSFgaAuthServiceIntegrationTests
-{
-    protected override bool? ListFirst => true;
-}
-
-/// <summary>Every list filter in <see cref="SqlOSFgaAuthServiceIntegrationTests"/> built to check each row the query reads.</summary>
-[TestClass]
-public class SqlOSFgaAuthServiceRowCheckIntegrationTests : SqlOSFgaAuthServiceIntegrationTests
-{
-    protected override bool? ListFirst => false;
 }

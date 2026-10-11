@@ -6,6 +6,10 @@ author: "Ross Slaney"
 tags: ["FGA", "EF Core", "AuthServer", "SCIM", "Security", "SqlOS"]
 ---
 
+<Callout type="warning" title="Historical release note">
+  The page executor, scope columns, and associated FGA maintenance described below have since been reverted on `main`, together with the later visibility-count strategy. Current source uses the original recursive TVF through `BuildFilterAsync`; sparse queries can examine many denied rows. The .NET 10 target and the auth fixes remain. See [current list filtering](/docs/fga/list-filter) and [pagination guidance](/docs/guides/paginating-authorized-lists) before integrating from source. This rollback does not downgrade an existing database schema; use a fresh database.
+</Callout>
+
 SqlOS 8.0.0 is a major release:
 
 - An authorized list page no longer has to read every grant the caller holds first.
@@ -66,7 +70,7 @@ npm install @sqlos/headless@8.0.0              # if you render your own login UI
 3. Add and apply one migration per context. It adds the column, plus an index on `ResourceId` where you declared none.
 4. Start the application. SqlOS builds the resource lineage and fills every `FgaScope` column once. On a large database, that first start takes a few minutes per million resources, and other instances wait for it.
 
-The full steps are in [FGA setup](/docs/fga/setup#upgrading-from-a-version-without-fgascope).
+These steps describe the released 8.0.0 implementation, not the current source; see the historical-release notice above.
 
 **A context built by hand calls `UseSqlOSFga`.** `AddSqlOS` applies it to the context it registers. Any other context that runs a `BuildFilterAsync` filter needs `optionsBuilder.UseSqlOSFga(loggerFactory)`. Without it, `BuildFilterAsync` throws and says so.
 

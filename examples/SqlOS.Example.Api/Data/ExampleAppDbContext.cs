@@ -27,6 +27,11 @@ public sealed class ExampleAppDbContext : SqlOSDbContext<ExampleAppDbContext>
             entity.Property(x => x.ResourceId).HasMaxLength(100).IsRequired();
             entity.HasIndex(x => x.OrganizationId);
             entity.HasIndex(x => x.ResourceId);
+            entity.Ignore(x => x.ResourceTypeId);
+            entity.Ignore(x => x.ResourceName);
+            entity.Ignore(x => x.ParentResourceId);
+            entity.Ignore(x => x.ResourceDescription);
+            entity.Ignore(x => x.ResourceIsActive);
         });
 
         modelBuilder.Entity<Chain>(entity =>

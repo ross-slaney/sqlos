@@ -6,11 +6,9 @@ group: "checks"
 order: 1
 ---
 
-`BuildFilterAsync` returns a filter for `Where(...)`. Lists only rows the subject may see. Use it wherever authorization has to sit inside a query of your own: pages, counts, joins, aggregates, search, `ExecuteUpdate`, `ExecuteDelete`.
+`BuildFilterAsync` returns a filter for `Where(...)`. Lists only rows the subject may see. Use this on list endpoints.
 
-The filter is one SQL `EXISTS` on the row's `ResourceId`. It composes into any query, in any order, with a keyset, a `Take`, a join or a `Count`. To build it, SqlOS asks the database whether this caller sees few rows of the table or many, and returns the filter that is fast for that caller; either filter returns exactly the rows the caller may see. What a page costs depends on how much of the table the caller may see. [What determines query cost](#what-determines-query-cost) gives the numbers, including the one case that reads far more than a page, and [Paginating authorized lists](/docs/guides/paginating-authorized-lists) the query shapes.
-
-This is a read-side helper. Lifecycle-managed domain rows normally implement `ISqlOSResourceEntity`; the filter only needs the inherited `ResourceId` contract to tie application rows to their FGA resources.
+This is a read-side helper. Lifecycle-managed domain rows normally implement `ISqlOSResourceEntity`; the filter only needs the inherited `ResourceId` contract to join application rows to accessible FGA resources.
 
 <Callout type="warning" title="Authentication comes first">
   The filter authorizes a subject ID; it does not authenticate the request. Validate a bearer token for the API's exact audience before the endpoint runs, then use the validated token's user ID as the FGA subject.
@@ -28,143 +26,15 @@ var chains = await dbContext.Chains
     .ToListAsync();
 ```
 
-The subject only sees chains they have access to. The filter translates to a SQL predicate -- no in-memory filtering.
-
-## How the filter works
-
-`BuildFilterAsync<T>` does three things:
-
-1. **It resolves the caller**: the caller's live subjects (the subject and its active groups) and the permission.
-2. **It asks the database one question**: does this caller see fewer resources of the permission's type than the **crossover** of `T`'s table? The crossover is the number of visible rows at which listing them first and checking them in order cost the same: `8·√N` for a table of N rows ([derived below](#what-determines-query-cost)), and at least 1,000. `fn_ListFirst` answers in the database: it counts the caller's resources, stops at the crossover, and sends back yes or no. No grant, root or row leaves the database, and the question costs at most the crossover, whoever asks.
-3. **It returns one of two filters**, by the answer.
-
-**Few rows, below the crossover: list first.**
-
-```sql
-WHERE EXISTS (
-    SELECT 1
-    FROM [dbo].fn_VisibleSet(@SubjectIds, @PermissionId, @TypeId) v
-    WHERE v.ResourceId = t.ResourceId)
-```
-
-`fn_VisibleSet` is the caller's visible resources, each once, worked out in full before the rest of the query runs. The database starts from those few rows, finds them in your table through its `ResourceId` index, sorts them and takes the page.
-
-On SQL Server this statement also carries `OPTION (RECOMPILE)`, which SqlOS adds to every statement that reads `fn_VisibleSet`. SQL Server compiles a statement once, for the list of whoever runs it first, and reuses that plan for everyone after; a plan compiled for a long list reads your whole table for a caller with a short one. With the hint, SQL Server plans each caller's statement for that caller's list. The hint is attached by `UseSqlOS()` on the context's options, which `AddSqlOS` and `SqlOSDbContext` call for you; a context you configure by hand calls it itself, and `BuildFilterAsync` refuses a SQL Server context without it. PostgreSQL plans the function by its declared row count and needs nothing.
-
-**Many rows, at or above the crossover: check each row.**
-
-```sql
-WHERE EXISTS (
-    SELECT 1
-    FROM [dbo].fn_CheckRow(t.ResourceId, @SubjectIds, @PermissionId))
-```
-
-The database reads your table in the query's own order and runs the point check on each row it reads, until the page is full. `fn_CheckRow` is the point check, `fn_IsResourceAccessible`, under a name of SqlOS's own (so your model may map `fn_IsResourceAccessible` too); it is the check [`CheckAccessAsync`](/docs/fga/checking-a-permission) runs: for the row's resource it reads the ancestors from the resource's reach down (at most `MaxResourceHierarchyDepth + 1` of them), and for each looks for a current grant to one of the caller's live subjects whose role includes the permission. It finds the caller's grants on each of those ancestors with one exact index seek per live subject, so its cost depends neither on how many grants the caller holds nor on how many other people hold grants on the same ancestors.
-
-Both filters are exact. Both are one `EXISTS` in your query, both compose with any LINQ (an order, a keyset, `Take`, `Count`, joins, `ExecuteUpdate`, `ExecuteDelete`), and neither needs anything on your table but `ResourceId` and its index. Their parameters are the caller's live subject ids (as JSON), the permission, and `@TypeId`, the permission's resource type (NULL for a permission without one). The database reads the grants when the statement runs.
-
-**Why two filters, not one.** A database plans a query before it runs it, so it cannot know that this caller sees only a handful of rows. One plan is fast either for callers who see much (read in order, check rows) or for callers who see little (list them first), not for both. The count tells SqlOS which kind of caller this is, and the database then runs the plan that fits.
-
-## The closure
-
-The filters read SqlOS's resources table, never yours. Every resource row there carries its place in the tree, written down once so that no query climbs it:
-
-| Column | What it holds |
-| --- | --- |
-| `Seq` (`bigint`) | The resource's compact key, which the ancestor columns refer to |
-| `Depth` (`smallint`) | Its level: 0 for a root. NULL when the row is malformed (a cycle, or deeper than the limit) |
-| `Reach` (`smallint`) | The highest level access can flow down from, through active resources only. NULL when the resource or an ancestor is inactive, or the row is malformed; a resource without a reach is denied |
-| `Ancestor0` … `Ancestor10` (`bigint`) | The `Seq` of its ancestor at each level: `Ancestor0` is the top of its tree, `Ancestor{Depth}` the resource itself, NULL below its depth. One column per level up to `MaxResourceHierarchyDepth` (10 by default, so eleven columns); a larger depth adds columns at startup |
-
-This is the tree's closure: the climb from a resource to its root, stored on the row. "Is X under R, where R sits at level ℓ, with nothing inactive between" is `X.Ancestor{ℓ} = R.Seq AND X.Reach <= ℓ`, one row read. "Every resource of a type under R" is one range of one index: SqlOS keeps one index per level on the resources table, `IX_SqlOSFgaResources_Ancestor{ℓ}` on `(Ancestor{ℓ}, ResourceTypeId)` including `Reach` and `Id`, over the rows that have an ancestor at that level.
-
-SqlOS creates these functions in its own schema at startup:
-
-| Function | What it does |
-| --- | --- |
-| `fn_ActiveSubjects` | Keeps the caller's subjects that are alive now; none when the caller is not |
-| `fn_AccessRoots` | Lists the caller's **access roots**: one row `(ResourceSeq, Depth)` per current grant of a live subject whose role includes the permission, on an active resource. It does not remove duplicates, so a count over it can stop early |
-| `fn_ListVisible` | Lists the caller's visible resources, root by root (below) |
-| `fn_VisibleSet` | The same resources, each once, worked out in full before the query goes on: a multi-statement function on SQL Server, PL/pgSQL on PostgreSQL. The list-first filter reads it |
-| `fn_ListFirst` | Counts `fn_ListVisible` up to the table's crossover and answers whether the count is below it |
-| `fn_IsResourceAccessible` | The point check for one resource. `CheckAccessAsync` runs it |
-| `fn_CheckRow` | The point check under SqlOS's own name, one row when it allows. The check-each-row filter reads it |
-
-On PostgreSQL, `fn_VisibleSet` and `fn_ListFirst` run with JIT off: their cost estimates can cross `jit_above_cost`, and compiling would take longer than the query.
-
-`fn_ListVisible` reads one range of one index per root:
-
-```sql
-CREATE OR ALTER FUNCTION [dbo].fn_ListVisible(@SubjectIds NVARCHAR(MAX), @PermissionId NVARCHAR(450), @TypeId NVARCHAR(450))
-RETURNS TABLE AS RETURN (
-    SELECT v.Id AS ResourceId
-    FROM [dbo].fn_AccessRoots(@SubjectIds, @PermissionId) a
-    CROSS APPLY (
-        SELECT r.Id FROM [dbo].[SqlOSFgaResources] r
-        WHERE a.Depth = 0 AND r.Ancestor0 = a.ResourceSeq AND r.Ancestor0 IS NOT NULL
-          AND r.Reach <= 0 AND (@TypeId IS NULL OR r.ResourceTypeId = @TypeId)
-        UNION ALL
-        SELECT r.Id FROM [dbo].[SqlOSFgaResources] r
-        WHERE a.Depth = 1 AND r.Ancestor1 = a.ResourceSeq AND r.Ancestor1 IS NOT NULL
-          AND r.Reach <= 1 AND (@TypeId IS NULL OR r.ResourceTypeId = @TypeId)
-        UNION ALL
-        …                                       -- one branch per level, to Ancestor10
-    ) v)
-```
-
-A resource is visible when one of the caller's roots is its ancestor at the root's level and nothing inactive sits between. For each root only the branch of its own level runs, and it reads the range of that level's index beneath the root. Each branch repeats `Ancestor{ℓ} IS NOT NULL` because SQL Server uses a filtered index only when the query states its filter. A resource beneath two roots is listed twice; `fn_VisibleSet` keeps it once. On PostgreSQL the function is the same with quoted identifiers and a lateral join, `LANGUAGE sql STABLE`, returning `TABLE("ResourceId" varchar(450))`.
-
-The row count behind the crossover is the one the database keeps in its catalog for your table: `sys.partitions` on SQL Server, `pg_class.reltuples` on PostgreSQL. PostgreSQL refreshes its count when the table is vacuumed or analyzed, which autovacuum does on its own; a table never vacuumed or analyzed counts as empty, so its crossover is 1,000. A stale count can only pick the slower filter, never change the rows.
-
-Two triggers on the resources table (after insert, after update of `ParentId` or `IsActive`) keep the closure exact; [Resource hierarchy](/docs/fga/resource-hierarchy#the-lineage) lists what each change costs. A retype or a delete changes no lineage.
-
-Each grant also carries `ResourceSeq`, its resource's `Seq`, which a trigger on the grants table copies when the grant is written (a resource's `Seq` never changes). The point check reads the ancestors' `Seq`s from the lineage and seeks the index on `(ResourceSeq, SubjectId)` once per ancestor and live subject. It never reads other people's grants: on a node where every member of an organization holds a grant, a check costs the same as on a node with one.
-
-## How a page runs
-
-**List first.** `fn_VisibleSet` runs once: for each of the caller's roots it reads the range of `IX_SqlOSFgaResources_Ancestor{ℓ}` beneath it, and it keeps each resource once. The database then finds those rows in your table through its `ResourceId` index, applies your other conditions and the keyset, sorts what is left and takes the page. The work is the caller's rows, however large the table.
-
-**Check each row.** The database reads your table in the query's order, from the keyset position, through the index you declared for that order. For each row it runs the point check: it reads the row's resource, then each ancestor from the resource's reach down and the caller's grants on it (one index seek per subject). It stops when the page is full. The work is the rows it reads before the page fills; for a caller who sees most of the table, that is about the page.
-
-## What determines query cost
-
-For a table of N rows, of which the caller may see V, a page of P rows, and the crossover C = 8·√N:
-
-| The caller | The filter | Cost per page |
-| --- | --- | --- |
-| Sees fewer rows than the crossover (one store, one workspace) | List first | About V index reads and a sort of V rows. It does not grow with the table |
-| Sees most rows (an administrator) | Check each row | About P rows read and checked. It does not grow with the table |
-| Sees many rows, not most (a region manager) | Check each row | About P·N/V rows checked when their rows are spread through the order; at most about P·N/C = P·√N/8 |
-| Holds k grants on single resources | List first while k is below C | About k index reads inside the database, then a sort. From C on, rows are checked and the number of grants no longer matters |
-
-Before the page, the question reads at most C index entries: one index range for a caller with one grant, and up to C of their grants for a caller with many single grants.
-
-The crossover is where the two filters cost the same. Listing first costs about one index read per visible row, V. Checking costs about P·N/V checks. A check costs about three listed rows on both engines, so they meet at V = √(3·P·N), which for a page of 20 is near 8·√N. Nothing in it is tuned: a different page size or cost ratio moves it, and the formula moves with them. So, but for the case below, the worst page grows with the square root of the table, not with the table. Pages and point checks are measured on both engines in `tests/SqlOS.Benchmarks`.
-
-**One case is worse.** Checking each row is fast when the caller's rows are spread through the query's order. A caller who sees many rows (at least the crossover) that all sit at the far end of that order pays for everything before them: for example, a customer who has added nothing for years, listing their rows newest first. The database reads and checks every newer row before it reaches theirs. Only an index on your table ordered by who can see each row, then by the sort column, avoids that, and SqlOS deliberately puts nothing on your tables. If the screen is scoped to that customer anyway, say so in the query: a condition on your own column, with an index that leads with it and ends with the sort (`HasIndex(o => new { o.CustomerId, o.CreatedAt, o.Id })`), lets the database start at their rows.
-
-Other costs are the query's own:
-
-- A `Count()`, a join or a list without `Take` reads every row the caller may see: their rows when they are listed first, and the whole table, each row checked, when they are many. That is what counting costs.
-- A large `Skip(...)` reads the skipped rows; use a keyset for deep lists.
-- A condition your order's index cannot narrow is tested as rows are read, so checking each row reads more rows to fill a page. Declare an index for the order you page in, ended by the key, and give a selective condition its own index, as you would for any query.
-- An order with no index makes the database read every row the filter passes before it sorts: the caller's rows when they are listed first, the whole table when each row is checked.
-
-One API preserves authorization semantics across these shapes; it does not make them equally cheap.
-
-## What your table carries
-
-Your table carries its `ResourceId` column and an index on it. If you declared no index on `ResourceId`, SqlOS adds one to the EF model (`IX_{Table}_SqlOSFgaResourceId`), so your migration creates it; the list-first filter finds the caller's rows through it. Nothing else of SqlOS's is on your table: no column, no trigger, no computed column, no statistics. Everything the filter reads lives on SqlOS's own tables, created at startup.
-
-**Upgrading from 8.0**: not supported in place; there are no compatibility shims. Either recreate the database, or remove what 8.0 put on your tables by hand: delete the `FgaScope` property from every entity (nothing declares it now), add and apply an EF migration that drops the column, and drop 8.0's per-table objects (triggers `TR_*_SqlOSFgaScope_*`, indexes `IX_*_FgaScope*`, computed columns `FgaScope*`, statistics `ST_*_FgaScopeType`) and its tables in SqlOS's schema (`SqlOSFgaDirect_*`, `SqlOSFgaGrantCounts`, `SqlOSFgaScopeTables`). SqlOS neither creates nor looks for any of them.
+The subject only sees chains they have access to. The filter translates to a SQL query -- no in-memory filtering.
 
 ## Filter lifetime
 
-The caller's principal set (the subject plus its active group memberships) and permission are resolved when the returned task is awaited, and the question is asked then. Grants are read again when each query runs: both filters read them inside the statement. A grant made or revoked after the filter was built, or a caller deactivated since, is seen by the next query over it; the choice made when the filter was built can make that query faster or slower, never change its rows. Build the filter once per request and compose it into that request's queries. Do not cache it in statics or reuse it across requests, because group membership is captured at construction.
+The subject's principal set (the subject plus its active group memberships) is resolved when the returned task is awaited. Build the filter once per request and compose it into that request's queries. Do not cache the filter in statics or reuse it across requests -- group membership is captured when the filter is built; grants are checked by the TVF when the SQL query executes.
 
-The filter holds no `DbContext`: compose it into a query on any instance of the application context registered with `AddSqlOS` (any context of the same model), including instances from `IDbContextFactory` or a pool. A context built by hand needs `modelBuilder.UseSqlOS(...)` (or `ApplySqlOSFgaModel()`) in its model and `UseSqlOS()` on its options; on SQL Server, `BuildFilterAsync` refuses a context without the second, because its list statements would not be planned per caller. List filters and point checks run in the database, so they need SQL Server or PostgreSQL; an in-memory provider fails with a message that says so.
+## Sparse-access limitation
 
-The filters and the point check agree row for row: a row the list shows is a row [`CheckAccessAsync`](/docs/fga/checking-a-permission) allows, and the other way round. The check-each-row filter is the point check, so it agrees by construction. The list-first filter applies the same rule through the closure, and the integration tests check that the two agree row for row, with each filter.
+The TVF walks the ancestors of each candidate resource to check grants. It can examine many denied rows before finding a page, or the entire remaining table when fewer than a page are accessible. This path does not provide table-size-independent pagination. See [Paginating authorized lists](/docs/guides/paginating-authorized-lists).
 
 ## Composing with plain EF
 
@@ -188,7 +58,7 @@ var items = await db.InventoryItems
     .ToListAsync();
 ```
 
-Everything composes into one SQL statement: the authorization predicate, your business predicates, the projection, the ordering, and the paging.
+Everything composes into one SQL statement: the authorization TVF join, your business predicates, the projection, the ordering, and the paging.
 
 For cursor/keyset pagination over authorized lists, see [Paginating authorized lists](/docs/guides/paginating-authorized-lists).
 

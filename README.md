@@ -27,18 +27,18 @@ var documents = await db.Documents
     .ToListAsync();
 ```
 
-The endpoint needs no `where tenantId` or `where userId` to discover authorized records across the caller's grants. Add those conditions when the screen itself is scoped to a tenant or owner. Declare the page's compound index (`HasIndex(d => new { d.Name, d.Id })`). `BuildFilterAsync` asks the database whether this caller sees few rows or many and returns the filter that fits, and the page is one statement either way. Point checks protect individual actions and writes.
+The endpoint needs no `where tenantId` or `where userId` to discover authorized records across the caller's grants. Add those conditions when the screen itself is scoped to a tenant or owner. Declare the page's compound index (`HasIndex(d => new { d.Name, d.Id })`); EF composes authorization, filtering, ordering, and pagination into SQL. Point checks protect individual actions and writes.
 
 ### Design the hierarchy around access
 
 - **Grant where access belongs.** Workspace → document, team → inspection → item, or department → case → record. Choose the highest node that matches the intended access. A grant covers the relevant descendants, including new ones; do not broaden access just to make queries faster.
 - **Use groups for shared responsibilities.** One group grant replaces duplicate grants for its members. Use direct grants for individual shares. Membership or ownership alone does not grant access.
-- **A caller's independent branches still matter.** A caller who sees few rows has them listed from their grants: one workspace grant is one index range, and 100 separately granted projects are 100 ranges read inside the database, then a sort of their rows. That cost follows this caller's access, including their groups, rather than scanning unrelated application rows.
-- **SqlOS's indexes live on SqlOS's tables.** The resources table holds the tree's closure (each resource's ancestor at every level) with one index per level. Your tables carry a `ResourceId` column and an index on it, nothing more. There is no copy of any caller's visible rows and no index per sorting permutation; the indexes on your tables are the ones you declare.
-- **Keep large reorganizations deliberate.** Moving or deactivating a branch changes inheritance and rewrites the closure of its subtree. Large subtree changes block other tree changes meanwhile.
-- **One API does not mean every query has the same cost.** A page costs about the page for a caller who sees most of the table, whose rows are checked in the page's order, and about the caller's rows for one who sees few, whose rows are listed first. In between, the worst page grows with the square root of the table, not with the table, unless a caller who sees many rows has them all at the far end of the page's order. Counts, joins, unindexed sorts, and selective filters keep their normal database costs.
+- **Sparse access can be expensive.** The authorization TVF checks candidate rows by walking their resource ancestors. A page can examine many denied rows, or the entire remaining table for an empty or underfull result. An index on the requested order does not remove this limitation.
+- **Keep application indexes deliberate.** Index the filters and orders your screens use. SqlOS does not add per-level page indexes, direct-grant tables, or an application-side page executor.
+- **Treat hierarchy changes as permission changes.** Moving or deactivating a branch changes which ancestor grants apply to its descendants.
+- **One API does not mean every query has the same cost.** Pages, counts, joins, and reports all compose the SQL authorization predicate. There is no page-sized-work guarantee independent of table size.
 
-`BuildFilterAsync` asks the database one question, how many rows this caller sees, counted up to the crossover where listing and checking cost the same; then every query is one statement in which SQL Server or PostgreSQL reads the grants, the tree and the rows. There is no external policy service, no application-side filtering, and no grant list leaving the database.
+Application tables connect to SqlOS resources through `ResourceId`. SQL Server or PostgreSQL evaluates the recursive authorization function in the query; there is no preliminary visibility count, custom page executor, or external policy service.
 
 → **[Designing your resource tree and its tradeoffs](https://sqlos.dev/docs/fga/designing-your-resource-tree)** · [Authorize EF Core queries](https://sqlos.dev/docs/quickstarts/ef-authorization) · [Page shapes and indexes](https://sqlos.dev/docs/guides/paginating-authorized-lists)
 

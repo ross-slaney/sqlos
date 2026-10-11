@@ -3,8 +3,8 @@ using SqlOS.AuthServer.Interfaces;
 using SqlOS.Database;
 using SqlOS.Extensions;
 using SqlOS.Fga;
-using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
+using SqlOS.Fga.Models;
 
 namespace SqlOS;
 
@@ -30,22 +30,17 @@ public abstract class SqlOSDbContext<TContext> : DbContext, ISqlOSAuthServerDbCo
         }
     }
 
-    /// <summary>Attaches SqlOS to the statements this context runs (<see cref="DbContextOptionsBuilderExtensions.UseSqlOS(DbContextOptionsBuilder)"/>).</summary>
-    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
-    {
-        base.OnConfiguring(optionsBuilder);
-        optionsBuilder.UseSqlOS();
-    }
+    public IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessible(
+        string resourceId,
+        string subjectIds,
+        string permissionId)
+        => FromExpression(() => IsResourceAccessible(resourceId, subjectIds, permissionId));
 
     protected sealed override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
-        var fga = SqlOSFgaOptionsResolver.Resolve(Database);
-        modelBuilder.UseSqlOS(Database.ProviderName, fga);
+        modelBuilder.UseSqlOS(Database.IsRelational() ? typeof(TContext) : null, Database.ProviderName);
         OnApplicationModelCreating(modelBuilder);
-
-        // Last, so every application entity is configured: the resource id index of each entity with one.
-        SqlOSFgaResourceEntities.Configure(modelBuilder);
     }
 
     /// <summary>

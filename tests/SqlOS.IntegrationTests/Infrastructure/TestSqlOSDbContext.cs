@@ -2,7 +2,6 @@ using Microsoft.EntityFrameworkCore;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.Database;
 using SqlOS.Extensions;
-using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
 
@@ -18,11 +17,11 @@ public sealed class TestSqlOSDbContext : DbContext, ISqlOSAuthServerDbContext, I
         }
     }
 
-    /// <summary>Runs SqlOS's point-check function (<c>fn_IsResourceAccessible</c>) directly: whether any grant reaches the resource.</summary>
-    public Task<bool> FunctionAllowsAsync(string resourceId, string subjectIdsJson, string permissionId)
-        => Set<SqlOSFgaAccessMatch>()
-            .FromSqlRaw(SqlOSDatabase.Resolve(Database).BuildAccessMatchQuerySql(new SqlOSFgaOptions()), resourceId, subjectIdsJson, permissionId)
-            .AnyAsync();
+    public IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessible(
+        string resourceId,
+        string subjectIds,
+        string permissionId)
+        => FromExpression(() => IsResourceAccessible(resourceId, subjectIds, permissionId));
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -31,20 +30,13 @@ public sealed class TestSqlOSDbContext : DbContext, ISqlOSAuthServerDbContext, I
         {
             entity.ToTable("LifecycleProtectedEntities");
             entity.HasKey(item => item.Id);
-            entity.HasIndex(item => item.Rank);
         });
-
-        // Last, after the application's entity: the SqlOS model and the resource id index on LifecycleProtectedEntities.
-        modelBuilder.UseSqlOS(Database.ProviderName);
+        modelBuilder.UseSqlOS(GetType(), Database.ProviderName);
     }
 }
 
 public sealed class LifecycleProtectedEntity : IHasResourceId
 {
-
     public string Id { get; set; } = string.Empty;
     public string ResourceId { get; set; } = string.Empty;
-
-    /// <summary>An order the application pages in.</summary>
-    public int Rank { get; set; }
 }
