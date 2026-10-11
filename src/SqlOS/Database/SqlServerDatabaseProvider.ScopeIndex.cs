@@ -79,13 +79,7 @@ internal sealed partial class SqlServerDatabaseProvider
         return [ddl, rebuild];
     }
 
-    /// <summary>
-    /// Refresh only changed projection values; an ordinary row change never fans out by principal. A plain
-    /// MERGE, not a serializable one (HOLDLOCK): the writers of one key are already serialized by the
-    /// application table's own primary key, and the rebuild runs under the exclusive lineage lock. A
-    /// serializable merge would range-lock the key's neighbourhood until the transaction ends, so a second
-    /// transaction inserting an adjacent key would wait for the first to commit, or deadlock with it.
-    /// </summary>
+    /// <summary>Administrative rebuild under the exclusive lineage lock.</summary>
     private static string ScopeIndexMerge(SqlOSFgaOptions options, SqlOSFgaScopeTable table, string source, bool removeMissing = false)
     {
         var columns = SqlOSFgaScopeIndex.Columns(table).Select(c => c.Column).ToList();
@@ -106,11 +100,19 @@ internal sealed partial class SqlServerDatabaseProvider
             """;
     }
 
-    private static string ScopeIndexRefreshRows(SqlOSFgaOptions options, SqlOSFgaScopeTable table)
-        => ScopeIndexMerge(options, table, $"(SELECT t.* FROM {ScopeTable(table)} t INNER JOIN inserted i ON {string.Join(" AND ", table.KeyColumns.Select(k => $"t.[{Escape(k)}] = i.[{Escape(k)}]"))})");
+    // Ordinary inserts need no upsert: the application's primary key already guarantees a new row.
+    // Read the transition values directly (including computed columns and rowversion), so neither an
+    // application scan nor a MERGE target scan takes locks on unrelated writers' rows.
+    private static string ScopeIndexInsertRows(SqlOSFgaOptions options, SqlOSFgaScopeTable table)
+        => $"""
+            INSERT INTO {ScopeIndexTable(options, table)} ({string.Join(", ", SqlOSFgaScopeIndex.Columns(table).Select(c => $"[{Escape(c.Column)}]"))})
+            SELECT {ScopeIndexSelect(table, SqlOSFgaLineage.Levels(options))}
+            FROM {ScopeIndexSource(options, table, "inserted")};
+            """;
 
+    // Drive deletion from the affected keys, rather than scanning private rows held by other writers.
     private static string ScopeIndexDeleteRows(SqlOSFgaOptions options, SqlOSFgaScopeTable table)
-        => $"DELETE d FROM {ScopeIndexTable(options, table)} d INNER JOIN deleted old ON {string.Join(" AND ", table.KeyColumns.Select(k => $"d.[{Escape(k)}] = old.[{Escape(k)}]"))};";
+        => $"DELETE d FROM deleted old INNER LOOP JOIN {ScopeIndexTable(options, table)} d ON {string.Join(" AND ", table.KeyColumns.Select(k => $"d.[{Escape(k)}] = old.[{Escape(k)}]"))};";
 
     /// <summary>The private scope rows used by a primary-key-correlated authorization predicate.</summary>
     public string BuildScopeIndexQuerySql(SqlOSFgaOptions options, SqlOSFgaScopeTable table)

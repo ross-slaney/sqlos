@@ -118,7 +118,7 @@ public class SqlOSFgaTableShapesIntegrationTests
     }
 
     [TestMethod]
-    public async Task TwoTransactionsInsertingAdjacentRows_DoNotWaitForEachOther()
+    public async Task TwoTransactionsWritingAdjacentRows_DoNotWaitForEachOther()
     {
         await using var host = await HostedApp.StartAsync();
         await using var scope = host.App.Services.CreateAsyncScope();
@@ -126,7 +126,7 @@ public class SqlOSFgaTableShapesIntegrationTests
         await CreateFoldersUsersAndGrantAsync(db);
 
         // The rows' resources exist already, committed: the two transactions below write only the rows, so all
-        // they can wait on is the row triggers' own work, the scope copy and SqlOS's projection of the table.
+        // they can wait on is the row triggers' own work in SqlOS's projection of the table.
         db.Set<SqlOSFgaResource>().AddRange(
             new SqlOSFgaResource { Id = "ticket::k1", ParentId = "folder_a", Name = "k1", ResourceTypeId = TicketType },
             new SqlOSFgaResource { Id = "ticket::k2", ParentId = "folder_a", Name = "k2", ResourceTypeId = TicketType });
@@ -143,13 +143,20 @@ public class SqlOSFgaTableShapesIntegrationTests
         first.Tickets.Add(new ShapeTicket { Id = "k1", ResourceId = "ticket::k1" });
         await first.SaveChangesAsync();
 
-        // A second transaction inserts the adjacent key. A serializable merge into the projection would have
-        // left the first transaction holding a range lock past k1, and this insert would wait for its commit.
+        // A target scan or range lock in projection maintenance must not block an unrelated insert.
         second.Database.SetCommandTimeout(TimeSpan.FromSeconds(10));
         second.Tickets.Add(new ShapeTicket { Id = "k2", ResourceId = "ticket::k2" });
         var insert = () => second.SaveChangesAsync();
         await insert.Should().NotThrowAsync("a writer of one key must not wait on another key's open transaction");
         await open.CommitAsync();
+        await open.DisposeAsync();
+
+        // The same independence is required when indexed values change and entries are replaced.
+        await using var updateTransaction = await first.Database.BeginTransactionAsync();
+        await first.Tickets.Where(t => t.Id == "k1").ExecuteUpdateAsync(s => s.SetProperty(t => t.ResourceId, "folder_b"));
+        var update = () => second.Tickets.Where(t => t.Id == "k2").ExecuteUpdateAsync(s => s.SetProperty(t => t.ResourceId, "folder_b"));
+        await update.Should().NotThrowAsync("updating one private entry must not scan another writer's locked entry");
+        await updateTransaction.CommitAsync();
 
         var (projection, copy, source) = TestDatabase.IsSqlServer
             ? ("Id, ResourceId", "dbo.SqlOSFgaScopeIndex_ShapeTickets ORDER BY Id", "ShapeTickets ORDER BY Id")

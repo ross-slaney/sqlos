@@ -565,7 +565,7 @@ internal sealed partial class SqlServerDatabaseProvider
                 SET NOCOUNT ON;
                 IF NOT EXISTS (SELECT 1 FROM inserted) RETURN;
                 {LineageLock(options, "Shared")}
-                {ScopeIndexRefreshRows(options, table)}
+                {ScopeIndexInsertRows(options, table)}
                 {DirectInsertFromRows(options, table, "inserted")}
             END
             """,
@@ -578,12 +578,10 @@ internal sealed partial class SqlServerDatabaseProvider
                 IF NOT ({anyDirectChange}) RETURN;
                 IF NOT EXISTS (SELECT 1 FROM inserted) RETURN;
                 {LineageLock(options, "Shared")}
-                -- A changed primary key removes the old projection. Resource lineage updates
-                -- maintain private scope directly, without firing this application trigger.
-                DELETE d FROM {ScopeIndexTable(options, table)} d
-                INNER JOIN deleted old ON {string.Join(" AND ", table.KeyColumns.Select(k => $"d.[{Escape(k)}] = old.[{Escape(k)}]"))}
-                WHERE NOT EXISTS (SELECT 1 FROM inserted i WHERE {string.Join(" AND ", table.KeyColumns.Select(k => $"i.[{Escape(k)}] = old.[{Escape(k)}]"))});
-                {ScopeIndexRefreshRows(options, table)}
+                -- Replace only affected entries, including changed keys and exact string spelling.
+                -- Resource lineage updates maintain private scope without firing this trigger.
+                {ScopeIndexDeleteRows(options, table)}
+                {ScopeIndexInsertRows(options, table)}
                 IF {anyDirectChange}
                 BEGIN
                     {DirectDeleteRows(options, table, "deleted")}

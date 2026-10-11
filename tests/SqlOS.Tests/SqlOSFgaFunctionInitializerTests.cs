@@ -222,11 +222,15 @@ public class SqlOSFgaFunctionInitializerTests
         all.Should().Contain("CREATE OR ALTER TRIGGER [app].[TR_Items_SqlOSFgaScope_Delete] ON [app].[Items]");
         all.Should().Contain("[dbo].[SqlOSFgaDirect_app_Items]");
 
-        // The projection is refreshed by a plain MERGE. A serializable (HOLDLOCK) merge would hold a range lock
-        // on the key's neighbourhood until the transaction ends, so a second transaction inserting an adjacent
-        // key would wait for the first to commit, or deadlock with it; the application table's own primary key
-        // already serializes the writers of one key.
-        all.Should().Contain("MERGE [dbo].[SqlOSFgaScopeIndex_app_Items] AS d");
+        // Ordinary writes use the affected transition rows; they do not upsert by scanning the private
+        // target, which could wait on an unrelated writer's key. MERGE is reserved for rebuilds.
+        var rowInsert = batches.Single(b => b.Contains("CREATE OR ALTER TRIGGER [app].[TR_Items_SqlOSFgaScope_Insert]", StringComparison.Ordinal));
+        rowInsert.Should().Contain("INSERT INTO [dbo].[SqlOSFgaScopeIndex_app_Items]");
+        rowInsert.Should().Contain("FROM inserted t LEFT JOIN");
+        rowInsert.Should().NotContain("MERGE");
+        var rowUpdate = batches.Single(b => b.Contains("CREATE OR ALTER TRIGGER [app].[TR_Items_SqlOSFgaScope_Update]", StringComparison.Ordinal));
+        rowUpdate.Should().Contain("DELETE d FROM deleted old INNER LOOP JOIN [dbo].[SqlOSFgaScopeIndex_app_Items] d");
+        rowUpdate.Should().NotContain("MERGE");
         all.Should().NotContain("HOLDLOCK");
 
         // Every maintaining trigger takes the lineage lock for its transaction before reading anything: inserts
