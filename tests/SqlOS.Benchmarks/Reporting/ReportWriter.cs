@@ -51,10 +51,13 @@ internal static class ReportWriter
         }
 
         var showsPlanning = largest.Scenarios.Any(s => s.ServerPlanningMs is not null);
-        text.Append(CultureInfo.InvariantCulture, $" product rows read @ {RetailTree.Count(largest.Products)} | server µs per row |");
+        var size = RetailTree.Count(largest.Products);
+        text.Append(CultureInfo.InvariantCulture, $" filter @ {size} | BuildFilterAsync ms @ {size} | request ms @ {size} | product rows read @ {size} | server µs per row |");
         text.AppendLine(showsPlanning ? " server planning ms |" : "");
         text.Append("|---|---:|");
-        text.Append(string.Concat(Enumerable.Repeat("---:|", steps.Count + (steps.Count > 1 ? 1 : 0) + 2 + (showsPlanning ? 1 : 0))));
+        text.Append(string.Concat(Enumerable.Repeat("---:|", steps.Count + (steps.Count > 1 ? 1 : 0))));
+        text.Append("---|");
+        text.Append(string.Concat(Enumerable.Repeat("---:|", 4 + (showsPlanning ? 1 : 0))));
         text.AppendLine();
 
         foreach (var scenario in largest.Scenarios)
@@ -74,6 +77,7 @@ internal static class ReportWriter
                     : string.Create(CultureInfo.InvariantCulture, $" ×{scenario.MedianMs / baseline.MedianMs:F2} |"));
             }
 
+            text.Append(CultureInfo.InvariantCulture, $" {scenario.Shape ?? "–"} | {(scenario.PrepareMs is { } prepare ? Milliseconds(prepare) : "–")} | {(scenario.RequestMs is { } request ? Milliseconds(request) : "–")} |");
             text.Append(CultureInfo.InvariantCulture, $" {(scenario.RowsExamined is { } rows ? rows.ToString("N0", CultureInfo.InvariantCulture) : "–")} |");
             text.Append(CultureInfo.InvariantCulture, $" {(scenario.MicrosecondsPerRowExamined is { } us ? us.ToString("F1", CultureInfo.InvariantCulture) : "–")} |");
             text.AppendLine(showsPlanning
@@ -82,7 +86,8 @@ internal static class ReportWriter
         }
 
         text.AppendLine();
-        text.AppendLine("Median milliseconds per query as the application sees it, warm cache; every answer is checked against ground truth. Product rows read and server times come from the actual plan of a filter page; a page call runs several statements and reports its own counters below.");
+        text.AppendLine("Median milliseconds per query as the application sees it, warm cache; every answer is checked against ground truth. Product rows read and server times come from the actual plan. "
+            + "BuildFilterAsync resolves the caller and asks fn_ListFirst whether they see fewer rows than the table's cap (8·√rows, at least 1,000): \"list first\" starts the query from those rows, \"row check\" reads the table in order and checks each row; the request is BuildFilterAsync plus the query.");
         if (steps.SelectMany(s => s.Scenarios).Any(s => !s.FullPage && !s.TimedOut))
         {
             text.AppendLine("† Fewer authorized rows than the page asks for exist at this scale, so the engine read to the end of the table; excluded from the scale gate.");
@@ -92,8 +97,6 @@ internal static class ReportWriter
         {
             text.AppendLine("‡ Did not finish within the run's budget for one query; counted at the budget, a lower bound, in every ratio.");
         }
-
-        AppendFilterVersusPage(text, steps);
 
         if (smallest.Density.Count > 0)
         {
@@ -132,7 +135,7 @@ internal static class ReportWriter
             if (maintained.LineageCheck is { } check)
             {
                 text.Append(CultureInfo.InvariantCulture,
-                    $" Rebuilt from scratch by SqlOS in {Seconds(check.RebuildSeconds)}: {(check.Agrees ? "identical to the loaded lineage and scope columns and to those after the maintenance pass (counts and hashes)" : $"DIFFERENT (loaded {check.Loaded}, after maintenance {check.Restored}, rebuilt {check.Rebuilt})")}.");
+                    $" Rebuilt from scratch by SqlOS in {Seconds(check.RebuildSeconds)}: {(check.Agrees ? "identical to the loaded lineage and to that after the maintenance pass (counts and hashes)" : $"DIFFERENT (loaded {check.Loaded}, after maintenance {check.Restored}, rebuilt {check.Rebuilt})")}.");
             }
 
             text.AppendLine();
@@ -144,7 +147,7 @@ internal static class ReportWriter
         foreach (var step in steps)
         {
             text.Append(CultureInfo.InvariantCulture,
-                $" {RetailTree.Count(step.Products)} products / {step.Resources:N0} resources: {Seconds(step.LoadRowsSeconds)} rows + {Seconds(step.LoadIndexesSeconds)} indexes + {Seconds(step.LoadMaintenanceSeconds)} statistics + {Seconds(step.PageIndexSeconds)} grant counts and direct indexes, {step.DatabaseBytes / 1e9:F1} GB ·");
+                $" {RetailTree.Count(step.Products)} products / {step.Resources:N0} resources: {Seconds(step.LoadRowsSeconds)} rows + {Seconds(step.LoadIndexesSeconds)} indexes + {Seconds(step.LoadMaintenanceSeconds)} statistics, {step.DatabaseBytes / 1e9:F1} GB ·");
         }
 
         text.Length -= 2;
@@ -181,57 +184,6 @@ internal static class ReportWriter
         return text.ToString();
     }
 
-    /// <summary>
-    /// The same page both ways, side by side: through <c>BuildFilterAsync</c> and through the page call, with
-    /// what the page call did at the largest scale (round trips, statements, index rows fetched, streams opened).
-    /// </summary>
-    private static void AppendFilterVersusPage(StringBuilder text, IReadOnlyList<ScaleStep> steps)
-    {
-        var largest = steps[^1];
-        var pages = largest.Scenarios.Where(s => s.Kind == "Page").ToList();
-        if (pages.Count == 0)
-        {
-            return;
-        }
-
-        text.AppendLine();
-        text.AppendLine(CultureInfo.InvariantCulture,
-            $"**Filter vs. walk** · the same page over `BuildFilterAsync`'s filter, as one statement the optimizer plans (filter: the page written as a projection ordered after `Select`, the caller's access roots read when it runs) and as the page SqlOS walks (page). Median ms of the query alone per scale; at {RetailTree.Count(largest.Products)}, the whole request (BuildFilterAsync + query) and what each path read before its rows");
-        text.AppendLine();
-        text.Append("| Page | σ |");
-        foreach (var step in steps)
-        {
-            text.Append(CultureInfo.InvariantCulture, $" {RetailTree.Count(step.Products)} filter | {RetailTree.Count(step.Products)} page |");
-        }
-
-        text.AppendLine(" request: filter (prepare + query) · page (prepare + query) | before the rows: filter roots read (ms) · page rounds / statements / rows fetched / streams · ms walk + load |");
-        text.Append("|---|---:|");
-        text.Append(string.Concat(Enumerable.Repeat("---:|", steps.Count * 2)));
-        text.AppendLine("---|---|");
-
-        foreach (var page in pages)
-        {
-            var twinId = "list." + page.Id["page.".Length..];
-            var twin = largest.Scenarios.FirstOrDefault(s => s.Id == twinId);
-            text.Append(CultureInfo.InvariantCulture, $"| {page.Title} | {Selectivity(page.Selectivity)} |");
-            foreach (var step in steps)
-            {
-                text.Append(CultureInfo.InvariantCulture, $" {Cell(step.Scenarios.FirstOrDefault(s => s.Id == twinId))} | {Cell(step.Scenarios.FirstOrDefault(s => s.Id == page.Id))} |");
-            }
-
-            text.Append(CultureInfo.InvariantCulture, $" {Request(twin)} · {Request(page)} |");
-            text.Append(CultureInfo.InvariantCulture, $" {(twin?.RootsFetched is { } roots ? string.Create(CultureInfo.InvariantCulture, $"{roots:N0} roots ({twin.RootsMs:F1} ms)") : "–")} · ");
-            text.AppendLine(page.Rounds is null
-                ? "– |"
-                : string.Create(CultureInfo.InvariantCulture, $"{page.Rounds} / {page.Statements} / {page.RowsFetched:N0} / {page.Streams} · {page.WalkMs:F1} + {page.LoadMs:F1} |"));
-        }
-    }
-
-    private static string Request(ScenarioResult? result)
-        => result is { RequestMs: { } request, PrepareMs: { } prepare } && !result.TimedOut
-            ? string.Create(CultureInfo.InvariantCulture, $"{Milliseconds(request)} ({prepare:F1} + {Milliseconds(result.MedianMs)})")
-            : "–";
-
     private static string Cell(ScenarioResult? result)
     {
         if (result is null)
@@ -248,7 +200,7 @@ internal static class ReportWriter
         return Milliseconds(result.MedianMs) + mark;
     }
 
-    private static bool IsPage(string kind) => kind is "List" or "Page";
+    private static bool IsPage(string kind) => kind is "List";
 
     private static string Selectivity(double value)
         => value >= 0.9999 ? "1"

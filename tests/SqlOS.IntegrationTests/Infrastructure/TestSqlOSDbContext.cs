@@ -34,18 +34,17 @@ public sealed class TestSqlOSDbContext : DbContext, ISqlOSAuthServerDbContext, I
             entity.HasIndex(item => item.Rank);
         });
 
-        // Last, after the application's entity: the SqlOS model and the scope column on LifecycleProtectedEntities.
+        // Last, after the application's entity: the SqlOS model and the resource id index on LifecycleProtectedEntities.
         modelBuilder.UseSqlOS(Database.ProviderName);
     }
 }
 
 public sealed class LifecycleProtectedEntity : IHasResourceId
 {
-    public byte[]? FgaScope { get; private set; }
 
     public string Id { get; set; } = string.Empty;
     public string ResourceId { get; set; } = string.Empty;
 
-    /// <summary>An order the application pages in; SqlOS mirrors its index per level of the scope column.</summary>
+    /// <summary>An order the application pages in.</summary>
     public int Rank { get; set; }
 }

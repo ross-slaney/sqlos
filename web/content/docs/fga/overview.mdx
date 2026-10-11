@@ -14,14 +14,14 @@ order: 0
   FGA is the authorization half of SqlOS. Roles and grants live on resources, child resources inherit access, and EF queries get translated into SQL-backed authorization filters instead of post-processing rows in memory.
 </Banner>
 
-FGA models resources as a tree. You grant roles on a node, and access flows to descendants through active resources. SQL Server or PostgreSQL filters and orders the data; SqlOS coordinates supported pages without loading the whole dataset into application memory.
+FGA models resources as a tree. You grant roles on a node, and access flows to descendants through active resources. SQL Server or PostgreSQL filters, orders and pages the data in one statement; nothing is loaded into application memory to be trimmed there.
 
 ![A team grant on Workspace A reaches Documents A and B. The same document query returns all four documents for a root administrator, A and B for the team, and only D for a guest with a direct grant.](/docs/fga-resource-tree.png)
 
 For a document editor, grant the owner access to a workspace and place their documents beneath it. New documents inherit access without a grant per document. A team → inspection → item hierarchy works the same way. These are access boundaries, not special resource types required by SqlOS.
 
 <Callout type="info" title="Modeling decisions are part of the design">
-  Grant at the highest node that matches the intended access, use groups for shared responsibilities, and keep large subtree moves deliberate. Pages spanning many independently granted branches still pay to discover and merge those branches. Declared indexes trade storage and write maintenance for efficient reads; arbitrary filters and aggregates retain their normal database costs. Read [Designing your resource tree](/docs/fga/designing-your-resource-tree) before choosing your hierarchy.
+  Grant at the highest node that matches the intended access, use groups for shared responsibilities, and keep large subtree moves deliberate. A page costs about the page for a caller who sees most of the table and about the caller's rows for one who sees few; in between, the worst page grows with the square root of the table. A caller granted on many separate branches pays one index range per branch, up to a cap set by the table's size. Filters and aggregates keep their normal database costs. Read [Designing your resource tree](/docs/fga/designing-your-resource-tree) before choosing your hierarchy.
 </Callout>
 
 ## How it works
@@ -70,7 +70,7 @@ Define resources (projects, chains, stores), roles (admin, viewer), and permissi
         .ToListAsync();
     ```
 
-    Users only see rows they may access. This unpaged query uses a SQL predicate over the resource lineage. Add a supported indexed order and `Take` and SqlOS can coordinate an authorized page using several SQL statements; see [Paginating authorized lists](/docs/guides/paginating-authorized-lists).
+    Users only see rows they may access. The filter is a SQL predicate over the resource tree's closure, and the whole query is one statement; add an order and a `Take` for a page. See [Paginating authorized lists](/docs/guides/paginating-authorized-lists).
   </TabsContent>
 
   <TabsContent value="checks">
@@ -95,7 +95,7 @@ Define resources (projects, chains, stores), roles (admin, viewer), and permissi
 
 ## Setup
 
-Derive your context from `SqlOSDbContext<TContext>` (or call `modelBuilder.UseSqlOS(Database.ProviderName)` last in your own `OnModelCreating`), declare `ResourceId` and `FgaScope` on each protected entity, and register SqlOS with your database provider:
+Derive your context from `SqlOSDbContext<TContext>` (or call `modelBuilder.UseSqlOS(Database.ProviderName)` last in your own `OnModelCreating`), declare `ResourceId` on each protected entity, and register SqlOS with your database provider:
 
 ```csharp
 builder.AddSqlOS<AppDbContext>(

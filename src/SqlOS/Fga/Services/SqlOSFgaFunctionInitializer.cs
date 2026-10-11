@@ -14,15 +14,14 @@ using SqlOS.Fga.Interfaces;
 namespace SqlOS.Fga.Services;
 
 /// <summary>
-/// Creates the SHRBAC enforcement routines in the database: the ancestor columns of the configured depth,
-/// <c>fn_ActiveSubjects</c>, <c>fn_AccessRoots</c>, <c>fn_IsResourceAccessible</c>, the routines and triggers
-/// that keep the resource lineage (and the scope column of application tables) exact, and the per-level
-/// indexes of those tables; and drops the ones of tables SqlOS no longer maintains. The definitions' hash is
-/// stored with the schema version, so a startup that finds the same hash, every object present, and nothing
-/// stale changes nothing; a new definition (a new SqlOS version, a changed option, an application table that
-/// is new, renamed, or has a new declared index) is applied under an exclusive lock, one batch per transaction.
-/// Builds the lineage once when it is empty but the resource tree is not. At every start, fills the scope of
-/// the application rows that have none.
+/// Creates the SHRBAC enforcement routines in the database: the ancestor columns of the configured depth
+/// and the index of each level, <c>fn_ActiveSubjects</c>, <c>fn_AccessRoots</c>, <c>fn_ListVisible</c>,
+/// <c>fn_VisibleSet</c>, <c>fn_ListFirst</c>, <c>fn_IsResourceAccessible</c>, <c>fn_CheckRow</c>, and the routines
+/// and triggers that keep the resource lineage exact. The
+/// definitions' hash is stored with the schema version, so a startup that finds the same hash and every
+/// object present changes nothing; a new definition (a new SqlOS version, a changed option) is applied under
+/// an exclusive lock, one batch per transaction. Builds the lineage once when it is empty but the resource
+/// tree is not.
 /// </summary>
 public class SqlOSFgaFunctionInitializer
 {
@@ -49,14 +48,13 @@ public class SqlOSFgaFunctionInitializer
     {
         _logger.LogInformation("Ensuring database functions exist...");
         var provider = SqlOSDatabase.Resolve(_context.Database);
-        var modelTables = ScopeTables();
 
         try
         {
             if (!_context.Database.IsRelational() || _context.Database.CurrentTransaction != null)
             {
                 // Inside a caller's transaction the caller owns the locking.
-                await EnsureAsync(provider, modelTables, cancellationToken);
+                await EnsureAsync(provider, cancellationToken);
                 _logger.LogInformation("Database functions verified.");
                 return;
             }
@@ -73,7 +71,7 @@ public class SqlOSFgaFunctionInitializer
                     await AcquireLockAsync(provider, cancellationToken);
                     try
                     {
-                        await EnsureAsync(provider, modelTables, cancellationToken);
+                        await EnsureAsync(provider, cancellationToken);
                         break;
                     }
                     catch (Exception ex) when (attempt < DeadlockAttempts && SqlOSDatabaseErrors.IsDeadlock(ex))
@@ -103,9 +101,8 @@ public class SqlOSFgaFunctionInitializer
     }
 
     /// <summary>
-    /// Waits for the initializer lock as long as another instance holds it: after an upgrade or a model change it
-    /// may be building indexes or the lineage on a large database for minutes. The host's shutdown token ends
-    /// the wait.
+    /// Waits for the initializer lock as long as another instance holds it: after an upgrade it may be
+    /// building indexes or the lineage on a large database for minutes. The host's shutdown token ends the wait.
     /// </summary>
     private async Task AcquireLockAsync(ISqlOSDatabaseProvider provider, CancellationToken cancellationToken)
     {
@@ -120,75 +117,40 @@ public class SqlOSFgaFunctionInitializer
             {
                 _logger.LogInformation(
                     "Another instance is setting up the SqlOS FGA routines; this instance waits for it to finish. "
-                    + "After an upgrade or a model change it can take minutes on a large database.");
+                    + "After an upgrade it can take minutes on a large database.");
             }
         }
     }
 
-    /// <summary>
-    /// Brings the database in line with the definitions, then fills the scope of rows that have none. Runs
-    /// under the initializer lock.
-    /// </summary>
-    private async Task EnsureAsync(ISqlOSDatabaseProvider provider, IReadOnlyList<SqlOSFgaScopeTable> modelTables, CancellationToken cancellationToken)
+    /// <summary>Brings the database in line with the definitions. Runs under the initializer lock.</summary>
+    private async Task EnsureAsync(ISqlOSDatabaseProvider provider, CancellationToken cancellationToken)
     {
-        // The protected tables whose migration is applied. A table without its scope column (the application runs
-        // SqlOS's bootstrap before its own migrations, as an application with foreign keys to SqlOS's tables must,
-        // or has not added the migration yet) is left for the next start, which finds it ready.
-        var tables = new List<SqlOSFgaScopeTable>();
-        foreach (var table in modelTables)
-        {
-            if (Convert.ToInt32(await ExecuteScalarAsync(provider.BuildScopeTableReadySql(table), null, cancellationToken), CultureInfo.InvariantCulture) == 1)
-            {
-                tables.Add(table);
-            }
-            else
-            {
-                _logger.LogWarning(
-                    "{Table} holds an entity with a resource id but has no {Column} column yet. SqlOS adds its triggers and indexes "
-                    + "at the next start after the migration that adds the column is applied; until then list filters on it fail.",
-                    table.Schema is null ? table.Table : $"{table.Schema}.{table.Table}",
-                    SqlOSFgaLineage.ScopeColumn);
-            }
-        }
-
-        // Dependencies first: the ancestor columns, then fn_ActiveSubjects, then the routines built on them.
-        // Each batch is idempotent (CREATE OR ALTER / CREATE OR REPLACE) and runs in its own transaction, so no
-        // batch holds a schema lock on one object while waiting for another; readers cannot deadlock with the
-        // initializer. Stale objects go before the tables' indexes are ensured.
+        // Dependencies first: the ancestor columns and their indexes, then fn_ActiveSubjects, then the routines
+        // built on them. Each batch is idempotent (CREATE OR ALTER / CREATE OR REPLACE) and runs in its own
+        // transaction, so no batch holds a schema lock on one object while waiting for another; readers cannot
+        // deadlock with the initializer.
         var batches = new List<string>();
         batches.AddRange(provider.BuildEnsureLineageColumnsSql(_options));
         batches.Add(provider.BuildActiveSubjectsFunctionSql(_options));
         batches.Add(provider.BuildAccessRootsFunctionSql(_options));
+        batches.Add(provider.BuildListVisibleFunctionSql(_options));
+        batches.Add(provider.BuildVisibleSetFunctionSql(_options));
+        batches.Add(provider.BuildListFirstFunctionSql(_options));
         batches.Add(provider.BuildIsResourceAccessibleFunctionSql(_options));
-        // The page index (grant counts, direct indexes, grants triggers) before the lineage maintenance: the
-        // scope triggers and the rebuild refer to its tables and routines.
-        batches.AddRange(provider.BuildPageIndexSql(_options, tables));
-        batches.AddRange(provider.BuildLineageMaintenanceSql(_options, tables));
-        batches.Add(provider.BuildScopeCleanupSql(_options, tables));
-        batches.AddRange(provider.BuildEnsureScopeIndexesSql(_options, tables));
+        batches.Add(provider.BuildCheckRowFunctionSql(_options));
+        batches.AddRange(provider.BuildLineageMaintenanceSql(_options));
         var hash = Hash(batches);
 
-        if (!await IsCurrentAsync(provider, tables, hash, cancellationToken))
+        if (!await IsCurrentAsync(provider, hash, cancellationToken))
         {
             await ApplyAsync(provider, batches, hash, cancellationToken);
         }
-
-        // Every start: the rows written while SqlOS's triggers were absent (a bulk load that skipped them, rows
-        // written before a table had them) get their scope. An index seek when there are none.
-        await ExecuteNonQueryAsync(provider.BuildScopeFillSql(_options), cancellationToken);
     }
 
-    /// <summary>The application tables of the context's model that carry the scope column.</summary>
-    private IReadOnlyList<SqlOSFgaScopeTable> ScopeTables()
-        => _context is DbContext db ? SqlOSFgaScopeColumns.Tables(db.Model) : [];
-
-    /// <summary>
-    /// The stored hash matches these definitions, every object they create exists and none is stale, and the
-    /// lineage is built.
-    /// </summary>
-    private async Task<bool> IsCurrentAsync(ISqlOSDatabaseProvider provider, IReadOnlyList<SqlOSFgaScopeTable> scopeTables, string hash, CancellationToken cancellationToken)
+    /// <summary>The stored hash matches these definitions, every object they create exists, and the lineage is built.</summary>
+    private async Task<bool> IsCurrentAsync(ISqlOSDatabaseProvider provider, string hash, CancellationToken cancellationToken)
     {
-        var stored = await ExecuteScalarAsync(provider.BuildSelectRoutinesHashSql(_options, scopeTables), null, cancellationToken) as string;
+        var stored = await ExecuteScalarAsync(provider.BuildSelectRoutinesHashSql(_options), cancellationToken) as string;
         if (!string.Equals(stored, hash, StringComparison.Ordinal))
         {
             return false;
@@ -203,25 +165,18 @@ public class SqlOSFgaFunctionInitializer
         string hash,
         CancellationToken cancellationToken)
     {
-        _logger.LogDebug("Creating or updating the FGA routines, the resource lineage columns, and the lineage triggers...");
+        _logger.LogDebug("Creating or updating the FGA routines, the resource lineage columns and indexes, and the lineage triggers...");
         foreach (var batch in batches)
         {
-            await _context.Database.ExecuteSqlRawAsync(batch, cancellationToken);
+            // Without a timeout: an index over a large resources table takes minutes.
+            await ExecuteNonQueryAsync(batch, cancellationToken);
         }
 
         _logger.LogInformation("The SqlOS FGA routines, triggers, and indexes are ready.");
 
         if (await LineageNeedsBuildAsync(provider, cancellationToken))
         {
-            // The rebuild fills the scope columns of every application table as well, and the page index.
             await BuildLineageAsync(provider, cancellationToken);
-        }
-        else
-        {
-            // A new definition (a new table, order or version) rebuilds the grant counts and the direct
-            // indexes from the grants and the rows: seconds, proportional to the grants.
-            _logger.LogInformation("Rebuilding the FGA grant counts and direct indexes...");
-            await ExecuteNonQueryAsync(provider.BuildPageIndexRebuildSql(_options), cancellationToken);
         }
 
         // Stored last: a rebuild that fails part-way (its ranges commit one by one) leaves the hash behind, so
@@ -239,7 +194,7 @@ public class SqlOSFgaFunctionInitializer
     /// </summary>
     private async Task<bool> LineageNeedsBuildAsync(ISqlOSDatabaseProvider provider, CancellationToken cancellationToken)
     {
-        var value = await ExecuteScalarAsync(provider.BuildLineageNeedsBuildSql(_options), null, cancellationToken);
+        var value = await ExecuteScalarAsync(provider.BuildLineageNeedsBuildSql(_options), cancellationToken);
         return Convert.ToInt32(value, CultureInfo.InvariantCulture) == 1;
     }
 
@@ -250,18 +205,13 @@ public class SqlOSFgaFunctionInitializer
         _logger.LogInformation("FGA resource lineage built.");
     }
 
-    private async Task<object?> ExecuteScalarAsync(string sql, DbParameter? parameter, CancellationToken cancellationToken)
+    private async Task<object?> ExecuteScalarAsync(string sql, CancellationToken cancellationToken)
     {
         var (connection, wasOpen) = await OpenAsync(cancellationToken);
         try
         {
             using var command = connection.CreateCommand();
             command.CommandText = sql;
-            if (parameter is not null)
-            {
-                command.Parameters.Add(parameter);
-            }
-
             Enlist(command);
             var value = await command.ExecuteScalarAsync(cancellationToken);
             return value is DBNull ? null : value;
@@ -330,4 +280,10 @@ public class SqlOSFgaFunctionInitializer
 
     internal static string BuildAccessRootsFunctionSql(SqlOSFgaOptions options)
         => SqlServerDatabaseProvider.Instance.BuildAccessRootsFunctionSql(options);
+
+    internal static string BuildListVisibleFunctionSql(SqlOSFgaOptions options)
+        => SqlServerDatabaseProvider.Instance.BuildListVisibleFunctionSql(options);
+
+    internal static string BuildListFirstFunctionSql(SqlOSFgaOptions options)
+        => SqlServerDatabaseProvider.Instance.BuildListFirstFunctionSql(options);
 }

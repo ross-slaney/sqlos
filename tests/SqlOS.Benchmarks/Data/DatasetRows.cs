@@ -4,9 +4,8 @@ namespace SqlOS.Benchmarks.Data;
 
 /// <summary>
 /// Rows for the bulk loaders, in the column order of <see cref="Columns"/>. The loaders write the lineage of
-/// every resource (depth, reach, and the ancestor at each level) and the scope value of every product
-/// themselves, so the dataset loads without firing the triggers; the first scale checks the result against
-/// SqlOS's own rebuild.
+/// every resource (depth, reach, and the ancestor at each level) themselves, so the dataset loads without
+/// firing the triggers; the first scale checks the result against SqlOS's own rebuild.
 /// </summary>
 internal static class DatasetRows
 {
@@ -25,11 +24,9 @@ internal static class DatasetRows
             .. Enumerable.Range(0, Levels).Select(level => (SqlOSFgaLineage.AncestorColumn(level), typeof(long))),
         ];
 
-        /// <summary>The product columns, with the scope column in the engine's type (<c>byte[]</c> on SQL Server, <c>long?[]</c> on PostgreSQL).</summary>
-        public static (string Name, Type Type)[] Products(Type scopeType) =>
+        public static readonly (string Name, Type Type)[] Products =
         [
             ("Id", typeof(int)), ("StoreId", typeof(int)), ("ResourceId", typeof(string)), ("Name", typeof(string)), ("Price", typeof(decimal)),
-            (SqlOSFgaLineage.ScopeColumn, scopeType),
         ];
 
         public static readonly (string Name, Type Type)[] Stores =
@@ -98,27 +95,13 @@ internal static class DatasetRows
         }
     }
 
-    /// <summary>
-    /// The catalog rows for products <c>(from, to]</c>, in ascending id order, with their scope value: every
-    /// product is active under active ancestors, so access flows from every level of its lineage (reach 0).
-    /// <paramref name="encode"/> builds the engine's value from the depth, the type, and the ancestor at each
-    /// level (<c>SqlOSFgaScope.Encode</c> or <c>EncodeArray</c>).
-    /// </summary>
-    public static IEnumerable<object?[]> Products(RetailTree tree, int productTypeSeq, long from, long to, Func<int, int, long?[], object> encode)
+    /// <summary>The catalog rows for products <c>(from, to]</c>, in ascending id order.</summary>
+    public static IEnumerable<object?[]> Products(RetailTree tree, long from, long to)
     {
         for (var id = from + 1; id <= to; id++)
         {
             var leaf = tree.LeafOf(id);
-            var row = new object?[6];
-            row[0] = (int)id;
-            row[1] = leaf.StoreId;
-            row[2] = RetailTree.ProductResourceId(id);
-            row[3] = ProductName(id);
-            row[4] = Price(id);
-            var ancestors = new object?[Levels];
-            WriteAncestors(ancestors, 0, leaf, tree.ProductSeq(id));
-            row[5] = encode(leaf.AncestorSeqs.Length, productTypeSeq, ancestors.Select(a => (long?)a).ToArray());
-            yield return row;
+            yield return [(int)id, leaf.StoreId, RetailTree.ProductResourceId(id), ProductName(id), Price(id)];
         }
     }
 

@@ -1,16 +1,17 @@
 name: Benchmarks
 
-# SHRBAC list filtering and point checks on the shipped schema, the resource lineage, the scope column, and
-# fn_IsResourceAccessible, one job per engine, beside Pull Request CI. See tests/SqlOS.Benchmarks/README.md.
+# SHRBAC list filtering and point checks on the shipped schema: the resource lineage with its per-level
+# indexes, fn_ListFirst, fn_VisibleSet, fn_ListVisible and fn_IsResourceAccessible, one job per engine,
+# beside Pull Request CI. See tests/SqlOS.Benchmarks/README.md.
 #
 # Two tiers:
 # - CI (every pull request push, merge to main, weekly): the catalog grows 100K -> 1M, about 15 minutes per
 #   engine.
 # - Full (1M -> 10M -> 50M, about two hours on SQL Server): only when the `benchmark-full` label is added to a
 #   pull request. It runs once per labelling, and later pushes run the CI tier; remove and re-add the label
-#   to run it again. A manual run can ask for any scales. 50M is the largest scale that fits a standard
-#   runner's disk with the per-level indexes. Every query has a budget (600 s): a page that exceeds it is
-#   reported as "> 600 s" and counted at the budget, a lower bound.
+#   to run it again. A manual run can ask for any scales; one that asks for 10M or more gets the full tier's
+#   time and disk. 50M is the largest scale that fits a standard runner's disk. Every query has a budget
+#   (600 s): a page that exceeds it is reported as "> 600 s" and counted at the budget, a lower bound.
 # Standard runners are free for public repositories.
 
 on:
@@ -43,8 +44,8 @@ concurrency:
 
 env:
   DOTNET_VERSION: "10.0.x"
-  # The full tier: the moment `benchmark-full` is added to a pull request, or a manual run that asks for 50M.
-  FULL_RUN: ${{ (github.event.action == 'labeled' && github.event.label.name == 'benchmark-full') || (github.event_name == 'workflow_dispatch' && contains(inputs.scales, '50m')) }}
+  # The full tier: the moment `benchmark-full` is added to a pull request, or a manual run that asks for 10M or 50M.
+  FULL_RUN: ${{ (github.event.action == 'labeled' && github.event.label.name == 'benchmark-full') || (github.event_name == 'workflow_dispatch' && (contains(inputs.scales, '10m') || contains(inputs.scales, '50m'))) }}
 
 jobs:
   benchmark:
@@ -52,7 +53,7 @@ jobs:
     # Adding some other label to a pull request should not re-run the benchmarks.
     if: github.event.action != 'labeled' || github.event.label.name == 'benchmark-full'
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ ((github.event.action == 'labeled' && github.event.label.name == 'benchmark-full') || (github.event_name == 'workflow_dispatch' && contains(inputs.scales, '50m'))) && 170 || 45 }}
+    timeout-minutes: ${{ ((github.event.action == 'labeled' && github.event.label.name == 'benchmark-full') || (github.event_name == 'workflow_dispatch' && (contains(inputs.scales, '10m') || contains(inputs.scales, '50m')))) && 170 || 45 }}
     strategy:
       fail-fast: false
       matrix:

@@ -7,10 +7,10 @@ namespace SqlOS.Fga.Extensions;
 public static class ModelBuilderExtensions
 {
     /// <summary>
-    /// Applies the SqlOS FGA entity model (without the auth server's) and configures the <c>FgaScope</c>
-    /// column of every application entity that implements <c>IHasResourceId</c>. Call it last in
-    /// <c>OnModelCreating</c>, after your own entities. Most applications call <c>UseSqlOS</c>, which applies
-    /// this and the auth server model, or derive from <c>SqlOSDbContext&lt;TContext&gt;</c>, which calls it.
+    /// Applies the SqlOS FGA entity model (without the auth server's) and indexes the resource id of every
+    /// application entity that implements <c>IHasResourceId</c>. Call it last in <c>OnModelCreating</c>,
+    /// after your own entities. Most applications call <c>UseSqlOS</c>, which applies this and the auth
+    /// server model, or derive from <c>SqlOSDbContext&lt;TContext&gt;</c>, which calls it.
     /// </summary>
     /// <example>
     /// modelBuilder.ApplySqlOSFgaModel();
@@ -23,7 +23,7 @@ public static class ModelBuilderExtensions
         configure?.Invoke(options);
 
         SqlOSFgaModelConfiguration.Configure(modelBuilder, options);
-        SqlOSFgaScopeColumns.Configure(modelBuilder, options);
+        SqlOSFgaResourceEntities.Configure(modelBuilder);
 
         return modelBuilder;
     }

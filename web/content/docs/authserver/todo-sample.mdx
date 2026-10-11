@@ -86,7 +86,7 @@ Role and permission matrix:
 
 The app grants `tenant_owner` on the user tenant node. Child Todo resources inherit access from that node, so the sample can:
 
-- list Todos as authorized pages: `Where(filter)` from `BuildFilterAsync`, a keyset cursor, the order and `Take` (cursor and page size in the query string), which SqlOS walks;
+- list Todos as authorized pages: `Where(filter)` from `BuildFilterAsync`, a keyset cursor, the order and `Take` (cursor and page size in the query string), one statement the database plans;
 - authorize create against the tenant node;
 - authorize toggle and delete against each Todo resource.
 

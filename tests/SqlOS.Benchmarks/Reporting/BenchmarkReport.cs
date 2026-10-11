@@ -66,9 +66,6 @@ internal sealed record ScaleStep(
     long DatabaseBytes,
     IReadOnlyList<ScenarioResult> Scenarios)
 {
-    /// <summary>Rebuilding the grant counts and the direct indexes after the load, as SqlOS does at every start.</summary>
-    public double PageIndexSeconds { get; init; }
-
     /// <summary>The grant-density pass (first scale only): the same scenarios with others' grants on the root.</summary>
     public IReadOnlyList<ScenarioResult> Density { get; init; } = [];
 
@@ -80,10 +77,10 @@ internal sealed record ScaleStep(
 }
 
 /// <summary>
-/// Three views of the lineage and the scope columns that must agree: as the loader generated them from the
-/// dataset, after the maintenance pass put every row back, and as SqlOS rebuilds them from the resource tree
-/// alone. Each is a row count and an order-independent hash over every column, so equal counts and hashes
-/// mean the same values in every row.
+/// Three views of the lineage that must agree: as the loader generated it from the dataset, after the
+/// maintenance pass put every row back, and as SqlOS rebuilds it from the resource tree alone. Each is a row
+/// count and an order-independent hash over every column, so equal counts and hashes mean the same values in
+/// every row.
 /// </summary>
 internal sealed record LineageCheck(
     string Loaded,

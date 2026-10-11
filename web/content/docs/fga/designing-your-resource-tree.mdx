@@ -31,7 +31,7 @@ A resource has one parent. Choose the parent for **permission inheritance**, not
 
 ## Grant at the highest node that matches the intended access
 
-One workspace grant can cover its current and future documents. It is easier to administer than creating a grant for every document, and the page executor can read that authorized branch through its index.
+One workspace grant can cover its current and future documents. It is easier to administer than creating a grant for every document, and SqlOS finds every document beneath it in one range of one index.
 
 “Highest” is relative to the access you mean to give. A department reviewer should receive a department grant, not a root grant. A collaborator who may read one document should receive a document grant, not a workspace grant. **Do not broaden access just to reduce the number of grants.**
 
@@ -54,43 +54,43 @@ var documents = await db.Documents
 
 The same query serves the three callers in the diagram. It needs no `OwnerId == subjectId` or `TenantId == tenantId` condition to discover their authorized documents. Add a workspace or tenant condition when the **screen itself** is scoped there; it is a product filter, not a replacement for authorization. Authentication still happens at the request boundary, and writes still need the appropriate permission check.
 
-For this compound order, declare the matching EF index, for example `HasIndex(d => new { d.Name, d.Id })`. Keep the returned authorization expression as its own `Where`; compose other conditions in additional `Where` calls. Ask for one extra row to detect another page, and use a keyset cursor for subsequent pages. [Paginating authorized lists](/docs/guides/paginating-authorized-lists) explains the supported query shapes and cursor forms.
+For this compound order, declare the matching EF index, for example `HasIndex(d => new { d.Name, d.Id })`. Compose other conditions in additional `Where` calls. Ask for one extra row to detect another page, and use a keyset cursor for subsequent pages. [Paginating authorized lists](/docs/guides/paginating-authorized-lists) explains the query shapes and cursor forms.
 
 ## The performance tradeoff is part of the model
 
-SqlOS maintains ancestry and indexes so a supported page can find authorized branches without first loading every grant or walking the entire application table looking for allowed rows. It trades extra database storage, write maintenance, and several coordinated SQL statements for that ability.
+SqlOS keeps the tree's closure on its own resources table: every resource's ancestor at each level, with one index per level. Before a list runs, SqlOS asks the database how many rows this caller sees, counted up to a cap that grows with the square root of the table. A caller below the cap has their rows listed first, from their grants, and sorted. A caller at or above it has the table read in the page's order, each row checked, until the page is full. So a page costs about the caller's rows for one who sees few and about the page for one who sees most of the table. [List filtering](/docs/fga/list-filter#what-determines-query-cost) gives the cost of each.
 
 | Design choice | What you gain | What still costs work |
 | --- | --- | --- |
-| A workspace or department grant | One grant covers a growing branch; adding descendants does not require a grant for each one | Tree navigation, index lookups, and the rows the query needs |
-| Grants on many independent branches | Correct global ordering across everything the caller may access | Discovering and merging those branches, even when a page is small or empty |
-| Grants on individual resources | Direct-grant indexes stream those rows in a supported order without listing all grants first | Principal and role streams, query predicates, and maintaining the direct entries |
-| A group grant | Shared access without a grant for every member | Resolving memberships; the group's independent branches still contribute work |
-| Declared page indexes | SQL can seek into each branch in the requested order | Index storage and write maintenance multiply with hierarchy depth and declared orders |
-| Ordinary EF composition | One `BuildFilterAsync` API for pages, counts, joins, and reports | These query shapes do not all use the optimized page executor |
+| A workspace or department grant | One grant covers a growing branch; adding descendants does not require a grant for each one | The rows beneath the grant when they are few; when they are many, the rows read in the page's order until the page is full |
+| Grants on many independent branches | Correct global ordering across everything the caller may access | Below the cap, one index range per branch and a sort of their rows, on every page; above it, each row checked |
+| Grants on individual resources | Share one document without widening the workspace grant | One index read per grant, inside the database, up to the cap |
+| A group grant | Shared access without a grant for every member | Resolving memberships; the group's branches cost what the caller's own would |
+| A declared index for the page's order | When rows are checked, the database seeks to the cursor and reads forward | Index storage and maintenance, as for any index you declare |
+| Ordinary EF composition | One `BuildFilterAsync` API for pages, counts, joins, and reports | A count or a join reads every visible row, which for a caller who sees many rows means the whole table; a page reads the caller's rows, or reads in order until it is full |
 
-The remaining branch cost belongs to **this caller's access**, including their groups. It is not a scan of every unrelated row in the database. A manager of one department and a collaborator on thousands of separately granted projects can therefore have different page costs even when they see the same number of records. Later pages and empty results can still need to visit those branches; a cursor does not automatically eliminate them.
+The cost belongs to **this caller's access**, including their groups, and to the page; it is not a scan of every unrelated row in the database. A manager of one department and a collaborator on thousands of separately granted projects can have different page costs even when they see the same number of records. The worst page is a caller who sees about the cap's worth of rows, where the two ways cost about the same; it grows with the square root of the table, not with the table.
 
-This is not a guarantee that every query costs only its page size. Database filters, joins, sorting, and aggregates keep their normal costs. Even an indexed page can examine many authorized candidates if an additional filter is poorly served by its index. Current optimized pages require a supported order backed by a declared index, with all sort columns in the same direction. Other valid EF query shapes use the authorization predicate; that path resolves the caller's access roots and lets the database plan the query.
+One case is worse. A caller who sees many rows, all at the far end of the page's order (a customer who has added nothing for years, listing their rows newest first), has every row before theirs read and checked. Only an index on your table ordered by who can see each row, then by the sort column, would avoid that, and SqlOS puts nothing on your tables. When the screen is scoped to that customer, a condition on your own column with an index that leads with it does the job; see [List filtering](/docs/fga/list-filter#what-determines-query-cost).
+
+Database filters, joins, sorting, and aggregates keep their normal costs. A page over a condition the sort index cannot narrow examines more candidates than it returns, as any EF query would.
 
 ## What SqlOS maintains for you
 
-Your application keeps ordinary tables and relationships, with `ResourceId` and the managed `FgaScope` column on protected entities. SqlOS owns the supporting lineage, per-level indexes, grant counts, direct-grant tables, and their triggers. There is no private copy of every visible row for every caller, and no index for every possible sorting permutation. Indexes follow the orders declared in your model.
-
-The page executor runs in the application and coordinates SQL statements. It holds candidate keys and sort values for the current page, then sends unused candidates back to the database to merge with newly fetched candidates. **The database applies filtering and ordering, including its own collation and type rules.** This uses temporary application RAM and network traffic proportional to the active streams and their buffered candidates, not a copy of the entire table. The buffer is discarded after the page; later requests start fresh.
+Your application keeps ordinary tables and relationships, with a `ResourceId` column and an index on it on each protected entity. SqlOS owns its resources table with the closure (`Seq`, `Depth`, `Reach`, one ancestor column per level), one index per level, the functions the filter reads, and the two triggers that keep the closure exact. Nothing of SqlOS's is on your tables. There is no private copy of every visible row for every caller, and no index for every possible sorting permutation; the indexes on your tables are the ones you declare.
 
 | Operation | Maintenance to account for |
 | --- | --- |
-| Add a resource or protected row | Derive its ancestry/scope and maintain the relevant indexes. Rows attached directly to a granted resource also create direct-index entries for those grants. Inherited workspace access does not create an entry per workspace member. |
-| Change an indexed sort value or a row's resource | Update the row's indexes and matching direct-grant entries. Many separate direct grants on that resource can make this a larger write. |
-| Grant, revoke, or change a grant | Adjust counts along the resource's ancestry and maintain direct entries for rows attached to that resource. This is not a per-descendant grant expansion. |
-| Move, deactivate, or reactivate a branch | Refresh affected descendant lineage/scopes and direct entries, and rebuild counts for affected principals. Large changes can block concurrent writes; schedule large reorganizations accordingly. |
-| A scheduled grant opens or expires | Refresh affected principals' counts. A page can perform an overdue refresh before walking, so that request may do more work. |
-| Add protected tables/indexes or upgrade supporting structures | Startup may build indexes and rebuild derived state. Plan for this work on a large database. |
+| Add a resource or protected row | One resources row, its closure computed from its parent; your row is an ordinary insert |
+| Change a sort value or a row's resource | An ordinary row update; nothing of SqlOS's changes |
+| Grant, revoke, or change a grant | One grants row; no lineage work. The next query sees it |
+| Move, deactivate, or reactivate a branch | Recompute the closure of the subtree beneath it, under a lock that other tree changes wait for; schedule large reorganizations accordingly |
+| A scheduled grant opens or expires | Nothing; the dates are read when a query runs |
+| Raise `MaxResourceHierarchyDepth`, or upgrade | Startup adds the ancestor columns and their indexes once; on a large resources table that takes minutes, once |
 
-Keep the hierarchy stable when possible. Changing a document's title is an ordinary row update; moving a large department beneath another organization changes inherited access and can affect its entire subtree. Treat those as different operations in your product design. Do not bypass SqlOS's maintenance triggers during bulk changes without following the documented rebuild procedure.
+Keep the hierarchy stable when possible. Changing a document's title is an ordinary row update; moving a large department beneath another organization changes inherited access and rewrites the closure of its entire subtree. Treat those as different operations in your product design. A bulk load of resources that bypasses the triggers must run the rebuild procedure afterwards; see [Resource hierarchy](/docs/fga/resource-hierarchy#the-lineage).
 
-For production, exercise the access patterns your application actually creates: one broad grant, sparse individual shares, several independent workspaces, later cursors, and empty results. The `SqlOS.Fga` logs expose page rounds, fetched candidates, and retained candidates, and explain failures to plan a recognized page shape. These help distinguish authorization traversal from the normal cost of a query's filters and indexes.
+For production, exercise the access patterns your application actually creates: one broad grant, sparse individual shares, several independent workspaces, later cursors, and empty results, and read the plans the database runs for them, as you would for any query. `tests/SqlOS.Benchmarks` does this for the shipped schema on both engines.
 
 ## Next steps
 

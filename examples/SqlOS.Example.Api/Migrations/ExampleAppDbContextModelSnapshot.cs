@@ -3631,10 +3631,6 @@ namespace SqlOS.Example.Api.Migrations
                     b.Property<string>("Description")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<byte[]>("FgaScope")
-                        .HasMaxLength(512)
-                        .HasColumnType("varbinary(512)");
-
                     b.Property<string>("HeadquartersAddress")
                         .HasColumnType("nvarchar(max)");
 
@@ -3657,14 +3653,7 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.HasIndex(new[] { "ResourceId" }, "IX_Chains_SqlOSFgaResourceId");
 
-                    b.ToTable("Chains", t =>
-                        {
-                            t.HasTrigger("TR_Chains_SqlOSFgaScope_Insert");
-
-                            t.HasTrigger("TR_Chains_SqlOSFgaScope_Update");
-                        });
-
-                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                    b.ToTable("Chains");
                 });
 
             modelBuilder.Entity("SqlOS.Example.Api.FgaRetail.Models.InventoryItem", b =>
@@ -3677,10 +3666,6 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.Property<string>("Description")
                         .HasColumnType("nvarchar(max)");
-
-                    b.Property<byte[]>("FgaScope")
-                        .HasMaxLength(512)
-                        .HasColumnType("varbinary(512)");
 
                     b.Property<string>("LocationId")
                         .IsRequired()
@@ -3718,14 +3703,7 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.HasIndex(new[] { "ResourceId" }, "IX_InventoryItems_SqlOSFgaResourceId");
 
-                    b.ToTable("InventoryItems", t =>
-                        {
-                            t.HasTrigger("TR_InventoryItems_SqlOSFgaScope_Insert");
-
-                            t.HasTrigger("TR_InventoryItems_SqlOSFgaScope_Update");
-                        });
-
-                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                    b.ToTable("InventoryItems");
                 });
 
             modelBuilder.Entity("SqlOS.Example.Api.FgaRetail.Models.Location", b =>
@@ -3745,10 +3723,6 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
-
-                    b.Property<byte[]>("FgaScope")
-                        .HasMaxLength(512)
-                        .HasColumnType("varbinary(512)");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -3780,14 +3754,7 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.HasIndex(new[] { "ResourceId" }, "IX_Locations_SqlOSFgaResourceId");
 
-                    b.ToTable("Locations", t =>
-                        {
-                            t.HasTrigger("TR_Locations_SqlOSFgaScope_Insert");
-
-                            t.HasTrigger("TR_Locations_SqlOSFgaScope_Update");
-                        });
-
-                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                    b.ToTable("Locations");
                 });
 
             modelBuilder.Entity("SqlOS.Example.Api.Models.ExampleUserProfile", b =>
@@ -3847,10 +3814,6 @@ namespace SqlOS.Example.Api.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
-                    b.Property<byte[]>("FgaScope")
-                        .HasMaxLength(512)
-                        .HasColumnType("varbinary(512)");
-
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -3874,14 +3837,7 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.HasIndex(new[] { "ResourceId" }, "IX_Workspaces_SqlOSFgaResourceId");
 
-                    b.ToTable("Workspaces", t =>
-                        {
-                            t.HasTrigger("TR_Workspaces_SqlOSFgaScope_Insert");
-
-                            t.HasTrigger("TR_Workspaces_SqlOSFgaScope_Update");
-                        });
-
-                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                    b.ToTable("Workspaces");
                 });
 
             modelBuilder.Entity("SqlOS.Fga.Models.SqlOSFgaAccessMatch", b =>
@@ -3903,19 +3859,6 @@ namespace SqlOS.Example.Api.Migrations
                     b.Property<string>("SubjectId")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
-
-                    b.ToTable((string)null);
-
-                    b.ToView(null, (string)null);
-                });
-
-            modelBuilder.Entity("SqlOS.Fga.Models.SqlOSFgaAccessRoot", b =>
-                {
-                    b.Property<short>("Depth")
-                        .HasColumnType("smallint");
-
-                    b.Property<long>("ResourceSeq")
-                        .HasColumnType("bigint");
 
                     b.ToTable((string)null);
 
@@ -4112,8 +4055,6 @@ namespace SqlOS.Example.Api.Migrations
                     b.ToTable("SqlOSFgaResources", "dbo", t =>
                         {
                             t.ExcludeFromMigrations();
-
-                            t.HasTrigger("TR_SqlOSFgaResources_Lineage_Delete");
 
                             t.HasTrigger("TR_SqlOSFgaResources_Lineage_Insert");
 
@@ -4409,6 +4350,17 @@ namespace SqlOS.Example.Api.Migrations
                         {
                             t.ExcludeFromMigrations();
                         });
+                });
+
+            modelBuilder.Entity("SqlOS.Fga.Models.SqlOSFgaVisibleResource", b =>
+                {
+                    b.Property<string>("ResourceId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.ToTable((string)null);
+
+                    b.ToView(null, (string)null);
                 });
 
             modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSApplicationAssignment", b =>

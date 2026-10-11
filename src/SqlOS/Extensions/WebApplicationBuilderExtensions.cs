@@ -57,6 +57,7 @@ public static class WebApplicationBuilderExtensions
         builder.Services.AddDbContext<TContext>(options =>
         {
             configureDbContext(options);
+            options.UseSqlOS();
             // Npgsql caches DateTime mappings on first use. Enable the UTC timestamp
             // compatibility switch only after this callback selects UseNpgsql.
             SqlOSDatabase.EnablePostgreSqlTimestampCompatibilityIfNeeded(options);

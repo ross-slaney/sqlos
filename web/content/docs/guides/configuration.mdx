@@ -80,7 +80,6 @@ public sealed class Workspace : ISqlOSResourceEntity
 {
     public Guid Id { get; set; }
     public string ResourceId { get; set; } = string.Empty;
-    public byte[]? FgaScope { get; private set; }
     public string Name { get; set; } = string.Empty;
 
     public string ResourceTypeId => "workspace";
@@ -212,7 +211,7 @@ Hosted auth and dashboard HTML use a restrictive nonce-based Content Security Po
 
 SqlOS runs its own SQL scripts on startup. Your EF migrations **do not** own SqlOS tables. If you need SqlOS tables before your migrations, call `SqlOSBootstrapper.InitializeAsync()` once first.
 
-Your migrations own your tables, including the `FgaScope` column of protected entities. On those tables SqlOS keeps its own triggers and per-level indexes, created at startup. See [Set up FGA](/docs/fga/setup).
+Your migrations own your tables, and SqlOS puts nothing on them. A protected entity needs a `ResourceId` column and an index on it; SqlOS adds the index to the EF model when you declared none, so your migration creates it. Everything else the filter reads is on SqlOS's own tables. See [Set up FGA](/docs/fga/setup).
 
 ## Dashboard paths
 
