@@ -57,7 +57,7 @@ WHERE EXISTS (
     FROM [dbo].fn_CheckRow(t.ResourceId, @SubjectIds, @PermissionId))
 ```
 
-The database reads your table in the query's own order and runs the point check on each row it reads, until the page is full. `fn_CheckRow` is the point check, `fn_IsResourceAccessible`, under a name of SqlOS's own (so your model may map `fn_IsResourceAccessible` too); it is the check [`CheckAccessAsync`](/docs/fga/checking-a-permission) runs: for the row's resource it reads the ancestors from the resource's reach down (at most `MaxResourceHierarchyDepth + 1` of them), and for each looks for a current grant to one of the caller's live subjects whose role includes the permission. It finds those grants with one index seek per ancestor and subject, so it reads neither the caller's other grants nor other people's grants on the same ancestors: its cost depends on neither.
+The database reads your table in the query's own order and runs the point check on each row it reads, until the page is full. `fn_CheckRow` is the point check, `fn_IsResourceAccessible`, under a name of SqlOS's own (so your model may map `fn_IsResourceAccessible` too); it is the check [`CheckAccessAsync`](/docs/fga/checking-a-permission) runs: for the row's resource it reads the ancestors from the resource's reach down (at most `MaxResourceHierarchyDepth + 1` of them), and for each looks for a current grant to one of the caller's live subjects whose role includes the permission. It finds the caller's grants on each of those ancestors with one exact index seek per live subject, so its cost depends neither on how many grants the caller holds nor on how many other people hold grants on the same ancestors.
 
 Both filters are exact. Both are one `EXISTS` in your query, both compose with any LINQ (an order, a keyset, `Take`, `Count`, joins, `ExecuteUpdate`, `ExecuteDelete`), and neither needs anything on your table but `ResourceId` and its index. Their parameters are the caller's live subject ids (as JSON), the permission, and `@TypeId`, the permission's resource type (NULL for a permission without one). The database reads the grants when the statement runs.
 
@@ -116,7 +116,7 @@ The row count behind the cap is the one the database keeps in its catalog for yo
 
 Two triggers on the resources table (after insert, after update of `ParentId` or `IsActive`) keep the closure exact; [Resource hierarchy](/docs/fga/resource-hierarchy#the-lineage) lists what each change costs. A retype or a delete changes no lineage.
 
-The grants table carries `ResourceSubjectHash`, a hash of each grant's resource id and subject id, with an index on it. The point check seeks it once per ancestor and live subject, then compares the ids (two pairs may share a hash), so it never reads other people's grants on the same ancestor. On a node where every member of an organization holds a grant, each check still reads only the caller's. On SQL Server the hash is `CHECKSUM`, which gives ids the column's collation calls equal the same value, so a grant whose ids differ from the caller's only in case is still found.
+Each grant also carries `ResourceSeq`, its resource's `Seq`, which a trigger on the grants table copies when the grant is written (a resource's `Seq` never changes). The point check reads the ancestors' `Seq`s from the lineage and seeks the index on `(ResourceSeq, SubjectId)` once per ancestor and live subject. It never reads other people's grants: on a node where every member of an organization holds a grant, a check costs the same as on a node with one.
 
 ## How a page runs
 

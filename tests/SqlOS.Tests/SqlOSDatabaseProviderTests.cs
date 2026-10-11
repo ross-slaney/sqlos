@@ -92,12 +92,11 @@ public class SqlOSDatabaseProviderTests
         sql.Should().Contain("(7, x.\"Ancestor7\")) AS lv(\"Level\", \"Seq\")");
         sql.Should().NotContain("Ancestor8");
         sql.Should().Contain("lv.\"Level\" >= x.\"Reach\"");
-        // One seek per ancestor and live subject, by the pair's hash alone (OFFSET 0: PostgreSQL does not move the
-        // id comparisons into the subquery and read the ancestor's grants by resource), then the ids decide.
+        // One exact seek per ancestor and live subject on (ResourceSeq, SubjectId); OFFSET 0 keeps it a seek, not
+        // a read of every grant on the ancestor.
         sql.Should().Contain("CROSS JOIN LATERAL unnest(ARRAY(SELECT live.\"SubjectId\" FROM \"dbo\".\"fn_ActiveSubjects\"(p_subject_ids) live)) AS s(\"SubjectId\")");
-        sql.Should().Contain("WHERE g.\"ResourceSubjectHash\" = hashtextextended(a.\"Id\", hashtextextended(s.\"SubjectId\", 0))\n    OFFSET 0\n) g");
-        sql.Should().Contain("AND g.\"ResourceId\" = a.\"Id\"\n  AND g.\"SubjectId\" = s.\"SubjectId\"");
-        sql.Should().NotContain("= ANY (ARRAY(SELECT live.");
+        sql.Should().Contain("WHERE g.\"ResourceSeq\" = lv.\"Seq\" AND g.\"SubjectId\" = s.\"SubjectId\"\n    OFFSET 0\n) g");
+        sql.Should().Contain("SELECT g.\"ResourceId\", g.\"Id\", g.\"SubjectId\", g.\"RoleId\", lv.\"Level\"");
         sql.Should().Contain("permission.\"ResourceTypeId\" IS NULL OR permission.\"ResourceTypeId\" = x.\"ResourceTypeId\"");
     }
 
@@ -181,6 +180,9 @@ public class SqlOSDatabaseProviderTests
         all.Should().Contain("AFTER INSERT ON \"ten\"\"ant\".\"res\"\"ources\"\n    REFERENCING NEW TABLE AS new_rows\n    FOR EACH STATEMENT");
         all.Should().Contain("AFTER UPDATE ON \"ten\"\"ant\".\"res\"\"ources\"\n    REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows");
         all.Should().NotContain("AFTER DELETE", "a resource with children cannot be deleted, and a leaf is in no other row's lineage");
+        all.Should().Contain("BEFORE INSERT OR UPDATE OF \"ResourceId\" ON \"ten\"\"ant\".\"SqlOSFgaGrants\"\n    FOR EACH ROW EXECUTE FUNCTION \"ten\"\"ant\".\"fn_SqlOSFgaGrants_ResourceSeq\"();");
+        all.Should().Contain("NEW.\"ResourceSeq\" := (SELECT r.\"Seq\" FROM \"ten\"\"ant\".\"res\"\"ources\" r WHERE r.\"Id\" = NEW.\"ResourceId\");");
+        all.Should().Contain("WHERE r.\"Id\" = g.\"ResourceId\" AND g.\"ResourceSeq\" IS DISTINCT FROM r.\"Seq\";", "the rebuild refreshes the grants' copy too");
         all.Should().Contain("WHERE \"Steps\" > 4");
         all.Should().Contain("p.\"Depth\" = 4");
         all.Should().Contain("USING ERRCODE = 'SQ012'");
@@ -203,6 +205,8 @@ public class SqlOSDatabaseProviderTests
         hash.Should().Contain("p.proname = 'fn_CheckRow'");
         hash.Should().Contain("p.proname = 'fn_res\"ources_LineageRebuild'");
         hash.Should().Contain("t.tgname = 'TR_res\"ources_Lineage_Update'");
+        hash.Should().Contain("c.relname = 'SqlOSFgaGrants' AND t.tgname = 'TR_SqlOSFgaGrants_ResourceSeq'");
+        hash.Should().Contain("p.proname = 'fn_SqlOSFgaGrants_ResourceSeq'");
         hash.Should().Contain("column_name = 'Ancestor4'");
         hash.Should().Contain("indexname IN ('IX_res\"ources_Ancestor0', 'IX_res\"ources_Ancestor1', 'IX_res\"ources_Ancestor2', 'IX_res\"ources_Ancestor3', 'IX_res\"ources_Ancestor4')) = 5");
     }

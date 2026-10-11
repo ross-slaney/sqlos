@@ -30,13 +30,12 @@ public class SqlOSFgaFunctionInitializerTests
         sql.Should().Contain("lv.[Level] >= x.Reach");
         sql.Should().Contain("x.Reach IS NOT NULL");
 
-        // The grant is sought once per ancestor and live subject, by the pair's hash alone (under a TOP, so the
-        // optimizer cannot read the ancestor's grants by resource instead), then the ids are compared: never the
-        // caller's whole grant list, never every grant other subjects hold on the ancestor.
+        // The grant is sought by the ancestor's Seq and one live subject, exactly, under a TOP: never by the
+        // caller's whole grant list, never by reading every grant other people hold on the ancestor.
         sql.Should().Contain("CROSS JOIN [dbo].fn_ActiveSubjects(@SubjectIds) s");
-        sql.Should().Contain("SELECT TOP (9223372036854775807) g.Id, g.ResourceId, g.SubjectId, g.RoleId, g.EffectiveFrom, g.EffectiveTo\n        FROM [dbo].[SqlOSFgaGrants] g\n        WHERE g.ResourceSubjectHash = CHECKSUM(a.Id, s.SubjectId)\n    ) g");
-        sql.Should().Contain("AND g.ResourceId = a.Id\n      AND g.SubjectId = s.SubjectId");
-        sql.Should().NotContain("HASHBYTES");
+        sql.Should().Contain("SELECT TOP (9223372036854775807) g.Id, g.ResourceId, g.SubjectId, g.RoleId, g.EffectiveFrom, g.EffectiveTo\n        FROM [dbo].[SqlOSFgaGrants] g\n        WHERE g.ResourceSeq = lv.Seq AND g.SubjectId = s.SubjectId\n    ) g");
+        sql.Should().Contain("SELECT TOP 1 g.ResourceId AS Id, g.Id AS GrantId");
+        sql.Should().NotContain("a.Seq = lv.Seq", "the grant names its ancestor; no resource is read to find it");
         sql.Should().Contain("rp.PermissionId = @PermissionId");
         sql.Should().Contain("permission.ResourceTypeId IS NULL OR permission.ResourceTypeId = x.ResourceTypeId");
         sql.Should().Contain("g.EffectiveFrom <= GETUTCDATE()");
@@ -182,12 +181,17 @@ public class SqlOSFgaFunctionInitializerTests
         rebuild.Should().Contain("SET [LineageBuilt] = 0");
         rebuild.Should().Contain("SET [LineageBuilt] = 1");
 
-        // Two triggers, on the resources table, and none anywhere else: a deleted resource is a leaf (a parent
-        // cannot be deleted) and in no other row's lineage.
+        // Two triggers on the resources table, and one on the grants table that copies a grant's resource Seq;
+        // none on delete: a deleted resource is a leaf (a parent cannot be deleted) and in no other row's lineage.
         all.Should().Contain("CREATE OR ALTER TRIGGER [dbo].[TR_SqlOSFgaResources_Lineage_Insert] ON [dbo].[SqlOSFgaResources]");
         all.Should().Contain("CREATE OR ALTER TRIGGER [dbo].[TR_SqlOSFgaResources_Lineage_Update] ON [dbo].[SqlOSFgaResources]");
         all.Should().NotContain("AFTER DELETE");
-        System.Text.RegularExpressions.Regex.Matches(all, "CREATE OR ALTER TRIGGER").Count.Should().Be(2);
+        System.Text.RegularExpressions.Regex.Matches(all, "CREATE OR ALTER TRIGGER").Count.Should().Be(3);
+        var grant = batches.Single(b => b.Contains("CREATE OR ALTER TRIGGER [dbo].[TR_SqlOSFgaGrants_ResourceSeq] ON [dbo].[SqlOSFgaGrants]", StringComparison.Ordinal));
+        grant.Should().Contain("AFTER INSERT, UPDATE");
+        grant.Should().Contain("IF NOT UPDATE(ResourceId) RETURN;");
+        grant.Should().Contain("UPDATE g SET ResourceSeq = r.Seq\n    FROM [dbo].[SqlOSFgaGrants] g\n    INNER JOIN inserted i ON i.Id = g.Id\n    INNER JOIN [dbo].[SqlOSFgaResources] r ON r.Id = g.ResourceId;");
+        rebuild.Should().Contain("WHERE g.ResourceSeq IS NULL OR g.ResourceSeq <> r.Seq;", "the rebuild refreshes the grants' copy too");
 
         // The depth guards: a chain climbing past the limit, or a child of a row at the deepest level.
         all.Should().Contain("WHERE Steps > 4");
@@ -255,6 +259,7 @@ public class SqlOSFgaFunctionInitializerTests
         hash.Should().Contain("OBJECT_ID(N'[ten''ant].[TR_res]]ources_Lineage_Insert]', N'TR') IS NOT NULL");
         hash.Should().Contain("OBJECT_ID(N'[ten''ant].[TR_res]]ources_Lineage_Update]', N'TR') IS NOT NULL");
         hash.Should().NotContain("Lineage_Delete");
+        hash.Should().Contain("OBJECT_ID(N'[ten''ant].[TR_SqlOSFgaGrants_ResourceSeq]', N'TR') IS NOT NULL");
         hash.Should().Contain("COL_LENGTH('[ten''ant].[res]]ources]', 'Ancestor3') IS NOT NULL");
         hash.Should().Contain("(SELECT COUNT(*) FROM sys.indexes WHERE object_id = OBJECT_ID(N'[ten''ant].[res]]ources]') AND name IN (N'IX_res]ources_Ancestor0', N'IX_res]ources_Ancestor1', N'IX_res]ources_Ancestor2', N'IX_res]ources_Ancestor3')) = 4");
         hash.Should().NotContain("FgaScope");
@@ -271,7 +276,9 @@ public class SqlOSFgaFunctionInitializerTests
 
         resources.GetDeclaredTriggers().Select(t => t.GetDatabaseName())
             .Should().BeEquivalentTo(SqlOSFgaLineage.TriggerNames("SqlOSFgaResources"));
-        context.Model.FindEntityType(typeof(SqlOSFgaGrant))!.GetDeclaredTriggers().Should().BeEmpty("a grant changes no stored structure; the filter reads grants when it runs");
+        var grants = context.Model.FindEntityType(typeof(SqlOSFgaGrant))!;
+        grants.GetDeclaredTriggers().Select(t => t.GetDatabaseName()).Should().BeEquivalentTo([SqlOSFgaLineage.GrantTriggerName("SqlOSFgaGrants")]);
+        grants.FindProperty(SqlOSFgaLineage.GrantResourceSeqColumn).Should().BeNull("the trigger keeps the grant's copy of its resource's Seq");
 
         // Only SqlOS's SQL routines read the lineage, so the model leaves it out and does not depend on the
         // configured depth: nothing in an application's model or migrations changes when the depth does.

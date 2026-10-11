@@ -287,6 +287,7 @@ internal sealed partial class SqlServerDatabaseProvider
         var refresh = $"[{schema}].[sp_{Escape(SqlOSFgaLineage.RefreshRoutineName(options.TableNames.Resources))}]";
         var rebuild = $"[{schema}].[sp_{Escape(SqlOSFgaLineage.RebuildRoutineName(options.TableNames.Resources))}]";
         var triggers = SqlOSFgaLineage.TriggerNames(options.TableNames.Resources);
+        var grants = $"[{schema}].[{Escape(options.TableNames.Grants)}]";
         var levels = SqlOSFgaLineage.Levels(options);
         var maxLevel = (levels - 1).ToString(CultureInfo.InvariantCulture);
         var malformed = $"THROW {MalformedError}, 'SqlOS FGA: the change would create a cycle, or place a resource deeper than the configured maximum hierarchy depth of {maxLevel}.', 1;";
@@ -490,6 +491,12 @@ internal sealed partial class SqlServerDatabaseProvider
                   AND NOT EXISTS (SELECT 1 FROM #SqlOSLineageNodes n WHERE n.Id = r.Id);
                 """)}
                 DROP TABLE #SqlOSLineageNodes;
+
+                -- 3. The grants' copy of their resource's Seq, which the point check seeks.
+                UPDATE g SET ResourceSeq = r.Seq
+                FROM {grants} g
+                INNER JOIN {resources} r ON r.Id = g.ResourceId
+                WHERE g.ResourceSeq IS NULL OR g.ResourceSeq <> r.Seq;
                 UPDATE [{schema}].[SqlOSFgaSchema] SET [LineageBuilt] = 1;
                 """)}
             END
@@ -534,7 +541,24 @@ internal sealed partial class SqlServerDatabaseProvider
             END
             """;
 
-        return [refreshProcedure, rebuildProcedure, insertTrigger, updateTrigger];
+        // A grant carries its resource's Seq (schema v16), which never changes, so only a grant's own write
+        // sets it. UPDATE() is true for every column of an insert; an update that leaves ResourceId alone
+        // returns at once.
+        var grantTrigger = $"""
+            CREATE OR ALTER TRIGGER [{schema}].[{Escape(SqlOSFgaLineage.GrantTriggerName(options.TableNames.Grants))}] ON {grants}
+            AFTER INSERT, UPDATE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF NOT UPDATE(ResourceId) RETURN;
+                UPDATE g SET ResourceSeq = r.Seq
+                FROM {grants} g
+                INNER JOIN inserted i ON i.Id = g.Id
+                INNER JOIN {resources} r ON r.Id = g.ResourceId;
+            END
+            """;
+
+        return [refreshProcedure, rebuildProcedure, insertTrigger, updateTrigger, grantTrigger];
     }
 
     /// <summary>Returns 1 until a rebuild has finished every range (see <c>LineageBuilt</c>).</summary>
@@ -608,6 +632,7 @@ internal sealed partial class SqlServerDatabaseProvider
             Exists("sp_" + SqlOSFgaLineage.RebuildRoutineName(resourcesTable), "P"),
         };
         conditions.AddRange(SqlOSFgaLineage.TriggerNames(resourcesTable).Select(t => Exists(t, "TR")));
+        conditions.Add(Exists(SqlOSFgaLineage.GrantTriggerName(options.TableNames.Grants), "TR"));
         conditions.Add($"COL_LENGTH('{SqlLiteral(resources)}', '{SqlOSFgaLineage.AncestorColumn(SqlOSFgaLineage.MaxLevel(options))}') IS NOT NULL");
         conditions.Add($"(SELECT COUNT(*) FROM sys.indexes WHERE object_id = OBJECT_ID(N'{SqlLiteral(resources)}') AND name IN ({string.Join(", ", indexes.Select(n => $"N'{SqlLiteral(n)}'"))})) = {indexes.Count.ToString(CultureInfo.InvariantCulture)}");
 

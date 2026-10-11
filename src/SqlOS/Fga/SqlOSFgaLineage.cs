@@ -65,6 +65,19 @@ internal static class SqlOSFgaLineage
     public static IReadOnlyList<string> TriggerNames(string resourcesTable)
         => [$"TR_{resourcesTable}_Lineage_Insert", $"TR_{resourcesTable}_Lineage_Update"];
 
+    /// <summary>
+    /// The grants' copy of their resource's <see cref="SeqColumn"/> (schema v16). The point check seeks a
+    /// subject's grants on an ancestor by (ancestor's Seq, subject id), so it reads only the caller's grants
+    /// there, however many other people hold grants on the same resource. A resource's Seq never changes.
+    /// </summary>
+    public const string GrantResourceSeqColumn = "ResourceSeq";
+
+    /// <summary>The index the point check seeks: (<see cref="GrantResourceSeqColumn"/>, SubjectId).</summary>
+    public static string GrantLookupIndexName(string grantsTable) => $"IX_{grantsTable}_ResourceSeq_SubjectId";
+
+    /// <summary>The trigger that fills <see cref="GrantResourceSeqColumn"/> when a grant is written.</summary>
+    public static string GrantTriggerName(string grantsTable) => $"TR_{grantsTable}_ResourceSeq";
+
     public static string RefreshRoutineName(string resourcesTable) => $"{resourcesTable}_LineageRefresh";
 
     public static string RebuildRoutineName(string resourcesTable) => $"{resourcesTable}_LineageRebuild";

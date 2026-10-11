@@ -259,6 +259,9 @@ internal sealed partial class PostgreSqlDatabaseProvider
         var onInsert = Qualify(options.Schema, $"fn_{resourcesTable}_LineageOnInsert");
         var onUpdate = Qualify(options.Schema, $"fn_{resourcesTable}_LineageOnUpdate");
         var triggers = SqlOSFgaLineage.TriggerNames(resourcesTable);
+        var grantsTable = options.TableNames.Grants;
+        var grants = Qualify(options.Schema, grantsTable);
+        var onGrant = Qualify(options.Schema, $"fn_{grantsTable}_ResourceSeq");
         var levels = SqlOSFgaLineage.Levels(options);
         var maxLevel = (levels - 1).ToString(CultureInfo.InvariantCulture);
         var malformed = $"RAISE EXCEPTION 'SqlOS FGA: the change would create a cycle, or place a resource deeper than the configured maximum hierarchy depth of {maxLevel}.' USING ERRCODE = '{MalformedErrorCode}';";
@@ -458,6 +461,11 @@ internal sealed partial class PostgreSqlDatabaseProvider
                   AND NOT EXISTS (SELECT 1 FROM {nodes} n WHERE n."Id" = r."Id");
 
                 DROP TABLE {nodes};
+
+                -- 3. The grants' copy of their resource's Seq, which the point check seeks.
+                UPDATE {grants} g SET "ResourceSeq" = r."Seq"
+                FROM {resources} r
+                WHERE r."Id" = g."ResourceId" AND g."ResourceSeq" IS DISTINCT FROM r."Seq";
                 UPDATE {Qualify(options.Schema, "SqlOSFgaSchema")} SET "LineageBuilt" = true;
             END
             $sqlos$;
@@ -562,7 +570,27 @@ internal sealed partial class PostgreSqlDatabaseProvider
                 FOR EACH STATEMENT EXECUTE FUNCTION {onUpdate}();
             """;
 
-        return [refreshFunction, rebuildFunction, insertFunction, updateFunction, resourceTriggers];
+        // A grant carries its resource's Seq (schema v16), which never changes, so only a grant's own write
+        // sets it: before the row is stored, so the grant is written once.
+        var grantFunction = $"""
+            CREATE OR REPLACE FUNCTION {onGrant}()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $sqlos$
+            BEGIN
+                NEW."ResourceSeq" := (SELECT r."Seq" FROM {resources} r WHERE r."Id" = NEW."ResourceId");
+                RETURN NEW;
+            END
+            $sqlos$;
+            """;
+
+        var grantTrigger = $"""
+            CREATE OR REPLACE TRIGGER {QuoteIdentifier(SqlOSFgaLineage.GrantTriggerName(grantsTable))}
+                BEFORE INSERT OR UPDATE OF "ResourceId" ON {grants}
+                FOR EACH ROW EXECUTE FUNCTION {onGrant}();
+            """;
+
+        return [refreshFunction, rebuildFunction, insertFunction, updateFunction, resourceTriggers, grantFunction, grantTrigger];
     }
 
     public string BuildLineageNeedsBuildSql(SqlOSFgaOptions options)
@@ -588,8 +616,8 @@ internal sealed partial class PostgreSqlDatabaseProvider
         var resourcesTable = options.TableNames.Resources;
         string Routine(string name)
             => $"EXISTS (SELECT 1 FROM pg_proc p INNER JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = '{schema}' AND p.proname = '{SqlLiteral(name)}')";
-        string Trigger(string name)
-            => $"EXISTS (SELECT 1 FROM pg_trigger t INNER JOIN pg_class c ON c.oid = t.tgrelid INNER JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = '{schema}' AND c.relname = '{SqlLiteral(resourcesTable)}' AND t.tgname = '{SqlLiteral(name)}' AND NOT t.tgisinternal)";
+        string Trigger(string table, string name)
+            => $"EXISTS (SELECT 1 FROM pg_trigger t INNER JOIN pg_class c ON c.oid = t.tgrelid INNER JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = '{schema}' AND c.relname = '{SqlLiteral(table)}' AND t.tgname = '{SqlLiteral(name)}' AND NOT t.tgisinternal)";
         string Column(string column)
             => $"EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = '{schema}' AND table_name = '{SqlLiteral(resourcesTable)}' AND column_name = '{SqlLiteral(column)}')";
 
@@ -607,7 +635,9 @@ internal sealed partial class PostgreSqlDatabaseProvider
             Routine("fn_" + SqlOSFgaLineage.RebuildRoutineName(resourcesTable)),
             Column(SqlOSFgaLineage.AncestorColumn(SqlOSFgaLineage.MaxLevel(options))),
         };
-        conditions.AddRange(SqlOSFgaLineage.TriggerNames(resourcesTable).Select(Trigger));
+        conditions.AddRange(SqlOSFgaLineage.TriggerNames(resourcesTable).Select(t => Trigger(resourcesTable, t)));
+        conditions.Add(Routine($"fn_{options.TableNames.Grants}_ResourceSeq"));
+        conditions.Add(Trigger(options.TableNames.Grants, SqlOSFgaLineage.GrantTriggerName(options.TableNames.Grants)));
         conditions.Add(
             $"(SELECT count(*) FROM pg_indexes WHERE schemaname = '{schema}' AND tablename = '{SqlLiteral(resourcesTable)}' AND indexname IN ({string.Join(", ", indexes.Select(n => $"'{SqlLiteral(n)}'"))})) = {indexes.Count.ToString(CultureInfo.InvariantCulture)}");
 

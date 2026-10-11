@@ -106,7 +106,15 @@ public static class SqlOSFgaModelConfiguration
         // Grant
         modelBuilder.Entity<SqlOSFgaGrant>(entity =>
         {
-            entity.ToTable(tables.Grants, schema, t => t.ExcludeFromMigrations());
+            entity.ToTable(tables.Grants, schema, t =>
+            {
+                t.ExcludeFromMigrations();
+
+                // The trigger that copies the resource's Seq onto the grant (SqlOSFgaFunctionInitializer),
+                // declared for the same reason as the lineage triggers. The column is the database's and is
+                // left out of the model.
+                t.HasTrigger(SqlOSFgaLineage.GrantTriggerName(tables.Grants));
+            });
             entity.HasKey(e => e.Id);
             entity.HasOne(e => e.Subject)
                 .WithMany(s => s.Grants)

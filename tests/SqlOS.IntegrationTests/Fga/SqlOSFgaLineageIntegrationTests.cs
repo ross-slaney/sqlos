@@ -287,6 +287,53 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
     }
 
     [TestMethod]
+    public async Task AGrant_CarriesItsResourcesSeq_WhenWritten_WhenMoved_AndAfterARebuild()
+    {
+        // The point check seeks a subject's grants on an ancestor by (ResourceSeq, SubjectId), so a grant must
+        // carry its resource's Seq however it was written, and the rebuild must restore a copy that was lost.
+        var ids = await CreateChainAsync("grantseq", "agency", "team");
+        var grantId = $"grant_seq_{Guid.NewGuid():N}";
+        try
+        {
+            Context.ChangeTracker.Clear();
+            Context.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant
+            {
+                Id = grantId,
+                SubjectId = FgaTestDataSeeder.AgencyMemberSubjectId,
+                ResourceId = ids[0],
+                RoleId = FgaTestDataSeeder.AgencyMemberRoleId,
+            });
+            await Context.SaveChangesAsync();
+            Context.ChangeTracker.Clear();
+            (await GrantResourceSeqAsync(grantId)).Should().Be(await ResourceSeqAsync(ids[0]), "the trigger copies it when the grant is written");
+
+            await Context.Database.ExecuteSqlRawAsync(
+                TestDatabase.Rewrite("UPDATE [dbo].[SqlOSFgaGrants] SET [ResourceId] = {0} WHERE [Id] = {1}"), ids[1], grantId);
+            (await GrantResourceSeqAsync(grantId)).Should().Be(await ResourceSeqAsync(ids[1]), "it follows a grant moved to another resource");
+
+            await Context.Database.ExecuteSqlRawAsync(
+                TestDatabase.Rewrite("UPDATE [dbo].[SqlOSFgaGrants] SET [ResourceSeq] = NULL WHERE [Id] = {0}"), grantId);
+            await Context.Database.ExecuteSqlRawAsync(TestDatabase.IsPostgreSql
+                ? "SELECT \"dbo\".\"fn_SqlOSFgaResources_LineageRebuild\"()"
+                : "EXEC [dbo].[sp_SqlOSFgaResources_LineageRebuild]");
+            (await GrantResourceSeqAsync(grantId)).Should().Be(await ResourceSeqAsync(ids[1]), "the rebuild restores it");
+        }
+        finally
+        {
+            await Context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("DELETE FROM [dbo].[SqlOSFgaGrants] WHERE [Id] = {0}"), grantId);
+            await DeleteAsync(ids);
+        }
+    }
+
+    private static Task<long?> GrantResourceSeqAsync(string grantId)
+        => Context.Database.SqlQueryRaw<long?>(
+            TestDatabase.Rewrite("SELECT [ResourceSeq] AS [Value] FROM [dbo].[SqlOSFgaGrants] WHERE [Id] = {0}"), grantId).SingleAsync();
+
+    private static Task<long?> ResourceSeqAsync(string resourceId)
+        => Context.Database.SqlQueryRaw<long?>(
+            TestDatabase.Rewrite("SELECT [Seq] AS [Value] FROM [dbo].[SqlOSFgaResources] WHERE [Id] = {0}"), resourceId).SingleAsync();
+
+    [TestMethod]
     public async Task WholeTable_SatisfiesTheInvariant()
     {
         // Everything the other suites left behind, checked against the walk-up definition.
