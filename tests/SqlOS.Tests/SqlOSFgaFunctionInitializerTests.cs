@@ -102,7 +102,7 @@ public class SqlOSFgaFunctionInitializerTests
         var sql = SqlServerDatabaseProvider.Instance.BuildEnsureScopeIndexesSql(options, [scope]).Single();
 
         // The rows that have no scope yet, which keeps the fill an index seek.
-        sql.Should().Contain("CREATE NONCLUSTERED INDEX [IX_Items_FgaScopeMissing] ON [app].[Items] ([ResourceId]) WHERE [FgaScope] IS NULL;");
+        sql.Should().Contain("CREATE NONCLUSTERED INDEX [SqlOSFgaScopeIndex_app_Items_ResourceId] ON [dbo].[SqlOSFgaScopeIndex_app_Items] ([ResourceId]) INCLUDE ([FgaScope]);");
 
         // Per level 0..2: a computed column over the level's eight bytes, the key index and the Price mirror on
         // it, filtered on the depth byte so a level no row reaches costs nothing.
@@ -127,7 +127,7 @@ public class SqlOSFgaFunctionInitializerTests
     }
 
     [TestMethod]
-    public void ScopeIndexQuery_ReadsTheScopeFromTheProjection_AndEveryOtherColumnFromTheRow()
+    public void ScopeIndexQuery_ReadsScopeAndTheExistingRowKey()
     {
         var options = new SqlOSFgaOptions();
         var scope = new SqlOSFgaScopeTable("app", "Items", "ResourceId", ["Id"], [new SqlOSFgaScopeOrder("Price", ["Price", "Id"])],
@@ -137,10 +137,10 @@ public class SqlOSFgaFunctionInitializerTests
 
         // The projection decides which rows are visible (its per-level indexes serve the predicate on the
         // scope); what the application sees, keys and order columns included, is the row's.
-        sql.Should().Contain("s.[FgaScope] AS [FgaScope]");
-        sql.Should().Contain("a.[Id] AS [Id]").And.Contain("a.[Price] AS [Price]").And.Contain("a.[Name] AS [Name]");
-        sql.Should().NotContain("s.[Id] AS").And.NotContain("s.[Price]");
-        sql.Should().Contain("FROM [dbo].[SqlOSFgaScopeIndex_app_Items] s").And.Contain("INNER JOIN [app].[Items] a ON a.[Id] = s.[Id]");
+        sql.Should().Contain("s.[Id] AS [ScopeKey0]");
+        sql.Should().Contain("s.[ResourceId] AS [ResourceId]").And.Contain("s.[FgaScope]");
+        sql.Should().Contain("FROM [dbo].[SqlOSFgaScopeIndex_app_Items] s");
+        sql.Should().NotContain("JOIN", "the application query correlates the private scope by its existing primary key");
     }
 
     [TestMethod]
@@ -154,7 +154,7 @@ public class SqlOSFgaFunctionInitializerTests
         sql.Should().Contain("tr.name LIKE N'TR[_]%[_]SqlOSFgaScope[_]%'");
         sql.Should().Contain("tr.parent_id = ISNULL(OBJECT_ID(N'[app].[Items]'), 0) AND tr.name IN (N'TR_Items_SqlOSFgaScope_Insert', N'TR_Items_SqlOSFgaScope_Update', N'TR_Items_SqlOSFgaScope_Delete')");
         sql.Should().Contain("i.name LIKE N'IX[_]%[_]FgaScope[0-9]%' OR i.name LIKE N'IX[_]%[_]FgaScopeMissing'");
-        sql.Should().Contain("i.name IN (N'IX_Items_FgaScope0', N'IX_Items_FgaScope0_Price', N'IX_Items_FgaScope1', N'IX_Items_FgaScope1_Price')");
+        sql.Should().Contain("i.name IN (N'IX_Items_FgaScope0', N'IX_Items_FgaScope0_Price', N'IX_Items_FgaScope1', N'IX_Items_FgaScope1_Price', N'SqlOSFgaScopeIndex_app_Items_ResourceId')");
         sql.Should().Contain("st.name LIKE N'ST[_]%[_]FgaScopeType'");
         sql.Should().Contain("c.name LIKE N'FgaScope[0-9]%' OR c.name = N'FgaScopeType'");
         sql.Should().Contain("DROP COLUMN");
@@ -217,8 +217,8 @@ public class SqlOSFgaFunctionInitializerTests
         // The row triggers: the scope follows a changed resource id; the direct index (rows granted on their
         // own resource, with the key and every declared order's columns) follows any change to those columns
         // and every delete.
-        all.Should().Contain("IF NOT (UPDATE([Id]) OR UPDATE([ResourceId]) OR UPDATE([FgaScope])) RETURN;");
-        all.Should().Contain("IF UPDATE([ResourceId])");
+        all.Should().Contain("IF NOT (UPDATE([Id]) OR UPDATE([ResourceId])) RETURN;");
+        all.Should().Contain("r.Id = t.[ResourceId]", "private scope is derived from the resource on each relevant write");
         all.Should().Contain("CREATE OR ALTER TRIGGER [app].[TR_Items_SqlOSFgaScope_Delete] ON [app].[Items]");
         all.Should().Contain("[dbo].[SqlOSFgaDirect_app_Items]");
 
@@ -290,7 +290,7 @@ public class SqlOSFgaFunctionInitializerTests
         hash.Should().Contain("OBJECT_ID(N'[ten''ant].[sp_res]]ources_ScopeFill]', N'P') IS NOT NULL");
         hash.Should().Contain("(SELECT COUNT(*) FROM sys.triggers WHERE parent_id = ISNULL(OBJECT_ID(N'[app].[Items]'), 0) AND name IN (N'TR_Items_SqlOSFgaScope_Insert', N'TR_Items_SqlOSFgaScope_Update', N'TR_Items_SqlOSFgaScope_Delete')) = 3");
         hash.Should().Contain("(SELECT COUNT(*) FROM sys.indexes WHERE object_id = ISNULL(OBJECT_ID(N'[ten''ant].[SqlOSFgaScopeIndex_app_Items]'), 0) AND name IN (");
-        hash.Should().Contain("N'IX_Items_FgaScope3')) = 4", "levels 0..3 live on the private projection");
+        hash.Should().Contain("N'IX_Items_FgaScope3', N'SqlOSFgaScopeIndex_app_Items_ResourceId')) = 5", "levels 0..3 live on the private projection");
         hash.Should().Contain("NOT EXISTS (SELECT N'DROP TRIGGER '", "nothing stale anywhere");
         hash.Should().Contain("COL_LENGTH('[ten''ant].[res]]ources]', 'Ancestor3') IS NOT NULL");
     }

@@ -725,7 +725,8 @@ internal sealed partial class PostgreSqlDatabaseProvider
     /// </summary>
     private string RowTest(SqlOSFgaOptions options, SqlOSFgaPageSpec spec, int level, int levels)
     {
-        var scope = $"{spec.Alias}.{QuoteIdentifier(SqlOSFgaLineage.ScopeColumn)}";
+        var scopeAlias = spec.PredicateSql is null ? spec.Alias : "sqlos_scope";
+        var scope = $"{scopeAlias}.{QuoteIdentifier(SqlOSFgaLineage.ScopeColumn)}";
         var type = spec.Typed ? $"SUBSTRING({scope}, {SqlOSFgaLineage.ScopeTypeOffset}, 4) = @Type AND " : "";
         if (level + 1 >= levels)
         {

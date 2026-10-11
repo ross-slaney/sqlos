@@ -166,6 +166,8 @@ public class SqlOSFgaUnindexedOrderInterceptorTests
                 item.HasIndex(i => i.PlacedAt);
             });
             modelBuilder.UseSqlOS(SqlOSDatabase.SqlServerProviderName, new SqlOSFgaOptions());
+            // This isolated predicate fixture represents the private scope index, not an application table.
+            modelBuilder.Entity<Item>().Property(i => i.FgaScope);
         }
     }
 

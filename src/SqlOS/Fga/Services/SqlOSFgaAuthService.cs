@@ -456,11 +456,11 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
     {
         var model = (_context as DbContext)?.Model;
         var entityType = model?.FindEntityType(typeof(T));
-        if (model != null && entityType?.FindProperty(SqlOSFgaLineage.ScopeColumn) == null)
+        if (model != null && entityType?.FindProperty(nameof(IHasResourceId.ResourceId)) == null)
         {
             throw new InvalidOperationException(
                 $"{typeof(T).Name} is not a protected entity of {_context.GetType().Name}, the DbContext registered with SqlOS. "
-                + "Map it in that context, so SqlOS keeps its FgaScope column current; list filters only work on its entities.");
+                + "Map it in that context, so SqlOS maintains its authorization indexes; list filters only work on its entities.");
         }
     }
 

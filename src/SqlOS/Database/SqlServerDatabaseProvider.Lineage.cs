@@ -179,7 +179,7 @@ internal sealed partial class SqlServerDatabaseProvider
             {
                 sql.AppendLine(CultureInfo.InvariantCulture, $"""
                     UPDATE t SET {ScopeAssignment(levels, "r", "rt")}
-                    FROM {ScopeTable(table)} t
+                    FROM {ScopeIndexTable(options, table)} t
                     INNER JOIN {source} s ON s.Id = t.[{Escape(table.ResourceIdColumn)}]
                     INNER JOIN {resources} r ON r.Id = s.Id
                     INNER JOIN {resourceTypes} rt ON rt.Id = r.ResourceTypeId;
@@ -430,7 +430,7 @@ internal sealed partial class SqlServerDatabaseProvider
         {
             typeChanges.AppendLine(CultureInfo.InvariantCulture, $"""
                 UPDATE t SET {ScopeAssignment(levels, "r", "rt")}
-                FROM {ScopeTable(table)} t
+                FROM {ScopeIndexTable(options, table)} t
                 INNER JOIN (SELECT Id, ResourceTypeId FROM inserted EXCEPT SELECT Id, ResourceTypeId FROM deleted) i ON i.Id = t.[{Escape(table.ResourceIdColumn)}]
                 INNER JOIN {resources} r ON r.Id = i.Id
                 INNER JOIN {resourceTypes} rt ON rt.Id = r.ResourceTypeId;
@@ -464,7 +464,7 @@ internal sealed partial class SqlServerDatabaseProvider
         {
             clears.AppendLine(CultureInfo.InvariantCulture, $"""
                 UPDATE t SET [{SqlOSFgaLineage.ScopeColumn}] = NULL
-                FROM {ScopeTable(table)} t
+                FROM {ScopeIndexTable(options, table)} t
                 INNER JOIN deleted d ON d.Id = t.[{Escape(table.ResourceIdColumn)}];
                 """);
         }
@@ -494,7 +494,7 @@ internal sealed partial class SqlServerDatabaseProvider
                 WHILE 1 = 1
                 BEGIN
                     UPDATE TOP ({SqlOSFgaLineage.ScopeFillBatchRows.ToString(CultureInfo.InvariantCulture)}) t SET {ScopeAssignment(levels, "r", "rt")}
-                    FROM {ScopeTable(table)} t
+                    FROM {ScopeIndexTable(options, table)} t
                     INNER JOIN {resources} r ON r.Id = t.[{Escape(table.ResourceIdColumn)}]
                     INNER JOIN {resourceTypes} rt ON rt.Id = r.ResourceTypeId
                     WHERE t.[{SqlOSFgaLineage.ScopeColumn}] IS NULL AND rt.{SqlOSFgaLineage.SeqColumn} IS NOT NULL;
@@ -547,13 +547,6 @@ internal sealed partial class SqlServerDatabaseProvider
         var triggers = SqlOSFgaLineage.ScopeTriggerNames(table.Table);
         var triggerSchema = table.Schema is null ? "" : $"[{Escape(table.Schema)}].";
         var keys = string.Join(" AND ", table.KeyColumns.Select(k => $"i.[{Escape(k)}] = t.[{Escape(k)}]"));
-        var copy = $"""
-            UPDATE t SET {ScopeAssignment(levels, "r", "rt")}
-            FROM {ScopeTable(table)} t
-            INNER JOIN inserted i ON {keys}
-            LEFT JOIN {resources} r ON r.Id = t.[{Escape(table.ResourceIdColumn)}]
-            LEFT JOIN {resourceTypes} rt ON rt.Id = r.ResourceTypeId;
-            """;
         var projectedColumns = SqlOSFgaPageIndex.DirectColumns(table);
         var directColumns = projectedColumns.Select(c => c.Column).Append(table.ResourceIdColumn).Distinct().ToList();
         // A computed sort value can change when another column is updated. Compare transition values for
@@ -572,7 +565,6 @@ internal sealed partial class SqlServerDatabaseProvider
                 SET NOCOUNT ON;
                 IF NOT EXISTS (SELECT 1 FROM inserted) RETURN;
                 {LineageLock(options, "Shared")}
-                {copy}
                 {ScopeIndexRefreshRows(options, table)}
                 {DirectInsertFromRows(options, table, "inserted")}
             END
@@ -583,15 +575,11 @@ internal sealed partial class SqlServerDatabaseProvider
             AS
             BEGIN
                 SET NOCOUNT ON;
-                IF NOT ({anyDirectChange} OR UPDATE([{SqlOSFgaLineage.ScopeColumn}])) RETURN;
+                IF NOT ({anyDirectChange}) RETURN;
                 IF NOT EXISTS (SELECT 1 FROM inserted) RETURN;
                 {LineageLock(options, "Shared")}
-                IF UPDATE([{Escape(table.ResourceIdColumn)}])
-                BEGIN
-                    {copy}
-                END
-                -- A changed primary key removes the old projection; a scope-only refresh leaves the
-                -- direct-grant index alone, just as it did before the projection moved off this table.
+                -- A changed primary key removes the old projection. Resource lineage updates
+                -- maintain private scope directly, without firing this application trigger.
                 DELETE d FROM {ScopeIndexTable(options, table)} d
                 INNER JOIN deleted old ON {string.Join(" AND ", table.KeyColumns.Select(k => $"d.[{Escape(k)}] = old.[{Escape(k)}]"))}
                 WHERE NOT EXISTS (SELECT 1 FROM inserted i WHERE {string.Join(" AND ", table.KeyColumns.Select(k => $"i.[{Escape(k)}] = old.[{Escape(k)}]"))});
@@ -644,7 +632,7 @@ internal sealed partial class SqlServerDatabaseProvider
     public string BuildScopeTableReadySql(SqlOSFgaScopeTable table)
     {
         ArgumentNullException.ThrowIfNull(table);
-        return $"SELECT CASE WHEN COL_LENGTH(N'{SqlLiteral(ScopeTable(table))}', N'{SqlOSFgaLineage.ScopeColumn}') IS NULL THEN 0 ELSE 1 END";
+        return $"SELECT CASE WHEN COL_LENGTH(N'{SqlLiteral(ScopeTable(table))}', N'{SqlLiteral(table.ResourceIdColumn)}') IS NULL THEN 0 ELSE 1 END";
     }
 
     /// <summary>
@@ -686,7 +674,7 @@ internal sealed partial class SqlServerDatabaseProvider
         return $"""
 
             UPDATE t SET {ScopeAssignment(levels, "r", "rt")}
-            FROM {ScopeTable(table)} t
+            FROM {ScopeIndexTable(options, table)} t
             INNER JOIN [{schema}].[{Escape(options.TableNames.Resources)}] r ON r.Id = {resourceId}
             INNER JOIN [{schema}].[{Escape(options.TableNames.ResourceTypes)}] rt ON rt.Id = r.ResourceTypeId
             WHERE {resourceId} >= @from AND {resourceId} <= @to
@@ -730,7 +718,6 @@ internal sealed partial class SqlServerDatabaseProvider
             conditions.Add(Exists(options.Schema, "sp_" + SqlOSFgaScopeIndex.RebuildRoutine(table), "P"));
             conditions.Add($"EXISTS (SELECT 1 FROM sys.extended_properties WHERE major_id = {ScopeIndexObject(options, table)} AND minor_id = 0 AND name = N'SqlOSProjection' AND CONVERT(nvarchar(64), value) = {ScopeIndexSignature(table)})");
             conditions.Add($"(SELECT COUNT(*) FROM sys.indexes WHERE object_id = {ScopeIndexObject(options, table)} AND name IN ({NameList(indexes)})) = {indexes.Count.ToString(CultureInfo.InvariantCulture)}");
-            conditions.Add($"EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = {ObjectOf(table)} AND name = N'{SqlLiteral(SqlOSFgaLineage.ScopeMissingIndexName(table.Table))}')");
             conditions.Add($"EXISTS (SELECT 1 FROM sys.stats WHERE object_id = {ScopeIndexObject(options, table)} AND name = N'{SqlLiteral(SqlOSFgaLineage.ScopeTypeStatisticsName(table.Table))}')");
             var direct = SqlOSFgaPageIndex.DirectTable(table);
             var directIndexes = SqlOSFgaPageIndex.DirectIndexNames(table).Append(SqlOSFgaPageIndex.DirectIndexName(table, "Key")).Append(SqlOSFgaPageIndex.DirectIndexName(table, "Row")).ToList();
@@ -809,8 +796,8 @@ internal sealed partial class SqlServerDatabaseProvider
                     ALTER TABLE {target} ADD [{SqlOSFgaLineage.ScopeTypeColumn}] AS SUBSTRING([{SqlOSFgaLineage.ScopeColumn}], {SqlOSFgaLineage.ScopeTypeOffset}, 4);
                 IF NOT EXISTS (SELECT 1 FROM sys.stats WHERE name = '{SqlLiteral(SqlOSFgaLineage.ScopeTypeStatisticsName(table.Table))}' AND object_id = OBJECT_ID(N'{literal}'))
                     CREATE STATISTICS [{Escape(SqlOSFgaLineage.ScopeTypeStatisticsName(table.Table))}] ON {target} ([{SqlOSFgaLineage.ScopeTypeColumn}]);
-                IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = '{SqlLiteral(SqlOSFgaLineage.ScopeMissingIndexName(table.Table))}' AND object_id = {ObjectOf(table)})
-                    CREATE NONCLUSTERED INDEX [{Escape(SqlOSFgaLineage.ScopeMissingIndexName(table.Table))}] ON {ScopeTable(table)} ([{Escape(table.ResourceIdColumn)}]) WHERE [{SqlOSFgaLineage.ScopeColumn}] IS NULL;
+                IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = '{SqlLiteral(SqlOSFgaScopeIndex.ResourceIndexName(table))}' AND object_id = {ScopeIndexObject(options, table)})
+                    CREATE NONCLUSTERED INDEX [{Escape(SqlOSFgaScopeIndex.ResourceIndexName(table))}] ON {target} ([{Escape(table.ResourceIdColumn)}]) INCLUDE ([FgaScope]);
                 """);
             for (var level = 0; level < levels; level++)
             {

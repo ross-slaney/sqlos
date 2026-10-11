@@ -61,7 +61,7 @@ public class SqlOSFgaListFilterE2eTests
         (await PageAsync(db.Documents, fga, alice)).Should().Equal("a1", "a2", "a3", "a4");
 
         db.ChangeTracker.Clear();
-        (await db.Documents.AsNoTracking().ToListAsync()).Should().OnlyContain(d => d.FgaScope != null, "SqlOS fills every row's scope");
+        db.Model.FindEntityType(typeof(HostedDocument))!.FindProperty("FgaScope").Should().BeNull();
     }
 
     [TestMethod]
@@ -77,8 +77,7 @@ public class SqlOSFgaListFilterE2eTests
         db.Notes.AddRange(new HostedNote("n1", "folder_a"), new HostedNote("n2", "folder_a"), new HostedNote("n3", "folder_b"));
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
-        (await db.Notes.AsNoTracking().CountAsync(n => EF.Property<byte[]>(n, nameof(IHasResourceId.FgaScope)) != null))
-            .Should().Be(3, "SqlOS fills the column of an explicit implementation too");
+        db.Model.FindEntityType(typeof(HostedNote))!.FindProperty("FgaScope").Should().BeNull();
 
         // A filter built by this request's service composes into a query on another context instance, as a
         // context from IDbContextFactory or a pool would be: the filter carries no DbContext.
@@ -261,7 +260,7 @@ public class SqlOSFgaListFilterE2eTests
             (await PageAsync(db.Tickets, fga, alice)).Should().Equal("a1", "a2", "a3", "a4");
 
             db.ChangeTracker.Clear();
-            (await db.Tickets.AsNoTracking().ToListAsync()).Should().OnlyContain(t => t.FgaScope != null, "SqlOS fills every row's scope");
+            db.Model.FindEntityType(typeof(ManualTicket))!.FindProperty("FgaScope").Should().BeNull();
         }
         finally
         {
@@ -346,7 +345,7 @@ public class SqlOSFgaListFilterE2eTests
         public string FolderResourceId { get; private set; } = string.Empty;
 
         // SqlOS's column, kept off the class's public surface.
-        byte[]? IHasResourceId.FgaScope => null;
+
 
         string ISqlOSResourceEntity.ResourceTypeId => DocumentType;
         string ISqlOSResourceEntity.ResourceName => Id;

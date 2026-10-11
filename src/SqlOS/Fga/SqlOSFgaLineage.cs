@@ -84,7 +84,7 @@ internal static class SqlOSFgaLineage
 
     public const string ScopePrefix = "SqlOSFga";
 
-    public const string ScopeColumn = nameof(Fga.Interfaces.IHasResourceId.FgaScope);
+    public const string ScopeColumn = "FgaScope";
 
     /// <summary>The column's maximum length: room for 63 levels, so a changed depth never changes the column.</summary>
     public const int ScopeMaxLength = 512;

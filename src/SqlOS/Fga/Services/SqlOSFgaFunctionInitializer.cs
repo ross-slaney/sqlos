@@ -16,7 +16,7 @@ namespace SqlOS.Fga.Services;
 /// <summary>
 /// Creates the SHRBAC enforcement routines in the database: the ancestor columns of the configured depth,
 /// <c>fn_ActiveSubjects</c>, <c>fn_AccessRoots</c>, <c>fn_IsResourceAccessible</c>, the routines and triggers
-/// that keep the resource lineage (and the scope column of application tables) exact, and the per-level
+/// that keep the resource lineage (and the private scope indexes) exact, and the per-level
 /// indexes of those tables; and drops the ones of tables SqlOS no longer maintains. The definitions' hash is
 /// stored with the schema version, so a startup that finds the same hash, every object present, and nothing
 /// stale changes nothing; a new definition (a new SqlOS version, a changed option, an application table that
@@ -131,7 +131,7 @@ public class SqlOSFgaFunctionInitializer
     /// </summary>
     private async Task EnsureAsync(ISqlOSDatabaseProvider provider, IReadOnlyList<SqlOSFgaScopeTable> modelTables, CancellationToken cancellationToken)
     {
-        // The protected tables whose migration is applied. A table without its scope column (the application runs
+        // The protected tables whose migration is applied. A table without its ResourceId column (the application runs
         // SqlOS's bootstrap before its own migrations, as an application with foreign keys to SqlOS's tables must,
         // or has not added the migration yet) is left for the next start, which finds it ready.
         var tables = new List<SqlOSFgaScopeTable>();
@@ -147,7 +147,7 @@ public class SqlOSFgaFunctionInitializer
                     "{Table} holds an entity with a resource id but has no {Column} column yet. SqlOS adds its triggers and indexes "
                     + "at the next start after the migration that adds the column is applied; until then list filters on it fail.",
                     table.Schema is null ? table.Table : $"{table.Schema}.{table.Table}",
-                    SqlOSFgaLineage.ScopeColumn);
+                    table.ResourceIdColumn);
             }
         }
 
@@ -175,10 +175,10 @@ public class SqlOSFgaFunctionInitializer
 
         // Every start: the rows written while SqlOS's triggers were absent (a bulk load that skipped them, rows
         // written before a table had them) get their scope. An index seek when there are none.
-        await ExecuteNonQueryAsync(provider.BuildScopeFillSql(_options), cancellationToken);
+        // Normal writes maintain the private indexes transactionally. No application scan at startup.
     }
 
-    /// <summary>The application tables of the context's model that carry the scope column.</summary>
+    /// <summary>The protected application tables of the context's model.</summary>
     private IReadOnlyList<SqlOSFgaScopeTable> ScopeTables()
         => _context is DbContext db ? SqlOSFgaScopeColumns.Tables(db.Model) : [];
 
@@ -215,7 +215,7 @@ public class SqlOSFgaFunctionInitializer
 
         if (await LineageNeedsBuildAsync(provider, cancellationToken))
         {
-            // The rebuild fills the scope columns of every application table as well, and the page index.
+            // The rebuild fills the private scope index of every protected table as well, and the page index.
             await BuildLineageAsync(provider, cancellationToken);
         }
         else

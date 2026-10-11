@@ -66,11 +66,12 @@ internal static class SqlOSFgaAccess
     /// translates: at the level of one root, the row's scope holds it), or by <c>false</c> for a caller with
     /// no root. <paramref name="rootsOf"/> is asked once per token.
     /// </summary>
-    public static Expression Resolve(Expression query, Func<SqlOSFgaAccessToken, IReadOnlyList<SqlOSFgaAccessRoot>> rootsOf)
+    public static Expression Resolve(Expression query, Func<SqlOSFgaAccessToken, IReadOnlyList<SqlOSFgaAccessRoot>> rootsOf,
+        Func<Type, SqlOSFgaAccessToken, IReadOnlyList<SqlOSFgaAccessRoot>, LambdaExpression>? build = null)
     {
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(rootsOf);
-        return new Resolver(rootsOf).Visit(query);
+        return new Resolver(rootsOf, build).Visit(query);
     }
 
     private static bool IsMarker(MethodCallExpression call)
@@ -116,7 +117,8 @@ internal static class SqlOSFgaAccess
         }
     }
 
-    private sealed class Resolver(Func<SqlOSFgaAccessToken, IReadOnlyList<SqlOSFgaAccessRoot>> rootsOf) : ExpressionVisitor
+    private sealed class Resolver(Func<SqlOSFgaAccessToken, IReadOnlyList<SqlOSFgaAccessRoot>> rootsOf,
+        Func<Type, SqlOSFgaAccessToken, IReadOnlyList<SqlOSFgaAccessRoot>, LambdaExpression>? build) : ExpressionVisitor
     {
         private readonly Dictionary<(SqlOSFgaAccessToken Token, Type Entity), LambdaExpression?> _predicates = [];
 
@@ -134,7 +136,7 @@ internal static class SqlOSFgaAccess
                 var roots = rootsOf(token);
                 predicate = roots.Count == 0
                     ? null
-                    : (LambdaExpression)BuildMethod.MakeGenericMethod(entityType).Invoke(null, [roots, token.SubjectIdsJson, token.TypeSeq, SqlOSFgaLineage.Levels(token.Options)])!;
+                    : build is not null ? build(entityType, token, roots) : (LambdaExpression)BuildMethod.MakeGenericMethod(entityType).Invoke(null, [roots, token.SubjectIdsJson, token.TypeSeq, SqlOSFgaLineage.Levels(token.Options)])!;
                 _predicates[(token, entityType)] = predicate;
             }
 

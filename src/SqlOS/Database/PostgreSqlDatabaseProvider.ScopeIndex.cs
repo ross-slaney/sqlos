@@ -46,7 +46,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
         var name = SqlOSFgaScopeIndex.Table(table);
         var columns = SqlOSFgaScopeIndex.Columns(table);
         var list = string.Join(", ", columns.Select(c => QuoteIdentifier(c.Column)));
-        var select = string.Join(", ", columns.Select(c => "t." + QuoteIdentifier(c.Column)));
+        var select = ScopeIndexSelect(table, SqlOSFgaLineage.Levels(options));
         var keys = string.Join(", ", table.KeyColumns.Select(QuoteIdentifier));
         var lockKey = SqlOSFgaLineage.LineageLockKey(options).ToString(CultureInfo.InvariantCulture);
         var ddl = $"""
@@ -59,9 +59,9 @@ internal sealed partial class PostgreSqlDatabaseProvider
                     DROP TABLE {index};
                 END IF;
                 IF NOT {ScopeIndexExists(options, table)} THEN
-                    CREATE TABLE {index} AS SELECT {select} FROM {ScopeTable(table)} t WITH NO DATA;
+                    CREATE TABLE {index} AS SELECT {select} FROM {ScopeIndexSource(options, table)} WITH NO DATA;
                     ALTER TABLE {index} ADD CONSTRAINT {QuoteIdentifier("PK_" + name)} PRIMARY KEY ({keys});
-                    INSERT INTO {index} ({list}) SELECT {select} FROM {ScopeTable(table)} t;
+                    INSERT INTO {index} ({list}) SELECT {select} FROM {ScopeIndexSource(options, table)};
                     EXECUTE format('COMMENT ON TABLE {index.Replace("'", "''", StringComparison.Ordinal)} IS %L', v_signature);
                 END IF;
             END
@@ -105,8 +105,8 @@ internal sealed partial class PostgreSqlDatabaseProvider
             : "";
         return $"""
             INSERT INTO {index} AS d ({string.Join(", ", columns)})
-            SELECT {string.Join(", ", columns.Select(c => "t." + c))}
-            FROM {ScopeTable(table)} t{only}
+            SELECT {ScopeIndexSelect(table, SqlOSFgaLineage.Levels(options))}
+            FROM {ScopeIndexSource(options, table)}{only}
             ON CONFLICT ({keys}) DO UPDATE SET {string.Join(", ", columns.Select(c => $"{c} = EXCLUDED.{c}"))}
             WHERE ({string.Join(", ", columns.Select(c => "d." + c))}) IS DISTINCT FROM ({string.Join(", ", columns.Select(c => "EXCLUDED." + c))});{delete}
             """;
@@ -119,22 +119,25 @@ internal sealed partial class PostgreSqlDatabaseProvider
             WHERE {string.Join(" AND ", table.KeyColumns.Select(k => $"d.{QuoteIdentifier(k)} = x.{QuoteIdentifier(k)}"))};
             """;
 
-    /// <summary>
-    /// A planned statement reads the application's table through its projection: the scope from the
-    /// projection, whose per-level indexes serve the authorization predicate, and every other column from
-    /// the row itself. The projection decides which rows are visible and nothing more, so a value it holds
-    /// (a key, an order column) is never what the application sees, stale or not.
-    /// </summary>
+    /// <summary>The private scope rows used by a primary-key-correlated authorization predicate.</summary>
     public string BuildScopeIndexQuerySql(SqlOSFgaOptions options, SqlOSFgaScopeTable table)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(table);
         return $"""
-            SELECT {string.Join(", ", table.Columns.Select(c => $"{(c.Column == SqlOSFgaLineage.ScopeColumn ? "s" : "a")}.{QuoteIdentifier(c.Column)} AS {QuoteIdentifier(c.Column)}"))}
+            SELECT {string.Join(", ", table.KeyColumns.Select((k, i) => $"s.{QuoteIdentifier(k)} AS {QuoteIdentifier("ScopeKey" + i)}"))}, s.{QuoteIdentifier(table.ResourceIdColumn)} AS "ResourceId", s."FgaScope"
             FROM {ScopeIndexTable(options, table)} s
-            INNER JOIN {ScopeTable(table)} a ON {string.Join(" AND ", table.KeyColumns.Select(k => $"a.{QuoteIdentifier(k)} = s.{QuoteIdentifier(k)}"))}
             """;
     }
+
+    private string ScopeIndexSelect(SqlOSFgaScopeTable table, int levels)
+        => string.Join(", ", SqlOSFgaScopeIndex.Columns(table).Select(c => c.Column == SqlOSFgaLineage.ScopeColumn
+            ? $"({ScopeValue(levels, "r", "rt")})::bytea AS {QuoteIdentifier(SqlOSFgaLineage.ScopeColumn)}"
+            : "t." + QuoteIdentifier(c.Column)));
+
+    private string ScopeIndexSource(SqlOSFgaOptions options, SqlOSFgaScopeTable table)
+        => $"{ScopeTable(table)} t LEFT JOIN {Qualify(options.Schema, options.TableNames.Resources)} r ON r.\"Id\" = t.{QuoteIdentifier(table.ResourceIdColumn)} "
+           + $"LEFT JOIN {Qualify(options.Schema, options.TableNames.ResourceTypes)} rt ON rt.\"Id\" = r.\"ResourceTypeId\"";
 
     /// <summary>A projection of a table SqlOS no longer maintains (renamed, or no longer protected).</summary>
     private static string StaleScopeIndexTables(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> tables)

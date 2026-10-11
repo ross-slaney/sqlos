@@ -62,19 +62,18 @@ internal sealed class PostgreSqlDatasetLoader(string connectionString, SqlOSFgaO
         var rows = Stopwatch.StartNew();
         var streams = Math.Clamp(Environment.ProcessorCount / 2, 1, 4);
         var chunk = (to - from + streams - 1) / streams;
-        var productType = typeSeq["product"];
         var copies = new List<Task>();
         for (var start = from; start < to; start += chunk)
         {
             var end = Math.Min(start + chunk, to);
             var (s, e) = (start, end);
             copies.Add(Task.Run(() => CopyAsync(Resources, DatasetRows.Columns.Resources, DatasetRows.ProductResources(tree, s, e), cancellationToken), cancellationToken));
-            copies.Add(Task.Run(() => CopyAsync(Products, DatasetRows.Columns.Products(typeof(byte[])), DatasetRows.Products(tree, productType, s, e, SqlOSFgaScope.Encode), cancellationToken), cancellationToken));
+            copies.Add(Task.Run(() => CopyAsync(Products, DatasetRows.Columns.Products(), DatasetRows.Products(tree, s, e), cancellationToken), cancellationToken));
         }
 
         await Task.WhenAll(copies);
         rows.Stop();
-        log.Info($"  rows loaded in {rows.Elapsed.TotalSeconds:F1}s ({streams} streams per table, lineage and scope column included)");
+        log.Info($"  rows loaded in {rows.Elapsed.TotalSeconds:F1}s ({streams} streams per table, resource lineage included; private indexes built next)");
 
         var indexes = Stopwatch.StartNew();
         foreach (var definition in dropped)
@@ -100,7 +99,7 @@ internal sealed class PostgreSqlDatasetLoader(string connectionString, SqlOSFgaO
         static string Quote(string column) => $"\"{column}\"";
         static string Cast(string expression) => $"CAST({expression} AS numeric)";
         var resources = await ChecksumAsync(LineageSql.ResourcesChecksum(Resources, Quote, Cast), cancellationToken);
-        var products = await ChecksumAsync(LineageSql.ProductsChecksum(Products, postgres: true), cancellationToken);
+        var products = await ChecksumAsync(LineageSql.ProductsChecksum($"\"{fga.Schema}\".\"SqlOSFgaScopeIndex_Products\"", postgres: true), cancellationToken);
         return new LineageChecksum(resources, products);
     }
 

@@ -97,8 +97,8 @@ internal interface ISqlOSDatabaseProvider
     string BuildPageIndexRebuildSql(SqlOSFgaOptions options);
 
     /// <summary>
-    /// The query a planned statement reads an application table through: its projection joined to the row,
-    /// the scope from the projection and every other column from the row (see <see cref="SqlOS.Fga.SqlOSFgaScopeIndex"/>).
+    /// The primary key, ResourceId, and scope rows used by non-page predicates to check the private index.
+    /// Application values remain in the original EF query.
     /// </summary>
     string BuildScopeIndexQuerySql(SqlOSFgaOptions options, SqlOSFgaScopeTable table);
 

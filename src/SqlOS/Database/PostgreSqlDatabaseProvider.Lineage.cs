@@ -168,7 +168,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
             foreach (var table in scopeTables)
             {
                 sql.AppendLine(CultureInfo.InvariantCulture, $"""
-                    UPDATE {ScopeTable(table)} t SET {ScopeAssignment(levels, "r", "rt")}
+                    UPDATE {ScopeIndexTable(options, table)} t SET {ScopeAssignment(levels, "r", "rt")}
                     FROM {source} s
                     INNER JOIN {resources} r ON r."Id" = s."Id"
                     INNER JOIN {resourceTypes} rt ON rt."Id" = r."ResourceTypeId"
@@ -445,7 +445,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
         foreach (var table in scopeTables)
         {
             typeChanges.AppendLine(CultureInfo.InvariantCulture, $"""
-                UPDATE {ScopeTable(table)} t SET {ScopeAssignment(levels, "r", "rt")}
+                UPDATE {ScopeIndexTable(options, table)} t SET {ScopeAssignment(levels, "r", "rt")}
                 FROM (SELECT "Id", "ResourceTypeId" FROM new_rows EXCEPT SELECT "Id", "ResourceTypeId" FROM old_rows) n
                 INNER JOIN {resources} r ON r."Id" = n."Id"
                 INNER JOIN {resourceTypes} rt ON rt."Id" = r."ResourceTypeId"
@@ -500,7 +500,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
         foreach (var table in scopeTables)
         {
             clears.AppendLine(CultureInfo.InvariantCulture, $"""
-                UPDATE {ScopeTable(table)} t SET {QuoteIdentifier(SqlOSFgaLineage.ScopeColumn)} = NULL
+                UPDATE {ScopeIndexTable(options, table)} t SET {QuoteIdentifier(SqlOSFgaLineage.ScopeColumn)} = NULL
                 FROM old_rows o
                 WHERE t.{QuoteIdentifier(table.ResourceIdColumn)} = o."Id";
                 """);
@@ -542,7 +542,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
         var fillBody = new StringBuilder();
         foreach (var table in scopeTables)
         {
-            var target = ScopeTable(table);
+            var target = ScopeIndexTable(options, table);
             var resourceIdColumn = QuoteIdentifier(table.ResourceIdColumn);
             fillBody.AppendLine(CultureInfo.InvariantCulture, $"""
                 LOOP
@@ -610,9 +610,9 @@ internal sealed partial class PostgreSqlDatabaseProvider
         var changedRows = $"(SELECT n.* FROM new_rows n WHERE EXISTS (SELECT 1 FROM {changedKeys} c WHERE {string.Join(" AND ", table.KeyColumns.Select(k => $"c.{QuoteIdentifier(k)} = n.{QuoteIdentifier(k)}"))}))";
         // The old versions of those rows: the direct entries to remove are the old key's, which a key change leaves behind otherwise.
         var changedOldRows = $"(SELECT {directList} FROM old_rows EXCEPT SELECT {directList} FROM new_rows)";
-        // The rows whose projection changed: the above, or the scope (this function's own update, the lineage
-        // refresh, the fill); the projection follows every one of them.
-        var projectedList = string.Join(", ", SqlOSFgaPageIndex.DirectColumns(table).Select(c => c.Column).Append(table.ResourceIdColumn).Append(SqlOSFgaLineage.ScopeColumn).Distinct().Select(QuoteIdentifier));
+        // Relevant application changes refresh the private projection. Resource lineage changes
+        // update that projection directly and never issue a second application-table write.
+        var projectedList = string.Join(", ", SqlOSFgaPageIndex.DirectColumns(table).Select(c => c.Column).Append(table.ResourceIdColumn).Distinct().Select(QuoteIdentifier));
         var changedProjection = $"(SELECT {projectedList} FROM new_rows EXCEPT SELECT {projectedList} FROM old_rows)";
         var newKeys = string.Join(" AND ", table.KeyColumns.Select(k => $"n.{QuoteIdentifier(k)} = o.{QuoteIdentifier(k)}"));
         return $"""
@@ -623,11 +623,6 @@ internal sealed partial class PostgreSqlDatabaseProvider
             BEGIN
                 PERFORM pg_advisory_xact_lock_shared({SqlOSFgaLineage.LineageLockKey(options).ToString(CultureInfo.InvariantCulture)});
                 {IsolationGuard}
-                UPDATE {ScopeTable(table)} t SET {ScopeAssignment(levels, "r", "rt")}
-                FROM new_rows n
-                LEFT JOIN {resources} r ON r."Id" = n.{resourceId}
-                LEFT JOIN {resourceTypes} rt ON rt."Id" = r."ResourceTypeId"
-                WHERE {keys};
                 {ScopeIndexMerge(options, table, "new_rows")}
                 {DirectInsertFromRows(options, table, "new_rows")}
                 RETURN NULL;
@@ -648,15 +643,6 @@ internal sealed partial class PostgreSqlDatabaseProvider
 
                 PERFORM pg_advisory_xact_lock_shared({SqlOSFgaLineage.LineageLockKey(options).ToString(CultureInfo.InvariantCulture)});
                 {IsolationGuard}
-                UPDATE {ScopeTable(table)} t SET {ScopeAssignment(levels, "r", "rt")}
-                FROM (
-                    SELECT {keyList}, {resourceId} FROM new_rows
-                    EXCEPT
-                    SELECT {keyList}, {resourceId} FROM old_rows
-                ) n
-                LEFT JOIN {resources} r ON r."Id" = n.{resourceId}
-                LEFT JOIN {resourceTypes} rt ON rt."Id" = r."ResourceTypeId"
-                WHERE {keys};
                 -- A changed key removes the old projection entry; the rest are refreshed in place.
                 DELETE FROM {ScopeIndexTable(options, table)} d
                 USING old_rows o
@@ -714,7 +700,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
     /// <summary>The scope column of every row of one application table, set from its resource's lineage (the rebuild).</summary>
     private string ScopeFillUpdate(SqlOSFgaOptions options, SqlOSFgaScopeTable table)
         => $"""
-            UPDATE {ScopeTable(table)} t SET {ScopeAssignment(SqlOSFgaLineage.Levels(options), "r", "rt")}
+            UPDATE {ScopeIndexTable(options, table)} t SET {ScopeAssignment(SqlOSFgaLineage.Levels(options), "r", "rt")}
             FROM {Qualify(options.Schema, options.TableNames.Resources)} r
             INNER JOIN {Qualify(options.Schema, options.TableNames.ResourceTypes)} rt ON rt."Id" = r."ResourceTypeId"
             WHERE t.{QuoteIdentifier(table.ResourceIdColumn)} = r."Id"
@@ -734,7 +720,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
         return $"""
             SELECT CASE WHEN EXISTS (
                 SELECT 1 FROM information_schema.columns
-                WHERE table_schema = {ScopeSchemaLiteral(table)} AND table_name = '{SqlLiteral(table.Table)}' AND column_name = '{SqlOSFgaLineage.ScopeColumn}')
+                WHERE table_schema = {ScopeSchemaLiteral(table)} AND table_name = '{SqlLiteral(table.Table)}' AND column_name = '{SqlLiteral(table.ResourceIdColumn)}')
             THEN 1 ELSE 0 END AS "Value"
             """;
     }
@@ -786,8 +772,6 @@ internal sealed partial class PostgreSqlDatabaseProvider
             conditions.Add($"{ScopeIndexStoredSignature(options, table)} = {ScopeIndexSignature(table)}");
             conditions.Add(
                 $"(SELECT count(*) FROM pg_indexes WHERE schemaname = '{schema}' AND tablename = '{projection}' AND indexname IN ({NameList(indexes)})) = {indexes.Count.ToString(CultureInfo.InvariantCulture)}");
-            conditions.Add(
-                $"EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = {ScopeSchemaLiteral(table)} AND tablename = '{SqlLiteral(table.Table)}' AND indexname = '{SqlLiteral(SqlOSFgaLineage.ScopeMissingIndexName(table.Table))}')");
             conditions.Add(
                 $"EXISTS (SELECT 1 FROM pg_statistic_ext s INNER JOIN pg_namespace n ON n.oid = s.stxnamespace INNER JOIN pg_class c ON c.oid = s.stxrelid WHERE n.nspname = '{schema}' AND c.relname = '{projection}' AND s.stxname = '{SqlLiteral(SqlOSFgaLineage.ScopeTypeStatisticsName(table.Table))}')");
             var directIndexes = SqlOSFgaPageIndex.DirectIndexNames(table).Append(SqlOSFgaPageIndex.DirectIndexName(table, "Key")).Append(SqlOSFgaPageIndex.DirectIndexName(table, "Row")).ToList();
@@ -871,7 +855,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
             var key = string.Join(", ", table.KeyColumns.Select(QuoteIdentifier));
             var sql = new StringBuilder();
             sql.AppendLine(CultureInfo.InvariantCulture, $"""
-                CREATE INDEX IF NOT EXISTS {QuoteIdentifier(SqlOSFgaLineage.ScopeMissingIndexName(table.Table))} ON {ScopeTable(table)} ({QuoteIdentifier(table.ResourceIdColumn)}) WHERE {scope} IS NULL;
+                CREATE INDEX IF NOT EXISTS {QuoteIdentifier(SqlOSFgaScopeIndex.ResourceIndexName(table))} ON {target} ({QuoteIdentifier(table.ResourceIdColumn)}) INCLUDE ({scope});
                 """);
             for (var level = 0; level < levels; level++)
             {

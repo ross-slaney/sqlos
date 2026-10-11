@@ -137,6 +137,8 @@ public class SqlOSFgaFilterBuilderTests
 
             // SQLite only prints the SQL here; the model is SQL Server's (a byte string scope column).
             modelBuilder.UseSqlOS(SqlOSDatabase.SqlServerProviderName, new SqlOSFgaOptions());
+            // This isolated predicate fixture represents the private scope index, not an application table.
+            modelBuilder.Entity<Item>().Property(i => i.FgaScope);
         }
     }
 

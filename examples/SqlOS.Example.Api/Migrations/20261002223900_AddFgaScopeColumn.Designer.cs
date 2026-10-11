@@ -3634,10 +3634,6 @@ namespace SqlOS.Example.Api.Migrations
                     b.Property<string>("Description")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<byte[]>("FgaScope")
-                        .HasMaxLength(512)
-                        .HasColumnType("varbinary(512)");
-
                     b.Property<string>("HeadquartersAddress")
                         .HasColumnType("nvarchar(max)");
 
@@ -3680,10 +3676,6 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.Property<string>("Description")
                         .HasColumnType("nvarchar(max)");
-
-                    b.Property<byte[]>("FgaScope")
-                        .HasMaxLength(512)
-                        .HasColumnType("varbinary(512)");
 
                     b.Property<string>("LocationId")
                         .IsRequired()
@@ -3748,10 +3740,6 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
-
-                    b.Property<byte[]>("FgaScope")
-                        .HasMaxLength(512)
-                        .HasColumnType("varbinary(512)");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -3849,10 +3837,6 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
-
-                    b.Property<byte[]>("FgaScope")
-                        .HasMaxLength(512)
-                        .HasColumnType("varbinary(512)");
 
                     b.Property<string>("Name")
                         .IsRequired()

@@ -100,9 +100,9 @@ plainOptions.UseSqlOSFga();
 var builtOptions = plainOptions.Options;
 BenchDbContext CreateContext() => new(builtOptions);
 
-// The schema, indexes, functions, lineage triggers, scope column, and core seed exactly as SqlOS creates them
+// The schema, indexes, functions, lineage triggers, private scope indexes, and core seed exactly as SqlOS creates them
 // for an application.
-log.Info("Creating the SqlOS FGA schema, the lineage, fn_AccessRoots, fn_IsResourceAccessible, the triggers, the scope column, and the authorization model...");
+log.Info("Creating the SqlOS FGA schema, the lineage, fn_AccessRoots, fn_IsResourceAccessible, the triggers, the private scope indexes, and the authorization model...");
 await using (var db = CreateContext())
 {
     await db.Database.EnsureCreatedAsync(cancellation);
@@ -124,7 +124,7 @@ var dataset = new DatasetShape(
     MaxDepth: 10,
     options.Seed,
     string.Create(CultureInfo.InvariantCulture,
-        $"The shipped schema, indexes, resource lineage, `fn_AccessRoots`, and `fn_IsResourceAccessible`, queried on a product table two ways, both over `BuildFilterAsync`'s filter on the context SqlOS registers: every page as one statement the optimizer plans (`list.*`: the page written as a projection ordered after `Select`, which SqlOS leaves to the optimizer; the caller's access roots are read when the statement runs, and the lineage from the row's own scope column) and the same page as written (`page.*`: walked by SqlOS over the grant counts, the per-level indexes, and the direct index, reading no root). The tree: {chains} retail chains ({chains - 1} at D = 5, one at D = 10) with {tree.Stores.Count:N0} stores and {tree.Nodes.Count + 1:N0} organizational nodes. Store sizes are log-normal, and products are spread through the id range the way rows arrive over time. {managedScopes:N0} managers hold grants on their store, region, or chain. One person holds {BenchmarkModel.HundredStoreGrants} store grants across the chains; two more hold 10,000 and 100,000 grants on single products, spread through the catalog. The people measured each resolve to 3 subjects (M = 3)."));
+        $"The shipped schema, indexes, resource lineage, `fn_AccessRoots`, and `fn_IsResourceAccessible`, queried on a product table two ways, both over `BuildFilterAsync`'s filter on the context SqlOS registers: every page as one statement the optimizer plans (`list.*`: the page written as a projection ordered after `Select`, which SqlOS leaves to the optimizer; the caller's access roots are read when the statement runs, and the lineage from the private scope index) and the same page as written (`page.*`: walked by SqlOS over the grant counts, the per-level indexes, and the direct index, reading no root). The tree: {chains} retail chains ({chains - 1} at D = 5, one at D = 10) with {tree.Stores.Count:N0} stores and {tree.Nodes.Count + 1:N0} organizational nodes. Store sizes are log-normal, and products are spread through the id range the way rows arrive over time. {managedScopes:N0} managers hold grants on their store, region, or chain. One person holds {BenchmarkModel.HundredStoreGrants} store grants across the chains; two more hold 10,000 and 100,000 grants on single products, spread through the catalog. The people measured each resolve to 3 subjects (M = 3)."));
 
 // Leave room for the CI runner's own logs and the uploaded results.
 long? FreeBytes() => options.DataDirectory is { } directory ? new DriveInfo(Path.GetFullPath(directory)).AvailableFreeSpace : null;
@@ -194,7 +194,7 @@ foreach (var target in options.Scales)
         }
     }
 
-    log.Info($"Growing the catalog to {RetailTree.Count(target)} products ({target - loaded:N0} new rows in each of two tables, lineage and scope columns included)...");
+    log.Info($"Growing the catalog to {RetailTree.Count(target)} products ({target - loaded:N0} new rows in each of two tables, resource lineage included; private indexes built after loading)...");
     var timing = await loader.GrowProductsAsync(tree, typeSeq, loaded, target, cancellation);
     if (loaded == 0)
     {

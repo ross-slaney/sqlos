@@ -21,7 +21,7 @@ namespace SqlOS.Tests.Fga;
 public class SqlOSFgaScopeColumnsTests
 {
     [TestMethod]
-    public void EveryResourceEntity_DeclaresTheColumn_AndSqlOSConfiguresIt_TheSameOnBothEngines()
+    public void ResourceIdIsTheOnlyAuthorizationColumn_OnBothEngines()
     {
         foreach (var context in new DbContext[] { Create<OnSqlServer>(SqlOSDatabase.SqlServerProviderName), Create<OnPostgreSql>(SqlOSDatabase.PostgreSqlProviderName) })
         {
@@ -30,12 +30,7 @@ public class SqlOSFgaScopeColumnsTests
 
             // The entity's own property (IHasResourceId.FgaScope), not a shadow one; a byte string with room for
             // any depth, which EF Core never writes.
-            var scope = orders.FindProperty(SqlOSFgaLineage.ScopeColumn)!;
-            scope.IsShadowProperty().Should().BeFalse();
-            scope.ClrType.Should().Be(typeof(byte[]));
-            scope.GetMaxLength().Should().Be(SqlOSFgaLineage.ScopeMaxLength);
-            scope.GetBeforeSaveBehavior().Should().Be(PropertySaveBehavior.Ignore);
-            scope.GetAfterSaveBehavior().Should().Be(PropertySaveBehavior.Ignore);
+            orders.FindProperty(SqlOSFgaLineage.ScopeColumn).Should().BeNull();
             orders.GetDeclaredTriggers().Select(t => t.GetDatabaseName())
                 .Should().BeEquivalentTo(SqlOSFgaLineage.ScopeTriggerNames("Orders"));
 
@@ -67,7 +62,7 @@ public class SqlOSFgaScopeColumnsTests
     }
 
     [TestMethod]
-    public void AnEntityThatImplementsTheColumnExplicitly_GetsTheSameColumn()
+    public void AnEntityWithOnlyResourceId_StillGetsIndexMaintenance()
     {
         // byte[]? IHasResourceId.FgaScope => null; keeps the column off the class's public surface (and out of
         // JSON). EF Core does not map an explicit implementation by convention, so SqlOS maps the column itself.
@@ -75,17 +70,13 @@ public class SqlOSFgaScopeColumnsTests
             .UseSqlServer("Server=unused;Database=unused;TrustServerCertificate=True").Options);
         var entity = context.Model.FindEntityType(typeof(ExplicitNote))!;
 
-        var scope = entity.FindProperty(SqlOSFgaLineage.ScopeColumn)!;
-        scope.IsShadowProperty().Should().BeTrue();
-        scope.ClrType.Should().Be(typeof(byte[]));
-        scope.GetMaxLength().Should().Be(SqlOSFgaLineage.ScopeMaxLength);
-        scope.GetBeforeSaveBehavior().Should().Be(PropertySaveBehavior.Ignore);
+        entity.FindProperty(SqlOSFgaLineage.ScopeColumn).Should().BeNull();
         entity.GetDeclaredTriggers().Select(t => t.GetDatabaseName()).Should().BeEquivalentTo(SqlOSFgaLineage.ScopeTriggerNames("ExplicitNotes"));
         SqlOSFgaScopeColumns.Tables(context.Model).Should().ContainSingle(t => t.Table == "ExplicitNotes");
     }
 
     [TestMethod]
-    public void AnEntityDerivingFromTheBaseClass_GetsTheShadowColumn_AndNoResourceDescriptionColumns()
+    public void AnEntityDerivingFromTheBaseClass_HasNoScopeOrResourceDescriptionColumns()
     {
         // SqlOSResourceEntity brings ResourceId and the scope column with it; the members that describe the
         // backing resource (ResourceTypeId, ResourceName, ...) feed synchronization and are never columns,
@@ -94,17 +85,7 @@ public class SqlOSFgaScopeColumnsTests
             .UseSqlServer("Server=unused;Database=unused;TrustServerCertificate=True").Options);
         var entity = context.Model.FindEntityType(typeof(BasedProject))!;
 
-        var scope = entity.FindProperty(SqlOSFgaLineage.ScopeColumn)!;
-        scope.IsShadowProperty().Should().BeTrue();
-        scope.ClrType.Should().Be(typeof(byte[]));
-        scope.GetMaxLength().Should().Be(SqlOSFgaLineage.ScopeMaxLength);
-        scope.GetBeforeSaveBehavior().Should().Be(PropertySaveBehavior.Ignore);
-        entity.FindProperty(nameof(IHasResourceId.ResourceId)).Should().NotBeNull();
-        entity.FindProperty(nameof(ISqlOSResourceEntity.ResourceTypeId)).Should().BeNull();
-        entity.FindProperty(nameof(ISqlOSResourceEntity.ResourceName)).Should().BeNull();
-        entity.FindProperty(nameof(ISqlOSResourceEntity.ParentResourceId)).Should().BeNull();
-        entity.FindProperty(nameof(ISqlOSResourceEntity.ResourceDescription)).Should().BeNull();
-        entity.FindProperty(nameof(ISqlOSResourceEntity.ResourceIsActive)).Should().BeNull();
+        entity.FindProperty(SqlOSFgaLineage.ScopeColumn).Should().BeNull();
         entity.GetDeclaredTriggers().Select(t => t.GetDatabaseName()).Should().BeEquivalentTo(SqlOSFgaLineage.ScopeTriggerNames("BasedProjects"));
         SqlOSFgaScopeColumns.Tables(context.Model).Should().ContainSingle(t => t.Table == "BasedProjects");
     }
@@ -126,8 +107,7 @@ public class SqlOSFgaScopeColumnsTests
         using var context = Create<OnNoProvider>(providerName: null);
         var scope = context.Model.FindEntityType(typeof(Order))!.FindProperty(SqlOSFgaLineage.ScopeColumn)!;
 
-        scope.ClrType.Should().Be(typeof(byte[]));
-        scope.GetMaxLength().Should().Be(SqlOSFgaLineage.ScopeMaxLength);
+        scope.Should().BeNull();
     }
 
     [TestMethod]
@@ -142,7 +122,7 @@ public class SqlOSFgaScopeColumnsTests
         // discriminator and the computed column are the table's. SQL Server's planned statements read the
         // table through SqlOS's projection of it, which must return every one of them.
         table.Table.Should().Be("Shapes");
-        table.Columns.Select(c => c.Column).Should().BeEquivalentTo(["Id", "ResourceId", "FgaScope", "Kind", "Subject", "Extent_Width", "Extent_Height", "Area"]);
+        table.Columns.Select(c => c.Column).Should().BeEquivalentTo(["Id", "ResourceId", "Kind", "Subject", "Extent_Width", "Extent_Height", "Area"]);
         table.Columns.Single(c => c.Column == "Area").ChangesOnUpdate.Should().BeTrue("a computed column changes with the columns it reads");
         table.Columns.Single(c => c.Column == "Subject").IsNullable.Should().BeTrue("a derived type's column is null on the other types' rows");
         table.Columns.Single(c => c.Column == "Id").StoreType.Should().Be("nvarchar(64)");
@@ -232,7 +212,6 @@ public class SqlOSFgaScopeColumnsTests
         public int Id { get; set; }
         public string ResourceId { get; set; } = string.Empty;
 
-        byte[]? IHasResourceId.FgaScope => null;
     }
 
     private sealed class BaseClassDbContext(DbContextOptions<BaseClassDbContext> options) : DbContext(options)

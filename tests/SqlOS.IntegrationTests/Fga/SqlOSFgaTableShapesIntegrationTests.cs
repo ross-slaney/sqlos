@@ -152,8 +152,8 @@ public class SqlOSFgaTableShapesIntegrationTests
         await open.CommitAsync();
 
         var (projection, copy, source) = TestDatabase.IsSqlServer
-            ? ("Id, CONVERT(varchar(max), FgaScope, 2)", "dbo.SqlOSFgaScopeIndex_ShapeTickets ORDER BY Id", "ShapeTickets ORDER BY Id")
-            : ("\"Id\", encode(\"FgaScope\", 'hex')", "\"dbo\".\"SqlOSFgaScopeIndex_ShapeTickets\" ORDER BY \"Id\"", "\"ShapeTickets\" ORDER BY \"Id\"");
+            ? ("Id, ResourceId", "dbo.SqlOSFgaScopeIndex_ShapeTickets ORDER BY Id", "ShapeTickets ORDER BY Id")
+            : ("\"Id\", \"ResourceId\"", "\"dbo\".\"SqlOSFgaScopeIndex_ShapeTickets\" ORDER BY \"Id\"", "\"ShapeTickets\" ORDER BY \"Id\"");
         (await ReadAsync(db, $"SELECT {projection} FROM {copy}"))
             .Should().Equal(await ReadAsync(db, $"SELECT {projection} FROM {source}"), "both rows reached the projection with their scope");
     }

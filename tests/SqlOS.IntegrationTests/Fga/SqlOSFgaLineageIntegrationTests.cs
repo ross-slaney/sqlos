@@ -441,8 +441,8 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
         var entityId = await CreateEntityAsync(ids[1]);
         try
         {
-            var before = await Context.Set<LifecycleProtectedEntity>().AsNoTracking().SingleAsync(e => e.Id == entityId);
-            before.FgaScope.Should().NotBeNull();
+            var before = await ReadEntityAsync(entityId);
+            before.TypeSeq.Should().NotBeNull();
 
             var tracked = await Context.Set<LifecycleProtectedEntity>().SingleAsync(e => e.Id == entityId);
             tracked.Rank = 42;
@@ -451,7 +451,7 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
 
             var after = await Context.Set<LifecycleProtectedEntity>().AsNoTracking().SingleAsync(e => e.Id == entityId);
             after.Rank.Should().Be(42);
-            after.FgaScope.Should().Equal(before.FgaScope, "EF Core never writes the scope column");
+            (await ReadEntityAsync(entityId)).Should().BeEquivalentTo(before, "an application update leaves private ancestry unchanged");
         }
         finally
         {
@@ -524,7 +524,7 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
             var maintainedEntities = await ReadEntitiesAsync();
             var ancestors = string.Join(", ", Enumerable.Range(0, Levels).Select(l => $"[Ancestor{l}] = NULL"));
             await Context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite($"UPDATE [dbo].[SqlOSFgaResources] SET [Depth] = NULL, [Reach] = NULL, {ancestors}"));
-            await Context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("UPDATE [LifecycleProtectedEntities] SET [FgaScope] = NULL"));
+            await Context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("UPDATE [dbo].[SqlOSFgaScopeIndex_LifecycleProtectedEntities] SET [FgaScope] = NULL"));
             await Context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("UPDATE [dbo].[SqlOSFgaSchema] SET [RoutinesHash] = NULL"));
             await ClearLineageBuiltAsync();
 
@@ -566,7 +566,7 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
             var clearLineage = $"UPDATE [dbo].[SqlOSFgaResources] SET [Depth] = NULL, [Reach] = NULL, {ancestors}";
             var failInTheLastRange = $"ALTER TABLE [dbo].[SqlOSFgaResources] WITH NOCHECK ADD CONSTRAINT [CK_Test_InterruptRebuild] CHECK ([Id] <> N'{ids[2]}' OR [Depth] IS NULL)";
             await Context.Database.ExecuteSqlRawAsync(clearLineage);
-            await Context.Database.ExecuteSqlRawAsync("UPDATE [LifecycleProtectedEntities] SET [FgaScope] = NULL");
+            await Context.Database.ExecuteSqlRawAsync("UPDATE [dbo].[SqlOSFgaScopeIndex_LifecycleProtectedEntities] SET [FgaScope] = NULL");
             await Context.Database.ExecuteSqlRawAsync("UPDATE [dbo].[SqlOSFgaSchema] SET [RoutinesHash] = NULL");
             await Context.Database.ExecuteSqlRawAsync(failInTheLastRange);
             try
@@ -605,7 +605,7 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
         try
         {
             var maintainedEntities = await ReadEntitiesAsync();
-            await Context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("UPDATE [LifecycleProtectedEntities] SET [FgaScope] = NULL"));
+            await Context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("UPDATE [dbo].[SqlOSFgaScopeIndex_LifecycleProtectedEntities] SET [FgaScope] = NULL"));
             await Context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("UPDATE [dbo].[SqlOSFgaSchema] SET [RoutinesHash] = NULL"));
 
             await new SqlOSFgaFunctionInitializer(Context, Options.Create(new SqlOSFgaOptions()), NullLogger<SqlOSFgaFunctionInitializer>.Instance)
@@ -1035,7 +1035,7 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
     /// </summary>
     private static Task<List<EntityRow>> ReadEntitiesAsync()
         => ReadAsync(
-            TestDatabase.Rewrite("SELECT [Id], [ResourceId], [FgaScope] FROM [LifecycleProtectedEntities]"),
+            TestDatabase.Rewrite("SELECT [Id], [ResourceId], [FgaScope] FROM [dbo].[SqlOSFgaScopeIndex_LifecycleProtectedEntities]"),
             reader =>
             {
                 if (reader.IsDBNull(2))

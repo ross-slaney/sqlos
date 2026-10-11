@@ -71,7 +71,7 @@ Use **Send test delivery** only with an operator-controlled destination. A test 
 - Permission key in code must match seeded permission keys exactly.
 - Use the access tester in `/sqlos/admin/fga/` to reproduce the check.
 - Rows a bulk load wrote without triggers have no scope until SqlOS's next start. Run the [scope fill](/docs/fga/setup#rows-written-without-the-triggers) from the job to make them visible at once.
-- A table the startup log names as having no `FgaScope` column yet is protected at the next start after its migration is applied.
+- A table the startup log names as not existing or having no `ResourceId` column yet is protected at the next start after its migration is applied.
 
 ## FGA errors
 

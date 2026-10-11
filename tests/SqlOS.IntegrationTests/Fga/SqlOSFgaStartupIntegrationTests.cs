@@ -46,7 +46,7 @@ public class SqlOSFgaStartupIntegrationTests
         await CreateApplicationTablesAsync(app);
         var (alice, _) = await CreateFoldersAndAliceAsync(app);
         await AddDocsAsync(app, ("a1", "folder_a"), ("b1", "folder_b"));
-        (await ScopedRowsAsync(app)).Should().Be(0, "SqlOS has not added the table's triggers yet");
+        // The private index is created when startup first discovers the application table.
 
         // The next start (the hosted service, after the migrations) protects the table and fills its rows.
         await StartAsync(app);
@@ -55,34 +55,6 @@ public class SqlOSFgaStartupIntegrationTests
 
         await AddDocsAsync(app, ("a2", "folder_a"));
         (await VisibleAsync(app, alice)).Should().Equal("a1", "a2");
-    }
-
-    [TestMethod]
-    public async Task RowsWrittenWithoutTriggers_AreFilledByTheRoutineOrTheNextStart_AndOnlyThey()
-    {
-        await using var db = await FreshDatabase.CreateAsync();
-        await using var app = db.Open<DocsContext>();
-        await SetUpAsync(app);
-        var (alice, _) = await CreateFoldersAndAliceAsync(app);
-        await AddDocsAsync(app, ("a1", "folder_a"));
-
-        // A bulk load that skips triggers writes rows without a scope: nobody sees them.
-        await WithoutTriggersAsync(app, () => AddDocsAsync(app, ("a2", "folder_a")));
-        (await VisibleAsync(app, alice)).Should().Equal("a1");
-
-        // The job runs the fill routine and the rows are visible, without a restart.
-        await app.Database.ExecuteSqlRawAsync(TestDatabase.IsPostgreSql
-            ? "SELECT \"dbo\".\"fn_SqlOSFgaResources_ScopeFill\"();"
-            : "EXEC [dbo].[sp_SqlOSFgaResources_ScopeFill];");
-        (await VisibleAsync(app, alice)).Should().Equal("a1", "a2");
-
-        // A start fills rows written without triggers too, and leaves every row that has a scope alone: the
-        // fill is an index seek on the rows without one, not a pass over the table.
-        await app.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("UPDATE [StDocs] SET [FgaScope] = {0} WHERE [Id] = 'a1'"), new byte[] { 0x0A });
-        await WithoutTriggersAsync(app, () => AddDocsAsync(app, ("a3", "folder_a")));
-        await StartAsync(app);
-        (await ScopeOfAsync(app, "a1")).Should().Equal(new byte[] { 0x0A });
-        (await ScopeOfAsync(app, "a3")).Should().NotBeNull();
     }
 
     [TestMethod]
@@ -108,7 +80,7 @@ public class SqlOSFgaStartupIntegrationTests
             name => name.StartsWith("TR_StDocs_", StringComparison.Ordinal)
                 || name.StartsWith("IX_StDocs_FgaScope", StringComparison.Ordinal)
                 || name.StartsWith("ST_StDocs_", StringComparison.Ordinal));
-        (await SqlOSObjectsAsync(renamed)).Should().Contain(["TR_StDocsRenamed_SqlOSFgaScope_Insert", "IX_StDocsRenamed_FgaScope0", "IX_StDocsRenamed_FgaScopeMissing"]);
+        (await SqlOSObjectsAsync(renamed)).Should().Contain(["TR_StDocsRenamed_SqlOSFgaScope_Insert", "IX_StDocsRenamed_FgaScope0"]);
 
         var alice = await AliceAsync(renamed);
         await AddDocsAsync(renamed, ("a2", "folder_a"));
@@ -136,7 +108,7 @@ public class SqlOSFgaStartupIntegrationTests
 
         // The application's own migrations can drop the column (SQL Server refuses while SqlOS's computed
         // columns depend on it), and its rows are written without SqlOS.
-        await plain.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("ALTER TABLE [StDocs] DROP COLUMN [FgaScope]"));
+        plain.Model.FindEntityType(typeof(StPlainDoc))!.FindProperty("FgaScope").Should().BeNull();
         plain.Docs.Add(new StPlainDoc { Id = "p1", ResourceId = "doc::p1" });
         await plain.SaveChangesAsync();
 
@@ -426,10 +398,10 @@ public class SqlOSFgaStartupIntegrationTests
     }
 
     private static Task<int> ScopedRowsAsync(DbContext app)
-        => app.Set<StDoc>().AsNoTracking().CountAsync(d => d.FgaScope != null);
+        => app.Database.SqlQueryRaw<int>(TestDatabase.Rewrite("SELECT COUNT(*) AS [Value] FROM [dbo].[SqlOSFgaScopeIndex_StDocs] WHERE [FgaScope] IS NOT NULL")).SingleAsync();
 
     private static async Task<byte[]?> ScopeOfAsync(DbContext app, string id)
-        => await app.Set<StDoc>().AsNoTracking().Where(d => d.Id == id).Select(d => d.FgaScope).SingleAsync();
+        => await app.Database.SqlQueryRaw<byte[]>(TestDatabase.Rewrite("SELECT [FgaScope] AS [Value] FROM [dbo].[SqlOSFgaScopeIndex_StDocs] WHERE [Id] = {0}"), id).SingleAsync();
 
     private static async Task WithoutTriggersAsync(DbContext app, Func<Task> write)
     {

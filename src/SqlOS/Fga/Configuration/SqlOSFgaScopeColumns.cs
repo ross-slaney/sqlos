@@ -1,18 +1,14 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using SqlOS.Fga.Interfaces;
+using SqlOS.Fga.Models;
 
 namespace SqlOS.Fga.Configuration;
 
 /// <summary>
-/// The scope column (<see cref="IHasResourceId.FgaScope"/>) of every application entity with a resource id.
-/// The entity declares the property; this pass maps the column (from the property, or as a shadow property
-/// when the entity implements it explicitly and EF Core does not map it by convention) and configures what
-/// the database needs of it: a fixed maximum length (so SQL Server can index pieces of it), that EF Core never
-/// writes it, the SQL Server triggers SqlOS keeps it current with (declared so EF Core's update pipeline
-/// avoids OUTPUT without INTO), and an index on the resource id the triggers find rows by. The per-level
-/// indexes, the triggers themselves, and the fill are created by <c>SqlOSFgaFunctionInitializer</c> at
-/// startup, outside the application's migrations.
+/// Configures ResourceId and automatic index-maintenance triggers on protected application entities.
+/// Ancestry and per-level indexes live in SqlOS-owned tables, outside application migrations.
+/// Trigger metadata also keeps EF Core's SQL Server writes compatible with those triggers.
 /// </summary>
 internal static class SqlOSFgaScopeColumns
 {
@@ -65,14 +61,33 @@ internal static class SqlOSFgaScopeColumns
                 }
             }
             var table = entityType.GetTableName()!;
-            var scope = entity.Property<byte[]>(SqlOSFgaLineage.ScopeColumn).HasMaxLength(SqlOSFgaLineage.ScopeMaxLength);
-            SqlOSFgaModelConfiguration.DatabaseOwned(scope);
+            // Scope exists only in SqlOS-owned indexes.
+            entity.Ignore(SqlOSFgaLineage.ScopeColumn);
 
             entity.ToTable(t =>
             {
                 foreach (var trigger in SqlOSFgaLineage.ScopeTriggerNames(table))
                 {
                     t.HasTrigger(trigger);
+                }
+            });
+
+            // A query-only model of this table's private index. Its key retains the application's CLR
+            // types and converters, so the authorization predicate can correlate by the existing PK.
+            modelBuilder.SharedTypeEntity<SqlOSFgaScopeRow>(SqlOSFgaScopeRow.ModelName(entityType.Name), scope =>
+            {
+                scope.HasNoKey();
+                scope.ToView(null);
+                scope.Property(x => x.ResourceId).HasMaxLength(450);
+                scope.Property(x => x.FgaScope).HasMaxLength(SqlOSFgaLineage.ScopeMaxLength);
+                var keys = entityType.FindPrimaryKey()!.Properties;
+                for (var i = 0; i < keys.Count; i++)
+                {
+                    var key = keys[i];
+                    var mapped = scope.Property(key.ClrType, SqlOSFgaScopeRow.KeyName(i));
+                    mapped.HasColumnType(key.GetColumnType());
+                    if (key.GetMaxLength() is { } length) mapped.HasMaxLength(length);
+                    if (key.GetValueConverter() is { } converter) mapped.HasConversion(converter);
                 }
             });
 
@@ -85,7 +100,7 @@ internal static class SqlOSFgaScopeColumns
     }
 
     /// <summary>
-    /// The application tables of the model that carry the scope column, for the database routines: how to
+    /// The protected application tables of the model, for the database routines: how to
     /// address each, and the orders it declared indexes for. Per level, SqlOS indexes the level's ancestor
     /// followed by the primary key, and followed by each declared order's columns and then the key (a cursor
     /// page orders by the declared columns, then the key). Every level has at least the key index, which is
@@ -98,7 +113,7 @@ internal static class SqlOSFgaScopeColumns
         var sqlosAssembly = typeof(SqlOSFgaScopeColumns).Assembly;
         foreach (var entityType in model.GetEntityTypes())
         {
-            if (!IsProtected(entityType, sqlosAssembly) || entityType.FindProperty(SqlOSFgaLineage.ScopeColumn) is null)
+            if (!IsProtected(entityType, sqlosAssembly))
             {
                 continue;
             }
@@ -130,7 +145,7 @@ internal static class SqlOSFgaScopeColumns
 
     /// <summary>
     /// An application entity type with a resource id: it implements <see cref="IHasResourceId"/> (and so
-    /// declares the scope column), maps its resource id, is mapped to a table of its own, and is not one of
+    /// exposes the resource id), maps its resource id, is mapped to a table of its own, and is not one of
     /// SqlOS's.
     /// </summary>
     private static bool IsProtected(IReadOnlyEntityType entityType, System.Reflection.Assembly sqlosAssembly)

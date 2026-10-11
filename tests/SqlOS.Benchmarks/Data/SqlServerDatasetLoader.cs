@@ -99,13 +99,12 @@ internal sealed class SqlServerDatasetLoader(string connectionString, SqlOSFgaOp
         var disabled = await DisableNonclusteredIndexesAsync(cancellationToken);
 
         var rows = Stopwatch.StartNew();
-        var productType = typeSeq["product"];
         await Task.WhenAll(
             Task.Run(() => BulkCopyAsync(Resources, DatasetRows.Columns.Resources, DatasetRows.ProductResources(tree, from, to), orderedBy: ["Id"], cancellationToken), cancellationToken),
-            Task.Run(() => BulkCopyAsync(Products, DatasetRows.Columns.Products(typeof(byte[])), DatasetRows.Products(tree, productType, from, to, SqlOSFgaScope.Encode), orderedBy: ["Id"], cancellationToken), cancellationToken));
+            Task.Run(() => BulkCopyAsync(Products, DatasetRows.Columns.Products(), DatasetRows.Products(tree, from, to), orderedBy: ["Id"], cancellationToken), cancellationToken));
         rows.Stop();
         await ExecuteAsync("CHECKPOINT;", cancellationToken);
-        log.Info($"  rows loaded in {rows.Elapsed.TotalSeconds:F1}s (lineage and scope column included)");
+        log.Info($"  rows loaded in {rows.Elapsed.TotalSeconds:F1}s (resource lineage included; private indexes built next)");
         await LogFileSizesAsync("load", cancellationToken);
 
         var indexes = Stopwatch.StartNew();
@@ -137,7 +136,7 @@ internal sealed class SqlServerDatasetLoader(string connectionString, SqlOSFgaOp
         static string Quote(string column) => $"[{column}]";
         static string Cast(string expression) => $"CONVERT(DECIMAL(38, 0), {expression})";
         var resources = await ChecksumAsync(LineageSql.ResourcesChecksum(Resources, Quote, Cast), cancellationToken);
-        var products = await ChecksumAsync(LineageSql.ProductsChecksum(Products, postgres: false), cancellationToken);
+        var products = await ChecksumAsync(LineageSql.ProductsChecksum($"[{fga.Schema}].[SqlOSFgaScopeIndex_Products]", postgres: false), cancellationToken);
         return new LineageChecksum(resources, products);
     }
 

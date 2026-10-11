@@ -1,52 +1,44 @@
 using System.Linq.Expressions;
+using System.Reflection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
-using Microsoft.EntityFrameworkCore.Query;
-using Microsoft.EntityFrameworkCore.Query.Internal;
 using SqlOS.Database;
 using SqlOS.Fga.Configuration;
+using SqlOS.Fga.Models;
+using SqlOS.Fga.Services;
 
 namespace SqlOS.Fga.Paging;
 
-#pragma warning disable EF1001 // Same EF query-root integration boundary as SqlOSFgaQueryCompiler.
-
-/// <summary>
-/// In a planned statement (a filtered query that is not a page), read each protected table through its
-/// projection: the scope from the projection, whose per-level indexes serve the authorization predicate,
-/// every other column from the row. The same on both engines. EF Core still translates the whole query:
-/// Where, joins, aggregates and ordering stay in SQL. Queries without an authorization filter never pass
-/// through this visitor.
-/// </summary>
-internal sealed class SqlOSFgaScopeIndexQueries(DbContext context, SqlOSFgaOptions options, ISqlOSDatabaseProvider provider) : ExpressionVisitor
+/// <summary>Non-page filters read scope from the private index, never from the application model.</summary>
+internal static class SqlOSFgaScopeIndexQueries
 {
-    private readonly IReadOnlyList<SqlOSFgaScopeTable> _tables = SqlOSFgaScopeColumns.Tables(context.Model);
+    private static readonly MethodInfo BuildMethod = typeof(SqlOSFgaScopeIndexQueries).GetMethod(nameof(Build), BindingFlags.NonPublic | BindingFlags.Static)!;
 
-    public static Expression Rewrite(Expression query, DbContext context, SqlOSFgaOptions options)
-    {
-        var providerName = context.Database.ProviderName;
-        return SqlOSDatabase.IsSqlServer(providerName) || SqlOSDatabase.IsPostgreSql(providerName)
-            ? new SqlOSFgaScopeIndexQueries(context, options, SqlOSDatabase.Resolve(providerName)).Visit(query)
-            : query;
-    }
+    public static LambdaExpression Predicate(DbContext context, Type entityType, SqlOSFgaAccessToken token, IReadOnlyList<SqlOSFgaAccessRoot> roots)
+        => (LambdaExpression)BuildMethod.MakeGenericMethod(entityType).Invoke(null, [context, token, roots])!;
 
-    protected override Expression VisitExtension(Expression node)
+    private static Expression<Func<T, bool>> Build<T>(DbContext context, SqlOSFgaAccessToken token, IReadOnlyList<SqlOSFgaAccessRoot> roots)
     {
-        // A user-supplied FromSql query has its own semantics and must not be replaced with a table read.
-        if (node is EntityQueryRootExpression root && root.GetType() == typeof(EntityQueryRootExpression))
+        var entity = context.Model.FindEntityType(typeof(T))!;
+        var table = SqlOSFgaScopeColumns.Tables(context.Model).Single(t => t.Table == entity.GetTableName()
+            && t.Schema == (entity.GetSchema() ?? context.Model.GetDefaultSchema()));
+        var provider = SqlOSDatabase.Resolve(context.Database);
+        var scopeFilter = SqlOSFgaFilterBuilder.Build<SqlOSFgaScopeRow>(roots, token.SubjectIdsJson, token.TypeSeq, SqlOSFgaLineage.Levels(token.Options));
+        var scopes = context.Set<SqlOSFgaScopeRow>(SqlOSFgaScopeRow.ModelName(entity.GetRootType().Name)).FromSqlRaw(provider.BuildScopeIndexQuerySql(token.Options, table)).Where(scopeFilter);
+        var row = Expression.Parameter(typeof(T), "row");
+        var scope = Expression.Parameter(typeof(SqlOSFgaScopeRow), "scope");
+        Expression? matches = null;
+        var keys = entity.FindPrimaryKey()!.Properties;
+        for (var i = 0; i < keys.Count; i++)
         {
-            var table = _tables.FirstOrDefault(t => t.Table == root.EntityType.GetTableName()
-                && t.Schema == (root.EntityType.GetSchema() ?? context.Model.GetDefaultSchema()));
-            if (table is not null)
-            {
-                var sql = provider.BuildScopeIndexQuerySql(options, table);
-                var arguments = Expression.Constant(Array.Empty<object>());
-                return root.QueryProvider is { } queryProvider
-                    ? new FromSqlQueryRootExpression(queryProvider, root.EntityType, sql, arguments)
-                    : new FromSqlQueryRootExpression(root.EntityType, sql, arguments);
-            }
+            var key = keys[i];
+            var applicationKey = Expression.Call(typeof(EF), nameof(EF.Property), [key.ClrType], row, Expression.Constant(key.Name));
+            var privateKey = Expression.Call(typeof(EF), nameof(EF.Property), [key.ClrType], scope, Expression.Constant(SqlOSFgaScopeRow.KeyName(i)));
+            var equal = Expression.Equal(privateKey, applicationKey);
+            matches = matches is null ? equal : Expression.AndAlso(matches, equal);
         }
-        return base.VisitExtension(node);
+        var sameRow = Expression.Lambda<Func<SqlOSFgaScopeRow, bool>>(matches!, scope);
+        return Expression.Lambda<Func<T, bool>>(
+            Expression.Call(typeof(Queryable), nameof(Queryable.Any), [typeof(SqlOSFgaScopeRow)], scopes.Expression, Expression.Quote(sameRow)), row);
     }
 }
-
-#pragma warning restore EF1001

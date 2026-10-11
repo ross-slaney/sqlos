@@ -97,7 +97,7 @@ internal sealed class SqlOSFgaPageQuery<T> where T : class, IHasResourceId
             ?? throw new InvalidOperationException($"{typeof(T).Name} is not an entity of {context.GetType().Name}.");
         var table = SqlOSFgaScopeColumns.Tables(model).FirstOrDefault(t => t.Table == entityType.GetTableName() && t.Schema == (entityType.GetSchema() ?? model.GetDefaultSchema()))
             ?? throw new InvalidOperationException(
-                $"{typeof(T).Name} is not a protected entity of {context.GetType().Name}: it has no {SqlOSFgaLineage.ScopeColumn} column SqlOS maintains. "
+                $"{typeof(T).Name} is not a protected entity of {context.GetType().Name}: it has no resource id SqlOS maintains. "
                 + "Map it in the context registered with SqlOS; pages only work on its entities.");
         var store = StoreObjectIdentifier.Table(table.Table, table.Schema);
 

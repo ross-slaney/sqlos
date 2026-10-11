@@ -45,7 +45,7 @@ public class SqlOSFgaPageIntegrationTests
     private const string OtherRoleId = "role_page_other";
 
     [TestMethod]
-    public async Task BaseClass_LeavesApplicationColumnsEqualToTheEfModel_AndUpgradesTheEarlierLayout()
+    public async Task BaseClass_UsesOnlyResourceId_AndMaintainsPrivateIndexes()
     {
         await using var host = await HostedApp.StartAsync();
         await using var scope = host.App.Services.CreateAsyncScope();
@@ -67,22 +67,7 @@ public class SqlOSFgaPageIntegrationTests
             comparison.Changes.Should().BeEmpty("SqlOS's startup must not leave undeclared columns for the application's schema tool to remove");
         }
 
-        // Reproduce the released v8 table shape, with application data already present: the per-level indexes on
-        // the application table (on SQL Server over computed columns). Startup must remove them and build the
-        // projection without an application migration.
-        await db.Database.ExecuteSqlRawAsync(TestDatabase.IsSqlServer
-            ? """
-              ALTER TABLE [PageItems] ADD [FgaScopeType] AS SUBSTRING([FgaScope], 2, 4);
-              ALTER TABLE [PageItems] ADD [FgaScope0] AS SUBSTRING([FgaScope], 6, 8);
-              CREATE STATISTICS [ST_PageItems_FgaScopeType] ON [PageItems] ([FgaScopeType]);
-              CREATE INDEX [IX_PageItems_FgaScope0] ON [PageItems] ([FgaScope0], [Id]) WHERE [FgaScope] >= 0x00;
-              DROP TABLE [dbo].[SqlOSFgaScopeIndex_PageItems];
-              """
-            : """
-              CREATE INDEX "IX_PageItems_FgaScope0" ON "PageItems" ((SUBSTRING("FgaScope", 6, 8)), "Id") WHERE "FgaScope" >= '\x00'::bytea;
-              CREATE STATISTICS "ST_PageItems_FgaScopeType" ON ((SUBSTRING("FgaScope", 2, 4))) FROM "PageItems";
-              DROP TABLE "dbo"."SqlOSFgaScopeIndex_PageItems";
-              """);
+        expected.Should().Contain("ResourceId").And.NotContain("FgaScope");
         var initializer = new SqlOSFgaFunctionInitializer(db,
             Options.Create(new SqlOS.Fga.Configuration.SqlOSFgaOptions()), NullLogger<SqlOSFgaFunctionInitializer>.Instance);
         await initializer.EnsureFunctionsExistAsync();
@@ -90,7 +75,7 @@ public class SqlOSFgaPageIntegrationTests
         (await ReadAsync(db, TestDatabase.IsSqlServer
                 ? "SELECT name FROM sys.indexes WHERE object_id = OBJECT_ID(N'PageItems') AND name LIKE 'IX[_]PageItems[_]FgaScope%'"
                 : "SELECT indexname FROM pg_indexes WHERE tablename = 'PageItems' AND indexname LIKE 'IX\\_PageItems\\_FgaScope%'"))
-            .Should().Equal(["IX_PageItems_FgaScopeMissing"], "the application table keeps only the index on rows without a scope");
+            .Should().BeEmpty("all scope indexes belong to SqlOS tables");
         await AssertScopeProjectionAsync(db);
         await initializer.EnsureFunctionsExistAsync();
         await AssertScopeProjectionAsync(db);
@@ -134,11 +119,11 @@ public class SqlOSFgaPageIntegrationTests
     {
         // Compare with the source rows, not with another query that uses the same authorization index.
         var (projection, source, copy, order) = TestDatabase.IsSqlServer
-            ? ("Id, Label, Rank, Stamp, ComputedStatus, CONVERT(varchar(max), FgaScope, 2) AS ScopeBytes", "PageItems", "dbo.SqlOSFgaScopeIndex_PageItems", "ORDER BY Id")
-            : ("\"Id\", \"Label\", \"Rank\", \"Stamp\", encode(\"FgaScope\", 'hex') AS \"ScopeBytes\"", "\"PageItems\"", "\"dbo\".\"SqlOSFgaScopeIndex_PageItems\"", "ORDER BY \"Id\"");
+            ? ("Id, Label, Rank, Stamp, ComputedStatus", "PageItems", "dbo.SqlOSFgaScopeIndex_PageItems", "ORDER BY Id")
+            : ("\"Id\", \"Label\", \"Rank\", \"Stamp\"", "\"PageItems\"", "\"dbo\".\"SqlOSFgaScopeIndex_PageItems\"", "ORDER BY \"Id\"");
         (await ReadAsync(db, $"SELECT {projection} FROM {copy} {order}"))
             .Should().Equal(await ReadAsync(db, $"SELECT {projection} FROM {source} {order}"),
-                "the projection must equal the application rows, including every scope byte");
+                "the projection must equal the application rows, including indexed fields; authorization is checked against point checks in the page matrix");
     }
 
     [TestMethod]

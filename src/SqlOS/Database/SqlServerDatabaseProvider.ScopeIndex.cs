@@ -37,9 +37,7 @@ internal sealed partial class SqlServerDatabaseProvider
         var index = ScopeIndexTable(options, table);
         var name = SqlOSFgaScopeIndex.Table(table);
         var columns = SqlOSFgaScopeIndex.Columns(table);
-        var select = string.Join(", ", columns.Select(c => c.StoreType.Equals("rowversion", StringComparison.OrdinalIgnoreCase) || c.StoreType.Equals("timestamp", StringComparison.OrdinalIgnoreCase)
-            ? $"CONVERT(binary(8), t.[{Escape(c.Column)}]) AS [{Escape(c.Column)}]"
-            : $"t.[{Escape(c.Column)}]"));
+        var select = ScopeIndexSelect(table, SqlOSFgaLineage.Levels(options));
         var list = string.Join(", ", columns.Select(c => $"[{Escape(c.Column)}]"));
         var keys = string.Join(", ", table.KeyColumns.Select(k => $"[{Escape(k)}]"));
         var ddl = $"""
@@ -53,9 +51,9 @@ internal sealed partial class SqlServerDatabaseProvider
             IF OBJECT_ID(N'{SqlLiteral(index)}', N'U') IS NULL
             BEGIN
                 SELECT TOP (0) {select} INTO {index}
-                FROM {ScopeTable(table)} t CROSS JOIN (SELECT 0 AS dummy) no_identity;
+                FROM {ScopeIndexSource(options, table, ScopeTable(table))};
                 ALTER TABLE {index} ADD CONSTRAINT [PK_{Escape(name)}] PRIMARY KEY ({keys});
-                INSERT INTO {index} ({list}) SELECT {select} FROM {ScopeTable(table)} t;
+                INSERT INTO {index} ({list}) SELECT {select} FROM {ScopeIndexSource(options, table, ScopeTable(table))};
                 EXEC sys.sp_addextendedproperty @name = N'SqlOSProjection', @value = @sqlosProjection,
                     @level0type = N'SCHEMA', @level0name = N'{SqlLiteral(options.Schema)}',
                     @level1type = N'TABLE', @level1name = N'{SqlLiteral(name)}';
@@ -99,7 +97,7 @@ internal sealed partial class SqlServerDatabaseProvider
         var changes = columns;
         return $"""
             MERGE {ScopeIndexTable(options, table)} AS d
-            USING (SELECT {list} FROM {source}) AS s
+            USING (SELECT {ScopeIndexSelect(table, SqlOSFgaLineage.Levels(options))} FROM {ScopeIndexSource(options, table, source)}) AS s
             ON {string.Join(" AND ", table.KeyColumns.Select(k => $"d.[{Escape(k)}] = s.[{Escape(k)}]"))}
             WHEN MATCHED AND EXISTS (SELECT {string.Join(", ", changes.Select(c => $"CONVERT(varbinary(max), d.[{Escape(c)}])"))} EXCEPT SELECT {string.Join(", ", changes.Select(c => $"CONVERT(varbinary(max), s.[{Escape(c)}])"))})
                 THEN UPDATE SET {string.Join(", ", changes.Select(c => $"[{Escape(c)}] = s.[{Escape(c)}]"))}
@@ -109,28 +107,32 @@ internal sealed partial class SqlServerDatabaseProvider
     }
 
     private static string ScopeIndexRefreshRows(SqlOSFgaOptions options, SqlOSFgaScopeTable table)
-        => ScopeIndexMerge(options, table, $"(SELECT t.* FROM {ScopeTable(table)} t INNER JOIN inserted i ON {string.Join(" AND ", table.KeyColumns.Select(k => $"t.[{Escape(k)}] = i.[{Escape(k)}]"))}) current_rows");
+        => ScopeIndexMerge(options, table, $"(SELECT t.* FROM {ScopeTable(table)} t INNER JOIN inserted i ON {string.Join(" AND ", table.KeyColumns.Select(k => $"t.[{Escape(k)}] = i.[{Escape(k)}]"))})");
 
     private static string ScopeIndexDeleteRows(SqlOSFgaOptions options, SqlOSFgaScopeTable table)
         => $"DELETE d FROM {ScopeIndexTable(options, table)} d INNER JOIN deleted old ON {string.Join(" AND ", table.KeyColumns.Select(k => $"d.[{Escape(k)}] = old.[{Escape(k)}]"))};";
 
-    /// <summary>
-    /// A planned statement reads the application's table through its projection: the scope from the
-    /// projection, whose per-level indexes serve the authorization predicate, and every other column from
-    /// the row itself, the same on both engines. The projection decides which rows are visible and nothing more, so a
-    /// value it holds (a key, an order column) is never what the application sees, stale or not. The join and
-    /// all filtering remain in SQL.
-    /// </summary>
+    /// <summary>The private scope rows used by a primary-key-correlated authorization predicate.</summary>
     public string BuildScopeIndexQuerySql(SqlOSFgaOptions options, SqlOSFgaScopeTable table)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(table);
         return $"""
-            SELECT {string.Join(", ", table.Columns.Select(c => $"{(c.Column == SqlOSFgaLineage.ScopeColumn ? "s" : "a")}.[{Escape(c.Column)}] AS [{Escape(c.Column)}]"))}
+            SELECT {string.Join(", ", table.KeyColumns.Select((k, i) => $"s.[{Escape(k)}] AS [ScopeKey{i}]"))}, s.[{Escape(table.ResourceIdColumn)}] AS [ResourceId], s.[FgaScope]
             FROM {ScopeIndexTable(options, table)} s
-            INNER JOIN {ScopeTable(table)} a ON {string.Join(" AND ", table.KeyColumns.Select(k => $"a.[{Escape(k)}] = s.[{Escape(k)}]"))}
             """;
     }
+
+    private static string ScopeIndexSelect(SqlOSFgaScopeTable table, int levels)
+        => string.Join(", ", SqlOSFgaScopeIndex.Columns(table).Select(c => c.Column == SqlOSFgaLineage.ScopeColumn
+            ? $"CAST({ScopeValue(levels, "r", "rt")} AS varbinary(512)) AS [FgaScope]"
+            : c.StoreType.Equals("rowversion", StringComparison.OrdinalIgnoreCase) || c.StoreType.Equals("timestamp", StringComparison.OrdinalIgnoreCase)
+                ? $"CONVERT(binary(8), t.[{Escape(c.Column)}]) AS [{Escape(c.Column)}]"
+                : $"t.[{Escape(c.Column)}]"));
+
+    private static string ScopeIndexSource(SqlOSFgaOptions options, SqlOSFgaScopeTable table, string source)
+        => $"{source} t LEFT JOIN [{Escape(options.Schema)}].[{Escape(options.TableNames.Resources)}] r ON r.Id = t.[{Escape(table.ResourceIdColumn)}] "
+           + $"LEFT JOIN [{Escape(options.Schema)}].[{Escape(options.TableNames.ResourceTypes)}] rt ON rt.Id = r.ResourceTypeId";
 
     private static string StaleScopeIndexTables(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> tables)
         => $"""

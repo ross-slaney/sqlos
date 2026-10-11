@@ -690,7 +690,8 @@ internal sealed partial class SqlServerDatabaseProvider
 
     private static string RowTest(SqlOSFgaOptions options, SqlOSFgaPageSpec spec, int level, int levels)
     {
-        var scope = $"{spec.Alias}.[{SqlOSFgaLineage.ScopeColumn}]";
+        var scopeAlias = spec.PredicateSql is null ? spec.Alias : "sqlos_scope";
+        var scope = $"{scopeAlias}.[{SqlOSFgaLineage.ScopeColumn}]";
         var type = spec.Typed ? $"SUBSTRING({scope}, {SqlOSFgaLineage.ScopeTypeOffset}, 4) = @Type AND " : "";
         if (level + 1 >= levels)
         {

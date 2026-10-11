@@ -95,7 +95,7 @@ Define resources (projects, chains, stores), roles (admin, viewer), and permissi
 
 ## Setup
 
-Derive your context from `SqlOSDbContext<TContext>` (or call `modelBuilder.UseSqlOS(Database.ProviderName)` last in your own `OnModelCreating`), declare `ResourceId` and `FgaScope` on each protected entity, and register SqlOS with your database provider:
+Derive your context from `SqlOSDbContext<TContext>` (or call `modelBuilder.UseSqlOS(Database.ProviderName)` last in your own `OnModelCreating`), declare `ResourceId` on each protected entity (or derive it from `SqlOSResourceEntity`), and register SqlOS with your database provider:
 
 ```csharp
 builder.AddSqlOS<AppDbContext>(
