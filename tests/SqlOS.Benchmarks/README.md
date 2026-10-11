@@ -197,7 +197,8 @@ the application's own `StoreId` index; every other page reads the page's rows an
 - **regression**: every scenario's median against the constant set for it and the engine in
   `regressionMilliseconds`: what the scenario costs today, with headroom for runner noise (several times the
   values CI reports). A change that makes any page or point check slower than its limit fails the run. Raise
-  a limit only with an explanation. For a page the gated timing is the whole request: `BuildFilterAsync`
+  a limit only with an explanation. The current limits came with the lineage filters (#509): four times the
+  slowest value CI measured at 1M or 10M, rounded up, and at least 25 ms. For a page the gated timing is the whole request: `BuildFilterAsync`
   (with `fn_ListFirst`'s count) and the query.
 
 ## Run it
