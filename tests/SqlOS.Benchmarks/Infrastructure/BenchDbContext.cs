@@ -45,19 +45,17 @@ internal sealed class BenchDbContext(DbContextOptions<BenchDbContext> options) :
             product.Property(p => p.Name).HasMaxLength(200).IsRequired();
             product.Property(p => p.Price).HasPrecision(10, 2);
 
-            // The indexes an application table like this carries: the unique resource id (which the scope
-            // triggers use), the store foreign key, and the one order the catalog pages in besides the key:
-            // price, then the key, as a keyset page by price orders (an index on price alone makes every page
-            // read the whole run of equal prices, hundreds of rows at 50M). SqlOS mirrors the key and the price
-            // index per level of the scope column; the foreign key's index and the unique index are not orders
-            // and are left alone.
+            // The indexes an application table like this carries: the unique resource id (which the filter's
+            // EXISTS joins the visible resources to), the store foreign key, and the one order the catalog
+            // pages in besides the key: price, then the key, as a keyset page by price orders (an index on
+            // price alone makes every page read the whole run of equal prices, hundreds of rows at 50M).
             product.HasIndex(p => p.ResourceId).IsUnique();
             product.HasOne<Store>().WithMany().HasForeignKey(p => p.StoreId);
             product.HasIndex(p => new { p.Price, p.Id }).HasDatabaseName("IX_Products_Price");
         });
 
-        // The app's entities first, then SqlOS: every entity above with a ResourceId gets the scope column
-        // (ApplySqlOSFgaModel documents the order).
+        // The app's entities first, then SqlOS: every entity above with a ResourceId gets its resource id
+        // indexed when the application declared none (ApplySqlOSFgaModel documents the order).
         modelBuilder.ApplySqlOSFgaModel(options => options.RootResourceId = BenchmarkModel.RootResourceId);
         modelBuilder.Entity<AccessibleRow>(row =>
         {
@@ -79,8 +77,6 @@ internal sealed class AccessibleRow
 /// <summary>A catalog row. Every product is its own FGA resource, as with <c>ISqlOSResourceEntity</c>.</summary>
 internal sealed class Product : IHasResourceId
 {
-    public byte[]? FgaScope { get; private set; }
-
     public int Id { get; set; }
     public int StoreId { get; set; }
     public string ResourceId { get; set; } = string.Empty;
@@ -90,8 +86,6 @@ internal sealed class Product : IHasResourceId
 
 internal sealed class Store : IHasResourceId
 {
-    public byte[]? FgaScope { get; private set; }
-
     public int Id { get; set; }
     public int Chain { get; set; }
     public string ResourceId { get; set; } = string.Empty;

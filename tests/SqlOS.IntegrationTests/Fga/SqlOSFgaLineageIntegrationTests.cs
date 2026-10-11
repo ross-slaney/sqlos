@@ -15,9 +15,9 @@ namespace SqlOS.IntegrationTests.Fga;
 
 /// <summary>
 /// The lineage invariant: every resource holds its depth, its ancestor at every level, and its reach (the
-/// highest level from which access flows down to it through active resources only), and every application
-/// row's scope column holds its resource's type and the ancestors access flows down from. The triggers must keep it after every kind
-/// of write the resources table and the application table receive, and reject a cycle or an over-deep row.
+/// highest level from which access flows down to it through active resources only). The triggers must keep it
+/// after every kind of write the resources table receives, and reject a cycle or an over-deep row. Application
+/// tables carry nothing of it: a row's resource id is all a filter reads of them.
 /// </summary>
 [TestClass]
 public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
@@ -28,8 +28,6 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
     private sealed record ResourceRow(string Id, string? ParentId, bool IsActive, string ResourceTypeId, long Seq, short? Depth, short? Reach, long?[] Ancestors);
 
     private sealed record Lineage(short? Depth, short? Reach, long?[] Ancestors);
-
-    private sealed record EntityRow(string Id, string ResourceId, long?[] Ancestors, short? Reach, int? TypeSeq);
 
     [TestMethod]
     public async Task InsertedChain_HasTheLineageOfEveryAncestor()
@@ -130,94 +128,43 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
     }
 
     [TestMethod]
-    public async Task ChangingTheResourceType_UpdatesTheScopeTypeOfItsRows()
+    public async Task ChangingTheResourceType_LeavesTheLineageAlone()
     {
         var ids = await CreateChainAsync("retype", "agency", "team");
-        var entityId = await CreateEntityAsync(ids[1]);
         try
         {
-            var typeSeq = await ReadTypeSeqAsync();
-            (await ReadEntityAsync(entityId)).TypeSeq.Should().Be(typeSeq["team"]);
-
+            var before = await ReadResourcesAsync();
             var team = await Context.Set<SqlOSFgaResource>().SingleAsync(r => r.Id == ids[1]);
             team.ResourceTypeId = "project";
             await Context.SaveChangesAsync();
 
-            (await ReadEntityAsync(entityId)).TypeSeq.Should().Be(typeSeq["project"]);
+            var after = await ReadResourcesAsync();
+            after.Single(r => r.Id == ids[1]).ResourceTypeId.Should().Be("project");
+            after.Select(r => r with { ResourceTypeId = "" }).Should().BeEquivalentTo(before.Select(r => r with { ResourceTypeId = "" }), InKeyOrder, "a type is not part of the lineage");
             await AssertLineageMatchesAsync(ids);
         }
         finally
         {
-            await DeleteEntityAsync(entityId);
             await DeleteAsync(ids);
         }
     }
 
     [TestMethod]
-    public async Task DeletingAResource_ClearsTheScopeColumnsOfItsRows()
+    public async Task DeletingALeaf_LeavesTheRestOfTheLineageAlone()
     {
         var ids = await CreateChainAsync("del", "agency", "team", "project");
-        var entityId = await CreateEntityAsync(ids[2]);
         try
         {
-            (await ReadEntityAsync(entityId)).Reach.Should().Be(0);
-
             var entity = await Context.Set<SqlOSFgaResource>().SingleAsync(r => r.Id == ids[2]);
             Context.Set<SqlOSFgaResource>().Remove(entity);
             await Context.SaveChangesAsync();
 
-            var row = await ReadEntityAsync(entityId);
-            row.Reach.Should().BeNull("a row whose resource is gone is visible to nobody");
-            row.TypeSeq.Should().BeNull();
-            row.Ancestors.Should().AllSatisfy(a => a.Should().BeNull());
+            (await ReadResourcesAsync()).Should().NotContain(r => r.Id == ids[2]);
             await AssertLineageMatchesAsync(ids[..2]);
         }
         finally
         {
-            await DeleteEntityAsync(entityId);
             await DeleteAsync(ids[..2]);
-        }
-    }
-
-    [TestMethod]
-    public async Task ScopeColumns_FollowTheRowsResource()
-    {
-        var ids = await CreateChainAsync("follow", "agency", "team");
-        var suffix = Guid.NewGuid().ToString("N");
-        var entityId = $"follow_{suffix}";
-        var pending = $"follow_pending_{suffix}";
-        try
-        {
-            // The application row arrives before its resource exists: it takes the lineage when the resource is created.
-            await Context.Database.ExecuteSqlRawAsync(
-                TestDatabase.Rewrite("INSERT INTO [LifecycleProtectedEntities] ([Id], [ResourceId], [Rank]) VALUES ({0}, {1}, 0)"),
-                entityId,
-                pending);
-            (await ReadEntityAsync(entityId)).Reach.Should().BeNull();
-
-            Context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource { Id = pending, ParentId = ids[1], Name = pending, ResourceTypeId = "project" });
-            await Context.SaveChangesAsync();
-            var row = await ReadEntityAsync(entityId);
-            row.Reach.Should().Be(0);
-            row.Ancestors[3].Should().Be((await ReadResourcesAsync()).Single(r => r.Id == pending).Seq);
-
-            // Pointing the row at another resource takes that resource's lineage; at nothing, none.
-            await Context.Database.ExecuteSqlRawAsync(
-                TestDatabase.Rewrite("UPDATE [LifecycleProtectedEntities] SET [ResourceId] = {0} WHERE [Id] = {1}"),
-                ids[0],
-                entityId);
-            (await ReadEntityAsync(entityId)).Ancestors[1].Should().Be((await ReadResourcesAsync()).Single(r => r.Id == ids[0]).Seq);
-            await Context.Database.ExecuteSqlRawAsync(
-                TestDatabase.Rewrite("UPDATE [LifecycleProtectedEntities] SET [ResourceId] = {0} WHERE [Id] = {1}"),
-                "no_such_resource",
-                entityId);
-            (await ReadEntityAsync(entityId)).Reach.Should().BeNull();
-        }
-        finally
-        {
-            await DeleteEntityAsync(entityId);
-            await DeleteAsync([pending]);
-            await DeleteAsync(ids);
         }
     }
 
@@ -318,7 +265,6 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
     {
         var ids = await CreateChainAsync("rebuild", "agency", "team", "project");
         var other = await CreateChainAsync("rebuild2", "agency", "team");
-        var entityId = await CreateEntityAsync(ids[2]);
         try
         {
             var team = await Context.Set<SqlOSFgaResource>().SingleAsync(r => r.Id == other[1]);
@@ -326,22 +272,66 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
             await Context.SaveChangesAsync();
 
             var maintained = await ReadResourcesAsync();
-            var maintainedEntities = await ReadEntitiesAsync();
             await Context.Database.ExecuteSqlRawAsync(TestDatabase.IsPostgreSql
                 ? "SELECT \"dbo\".\"fn_SqlOSFgaResources_LineageRebuild\"()"
                 : "EXEC [dbo].[sp_SqlOSFgaResources_LineageRebuild]");
 
-            (await ReadResourcesAsync()).Should().BeEquivalentTo(maintained);
-            (await ReadEntitiesAsync()).Should().BeEquivalentTo(maintainedEntities);
+            (await ReadResourcesAsync()).Should().BeEquivalentTo(maintained, InKeyOrder);
             maintained.Should().Contain(r => r.Depth == 3);
         }
         finally
         {
-            await DeleteEntityAsync(entityId);
             await DeleteAsync(ids);
             await DeleteAsync(other);
         }
     }
+
+    [TestMethod]
+    public async Task AGrant_CarriesItsResourcesSeq_WhenWritten_WhenMoved_AndAfterARebuild()
+    {
+        // The point check seeks a subject's grants on an ancestor by (ResourceSeq, SubjectId), so a grant must
+        // carry its resource's Seq however it was written, and the rebuild must restore a copy that was lost.
+        var ids = await CreateChainAsync("grantseq", "agency", "team");
+        var grantId = $"grant_seq_{Guid.NewGuid():N}";
+        try
+        {
+            Context.ChangeTracker.Clear();
+            Context.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant
+            {
+                Id = grantId,
+                SubjectId = FgaTestDataSeeder.AgencyMemberSubjectId,
+                ResourceId = ids[0],
+                RoleId = FgaTestDataSeeder.AgencyMemberRoleId,
+            });
+            await Context.SaveChangesAsync();
+            Context.ChangeTracker.Clear();
+            (await GrantResourceSeqAsync(grantId)).Should().Be(await ResourceSeqAsync(ids[0]), "the trigger copies it when the grant is written");
+
+            await Context.Database.ExecuteSqlRawAsync(
+                TestDatabase.Rewrite("UPDATE [dbo].[SqlOSFgaGrants] SET [ResourceId] = {0} WHERE [Id] = {1}"), ids[1], grantId);
+            (await GrantResourceSeqAsync(grantId)).Should().Be(await ResourceSeqAsync(ids[1]), "it follows a grant moved to another resource");
+
+            await Context.Database.ExecuteSqlRawAsync(
+                TestDatabase.Rewrite("UPDATE [dbo].[SqlOSFgaGrants] SET [ResourceSeq] = NULL WHERE [Id] = {0}"), grantId);
+            await Context.Database.ExecuteSqlRawAsync(TestDatabase.IsPostgreSql
+                ? "SELECT \"dbo\".\"fn_SqlOSFgaResources_LineageRebuild\"()"
+                : "EXEC [dbo].[sp_SqlOSFgaResources_LineageRebuild]");
+            (await GrantResourceSeqAsync(grantId)).Should().Be(await ResourceSeqAsync(ids[1]), "the rebuild restores it");
+        }
+        finally
+        {
+            await Context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("DELETE FROM [dbo].[SqlOSFgaGrants] WHERE [Id] = {0}"), grantId);
+            await DeleteAsync(ids);
+        }
+    }
+
+    private static Task<long?> GrantResourceSeqAsync(string grantId)
+        => Context.Database.SqlQueryRaw<long?>(
+            TestDatabase.Rewrite("SELECT [ResourceSeq] AS [Value] FROM [dbo].[SqlOSFgaGrants] WHERE [Id] = {0}"), grantId).SingleAsync();
+
+    private static Task<long?> ResourceSeqAsync(string resourceId)
+        => Context.Database.SqlQueryRaw<long?>(
+            TestDatabase.Rewrite("SELECT [Seq] AS [Value] FROM [dbo].[SqlOSFgaResources] WHERE [Id] = {0}"), resourceId).SingleAsync();
 
     [TestMethod]
     public async Task WholeTable_SatisfiesTheInvariant()
@@ -352,19 +342,30 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
     }
 
     [TestMethod]
+    public async Task EveryLevel_HasItsIndex()
+    {
+        // fn_ListVisible seeks the index of a root's level for the rows beneath it; one per level, on the resources
+        // table, and nothing on the application's table.
+        for (var level = 0; level < Levels; level++)
+        {
+            (await TestCatalog.IndexExistsAsync(Context, "SqlOSFgaResources", SqlOSFgaLineage.AncestorIndexName("SqlOSFgaResources", level)))
+                .Should().BeTrue("level {0} has its index", level);
+        }
+
+        (await TestCatalog.IndexExistsAsync(Context, "SqlOSFgaResources", SqlOSFgaLineage.AncestorIndexName("SqlOSFgaResources", Levels))).Should().BeFalse();
+    }
+
+    [TestMethod]
     public async Task BulkMove_SeveralSubtreesInOneStatement()
     {
         var from = await CreateChainAsync("bulk_from", "agency");
         var to = await CreateChainAsync("bulk_to", "agency");
         var teams = new List<string[]>();
-        var rows = new List<string>();
         try
         {
             for (var i = 0; i < 3; i++)
             {
-                var team = await CreateUnderAsync(from[0], $"bulk_team{i}", "team", "project");
-                teams.Add(team);
-                rows.Add(await CreateEntityAsync(team[1]));
+                teams.Add(await CreateUnderAsync(from[0], $"bulk_team{i}", "team", "project"));
             }
 
             // One UPDATE moves every team of one agency under another.
@@ -372,19 +373,15 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
                 TestDatabase.Rewrite("UPDATE [dbo].[SqlOSFgaResources] SET [ParentId] = {0} WHERE [ParentId] = {1}"), to[0], from[0]);
 
             await AssertLineageMatchesAsync([.. from, .. to, .. teams.SelectMany(t => t)]);
-            var toSeq = (await ReadResourcesAsync()).Single(r => r.Id == to[0]).Seq;
-            foreach (var row in rows)
+            var rows = await ReadResourcesAsync();
+            var toSeq = rows.Single(r => r.Id == to[0]).Seq;
+            foreach (var team in teams)
             {
-                (await ReadEntityAsync(row)).Ancestors[1].Should().Be(toSeq, "every moved row now sits under the other agency");
+                rows.Single(r => r.Id == team[1]).Ancestors[1].Should().Be(toSeq, "every moved project now sits under the other agency");
             }
         }
         finally
         {
-            foreach (var row in rows)
-            {
-                await DeleteEntityAsync(row);
-            }
-
             foreach (var team in teams)
             {
                 await DeleteAsync(team);
@@ -396,75 +393,9 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
     }
 
     [TestMethod]
-    public async Task BulkRowOperations_ExecuteUpdateAndExecuteDelete()
-    {
-        var first = await CreateChainAsync("bulk_rows_a", "agency", "team");
-        var second = await CreateChainAsync("bulk_rows_b", "agency", "team");
-        var suffix = Guid.NewGuid().ToString("N");
-        var ids = Enumerable.Range(0, 4).Select(i => $"bulk_row_{i}_{suffix}").ToArray();
-        try
-        {
-            foreach (var id in ids)
-            {
-                Context.Set<LifecycleProtectedEntity>().Add(new LifecycleProtectedEntity { Id = id, ResourceId = first[1] });
-            }
-
-            await Context.SaveChangesAsync();
-            Context.ChangeTracker.Clear();
-
-            // ExecuteUpdate re-points every row at another resource in one statement: each takes its lineage.
-            await Context.Set<LifecycleProtectedEntity>().Where(e => ids.Contains(e.Id))
-                .ExecuteUpdateAsync(set => set.SetProperty(e => e.ResourceId, second[1]));
-            await AssertLineageMatchesAsync([.. first, .. second]);
-            var secondSeq = (await ReadResourcesAsync()).Single(r => r.Id == second[1]).Seq;
-            foreach (var id in ids)
-            {
-                (await ReadEntityAsync(id)).Ancestors[2].Should().Be(secondSeq);
-            }
-
-            // ExecuteDelete removes them; nothing is left to maintain.
-            await Context.Set<LifecycleProtectedEntity>().Where(e => ids.Contains(e.Id)).ExecuteDeleteAsync();
-            (await ReadEntitiesAsync()).Should().NotContain(e => ids.Contains(e.Id));
-        }
-        finally
-        {
-            await Context.Set<LifecycleProtectedEntity>().Where(e => ids.Contains(e.Id)).ExecuteDeleteAsync();
-            await DeleteAsync(first);
-            await DeleteAsync(second);
-        }
-    }
-
-    [TestMethod]
-    public async Task UpdatingOtherColumnsThroughEf_LeavesTheScopeAlone()
-    {
-        var ids = await CreateChainAsync("ef_update", "agency", "team");
-        var entityId = await CreateEntityAsync(ids[1]);
-        try
-        {
-            var before = await Context.Set<LifecycleProtectedEntity>().AsNoTracking().SingleAsync(e => e.Id == entityId);
-            before.FgaScope.Should().NotBeNull();
-
-            var tracked = await Context.Set<LifecycleProtectedEntity>().SingleAsync(e => e.Id == entityId);
-            tracked.Rank = 42;
-            await Context.SaveChangesAsync();
-            Context.ChangeTracker.Clear();
-
-            var after = await Context.Set<LifecycleProtectedEntity>().AsNoTracking().SingleAsync(e => e.Id == entityId);
-            after.Rank.Should().Be(42);
-            after.FgaScope.Should().Equal(before.FgaScope, "EF Core never writes the scope column");
-        }
-        finally
-        {
-            await DeleteEntityAsync(entityId);
-            await DeleteAsync(ids);
-        }
-    }
-
-    [TestMethod]
     public async Task ReactivatingUnderAnAncestorThatIsStillInactive_KeepsTheReachCut()
     {
         var ids = await CreateChainAsync("nested_deact", "agency", "team", "project");
-        var entityId = await CreateEntityAsync(ids[2]);
         try
         {
             await SetActiveAsync(ids[0], false);
@@ -472,15 +403,14 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
             await SetActiveAsync(ids[1], true);
 
             await AssertLineageMatchesAsync(ids);
-            (await ReadEntityAsync(entityId)).Reach.Should().Be(2, "the agency is still inactive: access flows from the team down");
+            (await ReadResourcesAsync()).Single(r => r.Id == ids[2]).Reach.Should().Be(2, "the agency is still inactive: access flows from the team down");
 
             await SetActiveAsync(ids[0], true);
             await AssertLineageMatchesAsync(ids);
-            (await ReadEntityAsync(entityId)).Reach.Should().Be(0);
+            (await ReadResourcesAsync()).Single(r => r.Id == ids[2]).Reach.Should().Be(0);
         }
         finally
         {
-            await DeleteEntityAsync(entityId);
             await DeleteAsync(ids);
         }
     }
@@ -489,11 +419,9 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
     public async Task Rebuild_AcrossManyRanges_ReproducesTheLineage()
     {
         var ids = await CreateChainAsync("ranges", "agency", "team", "project");
-        var entityId = await CreateEntityAsync(ids[2]);
         try
         {
             var maintained = await ReadResourcesAsync();
-            var maintainedEntities = await ReadEntitiesAsync();
 
             // SQL Server commits the rebuild in ranges of the key; three resources a range makes many ranges here.
             await Context.Database.ExecuteSqlRawAsync(
@@ -501,42 +429,34 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
                     ? "SELECT \"dbo\".\"fn_SqlOSFgaResources_LineageRebuild\"()"
                     : "EXEC [dbo].[sp_SqlOSFgaResources_LineageRebuild] @RangeRows = 3");
 
-            (await ReadResourcesAsync()).Should().BeEquivalentTo(maintained);
-            (await ReadEntitiesAsync()).Should().BeEquivalentTo(maintainedEntities);
+            (await ReadResourcesAsync()).Should().BeEquivalentTo(maintained, InKeyOrder);
         }
         finally
         {
-            await DeleteEntityAsync(entityId);
             await DeleteAsync(ids);
         }
     }
 
     [TestMethod]
-    public async Task Startup_OnADatabaseWithoutLineage_BuildsItAndFillsEveryRow()
+    public async Task Startup_OnADatabaseWithoutLineage_BuildsIt()
     {
-        // The state an existing database is in before its first start on this version: resources and rows with no
-        // lineage, no scope, and no stored routines hash.
+        // The state a database is in before its first start: resources with no lineage and no stored routines hash.
         var ids = await CreateChainAsync("upgrade", "agency", "team", "project");
-        var entityId = await CreateEntityAsync(ids[2]);
         try
         {
             var maintained = await ReadResourcesAsync();
-            var maintainedEntities = await ReadEntitiesAsync();
             var ancestors = string.Join(", ", Enumerable.Range(0, Levels).Select(l => $"[Ancestor{l}] = NULL"));
             await Context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite($"UPDATE [dbo].[SqlOSFgaResources] SET [Depth] = NULL, [Reach] = NULL, {ancestors}"));
-            await Context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("UPDATE [LifecycleProtectedEntities] SET [FgaScope] = NULL"));
             await Context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("UPDATE [dbo].[SqlOSFgaSchema] SET [RoutinesHash] = NULL"));
             await ClearLineageBuiltAsync();
 
             await new SqlOSFgaFunctionInitializer(Context, Options.Create(new SqlOSFgaOptions()), NullLogger<SqlOSFgaFunctionInitializer>.Instance)
                 .EnsureFunctionsExistAsync();
 
-            (await ReadResourcesAsync()).Should().BeEquivalentTo(maintained);
-            (await ReadEntitiesAsync()).Should().BeEquivalentTo(maintainedEntities);
+            (await ReadResourcesAsync()).Should().BeEquivalentTo(maintained, InKeyOrder);
         }
         finally
         {
-            await DeleteEntityAsync(entityId);
             await DeleteAsync(ids);
         }
     }
@@ -555,18 +475,15 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
 
         // "zz" sorts after every other id, so this chain's last resource lies in the last range.
         var ids = await CreateChainAsync("zz_interrupted", "agency", "team", "project");
-        var entityId = await CreateEntityAsync(ids[2]);
         try
         {
             var maintained = await ReadResourcesAsync();
-            var maintainedEntities = await ReadEntitiesAsync();
 
             // A database before its first build, whose build then fails in its last range.
             var ancestors = string.Join(", ", Enumerable.Range(0, Levels).Select(l => $"[Ancestor{l}] = NULL"));
             var clearLineage = $"UPDATE [dbo].[SqlOSFgaResources] SET [Depth] = NULL, [Reach] = NULL, {ancestors}";
             var failInTheLastRange = $"ALTER TABLE [dbo].[SqlOSFgaResources] WITH NOCHECK ADD CONSTRAINT [CK_Test_InterruptRebuild] CHECK ([Id] <> N'{ids[2]}' OR [Depth] IS NULL)";
             await Context.Database.ExecuteSqlRawAsync(clearLineage);
-            await Context.Database.ExecuteSqlRawAsync("UPDATE [LifecycleProtectedEntities] SET [FgaScope] = NULL");
             await Context.Database.ExecuteSqlRawAsync("UPDATE [dbo].[SqlOSFgaSchema] SET [RoutinesHash] = NULL");
             await Context.Database.ExecuteSqlRawAsync(failInTheLastRange);
             try
@@ -585,37 +502,33 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
             await new SqlOSFgaFunctionInitializer(Context, Options.Create(new SqlOSFgaOptions()), NullLogger<SqlOSFgaFunctionInitializer>.Instance)
                 .EnsureFunctionsExistAsync();
 
-            (await ReadResourcesAsync()).Should().BeEquivalentTo(maintained);
-            (await ReadEntitiesAsync()).Should().BeEquivalentTo(maintainedEntities);
+            (await ReadResourcesAsync()).Should().BeEquivalentTo(maintained, InKeyOrder);
         }
         finally
         {
-            await DeleteEntityAsync(entityId);
             await DeleteAsync(ids);
         }
     }
 
     [TestMethod]
-    public async Task Startup_AfterANewDefinition_FillsRowsWrittenWithoutTheirScope()
+    public async Task Startup_AfterANewDefinition_ReappliesTheRoutines_AndKeepsTheLineage()
     {
-        // A table that gained the column, or rows written while the triggers were off: the lineage is there,
-        // the rows' scope is not. A start that applies new definitions fills them.
-        var ids = await CreateChainAsync("refill", "agency", "team");
-        var entityId = await CreateEntityAsync(ids[1]);
+        // A new SqlOS version or a changed option: the definitions are applied again; a lineage that is built
+        // stays as it is.
+        var ids = await CreateChainAsync("redefine", "agency", "team");
         try
         {
-            var maintainedEntities = await ReadEntitiesAsync();
-            await Context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("UPDATE [LifecycleProtectedEntities] SET [FgaScope] = NULL"));
+            var maintained = await ReadResourcesAsync();
             await Context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("UPDATE [dbo].[SqlOSFgaSchema] SET [RoutinesHash] = NULL"));
 
             await new SqlOSFgaFunctionInitializer(Context, Options.Create(new SqlOSFgaOptions()), NullLogger<SqlOSFgaFunctionInitializer>.Instance)
                 .EnsureFunctionsExistAsync();
 
-            (await ReadEntitiesAsync()).Should().BeEquivalentTo(maintainedEntities);
+            (await ReadResourcesAsync()).Should().BeEquivalentTo(maintained, InKeyOrder);
+            await AssertLineageMatchesAsync(ids);
         }
         finally
         {
-            await DeleteEntityAsync(entityId);
             await DeleteAsync(ids);
         }
     }
@@ -653,22 +566,19 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
     {
         var ids = await CreateChainAsync("race_ins", "agency", "team");
         var child = $"race_ins_child_{Guid.NewGuid():N}";
-        var entityId = $"race_ins_row_{Guid.NewGuid():N}";
         try
         {
             await using var first = await Tx.BeginAsync();
             await first.InsertResourceAsync(child, ids[1], "project");
-            await first.InsertEntityAsync(entityId, child);
 
             await using var second = await Tx.BeginAsync();
             await RaceAsync(first, second, second.SetActiveAsync(ids[1], false));
 
             await AssertLineageMatchesAsync([.. ids, child]);
-            (await ReadEntityAsync(entityId)).Reach.Should().Be(3, "the team is inactive: only a grant on the project itself reaches the row");
+            (await ReadResourcesAsync()).Single(r => r.Id == child).Reach.Should().Be(3, "the team is inactive: only a grant on the project itself reaches it");
         }
         finally
         {
-            await DeleteEntityAsync(entityId);
             await DeleteAsync([.. ids, child]);
         }
     }
@@ -678,25 +588,19 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
     {
         var ids = await CreateChainAsync("race_deact", "agency", "team");
         var child = $"race_deact_child_{Guid.NewGuid():N}";
-        var entityId = $"race_deact_row_{Guid.NewGuid():N}";
         try
         {
             await using var first = await Tx.BeginAsync();
             await first.SetActiveAsync(ids[1], false);
 
             await using var second = await Tx.BeginAsync();
-            await RaceAsync(first, second, Task.Run(async () =>
-            {
-                await second.InsertResourceAsync(child, ids[1], "project");
-                await second.InsertEntityAsync(entityId, child);
-            }));
+            await RaceAsync(first, second, Task.Run(() => second.InsertResourceAsync(child, ids[1], "project")));
 
             await AssertLineageMatchesAsync([.. ids, child]);
-            (await ReadEntityAsync(entityId)).Reach.Should().Be(3, "the team is inactive: only a grant on the project itself reaches the row");
+            (await ReadResourcesAsync()).Single(r => r.Id == child).Reach.Should().Be(3, "the team is inactive: only a grant on the project itself reaches it");
         }
         finally
         {
-            await DeleteEntityAsync(entityId);
             await DeleteAsync([.. ids, child]);
         }
     }
@@ -706,7 +610,6 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
     {
         var target = await CreateChainAsync("race_move_target", "agency", "team");
         var moving = await CreateChainAsync("race_move_src", "agency", "team", "project");
-        var entityId = await CreateEntityAsync(moving[2]);
         try
         {
             await using var first = await Tx.BeginAsync();
@@ -716,11 +619,10 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
             await RaceAsync(first, second, second.SetActiveAsync(target[1], false));
 
             await AssertLineageMatchesAsync([.. target, .. moving]);
-            (await ReadEntityAsync(entityId)).Reach.Should().Be(3, "the moved team now sits under an inactive team");
+            (await ReadResourcesAsync()).Single(r => r.Id == moving[2]).Reach.Should().Be(3, "the moved team now sits under an inactive team");
         }
         finally
         {
-            await DeleteEntityAsync(entityId);
             await DeleteAsync(moving);
             await DeleteAsync(target);
         }
@@ -825,9 +727,6 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
                 "INSERT INTO [dbo].[SqlOSFgaResources] ([Id], [ParentId], [Name], [ResourceTypeId], [IsActive], [CreatedAt], [UpdatedAt]) VALUES (@id, @parent, @id, @type, @active, @now, @now)",
                 ("@id", id), ("@parent", parentId), ("@type", typeId), ("@active", true), ("@now", DateTime.UtcNow));
 
-        public Task InsertEntityAsync(string id, string resourceId)
-            => ExecuteAsync("INSERT INTO [LifecycleProtectedEntities] ([Id], [ResourceId], [Rank]) VALUES (@id, @resource, 0)", ("@id", id), ("@resource", resourceId));
-
         public Task SetActiveAsync(string id, bool active)
             => ExecuteAsync("UPDATE [dbo].[SqlOSFgaResources] SET [IsActive] = @active WHERE [Id] = @id", ("@id", id), ("@active", active));
 
@@ -926,25 +825,13 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
         }
     }
 
-    private static async Task<string> CreateEntityAsync(string resourceId)
-    {
-        var id = $"lineage_{Guid.NewGuid():N}";
-        Context.Set<LifecycleProtectedEntity>().Add(new LifecycleProtectedEntity { Id = id, ResourceId = resourceId });
-        await Context.SaveChangesAsync();
-        Context.ChangeTracker.Clear();
-        return id;
-    }
-
     /// <summary>The flag a database has before its lineage is first built.</summary>
     private static Task ClearLineageBuiltAsync()
         => Context.Database.ExecuteSqlRawAsync(TestDatabase.IsPostgreSql
             ? "UPDATE \"dbo\".\"SqlOSFgaSchema\" SET \"LineageBuilt\" = false"
             : "UPDATE [dbo].[SqlOSFgaSchema] SET [LineageBuilt] = 0");
 
-    private static Task DeleteEntityAsync(string id)
-        => Context.Database.ExecuteSqlRawAsync(TestDatabase.Rewrite("DELETE FROM [LifecycleProtectedEntities] WHERE [Id] = {0}"), id);
-
-    /// <summary>The lineage of the given resources, and the scope columns of every application row, match the definition.</summary>
+    /// <summary>The lineage of the given resources matches the definition.</summary>
     private static async Task AssertLineageMatchesAsync(string[] ids)
     {
         var rows = await ReadResourcesAsync();
@@ -954,23 +841,6 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
             var actual = byId[id];
             var expected = Expected(byId, actual);
             new Lineage(actual.Depth, actual.Reach, actual.Ancestors).Should().BeEquivalentTo(expected, "the lineage of {0} must match the walk-up definition", id);
-        }
-
-        var typeSeq = await ReadTypeSeqAsync();
-        foreach (var row in await ReadEntitiesAsync())
-        {
-            if (byId.TryGetValue(row.ResourceId, out var resource))
-            {
-                var visibleFrom = resource.Ancestors.Select((a, level) => resource.Reach is { } reach && level >= reach ? a : null).ToArray();
-                new Lineage(null, row.Reach, row.Ancestors).Should().BeEquivalentTo(
-                    new Lineage(null, resource.Reach, visibleFrom), "row {0} must carry the lineage of {1} from its reach down", row.Id, row.ResourceId);
-                row.TypeSeq.Should().Be(typeSeq[resource.ResourceTypeId]);
-            }
-            else
-            {
-                row.Reach.Should().BeNull("row {0} has no resource", row.Id);
-                row.TypeSeq.Should().BeNull();
-            }
         }
     }
 
@@ -1014,7 +884,7 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
 
     private static Task<List<ResourceRow>> ReadResourcesAsync()
         => ReadAsync(
-            TestDatabase.Rewrite($"SELECT [Id], [ParentId], [IsActive], [ResourceTypeId], [Seq], [Depth], [Reach], {AncestorColumns("Ancestor")} FROM [dbo].[SqlOSFgaResources]"),
+            TestDatabase.Rewrite($"SELECT [Id], [ParentId], [IsActive], [ResourceTypeId], [Seq], [Depth], [Reach], {AncestorColumns("Ancestor")} FROM [dbo].[SqlOSFgaResources] ORDER BY [Seq]"),
             reader => new ResourceRow(
                 reader.GetString(0),
                 reader.IsDBNull(1) ? null : reader.GetString(1),
@@ -1025,29 +895,12 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
                 reader.IsDBNull(6) ? null : reader.GetInt16(6),
                 ReadAncestors(reader, 7)));
 
-    private static async Task<EntityRow> ReadEntityAsync(string id)
-        => (await ReadEntitiesAsync()).Single(e => e.Id == id);
-
     /// <summary>
-    /// The rows with their scope value decoded: the type, the ancestor at each level (NULL where access does not
-    /// flow down from that level), and so the reach: the first level with an ancestor. A row without a value has
-    /// none of them, which is what denies it.
+    /// Whole-table comparisons in the order <see cref="ReadResourcesAsync"/> reads (by Seq): matching rows in any
+    /// order costs the square of the table, and the shared database holds every suite's resources.
     /// </summary>
-    private static Task<List<EntityRow>> ReadEntitiesAsync()
-        => ReadAsync(
-            TestDatabase.Rewrite("SELECT [Id], [ResourceId], [FgaScope] FROM [LifecycleProtectedEntities]"),
-            reader =>
-            {
-                if (reader.IsDBNull(2))
-                {
-                    return new EntityRow(reader.GetString(0), reader.GetString(1), new long?[Levels], null, null);
-                }
-
-                var (_, typeSeq, ancestors) = SqlOSFgaScope.Decode(reader.GetFieldValue<byte[]>(2), Levels);
-
-                var reach = Array.FindIndex(ancestors, a => a is not null);
-                return new EntityRow(reader.GetString(0), reader.GetString(1), ancestors, reach < 0 ? null : (short)reach, typeSeq);
-            });
+    private static FluentAssertions.Equivalency.EquivalencyAssertionOptions<ResourceRow> InKeyOrder(FluentAssertions.Equivalency.EquivalencyAssertionOptions<ResourceRow> options)
+        => options.WithStrictOrdering();
 
     private static string AncestorColumns(string prefix)
         => string.Join(", ", Enumerable.Range(0, Levels).Select(l => $"[{prefix}{l}]"));
@@ -1062,12 +915,6 @@ public class SqlOSFgaLineageIntegrationTests : FgaIntegrationTestBase
 
         return ancestors;
     }
-
-    private static async Task<Dictionary<string, int>> ReadTypeSeqAsync()
-        => (await ReadAsync(
-            TestDatabase.Rewrite("SELECT [Id], [Seq] FROM [dbo].[SqlOSFgaResourceTypes]"),
-            reader => (reader.GetString(0), reader.GetInt32(1))))
-            .ToDictionary(t => t.Item1, t => t.Item2, StringComparer.Ordinal);
 
     private static async Task<List<T>> ReadAsync<T>(string sql, Func<DbDataReader, T> map)
     {

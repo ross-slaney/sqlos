@@ -3,41 +3,23 @@ using Npgsql;
 using NpgsqlTypes;
 using SqlOS.Fga.Configuration;
 
-using SqlOS.Fga;
-
 namespace SqlOS.Benchmarks.Data;
 
 /// <summary>
 /// PostgreSQL: parallel <c>COPY ... (FORMAT BINARY)</c> streams over disjoint id ranges. Foreign-key triggers
 /// and the lineage triggers are skipped for the loading sessions (<c>session_replication_role = replica</c>;
-/// the harness supplies the lineage and scope columns itself), secondary indexes are dropped and recreated
-/// from their own <c>pg_get_indexdef</c> definitions, and the tables are vacuumed so the visibility map is set
-/// the way autovacuum would leave a production table.
+/// the harness supplies the lineage itself), secondary indexes are dropped and recreated from their own
+/// <c>pg_get_indexdef</c> definitions, and the tables are vacuumed so the visibility map is set the way
+/// autovacuum would leave a production table.
 /// </summary>
 internal sealed class PostgreSqlDatasetLoader(string connectionString, SqlOSFgaOptions fga, Log log) : IDatasetLoader
 {
     private string Resources => $"\"{fga.Schema}\".\"{fga.TableNames.Resources}\"";
-    private string ResourceTypes => $"\"{fga.Schema}\".\"{fga.TableNames.ResourceTypes}\"";
     private string ResourceSequence => $"\"{fga.Schema}\".\"{fga.TableNames.Resources}_Seq\"";
     private const string Products = "public.\"Products\"";
     private const string Stores = "public.\"Stores\"";
 
     public Task ConfigureDatabaseAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-
-    public async Task<IReadOnlyDictionary<string, int>> ReadTypeSeqsAsync(CancellationToken cancellationToken)
-    {
-        var map = new Dictionary<string, int>(StringComparer.Ordinal);
-        await using var connection = new NpgsqlConnection(connectionString);
-        await connection.OpenAsync(cancellationToken);
-        await using var command = new NpgsqlCommand($"SELECT \"Id\", \"Seq\" FROM {ResourceTypes}", connection);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            map[reader.GetString(0)] = reader.GetInt32(1);
-        }
-
-        return map;
-    }
 
     public async Task<long> ReadRootSeqAsync(string rootId, CancellationToken cancellationToken)
     {
@@ -55,26 +37,25 @@ internal sealed class PostgreSqlDatasetLoader(string connectionString, SqlOSFgaO
         await ExecuteAsync($"SELECT setval('{ResourceSequence}', {tree.ProductSeqOffset}, true); ANALYZE {Resources}; ANALYZE {Stores};", cancellationToken);
     }
 
-    public async Task<LoadTiming> GrowProductsAsync(RetailTree tree, IReadOnlyDictionary<string, int> typeSeq, long from, long to, CancellationToken cancellationToken)
+    public async Task<LoadTiming> GrowProductsAsync(RetailTree tree, long from, long to, CancellationToken cancellationToken)
     {
         var dropped = await DropSecondaryIndexesAsync(cancellationToken);
 
         var rows = Stopwatch.StartNew();
         var streams = Math.Clamp(Environment.ProcessorCount / 2, 1, 4);
         var chunk = (to - from + streams - 1) / streams;
-        var productType = typeSeq["product"];
         var copies = new List<Task>();
         for (var start = from; start < to; start += chunk)
         {
             var end = Math.Min(start + chunk, to);
             var (s, e) = (start, end);
             copies.Add(Task.Run(() => CopyAsync(Resources, DatasetRows.Columns.Resources, DatasetRows.ProductResources(tree, s, e), cancellationToken), cancellationToken));
-            copies.Add(Task.Run(() => CopyAsync(Products, DatasetRows.Columns.Products(typeof(byte[])), DatasetRows.Products(tree, productType, s, e, SqlOSFgaScope.Encode), cancellationToken), cancellationToken));
+            copies.Add(Task.Run(() => CopyAsync(Products, DatasetRows.Columns.Products, DatasetRows.Products(tree, s, e), cancellationToken), cancellationToken));
         }
 
         await Task.WhenAll(copies);
         rows.Stop();
-        log.Info($"  rows loaded in {rows.Elapsed.TotalSeconds:F1}s ({streams} streams per table, lineage and scope column included)");
+        log.Info($"  rows loaded in {rows.Elapsed.TotalSeconds:F1}s ({streams} streams per table, lineage included)");
 
         var indexes = Stopwatch.StartNew();
         foreach (var definition in dropped)
@@ -95,13 +76,24 @@ internal sealed class PostgreSqlDatasetLoader(string connectionString, SqlOSFgaO
         return new LoadTiming(rows.Elapsed, indexes.Elapsed, maintenance.Elapsed);
     }
 
+    public async Task SettleGrantsAsync(CancellationToken cancellationToken)
+    {
+        // VACUUM runs outside a transaction, so one statement per call.
+        await ExecuteAsync($"VACUUM (ANALYZE) {Fga(fga.TableNames.Grants)};", cancellationToken);
+        foreach (var table in new[] { fga.TableNames.Subjects, fga.TableNames.Users, fga.TableNames.UserGroups, fga.TableNames.UserGroupMemberships })
+        {
+            await ExecuteAsync($"ANALYZE {Fga(table)};", cancellationToken);
+        }
+    }
+
+    private string Fga(string table) => $"\"{fga.Schema}\".\"{table}\"";
+
     public async Task<LineageChecksum> LineageChecksumAsync(CancellationToken cancellationToken)
     {
         static string Quote(string column) => $"\"{column}\"";
         static string Cast(string expression) => $"CAST({expression} AS numeric)";
-        var resources = await ChecksumAsync(LineageSql.ResourcesChecksum(Resources, Quote, Cast), cancellationToken);
-        var products = await ChecksumAsync(LineageSql.ProductsChecksum(Products, postgres: true), cancellationToken);
-        return new LineageChecksum(resources, products);
+        var (rows, hash) = await ChecksumAsync(LineageSql.ResourcesChecksum(Resources, Quote, Cast), cancellationToken);
+        return new LineageChecksum(rows, hash);
     }
 
     private async Task<(long Rows, decimal Hash)> ChecksumAsync(string sql, CancellationToken cancellationToken)
@@ -208,7 +200,6 @@ internal sealed class PostgreSqlDatasetLoader(string connectionString, SqlOSFgaO
             ? column == "Name" && table.Contains("SqlOSFga", StringComparison.Ordinal) ? NpgsqlDbType.Text : NpgsqlDbType.Varchar
             : type == typeof(int) ? NpgsqlDbType.Integer
             : type == typeof(long) ? NpgsqlDbType.Bigint
-            : type == typeof(byte[]) ? NpgsqlDbType.Bytea
             : type == typeof(short) ? NpgsqlDbType.Smallint
             : type == typeof(bool) ? NpgsqlDbType.Boolean
             : type == typeof(DateTime) ? NpgsqlDbType.Timestamp

@@ -3,8 +3,7 @@
 -- SqlOSFga Schema v11: resource sequence numbers and the resource lineage.
 --
 -- Resources.Seq numbers resources in creation order; it is the compact key the lineage columns hold.
--- ResourceTypes.Seq is the compact key of a resource's type, copied to application tables that carry
--- scope columns.
+-- ResourceTypes.Seq is the compact key of a resource's type.
 --
 -- The lineage of a resource is its ancestor at every level of the tree (Ancestor0 ... AncestorD, one
 -- column per level: the default depth's here, deeper ones added by SqlOSFgaFunctionInitializer when
@@ -61,8 +60,8 @@ ALTER TABLE "{Schema}"."{Resources}" ADD COLUMN IF NOT EXISTS "Depth" smallint N
 ALTER TABLE "{Schema}"."{Resources}" ADD COLUMN IF NOT EXISTS "Reach" smallint NULL;
 
 -- 4. The ancestor columns of the default depth (levels 0..10). A larger configured depth adds the columns
---    above level 10 through SqlOSFgaFunctionInitializer. They are read by resource id or by Seq, never
---    searched by value, so they carry no index.
+--    above level 10 through SqlOSFgaFunctionInitializer. SqlOSFgaFunctionInitializer also
+--    creates the index on each level, which fn_ListVisible reads for the rows beneath a root.
 ALTER TABLE "{Schema}"."{Resources}" ADD COLUMN IF NOT EXISTS "Ancestor0" bigint NULL;
 ALTER TABLE "{Schema}"."{Resources}" ADD COLUMN IF NOT EXISTS "Ancestor1" bigint NULL;
 ALTER TABLE "{Schema}"."{Resources}" ADD COLUMN IF NOT EXISTS "Ancestor2" bigint NULL;

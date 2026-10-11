@@ -128,6 +128,16 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
         var definition = await GetFunctionDefinitionAsync();
         var subjects = await TestCatalog.GetFunctionDefinitionAsync(Context, "fn_ActiveSubjects");
         var roots = await TestCatalog.GetFunctionDefinitionAsync(Context, "fn_AccessRoots");
+        var list = await TestCatalog.GetFunctionDefinitionAsync(Context, "fn_ListVisible");
+        var listFirst = await TestCatalog.GetFunctionDefinitionAsync(Context, "fn_ListFirst");
+
+        // fn_ListVisible lists from the roots: under each root, the rows whose ancestor at the root's level is
+        // the root and whose reach extends up to it. fn_ListFirst counts it up to the table's cap.
+        list.Should().Contain("fn_AccessRoots");
+        list.Should().Contain("Reach");
+        list.Should().Contain("Ancestor10");
+        list.Should().NotContain("Ancestor11");
+        listFirst.Should().Contain("fn_ListVisible");
 
         if (TestDatabase.IsPostgreSql)
         {
@@ -138,7 +148,7 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
             subjects.Should().Contain("p_subject_ids::jsonb ->> 0");
             definition.Should().Contain("x.\"Reach\" IS NOT NULL");
             definition.Should().Contain("permission.\"ResourceTypeId\" IS NULL OR permission.\"ResourceTypeId\" = x.\"ResourceTypeId\"");
-            roots.Should().Contain("r.\"IsActive\" = TRUE");
+            roots.Should().Contain("x.\"IsActive\" = TRUE");
         }
         else
         {
@@ -149,7 +159,7 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
             subjects.Should().Contain("JSON_VALUE(@SubjectIds, '$[0]')");
             definition.Should().Contain("x.Reach IS NOT NULL");
             definition.Should().Contain("permission.ResourceTypeId IS NULL OR permission.ResourceTypeId = x.ResourceTypeId");
-            roots.Should().Contain("r.IsActive = 1");
+            roots.Should().Contain("x.IsActive = 1");
         }
     }
 

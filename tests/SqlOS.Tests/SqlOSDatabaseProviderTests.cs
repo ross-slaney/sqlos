@@ -92,7 +92,11 @@ public class SqlOSDatabaseProviderTests
         sql.Should().Contain("(7, x.\"Ancestor7\")) AS lv(\"Level\", \"Seq\")");
         sql.Should().NotContain("Ancestor8");
         sql.Should().Contain("lv.\"Level\" >= x.\"Reach\"");
-        sql.Should().Contain("g.\"SubjectId\" = ANY (ARRAY(SELECT live.\"SubjectId\" FROM \"dbo\".\"fn_ActiveSubjects\"(p_subject_ids) live))");
+        // One exact seek per ancestor and live subject on (ResourceSeq, SubjectId); OFFSET 0 keeps it a seek, not
+        // a read of every grant on the ancestor.
+        sql.Should().Contain("CROSS JOIN LATERAL unnest(ARRAY(SELECT live.\"SubjectId\" FROM \"dbo\".\"fn_ActiveSubjects\"(p_subject_ids) live)) AS s(\"SubjectId\")");
+        sql.Should().Contain("WHERE g.\"ResourceSeq\" = lv.\"Seq\" AND g.\"SubjectId\" = s.\"SubjectId\"\n    OFFSET 0\n) g");
+        sql.Should().Contain("SELECT g.\"ResourceId\", g.\"Id\", g.\"SubjectId\", g.\"RoleId\", lv.\"Level\"");
         sql.Should().Contain("permission.\"ResourceTypeId\" IS NULL OR permission.\"ResourceTypeId\" = x.\"ResourceTypeId\"");
     }
 
@@ -104,9 +108,53 @@ public class SqlOSDatabaseProviderTests
         sql.Should().Contain("CREATE OR REPLACE FUNCTION \"dbo\".\"fn_AccessRoots\"");
         sql.Should().Contain("RETURNS TABLE(\"ResourceSeq\" bigint, \"Depth\" smallint)");
         sql.Should().Contain("WITH g AS MATERIALIZED");
-        sql.Should().Contain("r.\"IsActive\" = TRUE AND r.\"Depth\" IS NOT NULL");
-        PostgreSqlDatabaseProvider.Instance.BuildAccessRootsQuerySql(new SqlOSFgaOptions())
-            .Should().Be("SELECT a.\"ResourceSeq\", a.\"Depth\" FROM \"dbo\".\"fn_AccessRoots\"({0}, {1}) AS a");
+        sql.Should().NotContain("DISTINCT", "a count up to a cap reads only the first roots it needs");
+        sql.Should().Contain("CROSS JOIN LATERAL (\n    SELECT x.\"Seq\", x.\"Depth\"\n    FROM \"dbo\".\"SqlOSFgaResources\" x\n    WHERE x.\"Id\" = g.\"ResourceId\" AND x.\"IsActive\" = TRUE AND x.\"Depth\" IS NOT NULL\n    LIMIT 1\n) r");
+    }
+
+    [TestMethod]
+    public void PostgreSqlListSql_ListsRootByRoot_TheSetIsOpaque_AndListFirstCountsUpToTheCap()
+    {
+        var provider = PostgreSqlDatabaseProvider.Instance;
+        var options = new SqlOSFgaOptions { MaxResourceHierarchyDepth = 2 };
+
+        // Inlinable (LANGUAGE sql, STABLE, one SELECT); the lateral join keeps the roots driving.
+        var list = provider.BuildListVisibleFunctionSql(options);
+        list.Should().Contain("CREATE OR REPLACE FUNCTION \"dbo\".\"fn_ListVisible\"(");
+        list.Should().Contain("RETURNS TABLE(\"ResourceId\" varchar(450))");
+        list.Should().Contain("LANGUAGE sql\nSTABLE");
+        list.Should().Contain("FROM \"dbo\".\"fn_AccessRoots\"(p_subject_ids, p_permission_id) a\nCROSS JOIN LATERAL (");
+        for (var level = 0; level <= 2; level++)
+        {
+            list.Should().Contain($"SELECT r.\"Id\" FROM \"dbo\".\"SqlOSFgaResources\" r WHERE a.\"Depth\" = {level} AND r.\"Ancestor{level}\" = a.\"ResourceSeq\" AND r.\"Ancestor{level}\" IS NOT NULL AND r.\"Reach\" <= {level} AND (p_type_id IS NULL OR r.\"ResourceTypeId\" = p_type_id)");
+        }
+
+        list.Should().NotContain("Ancestor3");
+        // A function with a SET clause is never inlined; the list must be, inside the set and the count.
+        list.Should().NotContain("SET jit");
+
+        // PL/pgSQL, never inlined: the planner sees a small set and starts the statement from it. Without JIT:
+        // an over-costed list of a few rows would compile for longer than it runs.
+        var set = provider.BuildVisibleSetFunctionSql(options);
+        set.Should().Contain("CREATE OR REPLACE FUNCTION \"dbo\".\"fn_VisibleSet\"(");
+        set.Should().Contain("LANGUAGE plpgsql\nSTABLE\nROWS 10\nSET jit = off");
+        set.Should().Contain("SELECT DISTINCT l.\"ResourceId\" FROM \"dbo\".\"fn_ListVisible\"(p_subject_ids, p_permission_id, p_type_id) l;");
+
+        var listFirst = provider.BuildListFirstFunctionSql(options);
+        listFirst.Should().Contain("CREATE OR REPLACE FUNCTION \"dbo\".\"fn_ListFirst\"(");
+        listFirst.Should().Contain("RETURNS TABLE(\"ListFirst\" boolean)");
+        listFirst.Should().Contain("LANGUAGE sql\nSTABLE\nSET jit = off");
+        listFirst.Should().Contain("CASE WHEN 8 * sqrt(greatest(coalesce((SELECT t.reltuples FROM pg_class t WHERE t.oid = to_regclass(p_table)), 0), 0)::float8) > 1000");
+        listFirst.Should().Contain("FROM (SELECT 1 FROM \"dbo\".\"fn_ListVisible\"(p_subject_ids, p_permission_id, p_type_id) LIMIT c.cap) t");
+        listFirst.Should().Contain("SELECT v.visible < c.cap");
+
+        var checkRow = provider.BuildCheckRowFunctionSql(options);
+        checkRow.Should().Contain("CREATE OR REPLACE FUNCTION \"dbo\".\"fn_CheckRow\"(");
+        checkRow.Should().Contain("LANGUAGE sql\nSTABLE");
+        checkRow.Should().Contain("SELECT TRUE FROM \"dbo\".\"fn_IsResourceAccessible\"(p_resource_id, p_subject_ids, p_permission_id)");
+
+        provider.BuildListFirstQuerySql(options).Should().Be(
+            "SELECT f.\"ListFirst\" AS \"Value\" FROM \"dbo\".\"fn_ListFirst\"(CAST({0} AS text), CAST({1} AS varchar(450)), CAST({2} AS varchar(450)), CAST({3} AS text)) AS f");
     }
 
     [TestMethod]
@@ -114,14 +162,15 @@ public class SqlOSDatabaseProviderTests
     {
         var options = new SqlOSFgaOptions { Schema = "ten\"ant", MaxResourceHierarchyDepth = 4 };
         options.TableNames.Resources = "res\"ources";
-        var scope = new SqlOSFgaScopeTable("app", "Items", "ResourceId", ["Id"], [], [new SqlOSFgaScopeColumn("Id", "integer", false)]);
 
-        var columns = PostgreSqlDatabaseProvider.Instance.BuildEnsureLineageColumnsSql(options).Single();
-        columns.Should().Contain("ALTER TABLE \"ten\"\"ant\".\"res\"\"ources\" ADD COLUMN IF NOT EXISTS \"Ancestor4\" bigint NULL;");
-        columns.Should().NotContain("INDEX", "the ancestor columns are read by resource id or by Seq, never searched by value");
-        columns.Should().NotContain("Ancestor5");
+        var ensure = PostgreSqlDatabaseProvider.Instance.BuildEnsureLineageColumnsSql(options);
+        ensure.Should().HaveCount(2, "the columns, then the indexes over them");
+        ensure[0].Should().Contain("ALTER TABLE \"ten\"\"ant\".\"res\"\"ources\" ADD COLUMN IF NOT EXISTS \"Ancestor4\" bigint NULL;");
+        ensure[0].Should().NotContain("Ancestor5");
+        ensure[1].Should().Contain("CREATE INDEX IF NOT EXISTS \"IX_res\"\"ources_Ancestor4\" ON \"ten\"\"ant\".\"res\"\"ources\" (\"Ancestor4\", \"ResourceTypeId\") INCLUDE (\"Reach\", \"Id\") WHERE \"Ancestor4\" IS NOT NULL;");
+        ensure[1].Should().NotContain("Ancestor5");
 
-        var batches = PostgreSqlDatabaseProvider.Instance.BuildLineageMaintenanceSql(options, [scope]);
+        var batches = PostgreSqlDatabaseProvider.Instance.BuildLineageMaintenanceSql(options);
         var all = string.Join("\n", batches);
         all.Should().Contain("CREATE OR REPLACE FUNCTION \"ten\"\"ant\".\"fn_res\"\"ources_LineageRefresh\"(p_ids varchar[], p_reject boolean)");
         all.Should().Contain("CREATE OR REPLACE FUNCTION \"ten\"\"ant\".\"fn_res\"\"ources_LineageRebuild\"()");
@@ -130,65 +179,36 @@ public class SqlOSDatabaseProviderTests
         all.Should().Contain("CREATE TEMP TABLE \"SqlOSLineageAffected\"");
         all.Should().Contain("AFTER INSERT ON \"ten\"\"ant\".\"res\"\"ources\"\n    REFERENCING NEW TABLE AS new_rows\n    FOR EACH STATEMENT");
         all.Should().Contain("AFTER UPDATE ON \"ten\"\"ant\".\"res\"\"ources\"\n    REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows");
-        all.Should().Contain("AFTER DELETE ON \"ten\"\"ant\".\"res\"\"ources\"");
+        all.Should().NotContain("AFTER DELETE", "a resource with children cannot be deleted, and a leaf is in no other row's lineage");
+        all.Should().Contain("BEFORE INSERT OR UPDATE OF \"ResourceId\" ON \"ten\"\"ant\".\"SqlOSFgaGrants\"\n    FOR EACH ROW EXECUTE FUNCTION \"ten\"\"ant\".\"fn_SqlOSFgaGrants_ResourceSeq\"();");
+        all.Should().Contain("NEW.\"ResourceSeq\" := (SELECT r.\"Seq\" FROM \"ten\"\"ant\".\"res\"\"ources\" r WHERE r.\"Id\" = NEW.\"ResourceId\");");
+        all.Should().Contain("WHERE r.\"Id\" = g.\"ResourceId\" AND g.\"ResourceSeq\" IS DISTINCT FROM r.\"Seq\";", "the rebuild refreshes the grants' copy too");
         all.Should().Contain("WHERE \"Steps\" > 4");
         all.Should().Contain("p.\"Depth\" = 4");
         all.Should().Contain("USING ERRCODE = 'SQ012'");
         all.Should().Contain("\"Ancestor4\" = CASE WHEN nd.\"Depth\" = 4 THEN n.\"Seq\" WHEN nd.\"Depth\" > 4 THEN p.\"Ancestor4\" ELSE NULL END");
-        all.Should().Contain("CREATE OR REPLACE FUNCTION \"ten\"\"ant\".\"fn_SqlOSFgaScope_app_Items_Insert\"()");
-        all.Should().Contain("CREATE OR REPLACE FUNCTION \"ten\"\"ant\".\"fn_SqlOSFgaScope_app_Items_Update\"()");
         all.Should().Contain("SELECT \"Id\", \"ParentId\", \"IsActive\" FROM new_rows\n        EXCEPT\n        SELECT \"Id\", \"ParentId\", \"IsActive\" FROM old_rows", "changed rows come from a hashed set operation");
-        System.Text.RegularExpressions.Regex.IsMatch(all, "SELECT \"Id\", \"ResourceId\" FROM new_rows\\s+EXCEPT\\s+SELECT \"Id\", \"ResourceId\" FROM old_rows").Should().BeTrue();
-        all.Should().Contain("IF NOT EXISTS (SELECT 1 FROM (SELECT \"Id\", \"ResourceId\" FROM new_rows EXCEPT SELECT \"Id\", \"ResourceId\" FROM old_rows) c) THEN", "the rows whose key, order columns, or resource id changed drive the direct index");
-        all.Should().NotContain("TEMP TABLE \"SqlOSScopeChanged\"", "this function's own update fires it again, and a nested call must not disturb the outer one");
-        all.Should().Contain("CREATE OR REPLACE FUNCTION \"ten\"\"ant\".\"fn_SqlOSFgaScope_app_Items_Delete\"()");
-        all.Should().Contain("AFTER DELETE ON \"app\".\"Items\"");
         all.Should().NotContain("JOIN old_rows", "a join of the transition tables has nothing to plan by");
-        all.Should().Contain("IF NOT EXISTS (", "the update function must leave before updating, or its own update fires it forever");
-        all.Should().Contain("AFTER UPDATE ON \"app\".\"Items\"");
-        all.Should().Contain("\"FgaScope\" = CASE WHEN r.\"Id\" IS NULL THEN NULL ELSE substring(int2send(COALESCE(r.\"Depth\", 0)::smallint) from 2 for 1) || int4send(rt.\"Seq\") || int8send(COALESCE(CASE WHEN r.\"Reach\" <= 0 THEN r.\"Ancestor0\" END, 0))");
-        all.Should().Contain("int8send(COALESCE(CASE WHEN r.\"Reach\" <= 4 THEN r.\"Ancestor4\" END, 0)) END");
-        all.Should().Contain("\"FgaScope\" = NULL");
+        all.Should().NotContain("FgaScope", "nothing of SqlOS's is on an application table");
+        all.Should().NotContain("ResourceTypeId", "a retype changes no lineage");
         var key = SqlOSFgaLineage.LineageLockKey(options).ToString(System.Globalization.CultureInfo.InvariantCulture);
         all.Should().Contain($"PERFORM pg_advisory_xact_lock_shared({key});");
         all.Should().Contain($"PERFORM pg_advisory_xact_lock({key});");
         all.Should().Contain("IF current_setting('transaction_isolation') = 'repeatable read' THEN");
 
-        // Per level: an expression index on the level's eight bytes, over the key and over each declared order,
-        // filtered on the depth byte to the rows at or below the level; stale mirrors dropped.
-        var indexes = PostgreSqlDatabaseProvider.Instance.BuildEnsureScopeIndexesSql(options, [scope with { Orders = [new SqlOSFgaScopeOrder("Price", ["Price", "Id"])] }]).Single();
-        indexes.Should().Contain("CREATE INDEX IF NOT EXISTS \"IX_Items_FgaScopeMissing\" ON \"app\".\"Items\" (\"ResourceId\") WHERE \"FgaScope\" IS NULL;");
-        indexes.Should().Contain($"CREATE INDEX IF NOT EXISTS \"IX_Items_FgaScope4\" ON \"app\".\"Items\" ((SUBSTRING(\"FgaScope\", {SqlOSFgaLineage.ScopeAncestorOffset(4)}, 8)), \"Id\") WHERE \"FgaScope\" >= '\\x04'::bytea;");
-        indexes.Should().Contain("CREATE INDEX IF NOT EXISTS \"IX_Items_FgaScope0_Price\" ON \"app\".\"Items\" ((SUBSTRING(\"FgaScope\", 6, 8)), \"Price\", \"Id\") WHERE \"FgaScope\" >= '\\x00'::bytea;");
-        indexes.Should().NotContain("FgaScope5\"");
-        indexes.Should().Contain("CREATE STATISTICS IF NOT EXISTS \"ST_Items_FgaScopeType\" ON ((SUBSTRING(\"FgaScope\", 2, 4))) FROM \"app\".\"Items\";");
-        indexes.Should().Contain("ANALYZE \"app\".\"Items\";");
-        indexes.Should().NotContain("DROP", "stale objects are the cleanup's");
-
-        // The cleanup finds SqlOS's objects on every table by name and keeps the ones of maintained tables.
-        var cleanup = PostgreSqlDatabaseProvider.Instance.BuildScopeCleanupSql(options, [scope]);
-        cleanup.Should().Contain("t.tgname LIKE 'TR\\_%\\_SqlOSFgaScope\\_%'");
-        cleanup.Should().Contain("n.nspname = 'app' AND c.relname = 'Items' AND t.tgname IN ('TR_Items_SqlOSFgaScope_Insert', 'TR_Items_SqlOSFgaScope_Update', 'TR_Items_SqlOSFgaScope_Delete')");
-        cleanup.Should().Contain("p.proname LIKE 'fn\\_SqlOSFgaScope\\_%'");
-        cleanup.Should().Contain("p.proname NOT IN ('fn_SqlOSFgaScope_app_Items_Insert', 'fn_SqlOSFgaScope_app_Items_Update', 'fn_SqlOSFgaScope_app_Items_Delete', 'fn_SqlOSFgaDirect_app_Items_Rebuild')");
-        cleanup.Should().Contain("i.indexname ~ '^IX_.*_FgaScope([0-9]|Missing)'");
-        cleanup.Should().Contain("s.stxname LIKE 'ST\\_%\\_FgaScopeType'");
-        cleanup.Should().Contain("EXECUTE stale.statement;");
-
-        // The fill sets only the rows that have no scope, in batches, under the shared lock.
-        all.Should().Contain("CREATE OR REPLACE FUNCTION \"ten\"\"ant\".\"fn_res\"\"ources_ScopeFill\"()");
-        all.Should().Contain("WHERE m.\"FgaScope\" IS NULL");
-
-        var hash = PostgreSqlDatabaseProvider.Instance.BuildSelectRoutinesHashSql(options, [scope]);
+        var hash = PostgreSqlDatabaseProvider.Instance.BuildSelectRoutinesHashSql(options);
         hash.Should().Contain("p.proname = 'fn_ActiveSubjects'");
         hash.Should().Contain("p.proname = 'fn_AccessRoots'");
+        hash.Should().Contain("p.proname = 'fn_ListVisible'");
+        hash.Should().Contain("p.proname = 'fn_VisibleSet'");
+        hash.Should().Contain("p.proname = 'fn_ListFirst'");
+        hash.Should().Contain("p.proname = 'fn_CheckRow'");
         hash.Should().Contain("p.proname = 'fn_res\"ources_LineageRebuild'");
         hash.Should().Contain("t.tgname = 'TR_res\"ources_Lineage_Update'");
-        hash.Should().Contain("n.nspname = 'app' AND c.relname = 'Items' AND t.tgname = 'TR_Items_SqlOSFgaScope_Insert'");
+        hash.Should().Contain("c.relname = 'SqlOSFgaGrants' AND t.tgname = 'TR_SqlOSFgaGrants_ResourceSeq'");
+        hash.Should().Contain("p.proname = 'fn_SqlOSFgaGrants_ResourceSeq'");
         hash.Should().Contain("column_name = 'Ancestor4'");
-        hash.Should().Contain("p.proname = 'fn_res\"ources_ScopeFill'");
-        hash.Should().Contain("indexname IN (");
-        hash.Should().Contain("NOT EXISTS (SELECT format('DROP TRIGGER");
+        hash.Should().Contain("indexname IN ('IX_res\"ources_Ancestor0', 'IX_res\"ources_Ancestor1', 'IX_res\"ources_Ancestor2', 'IX_res\"ources_Ancestor3', 'IX_res\"ources_Ancestor4')) = 5");
     }
 
     [TestMethod]

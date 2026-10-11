@@ -90,7 +90,11 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
         return sql + " FOR UPDATE";
     }
 
-    /// <summary><c>fn_IsResourceAccessible</c>: the point check over the lineage (see the SQL Server provider).</summary>
+    /// <summary>
+    /// <c>fn_IsResourceAccessible</c>: the point check over the lineage (see the SQL Server provider). The grant
+    /// seek sits in a subquery with <c>OFFSET 0</c>, which PostgreSQL neither flattens nor moves conditions into,
+    /// so it stays one exact seek per ancestor and subject instead of a read of every grant on the ancestor.
+    /// </summary>
     public string BuildIsResourceAccessibleFunctionSql(SqlOSFgaOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -128,11 +132,16 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
             LANGUAGE sql
             STABLE
             AS $sqlos$
-            SELECT a."Id", g."Id", g."SubjectId", g."RoleId", lv."Level"
+            SELECT g."ResourceId", g."Id", g."SubjectId", g."RoleId", lv."Level"
             FROM {resources} x
             CROSS JOIN LATERAL (VALUES {levels}) AS lv("Level", "Seq")
-            INNER JOIN {resources} a ON a."Seq" = lv."Seq"
-            INNER JOIN {grants} g ON g."ResourceId" = a."Id"
+            CROSS JOIN LATERAL unnest(ARRAY(SELECT live."SubjectId" FROM {schema}."fn_ActiveSubjects"(p_subject_ids) live)) AS s("SubjectId")
+            CROSS JOIN LATERAL (
+                SELECT g."Id", g."ResourceId", g."SubjectId", g."RoleId", g."EffectiveFrom", g."EffectiveTo"
+                FROM {grants} g
+                WHERE g."ResourceSeq" = lv."Seq" AND g."SubjectId" = s."SubjectId"
+                OFFSET 0
+            ) g
             WHERE x."Id" = p_resource_id
               AND x."Reach" IS NOT NULL
               AND lv."Seq" IS NOT NULL
@@ -143,7 +152,6 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
                   WHERE permission."Id" = p_permission_id
                     AND (permission."ResourceTypeId" IS NULL OR permission."ResourceTypeId" = x."ResourceTypeId")
               )
-              AND g."SubjectId" = ANY (ARRAY(SELECT live."SubjectId" FROM {schema}."fn_ActiveSubjects"(p_subject_ids) live))
               AND g."RoleId" = ANY (ARRAY(SELECT rp."RoleId" FROM {rolePermissions} rp WHERE rp."PermissionId" = p_permission_id))
               AND (g."EffectiveFrom" IS NULL OR g."EffectiveFrom" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))
               AND (g."EffectiveTo" IS NULL OR g."EffectiveTo" >= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))

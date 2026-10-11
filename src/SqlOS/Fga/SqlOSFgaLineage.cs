@@ -4,10 +4,9 @@ namespace SqlOS.Fga;
 
 /// <summary>
 /// Names of the resource lineage: the columns on the resources table that hold each resource's ancestor at
-/// every level, its depth, and its reach; the routines and triggers that keep them exact; and the scope
-/// column that carries them onto every application table whose entity has a resource id.
-/// One definition, used by the model configuration (so EF Core knows the columns and triggers exist), by
-/// the filter builder, and by both database providers (which create them).
+/// every level, its depth, and its reach (the tree's closure, one row per resource); the index per level;
+/// and the routines and triggers that keep them exact. One definition, used by the model configuration (so
+/// EF Core knows the triggers exist) and by both database providers (which create them).
 /// </summary>
 internal static class SqlOSFgaLineage
 {
@@ -31,12 +30,11 @@ internal static class SqlOSFgaLineage
     public const int RebuildRangeRows = 500_000;
 
     /// <summary>
-    /// The lock that serializes changes to the resource tree. Every trigger that maintains the lineage or a scope
-    /// column takes it before reading anything: inserts (of resources or of application rows) take it shared, so
-    /// they run side by side; moves, activity changes, retypes, deletes, the rebuild, and the one-time fill take
-    /// it exclusively. A change therefore never computes from another transaction's uncommitted state: it waits
-    /// for that transaction to commit, then reads what was committed. Without it, an insert racing a
-    /// deactivation could leave the new row visible, and two moves could together commit a cycle.
+    /// The lock that serializes changes to the resource tree. Every trigger that maintains the lineage takes it
+    /// before reading anything: inserts take it shared, so they run side by side; moves, activity changes, and
+    /// the rebuild take it exclusively. A change therefore never computes from another transaction's
+    /// uncommitted state: it waits for that transaction to commit, then reads what was committed. Without it,
+    /// two moves could together commit a cycle.
     /// </summary>
     public static string LineageLockName(SqlOSFgaOptions options) => $"SqlOS:FgaLineage:{options.Schema}.{options.TableNames.Resources}";
 
@@ -48,6 +46,13 @@ internal static class SqlOSFgaLineage
     /// <summary>The ancestor column for a level: <c>Ancestor0</c> is the top of the resource's tree.</summary>
     public static string AncestorColumn(int level) => "Ancestor" + level.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
+    /// <summary>The index on a level's ancestor column: the rows beneath a root at that level, in one seek.</summary>
+    public static string AncestorIndexName(string resourcesTable, int level) => $"IX_{resourcesTable}_{AncestorColumn(level)}";
+
+    /// <summary>The index of every level the configured depth calls for.</summary>
+    public static IReadOnlyList<string> AncestorIndexNames(SqlOSFgaOptions options)
+        => Enumerable.Range(0, Levels(options)).Select(level => AncestorIndexName(options.TableNames.Resources, level)).ToList();
+
     /// <summary>The number of levels, and so of ancestor columns: the configured depth plus the root level.</summary>
     public static int Levels(SqlOSFgaOptions options) => Levels(options.MaxResourceHierarchyDepth);
 
@@ -56,118 +61,52 @@ internal static class SqlOSFgaLineage
     /// <summary>The deepest level a resource may sit at.</summary>
     public static int MaxLevel(SqlOSFgaOptions options) => Levels(options) - 1;
 
-    /// <summary>The statement triggers on the resources table that keep the lineage exact.</summary>
+    /// <summary>The statement triggers on the resources table that keep the lineage exact: after insert, after update.</summary>
     public static IReadOnlyList<string> TriggerNames(string resourcesTable)
-        => [$"TR_{resourcesTable}_Lineage_Insert", $"TR_{resourcesTable}_Lineage_Update", $"TR_{resourcesTable}_Lineage_Delete"];
+        => [$"TR_{resourcesTable}_Lineage_Insert", $"TR_{resourcesTable}_Lineage_Update"];
+
+    /// <summary>
+    /// The grants' copy of their resource's <see cref="SeqColumn"/> (schema v16). The point check seeks a
+    /// subject's grants on an ancestor by (ancestor's Seq, subject id), so it reads only the caller's grants
+    /// there, however many other people hold grants on the same resource. A resource's Seq never changes.
+    /// </summary>
+    public const string GrantResourceSeqColumn = "ResourceSeq";
+
+    /// <summary>The index the point check seeks: (<see cref="GrantResourceSeqColumn"/>, SubjectId).</summary>
+    public static string GrantLookupIndexName(string grantsTable) => $"IX_{grantsTable}_ResourceSeq_SubjectId";
+
+    /// <summary>The trigger that fills <see cref="GrantResourceSeqColumn"/> when a grant is written.</summary>
+    public static string GrantTriggerName(string grantsTable) => $"TR_{grantsTable}_ResourceSeq";
 
     public static string RefreshRoutineName(string resourcesTable) => $"{resourcesTable}_LineageRefresh";
 
     public static string RebuildRoutineName(string resourcesTable) => $"{resourcesTable}_LineageRebuild";
 
     /// <summary>
-    /// The routine that sets the scope column of every application row that has none (rows written while
-    /// SqlOS's triggers were absent: bulk loads that skip triggers, rows written before a table's triggers
-    /// existed). SqlOS runs it at every start; a bulk-load job can run it right away.
+    /// The index on an application table's resource id, which a filtered query joins the visible resources
+    /// to. Part of the application's EF model (so of its migrations), added when the application declared
+    /// none.
     /// </summary>
-    public static string ScopeFillRoutineName(string resourcesTable) => $"{resourcesTable}_ScopeFill";
+    public static string ResourceIdIndexName(string table) => $"IX_{table}_SqlOSFgaResourceId";
 
-    /// <summary>Rows the scope fill sets per statement on SQL Server, each its own transaction.</summary>
-    public const int ScopeFillBatchRows = 50_000;
+    // How a list filter is chosen (fn_ListFirst). A page of k rows costs, listed first, about one index read
+    // per row the caller sees (V), then a sort; read in the table's order and checked row by row, about k·N/V
+    // row checks, N the table's rows, each check a few index reads. The two meet near V = √(c·k·N), c the
+    // ratio of their unit costs: measured at about 3 on both engines for pages of 20 to 25 rows, which puts
+    // the meeting point near 8·√N. Below it the caller's rows are listed first; at or above it they are
+    // checked in order. Either way a page costs at most about the cap's worth of index reads, plus the count.
 
-    // The scope column: the lineage of a row's resource, held on the application table itself. Every entity
-    // implementing IHasResourceId declares it (IHasResourceId.FgaScope), so it exists on every table with a
-    // resource id, and maps to a byte string on both engines (varbinary(512), bytea): byte 1 the depth,
-    // bytes 2-5 the resource type's compact key, then eight bytes per level holding the ancestor at that
-    // level where access flows down to the row from it, zero elsewhere; integers big-endian. SqlOS reads each
-    // piece through SUBSTRING, which it indexes per level: an expression index on PostgreSQL, a storage-free
-    // computed column on SQL Server.
+    /// <summary>The cap's factor: a caller who sees fewer than <c>8·√N</c> rows of an N-row table has them listed first.</summary>
+    public const int ListFirstFactor = 8;
 
-    public const string ScopePrefix = "SqlOSFga";
+    /// <summary>The smallest cap, for small or never-measured tables: listing 1,000 rows first costs milliseconds.</summary>
+    public const int ListFirstMinimum = 1_000;
 
-    public const string ScopeColumn = nameof(Fga.Interfaces.IHasResourceId.FgaScope);
-
-    /// <summary>The column's maximum length: room for 63 levels, so a changed depth never changes the column.</summary>
-    public const int ScopeMaxLength = 512;
-
-    public const int ScopeMaxLevels = 63;
-
-    /// <summary>The (1-based) offset of the depth byte.</summary>
-    public const int ScopeDepthOffset = 1;
-
-    /// <summary>The (1-based) offset of the four type bytes.</summary>
-    public const int ScopeTypeOffset = 2;
-
-    /// <summary>The (1-based) offset of the eight ancestor bytes of a level.</summary>
-    public static int ScopeAncestorOffset(int level) => 6 + 8 * level;
-
-    /// <summary>The bytes a scope value of the given number of levels takes.</summary>
-    public static int ScopeBinaryLength(int levels) => 5 + 8 * levels;
-
-    /// <summary>SQL Server: the computed column reading a level's ancestor out of the scope column, which the level's indexes are built on.</summary>
-    public static string ScopeLevelColumn(int level) => ScopeColumn + level.ToString(System.Globalization.CultureInfo.InvariantCulture);
-
-    /// <summary>
-    /// SQL Server: the computed column reading the resource type out of the scope column. Never indexed; it
-    /// exists so the optimizer has statistics on the type test (which the query spells out as the same
-    /// expression) and knows it keeps nearly every row, instead of guessing it is selective and scanning the
-    /// table in place of walking a level's index.
-    /// </summary>
-    public const string ScopeTypeColumn = ScopeColumn + "Type";
-
-    /// <summary>The statistics on the type expression (both engines), for the same reason.</summary>
-    public static string ScopeTypeStatisticsName(string table) => $"ST_{table}_{ScopeTypeColumn}";
-
-    public static string ScopeIndexName(string table, int level, string? mirrored)
-        => mirrored is null
-            ? $"IX_{table}_{ScopeLevelColumn(level)}"
-            : $"IX_{table}_{ScopeLevelColumn(level)}_{mirrored}";
-
-    /// <summary>The filtered index on the rows that have no scope yet, which keeps the fill an index seek.</summary>
-    public static string ScopeMissingIndexName(string table) => $"IX_{table}_{ScopeColumn}Missing";
-
-    /// <summary>Every index SqlOS creates on a table: the per-level ones and the one on rows missing their scope.</summary>
-    public static IReadOnlyList<string> ScopeIndexNames(SqlOSFgaScopeTable table, int levels)
-        => Enumerable.Range(0, levels)
-            .SelectMany(level => new[] { ScopeIndexName(table.Table, level, null) }
-                .Concat(table.Orders.Select(o => ScopeIndexName(table.Table, level, o.Suffix))))
-            .Append(ScopeMissingIndexName(table.Table))
-            .ToList();
-
-    public static string ScopeResourceIdIndexName(string table) => $"IX_{table}_{ScopePrefix}ResourceId";
-
-    /// <summary>The statement triggers on an application table that copy the lineage onto its rows and keep its direct index current.</summary>
-    public static IReadOnlyList<string> ScopeTriggerNames(string table)
-        => [$"TR_{table}_{ScopePrefix}Scope_Insert", $"TR_{table}_{ScopePrefix}Scope_Update", $"TR_{table}_{ScopePrefix}Scope_Delete"];
-}
-
-/// <summary>An application table that carries the scope column, as the database routines need to address it.</summary>
-/// <param name="Schema">The table's schema, or null for the connection's default.</param>
-/// <param name="Table">The table name.</param>
-/// <param name="ResourceIdColumn">The column holding the resource id.</param>
-/// <param name="KeyColumns">The primary key columns, used to join a statement's rows back to the table.</param>
-/// <param name="Orders">The orders the application declared indexes for, each mirrored per level.</param>
-/// <param name="Columns">The store types of the key and order columns, for the direct index and the page statements.</param>
-internal sealed record SqlOSFgaScopeTable(
-    string? Schema,
-    string Table,
-    string ResourceIdColumn,
-    IReadOnlyList<string> KeyColumns,
-    IReadOnlyList<SqlOSFgaScopeOrder> Orders,
-    IReadOnlyList<SqlOSFgaScopeColumn> Columns)
-{
-    public SqlOSFgaScopeTable(string? schema, string table, string resourceIdColumn, IReadOnlyList<string> keyColumns)
-        : this(schema, table, resourceIdColumn, keyColumns, [], [])
+    /// <summary>The cap for a table of <paramref name="rows"/> rows (an expression), in SQL both engines read the same way.</summary>
+    public static string ListFirstCapSql(string rows, string sqrt)
     {
-    }
-
-    public SqlOSFgaScopeTable(string? schema, string table, string resourceIdColumn, IReadOnlyList<string> keyColumns, IReadOnlyList<SqlOSFgaScopeOrder> orders)
-        : this(schema, table, resourceIdColumn, keyColumns, orders, [])
-    {
+        var factor = ListFirstFactor.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var minimum = ListFirstMinimum.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return $"CASE WHEN {factor} * {sqrt}({rows}) > {minimum} THEN {factor} * {sqrt}({rows}) ELSE {minimum} END";
     }
 }
-
-/// <summary>An index the application declared on a table: the suffix that names its mirrors, and its columns followed by the key.</summary>
-internal sealed record SqlOSFgaScopeOrder(string Suffix, IReadOnlyList<string> Columns);
-
-/// <summary>A key or order column of an application table: its name, its store type (<c>int</c>, <c>nvarchar(200)</c>…), and whether it is nullable.</summary>
-internal sealed record SqlOSFgaScopeColumn(string Column, string StoreType, bool IsNullable);

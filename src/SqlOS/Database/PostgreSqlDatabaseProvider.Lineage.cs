@@ -2,14 +2,13 @@ using System.Globalization;
 using System.Text;
 using SqlOS.Fga;
 using SqlOS.Fga.Configuration;
-using SqlOS.Fga.Paging;
 
 namespace SqlOS.Database;
 
 /// <summary>
 /// The SHRBAC enforcement artifacts around the row filter (see the SQL Server provider): the caller's live
-/// subjects and access roots, the resource lineage with the routines and triggers that keep it exact, and the
-/// scope columns that copy it onto application tables.
+/// subjects and access roots, the resource lineage with the index per level and the routines and triggers
+/// that keep it exact, and <c>fn_ListVisible</c>, <c>fn_VisibleSet</c> and <c>fn_ListFirst</c>.
 /// </summary>
 internal sealed partial class PostgreSqlDatabaseProvider
 {
@@ -81,7 +80,8 @@ internal sealed partial class PostgreSqlDatabaseProvider
             STABLE
             AS $sqlos$
             -- The caller's current grants first, found by subject, then their resources by primary key. The CTE is
-            -- materialized so the planner cannot start from the resource table.
+            -- materialized so the planner cannot start from the resource table; it is read as far as the
+            -- statement needs (a count up to a cap stops early), so nothing here deduplicates.
             WITH g AS MATERIALIZED (
                 SELECT g."ResourceId"
                 FROM {grants} g
@@ -90,47 +90,178 @@ internal sealed partial class PostgreSqlDatabaseProvider
                   AND (g."EffectiveFrom" IS NULL OR g."EffectiveFrom" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))
                   AND (g."EffectiveTo" IS NULL OR g."EffectiveTo" >= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))
             )
-            SELECT DISTINCT r."Seq", r."Depth"
+            SELECT r."Seq", r."Depth"
             FROM g
-            INNER JOIN {resources} r ON r."Id" = g."ResourceId"
-            WHERE r."IsActive" = TRUE AND r."Depth" IS NOT NULL
+            -- Each grant's resource by its key: a lookup per grant, never a pass over the resources.
+            CROSS JOIN LATERAL (
+                SELECT x."Seq", x."Depth"
+                FROM {resources} x
+                WHERE x."Id" = g."ResourceId" AND x."IsActive" = TRUE AND x."Depth" IS NOT NULL
+                LIMIT 1
+            ) r
             $sqlos$;
             """;
     }
 
-    public string BuildAccessRootsQuerySql(SqlOSFgaOptions options)
+    /// <summary>
+    /// <c>fn_ListVisible</c>: the caller's visible resources, listed root by root (see the SQL Server
+    /// provider). A SQL function of one SELECT, inlined into the statement that uses it; the lateral join keeps
+    /// the roots driving, and each level's branch runs only for roots at that level (a one-time filter).
+    /// </summary>
+    public string BuildListVisibleFunctionSql(SqlOSFgaOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return $"SELECT a.\"ResourceSeq\", a.\"Depth\" FROM {QuoteIdentifier(options.Schema)}.\"fn_AccessRoots\"({{0}}, {{1}}) AS a";
+        var schema = QuoteIdentifier(options.Schema);
+        var resources = Qualify(options.Schema, options.TableNames.Resources);
+        var branches = string.Join("\n    UNION ALL\n", Enumerable.Range(0, SqlOSFgaLineage.Levels(options)).Select(level =>
+        {
+            var l = level.ToString(CultureInfo.InvariantCulture);
+            var ancestor = "r." + QuoteIdentifier(SqlOSFgaLineage.AncestorColumn(level));
+            return $"    SELECT r.\"Id\" FROM {resources} r WHERE a.\"Depth\" = {l} AND {ancestor} = a.\"ResourceSeq\" AND {ancestor} IS NOT NULL AND r.\"Reach\" <= {l} AND (p_type_id IS NULL OR r.\"ResourceTypeId\" = p_type_id)";
+        }));
+        return $"""
+            CREATE OR REPLACE FUNCTION {schema}."fn_ListVisible"(
+                p_subject_ids text,
+                p_permission_id varchar(450),
+                p_type_id varchar(450)
+            )
+            RETURNS TABLE("ResourceId" varchar(450))
+            LANGUAGE sql
+            STABLE
+            AS $sqlos$
+            SELECT v."Id"
+            FROM {schema}."fn_AccessRoots"(p_subject_ids, p_permission_id) a
+            CROSS JOIN LATERAL (
+            {branches}
+            ) v
+            $sqlos$;
+            """;
     }
 
+    /// <summary>
+    /// <c>fn_VisibleSet</c>: the rows of <c>fn_ListVisible</c>, each once (see the SQL Server provider). PL/pgSQL,
+    /// so the planner never inlines it: it sees a set of about ten rows and starts the statement from it. Without
+    /// JIT: the planner costs a root's range by the level's statistics (the top level's by every row), so a list
+    /// of a few rows can cross <c>jit_above_cost</c> and spend half a second compiling a query that runs in one.
+    /// </summary>
+    public string BuildVisibleSetFunctionSql(SqlOSFgaOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var schema = QuoteIdentifier(options.Schema);
+        return $"""
+            CREATE OR REPLACE FUNCTION {schema}."fn_VisibleSet"(
+                p_subject_ids text,
+                p_permission_id varchar(450),
+                p_type_id varchar(450)
+            )
+            RETURNS TABLE("ResourceId" varchar(450))
+            LANGUAGE plpgsql
+            STABLE
+            ROWS 10
+            SET jit = off
+            AS $sqlos$
+            BEGIN
+                RETURN QUERY
+                SELECT DISTINCT l."ResourceId" FROM {schema}."fn_ListVisible"(p_subject_ids, p_permission_id, p_type_id) l;
+            END
+            $sqlos$;
+            """;
+    }
+
+    /// <summary>
+    /// <c>fn_ListFirst</c>: whether the caller sees fewer resources than the table's cap (see the SQL Server
+    /// provider). The table's row count is the planner's (<c>pg_class.reltuples</c>; -1, never analyzed, reads as 0).
+    /// Without JIT, for the reason <c>fn_VisibleSet</c> is: the count is over-costed and would compile for longer
+    /// than it runs.
+    /// </summary>
+    public string BuildListFirstFunctionSql(SqlOSFgaOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var schema = QuoteIdentifier(options.Schema);
+        var rows = "greatest(coalesce((SELECT t.reltuples FROM pg_class t WHERE t.oid = to_regclass(p_table)), 0), 0)::float8";
+        return $"""
+            CREATE OR REPLACE FUNCTION {schema}."fn_ListFirst"(
+                p_subject_ids text,
+                p_permission_id varchar(450),
+                p_type_id varchar(450),
+                p_table text
+            )
+            RETURNS TABLE("ListFirst" boolean)
+            LANGUAGE sql
+            STABLE
+            SET jit = off
+            AS $sqlos$
+            SELECT v.visible < c.cap
+            FROM (SELECT CAST({SqlOSFgaLineage.ListFirstCapSql(rows, "sqrt")} AS bigint) AS cap) c
+            CROSS JOIN LATERAL (
+                SELECT count(*) AS visible
+                FROM (SELECT 1 FROM {schema}."fn_ListVisible"(p_subject_ids, p_permission_id, p_type_id) LIMIT c.cap) t
+            ) v
+            $sqlos$;
+            """;
+    }
+
+    /// <summary>
+    /// <c>fn_CheckRow</c>: one row when the point check allows the resource (see the SQL Server provider). A SQL
+    /// function of one SELECT, inlined, and <c>fn_IsResourceAccessible</c> inlined within it.
+    /// </summary>
+    public string BuildCheckRowFunctionSql(SqlOSFgaOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var schema = QuoteIdentifier(options.Schema);
+        return $"""
+            CREATE OR REPLACE FUNCTION {schema}."fn_CheckRow"(
+                p_resource_id varchar(450),
+                p_subject_ids text,
+                p_permission_id varchar(450)
+            )
+            RETURNS TABLE("Allowed" boolean)
+            LANGUAGE sql
+            STABLE
+            AS $sqlos$
+            SELECT TRUE FROM {schema}."fn_IsResourceAccessible"(p_resource_id, p_subject_ids, p_permission_id)
+            $sqlos$;
+            """;
+    }
+
+    /// <summary>The query over <c>fn_ListFirst</c> (see the SQL Server provider); the type id is cast so a null still resolves the function.</summary>
+    public string BuildListFirstQuerySql(SqlOSFgaOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return $"SELECT f.\"ListFirst\" AS \"Value\" FROM {QuoteIdentifier(options.Schema)}.\"fn_ListFirst\"(CAST({{0}} AS text), CAST({{1}} AS varchar(450)), CAST({{2}} AS varchar(450)), CAST({{3}} AS text)) AS f";
+    }
+
+    /// <summary>The ancestor columns of the configured depth and the index of each level (see the SQL Server provider).</summary>
     public IReadOnlyList<string> BuildEnsureLineageColumnsSql(SqlOSFgaOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
         var resources = Qualify(options.Schema, options.TableNames.Resources);
-        var sql = new StringBuilder();
+        var columns = new StringBuilder();
+        var indexes = new StringBuilder();
         for (var level = 0; level < SqlOSFgaLineage.Levels(options); level++)
         {
             var column = QuoteIdentifier(SqlOSFgaLineage.AncestorColumn(level));
-            sql.AppendLine(CultureInfo.InvariantCulture, $"ALTER TABLE {resources} ADD COLUMN IF NOT EXISTS {column} bigint NULL;");
+            var index = QuoteIdentifier(SqlOSFgaLineage.AncestorIndexName(options.TableNames.Resources, level));
+            columns.AppendLine(CultureInfo.InvariantCulture, $"ALTER TABLE {resources} ADD COLUMN IF NOT EXISTS {column} bigint NULL;");
+            indexes.AppendLine(CultureInfo.InvariantCulture, $"CREATE INDEX IF NOT EXISTS {index} ON {resources} ({column}, \"ResourceTypeId\") INCLUDE (\"{SqlOSFgaLineage.ReachColumn}\", \"Id\") WHERE {column} IS NOT NULL;");
         }
 
-        return [sql.ToString()];
+        return [columns.ToString(), indexes.ToString()];
     }
 
-    public IReadOnlyList<string> BuildLineageMaintenanceSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
+    public IReadOnlyList<string> BuildLineageMaintenanceSql(SqlOSFgaOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(scopeTables);
         var resourcesTable = options.TableNames.Resources;
         var resources = Qualify(options.Schema, resourcesTable);
-        var resourceTypes = Qualify(options.Schema, options.TableNames.ResourceTypes);
         var refresh = Qualify(options.Schema, "fn_" + SqlOSFgaLineage.RefreshRoutineName(resourcesTable));
         var rebuild = Qualify(options.Schema, "fn_" + SqlOSFgaLineage.RebuildRoutineName(resourcesTable));
         var onInsert = Qualify(options.Schema, $"fn_{resourcesTable}_LineageOnInsert");
         var onUpdate = Qualify(options.Schema, $"fn_{resourcesTable}_LineageOnUpdate");
-        var onDelete = Qualify(options.Schema, $"fn_{resourcesTable}_LineageOnDelete");
         var triggers = SqlOSFgaLineage.TriggerNames(resourcesTable);
+        var grantsTable = options.TableNames.Grants;
+        var grants = Qualify(options.Schema, grantsTable);
+        var onGrant = Qualify(options.Schema, $"fn_{grantsTable}_ResourceSeq");
         var levels = SqlOSFgaLineage.Levels(options);
         var maxLevel = (levels - 1).ToString(CultureInfo.InvariantCulture);
         var malformed = $"RAISE EXCEPTION 'SqlOS FGA: the change would create a cycle, or place a resource deeper than the configured maximum hierarchy depth of {maxLevel}.' USING ERRCODE = '{MalformedErrorCode}';";
@@ -159,25 +290,6 @@ internal sealed partial class PostgreSqlDatabaseProvider
             => $"CASE WHEN {row}.\"ParentId\" IS NULL THEN 0 WHEN {p}.\"Depth\" IS NULL OR {p}.\"Depth\" >= {maxLevel} THEN NULL ELSE {p}.\"Depth\" + 1 END";
 
         var nulls = string.Join(", ", new[] { "\"Depth\" = NULL", "\"Reach\" = NULL" }.Concat(Enumerable.Range(0, levels).Select(l => $"{QuoteIdentifier(SqlOSFgaLineage.AncestorColumn(l))} = NULL")));
-
-        // Copies the lineage of the resources whose ids `source` yields (a relation with an "Id" column) onto
-        // their rows in each scope table.
-        string Propagate(string source)
-        {
-            var sql = new StringBuilder();
-            foreach (var table in scopeTables)
-            {
-                sql.AppendLine(CultureInfo.InvariantCulture, $"""
-                    UPDATE {ScopeTable(table)} t SET {ScopeAssignment(levels, "r", "rt")}
-                    FROM {source} s
-                    INNER JOIN {resources} r ON r."Id" = s."Id"
-                    INNER JOIN {resourceTypes} rt ON rt."Id" = r."ResourceTypeId"
-                    WHERE t.{QuoteIdentifier(table.ResourceIdColumn)} = s."Id";
-                    """);
-            }
-
-            return sql.ToString();
-        }
 
         // The chains of the given rows (a FROM item aliased `c` with an "Id" column) that can have become
         // malformed, walked up to the depth limit: a chain still climbing past it lies in a cycle or too deep. For inserted rows,
@@ -282,22 +394,15 @@ internal sealed partial class PostgreSqlDatabaseProvider
                 UPDATE {resources} r SET {nulls}
                 FROM {affected} a
                 WHERE r."Id" = a."Id" AND a."Wave" IS NULL;
-
-                -- 5. The scope columns of the affected rows' application rows.
-                {Propagate(affected)}
-                -- 6. The grant counts of the principals holding grants on the affected resources (their chains
-                --    changed), and the activity and type of their rows' direct entries.
-                {CountsRefreshForResources(options, affected)}
-                {string.Concat(scopeTables.Select(t => DirectRefresh(options, t, affected) + "\n"))}
                 DROP TABLE {affected};
             END
             $sqlos$;
             """;
 
         // The whole table: the internal nodes (every resource that is some row's parent; few next to the
-        // leaves) get their lineage level by level in a temp table, then the nodes take it from there, the
-        // leaves from their parent node, and the application rows from their resource. The function body is
-        // one transaction: a failed rebuild leaves the previous lineage.
+        // leaves) get their lineage level by level in a temp table, then the nodes take it from there and the
+        // leaves from their parent node. The function body is one transaction: a failed rebuild leaves the
+        // previous lineage.
         var nodes = "pg_temp.\"SqlOSLineageNodes\"";
         var nodeColumns = new[] { "\"Depth\"", "\"Reach\"" }.Concat(Enumerable.Range(0, levels).Select(l => QuoteIdentifier(SqlOSFgaLineage.AncestorColumn(l)))).ToList();
         var rebuildFunction = $"""
@@ -355,11 +460,12 @@ internal sealed partial class PostgreSqlDatabaseProvider
                 WHERE r."ParentId" IS NULL
                   AND NOT EXISTS (SELECT 1 FROM {nodes} n WHERE n."Id" = r."Id");
 
-                -- 3. The scope columns of every application row.
-                {string.Concat(scopeTables.Select(t => ScopeFillUpdate(options, t) + ";\n"))}
-                -- 4. The grant counts and the direct indexes, from the grants and the new lineage.
-                PERFORM {Qualify(options.Schema, "fn_" + SqlOSFgaPageIndex.RebuildRoutine)}();
                 DROP TABLE {nodes};
+
+                -- 3. The grants' copy of their resource's Seq, which the point check seeks.
+                UPDATE {grants} g SET "ResourceSeq" = r."Seq"
+                FROM {resources} r
+                WHERE r."Id" = g."ResourceId" AND g."ResourceSeq" IS DISTINCT FROM r."Seq";
                 UPDATE {Qualify(options.Schema, "SqlOSFgaSchema")} SET "LineageBuilt" = true;
             END
             $sqlos$;
@@ -417,43 +523,13 @@ internal sealed partial class PostgreSqlDatabaseProvider
                     SELECT array_agg("Id") INTO v_next FROM computed;
                     v_wave := v_next;
                 END LOOP;
-
-                {Propagate("new_rows")}
-                -- A parent that had no children before this statement is now a container: the grants on it
-                -- enter the grant counts (a childless resource's grants are served by the direct index alone).
-                {CountsRefreshForResources(options, $"(SELECT DISTINCT n.\"ParentId\" AS \"Id\" FROM new_rows n WHERE n.\"ParentId\" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM {resources} c WHERE c.\"ParentId\" = n.\"ParentId\" AND NOT EXISTS (SELECT 1 FROM new_rows x WHERE x.\"Id\" = c.\"Id\")))")}
                 RETURN NULL;
             END
             $sqlos$;
             """;
 
-        // The parents that gained their first children or lost their last ones in an update: their grants
-        // enter or leave the grant counts. The moved rows come from EXCEPT, never from a join of the transition tables.
-        const string movedIn = "(SELECT \"Id\", \"ParentId\" FROM new_rows EXCEPT SELECT \"Id\", \"ParentId\" FROM old_rows)";
-        const string movedOut = "(SELECT \"Id\", \"ParentId\" FROM old_rows EXCEPT SELECT \"Id\", \"ParentId\" FROM new_rows)";
-        var transitionedParents = $"""
-            (SELECT m."ParentId" AS "Id" FROM {movedIn} m
-             WHERE m."ParentId" IS NOT NULL
-               AND NOT EXISTS (SELECT 1 FROM {resources} c WHERE c."ParentId" = m."ParentId" AND NOT EXISTS (SELECT 1 FROM {movedIn} y WHERE y."Id" = c."Id"))
-             UNION
-             SELECT o."ParentId" FROM {movedOut} o
-             WHERE o."ParentId" IS NOT NULL
-               AND NOT EXISTS (SELECT 1 FROM {resources} c WHERE c."ParentId" = o."ParentId"))
-            """;
-
-        var typeChanges = new StringBuilder();
-        foreach (var table in scopeTables)
-        {
-            typeChanges.AppendLine(CultureInfo.InvariantCulture, $"""
-                UPDATE {ScopeTable(table)} t SET {ScopeAssignment(levels, "r", "rt")}
-                FROM (SELECT "Id", "ResourceTypeId" FROM new_rows EXCEPT SELECT "Id", "ResourceTypeId" FROM old_rows) n
-                INNER JOIN {resources} r ON r."Id" = n."Id"
-                INNER JOIN {resourceTypes} rt ON rt."Id" = r."ResourceTypeId"
-                WHERE t.{QuoteIdentifier(table.ResourceIdColumn)} = n."Id";
-                {DirectRefresh(options, table, "(SELECT n.\"Id\" FROM (SELECT \"Id\", \"ResourceTypeId\" FROM new_rows EXCEPT SELECT \"Id\", \"ResourceTypeId\" FROM old_rows) n)")}
-                """);
-        }
-
+        // A deleted row needs no trigger: a resource with children cannot be deleted, and a leaf is in no
+        // other row's lineage.
         var updateFunction = $"""
             CREATE OR REPLACE FUNCTION {onUpdate}()
             RETURNS trigger
@@ -461,11 +537,10 @@ internal sealed partial class PostgreSqlDatabaseProvider
             AS $sqlos$
             DECLARE
                 v_ids varchar[];
-                v_types boolean;
             BEGIN
                 -- A statement trigger with transition tables cannot name columns, so this fires for every
                 -- update of the table, the lineage's own included (and for statements that touched no row);
-                -- only a changed parent, activity, or type matters.
+                -- only a changed parent or activity matters.
                 -- Changed rows are found with EXCEPT, a hashed set operation: a join of the two transition
                 -- tables has no index or statistics to plan by, and a bulk update would pay for it quadratically.
                 SELECT array_agg("Id") INTO v_ids
@@ -474,48 +549,11 @@ internal sealed partial class PostgreSqlDatabaseProvider
                     EXCEPT
                     SELECT "Id", "ParentId", "IsActive" FROM old_rows
                 ) changed;
-                SELECT EXISTS (
-                    SELECT 1 FROM (
-                        SELECT "Id", "ResourceTypeId" FROM new_rows
-                        EXCEPT
-                        SELECT "Id", "ResourceTypeId" FROM old_rows
-                    ) retyped) INTO v_types;
-                IF v_ids IS NULL AND NOT v_types THEN
+                IF v_ids IS NULL THEN
                     RETURN NULL;
                 END IF;
                 {lockExclusive}
-                IF v_ids IS NOT NULL THEN
-                    PERFORM {refresh}(v_ids, true);
-                    {CountsRefreshForResources(options, transitionedParents)}
-                END IF;
-                IF v_types THEN
-                    {(typeChanges.Length == 0 ? "NULL;" : typeChanges.ToString())}
-                END IF;
-                RETURN NULL;
-            END
-            $sqlos$;
-            """;
-
-        var clears = new StringBuilder();
-        foreach (var table in scopeTables)
-        {
-            clears.AppendLine(CultureInfo.InvariantCulture, $"""
-                UPDATE {ScopeTable(table)} t SET {QuoteIdentifier(SqlOSFgaLineage.ScopeColumn)} = NULL
-                FROM old_rows o
-                WHERE t.{QuoteIdentifier(table.ResourceIdColumn)} = o."Id";
-                """);
-        }
-
-        var deleteFunction = $"""
-            CREATE OR REPLACE FUNCTION {onDelete}()
-            RETURNS trigger
-            LANGUAGE plpgsql
-            AS $sqlos$
-            BEGIN
-                {lockExclusive}
-                {clears}
-                -- A parent left without children is a container no more: the grants on it leave the grant counts.
-                {CountsRefreshForResources(options, $"(SELECT DISTINCT o.\"ParentId\" AS \"Id\" FROM old_rows o WHERE o.\"ParentId\" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM {resources} c WHERE c.\"ParentId\" = o.\"ParentId\"))")}
+                PERFORM {refresh}(v_ids, true);
                 RETURN NULL;
             END
             $sqlos$;
@@ -530,151 +568,29 @@ internal sealed partial class PostgreSqlDatabaseProvider
                 AFTER UPDATE ON {resources}
                 REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows
                 FOR EACH STATEMENT EXECUTE FUNCTION {onUpdate}();
-            CREATE OR REPLACE TRIGGER {QuoteIdentifier(triggers[2])}
-                AFTER DELETE ON {resources}
-                REFERENCING OLD TABLE AS old_rows
-                FOR EACH STATEMENT EXECUTE FUNCTION {onDelete}();
             """;
 
-        // The rows of every application table that have no scope yet (see the SQL Server provider), in batches
-        // of rows so each statement's transition tables stay small. Shared lock, as an insert takes it.
-        var fill = Qualify(options.Schema, "fn_" + SqlOSFgaLineage.ScopeFillRoutineName(resourcesTable));
-        var fillBody = new StringBuilder();
-        foreach (var table in scopeTables)
-        {
-            var target = ScopeTable(table);
-            var resourceIdColumn = QuoteIdentifier(table.ResourceIdColumn);
-            fillBody.AppendLine(CultureInfo.InvariantCulture, $"""
-                LOOP
-                    UPDATE {target} t SET {ScopeAssignment(levels, "r", "rt")}
-                    FROM {resources} r
-                    INNER JOIN {resourceTypes} rt ON rt."Id" = r."ResourceTypeId"
-                    WHERE t.{resourceIdColumn} = r."Id"
-                      AND t.ctid = ANY (ARRAY(
-                          SELECT m.ctid FROM {target} m
-                          INNER JOIN {resources} mr ON mr."Id" = m.{resourceIdColumn}
-                          INNER JOIN {resourceTypes} mrt ON mrt."Id" = mr."ResourceTypeId"
-                          WHERE m.{QuoteIdentifier(SqlOSFgaLineage.ScopeColumn)} IS NULL AND mrt."{SqlOSFgaLineage.SeqColumn}" IS NOT NULL
-                          LIMIT {SqlOSFgaLineage.ScopeFillBatchRows.ToString(CultureInfo.InvariantCulture)}));
-                    GET DIAGNOSTICS v_rows = ROW_COUNT;
-                    EXIT WHEN v_rows < {SqlOSFgaLineage.ScopeFillBatchRows.ToString(CultureInfo.InvariantCulture)};
-                END LOOP;
-                """);
-        }
-
-        var fillFunction = $"""
-            CREATE OR REPLACE FUNCTION {fill}()
-            RETURNS void
-            LANGUAGE plpgsql
-            AS $sqlos$
-            DECLARE
-                v_rows bigint;
-            BEGIN
-                PERFORM pg_advisory_xact_lock_shared({lockKey});
-                {fillBody}
-            END
-            $sqlos$;
-            """;
-
-        var batches = new List<string> { refreshFunction, rebuildFunction, fillFunction, insertFunction, updateFunction, deleteFunction, resourceTriggers };
-        foreach (var table in scopeTables)
-        {
-            batches.Add(ScopeTriggers(options, table, levels));
-        }
-
-        return batches;
-    }
-
-    /// <summary>
-    /// The trigger functions and the three triggers on an application table (see the SQL Server provider). The
-    /// update trigger fires for every update of the table (a statement trigger with transition tables cannot
-    /// name columns) and copies the lineage only onto rows whose resource id changed; the direct index follows
-    /// every row whose resource id or sort columns changed, and every row deleted.
-    /// </summary>
-    private string ScopeTriggers(SqlOSFgaOptions options, SqlOSFgaScopeTable table, int levels)
-    {
-        var resources = Qualify(options.Schema, options.TableNames.Resources);
-        var resourceTypes = Qualify(options.Schema, options.TableNames.ResourceTypes);
-        var onInsert = Qualify(options.Schema, ScopeFunctionName(table, "Insert"));
-        var onUpdate = Qualify(options.Schema, ScopeFunctionName(table, "Update"));
-        var onDelete = Qualify(options.Schema, ScopeFunctionName(table, "Delete"));
-        var triggers = SqlOSFgaLineage.ScopeTriggerNames(table.Table);
-        var resourceId = QuoteIdentifier(table.ResourceIdColumn);
-        var keys = string.Join(" AND ", table.KeyColumns.Select(k => $"t.{QuoteIdentifier(k)} = n.{QuoteIdentifier(k)}"));
-        var keyList = string.Join(", ", table.KeyColumns.Select(QuoteIdentifier));
-        var directList = string.Join(", ", SqlOSFgaPageIndex.DirectColumns(table).Select(c => c.Column).Append(table.ResourceIdColumn).Distinct().Select(QuoteIdentifier));
-        // The rows whose key, sort columns, or resource id changed: a hashed set operation over the transition
-        // tables, computed where it is needed rather than kept in a temp table (this function's own update of
-        // the scope fires it again, and a nested call must not disturb the outer one).
-        var changedKeys = $"(SELECT {directList} FROM new_rows EXCEPT SELECT {directList} FROM old_rows)";
-        var changedRows = $"(SELECT n.* FROM new_rows n WHERE EXISTS (SELECT 1 FROM {changedKeys} c WHERE {string.Join(" AND ", table.KeyColumns.Select(k => $"c.{QuoteIdentifier(k)} = n.{QuoteIdentifier(k)}"))}))";
-        return $"""
-            CREATE OR REPLACE FUNCTION {onInsert}()
+        // A grant carries its resource's Seq (schema v16), which never changes, so only a grant's own write
+        // sets it: before the row is stored, so the grant is written once.
+        var grantFunction = $"""
+            CREATE OR REPLACE FUNCTION {onGrant}()
             RETURNS trigger
             LANGUAGE plpgsql
             AS $sqlos$
             BEGIN
-                PERFORM pg_advisory_xact_lock_shared({SqlOSFgaLineage.LineageLockKey(options).ToString(CultureInfo.InvariantCulture)});
-                {IsolationGuard}
-                UPDATE {ScopeTable(table)} t SET {ScopeAssignment(levels, "r", "rt")}
-                FROM new_rows n
-                LEFT JOIN {resources} r ON r."Id" = n.{resourceId}
-                LEFT JOIN {resourceTypes} rt ON rt."Id" = r."ResourceTypeId"
-                WHERE {keys};
-                {DirectInsertFromRows(options, table, "new_rows")}
-                RETURN NULL;
+                NEW."ResourceSeq" := (SELECT r."Seq" FROM {resources} r WHERE r."Id" = NEW."ResourceId");
+                RETURN NEW;
             END
             $sqlos$;
-            CREATE OR REPLACE FUNCTION {onUpdate}()
-            RETURNS trigger
-            LANGUAGE plpgsql
-            AS $sqlos$
-            BEGIN
-                -- Statement triggers fire for every update of the table, this function's own included and
-                -- statements that touched no row: leave unless some row's resource id, key, or sort column changed.
-                -- The changed rows come from EXCEPT, a hashed set operation, never from a join of the transition tables.
-                IF NOT EXISTS (SELECT 1 FROM {changedKeys} c) THEN
-                    RETURN NULL;
-                END IF;
-
-                PERFORM pg_advisory_xact_lock_shared({SqlOSFgaLineage.LineageLockKey(options).ToString(CultureInfo.InvariantCulture)});
-                {IsolationGuard}
-                UPDATE {ScopeTable(table)} t SET {ScopeAssignment(levels, "r", "rt")}
-                FROM (
-                    SELECT {keyList}, {resourceId} FROM new_rows
-                    EXCEPT
-                    SELECT {keyList}, {resourceId} FROM old_rows
-                ) n
-                LEFT JOIN {resources} r ON r."Id" = n.{resourceId}
-                LEFT JOIN {resourceTypes} rt ON rt."Id" = r."ResourceTypeId"
-                WHERE {keys};
-                {DirectDeleteRows(options, table, changedKeys)}
-                {DirectInsertFromRows(options, table, changedRows)}
-                RETURN NULL;
-            END
-            $sqlos$;
-            CREATE OR REPLACE FUNCTION {onDelete}()
-            RETURNS trigger
-            LANGUAGE plpgsql
-            AS $sqlos$
-            BEGIN
-                {DirectDeleteRows(options, table, "old_rows")}
-                RETURN NULL;
-            END
-            $sqlos$;
-            CREATE OR REPLACE TRIGGER {QuoteIdentifier(triggers[0])}
-                AFTER INSERT ON {ScopeTable(table)}
-                REFERENCING NEW TABLE AS new_rows
-                FOR EACH STATEMENT EXECUTE FUNCTION {onInsert}();
-            CREATE OR REPLACE TRIGGER {QuoteIdentifier(triggers[1])}
-                AFTER UPDATE ON {ScopeTable(table)}
-                REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows
-                FOR EACH STATEMENT EXECUTE FUNCTION {onUpdate}();
-            CREATE OR REPLACE TRIGGER {QuoteIdentifier(triggers[2])}
-                AFTER DELETE ON {ScopeTable(table)}
-                REFERENCING OLD TABLE AS old_rows
-                FOR EACH STATEMENT EXECUTE FUNCTION {onDelete}();
             """;
+
+        var grantTrigger = $"""
+            CREATE OR REPLACE TRIGGER {QuoteIdentifier(SqlOSFgaLineage.GrantTriggerName(grantsTable))}
+                BEFORE INSERT OR UPDATE OF "ResourceId" ON {grants}
+                FOR EACH ROW EXECUTE FUNCTION {onGrant}();
+            """;
+
+        return [refreshFunction, rebuildFunction, insertFunction, updateFunction, resourceTriggers, grantFunction, grantTrigger];
     }
 
     public string BuildLineageNeedsBuildSql(SqlOSFgaOptions options)
@@ -693,89 +609,37 @@ internal sealed partial class PostgreSqlDatabaseProvider
         return $"SELECT {Qualify(options.Schema, "fn_" + SqlOSFgaLineage.RebuildRoutineName(options.TableNames.Resources))}();";
     }
 
-    /// <summary>The scope column of every row of one application table, set from its resource's lineage (the rebuild).</summary>
-    private string ScopeFillUpdate(SqlOSFgaOptions options, SqlOSFgaScopeTable table)
-        => $"""
-            UPDATE {ScopeTable(table)} t SET {ScopeAssignment(SqlOSFgaLineage.Levels(options), "r", "rt")}
-            FROM {Qualify(options.Schema, options.TableNames.Resources)} r
-            INNER JOIN {Qualify(options.Schema, options.TableNames.ResourceTypes)} rt ON rt."Id" = r."ResourceTypeId"
-            WHERE t.{QuoteIdentifier(table.ResourceIdColumn)} = r."Id"
-            """;
-
-    /// <summary>Runs the scope fill: every application row that has no scope gets its resource's.</summary>
-    public string BuildScopeFillSql(SqlOSFgaOptions options)
+    public string BuildSelectRoutinesHashSql(SqlOSFgaOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return $"SELECT {Qualify(options.Schema, "fn_" + SqlOSFgaLineage.ScopeFillRoutineName(options.TableNames.Resources))}();";
-    }
-
-    /// <summary>1 when the application table exists and has its scope column (its migration is applied), else 0.</summary>
-    public string BuildScopeTableReadySql(SqlOSFgaScopeTable table)
-    {
-        ArgumentNullException.ThrowIfNull(table);
-        return $"""
-            SELECT CASE WHEN EXISTS (
-                SELECT 1 FROM information_schema.columns
-                WHERE table_schema = {ScopeSchemaLiteral(table)} AND table_name = '{SqlLiteral(table.Table)}' AND column_name = '{SqlOSFgaLineage.ScopeColumn}')
-            THEN 1 ELSE 0 END AS "Value"
-            """;
-    }
-
-    public string BuildSelectRoutinesHashSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(scopeTables);
         var schema = SqlLiteral(options.Schema);
         var resourcesTable = options.TableNames.Resources;
         string Routine(string name)
             => $"EXISTS (SELECT 1 FROM pg_proc p INNER JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = '{schema}' AND p.proname = '{SqlLiteral(name)}')";
-        string Trigger(string? tableSchema, string table, string name)
-            => $"EXISTS (SELECT 1 FROM pg_trigger t INNER JOIN pg_class c ON c.oid = t.tgrelid INNER JOIN pg_namespace n ON n.oid = c.relnamespace WHERE "
-               + (tableSchema is null ? "" : $"n.nspname = '{SqlLiteral(tableSchema)}' AND ")
-               + $"c.relname = '{SqlLiteral(table)}' AND t.tgname = '{SqlLiteral(name)}' AND NOT t.tgisinternal)";
+        string Trigger(string table, string name)
+            => $"EXISTS (SELECT 1 FROM pg_trigger t INNER JOIN pg_class c ON c.oid = t.tgrelid INNER JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = '{schema}' AND c.relname = '{SqlLiteral(table)}' AND t.tgname = '{SqlLiteral(name)}' AND NOT t.tgisinternal)";
         string Column(string column)
             => $"EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = '{schema}' AND table_name = '{SqlLiteral(resourcesTable)}' AND column_name = '{SqlLiteral(column)}')";
 
+        var indexes = SqlOSFgaLineage.AncestorIndexNames(options);
         var conditions = new List<string>
         {
             Routine("fn_ActiveSubjects"),
             Routine("fn_AccessRoots"),
+            Routine("fn_ListVisible"),
+            Routine("fn_VisibleSet"),
+            Routine("fn_ListFirst"),
             Routine("fn_IsResourceAccessible"),
+            Routine("fn_CheckRow"),
             Routine("fn_" + SqlOSFgaLineage.RefreshRoutineName(resourcesTable)),
             Routine("fn_" + SqlOSFgaLineage.RebuildRoutineName(resourcesTable)),
-            Routine("fn_" + SqlOSFgaLineage.ScopeFillRoutineName(resourcesTable)),
-            Routine("fn_" + SqlOSFgaPageIndex.CountsRebuildRoutine),
-            Routine("fn_" + SqlOSFgaPageIndex.CountsAdjustRoutine),
-            Routine("fn_" + SqlOSFgaPageIndex.CountsRefreshRoutine),
-            Routine("fn_" + SqlOSFgaPageIndex.RebuildRoutine),
             Column(SqlOSFgaLineage.AncestorColumn(SqlOSFgaLineage.MaxLevel(options))),
         };
-        conditions.AddRange(SqlOSFgaLineage.TriggerNames(resourcesTable).Select(t => Trigger(options.Schema, resourcesTable, t)));
-        conditions.AddRange(SqlOSFgaPageIndex.GrantTriggerNames(options.TableNames.Grants).Select(t => Trigger(options.Schema, options.TableNames.Grants, t)));
-        var levels = SqlOSFgaLineage.Levels(options);
-        foreach (var table in scopeTables)
-        {
-            // Every object of the table exists (see the SQL Server provider).
-            var indexes = SqlOSFgaLineage.ScopeIndexNames(table, levels);
-            conditions.Add(Routine(ScopeFunctionName(table, "Insert")));
-            conditions.Add(Routine(ScopeFunctionName(table, "Update")));
-            conditions.Add(Routine(ScopeFunctionName(table, "Delete")));
-            conditions.Add(Routine("fn_" + SqlOSFgaPageIndex.DirectRebuildRoutine(table)));
-            conditions.AddRange(SqlOSFgaLineage.ScopeTriggerNames(table.Table).Select(t => Trigger(table.Schema, table.Table, t)));
-            conditions.Add(
-                $"(SELECT count(*) FROM pg_indexes WHERE schemaname = {ScopeSchemaLiteral(table)} AND tablename = '{SqlLiteral(table.Table)}' AND indexname IN ({NameList(indexes)})) = {indexes.Count.ToString(CultureInfo.InvariantCulture)}");
-            conditions.Add(
-                $"EXISTS (SELECT 1 FROM pg_statistic_ext s INNER JOIN pg_namespace n ON n.oid = s.stxnamespace WHERE n.nspname = {ScopeSchemaLiteral(table)} AND s.stxname = '{SqlLiteral(SqlOSFgaLineage.ScopeTypeStatisticsName(table.Table))}')");
-            var directIndexes = SqlOSFgaPageIndex.DirectIndexNames(table).Append(SqlOSFgaPageIndex.DirectIndexName(table, "Key")).Append(SqlOSFgaPageIndex.DirectIndexName(table, "Row")).ToList();
-            conditions.Add(
-                $"(SELECT count(*) FROM pg_indexes WHERE schemaname = '{schema}' AND tablename = '{SqlLiteral(SqlOSFgaPageIndex.DirectTable(table))}' AND indexname IN ({NameList(directIndexes)})) = {directIndexes.Count.ToString(CultureInfo.InvariantCulture)}");
-        }
-
-        // And nothing stale anywhere.
-        foreach (var stale in new[] { StaleTriggers(options, scopeTables), StaleFunctions(options, scopeTables), StaleIndexes(options, scopeTables, levels), StaleStatistics(options, scopeTables), StaleDirectTables(options, scopeTables) })
-        {
-            conditions.Add($"NOT EXISTS ({stale})");
-        }
+        conditions.AddRange(SqlOSFgaLineage.TriggerNames(resourcesTable).Select(t => Trigger(resourcesTable, t)));
+        conditions.Add(Routine($"fn_{options.TableNames.Grants}_ResourceSeq"));
+        conditions.Add(Trigger(options.TableNames.Grants, SqlOSFgaLineage.GrantTriggerName(options.TableNames.Grants)));
+        conditions.Add(
+            $"(SELECT count(*) FROM pg_indexes WHERE schemaname = '{schema}' AND tablename = '{SqlLiteral(resourcesTable)}' AND indexname IN ({string.Join(", ", indexes.Select(n => $"'{SqlLiteral(n)}'"))})) = {indexes.Count.ToString(CultureInfo.InvariantCulture)}");
 
         return $"""
             SELECT "RoutinesHash"
@@ -791,199 +655,6 @@ internal sealed partial class PostgreSqlDatabaseProvider
         return $"UPDATE {Qualify(options.Schema, "SqlOSFgaSchema")} SET \"RoutinesHash\" = @RoutinesHash";
     }
 
-    private static string ScopeFunctionName(SqlOSFgaScopeTable table, string @event)
-        => $"fn_{SqlOSFgaLineage.ScopePrefix}Scope_{(table.Schema is null ? "" : table.Schema + "_")}{table.Table}_{@event}";
-
-    private string ScopeTable(SqlOSFgaScopeTable table)
-        => table.Schema is null ? QuoteIdentifier(table.Table) : Qualify(table.Schema, table.Table);
-
-    /// <summary>
-    /// The scope value of a row from its resource row <paramref name="r"/> (which may be NULL: the row then has
-    /// no scope and nobody sees it) and the resource's type row <paramref name="rt"/>: the depth byte, the four
-    /// type bytes, then eight bytes per level holding the ancestor where access flows down to the row from that
-    /// level, zero elsewhere. <c>int4send</c> and <c>int8send</c> are big-endian, the same bytes SQL Server
-    /// writes and <c>SqlOSFgaScope.Bytes</c> encodes a parameter as.
-    /// </summary>
-    private static string ScopeValue(int levels, string r, string rt)
-    {
-        var parts = new List<string>
-        {
-            $"substring(int2send(COALESCE({r}.\"{SqlOSFgaLineage.DepthColumn}\", 0)::smallint) from 2 for 1)",
-            $"int4send({rt}.\"{SqlOSFgaLineage.SeqColumn}\")",
-        };
-        for (var level = 0; level < levels; level++)
-        {
-            parts.Add($"int8send(COALESCE(CASE WHEN {r}.\"{SqlOSFgaLineage.ReachColumn}\" <= {level} THEN {r}.\"{SqlOSFgaLineage.AncestorColumn(level)}\" END, 0))");
-        }
-
-        return $"CASE WHEN {r}.\"Id\" IS NULL THEN NULL ELSE {string.Join(" || ", parts)} END";
-    }
-
-    private string ScopeAssignment(int levels, string r, string rt)
-        => $"{QuoteIdentifier(SqlOSFgaLineage.ScopeColumn)} = {ScopeValue(levels, r, rt)}";
-
-    private static string ScopeSchemaLiteral(SqlOSFgaScopeTable table)
-        => table.Schema is null ? "current_schema()" : $"'{SqlLiteral(table.Schema)}'";
-
-    /// <summary>
-    /// The indexes of one application table, per level: an expression index on the level's eight bytes of the
-    /// scope column followed by the primary key, and one more per order the application declared, each
-    /// filtered on the depth byte to the rows at or below the level; and a partial index on the rows that have
-    /// no scope yet, which keeps the fill an index scan. Also extended statistics on the type bytes, analyzed at
-    /// once: without them the planner guesses the type test is selective and sorts the caller's whole scope
-    /// instead of walking the level's index. Idempotent. Objects no longer wanted are dropped by
-    /// <see cref="BuildScopeCleanupSql"/>.
-    /// </summary>
-    public IReadOnlyList<string> BuildEnsureScopeIndexesSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(scopeTables);
-        var levels = SqlOSFgaLineage.Levels(options);
-        var batches = new List<string>();
-        foreach (var table in scopeTables)
-        {
-            var target = ScopeTable(table);
-            var scope = QuoteIdentifier(SqlOSFgaLineage.ScopeColumn);
-            var key = string.Join(", ", table.KeyColumns.Select(QuoteIdentifier));
-            var sql = new StringBuilder();
-            sql.AppendLine(CultureInfo.InvariantCulture, $"""
-                CREATE INDEX IF NOT EXISTS {QuoteIdentifier(SqlOSFgaLineage.ScopeMissingIndexName(table.Table))} ON {target} ({QuoteIdentifier(table.ResourceIdColumn)}) WHERE {scope} IS NULL;
-                """);
-            for (var level = 0; level < levels; level++)
-            {
-                var ancestor = $"SUBSTRING({scope}, {SqlOSFgaLineage.ScopeAncestorOffset(level)}, 8)";
-                var filter = $"{scope} >= '\\x{level:x2}'::bytea";
-                foreach (var (name, columns) in new[] { (SqlOSFgaLineage.ScopeIndexName(table.Table, level, null), key) }
-                    .Concat(table.Orders.Select(o => (SqlOSFgaLineage.ScopeIndexName(table.Table, level, o.Suffix), string.Join(", ", o.Columns.Select(QuoteIdentifier))))))
-                {
-                    sql.AppendLine(CultureInfo.InvariantCulture, $"""
-                        CREATE INDEX IF NOT EXISTS {QuoteIdentifier(name)} ON {target} (({ancestor}), {columns}) WHERE {filter};
-                        """);
-                }
-            }
-
-            sql.AppendLine(CultureInfo.InvariantCulture, $"""
-                CREATE STATISTICS IF NOT EXISTS {QuoteIdentifier(SqlOSFgaLineage.ScopeTypeStatisticsName(table.Table))} ON ((SUBSTRING({scope}, {SqlOSFgaLineage.ScopeTypeOffset}, 4))) FROM {target};
-                ANALYZE {target};
-                """);
-            batches.Add(sql.ToString());
-        }
-
-        return batches;
-    }
-
-    // SqlOS's objects on application tables carry names no application object has (see the SQL Server
-    // provider); on PostgreSQL also the trigger functions fn_SqlOSFgaScope_* in SqlOS's schema. Any of them not
-    // belonging to a table SqlOS maintains now, under its current name, is stale.
-
-    private static string NameList(IEnumerable<string> names) => string.Join(", ", names.Select(n => $"'{SqlLiteral(n)}'"));
-
-    private static string Wanted(IReadOnlyList<SqlOSFgaScopeTable> scopeTables, Func<SqlOSFgaScopeTable, string> condition)
-        => scopeTables.Count == 0 ? "FALSE" : string.Join(" OR ", scopeTables.Select(t => $"({condition(t)})"));
-
-    /// <summary>
-    /// The table is one of this installation's: one it recorded (see <c>SqlOSFgaScopeTables</c>), or one the
-    /// model protects now (a renamed table carries objects named for its old name). Another SqlOS
-    /// installation's tables are neither, so its objects are never taken for stale.
-    /// </summary>
-    private static string Owned(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables, string schemaColumn, string tableColumn)
-        => $"({schemaColumn}::text, {tableColumn}::text) IN (SELECT o.\"TableSchema\"::text, o.\"TableName\"::text FROM \"{options.Schema.Replace("\"", "\"\"", StringComparison.Ordinal)}\".\"SqlOSFgaScopeTables\" o"
-           + string.Concat(scopeTables.Select(t => $" UNION ALL SELECT {ScopeSchemaLiteral(t)}::text, '{SqlLiteral(t.Table)}'::text"))
-           + ")";
-
-    private static string StaleTriggers(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
-        => $"""
-            SELECT format('DROP TRIGGER %I ON %I.%I', t.tgname, n.nspname, c.relname) AS statement
-            FROM pg_trigger t
-            INNER JOIN pg_class c ON c.oid = t.tgrelid
-            INNER JOIN pg_namespace n ON n.oid = c.relnamespace
-            WHERE NOT t.tgisinternal AND t.tgname LIKE 'TR\_%\_{SqlOSFgaLineage.ScopePrefix}Scope\_%'
-              AND {Owned(options, scopeTables, "n.nspname", "c.relname")}
-              AND NOT ({Wanted(scopeTables, tb => $"n.nspname = {ScopeSchemaLiteral(tb)} AND c.relname = '{SqlLiteral(tb.Table)}' AND t.tgname IN ({NameList(SqlOSFgaLineage.ScopeTriggerNames(tb.Table))})")})
-            """;
-
-    private static string StaleFunctions(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
-        => $"""
-            SELECT format('DROP FUNCTION %I.%I()', n.nspname, p.proname) AS statement
-            FROM pg_proc p
-            INNER JOIN pg_namespace n ON n.oid = p.pronamespace
-            WHERE n.nspname = '{SqlLiteral(options.Schema)}'
-              AND (p.proname LIKE 'fn\_{SqlOSFgaLineage.ScopePrefix}Scope\_%' OR p.proname LIKE 'fn\_{SqlOSFgaPageIndex.DirectPrefix.Replace("_", "\\_", StringComparison.Ordinal)}%')
-              AND p.proname NOT IN ({(scopeTables.Count == 0 ? "''" : NameList(scopeTables.SelectMany(t => new[] { ScopeFunctionName(t, "Insert"), ScopeFunctionName(t, "Update"), ScopeFunctionName(t, "Delete"), "fn_" + SqlOSFgaPageIndex.DirectRebuildRoutine(t) })))})
-            """;
-
-    /// <summary>A direct index of a table SqlOS no longer maintains (renamed, or no longer protected).</summary>
-    private static string StaleDirectTables(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
-        => $"""
-            SELECT format('DROP TABLE %I.%I', n.nspname, c.relname) AS statement
-            FROM pg_class c
-            INNER JOIN pg_namespace n ON n.oid = c.relnamespace
-            WHERE n.nspname = '{SqlLiteral(options.Schema)}' AND c.relkind = 'r' AND c.relname LIKE '{SqlOSFgaPageIndex.DirectPrefix.Replace("_", "\\_", StringComparison.Ordinal)}%'
-              AND c.relname NOT IN ({(scopeTables.Count == 0 ? "''" : NameList(scopeTables.Select(SqlOSFgaPageIndex.DirectTable)))})
-            """;
-
-    private static string StaleIndexes(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables, int levels)
-        => $"""
-            SELECT format('DROP INDEX %I.%I', i.schemaname, i.indexname) AS statement
-            FROM pg_indexes i
-            WHERE i.indexname ~ '^IX_.*_{SqlOSFgaLineage.ScopeColumn}([0-9]|Missing)'
-              AND {Owned(options, scopeTables, "i.schemaname", "i.tablename")}
-              AND NOT ({Wanted(scopeTables, t => $"i.schemaname = {ScopeSchemaLiteral(t)} AND i.tablename = '{SqlLiteral(t.Table)}' AND i.indexname IN ({NameList(SqlOSFgaLineage.ScopeIndexNames(t, levels))})")})
-            """;
-
-    private static string StaleStatistics(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
-        => $"""
-            SELECT format('DROP STATISTICS %I.%I', n.nspname, s.stxname) AS statement
-            FROM pg_statistic_ext s
-            INNER JOIN pg_namespace n ON n.oid = s.stxnamespace
-            INNER JOIN pg_class c ON c.oid = s.stxrelid
-            INNER JOIN pg_namespace tn ON tn.oid = c.relnamespace
-            WHERE s.stxname LIKE 'ST\_%\_{SqlOSFgaLineage.ScopeTypeColumn}'
-              AND {Owned(options, scopeTables, "tn.nspname", "c.relname")}
-              AND NOT ({Wanted(scopeTables, t => $"n.nspname = {ScopeSchemaLiteral(t)} AND c.relname = '{SqlLiteral(t.Table)}' AND s.stxname = '{SqlLiteral(SqlOSFgaLineage.ScopeTypeStatisticsName(t.Table))}'")})
-            """;
-
-    /// <summary>
-    /// Drops SqlOS's stale objects from this installation's tables (see <see cref="Owned"/>): triggers, their
-    /// functions, indexes, statistics. Then records the tables the model protects now as this installation's.
-    /// Idempotent.
-    /// </summary>
-    public string BuildScopeCleanupSql(SqlOSFgaOptions options, IReadOnlyList<SqlOSFgaScopeTable> scopeTables)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(scopeTables);
-        var levels = SqlOSFgaLineage.Levels(options);
-        var loops = new StringBuilder();
-        foreach (var stale in new[] { StaleTriggers(options, scopeTables), StaleFunctions(options, scopeTables), StaleIndexes(options, scopeTables, levels), StaleStatistics(options, scopeTables), StaleDirectTables(options, scopeTables) })
-        {
-            loops.AppendLine(CultureInfo.InvariantCulture, $"""
-                FOR stale IN {stale}
-                LOOP
-                    EXECUTE stale.statement;
-                END LOOP;
-                """);
-        }
-
-        var registry = Qualify(options.Schema, "SqlOSFgaScopeTables");
-        loops.AppendLine(CultureInfo.InvariantCulture, $"DELETE FROM {registry};");
-        if (scopeTables.Count > 0)
-        {
-            loops.AppendLine($"INSERT INTO {registry} (\"TableSchema\", \"TableName\") VALUES "
-                + string.Join(", ", scopeTables.Select(t => $"({ScopeSchemaLiteral(t)}, '{SqlLiteral(t.Table)}')"))
-                + ";");
-        }
-
-        return $"""
-            DO $sqlos$
-            DECLARE
-                stale record;
-            BEGIN
-                {loops}
-            END
-            $sqlos$;
-            """;
-    }
-
     /// <summary>
     /// A transaction in REPEATABLE READ keeps reading the snapshot it started with even after waiting for the
     /// lineage lock, so it could compute from state another transaction has since changed. READ COMMITTED (the
@@ -992,7 +663,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
     /// </summary>
     private const string IsolationGuard = """
         IF current_setting('transaction_isolation') = 'repeatable read' THEN
-            RAISE EXCEPTION 'SqlOS FGA: change resources and protected rows in a READ COMMITTED or SERIALIZABLE transaction, not REPEATABLE READ: a repeatable read can miss a concurrent change to the tree.' USING ERRCODE = 'SQ014';
+            RAISE EXCEPTION 'SqlOS FGA: change resources in a READ COMMITTED or SERIALIZABLE transaction, not REPEATABLE READ: a repeatable read can miss a concurrent change to the tree.' USING ERRCODE = 'SQ014';
         END IF;
         """;
 

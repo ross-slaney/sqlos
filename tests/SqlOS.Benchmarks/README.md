@@ -6,47 +6,36 @@ catalog grows from 1M to 50M products in CI, and fails CI when that behavior reg
 It is the maintained successor to the harness behind the paper's Section 7 (kept in `paper/benchmark`),
 which ran a hand-copied version of the schema and function at 1.2M–1.5M resources on SQL Server only.
 
-Every page is measured two ways, both from `BuildFilterAsync`'s filter composed into the query an
-application writes (`Where(filter)`, the cursor, the order, `Take(k + 1)`) on the context SqlOS registers
-(`UseSqlOSFga`, what `AddSqlOS` applies). A list page (`list.*`) is the page written as a projection ordered
-after `Select`, which is not a page SqlOS walks: the optimizer plans it as one statement over the predicate,
-the same statement every query that is not a page gets (a count, a join). SqlOS reads the caller's access
-roots when that statement runs and writes them into it; the row's own scope column holds its resource's
-ancestor at every level access flows down from, so a single-grant caller's page is one seek of an index that
-starts with that level's part of the column and continues with the order the page asks for. The same page
-as written (`page.*`) is walked by SqlOS: the library owns the access path (the adaptive walk over the
-per-subject grant counts, the same per-level indexes, and the direct index of rows granted on their own
-resource), reads no root up front, and the work is about a page's worth for any caller, dense or sparse,
-one grant or a hundred thousand. Point checks measure `fn_IsResourceAccessible` and `Allows`
+Every page (`list.*`) is the LINQ query an application writes (`Where(filter)`, the cursor, the order,
+`Take(k + 1)`) with the filter `BuildFilterAsync` returns. `BuildFilterAsync` first asks the database
+(`fn_ListFirst`) whether the caller sees fewer rows than the table's cap, 8·√rows; below it the filter lists
+the caller's rows first (`fn_VisibleSet`), at or above it the query reads the table in order and checks each
+row with the point check (`fn_CheckRow`, which is `fn_IsResourceAccessible`). The summary shows which filter each caller got and the
+time `BuildFilterAsync` took. Point checks measure `fn_IsResourceAccessible` and `Allows`
 (`CheckAccessAsync`), which applications call.
 
 ## What is measured
 
-- **The shipped artifacts.** The FGA schema scripts, their indexes, the lineage columns and their triggers,
-  the scope column with its per-level indexes and triggers, `fn_ActiveSubjects`, `fn_AccessRoots`,
-  `fn_IsResourceAccessible`, and the core seed are created by SqlOS's own initializers
-  (`SqlOSFgaSchemaInitializer`, `SqlOSFgaFunctionInitializer`, `SqlOSFgaSeedService`) from an application
-  context. A change to any of them is what gets measured.
+- **The shipped artifacts.** The FGA schema scripts, their indexes, the lineage columns with their per-level
+  indexes and triggers, `fn_ActiveSubjects`, `fn_AccessRoots`, `fn_ListVisible`, `fn_VisibleSet`,
+  `fn_ListFirst`, `fn_IsResourceAccessible`, `fn_CheckRow`, and
+  the core seed are created by SqlOS's own initializers (`SqlOSFgaSchemaInitializer`,
+  `SqlOSFgaFunctionInitializer`, `SqlOSFgaSeedService`) from an application context. A change to any of
+  them is what gets measured.
 - **The application's queries.** Every page is `BuildFilterAsync<Product>` composed into the query an
   application writes, through EF Core, so the timing includes the SQL EF generates for callers. Three
-  timings per page: `BuildFilterAsync` (`prepare`: the caller's principals and the permission; it reads no
-  grant, and the harness fails the run if it did), the query alone (what the gates hold: for `list.*` the
-  planned statement with the roots it reads when it runs, for `page.*` the walk's round trips and loading
-  the page's rows), and the whole request (`request`, both). What each path transferred before its rows is
-  reported too: the access roots a planned statement read (`roots`), the walk's rounds, statements, index
-  rows fetched (each once; the rows held between rounds are counted as `retained`) and streams. Warm cache;
-  median and p95 over up to 25 runs. The harness fails a `page.*`
-  scenario that ran as a plain query or read a root, and a `list.*` one that was walked.
+  timings per page: `BuildFilterAsync` (`prepare`: the caller's principals and the permission), the query
+  alone (what the gates hold), and the whole request (`request`, both). Warm cache; median and p95 over up
+  to 25 runs.
 - **Every answer is checked against ground truth.** The exact page (k + 1 rows after the cursor, or the first
   k + 1 rows by price) and every allow or deny are recomputed from the dataset generator, so a fast wrong
   answer fails the run.
-- **The actual plan is captured** for each filter page (`EXPLAIN (ANALYZE, BUFFERS)` or `SET STATISTICS
-  XML`). From it the report takes product rows read, server execution time, and server planning time. The
-  plans are uploaded with the results. A walked page is several statements, so it reports the executor's own
-  counters instead: round trips, statements, index rows fetched, streams opened (one seek each).
-- **The lineage is verified.** At the first scale, the lineage and scope values the loader generated are
-  compared (counts and order-independent hashes over every column) with the same after the maintenance pass
-  and with what SqlOS rebuilds from the resource tree alone with its own procedure.
+- **The actual plan is captured** for each page (`EXPLAIN (ANALYZE, BUFFERS)` or `SET STATISTICS XML`).
+  From it the report takes product rows read, server execution time, and server planning time. The plans
+  are uploaded with the results.
+- **The lineage is verified.** At the first scale, the lineage the loader generated is compared (counts and
+  order-independent hashes over every column) with the same after the maintenance pass and with what SqlOS
+  rebuilds from the resource tree alone with its own procedure.
 - **Every query has a budget** (`--scenario-budget`, 600 s by default). A scenario whose first execution
   exceeds it is reported as `> 600 s‡` and counted at the budget, a lower bound, in every ratio, so a
   pathological page bounds the run instead of ending it.
@@ -65,15 +54,15 @@ A retail company under the SqlOS root: twelve chains, about 13,800 stores and 74
   store, which put the store manager's rows at the front of the table and hid the cost of sparse access.)
 - **Every product is a resource**, as with `ISqlOSResourceEntity`. `Products` carries the indexes such a
   table has: the unique `ResourceId`, the `StoreId` foreign key, and one declared order besides the key,
-  `Price`. SqlOS mirrors the key and the price index once per level of the scope column.
+  `Price`.
 - **Eight people, M = 3 each** (the user and two groups): a company admin granted through a group on the
   root, a chain manager, a region manager, a manager of the deep chain, and the manager of a median-sized
   store. One person holds 100 store grants spread across every chain (a hundred roots). Two more people hold
   10,000 and 100,000 grants on single products.
 
 The data is a pure function of the seed, so it grows in place (1M → 10M → 50M) and any page can be verified.
-The loaders write sequence numbers, lineage, and scope values themselves; the first scale checks them
-against SqlOS's rebuild.
+The loaders write sequence numbers and lineage themselves; the first scale checks them against SqlOS's
+rebuild.
 
 ## Scenarios
 
@@ -84,16 +73,18 @@ against SqlOS's rebuild.
 | `list.admin.by-price`, `list.region.by-price`, `list.store.by-price` | Pages in an order the application declared an index for, dense to sparse |
 | `list.chain.first-page`, `list.region.first-page` | Narrower grants (σ = 7%, 1%) |
 | `list.deep-chain.first-page` | The same at D = 10 |
-| `list.store.first-page`, `list.store.mid-cursor` | Sparse access (σ ≈ 0.0065%): one seek, the same as a dense page, from the start and from the middle of the table |
+| `list.store.first-page`, `list.store.mid-cursor` | Sparse access (σ ≈ 0.0065%), from the start and from the middle of the table |
 | `list.store.by-store` | The same person listing their store with `WHERE StoreId = …`: the application narrowed the page itself |
 | `list.stores100.first-page`, `list.stores100.by-price` | A hundred roots: one person granted 100 stores across every chain, in key order and by price |
-| `list.grants10k.first-page`, `list.grants100k.first-page` | Thousands of roots: the same predicate, with the roots at the product level sent as one list parameter. Callers with tens of thousands of single-resource grants are outside the filter's intended shape (access flows down a hierarchy); these filter pages are measured and held to their own limits, not expected to be flat |
-| `page.*` | Every `list.*` page above, the same query walked by SqlOS (`UseSqlOSFga`): the same person, filter, cursor, order, and page size. Held to the scale gate like any other page, the many-grants people included: the walk reads their rows from the direct index |
+| `list.grants10k.first-page`, `list.grants100k.first-page` | Thousands of roots: one person with 10,000 and 100,000 grants on single products. Callers with tens of thousands of single-resource grants are outside the filter's intended shape (access flows down a hierarchy); these pages are measured and held to their own limits, not expected to be flat |
 | `point.function.*`, `point.api.*` | `fn_IsResourceAccessible` for one product at depth 4 and 9, a denial, the many-grants people, and `Allows` |
-| `density.*` | At the first scale only: the region page (both ways) and the denied check re-run while 100 other people hold grants on the root. Only the caller's own grants should matter. Reported, not gated |
+| `density.*` | At the first scale only: the region page and the denied check re-run while 100 other people hold grants on the root. Only the caller's own grants should matter. Reported, not gated |
 | maintenance | At the first scale only: 2,000 single-row inserts with the lineage triggers on and off, one 2,000-row insert, one 2,000-row delete, and reparent, deactivate and reactivate of a region subtree; then a rebuild from scratch, compared with the maintained lineage |
 
 ## The run that replaced the tree walk
+
+History: this section records the 8.0 scope-column design (a column on every protected table), which 9.0
+removed; nothing below describes the current filters. Their numbers are in the latest run's summary.
 
 Run 36964060038 (2026-10-02, hosted `ubuntu-latest`, 4 vCPU, 17 GB, 8 GB to the engine), 1M → 10M → 50M on
 both engines, measured the scope column against the function it replaced, which walked up the tree from
@@ -195,24 +186,20 @@ the application's own `StoreId` index; every other page reads the page's rows an
 ## Gates (`gates.json`)
 
 - **correctness**: every scenario returned exactly the authorized answer.
-- **lineage**: the loaded lineage and scope values, the same after the maintenance pass, and SqlOS's
-  rebuild are identical (counts and hashes).
-- **scale**: per-page cost must follow the work the paper predicts, not N. The median at the largest scale
-  may be at most `maxRatio` (2.0) times the median at the smallest, times the growth of the rows the page has
-  to touch, plus `slackMilliseconds`. A page through the scope column touches k rows at any N (one index
-  seek), so it has no growth term; a page filtered to a store touches that store's σN rows through its own
-  index. The many-grants pages are exempt: their cost follows the caller's grants, not N.
+- **lineage**: the loaded lineage, the same after the maintenance pass, and SqlOS's rebuild are identical
+  (counts and hashes).
+- **scale**: per-page cost must follow the work the filter it got predicts, not N. The median at the largest
+  scale may be at most `maxRatio` (2.0) times the median at the smallest, times the growth of the rows the page
+  has to touch, plus `slackMilliseconds`. A caller listed first touches their own σN rows; a caller whose rows
+  are checked one by one touches about k/σ rows, the same at any N. A caller who crosses the cap between the
+  two scales is not compared (the two pages read rows differently). The many-grants pages are exempt: their
+  cost follows the caller's grants, not N.
 - **regression**: every scenario's median against the constant set for it and the engine in
   `regressionMilliseconds`: what the scenario costs today, with headroom for runner noise (several times the
   values CI reports). A change that makes any page or point check slower than its limit fails the run. Raise
-  a limit only with an explanation. The gated timing is the query alone; for a `list.*` page that includes
-  reading the caller's access roots, which the planned statement does when it runs (a `page.*` page reads
-  none): the many-grants filter pages carry 10,000 and 100,000 roots per execution, which is most of their
-  time (on PostgreSQL at 1M, locally: 59 of 71 ms and 522 of 638 ms), and their limits say so. The SQL Server limits of the many-grants filter pages
-  (`list.grants10k.first-page`, `list.grants100k.first-page`) cover the full tier's runner, where those two
-  statements take 8.6 s and 31.6 s at every scale (0.5 s and 1 s on the CI tier's runner): they are the cost
-  of the optimizer planning a predicate with ten thousand roots in it, which is what the walked pages of the
-  same callers (`page.grants*`, about 25 ms) exist to avoid.
+  a limit only with an explanation. The current limits came with the lineage filters (#509): four times the
+  slowest value CI measured at 1M or 10M, rounded up, and at least 25 ms. For a page the gated timing is the whole request: `BuildFilterAsync`
+  (with `fn_ListFirst`'s count) and the query.
 
 ## Run it
 
@@ -264,18 +251,17 @@ Filled in from the CI runs of this branch; see the run summaries until then.
 Each engine uses its bulk path, into the tables SqlOS created:
 
 - **SQL Server**: ordered `SqlBulkCopy` with a table lock into the clustered primary keys (minimally logged
-  under simple recovery). Bulk copy fires no triggers, so the lineage and scope values travel with the rows.
+  under simple recovery). Bulk copy fires no triggers, so the lineage travels with the rows.
 - **PostgreSQL**: parallel `COPY … (FORMAT BINARY)` with foreign-key and lineage triggers skipped for the
   loading sessions (`session_replication_role = replica`).
 
-Secondary indexes, the per-level ancestor and scope indexes among them, are set aside during a load and
-rebuilt from their own definitions, so no DDL is copied into the harness. Foreign keys are revalidated (SQL
-Server), statistics are refreshed, PostgreSQL tables are vacuumed so the visibility map matches a table
-autovacuum maintains, and the resource sequence is moved past the loaded numbers so the maintenance pass
-inserts like an application would. The grant counts and the direct indexes behind the walk are then rebuilt
-with SqlOS's own routine, as SqlOS does at every start: the load went past the triggers that keep them, and
-a store becomes a container (its grants enter the counts) only once it has products. The rebuild's time is
-reported with the load.
+Secondary indexes, the per-level ancestor indexes among them, are set aside during a load and rebuilt from
+their own definitions, so no DDL is copied into the harness. Foreign keys are revalidated (SQL Server),
+statistics are refreshed, PostgreSQL tables are vacuumed so the visibility map matches a table autovacuum
+maintains, and the resource sequence is moved past the loaded numbers so the maintenance pass inserts like
+an application would. The people and their grants are made through SqlOS's API after the load; the grant and
+subject tables' statistics are then refreshed too, as automatic statistics would, so no page is planned
+before the engine has seen the grants.
 
 The PostgreSQL container turns off durability settings that only affect writes (`fsync`, WAL level,
 synchronous commit). Planner settings are the usual SSD values.

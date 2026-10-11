@@ -12,10 +12,19 @@ using SqlOS.IntegrationTests.Infrastructure;
 
 namespace SqlOS.IntegrationTests.Fga;
 
+/// <summary>
+/// The point check and the list filter. Every test here runs three times: with the filter's shape decided by
+/// the database (this class: the test data is small, so a caller is listed first unless they see the cap's
+/// worth of rows), and with each shape forced (<see cref="SqlOSFgaAuthServiceListFirstIntegrationTests"/>,
+/// <see cref="SqlOSFgaAuthServiceRowCheckIntegrationTests"/>), so both shapes meet every case.
+/// </summary>
 [TestClass]
 public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
 {
     private SqlOSFgaAuthService _authService = null!;
+
+    /// <summary>The filter's shape: decided by fn_ListFirst (null), listed first (true), or each row checked (false).</summary>
+    protected virtual bool? ListFirst => null;
 
     [TestInitialize]
     public void TestInit()
@@ -24,27 +33,30 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
         _authService = new SqlOSFgaAuthService(
             Context,
             Options.Create(new SqlOSFgaOptions()),
-            loggerFactory.CreateLogger<SqlOSFgaAuthService>());
+            loggerFactory.CreateLogger<SqlOSFgaAuthService>())
+        {
+            ListFirstOverride = ListFirst,
+        };
     }
 
     [TestMethod]
-    public async Task BuildFilterAsync_ComposesIntoASingleSqlQuery_OverTheScopeColumn()
+    public async Task BuildFilterAsync_ComposesIntoOneQuery_AsOneExists()
     {
         var filter = await _authService.BuildFilterAsync<LifecycleProtectedEntity>(
             FgaTestDataSeeder.AgencyAdminSubjectId,
             "TEST_VIEW");
         var sql = Context.Set<LifecycleProtectedEntity>().Where(filter).ToQueryString();
 
-        // The predicate reads the row's own scope column at the agency admin's level (1), with the root as a
-        // parameter, joins nothing, and checks the caller's liveness once per query. On SQL Server the level is
-        // The same SQL on both engines: the level's eight bytes compared with a parameter, under the depth-byte
-        // filter of the level's index.
-        StringAssert.Contains(sql, $"{SqlOSFgaLineage.ScopeAncestorOffset(1)}, 8)");
-        StringAssert.Contains(sql, "SUBSTRING(");
-        StringAssert.Contains(sql, "FgaScope");
-        StringAssert.Contains(sql, "fn_ActiveSubjects");
-        Assert.IsFalse(sql.Contains("fn_IsResourceAccessible", StringComparison.OrdinalIgnoreCase), sql);
-        Assert.IsFalse(sql.Contains("SqlOSFgaResources", StringComparison.OrdinalIgnoreCase), sql);
+        // One statement: the application's query with one EXISTS. The agency admin sees a handful of rows, so the
+        // database lists them first (fn_VisibleSet); forced the other way, each row is checked (fn_CheckRow,
+        // the point check). Either way the grants and roots are read inside the function when the statement
+        // runs; the parameters are the caller's subjects and the permission.
+        var expected = ListFirst == false ? "fn_CheckRow" : "fn_VisibleSet";
+        var other = ListFirst == false ? "fn_VisibleSet" : "fn_CheckRow";
+        StringAssert.Contains(sql, expected);
+        StringAssert.Contains(sql, "EXISTS");
+        Assert.IsFalse(sql.Contains(other, StringComparison.OrdinalIgnoreCase), sql);
+        Assert.IsFalse(sql.Contains("SqlOSFgaGrants", StringComparison.OrdinalIgnoreCase), sql);
         Assert.AreEqual(1, Regex.Matches(sql, "LifecycleProtectedEntities", RegexOptions.IgnoreCase).Count, $"One query over the table. SQL:{Environment.NewLine}{sql}");
     }
 
@@ -92,10 +104,11 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
     }
 
     [TestMethod]
-    public async Task ACallerWithThousandsOfGrants_IsFilteredByTheSameScopeTest()
+    public async Task ACallerWithThousandsOfGrants_IsFilteredExactly_AndHasEachRowChecked()
     {
-        // 2,500 grants on single projects: the predicate tests each row's scope against all of them, the same
-        // test as for one grant, and returns exactly the granted rows.
+        // 2,500 grants on single projects: more visible resources than the cap of a small table (1,000), so the
+        // database checks each row rather than listing them; the roots are counted inside the database, never
+        // passed to the statement. Either shape returns exactly the granted rows.
         var subjectService = CreateSubjectService();
         var user = await subjectService.CreateUserAsync("Many Grants User", $"many-grants-{Guid.NewGuid():N}@example.com");
         var suffix = Guid.NewGuid().ToString("N");
@@ -120,13 +133,22 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
         await Context.SaveChangesAsync();
         Context.ChangeTracker.Clear();
 
-        var filter = await _authService.BuildFilterAsync<LifecycleProtectedEntity>(user.SubjectId, "TEST_VIEW");
-        var query = Context.Set<LifecycleProtectedEntity>().AsNoTracking().Where(e => e.Id.EndsWith(suffix)).Where(filter);
-        var sql = query.ToQueryString();
-        StringAssert.Contains(sql, SqlOSFgaLineage.ScopeColumn);
-        Assert.IsFalse(sql.Contains("fn_IsResourceAccessible"), "one method: no per-row function");
-        var visible = await query.Select(e => e.Id).ToListAsync();
-        CollectionAssert.AreEquivalent(new[] { $"manyrow_a_{suffix}", $"manyrow_b_{suffix}" }, visible);
+        try
+        {
+            var filter = await _authService.BuildFilterAsync<LifecycleProtectedEntity>(user.SubjectId, "TEST_VIEW");
+            var query = Context.Set<LifecycleProtectedEntity>().AsNoTracking().Where(e => e.Id.EndsWith(suffix)).Where(filter);
+            var sql = query.ToQueryString();
+            StringAssert.Contains(sql, ListFirst == true ? "fn_VisibleSet" : "fn_CheckRow");
+            var visible = await query.Select(e => e.Id).ToListAsync();
+            CollectionAssert.AreEquivalent(new[] { $"manyrow_a_{suffix}", $"manyrow_b_{suffix}" }, visible);
+        }
+        finally
+        {
+            // The database is shared by every suite: leave it as small as it was.
+            await Context.Set<LifecycleProtectedEntity>().Where(e => e.Id.EndsWith(suffix)).ExecuteDeleteAsync();
+            await Context.Set<SqlOSFgaGrant>().Where(g => g.SubjectId == user.SubjectId).ExecuteDeleteAsync();
+            await Context.Set<SqlOSFgaResource>().Where(r => r.Id.EndsWith(suffix)).ExecuteDeleteAsync();
+        }
     }
 
     [TestMethod]
@@ -454,6 +476,29 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
         await AssertPointAndFilterAsync(attackerSubjectId, resourceId, expected: false);
     }
 
+    [TestMethod]
+    public async Task AGrantWhoseSubjectIdDiffersOnlyInCase_CountsWhereTheCollationIgnoresCase()
+    {
+        // SQL Server's default collation calls 'abc' and 'ABC' equal, so its foreign key accepts a grant whose
+        // subject id differs from the subject's only in case. The point check seeks grants by a hash of the
+        // resource and subject ids, so the hash must agree with the collation: else the check, and the filter
+        // that checks each row with it, would miss a grant the list-first filter (which compares ids) finds.
+        if (!TestDatabase.IsSqlServer)
+        {
+            return; // PostgreSQL compares ids byte for byte: such a grant cannot exist.
+        }
+
+        var suffix = Guid.NewGuid().ToString("N");
+        var subjectId = $"subj_case_{suffix}";
+        Context.Set<SqlOSFgaSubject>().Add(new SqlOSFgaSubject { Id = subjectId, SubjectTypeId = "user", DisplayName = "Case" });
+        Context.Set<SqlOSFgaUser>().Add(new SqlOSFgaUser { Id = $"usr_case_{suffix}", SubjectId = subjectId, IsActive = true });
+        await Context.SaveChangesAsync();
+        var resourceId = await CreateProtectedResourceWithGrantAsync(subjectId.ToUpperInvariant());
+        Context.ChangeTracker.Clear();
+
+        await AssertPointAndFilterAsync(subjectId, resourceId, expected: true);
+    }
+
     private SqlOSFgaSubjectService CreateSubjectService()
     {
         var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
@@ -497,4 +542,18 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
             .AnyAsync();
         Assert.AreEqual(expected, listed, "EF authorization filter did not match the point authorization result.");
     }
+}
+
+/// <summary>Every list filter in <see cref="SqlOSFgaAuthServiceIntegrationTests"/> built to list the caller's rows first.</summary>
+[TestClass]
+public class SqlOSFgaAuthServiceListFirstIntegrationTests : SqlOSFgaAuthServiceIntegrationTests
+{
+    protected override bool? ListFirst => true;
+}
+
+/// <summary>Every list filter in <see cref="SqlOSFgaAuthServiceIntegrationTests"/> built to check each row the query reads.</summary>
+[TestClass]
+public class SqlOSFgaAuthServiceRowCheckIntegrationTests : SqlOSFgaAuthServiceIntegrationTests
+{
+    protected override bool? ListFirst => false;
 }

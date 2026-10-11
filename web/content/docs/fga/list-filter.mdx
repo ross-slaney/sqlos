@@ -6,9 +6,9 @@ group: "checks"
 order: 1
 ---
 
-`BuildFilterAsync` returns a filter for `Where(...)`. Lists only rows the subject may see. Use it wherever authorization has to sit inside a query of your own: counts, joins, aggregates, offset pages, search.
+`BuildFilterAsync` returns a filter for `Where(...)`. Lists only rows the subject may see. Use it wherever authorization has to sit inside a query of your own: pages, counts, joins, aggregates, search, `ExecuteUpdate`, `ExecuteDelete`.
 
-A supported paged list uses the same filter with a declared indexed order and a `Take`. SqlOS finds and merges rows from authorized branches without first loading the caller's complete grant list. Work still depends on the caller's independently granted branches, resolved principals, and the query's filters. [Designing your resource tree](/docs/fga/designing-your-resource-tree) explains the tradeoffs; [Paginating authorized lists](/docs/guides/paginating-authorized-lists) covers the query shapes.
+The filter is one SQL `EXISTS` on the row's `ResourceId`. It composes into any query, in any order, with a keyset, a `Take`, a join or a `Count`. To build it, SqlOS asks the database whether this caller sees few rows of the table or many, and returns the filter that is fast for that caller; either filter returns exactly the rows the caller may see. What a page costs depends on how much of the table the caller may see. [What determines query cost](#what-determines-query-cost) gives the numbers, including the one case that reads far more than a page, and [Paginating authorized lists](/docs/guides/paginating-authorized-lists) the query shapes.
 
 This is a read-side helper. Lifecycle-managed domain rows normally implement `ISqlOSResourceEntity`; the filter only needs the inherited `ResourceId` contract to tie application rows to their FGA resources.
 
@@ -32,57 +32,137 @@ The subject only sees chains they have access to. The filter translates to a SQL
 
 ## How the filter works
 
-Every FGA resource carries its **lineage**: its ancestor at each level of the tree, its depth, and its **reach**, the highest level from which access flows down to it through active resources only. Schema v11 adds the columns to the resource table (one ancestor column per level up to the default depth of 10; a larger `MaxResourceHierarchyDepth` adds the rest at startup), SqlOS keeps them exact with triggers, and fills them once when you upgrade.
+`BuildFilterAsync<T>` does three things:
 
-Every entity of yours that implements `IHasResourceId` declares one more column, the **scope column** (`FgaScope`): its row's resource type and, for each level of the tree, the ancestor at that level where access flows down to the row from it. SqlOS keeps it current with triggers on your table and on the resource table, and fills it once when you upgrade. [Set up FGA](/docs/fga/setup) shows the declaration for both ways of adding SqlOS.
+1. **It resolves the caller**: the caller's live subjects (the subject and its active groups) and the permission.
+2. **It asks the database one question**: does this caller see fewer resources of the permission's type than the cap of `T`'s table? The cap is `8·√N` for a table of N rows, and at least 1,000. `fn_ListFirst` answers in the database: it counts the caller's resources, stops at the cap, and sends back yes or no. No grant, root or row leaves the database, and the question costs at most the cap, whoever asks.
+3. **It returns one of two filters**, by the answer.
 
-Building a filter resolves the caller's principals (the subject and its active groups) and the permission, and reads no grant. The filter is evaluated by the context's query execution (`AddSqlOS` configures it; a context built by hand calls `UseSqlOSFga`) when a query over it runs, in one of two ways. A page (the filter, an order, a `Take`) is walked: SqlOS reads the caller's granted branches of the tree as it goes and does not enumerate the complete grant list up front; [Paginating authorized lists](/docs/guides/paginating-authorized-lists) covers it. Every other query (a count, a join, a list without `Take`) runs as one statement: SqlOS first reads the caller's **access roots**, the resources on which the caller, or one of their active groups, holds a current grant whose role includes the permission, and the statement then says, for each row: at the level of one of those roots, the row's scope column holds that root. It is the same predicate for every caller and every table, it joins nothing, and a suitable query and index can let the optimizer seek into a single granted branch. Additional predicates and query shape still affect the plan.
+**Few rows, below the cap: list first.**
 
-There is one filter, whatever the number of grants. In a planned statement, a caller with several roots at a level, up to thousands of grants on single resources, gets the same test: the row's scope at that level is one of the roots, sent as one list parameter. The roots are read for every such statement, so a count or a join costs more as the caller's grants grow. A page does not have this cost: the walk reads each grant's rows from where they are and merges them in the page's order.
-
-## The scope column
-
-The scope column is one column per table. Your entity declares it, and SqlOS manages its contents:
-
-```csharp
-public byte[]? FgaScope { get; private set; }
+```sql
+WHERE EXISTS (
+    SELECT 1
+    FROM [dbo].fn_VisibleSet(@SubjectIds, @PermissionId, @TypeId) v
+    WHERE v.ResourceId = t.ResourceId)
 ```
 
-The compiler requires it: `IHasResourceId` (and `ISqlOSResourceEntity`, which extends it) has an `FgaScope` member, so an entity without it does not build. EF Core maps it like any other property, as `varbinary(512)` on SQL Server and `bytea` on PostgreSQL, the same layout on both, sized for any depth you may configure later. Your migration carries it, with an index on `ResourceId` if you declared none: the triggers find a resource's rows by it. SqlOS never writes it through EF Core, and your code never sets it.
+`fn_VisibleSet` is the caller's visible resources, each once, worked out in full before the rest of the query runs. The database starts from those few rows, finds them in your table through its `ResourceId` index, sorts them and takes the page.
 
-What SqlOS creates and maintains itself at startup, outside your migrations:
+**Many rows, at or above the cap: check each row.**
 
-- per level of the tree, an index on that level's part of the scope column followed by your primary key, and one more per index you declared on the table (the orders you page in), filtered to the rows at or below the level, so a level deeper than any row costs nothing. On PostgreSQL these are expression indexes; on SQL Server they are built on computed columns that take no storage;
-- statistics on the type part of the column to help the optimizer estimate the type filter;
-- two triggers on your table that set a row's scope when it is inserted or its `ResourceId` changes, and the resource table's triggers that keep it current when resources move, are deactivated, retyped, or deleted;
-- at every start, the scope of rows that have none (a new table's rows, rows a bulk load wrote without triggers), set through an index on those rows.
+```sql
+WHERE EXISTS (
+    SELECT 1
+    FROM [dbo].fn_CheckRow(t.ResourceId, @SubjectIds, @PermissionId))
+```
 
-If SqlOS starts before the migration that adds a table's column, it logs a warning naming the table and protects the table at the next start.
+The database reads your table in the query's own order and runs the point check on each row it reads, until the page is full. `fn_CheckRow` is the point check, `fn_IsResourceAccessible`, under a name of SqlOS's own (so your model may map `fn_IsResourceAccessible` too); it is the check [`CheckAccessAsync`](/docs/fga/checking-a-permission) runs: for the row's resource it reads the ancestors from the resource's reach down (at most `MaxResourceHierarchyDepth + 1` of them), and for each looks for a current grant to one of the caller's live subjects whose role includes the permission. It finds the caller's grants on each of those ancestors with one exact index seek per live subject, so its cost depends neither on how many grants the caller holds nor on how many other people hold grants on the same ancestors.
 
-Declare an index for each order you page in and end it with the key, as the [pagination guide](/docs/guides/paginating-authorized-lists) shows; SqlOS mirrors it per level. A page sorted by a column you declared no index for still returns the right rows, through the caller's whole scope rather than one seek, and SqlOS logs a warning naming the entity, the order, and the index to declare, once per query shape.
+Both filters are exact. Both are one `EXISTS` in your query, both compose with any LINQ (an order, a keyset, `Take`, `Count`, joins, `ExecuteUpdate`, `ExecuteDelete`), and neither needs anything on your table but `ResourceId` and its index. Their parameters are the caller's live subject ids (as JSON), the permission, and `@TypeId`, the permission's resource type (NULL for a permission without one). The database reads the grants when the statement runs.
 
-The price is storage and index maintenance: one index per level per declared order, over the rows at or below that level. The page executor also uses grant counts and direct-grant tables; [the modeling guide](/docs/fga/designing-your-resource-tree#what-sqlos-maintains-for-you) explains their storage and write implications. These are indexes for declared orders, not every possible sorting permutation.
+**Why two filters, not one.** A database plans a query before it runs it, so it cannot know that this caller sees only a handful of rows. One plan is fast either for callers who see much (read in order, check rows) or for callers who see little (list them first), not for both. The count tells SqlOS which kind of caller this is, and the database then runs the plan that fits.
 
-**Upgrading**: add `public byte[]? FgaScope { get; private set; }` to every entity that implements `IHasResourceId` (the build lists them), add and apply one migration per context, and start the application. A context that uses `EnsureCreated` gets the column with its tables.
+## The closure
 
-## Filter lifetime
+The filters read SqlOS's resources table, never yours. Every resource row there carries its place in the tree, written down once so that no query climbs it:
 
-The caller's principal set (the subject plus its active group memberships) and permission are resolved when the returned task is awaited; grants are read when each query runs. Build the filter once per request and compose it into that request's queries. Do not cache it in statics or reuse it across requests, because group membership is captured at construction. The caller's own lifecycle is still checked when the query runs: a user deactivated after the filter was built sees nothing.
+| Column | What it holds |
+| --- | --- |
+| `Seq` (`bigint`) | The resource's compact key, which the ancestor columns refer to |
+| `Depth` (`smallint`) | Its level: 0 for a root. NULL when the row is malformed (a cycle, or deeper than the limit) |
+| `Reach` (`smallint`) | The highest level access can flow down from, through active resources only. NULL when the resource or an ancestor is inactive, or the row is malformed; a resource without a reach is denied |
+| `Ancestor0` … `Ancestor10` (`bigint`) | The `Seq` of its ancestor at each level: `Ancestor0` is the top of its tree, `Ancestor{Depth}` the resource itself, NULL below its depth. One column per level up to `MaxResourceHierarchyDepth` (10 by default, so eleven columns); a larger depth adds columns at startup |
 
-The filter holds no `DbContext`: compose it into a query on an instance of the same application context configured with SqlOS's query execution (`AddSqlOS` configures it; a context built by hand calls `UseSqlOSFga`), including instances from `IDbContextFactory` or a pool. List filters and point checks run in the database, so they need SQL Server or PostgreSQL; an in-memory provider fails with a message that says so.
+This is the tree's closure: the climb from a resource to its root, stored on the row. "Is X under R, where R sits at level ℓ, with nothing inactive between" is `X.Ancestor{ℓ} = R.Seq AND X.Reach <= ℓ`, one row read. "Every resource of a type under R" is one range of one index: SqlOS keeps one index per level on the resources table, `IX_SqlOSFgaResources_Ancestor{ℓ}` on `(Ancestor{ℓ}, ResourceTypeId)` including `Reach` and `Id`, over the rows that have an ancestor at that level.
+
+SqlOS creates these functions in its own schema at startup:
+
+| Function | What it does |
+| --- | --- |
+| `fn_ActiveSubjects` | Keeps the caller's subjects that are alive now; none when the caller is not |
+| `fn_AccessRoots` | Lists the caller's **access roots**: one row `(ResourceSeq, Depth)` per current grant of a live subject whose role includes the permission, on an active resource. It does not remove duplicates, so a count over it can stop early |
+| `fn_ListVisible` | Lists the caller's visible resources, root by root (below) |
+| `fn_VisibleSet` | The same resources, each once, worked out in full before the query goes on: a multi-statement function on SQL Server, PL/pgSQL on PostgreSQL. The list-first filter reads it |
+| `fn_ListFirst` | Counts `fn_ListVisible` up to the table's cap and answers whether the count is below it |
+| `fn_IsResourceAccessible` | The point check for one resource. `CheckAccessAsync` runs it |
+| `fn_CheckRow` | The point check under SqlOS's own name, one row when it allows. The check-each-row filter reads it |
+
+On PostgreSQL, `fn_VisibleSet` and `fn_ListFirst` run with JIT off: their cost estimates can cross `jit_above_cost`, and compiling would take longer than the query.
+
+`fn_ListVisible` reads one range of one index per root:
+
+```sql
+CREATE OR ALTER FUNCTION [dbo].fn_ListVisible(@SubjectIds NVARCHAR(MAX), @PermissionId NVARCHAR(450), @TypeId NVARCHAR(450))
+RETURNS TABLE AS RETURN (
+    SELECT v.Id AS ResourceId
+    FROM [dbo].fn_AccessRoots(@SubjectIds, @PermissionId) a
+    CROSS APPLY (
+        SELECT r.Id FROM [dbo].[SqlOSFgaResources] r
+        WHERE a.Depth = 0 AND r.Ancestor0 = a.ResourceSeq AND r.Ancestor0 IS NOT NULL
+          AND r.Reach <= 0 AND (@TypeId IS NULL OR r.ResourceTypeId = @TypeId)
+        UNION ALL
+        SELECT r.Id FROM [dbo].[SqlOSFgaResources] r
+        WHERE a.Depth = 1 AND r.Ancestor1 = a.ResourceSeq AND r.Ancestor1 IS NOT NULL
+          AND r.Reach <= 1 AND (@TypeId IS NULL OR r.ResourceTypeId = @TypeId)
+        UNION ALL
+        …                                       -- one branch per level, to Ancestor10
+    ) v)
+```
+
+A resource is visible when one of the caller's roots is its ancestor at the root's level and nothing inactive sits between. For each root only the branch of its own level runs, and it reads the range of that level's index beneath the root. Each branch repeats `Ancestor{ℓ} IS NOT NULL` because SQL Server uses a filtered index only when the query states its filter. A resource beneath two roots is listed twice; `fn_VisibleSet` keeps it once. On PostgreSQL the function is the same with quoted identifiers and a lateral join, `LANGUAGE sql STABLE`, returning `TABLE("ResourceId" varchar(450))`.
+
+The row count behind the cap is the one the database keeps in its catalog for your table: `sys.partitions` on SQL Server, `pg_class.reltuples` on PostgreSQL. PostgreSQL refreshes its count when the table is vacuumed or analyzed, which autovacuum does on its own; a table never vacuumed or analyzed counts as empty, so its cap is 1,000. A stale count can only pick the slower filter, never change the rows.
+
+Two triggers on the resources table (after insert, after update of `ParentId` or `IsActive`) keep the closure exact; [Resource hierarchy](/docs/fga/resource-hierarchy#the-lineage) lists what each change costs. A retype or a delete changes no lineage.
+
+Each grant also carries `ResourceSeq`, its resource's `Seq`, which a trigger on the grants table copies when the grant is written (a resource's `Seq` never changes). The point check reads the ancestors' `Seq`s from the lineage and seeks the index on `(ResourceSeq, SubjectId)` once per ancestor and live subject. It never reads other people's grants: on a node where every member of an organization holds a grant, a check costs the same as on a node with one.
+
+## How a page runs
+
+**List first.** `fn_VisibleSet` runs once: for each of the caller's roots it reads the range of `IX_SqlOSFgaResources_Ancestor{ℓ}` beneath it, and it keeps each resource once. The database then finds those rows in your table through its `ResourceId` index, applies your other conditions and the keyset, sorts what is left and takes the page. The work is the caller's rows, however large the table.
+
+**Check each row.** The database reads your table in the query's order, from the keyset position, through the index you declared for that order. For each row it runs the point check: it reads the row's resource, then each ancestor from the resource's reach down and the caller's grants on it (one index seek per subject). It stops when the page is full. The work is the rows it reads before the page fills; for a caller who sees most of the table, that is about the page.
 
 ## What determines query cost
 
-Supported indexed pages use lineage, grant counts, and direct-grant indexes to find rows where the caller has access. They avoid enumerating the entire grant list before the page. A page across many independent inherited branches still needs to discover and merge those branches; even an empty page can need to visit them all.
+For a table of N rows, of which the caller may see V, a page of P rows, and the cap C = 8·√N:
 
-Other costs remain:
+| The caller | The filter | Cost per page |
+| --- | --- | --- |
+| Sees fewer rows than the cap (one store, one workspace) | List first | About V index reads and a sort of V rows. It does not grow with the table |
+| Sees most rows (an administrator) | Check each row | About P rows read and checked. It does not grow with the table |
+| Sees many rows, not most (a region manager) | Check each row | About P·N/V rows checked when their rows are spread through the order; at most about P·N/C = P·√N/8 |
+| Holds k grants on single resources | List first while k is below C | About k index reads inside the database, then a sort. From C on, rows are checked and the number of grants no longer matters |
 
-- `Count()`, `Sum()`, joins, and other aggregate or non-page shapes use the SQL predicate path, including resolving access roots.
-- A large `Skip(...)` makes the executor walk the skipped rows; use keyset pagination for deep lists.
-- Unsupported orders, including mixed directions or an order without a suitable declared index, fall back to the predicate path.
-- Filters not served efficiently by the available indexes can require examining many candidates, even on an optimized page.
+Before the page, the question reads at most C index entries: one index range for a caller with one grant, and up to C of their grants for a caller with many single grants.
 
-One API preserves authorization semantics across these shapes; it does not make them equally cheap. See the [pagination guide](/docs/guides/paginating-authorized-lists) for exact recognition rules and diagnostics.
+The two filters meet near the cap, where they cost about the same. So, but for the case below, the worst page grows with the square root of the table, not with the table. Pages and point checks are measured on both engines in `tests/SqlOS.Benchmarks`.
+
+**One case is worse.** Checking each row is fast when the caller's rows are spread through the query's order. A caller who sees many rows (at least the cap) that all sit at the far end of that order pays for everything before them: for example, a customer who has added nothing for years, listing their rows newest first. The database reads and checks every newer row before it reaches theirs. Only an index on your table ordered by who can see each row, then by the sort column, avoids that, and SqlOS deliberately puts nothing on your tables. If the screen is scoped to that customer anyway, say so in the query: a condition on your own column, with an index that leads with it and ends with the sort (`HasIndex(o => new { o.CustomerId, o.CreatedAt, o.Id })`), lets the database start at their rows.
+
+Other costs are the query's own:
+
+- A `Count()`, a join or a list without `Take` reads every row the caller may see: their rows when they are listed first, and the whole table, each row checked, when they are many. That is what counting costs.
+- A large `Skip(...)` reads the skipped rows; use a keyset for deep lists.
+- A condition your order's index cannot narrow is tested as rows are read, so checking each row reads more rows to fill a page. Declare an index for the order you page in, ended by the key, and give a selective condition its own index, as you would for any query.
+- An order with no index makes the database read every row the filter passes before it sorts: the caller's rows when they are listed first, the whole table when each row is checked.
+
+One API preserves authorization semantics across these shapes; it does not make them equally cheap.
+
+## What your table carries
+
+Your table carries its `ResourceId` column and an index on it. If you declared no index on `ResourceId`, SqlOS adds one to the EF model (`IX_{Table}_SqlOSFgaResourceId`), so your migration creates it; the list-first filter finds the caller's rows through it. Nothing else of SqlOS's is on your table: no column, no trigger, no computed column, no statistics. Everything the filter reads lives on SqlOS's own tables, created at startup.
+
+**Upgrading from 8.0**: not supported in place; there are no compatibility shims. Either recreate the database, or remove what 8.0 put on your tables by hand: delete the `FgaScope` property from every entity (nothing declares it now), add and apply an EF migration that drops the column, and drop 8.0's per-table objects (triggers `TR_*_SqlOSFgaScope_*`, indexes `IX_*_FgaScope*`, computed columns `FgaScope*`, statistics `ST_*_FgaScopeType`) and its tables in SqlOS's schema (`SqlOSFgaDirect_*`, `SqlOSFgaGrantCounts`, `SqlOSFgaScopeTables`). SqlOS neither creates nor looks for any of them.
+
+## Filter lifetime
+
+The caller's principal set (the subject plus its active group memberships) and permission are resolved when the returned task is awaited, and the question is asked then. Grants are read again when each query runs: both filters read them inside the statement. A grant made or revoked after the filter was built, or a caller deactivated since, is seen by the next query over it; the choice made when the filter was built can make that query faster or slower, never change its rows. Build the filter once per request and compose it into that request's queries. Do not cache it in statics or reuse it across requests, because group membership is captured at construction.
+
+The filter holds no `DbContext`: compose it into a query on any instance of the application context registered with `AddSqlOS` (any context of the same model), including instances from `IDbContextFactory` or a pool. A context built by hand needs nothing beyond `modelBuilder.UseSqlOS(...)` (or `ApplySqlOSFgaModel()`) in its model. List filters and point checks run in the database, so they need SQL Server or PostgreSQL; an in-memory provider fails with a message that says so.
+
+The filters and the point check agree row for row: a row the list shows is a row [`CheckAccessAsync`](/docs/fga/checking-a-permission) allows, and the other way round. The check-each-row filter is the point check, so it agrees by construction. The list-first filter applies the same rule through the closure, and the integration tests check that the two agree row for row, with each filter.
 
 ## Composing with plain EF
 

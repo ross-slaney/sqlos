@@ -3,7 +3,6 @@ using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using SqlOS.Fga;
 using SqlOS.Fga.Models;
-using SqlOS.Fga.Paging;
 
 namespace SqlOS.Fga.Configuration;
 
@@ -111,12 +110,10 @@ public static class SqlOSFgaModelConfiguration
             {
                 t.ExcludeFromMigrations();
 
-                // The page-index triggers (grant counts and direct indexes), declared for the same reason as
-                // the lineage triggers above.
-                foreach (var trigger in SqlOSFgaPageIndex.GrantTriggerNames(tables.Grants))
-                {
-                    t.HasTrigger(trigger);
-                }
+                // The trigger that copies the resource's Seq onto the grant (SqlOSFgaFunctionInitializer),
+                // declared for the same reason as the lineage triggers. The column is the database's and is
+                // left out of the model.
+                t.HasTrigger(SqlOSFgaLineage.GrantTriggerName(tables.Grants));
             });
             entity.HasKey(e => e.Id);
             entity.HasOne(e => e.Subject)
@@ -221,8 +218,15 @@ public static class SqlOSFgaModelConfiguration
             entity.ToView(null);
         });
 
-        // AccessRoot (keyless - fn_AccessRoots result): the resources a caller holds a usable grant on.
-        modelBuilder.Entity<SqlOSFgaAccessRoot>(entity =>
+        // RowCheck (keyless - fn_CheckRow result): the point check's answer for one row.
+        modelBuilder.Entity<SqlOSFgaRowCheck>(entity =>
+        {
+            entity.HasNoKey();
+            entity.ToView(null);
+        });
+
+        // VisibleResource (keyless - fn_VisibleSet result): a resource the caller may see.
+        modelBuilder.Entity<SqlOSFgaVisibleResource>(entity =>
         {
             entity.HasNoKey();
             entity.ToView(null);
@@ -235,10 +239,9 @@ public static class SqlOSFgaModelConfiguration
             entity.ToView(null);
         });
 
-        // The functions the list filter composes into application queries, and how a query reads a row's
-        // scope value. Mapped to static methods, so the filter carries no DbContext instance.
+        // The functions the list filter composes into application queries. Mapped to static methods, so the
+        // filter carries no DbContext instance.
         SqlOSFgaFunctions.Register(modelBuilder, schema);
-        SqlOSFgaScope.Register(modelBuilder);
     }
 
     /// <summary>A column the database fills and maintains: EF Core reads it and never includes it in a write.</summary>
