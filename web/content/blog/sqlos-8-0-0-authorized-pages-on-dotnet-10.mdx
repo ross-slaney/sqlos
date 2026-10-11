@@ -6,9 +6,7 @@ author: "Ross Slaney"
 tags: ["FGA", "EF Core", "AuthServer", "SCIM", "Security", "SqlOS"]
 ---
 
-<Callout type="warning" title="Historical release note">
-  The page executor, scope columns, and associated FGA maintenance described below have since been reverted on `main`, together with the later visibility-count strategy. Current source uses the original recursive TVF through `BuildFilterAsync`; sparse queries can examine many denied rows. The .NET 10 target and the auth fixes remain. See [current list filtering](/docs/fga/list-filter) and [pagination guidance](/docs/guides/paginating-authorized-lists) before integrating from source. This rollback does not downgrade an existing database schema; use a fresh database.
-</Callout>
+> **Historical release note.** The page executor, scope columns, and associated FGA maintenance described below have since been reverted on `main`, together with the later visibility-count strategy. Current source uses the original recursive TVF through `BuildFilterAsync`; sparse queries can examine many denied rows. The .NET 10 target and the auth fixes remain. See [current list filtering](/docs/fga/list-filter) and [pagination guidance](/docs/guides/paginating-authorized-lists) before integrating from source. This rollback does not downgrade an existing database schema; use a fresh database.
 
 SqlOS 8.0.0 is a major release:
 
