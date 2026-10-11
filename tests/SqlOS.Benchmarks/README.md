@@ -191,7 +191,8 @@ the application's own `StoreId` index; every other page reads the page's rows an
 - **scale**: per-page cost must follow the work the filter it got predicts, not N. The median at the largest
   scale may be at most `maxRatio` (2.0) times the median at the smallest, times the growth of the rows the page
   has to touch, plus `slackMilliseconds`. A caller listed first touches their own σN rows; a caller whose rows
-  are checked one by one touches about k/σ rows, the same at any N. The many-grants pages are exempt: their
+  are checked one by one touches about k/σ rows, the same at any N. A caller who crosses the cap between the
+  two scales is not compared (the two pages read rows differently). The many-grants pages are exempt: their
   cost follows the caller's grants, not N.
 - **regression**: every scenario's median against the constant set for it and the engine in
   `regressionMilliseconds`: what the scenario costs today, with headroom for runner noise (several times the
@@ -257,7 +258,9 @@ Secondary indexes, the per-level ancestor indexes among them, are set aside duri
 their own definitions, so no DDL is copied into the harness. Foreign keys are revalidated (SQL Server),
 statistics are refreshed, PostgreSQL tables are vacuumed so the visibility map matches a table autovacuum
 maintains, and the resource sequence is moved past the loaded numbers so the maintenance pass inserts like
-an application would.
+an application would. The people and their grants are made through SqlOS's API after the load; the grant and
+subject tables' statistics are then refreshed too, as automatic statistics would, so no page is planned
+before the engine has seen the grants.
 
 The PostgreSQL container turns off durability settings that only affect writes (`fsync`, WAL level,
 synchronous commit). Planner settings are the usual SSD values.

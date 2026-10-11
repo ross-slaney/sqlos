@@ -112,6 +112,12 @@ internal sealed class SqlServerDatasetLoader(string connectionString, SqlOSFgaOp
         return new LoadTiming(rows.Elapsed, indexes.Elapsed, maintenance.Elapsed);
     }
 
+    public Task SettleGrantsAsync(CancellationToken cancellationToken)
+        => ExecuteAsync(
+            string.Join(" ", new[] { fga.TableNames.Grants, fga.TableNames.Subjects, fga.TableNames.Users, fga.TableNames.UserGroups, fga.TableNames.UserGroupMemberships }
+                .Select(table => $"UPDATE STATISTICS [{fga.Schema}].[{table}];")),
+            cancellationToken);
+
     public async Task<LineageChecksum> LineageChecksumAsync(CancellationToken cancellationToken)
     {
         static string Quote(string column) => $"[{column}]";

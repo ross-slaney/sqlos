@@ -106,9 +106,13 @@ internal sealed partial class SqlServerDatabaseProvider : ISqlOSDatabaseProvider
     /// <summary>
     /// <c>fn_IsResourceAccessible(@ResourceId, @SubjectIds, @PermissionId)</c>: the point check. The target's
     /// lineage names its ancestor at every level; the levels its reach covers are the active path a grant may
-    /// sit on. One grant lookup per such ancestor, by resource, so the cost is the depth of the tree and never
-    /// the number of grants the caller holds. Returns the grant that decides it (on the nearest ancestor that
-    /// holds one): the ancestor's id, the grant, its subject and role, and the ancestor's level; or no row.
+    /// sit on. One grant seek per such ancestor and live subject, on the grants' <c>ResourceSubjectHash</c>
+    /// (schema v16), so the cost is the depth of the tree times the caller's subjects: never the number of grants
+    /// the caller holds, nor the number other subjects hold on the same ancestors. The seek sits under a TOP, which
+    /// the optimizer does not move conditions past, so it cannot trade the seek for the grants by resource or by
+    /// subject; the ids are compared after it (two pairs may share a hash). Returns the grant that decides it (on
+    /// the nearest ancestor that holds one): the ancestor's id, the grant, its subject and role, and the ancestor's
+    /// level; or no row.
     /// </summary>
     public string BuildIsResourceAccessibleFunctionSql(SqlOSFgaOptions options)
     {
@@ -136,14 +140,20 @@ internal sealed partial class SqlServerDatabaseProvider : ISqlOSDatabaseProvider
                 INNER JOIN [{schema}].[{permissions}] permission ON permission.Id = @PermissionId
                 CROSS APPLY (VALUES {levels}) AS lv([Level], [Seq])
                 INNER JOIN [{schema}].[{resources}] a ON a.Seq = lv.Seq
-                INNER JOIN [{schema}].[{grants}] g ON g.ResourceId = a.Id
+                CROSS JOIN [{schema}].fn_ActiveSubjects(@SubjectIds) s
+                CROSS APPLY (
+                    SELECT TOP (9223372036854775807) g.Id, g.ResourceId, g.SubjectId, g.RoleId, g.EffectiveFrom, g.EffectiveTo
+                    FROM [{schema}].[{grants}] g
+                    WHERE g.ResourceSubjectHash = CHECKSUM(a.Id, s.SubjectId)
+                ) g
                 INNER JOIN [{schema}].[{rolePermissions}] rp ON rp.RoleId = g.RoleId AND rp.PermissionId = @PermissionId
                 WHERE x.Id = @ResourceId
                   AND x.Reach IS NOT NULL
                   AND lv.Seq IS NOT NULL
                   AND lv.[Level] >= x.Reach
                   AND (permission.ResourceTypeId IS NULL OR permission.ResourceTypeId = x.ResourceTypeId)
-                  AND g.SubjectId IN (SELECT live.SubjectId FROM [{schema}].fn_ActiveSubjects(@SubjectIds) live)
+                  AND g.ResourceId = a.Id
+                  AND g.SubjectId = s.SubjectId
                   AND (g.EffectiveFrom IS NULL OR g.EffectiveFrom <= GETUTCDATE())
                   AND (g.EffectiveTo IS NULL OR g.EffectiveTo >= GETUTCDATE())
                 ORDER BY lv.[Level] DESC

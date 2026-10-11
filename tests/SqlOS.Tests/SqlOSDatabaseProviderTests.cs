@@ -92,7 +92,12 @@ public class SqlOSDatabaseProviderTests
         sql.Should().Contain("(7, x.\"Ancestor7\")) AS lv(\"Level\", \"Seq\")");
         sql.Should().NotContain("Ancestor8");
         sql.Should().Contain("lv.\"Level\" >= x.\"Reach\"");
-        sql.Should().Contain("g.\"SubjectId\" = ANY (ARRAY(SELECT live.\"SubjectId\" FROM \"dbo\".\"fn_ActiveSubjects\"(p_subject_ids) live))");
+        // One seek per ancestor and live subject, by the pair's hash alone (OFFSET 0: PostgreSQL does not move the
+        // id comparisons into the subquery and read the ancestor's grants by resource), then the ids decide.
+        sql.Should().Contain("CROSS JOIN LATERAL unnest(ARRAY(SELECT live.\"SubjectId\" FROM \"dbo\".\"fn_ActiveSubjects\"(p_subject_ids) live)) AS s(\"SubjectId\")");
+        sql.Should().Contain("WHERE g.\"ResourceSubjectHash\" = hashtextextended(a.\"Id\", hashtextextended(s.\"SubjectId\", 0))\n    OFFSET 0\n) g");
+        sql.Should().Contain("AND g.\"ResourceId\" = a.\"Id\"\n  AND g.\"SubjectId\" = s.\"SubjectId\"");
+        sql.Should().NotContain("= ANY (ARRAY(SELECT live.");
         sql.Should().Contain("permission.\"ResourceTypeId\" IS NULL OR permission.\"ResourceTypeId\" = x.\"ResourceTypeId\"");
     }
 
@@ -126,16 +131,20 @@ public class SqlOSDatabaseProviderTests
         }
 
         list.Should().NotContain("Ancestor3");
+        // A function with a SET clause is never inlined; the list must be, inside the set and the count.
+        list.Should().NotContain("SET jit");
 
-        // PL/pgSQL, never inlined: the planner sees a small set and starts the statement from it.
+        // PL/pgSQL, never inlined: the planner sees a small set and starts the statement from it. Without JIT:
+        // an over-costed list of a few rows would compile for longer than it runs.
         var set = provider.BuildVisibleSetFunctionSql(options);
         set.Should().Contain("CREATE OR REPLACE FUNCTION \"dbo\".\"fn_VisibleSet\"(");
-        set.Should().Contain("LANGUAGE plpgsql\nSTABLE\nROWS 10");
+        set.Should().Contain("LANGUAGE plpgsql\nSTABLE\nROWS 10\nSET jit = off");
         set.Should().Contain("SELECT DISTINCT l.\"ResourceId\" FROM \"dbo\".\"fn_ListVisible\"(p_subject_ids, p_permission_id, p_type_id) l;");
 
         var listFirst = provider.BuildListFirstFunctionSql(options);
         listFirst.Should().Contain("CREATE OR REPLACE FUNCTION \"dbo\".\"fn_ListFirst\"(");
         listFirst.Should().Contain("RETURNS TABLE(\"ListFirst\" boolean)");
+        listFirst.Should().Contain("LANGUAGE sql\nSTABLE\nSET jit = off");
         listFirst.Should().Contain("CASE WHEN 8 * sqrt(greatest(coalesce((SELECT t.reltuples FROM pg_class t WHERE t.oid = to_regclass(p_table)), 0), 0)::float8) > 1000");
         listFirst.Should().Contain("FROM (SELECT 1 FROM \"dbo\".\"fn_ListVisible\"(p_subject_ids, p_permission_id, p_type_id) LIMIT c.cap) t");
         listFirst.Should().Contain("SELECT v.visible < c.cap");

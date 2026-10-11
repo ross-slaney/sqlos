@@ -30,9 +30,13 @@ public class SqlOSFgaFunctionInitializerTests
         sql.Should().Contain("lv.[Level] >= x.Reach");
         sql.Should().Contain("x.Reach IS NOT NULL");
 
-        // The grant is matched by the ancestor, never by the caller's whole grant list.
-        sql.Should().Contain("INNER JOIN [dbo].[SqlOSFgaGrants] g ON g.ResourceId = a.Id");
-        sql.Should().Contain("g.SubjectId IN (SELECT live.SubjectId FROM [dbo].fn_ActiveSubjects(@SubjectIds) live)");
+        // The grant is sought once per ancestor and live subject, by the pair's hash alone (under a TOP, so the
+        // optimizer cannot read the ancestor's grants by resource instead), then the ids are compared: never the
+        // caller's whole grant list, never every grant other subjects hold on the ancestor.
+        sql.Should().Contain("CROSS JOIN [dbo].fn_ActiveSubjects(@SubjectIds) s");
+        sql.Should().Contain("SELECT TOP (9223372036854775807) g.Id, g.ResourceId, g.SubjectId, g.RoleId, g.EffectiveFrom, g.EffectiveTo\n        FROM [dbo].[SqlOSFgaGrants] g\n        WHERE g.ResourceSubjectHash = CHECKSUM(a.Id, s.SubjectId)\n    ) g");
+        sql.Should().Contain("AND g.ResourceId = a.Id\n      AND g.SubjectId = s.SubjectId");
+        sql.Should().NotContain("HASHBYTES");
         sql.Should().Contain("rp.PermissionId = @PermissionId");
         sql.Should().Contain("permission.ResourceTypeId IS NULL OR permission.ResourceTypeId = x.ResourceTypeId");
         sql.Should().Contain("g.EffectiveFrom <= GETUTCDATE()");

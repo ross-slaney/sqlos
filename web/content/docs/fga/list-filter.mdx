@@ -57,7 +57,7 @@ WHERE EXISTS (
     FROM [dbo].fn_CheckRow(t.ResourceId, @SubjectIds, @PermissionId))
 ```
 
-The database reads your table in the query's own order and runs the point check on each row it reads, until the page is full. `fn_CheckRow` is the point check, `fn_IsResourceAccessible`, under a name of SqlOS's own (so your model may map `fn_IsResourceAccessible` too); it is the check [`CheckAccessAsync`](/docs/fga/checking-a-permission) runs: for the row's resource it reads the ancestors from the resource's reach down (at most `MaxResourceHierarchyDepth + 1` of them), and for each looks for a current grant to one of the caller's live subjects whose role includes the permission. Its cost does not depend on how many grants the caller holds.
+The database reads your table in the query's own order and runs the point check on each row it reads, until the page is full. `fn_CheckRow` is the point check, `fn_IsResourceAccessible`, under a name of SqlOS's own (so your model may map `fn_IsResourceAccessible` too); it is the check [`CheckAccessAsync`](/docs/fga/checking-a-permission) runs: for the row's resource it reads the ancestors from the resource's reach down (at most `MaxResourceHierarchyDepth + 1` of them), and for each looks for a current grant to one of the caller's live subjects whose role includes the permission. It finds those grants with one index seek per ancestor and subject, so it reads neither the caller's other grants nor other people's grants on the same ancestors: its cost depends on neither.
 
 Both filters are exact. Both are one `EXISTS` in your query, both compose with any LINQ (an order, a keyset, `Take`, `Count`, joins, `ExecuteUpdate`, `ExecuteDelete`), and neither needs anything on your table but `ResourceId` and its index. Their parameters are the caller's live subject ids (as JSON), the permission, and `@TypeId`, the permission's resource type (NULL for a permission without one). The database reads the grants when the statement runs.
 
@@ -88,6 +88,8 @@ SqlOS creates these functions in its own schema at startup:
 | `fn_IsResourceAccessible` | The point check for one resource. `CheckAccessAsync` runs it |
 | `fn_CheckRow` | The point check under SqlOS's own name, one row when it allows. The check-each-row filter reads it |
 
+On PostgreSQL, `fn_VisibleSet` and `fn_ListFirst` run with JIT off: their cost estimates can cross `jit_above_cost`, and compiling would take longer than the query.
+
 `fn_ListVisible` reads one range of one index per root:
 
 ```sql
@@ -114,11 +116,13 @@ The row count behind the cap is the one the database keeps in its catalog for yo
 
 Two triggers on the resources table (after insert, after update of `ParentId` or `IsActive`) keep the closure exact; [Resource hierarchy](/docs/fga/resource-hierarchy#the-lineage) lists what each change costs. A retype or a delete changes no lineage.
 
+The grants table carries `ResourceSubjectHash`, a hash of each grant's resource id and subject id, with an index on it. The point check seeks it once per ancestor and live subject, then compares the ids (two pairs may share a hash), so it never reads other people's grants on the same ancestor. On a node where every member of an organization holds a grant, each check still reads only the caller's. On SQL Server the hash is `CHECKSUM`, which gives ids the column's collation calls equal the same value, so a grant whose ids differ from the caller's only in case is still found.
+
 ## How a page runs
 
 **List first.** `fn_VisibleSet` runs once: for each of the caller's roots it reads the range of `IX_SqlOSFgaResources_Ancestor{ℓ}` beneath it, and it keeps each resource once. The database then finds those rows in your table through its `ResourceId` index, applies your other conditions and the keyset, sorts what is left and takes the page. The work is the caller's rows, however large the table.
 
-**Check each row.** The database reads your table in the query's order, from the keyset position, through the index you declared for that order. For each row it runs the point check: it reads the row's resource, then each ancestor from the resource's reach down and that ancestor's grants. It stops when the page is full. The work is the rows it reads before the page fills; for a caller who sees most of the table, that is about the page.
+**Check each row.** The database reads your table in the query's order, from the keyset position, through the index you declared for that order. For each row it runs the point check: it reads the row's resource, then each ancestor from the resource's reach down and the caller's grants on it (one index seek per subject). It stops when the page is full. The work is the rows it reads before the page fills; for a caller who sees most of the table, that is about the page.
 
 ## What determines query cost
 
@@ -133,7 +137,7 @@ For a table of N rows, of which the caller may see V, a page of P rows, and the 
 
 Before the page, the question reads at most C index entries: one index range for a caller with one grant, and up to C of their grants for a caller with many single grants.
 
-The two filters meet near the cap, where they cost about the same. So, but for the case below, the worst page grows with the square root of the table, not with the table: a few hundred milliseconds at fifty million rows. Pages and point checks are measured on both engines in `tests/SqlOS.Benchmarks`.
+The two filters meet near the cap, where they cost about the same. So, but for the case below, the worst page grows with the square root of the table, not with the table. Pages and point checks are measured on both engines in `tests/SqlOS.Benchmarks`.
 
 **One case is worse.** Checking each row is fast when the caller's rows are spread through the query's order. A caller who sees many rows (at least the cap) that all sit at the far end of that order pays for everything before them: for example, a customer who has added nothing for years, listing their rows newest first. The database reads and checks every newer row before it reaches theirs. Only an index on your table ordered by who can see each row, then by the sort column, avoids that, and SqlOS deliberately puts nothing on your tables. If the screen is scoped to that customer anyway, say so in the query: a condition on your own column, with an index that leads with it and ends with the sort (`HasIndex(o => new { o.CustomerId, o.CreatedAt, o.Id })`), lets the database start at their rows.
 

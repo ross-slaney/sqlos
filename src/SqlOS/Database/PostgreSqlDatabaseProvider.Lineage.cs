@@ -140,7 +140,9 @@ internal sealed partial class PostgreSqlDatabaseProvider
 
     /// <summary>
     /// <c>fn_VisibleSet</c>: the rows of <c>fn_ListVisible</c>, each once (see the SQL Server provider). PL/pgSQL,
-    /// so the planner never inlines it: it sees a set of about ten rows and starts the statement from it.
+    /// so the planner never inlines it: it sees a set of about ten rows and starts the statement from it. Without
+    /// JIT: the planner costs a root's range by the level's statistics (the top level's by every row), so a list
+    /// of a few rows can cross <c>jit_above_cost</c> and spend half a second compiling a query that runs in one.
     /// </summary>
     public string BuildVisibleSetFunctionSql(SqlOSFgaOptions options)
     {
@@ -156,6 +158,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
             LANGUAGE plpgsql
             STABLE
             ROWS 10
+            SET jit = off
             AS $sqlos$
             BEGIN
                 RETURN QUERY
@@ -168,6 +171,8 @@ internal sealed partial class PostgreSqlDatabaseProvider
     /// <summary>
     /// <c>fn_ListFirst</c>: whether the caller sees fewer resources than the table's cap (see the SQL Server
     /// provider). The table's row count is the planner's (<c>pg_class.reltuples</c>; -1, never analyzed, reads as 0).
+    /// Without JIT, for the reason <c>fn_VisibleSet</c> is: the count is over-costed and would compile for longer
+    /// than it runs.
     /// </summary>
     public string BuildListFirstFunctionSql(SqlOSFgaOptions options)
     {
@@ -184,6 +189,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
             RETURNS TABLE("ListFirst" boolean)
             LANGUAGE sql
             STABLE
+            SET jit = off
             AS $sqlos$
             SELECT v.visible < c.cap
             FROM (SELECT CAST({SqlOSFgaLineage.ListFirstCapSql(rows, "sqrt")} AS bigint) AS cap) c

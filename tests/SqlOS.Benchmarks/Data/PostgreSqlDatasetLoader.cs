@@ -76,6 +76,18 @@ internal sealed class PostgreSqlDatasetLoader(string connectionString, SqlOSFgaO
         return new LoadTiming(rows.Elapsed, indexes.Elapsed, maintenance.Elapsed);
     }
 
+    public async Task SettleGrantsAsync(CancellationToken cancellationToken)
+    {
+        // VACUUM runs outside a transaction, so one statement per call.
+        await ExecuteAsync($"VACUUM (ANALYZE) {Fga(fga.TableNames.Grants)};", cancellationToken);
+        foreach (var table in new[] { fga.TableNames.Subjects, fga.TableNames.Users, fga.TableNames.UserGroups, fga.TableNames.UserGroupMemberships })
+        {
+            await ExecuteAsync($"ANALYZE {Fga(table)};", cancellationToken);
+        }
+    }
+
+    private string Fga(string table) => $"\"{fga.Schema}\".\"{table}\"";
+
     public async Task<LineageChecksum> LineageChecksumAsync(CancellationToken cancellationToken)
     {
         static string Quote(string column) => $"\"{column}\"";

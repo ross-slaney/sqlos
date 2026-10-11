@@ -476,6 +476,29 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
         await AssertPointAndFilterAsync(attackerSubjectId, resourceId, expected: false);
     }
 
+    [TestMethod]
+    public async Task AGrantWhoseSubjectIdDiffersOnlyInCase_CountsWhereTheCollationIgnoresCase()
+    {
+        // SQL Server's default collation calls 'abc' and 'ABC' equal, so its foreign key accepts a grant whose
+        // subject id differs from the subject's only in case. The point check seeks grants by a hash of the
+        // resource and subject ids, so the hash must agree with the collation: else the check, and the filter
+        // that checks each row with it, would miss a grant the list-first filter (which compares ids) finds.
+        if (!TestDatabase.IsSqlServer)
+        {
+            return; // PostgreSQL compares ids byte for byte: such a grant cannot exist.
+        }
+
+        var suffix = Guid.NewGuid().ToString("N");
+        var subjectId = $"subj_case_{suffix}";
+        Context.Set<SqlOSFgaSubject>().Add(new SqlOSFgaSubject { Id = subjectId, SubjectTypeId = "user", DisplayName = "Case" });
+        Context.Set<SqlOSFgaUser>().Add(new SqlOSFgaUser { Id = $"usr_case_{suffix}", SubjectId = subjectId, IsActive = true });
+        await Context.SaveChangesAsync();
+        var resourceId = await CreateProtectedResourceWithGrantAsync(subjectId.ToUpperInvariant());
+        Context.ChangeTracker.Clear();
+
+        await AssertPointAndFilterAsync(subjectId, resourceId, expected: true);
+    }
+
     private SqlOSFgaSubjectService CreateSubjectService()
     {
         var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());

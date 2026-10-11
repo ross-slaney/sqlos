@@ -23,6 +23,13 @@ internal interface IDatasetLoader
     Task<LoadTiming> GrowProductsAsync(RetailTree tree, long from, long to, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Brings the statistics of SqlOS's grant and subject tables current once the people and their grants
+    /// exist, the way automatic statistics would leave a production database: the grants arrive through SqlOS's
+    /// API after the bulk load, and a page measured before the engine has seen them is planned on a guess.
+    /// </summary>
+    Task SettleGrantsAsync(CancellationToken cancellationToken);
+
+    /// <summary>
     /// The row count and an order-independent hash of the lineage (every resource's depth, reach and
     /// ancestors), for comparing a rebuild with the load.
     /// </summary>

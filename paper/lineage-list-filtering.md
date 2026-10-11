@@ -142,7 +142,10 @@ application table.
 - `fn_IsResourceAccessible(x, S, P)` is the point check. It reads x's row and, for each ℓ from Reach(x) to
   depth(x), the resource whose `Seq` is Ancestor_ℓ(x) and its grants to a live subject of S whose role
   includes P, provided P's type, if it has one, is x's. It returns the deciding grant (on the nearest such
-  ancestor) or no row: at most D + 1 grant lookups, each by resource, whatever |roots(S, P)| is.
+  ancestor) or no row. Each ancestor's grants are sought by a hash of the (resource, subject) pair, one seek
+  per live subject (schema v16; the ids are compared after the seek), so the check reads only S's grants
+  there: at most (D + 1)·|S| seeks, whatever |roots(S, P)| is and however many other subjects hold grants on
+  the same ancestors.
 - `fn_ListFirst(S, P, T, t)` returns one boolean: whether `fn_ListVisible(S, P, T)` has fewer than C rows,
   counting at most C of them (`TOP (C)`, `LIMIT C`). Here C = max(8·√N, 1000), with N the row count of t that
   the engine keeps in its catalog (`sys.partitions`; `pg_class.reltuples`, read as 0 before the table's first
@@ -197,7 +200,7 @@ table of N rows of which the caller may see V (V = σN), and a tree of depth D.
   sort: about V seeks and V·log k comparisons, independent of N but for the depth of the indexes.
 - *Row check* (V ≥ C) reads t in the requested order from the keyset position and runs the point check on
   each row until k pass. When the caller's rows are spread through the order, that is about k·N/V rows, each
-  at most D + 1 grant lookups. This is the paper's Theorem 3 with the per-row walk replaced by the lineage.
+  at most (D + 1)·|S| grant seeks. This is the paper's Theorem 3 with the per-row walk replaced by the lineage.
   For a caller who sees most of the table (V ≈ N) it is about k rows, independent of N.
 
 **The cap.** Let c_l be the cost of a listed row (an index entry, a lookup in t, its share of the sort)

@@ -224,8 +224,8 @@ public class SqlOSFgaStartupIntegrationTests
     public async Task PostgreSql_TheListAndTheRowCheckAreInlined_AndTheSetIsNot()
     {
         // fn_ListVisible, fn_AccessRoots, fn_CheckRow and fn_IsResourceAccessible are SQL functions the planner
-        // inlines into the statement that uses them; fn_VisibleSet is PL/pgSQL on purpose, a small set the
-        // statement starts from.
+        // inlines into the statement that uses them: none is a Function Scan (an inlined one may still name a
+        // Subquery Scan). fn_VisibleSet is PL/pgSQL on purpose, a small set the statement starts from.
         if (!TestDatabase.IsPostgreSql)
         {
             return;
@@ -239,11 +239,12 @@ public class SqlOSFgaStartupIntegrationTests
         var subjects = JsonSerializer.Serialize(new[] { alice });
 
         var count = await ExplainAsync(db, """SELECT count(*) FROM (SELECT 1 FROM "dbo"."fn_ListVisible"(@subjects, @permission, @type) LIMIT 1000) c""", subjects);
-        count.Should().NotContain("Function Scan", count);
+        count.Should().NotMatchRegex("Function Scan on \"?fn_", count);
         count.Should().Contain("SqlOSFgaGrants", "the roots are planned as part of the statement");
 
         var rowCheck = await ExplainAsync(db, """SELECT d."Id" FROM "StDocs" d WHERE EXISTS (SELECT 1 FROM "dbo"."fn_CheckRow"(d."ResourceId", @subjects, @permission) f) ORDER BY d."Id" LIMIT 20""", subjects);
-        rowCheck.Should().NotContain("Function Scan", rowCheck);
+        rowCheck.Should().NotMatchRegex("Function Scan on \"?fn_", rowCheck);
+        rowCheck.Should().Contain("SqlOSFgaGrants", "the point check is planned as part of the statement");
 
         var listed = await ExplainAsync(db, """SELECT d."Id" FROM "StDocs" d WHERE EXISTS (SELECT 1 FROM "dbo"."fn_VisibleSet"(@subjects, @permission, @type) v WHERE v."ResourceId" = d."ResourceId") ORDER BY d."Id" LIMIT 20""", subjects);
         listed.Should().Contain("Function Scan on \"fn_VisibleSet\"", listed);

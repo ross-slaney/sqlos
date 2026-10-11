@@ -197,6 +197,7 @@ foreach (var target in options.Scales)
         await using var db = CreateContext();
         var granted = await BenchmarkModel.GrantProductsAsync(db, people, target, cancellation);
         log.Info($"Granted {granted:N0} single products to the many-grants people ({string.Join(", ", people.ManyGrants.Select(p => $"{p.Key}: {p.GrantedProducts:N0}"))}).");
+        await loader.SettleGrantsAsync(cancellation);
     }
 
     loaded = target;

@@ -89,6 +89,14 @@ internal static class GateEvaluator
                     continue;
                 }
 
+                if (baseline.Shape != scenario.Shape)
+                {
+                    // The caller crossed the cap between the two scales: the pages read their rows differently,
+                    // at a different cost per row, so their times say nothing about growth. The regression gate
+                    // holds each scale's page to its limit.
+                    continue;
+                }
+
                 var growth = ExpectedRows(scenario, largest.Products) / ExpectedRows(baseline, smallest.Products);
                 var limit = baseline.MedianMs * config.Scale.MaxRatio * growth + config.Scale.SlackMilliseconds;
                 results.Add(new GateResult(
