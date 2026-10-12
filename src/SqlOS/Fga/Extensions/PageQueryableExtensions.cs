@@ -157,7 +157,6 @@ public static class PageQueryableExtensions
 
             var keys = selection.Rows.Select(row => row[^1]).ToList();
             var loaded = keys.Count == 0 ? [] : await LoadAsync(keys, cancellationToken);
-            var dropped = keys.Count - loaded.Count;
             var nextCursor = selection.HasMore && selection.Rows.Count > 0
                 ? SqlOSFgaPageCursor.Encode(ordering.EntityType, _columns, ordering.Descending, selection.Rows[^1])
                 : null;

@@ -300,6 +300,43 @@ public class SqlOSFgaPageOrderMaintenanceIntegrationTests
     }
 
     [TestMethod]
+    public async Task SynchronousSaveChanges_KeepsEntriesEqualToARebuild()
+    {
+        using var context = PageOrderFixture.CreateContext();
+        var document = PageOrderFixture.NewDocument(NewResourceId(), FgaTestDataSeeder.TestProjectResourceId, 415);
+
+        context.Documents.Add(document);
+        context.SaveChanges();
+        (await NodesOf(context, PageOrderTestDbContext.TitleEntries, document.Id)).Should().HaveCount(4);
+
+        document.Title = "zz synchronous";
+        context.SaveChanges();
+        await AssertEntriesMatchRebuildAsync();
+
+        context.Documents.Remove(document);
+        context.SaveChanges();
+        (await NodesOf(context, PageOrderTestDbContext.TitleEntries, document.Id)).Should().BeEmpty();
+        await AssertEntriesMatchRebuildAsync();
+    }
+
+    [TestMethod]
+    public async Task AmbientTransactionScope_IsUsed()
+    {
+        var document = PageOrderFixture.NewDocument(NewResourceId(), FgaTestDataSeeder.TestProjectResourceId, 416);
+        using (new System.Transactions.TransactionScope(System.Transactions.TransactionScopeAsyncFlowOption.Enabled))
+        {
+            await using var context = PageOrderFixture.CreateContext();
+            context.Documents.Add(document);
+            await context.SaveChangesAsync();
+            (await NodesOf(context, PageOrderTestDbContext.RankEntries, document.Id)).Should().HaveCount(4);
+        }
+
+        await using var verifier = PageOrderFixture.CreateContext();
+        (await verifier.Documents.AnyAsync(candidate => candidate.Id == document.Id)).Should().BeFalse();
+        (await NodesOf(verifier, PageOrderTestDbContext.RankEntries, document.Id)).Should().BeEmpty();
+    }
+
+    [TestMethod]
     public async Task Reconcile_FillsAnEmptyEntryTable_AndLeavesAFilledOneAlone()
     {
         await PageOrderFixture.ExecuteAsync($"DELETE FROM {TestDatabase.Qualify(PageOrderTestDbContext.TitleEntries)}");

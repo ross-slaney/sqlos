@@ -26,7 +26,7 @@ try
             await PrintJsonAsync(await ApiGetAsync(http, "/api/me"));
             break;
         case "list":
-            await PrintTodosAsync(await ApiGetAsync(http, "/api/todos"));
+            await ListTodosAsync(http, ReadPageSize(commandArgs));
             break;
         case "add":
             if (commandArgs.Length == 0 || string.IsNullOrWhiteSpace(commandArgs[0]))
@@ -253,24 +253,57 @@ static async Task PrintJsonAsync(JsonDocument document)
     Console.WriteLine();
 }
 
-static Task PrintTodosAsync(JsonDocument document)
+// GET /api/todos returns one page ({ data, nextCursor, ... }); follow nextCursor to the last page.
+static async Task ListTodosAsync(HttpClient http, int? pageSize)
 {
-    var items = document.RootElement.GetProperty("items").EnumerateArray().ToArray();
-    if (items.Length == 0)
+    string? cursor = null;
+    var printed = 0;
+    do
+    {
+        var query = new List<string>();
+        if (pageSize != null)
+        {
+            query.Add($"pageSize={pageSize}");
+        }
+
+        if (cursor != null)
+        {
+            query.Add($"cursor={Uri.EscapeDataString(cursor)}");
+        }
+
+        using var page = await ApiGetAsync(http, query.Count == 0 ? "/api/todos" : $"/api/todos?{string.Join('&', query)}");
+        foreach (var item in page.RootElement.GetProperty("data").EnumerateArray())
+        {
+            var id = item.GetProperty("id").GetString();
+            var title = item.GetProperty("title").GetString();
+            var completed = item.GetProperty("isCompleted").GetBoolean();
+            Console.WriteLine($"{(completed ? "x" : " ")} {id}  {title}");
+            printed++;
+        }
+
+        cursor = page.RootElement.TryGetProperty("nextCursor", out var next) && next.ValueKind == JsonValueKind.String
+            ? next.GetString()
+            : null;
+    }
+    while (cursor != null);
+
+    if (printed == 0)
     {
         Console.WriteLine("No todos.");
-        return Task.CompletedTask;
     }
+}
 
-    foreach (var item in items)
+static int? ReadPageSize(string[] commandArgs)
+{
+    var index = Array.FindIndex(commandArgs, arg => arg.Equals("--page-size", StringComparison.OrdinalIgnoreCase));
+    if (index < 0)
     {
-        var id = item.GetProperty("id").GetString();
-        var title = item.GetProperty("title").GetString();
-        var completed = item.GetProperty("isCompleted").GetBoolean();
-        Console.WriteLine($"{(completed ? "x" : " ")} {id}  {title}");
+        return null;
     }
 
-    return Task.CompletedTask;
+    return index + 1 < commandArgs.Length && int.TryParse(commandArgs[index + 1], out var pageSize) && pageSize > 0
+        ? pageSize
+        : throw new InvalidOperationException("Usage: todo-cli list [--page-size <n>]");
 }
 
 static void TryOpenBrowser(string url)
@@ -308,7 +341,7 @@ static void PrintHelp()
       login [--no-browser]
       logout
       whoami
-      list
+      list [--page-size <n>]
       add "<text>"
       toggle <todo-id>
 

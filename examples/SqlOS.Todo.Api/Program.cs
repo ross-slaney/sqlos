@@ -10,7 +10,9 @@ using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Services;
 using SqlOS.Configuration;
 using SqlOS.Extensions;
+using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
+using SqlOS.Pagination;
 using SqlOS.Todo.Api.Configuration;
 using SqlOS.Todo.Api.Data;
 using SqlOS.Todo.Api.Models;
@@ -407,6 +409,8 @@ app.MapGet("/api/todos", async (
     ISqlOSFgaAuthService fgaAuthService,
     IOptions<TodoSampleOptions> sampleOptions,
     TodoSampleDbContext dbContext,
+    string? cursor,
+    int? pageSize,
     CancellationToken cancellationToken) =>
 {
     var authResult = await RequireTodoContextAsync(httpContext, authService, todoFgaService, sampleOptions.Value, "todos.read", cancellationToken);
@@ -420,30 +424,28 @@ app.MapGet("/api/todos", async (
         todoContext.SubjectId,
         TodoFgaService.TodoReadPermission);
 
-    var items = await dbContext.TodoItems
-        .AsNoTracking()
-        .Where(filter)
-        .OrderBy(x => x.IsCompleted)
-        .ThenBy(x => x.CreatedAt)
-        .Select(x => new
-        {
-            x.Id,
-            x.ResourceId,
-            x.Title,
-            x.IsCompleted,
-            x.CreatedAt,
-            x.CompletedAt
-        })
-        .ToListAsync(cancellationToken);
-
-    return Results.Ok(new
+    SqlOSCursorPage<TodoItem> page;
+    try
     {
-        resource = sampleOptions.Value.Resource,
-        audience = todoContext.ValidatedToken.Audience,
-        subjectId = todoContext.SubjectId,
-        organizationId = todoContext.ValidatedToken.OrganizationId,
-        items
-    });
+        page = await dbContext.TodoItems
+            .AsNoTracking()
+            .OrderByDescending(x => x.CreatedAt)
+            .ToPageAsync(filter, Math.Clamp(pageSize ?? 20, 1, 100), cursor, cancellationToken);
+    }
+    catch (SqlOSCursorException exception)
+    {
+        return SqlOSCursorPagination.BadRequest(exception);
+    }
+
+    return Results.Ok(page.ToResponse(x => new
+    {
+        x.Id,
+        x.ResourceId,
+        x.Title,
+        x.IsCompleted,
+        x.CreatedAt,
+        x.CompletedAt
+    }));
 });
 
 app.MapPost("/api/todos", async (

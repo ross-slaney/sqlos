@@ -302,6 +302,8 @@ internal static class SqlOSFgaPageOrderMaintenance
     /// <summary>
     /// Subtree refreshes first, then rows by key: a row that is both under a changed resource and
     /// changed itself is rewritten last by key, so it ends with exactly one set of entries.
+    /// An order whose entry table startup found missing is skipped: its rows are written, and the
+    /// first start after the table exists fills it.
     /// </summary>
     private static IEnumerable<(string Sql, DbParameter[] Parameters)> Statements(DbContext context, Plan plan)
     {
@@ -310,7 +312,7 @@ internal static class SqlOSFgaPageOrderMaintenance
 
         if (plan.ChangedResources.Count > 0)
         {
-            foreach (var order in SqlOSFgaPageOrders.All(context.Model))
+            foreach (var order in SqlOSFgaPageOrders.All(context.Model).Where(order => !SqlOSFgaPageOrders.IsTableMissing(context.Model, order)))
             {
                 var store = order.Store(maxDepth);
                 yield return (
@@ -328,7 +330,7 @@ internal static class SqlOSFgaPageOrderMaintenance
             // not make the insert of a reused key fail.
             var refresh = rows.Added.Select(entry => ProviderKey(entry, rows.Key)).Concat(rows.Modified).ToList();
             var delete = refresh.Concat(rows.Deleted).ToList();
-            foreach (var order in rows.Orders)
+            foreach (var order in rows.Orders.Where(order => !SqlOSFgaPageOrders.IsTableMissing(context.Model, order)))
             {
                 var store = order.Store(maxDepth);
                 if (delete.Count > 0)

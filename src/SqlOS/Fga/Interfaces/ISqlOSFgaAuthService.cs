@@ -85,7 +85,8 @@ public interface ISqlOSFgaAuthService
     /// <c>SqlOSDbContext&lt;TContext&gt;</c> keeps entries current for every write that goes through
     /// <c>SaveChanges</c>. Call this after writes that bypass EF Core (bulk loads, raw SQL,
     /// <c>ExecuteUpdate</c>/<c>ExecuteDelete</c>) and for recovery. Until then, rows those writes
-    /// added are missing from pages, never wrongly present.
+    /// added are missing from pages and rows they changed page at their old position; a row the
+    /// caller may not see is never returned, because every page row passes the filter once more.
     /// </para>
     /// </remarks>
     Task RebuildPageOrdersAsync(CancellationToken cancellationToken = default);

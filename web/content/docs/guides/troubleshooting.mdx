@@ -71,6 +71,20 @@ Use **Send test delivery** only with an operator-controlled destination. A test 
 - Permission key in code must match seeded permission keys exactly.
 - Use the access tester in `/sqlos/admin/fga/` to reproduce the check.
 
+## ToPageAsync logs "No page order is declared"
+
+```text
+ToPageAsync scanned 1240 rows of Product ordered by CreatedAt, Id asc to fill a page of 20. No page order is declared for it, ...
+```
+
+The page was ordered by an order no `HasPageOrder` declares, so `ToPageAsync` read the table in that order and checked each row, the way `.Where(filter)` does. It logs this once per entity and order. Declare the order the message names, `modelBuilder.Entity<Product>().HasPageOrder(e => e.CreatedAt)`, and add a migration; the next start fills the new table.
+
+## Pages are missing rows
+
+- Rows written outside EF Core (bulk loads, raw SQL, `ExecuteUpdate`/`ExecuteDelete`) have no page-order entries until you call `ISqlOSFgaAuthService.RebuildPageOrdersAsync()`.
+- A startup warning `Page order ...: table ... does not exist` means the migration that creates the entry table has not been applied. Pages for that order still return the right rows, by reading the table in order.
+- The context must derive from `SqlOSDbContext<TContext>`; a hand-rolled `ISqlOSFgaDbContext` does not keep page orders current.
+
 ## Still stuck?
 
 - Search [GitHub issues](https://github.com/ross-slaney/sqlos/issues)

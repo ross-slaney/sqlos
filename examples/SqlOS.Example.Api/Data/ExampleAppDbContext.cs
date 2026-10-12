@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using SqlOS;
 using SqlOS.Example.Api.FgaRetail.Models;
 using SqlOS.Example.Api.Models;
+using SqlOS.Fga.Extensions;
 
 namespace SqlOS.Example.Api.Data;
 
@@ -34,12 +35,15 @@ public sealed class ExampleAppDbContext : SqlOSDbContext<ExampleAppDbContext>
             entity.Ignore(x => x.ResourceIsActive);
         });
 
+        // The retail lists page with ToPageAsync; each order they page by is declared, so a page
+        // costs about a page for any caller.
         modelBuilder.Entity<Chain>(entity =>
         {
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => x.ResourceId);
             entity.Property(x => x.Name).HasMaxLength(200).IsRequired();
             entity.Property(x => x.ResourceId).HasMaxLength(100).IsRequired();
+            entity.HasPageOrder(x => x.Name);
         });
 
         modelBuilder.Entity<Location>(entity =>
@@ -53,6 +57,7 @@ public sealed class ExampleAppDbContext : SqlOSDbContext<ExampleAppDbContext>
                 .WithMany(x => x.Locations)
                 .HasForeignKey(x => x.ChainId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasPageOrder(x => x.Name);
         });
 
         modelBuilder.Entity<InventoryItem>(entity =>
@@ -68,6 +73,9 @@ public sealed class ExampleAppDbContext : SqlOSDbContext<ExampleAppDbContext>
                 .WithMany(x => x.InventoryItems)
                 .HasForeignKey(x => x.LocationId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasPageOrder(x => x.Name);
+            entity.HasPageOrder(x => x.Sku);
+            entity.HasPageOrder(x => x.Price);
         });
 
         modelBuilder.Entity<ExampleUserProfile>(entity =>

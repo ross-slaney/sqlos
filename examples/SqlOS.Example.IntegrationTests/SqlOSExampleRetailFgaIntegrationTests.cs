@@ -225,6 +225,46 @@ public sealed class SqlOSExampleRetailFgaIntegrationTests
         return subjects ?? [];
     }
 
+    [TestMethod]
+    public async Task ChainList_PagesByName_ThroughNextCursor()
+    {
+        var companyAdminEmail = await GetUserEmailByDisplayNameAsync("Company Admin");
+        var names = new List<string>();
+        string? cursor = null;
+        do
+        {
+            var path = cursor == null ? "/api/chains?pageSize=2" : $"/api/chains?pageSize=2&cursor={Uri.EscapeDataString(cursor)}";
+            var response = await GetAsUserAsync(path, companyAdminEmail);
+            response.EnsureSuccessStatusCode();
+            var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            names.AddRange(json.RootElement.GetProperty("data").EnumerateArray().Select(x => x.GetProperty("name").GetString()!));
+            cursor = json.RootElement.GetProperty("nextCursor").GetString();
+        }
+        while (cursor != null);
+
+        names.Should().OnlyHaveUniqueItems();
+        names.Where(name => new[] { "Aldi", "Costco", "Kroger", "Target", "Walmart" }.Contains(name))
+            .Should().Equal("Aldi", "Costco", "Kroger", "Target", "Walmart");
+    }
+
+    [TestMethod]
+    public async Task InventoryCursor_FromAnotherSort_IsABadRequest()
+    {
+        var companyAdminEmail = await GetUserEmailByDisplayNameAsync("Company Admin");
+        var first = await GetAsUserAsync("/api/locations/loc_001/inventory?pageSize=1&sortBy=sku", companyAdminEmail);
+        first.EnsureSuccessStatusCode();
+        var cursor = JsonDocument.Parse(await first.Content.ReadAsStringAsync()).RootElement.GetProperty("nextCursor").GetString();
+        cursor.Should().NotBeNull();
+
+        var next = await GetAsUserAsync($"/api/locations/loc_001/inventory?pageSize=1&sortBy=sku&cursor={Uri.EscapeDataString(cursor!)}", companyAdminEmail);
+        var mismatched = await GetAsUserAsync($"/api/locations/loc_001/inventory?pageSize=1&sortBy=price&cursor={Uri.EscapeDataString(cursor!)}", companyAdminEmail);
+
+        next.EnsureSuccessStatusCode();
+        mismatched.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        JsonDocument.Parse(await mismatched.Content.ReadAsStringAsync()).RootElement.GetProperty("error").GetString()
+            .Should().Be("invalid_cursor");
+    }
+
     private static async Task<string> GetUserEmailByDisplayNameAsync(string displayName)
     {
         var subjects = await GetDemoSubjectsAsync();

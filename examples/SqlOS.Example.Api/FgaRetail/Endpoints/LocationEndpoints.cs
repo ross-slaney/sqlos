@@ -7,6 +7,7 @@ using SqlOS.Example.Api.FgaRetail.Seeding;
 using SqlOS.Example.Api.FgaRetail.Services;
 using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
+using SqlOS.Pagination;
 
 namespace SqlOS.Example.Api.FgaRetail.Endpoints;
 
@@ -254,9 +255,8 @@ public static class LocationEndpoints
         string? cursor)
     {
         var canView = await fga.BuildFilterAsync<Location>(subjectId, RetailPermissionKeys.LocationView);
-        var size = Math.Clamp(pageSize, 1, 100);
 
-        var query = context.Locations.Where(canView);
+        IQueryable<Location> query = context.Locations.AsNoTracking().Include(l => l.Chain);
 
         if (chainId != null)
         {
@@ -271,43 +271,28 @@ public static class LocationEndpoints
                 (l.StoreNumber != null && l.StoreNumber.ToLower().Contains(term)));
         }
 
-        // Keyset cursor: skip everything at or before the last row of the previous page.
-        if (cursor != null)
+        // StoreNumber is nullable, so the page order is Name (declared in ExampleAppDbContext).
+        SqlOSCursorPage<Location> page;
+        try
         {
-            var (after, afterId) = RetailCursor.Decode(cursor);
-            query = query.Where(l =>
-                (l.StoreNumber ?? "").CompareTo(after) > 0 ||
-                ((l.StoreNumber ?? "") == after && l.Id.CompareTo(afterId) > 0));
+            page = await query.OrderBy(l => l.Name).ToPageAsync(canView, Math.Clamp(pageSize, 1, 100), cursor);
+        }
+        catch (Exception exception) when (exception is SqlOSCursorException or ArgumentException { ParamName: "cursor" })
+        {
+            return Results.BadRequest(new { error = SqlOSCursorException.ErrorCode, message = exception.Message });
         }
 
-        var rows = await query
-            .OrderBy(l => l.StoreNumber ?? "")
-            .ThenBy(l => l.Id) // unique tiebreaker keeps pages deterministic
-            .Select(l => new LocationDto
-            {
-                Id = l.Id,
-                ResourceId = l.ResourceId,
-                ChainId = l.ChainId,
-                ChainName = l.Chain!.Name,
-                Name = l.Name,
-                StoreNumber = l.StoreNumber,
-                City = l.City,
-                State = l.State,
-                CreatedAt = l.CreatedAt
-            })
-            .Take(size + 1)
-            .ToListAsync();
-
-        var hasNextPage = rows.Count > size;
-        if (hasNextPage) rows.RemoveAt(size);
-
-        string? nextCursor = null;
-        if (hasNextPage)
+        return Results.Ok(page.ToResponse(l => new LocationDto
         {
-            var last = rows[^1];
-            nextCursor = RetailCursor.Encode(last.StoreNumber ?? "", last.Id);
-        }
-
-        return Results.Ok(new { data = rows, pageSize = size, nextCursor, hasNextPage });
+            Id = l.Id,
+            ResourceId = l.ResourceId,
+            ChainId = l.ChainId,
+            ChainName = l.Chain!.Name,
+            Name = l.Name,
+            StoreNumber = l.StoreNumber,
+            City = l.City,
+            State = l.State,
+            CreatedAt = l.CreatedAt
+        }));
     }
 }

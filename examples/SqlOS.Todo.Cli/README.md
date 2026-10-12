@@ -64,8 +64,11 @@ Complete sign-in in the browser. The CLI stores the access and refresh token res
 # Show the authenticated identity and token context.
 dotnet run --project examples/SqlOS.Todo.Cli/SqlOS.Todo.Cli.csproj -- whoami
 
-# List visible todos.
+# List visible todos, newest first. The CLI follows nextCursor until the last page.
 dotnet run --project examples/SqlOS.Todo.Cli/SqlOS.Todo.Cli.csproj -- list
+
+# The same list, fetched two todos per request.
+dotnet run --project examples/SqlOS.Todo.Cli/SqlOS.Todo.Cli.csproj -- list --page-size 2
 
 # Create a todo.
 dotnet run --project examples/SqlOS.Todo.Cli/SqlOS.Todo.Cli.csproj -- add "Ship the CLI"
@@ -83,7 +86,7 @@ The available commands are:
 | --- | --- |
 | `login` | Discovers the client/server and completes device authorization |
 | `whoami` | `GET /api/me` |
-| `list` | `GET /api/todos` and compact terminal formatting |
+| `list [--page-size <n>]` | `GET /api/todos?pageSize=&cursor=`, following `nextCursor` to the last page, with compact terminal formatting |
 | `add "<text>"` | `POST /api/todos` |
 | `toggle <todo-id>` | `POST /api/todos/{id}/toggle` |
 | `logout` | Deletes the local token file |

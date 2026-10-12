@@ -20,25 +20,23 @@ For a document editor, create a workspace when someone signs up and grant them a
 
 ```csharp
 var canRead = await authorization.BuildFilterAsync<Document>(subjectId, "document.read");
-var documents = await db.Documents
-    .Where(canRead)
-    .OrderBy(d => d.Name).ThenBy(d => d.Id)
-    .Take(21)
-    .ToListAsync();
+var page = await db.Documents
+    .OrderBy(d => d.Name)
+    .ToPageAsync(canRead, pageSize: 20, cursor);
 ```
 
-The endpoint needs no `where tenantId` or `where userId` to discover authorized records across the caller's grants. Add those conditions when the screen itself is scoped to a tenant or owner. Declare the page's compound index (`HasIndex(d => new { d.Name, d.Id })`); EF composes authorization, filtering, ordering, and pagination into SQL. Point checks protect individual actions and writes.
+The endpoint needs no `where tenantId` or `where userId` to discover authorized records across the caller's grants. Add those conditions when the screen itself is scoped to a tenant or owner. Declare the order the screen pages by (`HasPageOrder(d => d.Name)`) and index it on your table (`HasIndex(d => new { d.Name, d.Id })`). Use `.Where(canRead)` for counts, joins, and other queries that are not pages. Point checks protect individual actions and writes.
 
 ### Design the hierarchy around access
 
 - **Grant where access belongs.** Workspace → document, team → inspection → item, or department → case → record. Choose the highest node that matches the intended access. A grant covers the relevant descendants, including new ones; do not broaden access just to make queries faster.
 - **Use groups for shared responsibilities.** One group grant replaces duplicate grants for its members. Use direct grants for individual shares. Membership or ownership alone does not grant access.
-- **Sparse access can be expensive.** The authorization TVF checks candidate rows by walking their resource ancestors. A page can examine many denied rows, or the entire remaining table for an empty or underfull result. An index on the requested order does not remove this limitation.
-- **Keep application indexes deliberate.** Index the filters and orders your screens use. SqlOS does not add per-level page indexes, direct-grant tables, or an application-side page executor.
-- **Treat hierarchy changes as permission changes.** Moving or deactivating a branch changes which ancestor grants apply to its descendants.
-- **One API does not mean every query has the same cost.** Pages, counts, joins, and reports all compose the SQL authorization predicate. There is no page-sized-work guarantee independent of table size.
+- **Declare the orders your lists page by.** `HasPageOrder(d => d.Name)` makes SqlOS keep a copy of that order under every node of the resource tree, in its own table. `ToPageAsync` then costs about a page for any caller: one who sees everything, one who sees three rows of a million, one whose rows sit at the far end of the order. An order you have not declared still pages correctly but reads the table for a caller who sees little of it, and SqlOS logs the declaration to add.
+- **Keep application indexes deliberate.** Index the filters and orders your screens use. SqlOS adds nothing to your tables; a page order is a table in SqlOS's own schema, kept current in the same transaction as each save.
+- **Treat hierarchy changes as permission changes.** Moving or deactivating a branch changes which ancestor grants apply to its descendants, and rewrites that branch's page-order entries.
+- **Pages are not every query.** Counts, joins, and reports compose the SQL authorization predicate with `.Where(filter)` and check rows one by one; a caller who sees little of a large table makes them read most of it.
 
-Application tables connect to SqlOS resources through `ResourceId`. SQL Server or PostgreSQL evaluates the recursive authorization function in the query; there is no preliminary visibility count, custom page executor, or external policy service.
+Application tables connect to SqlOS resources through `ResourceId`. SQL Server or PostgreSQL evaluates the recursive authorization function in the query; there is no preliminary visibility count or external policy service.
 
 → **[Designing your resource tree and its tradeoffs](https://sqlos.dev/docs/fga/designing-your-resource-tree)** · [Authorize EF Core queries](https://sqlos.dev/docs/quickstarts/ef-authorization) · [Page shapes and indexes](https://sqlos.dev/docs/guides/paginating-authorized-lists)
 

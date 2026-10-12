@@ -107,8 +107,9 @@ async function initAppPage() {
 }
 
 async function refreshTodos(todoListElement, sessionInfoElement) {
+  const config = await getSampleConfig();
   const meResponse = await apiFetch("/api/me");
-  const todosResponse = await apiFetch("/api/todos");
+  const todosResponse = await apiFetch("/api/todos?pageSize=50");
   const mePayload = await meResponse.json();
   const todosPayload = await todosResponse.json();
 
@@ -130,13 +131,14 @@ async function refreshTodos(todoListElement, sessionInfoElement) {
       subjectId: mePayload.subjectId,
       clientId: mePayload.clientId,
       audience: mePayload.audience,
-      resource: todosPayload.resource
+      resource: config.resource
     },
     null,
     2
   );
 
-  const items = todosPayload.items || [];
+  // GET /api/todos returns a page: { data, pageSize, nextCursor, hasNextPage }.
+  const items = todosPayload.data || [];
   if (!items.length) {
     todoListElement.innerHTML = `<div class="empty-state">No todos yet. Add one from the form above.</div>`;
     return;

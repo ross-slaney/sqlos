@@ -150,6 +150,22 @@ public sealed class TodoE2eTests
         Assert.AreEqual(0, list.ExitCode, list.ToString());
         StringAssert.Contains(list.StandardOutput, todoTitle, "list must show the todo created with the device-grant token");
 
+        // Two more todos and a page size of 2: the CLI must follow nextCursor to the second page.
+        var moreTitles = new[] { $"{todoTitle} two", $"{todoTitle} three" };
+        foreach (var title in moreTitles)
+        {
+            var addMore = await CliProcess.RunAsync(tokenHome, "add", title);
+            Assert.AreEqual(0, addMore.ExitCode, addMore.ToString());
+        }
+
+        var paged = await CliProcess.RunAsync(tokenHome, "list", "--page-size", "2");
+        Assert.AreEqual(0, paged.ExitCode, paged.ToString());
+        var lines = paged.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        CollectionAssert.AreEqual(
+            new[] { moreTitles[1], moreTitles[0], todoTitle },
+            lines.Select(line => line.Split("  ", 2)[^1]).ToArray(),
+            "a paged list must show every todo, newest first, across pages");
+
         var logout = await CliProcess.RunAsync(tokenHome, "logout");
         Assert.AreEqual(0, logout.ExitCode, logout.ToString());
         Assert.IsFalse(File.Exists(Path.Combine(tokenHome, "tokens.json")), "logout must delete the token file");
