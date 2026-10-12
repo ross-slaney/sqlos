@@ -36,6 +36,12 @@ public abstract class SqlOSDbContext<TContext> : DbContext, ISqlOSAuthServerDbCo
         string permissionId)
         => FromExpression(() => IsResourceAccessible(resourceId, subjectIds, permissionId));
 
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        base.OnConfiguring(optionsBuilder);
+        optionsBuilder.UseSqlOSFga();
+    }
+
     protected sealed override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);

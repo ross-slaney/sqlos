@@ -1,6 +1,6 @@
 ---
 title: "Paginating authorized lists"
-description: "Compose BuildFilterAsync with offset or keyset pagination in plain EF Core."
+description: "Use ordinary EF pages with native scope indexes, and understand supported orders, cursors, and query costs."
 section: "authorization"
 group: "checks"
 order: 6
@@ -15,11 +15,44 @@ order: 6
   SqlOS provides the authorization filter. Pagination, sorting, search, and projection are ordinary EF Core (or an external pagination library) composed on the same query.
 </Banner>
 
-`BuildFilterAsync` returns an `Expression<Func<T, bool>>` that translates to the SqlOS authorization TVF at query time. Anything you compose after `.Where(filter)` — projections, ordering, `Skip`/`Take`, keyset predicates — ends up in the same SQL statement.
+`BuildFilterAsync` returns an `Expression<Func<T, bool>>` for ordinary EF queries. A supported indexed page uses SqlOS's native scope indexes; other shapes retain the recursive authorization TVF. Both paths evaluate grants in the database and preserve the resource-tree model. You keep one authorization API.
 
-## Sparse-access limitation
+## An indexed page
 
-The recursive authorization TVF checks candidate rows; it does not jump directly into authorized branches. A caller with sparse access can therefore require many checks to fill a page, even with an index on the requested order. Empty or underfull results can examine the entire remaining table. Keyset pagination removes offset work but does not solve this limitation.
+Declare the ordinary compound index your screen uses, then filter and order the entity query before taking the page:
+
+```csharp
+// In the application's EF model configuration:
+modelBuilder.Entity<InventoryItem>().HasIndex(i => new { i.Name, i.Id });
+
+var canView = await fga.BuildFilterAsync<InventoryItem>(
+    subjectId, RetailPermissionKeys.InventoryView);
+
+var items = await db.InventoryItems
+    .Where(canView)
+    .OrderBy(i => i.Name).ThenBy(i => i.Id)
+    .Take(pageSize + 1)
+    .Select(i => new { i.Id, i.Name, i.Price })
+    .ToListAsync();
+```
+
+Use bounded, indexable column types for declared orders, such as `HasMaxLength(200)` for `Name`. Database index-width limits still apply.
+
+The database seeks matching rows within each eligible granted branch, removes duplicates, and chooses the global page using its native sorting rules. A caller's workspace grant can cover many rows without scanning unrelated workspaces. Only the page leaves the database; SqlOS does not load the grant list or sort rows in application memory.
+
+`AddSqlOS<TContext>` and `SqlOSDbContext` configure this automatically. Run SqlOS initialization after application migrations, outside an application-owned transaction. Standalone contexts using the lower-level FGA interfaces can enable the same integration with `options.UseSqlOSFga()` before initialization. SqlOS stores the maintained indexes in its own schema and adds no helper columns or indexes to application tables. The application link remains `ResourceId`.
+
+## Supported shapes and costs
+
+The native page path requires an ordinary single-table entity implementing `IHasResourceId`, one supported scalar primary key, one positive authorization predicate, an order covered by a maintained declared index, and `Take`. A primary-key order is supported without declaring another application index. Compound orders must match a declared index, including directions; reverse scans are supported. This does not create indexes for every sorting permutation.
+
+Apply business filters and cursor conditions before `Take`. Select the response fields after it. A condition written after `Take` still filters the selected page; SqlOS does not move it before the limit.
+
+Let `G` be the caller's eligible independently granted scopes and `k` the requested page size. The database performs a lookup per scope and takes at most `G × k` matching candidates before global deduplication and ordering. Normal index-lookup costs apply. This covers sparse and dense access, but more independent grants still mean more work, including direct grants on individual resources. Empty results check every eligible scope.
+
+Application and global filters run before each branch's limit. A residual filter can examine many authorized rows before finding `k` matches; filtering on an uncopied column also requires an application-table join. `Skip(n)` must produce the skipped prefix as well as the page. Neither cost is eliminated by authorization indexes.
+
+Counts without a page limit, exports, includes, `IgnoreQueryFilters`, unsupported compositions, and orders without a maintained matching index keep the original TVF query. Inheritance, table/entity splitting, owned mappings, views, temporal queries, and unsupported key types also use that path. The TVF can check many denied rows, including the remaining table for an empty result. A diagnostic identifies an unsupported page shape; no universal page-sized-work guarantee applies to arbitrary LINQ. Keep database/schema mappings stable: changing the connection's search path or default schema between initialization and querying is unsupported.
 
 ## Offset pagination
 
@@ -32,22 +65,22 @@ var canView = await fga.BuildFilterAsync<InventoryItem>(
 var items = await db.InventoryItems
     .Where(canView)
     .Where(i => i.LocationId == locationId)
+    .OrderBy(i => i.Name).ThenBy(i => i.Id)
+    .Skip(page * pageSize).Take(pageSize)
     .Select(i => new InventoryItemDto
     {
         Id = i.Id,
         Name = i.Name,
-        LocationName = i.Location!.Name
+        Price = i.Price
     })
-    .OrderBy(d => d.Name).ThenBy(d => d.Id)
-    .Skip(page * pageSize).Take(pageSize)
     .ToListAsync();
 ```
 
-Offset pagination is fine for small admin-style lists and simple UIs. For large tables or infinite scrolling, prefer keyset pagination, which does not degrade as the offset grows.
+Offset pagination is useful for small admin-style lists. For large tables or infinite scrolling, prefer keyset pagination: it avoids repeatedly visiting the skipped prefix. The `LocationId` condition still has its ordinary database filter cost.
 
 ## Keyset pagination with an external package
 
-Keyset (cursor/seek) pagination works with any library that composes on `IQueryable`. This example uses [MR.EntityFrameworkCore.KeysetPagination](https://github.com/mrahhal/MR.EntityFrameworkCore.KeysetPagination):
+Keyset (cursor/seek) pagination expresses the last row's position as a `Where` condition on the next query. Libraries that compose on `IQueryable` retain ordinary EF semantics; their resulting query must fit the supported shape above to use the native path. This example uses [MR.EntityFrameworkCore.KeysetPagination](https://github.com/mrahhal/MR.EntityFrameworkCore.KeysetPagination) on the entity query:
 
 ```csharp
 using MR.EntityFrameworkCore.KeysetPagination;
@@ -55,25 +88,21 @@ using MR.EntityFrameworkCore.KeysetPagination;
 var canView = await fga.BuildFilterAsync<InventoryItem>(
     subjectId, RetailPermissionKeys.InventoryView);
 
-var dtos = db.InventoryItems
+var query = db.InventoryItems
     .Where(canView)
-    .Where(i => i.LocationId == locationId)
-    .Select(i => new InventoryItemDto
-    {
-        Id = i.Id,
-        Name = i.Name,
-        Price = i.Price,
-        LocationName = i.Location!.Name
-    });
+    .Where(i => i.LocationId == locationId);
 
 // reference carries the sort value + Id of the last row on the previous page
 // (decoded from an opaque cursor your endpoint issued).
-var keysetContext = dtos.KeysetPaginate(
+var keysetContext = query.KeysetPaginate(
     b => b.Ascending(d => d.Name).Ascending(d => d.Id),
     KeysetPaginationDirection.Forward,
     reference);
 
-var rows = await keysetContext.Query.Take(pageSize + 1).ToListAsync();
+var rows = await keysetContext.Query
+    .Take(pageSize + 1)
+    .Select(i => new { i.Id, i.Name, i.Price })
+    .ToListAsync();
 
 var hasNextPage = rows.Count > pageSize;
 if (hasNextPage) rows.RemoveAt(pageSize);
@@ -83,7 +112,7 @@ Fetching `pageSize + 1` rows and trimming the extra is a simple way to compute `
 
 ## Authorization is evaluated at query time
 
-The filter's TVF runs inside each page's SQL query. If grants change between keyset pages, newly authorized rows appear and newly revoked rows disappear from subsequent pages — the keyset predicate skips by position in the sort order, not by a snapshot of the first page. This is normally exactly what you want: a revoked subject stops seeing rows on the very next page fetch.
+Both query paths evaluate current grants, role permissions, principal eligibility, and grant validity windows in SQL. A later page uses its cursor against the authorization state visible to that query's transaction. Newly authorized rows after the cursor can appear; revoked rows disappear once the revocation is visible. There is no retained first-page authorization snapshot or pagination session. Normal database transaction isolation still applies.
 
 Note that the *principal set* (the subject plus its group memberships) is captured when `BuildFilterAsync` is awaited. Build the filter once per request; do not cache it in statics or reuse it across requests.
 

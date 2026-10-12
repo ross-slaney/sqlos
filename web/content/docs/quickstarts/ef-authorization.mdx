@@ -152,7 +152,8 @@ api.MapGet("/projects", async (
     var projects = await db.Projects
         .AsNoTracking()
         .Where(filter)
-        .OrderBy(project => project.Name)
+        .OrderBy(project => project.Name).ThenBy(project => project.Id)
+        .Take(20)
         .Select(project => new
         {
             project.Id,
@@ -179,7 +180,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
             entity.ToTable("Projects");
             entity.HasKey(project => project.Id);
             entity.Property(project => project.ResourceId).HasMaxLength(200);
+            entity.Property(project => project.Name).HasMaxLength(200);
             entity.HasIndex(project => project.ResourceId).IsUnique();
+            entity.HasIndex(project => new { project.Name, project.Id });
         });
     }
 }
@@ -201,7 +204,9 @@ public sealed class Project : ISqlOSResourceEntity
 public sealed record CreateProjectRequest(string Name);
 ```
 
-Create the `Projects` table with your normal EF migration workflow. SqlOS owns its own tables; your application migration owns `Projects`.
+Create the `Projects` table with your normal EF migration workflow, before SqlOS initialization and before accepting queries. SqlOS owns its own tables; your application migration owns `Projects`. Run initialization outside an application-owned transaction.
+
+The list returns the first 20 accessible projects. Its declared `(Name, Id)` index and `Take` let SqlOS use the native indexed-page path on PostgreSQL and SQL Server. `BuildFilterAsync` remains the only authorization query API: there is no separate page method or grant list to load. For subsequent pages, use the cursor pattern in [Paginating authorized lists](/docs/guides/paginating-authorized-lists).
 
 ## How the write works
 
@@ -212,6 +217,8 @@ Create the `Projects` table with your normal EF migration workflow. SqlOS owns i
 5. `SqlOSDbContext.SaveChangesAsync` synchronizes the backing resource before EF commits.
 
 The grant remains explicit. Implementing `ISqlOSResourceEntity` does not grant access by itself.
+
+SqlOS maintains shared ancestry and indexed values in its own tables, using database triggers in the source transaction. `ResourceId` is the application table's only connection to those structures; SqlOS adds no helper columns or indexes to `Projects`. `SqlOSDbContext` configures SQL Server's trigger-compatible save behavior automatically.
 
 ## Verify
 
@@ -264,8 +271,9 @@ Keep `ResourceId` as a mapped string property. Call `Where(filter)` while the qu
 ## Production notes
 
 - Never accept the acting subject ID from the request body or query string.
-- Use stable, unique resource IDs and index the mapped `ResourceId` property.
+- Use stable resource IDs and declare the ordinary compound indexes your screens order by.
 - Model tenant or organization roots when roles should inherit to many child rows.
+- An indexed page performs work per eligible granted scope. Many independent grants still cost more; residual filters can inspect additional authorized rows. Counts, unindexed orders, and unsupported compositions retain the original TVF path. See [page scope and costs](/docs/guides/paginating-authorized-lists).
 - Check write permissions before modifying existing resources; list filtering only protects reads.
 - Keep resource creation, subject provisioning, and the initial grant in one application transaction where possible.
 - Add integration tests proving that ungranted subjects cannot read or mutate protected rows.

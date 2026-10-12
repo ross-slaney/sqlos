@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using SqlOS.Database;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
+using SqlOS.Fga.Indexing;
 
 namespace SqlOS.Fga.Services;
 
@@ -27,6 +28,8 @@ public class SqlOSFgaFunctionInitializer
     {
         _logger.LogInformation("Ensuring database functions exist...");
         await EnsureIsResourceAccessibleFunctionAsync(cancellationToken);
+        if (_context is DbContext dbContext)
+            await SqlOSFgaIndexInitializer.EnsureAsync(dbContext, _options, _logger, cancellationToken);
         _logger.LogInformation("Database functions verified.");
     }
 

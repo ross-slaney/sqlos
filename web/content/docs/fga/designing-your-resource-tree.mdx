@@ -58,19 +58,23 @@ For this compound order, declare the matching EF index, for example `HasIndex(d 
 
 ## Query performance
 
-`BuildFilterAsync` resolves the caller's principals and returns a predicate. EF translates it to the recursive authorization TVF in the same SQL query as the application's filters, ordering, and pagination. The function walks a candidate resource's ancestors to find a matching current grant; SqlOS does not choose between query strategies using a visibility count.
+`BuildFilterAsync` resolves the caller's principals and returns the same authorization predicate for every query. For a supported single-table page with a declared indexed order and `Take`, SqlOS translates that query into database-native scope-index lookups. The database finds the caller's eligible grants, reads matching candidates from each granted branch, removes duplicates, and selects the page in the application's order. Only the final results leave the database.
 
-A caller who can see most candidates can fill a page quickly. Sparse access can require checking many denied rows, and an empty or underfull page can examine the entire remaining table. A matching sorting index and keyset cursor avoid some ordinary sorting and offset costs, but do not eliminate this authorization cost. Counts, joins, and reports also depend on the work in the database query.
+This gives sparse callers an indexed route into their branches instead of walking unrelated records looking for a match. A workspace containing many documents can be one branch lookup; grants on 100 separate workspaces require up to 100 branch lookups. For `G` eligible granted scopes and a page size of `k`, the query takes at most `G × k` matching candidates before deduplication and global ordering. Direct grants on many separate resources also contribute to `G`.
 
-Grant placement should express the intended access. It is not a guarantee that a workspace grant makes every list query independent of table size. Test broad access, sparse individual shares, later cursors, and empty results using your application's real filters and orders.
+The bound is on matching candidates, not every row the database examines. An application filter without a suitable index can still inspect many rows inside an authorized branch. Empty pages check every eligible branch; `Skip` also pays for the skipped prefix. Counts, exports, includes, unsupported query shapes, and orders without a maintained matching index keep the recursive authorization TVF. That fallback can check many denied rows and does not receive the indexed-page benefit.
+
+Grant placement should express the intended access. Hierarchy grants keep the number of independent scopes small, but do not make arbitrary sorting, filtering, or reports constant-time. Test your screens' actual filters and orders, including later cursors and empty results. See [the supported page shapes and costs](/docs/guides/paginating-authorized-lists).
 
 ## What SqlOS maintains for you
 
 Your application keeps ordinary tables and relationships, connected to FGA through `ResourceId`. Entities implementing `ISqlOSResourceEntity` describe their resource and parent; `SqlOSDbContext<TContext>` synchronizes those resource rows during saves. Grants remain explicit.
 
-SqlOS owns its resource, principal, group, role, permission, and grant tables and the authorization functions. It does not maintain application scope columns, per-level page indexes, grant-count caches, or direct-grant page tables. Application sorting and filtering stay with the database through ordinary EF queries.
+SqlOS owns its resource, principal, group, role, permission, and grant tables and the authorization functions. It also maintains shared ancestry, a resource-to-application-row lookup, and copies of declared indexed values beneath their eligible ancestors. These structures live in SqlOS tables. **SqlOS adds no helper columns or indexes to application tables:** `ResourceId` remains the connection. Database triggers keep the copies current in the same transaction; `AddSqlOS` and `SqlOSDbContext` configure the integration, including SQL Server save compatibility.
 
-Changing a resource's parent changes which ancestor grants can apply on subsequent queries. Keep hierarchy changes deliberate because they change access, and check the appropriate permissions before making them. Build the authorization filter per request so principal and group resolution is current.
+The indexes are shared by every principal. An ordinary application write maintains its row's ancestor copies and indexes, not a copy for every principal who can access it. Grants, roles, and group memberships stay in their existing policy tables; changing them does not rewrite the descendants' scope indexes. Storage grows with rows, resource depth, and declared indexes, not every possible sort permutation.
+
+Moving or deactivating a resource changes which ancestor grants can apply and rebuilds the affected descendants' entries. Treat these as deliberate administrative operations and check the appropriate permissions first. Concurrent hierarchy changes and writes can contend or require transaction retries. First initialization or a changed index model populates the affected structures; ordinary startup does not rebuild unchanged data. Build the authorization filter per request so principal and group resolution is current.
 
 ## Next steps
 

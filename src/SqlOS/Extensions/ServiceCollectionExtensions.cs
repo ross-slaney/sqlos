@@ -19,6 +19,7 @@ using SqlOS.Email.Services;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Services;
+using SqlOS.Fga;
 using SqlOS.Hosting;
 using SqlOS.Services;
 using SqlOS.Security;
@@ -42,6 +43,7 @@ public static class ServiceCollectionExtensions
         SqlOSOptionsValidator.ValidateOrThrow(options);
 
         services.AddRouting();
+        services.ConfigureDbContext<TContext>((_, builder) => builder.UseSqlOSFga());
         services.AddSingleton<SqlOSEndpointMappingState>();
         services.AddSingleton(Options.Create(options));
         services.AddSingleton(Options.Create(options.AuthServer));

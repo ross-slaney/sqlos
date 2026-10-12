@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
+using SqlOS.Fga.Indexing;
+using System.Text.Json;
 
 namespace SqlOS.Fga.Configuration;
 
@@ -14,6 +16,8 @@ public static class SqlOSFgaModelConfiguration
     {
         var schema = options.Schema;
         var tables = options.TableNames;
+        modelBuilder.Model.SetAnnotation(SqlOSFgaNativeOptions.SchemaAnnotation, schema);
+        modelBuilder.Model.SetAnnotation(SqlOSFgaNativeOptions.TablesAnnotation, JsonSerializer.Serialize(tables));
         modelBuilder.Model.SetAnnotation(
             SqlOSFgaHierarchyDepth.ModelAnnotationName,
             SqlOSFgaHierarchyDepth.Normalize(options.MaxResourceHierarchyDepth));

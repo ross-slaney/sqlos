@@ -87,4 +87,4 @@ Example: check `CHAIN_VIEW` on `chain_walmart`.
 3. Walk up: `chain_walmart` → `org::acme` → `root`.
 4. Match on any ancestor? Allow.
 
-SQL Server runs this as a **TVF**. EF uses it in `Where`. No giant loads into memory.
+The recursive **TVF** provides this authorization predicate on SQL Server and PostgreSQL. Supported indexed pages use shared scope indexes to seek into granted branches, with the same grants and inheritance rules. Both paths run in the database through `BuildFilterAsync`; see [paginating authorized lists](/docs/guides/paginating-authorized-lists) for supported shapes and costs.

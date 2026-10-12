@@ -33,12 +33,12 @@ The endpoint needs no `where tenantId` or `where userId` to discover authorized 
 
 - **Grant where access belongs.** Workspace → document, team → inspection → item, or department → case → record. Choose the highest node that matches the intended access. A grant covers the relevant descendants, including new ones; do not broaden access just to make queries faster.
 - **Use groups for shared responsibilities.** One group grant replaces duplicate grants for its members. Use direct grants for individual shares. Membership or ownership alone does not grant access.
-- **Sparse access can be expensive.** The authorization TVF checks candidate rows by walking their resource ancestors. A page can examine many denied rows, or the entire remaining table for an empty or underfull result. An index on the requested order does not remove this limitation.
-- **Keep application indexes deliberate.** Index the filters and orders your screens use. SqlOS does not add per-level page indexes, direct-grant tables, or an application-side page executor.
+- **Sparse pages start from grants.** For supported indexed pages, SqlOS uses shared scope indexes to seek into the caller's granted branches. It does not scan unrelated rows hoping to find enough authorized results. More independently granted branches still mean more index seeks; hierarchy grants keep that work small.
+- **Keep application indexes deliberate.** Declare the compound orders your screens use. SqlOS maintains matching scope indexes in its own tables; it adds no helper columns or indexes to application tables. Filtering, sorting, and merging run in one database statement.
 - **Treat hierarchy changes as permission changes.** Moving or deactivating a branch changes which ancestor grants apply to its descendants.
-- **One API does not mean every query has the same cost.** Pages, counts, joins, and reports all compose the SQL authorization predicate. There is no page-sized-work guarantee independent of table size.
+- **One API does not mean every query has the same cost.** The optimized path covers ordinary indexed pages. Counts, joins, unsupported query shapes, and unindexed orders retain the authorization TVF. Residual filters still have ordinary database costs. SqlOS logs when an authorized page cannot use its native scope index.
 
-Application tables connect to SqlOS resources through `ResourceId`. SQL Server or PostgreSQL evaluates the recursive authorization function in the query; there is no preliminary visibility count, custom page executor, or external policy service.
+Application tables connect to SqlOS resources through `ResourceId`. The public query remains `BuildFilterAsync` plus ordinary LINQ. SqlOS transparently maintains ancestry and indexed values in its own tables, with database triggers keeping writes consistent. There is no preliminary visibility count, application-side page executor, or retained pagination session. [Native scope indexes: supported queries and costs](docs/FGA_NATIVE_INDEXES.md).
 
 → **[Designing your resource tree and its tradeoffs](https://sqlos.dev/docs/fga/designing-your-resource-tree)** · [Authorize EF Core queries](https://sqlos.dev/docs/quickstarts/ef-authorization) · [Page shapes and indexes](https://sqlos.dev/docs/guides/paginating-authorized-lists)
 

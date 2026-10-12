@@ -26,19 +26,21 @@ var chains = await dbContext.Chains
     .ToListAsync();
 ```
 
-The subject only sees chains they have access to. The filter translates to a SQL query -- no in-memory filtering.
+The subject only sees chains they have access to. The filter translates to SQL; no application-side authorization filtering is needed. This unbounded list uses the original TVF path. For an indexed page, declare its compound order and add `Take` before projecting the results, as below.
 
 ## Filter lifetime
 
-The subject's principal set (the subject plus its active group memberships) is resolved when the returned task is awaited. Build the filter once per request and compose it into that request's queries. Do not cache the filter in statics or reuse it across requests -- group membership is captured when the filter is built; grants are checked by the TVF when the SQL query executes.
+The subject's principal set (the subject plus its active group memberships) is resolved when the returned task is awaited. Build the filter once per request and compose it into that request's queries. Do not cache the filter in statics or reuse it across requests: group membership is captured when the filter is built; current grants and principal eligibility are checked when SQL executes, on both query paths.
 
-## Sparse-access limitation
+## Indexed pages and the TVF fallback
 
-The TVF walks the ancestors of each candidate resource to check grants. It can examine many denied rows before finding a page, or the entire remaining table when fewer than a page are accessible. This path does not provide table-size-independent pagination. See [Paginating authorized lists](/docs/guides/paginating-authorized-lists).
+For a supported single-table page with a declared indexed order and `Take`, SqlOS uses shared scope indexes to seek into the caller's granted branches. The database filters each branch, removes overlapping results, sorts them, and returns the page in one SQL statement. Application tables retain their `ResourceId` link; SqlOS adds no helper columns or indexes to them. `AddSqlOS` and `SqlOSDbContext` configure the integration automatically.
+
+For `G` eligible granted scopes and page size `k`, the query collects at most `G × k` matching candidates before deduplication and ordering. Residual application filters can examine additional authorized rows, and many independent grants still require many branch lookups. Counts, exports, unsupported compositions, and orders without a maintained index retain the TVF. That path can examine many denied rows, or the remaining table for an empty result. See [supported page shapes and costs](/docs/guides/paginating-authorized-lists).
 
 ## Composing with plain EF
 
-SqlOS does authorization filters only. Pagination, sorting, search, and projection are ordinary EF Core on the same query:
+Keep pagination, sorting, search, and projection in ordinary EF Core. Declare an index matching `(Name, Id)`, put the page limit on the entity query, then select the response fields:
 
 ```csharp
 var canView = await authService
@@ -47,24 +49,24 @@ var canView = await authService
 var items = await db.InventoryItems
     .Where(canView)
     .Where(i => i.LocationId == locationId)
+    .OrderBy(i => i.Name).ThenBy(i => i.Id)
+    .Skip(page * pageSize).Take(pageSize)
     .Select(i => new InventoryItemDto
     {
         Id = i.Id,
         Name = i.Name,
-        LocationName = i.Location!.Name
+        Price = i.Price
     })
-    .OrderBy(d => d.Name).ThenBy(d => d.Id)
-    .Skip(page * pageSize).Take(pageSize)
     .ToListAsync();
 ```
 
-Everything composes into one SQL statement: the authorization TVF join, your business predicates, the projection, the ordering, and the paging.
+Authorization, business predicates, ordering, and pagination stay in the database. `Skip` still pays for the skipped prefix; a keyset condition avoids that offset work. There is no separate authorization-aware page API.
 
 For cursor/keyset pagination over authorized lists, see [Paginating authorized lists](/docs/guides/paginating-authorized-lists).
 
 ## Full endpoint example
 
-From the retail example app:
+An endpoint using the same pattern:
 
 ```csharp
 using SqlOS.AuthServer.Extensions;
@@ -91,19 +93,21 @@ api.MapGet("/chains", async (
         query = query.Where(c => c.Name.Contains(search));
 
     var chains = await query
+        .OrderBy(c => c.Name).ThenBy(c => c.Id)
+        .Skip((page ?? 0) * (pageSize ?? 20)).Take(pageSize ?? 20)
         .Select(c => new ChainListDto
         {
             Id = c.Id,
             Name = c.Name,
             LocationCount = c.Locations.Count
         })
-        .OrderBy(d => d.Name).ThenBy(d => d.Id)
-        .Skip((page ?? 0) * (pageSize ?? 20)).Take(pageSize ?? 20)
         .ToListAsync();
 
     return Results.Ok(chains);
 });
 ```
+
+Declare `(Name, Id)` in the `Chain` EF model for this page order. `Name.Contains(search)` and the per-row location count keep their normal database costs; the scope index does not make substring search or aggregates constant-time.
 
 ## When to use
 
