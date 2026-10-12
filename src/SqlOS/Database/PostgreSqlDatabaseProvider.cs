@@ -103,8 +103,7 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
         var userGroups = Qualify(options.Schema, tables.UserGroups);
         var agents = Qualify(options.Schema, tables.Agents);
         var permissions = Qualify(options.Schema, tables.Permissions);
-        var maxDepth = Math.Max(1, options.MaxResourceHierarchyDepth)
-            .ToString(CultureInfo.InvariantCulture);
+        var maxDepth = MaxDepth(options);
         return $"""
             CREATE OR REPLACE FUNCTION {schema}."fn_IsResourceAccessible"(
                 p_resource_id varchar(128),
@@ -115,30 +114,7 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
             LANGUAGE sql
             STABLE
             AS $sqlos$
-            WITH RECURSIVE ancestors AS (
-                SELECT
-                    "Id",
-                    "ParentId",
-                    0 AS "Depth",
-                    ('|' || "Id" || '|')::text AS "VisitedPath",
-                    FALSE AS "CycleDetected"
-                FROM {resources}
-                WHERE "Id" = p_resource_id AND "IsActive" = TRUE
-
-                UNION ALL
-
-                SELECT
-                    r."Id",
-                    r."ParentId",
-                    a."Depth" + 1,
-                    (a."VisitedPath" || r."Id" || '|')::text,
-                    (strpos(a."VisitedPath", '|' || r."Id" || '|') > 0)
-                FROM {resources} r
-                INNER JOIN ancestors a ON r."Id" = a."ParentId"
-                WHERE a."Depth" < {maxDepth}
-                  AND a."CycleDetected" = FALSE
-                  AND r."IsActive" = TRUE
-            )
+            {BuildAncestorsCte(options)}
             SELECT a."Id"
             FROM ancestors a
             INNER JOIN {grants} g ON a."Id" = g."ResourceId"
@@ -164,7 +140,213 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
                   WHERE target."Id" = p_resource_id
                     AND (permission."ResourceTypeId" IS NULL OR permission."ResourceTypeId" = target."ResourceTypeId")
               )
-              AND (s."SubjectTypeId" <> 'user' OR u."IsActive" = TRUE)
+              {BuildSubjectActivityConditions(options)}
+              AND (g."EffectiveFrom" IS NULL OR g."EffectiveFrom" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))
+              AND (g."EffectiveTo" IS NULL OR g."EffectiveTo" >= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))
+            LIMIT 1
+            $sqlos$;
+            """;
+    }
+
+    public string BuildResourceAncestorsFunctionSql(SqlOSFgaOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var schema = QuoteIdentifier(options.Schema);
+        var maxDepth = MaxDepth(options);
+        return $"""
+            CREATE OR REPLACE FUNCTION {schema}."fn_ResourceAncestors"(
+                p_resource_id varchar(450)
+            )
+            RETURNS TABLE("NodeId" varchar(450), "Depth" int)
+            LANGUAGE sql
+            STABLE
+            AS $sqlos$
+            {BuildAncestorsCte(options)}
+            SELECT a."Id", a."Depth"
+            FROM ancestors a
+            WHERE NOT EXISTS (SELECT 1 FROM ancestors malformed WHERE malformed."CycleDetected" = TRUE)
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM ancestors truncated
+                  WHERE truncated."Depth" = {maxDepth}
+                    AND truncated."ParentId" IS NOT NULL
+              )
+            $sqlos$;
+            """;
+    }
+
+    public string BuildPageNodesFunctionSql(SqlOSFgaOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var schema = QuoteIdentifier(options.Schema);
+        var tables = options.TableNames;
+        var resources = Qualify(options.Schema, tables.Resources);
+        var grants = Qualify(options.Schema, tables.Grants);
+        var rolePermissions = Qualify(options.Schema, tables.RolePermissions);
+        var subjects = Qualify(options.Schema, tables.Subjects);
+        var users = Qualify(options.Schema, tables.Users);
+        var serviceAccounts = Qualify(options.Schema, tables.ServiceAccounts);
+        var userGroups = Qualify(options.Schema, tables.UserGroups);
+        var agents = Qualify(options.Schema, tables.Agents);
+
+        // The grant conditions sit at the same indentation as in fn_IsResourceAccessible so the
+        // shared subject-activity text is byte-identical in both functions.
+        return $"""
+            CREATE OR REPLACE FUNCTION {schema}."fn_PageNodes"(
+                p_subject_ids text,
+                p_permission_id varchar(128)
+            )
+            RETURNS TABLE("NodeId" varchar(450))
+            LANGUAGE sql
+            STABLE
+            AS $sqlos$
+            WITH granted AS (
+            SELECT DISTINCT g."ResourceId" AS "NodeId"
+            FROM {grants} g
+            INNER JOIN {rolePermissions} rp ON g."RoleId" = rp."RoleId"
+            INNER JOIN {subjects} s ON g."SubjectId" = s."Id"
+            INNER JOIN {resources} node ON node."Id" = g."ResourceId"
+            LEFT JOIN {users} u ON s."Id" = u."SubjectId"
+            LEFT JOIN {serviceAccounts} sa ON s."Id" = sa."SubjectId"
+            LEFT JOIN {userGroups} ug ON s."Id" = ug."SubjectId"
+            LEFT JOIN {agents} ag ON s."Id" = ag."SubjectId"
+            WHERE g."SubjectId" IN (SELECT jsonb_array_elements_text(p_subject_ids::jsonb))
+              AND rp."PermissionId" = p_permission_id
+              AND node."IsActive" = TRUE
+              {BuildSubjectActivityConditions(options)}
+              AND (g."EffectiveFrom" IS NULL OR g."EffectiveFrom" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))
+              AND (g."EffectiveTo" IS NULL OR g."EffectiveTo" >= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))
+            )
+            SELECT granted."NodeId"
+            FROM granted
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM {schema}."fn_ResourceAncestors"(granted."NodeId") ancestor
+                INNER JOIN granted covering ON covering."NodeId" = ancestor."NodeId"
+                WHERE ancestor."Depth" >= 1
+            )
+            $sqlos$;
+            """;
+    }
+
+    public string BuildDeletePageEntriesByKeysSql(SqlOSFgaPageOrderStore order)
+        => $"""
+            DELETE FROM {Entries(order)}
+            WHERE {QuoteIdentifier(order.EntryRowKeyColumn)} = ANY(@keys);
+            """;
+
+    public string BuildInsertPageEntriesByKeysSql(SqlOSFgaPageOrderStore order)
+        => $"""
+            {InsertEntries(order)}
+            WHERE t.{QuoteIdentifier(order.AppKeyColumn)} = ANY(@keys);
+            """;
+
+    public string BuildDeletePageEntriesBySubtreeSql(SqlOSFgaPageOrderStore order)
+        => $"""
+            {SubtreeCte(order)}
+            DELETE FROM {Entries(order)}
+            WHERE {QuoteIdentifier(order.EntryRowKeyColumn)} IN (
+                SELECT t.{QuoteIdentifier(order.AppKeyColumn)}
+                FROM {AppTable(order)} AS t
+                WHERE t.{QuoteIdentifier(order.AppResourceIdColumn)} IN (SELECT subtree."Id" FROM subtree)
+            );
+            """;
+
+    public string BuildInsertPageEntriesBySubtreeSql(SqlOSFgaPageOrderStore order)
+        => $"""
+            {SubtreeCte(order)}
+            {InsertEntries(order)}
+            WHERE t.{QuoteIdentifier(order.AppResourceIdColumn)} IN (SELECT subtree."Id" FROM subtree);
+            """;
+
+    public string BuildDeleteAllPageEntriesSql(SqlOSFgaPageOrderStore order)
+        => $"DELETE FROM {Entries(order)};";
+
+    public string BuildInsertAllPageEntriesSql(SqlOSFgaPageOrderStore order)
+        => $"{InsertEntries(order)};";
+
+    public string BuildTableExistsSql(string? schema, string table)
+    {
+        var name = Table(schema, table).Replace("'", "''", StringComparison.Ordinal);
+        return $"SELECT CASE WHEN to_regclass('{name}') IS NULL THEN 0 ELSE 1 END AS \"Value\"";
+    }
+
+    public string BuildTableHasRowsSql(string? schema, string table)
+        => $"SELECT CASE WHEN EXISTS (SELECT 1 FROM {Table(schema, table)}) THEN 1 ELSE 0 END AS \"Value\"";
+
+    public DbParameter CreatePageKeysParameter(string name, IReadOnlyList<object> keys)
+    {
+        ArgumentNullException.ThrowIfNull(keys);
+        if (keys.Count == 0)
+        {
+            throw new ArgumentException("At least one key is required.", nameof(keys));
+        }
+
+        // A typed array (uuid[], integer[], text[], ...) so "= ANY(@keys)" compares like the key column.
+        var array = Array.CreateInstance(keys[0].GetType(), keys.Count);
+        for (var index = 0; index < keys.Count; index++)
+        {
+            array.SetValue(keys[index], index);
+        }
+
+        return new NpgsqlParameter(name, array);
+    }
+
+    public DbParameter CreatePageResourceIdsParameter(string name, IReadOnlyCollection<string> resourceIds)
+        => new NpgsqlParameter(name, resourceIds.ToArray());
+
+    /// <summary>
+    /// The ancestors CTE of <c>fn_IsResourceAccessible</c>, shared verbatim with
+    /// <c>fn_ResourceAncestors</c>. Lines after the first carry their absolute indentation in
+    /// the function text.
+    /// </summary>
+    internal static string BuildAncestorsCte(SqlOSFgaOptions options)
+    {
+        var resources = Instance.Qualify(options.Schema, options.TableNames.Resources);
+        var maxDepth = MaxDepth(options);
+        return $"""
+            WITH RECURSIVE ancestors AS (
+                SELECT
+                    "Id",
+                    "ParentId",
+                    0 AS "Depth",
+                    ('|' || "Id" || '|')::text AS "VisitedPath",
+                    FALSE AS "CycleDetected"
+                FROM {resources}
+                WHERE "Id" = p_resource_id AND "IsActive" = TRUE
+
+                UNION ALL
+
+                SELECT
+                    r."Id",
+                    r."ParentId",
+                    a."Depth" + 1,
+                    (a."VisitedPath" || r."Id" || '|')::text,
+                    (strpos(a."VisitedPath", '|' || r."Id" || '|') > 0)
+                FROM {resources} r
+                INNER JOIN ancestors a ON r."Id" = a."ParentId"
+                WHERE a."Depth" < {maxDepth}
+                  AND a."CycleDetected" = FALSE
+                  AND r."IsActive" = TRUE
+            )
+            """;
+    }
+
+    /// <summary>
+    /// The subject-activity conditions of <c>fn_IsResourceAccessible</c> for the grant's subject
+    /// and for the caller (<c>$[0]</c>), shared verbatim with <c>fn_PageNodes</c>. Lines after the
+    /// first carry their absolute indentation in the function text.
+    /// </summary>
+    internal static string BuildSubjectActivityConditions(SqlOSFgaOptions options)
+    {
+        var tables = options.TableNames;
+        var subjects = Instance.Qualify(options.Schema, tables.Subjects);
+        var users = Instance.Qualify(options.Schema, tables.Users);
+        var serviceAccounts = Instance.Qualify(options.Schema, tables.ServiceAccounts);
+        var userGroups = Instance.Qualify(options.Schema, tables.UserGroups);
+        var agents = Instance.Qualify(options.Schema, tables.Agents);
+        return $"""
+            AND (s."SubjectTypeId" <> 'user' OR u."IsActive" = TRUE)
               AND (s."SubjectTypeId" <> 'service_account' OR (sa."SubjectId" IS NOT NULL AND (sa."ExpiresAt" IS NULL OR sa."ExpiresAt" > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))))
               AND (s."SubjectTypeId" <> 'group' OR ug."IsActive" = TRUE)
               AND (s."SubjectTypeId" <> 'agent' OR ag."SubjectId" IS NOT NULL)
@@ -181,12 +363,54 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
                     AND (caller."SubjectTypeId" <> 'group' OR callerGroup."IsActive" = TRUE)
                     AND (caller."SubjectTypeId" <> 'agent' OR callerAgent."SubjectId" IS NOT NULL)
               )
-              AND (g."EffectiveFrom" IS NULL OR g."EffectiveFrom" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))
-              AND (g."EffectiveTo" IS NULL OR g."EffectiveTo" >= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))
-            LIMIT 1
-            $sqlos$;
             """;
     }
+
+    private string Table(string? schema, string table)
+        => schema == null ? QuoteIdentifier(table) : Qualify(schema, table);
+
+    private string Entries(SqlOSFgaPageOrderStore order)
+        => Table(order.EntrySchema, order.EntryTable);
+
+    private string AppTable(SqlOSFgaPageOrderStore order)
+        => Table(order.AppSchema, order.AppTable);
+
+    private string InsertEntries(SqlOSFgaPageOrderStore order)
+    {
+        var entryColumns = new[] { order.EntryNodeIdColumn }
+            .Concat(order.EntrySortColumns)
+            .Append(order.EntryRowKeyColumn)
+            .Select(QuoteIdentifier);
+        var appColumns = new[] { "a.\"NodeId\"" }
+            .Concat(order.AppSortColumns.Select(column => $"t.{QuoteIdentifier(column)}"))
+            .Append($"t.{QuoteIdentifier(order.AppKeyColumn)}");
+        return $"""
+            INSERT INTO {Entries(order)} ({string.Join(", ", entryColumns)})
+            SELECT {string.Join(", ", appColumns)}
+            FROM {AppTable(order)} AS t
+            CROSS JOIN LATERAL {Qualify(order.FgaSchema, "fn_ResourceAncestors")}(t.{QuoteIdentifier(order.AppResourceIdColumn)}) AS a
+            """;
+    }
+
+    /// <summary>
+    /// The resources in <c>@resourceIds</c> and their descendants, bounded by the hierarchy depth.
+    /// The ids themselves anchor the walk, so a deleted resource still names the rows that point at it.
+    /// </summary>
+    private string SubtreeCte(SqlOSFgaPageOrderStore order)
+        => $"""
+            WITH RECURSIVE subtree AS (
+                SELECT ids.id::varchar(450) AS "Id", 0 AS "Depth"
+                FROM unnest(@resourceIds) AS ids(id)
+                UNION ALL
+                SELECT child."Id", subtree."Depth" + 1
+                FROM {Qualify(order.FgaSchema, order.ResourcesTable)} AS child
+                INNER JOIN subtree ON child."ParentId" = subtree."Id"
+                WHERE subtree."Depth" < {order.MaxDepth.ToString(CultureInfo.InvariantCulture)}
+            )
+            """;
+
+    private static string MaxDepth(SqlOSFgaOptions options)
+        => Math.Max(1, options.MaxResourceHierarchyDepth).ToString(CultureInfo.InvariantCulture);
 
     public async Task AcquireTransactionLockAsync(
         DatabaseFacade database,

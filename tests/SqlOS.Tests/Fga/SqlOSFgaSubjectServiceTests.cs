@@ -19,6 +19,9 @@ public class TestInMemoryDbContext : DbContext, ISqlOSFgaDbContext
         string resourceId, string subjectIds, string permissionId)
         => throw new NotSupportedException("TVF not supported with InMemory provider");
 
+    public IQueryable<SqlOSFgaPageNode> PageNodes(string subjectIds, string permissionId)
+        => throw new NotSupportedException("TVF not supported with InMemory provider");
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);

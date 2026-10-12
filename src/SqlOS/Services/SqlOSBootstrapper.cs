@@ -1,8 +1,11 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SqlOS.Configuration;
 using SqlOS.AuthServer.Services;
 using SqlOS.Email.Services;
+using SqlOS.Fga;
+using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Services;
 
 namespace SqlOS.Services;
@@ -20,6 +23,7 @@ public sealed class SqlOSBootstrapper
     private readonly SqlOSFgaFunctionInitializer _fgaFunctionInitializer;
     private readonly SqlOSFgaHierarchyValidator _fgaHierarchyValidator;
     private readonly SqlOSFgaSeedService _fgaSeedService;
+    private readonly ISqlOSFgaDbContext _fgaContext;
     private readonly ILogger<SqlOSBootstrapper> _logger;
 
     public SqlOSBootstrapper(
@@ -34,6 +38,7 @@ public sealed class SqlOSBootstrapper
         SqlOSFgaFunctionInitializer fgaFunctionInitializer,
         SqlOSFgaHierarchyValidator fgaHierarchyValidator,
         SqlOSFgaSeedService fgaSeedService,
+        ISqlOSFgaDbContext fgaContext,
         ILogger<SqlOSBootstrapper> logger)
     {
         _options = options.Value;
@@ -47,6 +52,7 @@ public sealed class SqlOSBootstrapper
         _fgaFunctionInitializer = fgaFunctionInitializer;
         _fgaHierarchyValidator = fgaHierarchyValidator;
         _fgaSeedService = fgaSeedService;
+        _fgaContext = fgaContext;
         _logger = logger;
     }
 
@@ -70,6 +76,12 @@ public sealed class SqlOSBootstrapper
         if (_options.Fga.InitializeFunctions)
         {
             await _fgaFunctionInitializer.EnsureFunctionsExistAsync(cancellationToken);
+        }
+
+        // Fill the entry table of a newly declared page order whose application table has rows.
+        if (_fgaContext is DbContext fgaDbContext)
+        {
+            await SqlOSFgaPageOrderMaintenance.ReconcileAsync(fgaDbContext, _logger, cancellationToken);
         }
         if (_options.Fga.SeedCoreData)
         {

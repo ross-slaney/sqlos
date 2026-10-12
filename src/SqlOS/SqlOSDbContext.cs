@@ -5,6 +5,7 @@ using SqlOS.Extensions;
 using SqlOS.Fga;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
+using SqlOS.Fga.Paging;
 
 namespace SqlOS;
 
@@ -15,7 +16,8 @@ namespace SqlOS;
 /// <remarks>
 /// SqlOS registers its auth, email, calendar, and FGA entities before invoking
 /// <see cref="OnApplicationModelCreating"/>. Save operations synchronize tracked
-/// <see cref="ISqlOSResourceEntity"/> instances with their backing FGA resources.
+/// <see cref="ISqlOSResourceEntity"/> instances with their backing FGA resources and keep the
+/// entries of declared page orders (<c>HasPageOrder</c>) current in the same transaction.
 /// </remarks>
 public abstract class SqlOSDbContext<TContext> : DbContext, ISqlOSAuthServerDbContext, ISqlOSFgaDbContext
     where TContext : SqlOSDbContext<TContext>
@@ -36,11 +38,19 @@ public abstract class SqlOSDbContext<TContext> : DbContext, ISqlOSAuthServerDbCo
         string permissionId)
         => FromExpression(() => IsResourceAccessible(resourceId, subjectIds, permissionId));
 
+    public IQueryable<SqlOSFgaPageNode> PageNodes(
+        string subjectIds,
+        string permissionId)
+        => FromExpression(() => PageNodes(subjectIds, permissionId));
+
     protected sealed override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
         modelBuilder.UseSqlOS(Database.IsRelational() ? typeof(TContext) : null, Database.ProviderName);
         OnApplicationModelCreating(modelBuilder);
+
+        // After the application's configuration, so page orders see final columns, keys and tables.
+        SqlOSFgaPageOrders.ApplyModel(modelBuilder.Model, Database.ProviderName);
     }
 
     /// <summary>
@@ -57,7 +67,14 @@ public abstract class SqlOSDbContext<TContext> : DbContext, ISqlOSAuthServerDbCo
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         SqlOSResourceEntitySynchronizer.Sync(this);
-        return base.SaveChanges(acceptAllChangesOnSuccess);
+        var pageOrders = SqlOSFgaPageOrderMaintenance.Collect(this);
+        return pageOrders == null
+            ? base.SaveChanges(acceptAllChangesOnSuccess)
+            : SqlOSFgaPageOrderMaintenance.SaveChanges(
+                this,
+                pageOrders,
+                accept => base.SaveChanges(accept),
+                acceptAllChangesOnSuccess);
     }
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
@@ -68,6 +85,14 @@ public abstract class SqlOSDbContext<TContext> : DbContext, ISqlOSAuthServerDbCo
         CancellationToken cancellationToken = default)
     {
         await SqlOSResourceEntitySynchronizer.SyncAsync(this, cancellationToken);
-        return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        var pageOrders = SqlOSFgaPageOrderMaintenance.Collect(this);
+        return pageOrders == null
+            ? await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken)
+            : await SqlOSFgaPageOrderMaintenance.SaveChangesAsync(
+                this,
+                pageOrders,
+                (accept, token) => base.SaveChangesAsync(accept, token),
+                acceptAllChangesOnSuccess,
+                cancellationToken);
     }
 }

@@ -50,40 +50,8 @@ public static class SqlOSCursorCodec
         ArgumentException.ThrowIfNullOrWhiteSpace(expectedSortKey);
         ArgumentNullException.ThrowIfNull(expectedFilterFingerprint);
 
-        if (string.IsNullOrWhiteSpace(cursor))
-        {
-            throw new SqlOSCursorException("The cursor is missing.");
-        }
-
-        if (cursor.Length > MaxEncodedLength)
-        {
-            throw new SqlOSCursorException("The cursor is invalid.");
-        }
-
-        byte[] bytes;
-        try
-        {
-            bytes = Base64UrlDecode(cursor);
-        }
-        catch (FormatException)
-        {
-            throw new SqlOSCursorException("The cursor is invalid.");
-        }
-
-        CursorPayload? payload;
-        try
-        {
-            payload = JsonSerializer.Deserialize<CursorPayload>(bytes, JsonOptions);
-        }
-        catch (JsonException)
-        {
-            throw new SqlOSCursorException("The cursor is invalid.");
-        }
-
-        if (payload == null || payload.V != CurrentVersion)
-        {
-            throw new SqlOSCursorException("The cursor is not supported.");
-        }
+        var payload = ReadPayload(cursor, out var error)
+            ?? throw new SqlOSCursorException(error!);
 
         if (!string.Equals(payload.S, expectedSortKey, StringComparison.Ordinal))
         {
@@ -101,6 +69,69 @@ public static class SqlOSCursorCodec
         }
 
         return payload.K;
+    }
+
+    /// <summary>
+    /// Reads a cursor without checking which list it belongs to, so a caller can tell a cursor
+    /// from another list apart from one that is not a cursor at all.
+    /// </summary>
+    internal static bool TryRead(
+        string cursor,
+        out string sortKey,
+        out string filterFingerprint,
+        out IReadOnlyList<string> keyValues)
+    {
+        var payload = ReadPayload(cursor, out _);
+        sortKey = payload?.S ?? string.Empty;
+        filterFingerprint = payload?.F ?? string.Empty;
+        keyValues = payload?.K ?? [];
+        return payload is { K.Length: > 0 };
+    }
+
+    private static CursorPayload? ReadPayload(string cursor, out string? error)
+    {
+        if (string.IsNullOrWhiteSpace(cursor))
+        {
+            error = "The cursor is missing.";
+            return null;
+        }
+
+        if (cursor.Length > MaxEncodedLength)
+        {
+            error = "The cursor is invalid.";
+            return null;
+        }
+
+        byte[] bytes;
+        try
+        {
+            bytes = Base64UrlDecode(cursor);
+        }
+        catch (FormatException)
+        {
+            error = "The cursor is invalid.";
+            return null;
+        }
+
+        CursorPayload? payload;
+        try
+        {
+            payload = JsonSerializer.Deserialize<CursorPayload>(bytes, JsonOptions);
+        }
+        catch (JsonException)
+        {
+            error = "The cursor is invalid.";
+            return null;
+        }
+
+        if (payload == null || payload.V != CurrentVersion)
+        {
+            error = "The cursor is not supported.";
+            return null;
+        }
+
+        error = null;
+        return payload;
     }
 
     public static string Fingerprint(params string?[] parts)

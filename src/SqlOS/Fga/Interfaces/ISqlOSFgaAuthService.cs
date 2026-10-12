@@ -69,4 +69,24 @@ public interface ISqlOSFgaAuthService
     Task<Expression<Func<T, bool>>> BuildFilterAsync<T>(
         string subjectId,
         string permissionKey) where T : IHasResourceId;
+
+    /// <summary>
+    /// Rebuilds the entries of every page order declared in the context's model from the
+    /// application tables and the resource graph.
+    /// </summary>
+    /// <param name="cancellationToken">A token that can cancel the rebuild.</param>
+    /// <returns>A task that completes when every page order has been rebuilt.</returns>
+    /// <remarks>
+    /// <para>
+    /// For each order: delete all entries, then insert them in one statement, inside one
+    /// transaction per order. The cost is the table's rows times the tree depth.
+    /// </para>
+    /// <para>
+    /// <c>SqlOSDbContext&lt;TContext&gt;</c> keeps entries current for every write that goes through
+    /// <c>SaveChanges</c>. Call this after writes that bypass EF Core (bulk loads, raw SQL,
+    /// <c>ExecuteUpdate</c>/<c>ExecuteDelete</c>) and for recovery. Until then, rows those writes
+    /// added are missing from pages, never wrongly present.
+    /// </para>
+    /// </remarks>
+    Task RebuildPageOrdersAsync(CancellationToken cancellationToken = default);
 }

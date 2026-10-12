@@ -30,7 +30,22 @@ internal interface ISqlOSDatabaseProvider
     string BuildEnsureFgaVersionTableSql(string schema);
     string BuildSelectFgaVersionSql(string schema);
     string BuildIsResourceAccessibleFunctionSql(SqlOSFgaOptions options);
+    string BuildResourceAncestorsFunctionSql(SqlOSFgaOptions options);
+    string BuildPageNodesFunctionSql(SqlOSFgaOptions options);
     string BuildLockedSelectSql(string schema, string table, string whereSql, string? orderBySql = null);
+
+    // Page-order maintenance. Key lists go through one @keys parameter, resource lists through one
+    // @resourceIds parameter (CreatePageKeysParameter / CreatePageResourceIdsParameter).
+    string BuildDeletePageEntriesByKeysSql(SqlOSFgaPageOrderStore order);
+    string BuildInsertPageEntriesByKeysSql(SqlOSFgaPageOrderStore order);
+    string BuildDeletePageEntriesBySubtreeSql(SqlOSFgaPageOrderStore order);
+    string BuildInsertPageEntriesBySubtreeSql(SqlOSFgaPageOrderStore order);
+    string BuildDeleteAllPageEntriesSql(SqlOSFgaPageOrderStore order);
+    string BuildInsertAllPageEntriesSql(SqlOSFgaPageOrderStore order);
+    string BuildTableExistsSql(string? schema, string table);
+    string BuildTableHasRowsSql(string? schema, string table);
+    DbParameter CreatePageKeysParameter(string name, IReadOnlyList<object> keys);
+    DbParameter CreatePageResourceIdsParameter(string name, IReadOnlyCollection<string> resourceIds);
 
     string BuildRateLimitIncrementSql(string schema);
     string BuildRateLimitReservePairSql(string schema);

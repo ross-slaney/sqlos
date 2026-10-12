@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
+using SqlOS.Fga.Paging;
 
 namespace SqlOS.Fga.Services;
 
@@ -436,12 +437,12 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
         var entityParam = Expression.Parameter(typeof(T), "entity");
         var resourceIdProp = Expression.Property(entityParam, nameof(IHasResourceId.ResourceId));
         var contextExpr = Expression.Constant(_context, contextType);
-        var filterParameters = new AuthorizationFilterParameters(subjectIdsJson, permissionId);
+        var filterParameters = new SqlOSFgaAuthorizationFilterParameters(subjectIdsJson, permissionId);
         var filterParametersExpr = Expression.Constant(filterParameters);
         var tvfCall = Expression.Call(contextExpr, tvfMethod,
             resourceIdProp,
-            Expression.Field(filterParametersExpr, nameof(AuthorizationFilterParameters.SubjectIds)),
-            Expression.Field(filterParametersExpr, nameof(AuthorizationFilterParameters.PermissionId)));
+            Expression.Field(filterParametersExpr, nameof(SqlOSFgaAuthorizationFilterParameters.SubjectIds)),
+            Expression.Field(filterParametersExpr, nameof(SqlOSFgaAuthorizationFilterParameters.PermissionId)));
 
         var anyMethod = typeof(Queryable).GetMethods()
             .First(m => m.Name == "Any" && m.GetParameters().Length == 1)
@@ -450,6 +451,11 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
 
         return Expression.Lambda<Func<T, bool>>(anyCall, entityParam);
     }
+
+    public Task RebuildPageOrdersAsync(CancellationToken cancellationToken = default)
+        => _context is DbContext dbContext
+            ? SqlOSFgaPageOrderMaintenance.RebuildAsync(dbContext, _logger, cancellationToken)
+            : Task.CompletedTask;
 
     private async Task<List<string>> ResolveSubjectsAsync(string subjectId, List<SqlOSFgaAccessTrace> trace)
     {
@@ -600,15 +606,4 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
             .ToListAsync();
     }
 
-    private sealed class AuthorizationFilterParameters
-    {
-        public AuthorizationFilterParameters(string subjectIds, string permissionId)
-        {
-            SubjectIds = subjectIds;
-            PermissionId = permissionId;
-        }
-
-        public readonly string SubjectIds;
-        public readonly string PermissionId;
-    }
 }

@@ -535,6 +535,9 @@ public sealed class SqlOSErgonomicsExtensionsTests
         public Task<Expression<Func<T, bool>>> BuildFilterAsync<T>(string subjectId, string permissionKey)
             where T : IHasResourceId
             => throw new NotImplementedException();
+
+        public Task RebuildPageOrdersAsync(CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
     }
 
     private sealed class ManualDepthFgaDbContext(DbContextOptions<ManualDepthFgaDbContext> options)
@@ -544,6 +547,9 @@ public sealed class SqlOSErgonomicsExtensionsTests
             string resourceId,
             string subjectIds,
             string permissionId)
+            => throw new NotSupportedException();
+
+        public IQueryable<SqlOSFgaPageNode> PageNodes(string subjectIds, string permissionId)
             => throw new NotSupportedException();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)

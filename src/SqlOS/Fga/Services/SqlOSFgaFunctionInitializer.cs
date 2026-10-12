@@ -26,39 +26,54 @@ public class SqlOSFgaFunctionInitializer
     public async Task EnsureFunctionsExistAsync(CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Ensuring database functions exist...");
-        await EnsureIsResourceAccessibleFunctionAsync(cancellationToken);
+        var provider = SqlOSDatabase.Resolve(_context.Database);
+
+        // fn_PageNodes calls fn_ResourceAncestors, so the ancestors function is installed first.
+        var functions = new (string Name, string Sql)[]
+        {
+            ("fn_IsResourceAccessible", provider.BuildIsResourceAccessibleFunctionSql(_options)),
+            ("fn_ResourceAncestors", provider.BuildResourceAncestorsFunctionSql(_options)),
+            ("fn_PageNodes", provider.BuildPageNodesFunctionSql(_options)),
+        };
+
+        if (_context.Database.IsRelational() && _context.Database.CurrentTransaction == null)
+        {
+            await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+            await SqlOSDatabase.AcquireExclusiveTransactionLockAsync(
+                _context.Database,
+                "SqlOS:FgaFunctionInitializer",
+                TimeSpan.FromSeconds(30),
+                "Could not acquire the SqlOS FGA function lock.",
+                cancellationToken);
+            foreach (var function in functions)
+            {
+                await EnsureFunctionAsync(function.Name, function.Sql, cancellationToken);
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+        }
+        else
+        {
+            foreach (var function in functions)
+            {
+                await EnsureFunctionAsync(function.Name, function.Sql, cancellationToken);
+            }
+        }
+
         _logger.LogInformation("Database functions verified.");
     }
 
-    private async Task EnsureIsResourceAccessibleFunctionAsync(CancellationToken cancellationToken)
+    private async Task EnsureFunctionAsync(string name, string functionSql, CancellationToken cancellationToken)
     {
-        var functionSql = SqlOSDatabase.Resolve(_context.Database).BuildIsResourceAccessibleFunctionSql(_options);
-
         try
         {
-            _logger.LogDebug("Creating or updating fn_IsResourceAccessible TVF...");
-            if (_context.Database.IsRelational() && _context.Database.CurrentTransaction == null)
-            {
-                await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
-                await SqlOSDatabase.AcquireExclusiveTransactionLockAsync(
-                    _context.Database,
-                    "SqlOS:FgaFunctionInitializer",
-                    TimeSpan.FromSeconds(30),
-                    "Could not acquire the SqlOS FGA function lock.",
-                    cancellationToken);
-                await _context.Database.ExecuteSqlRawAsync(functionSql, cancellationToken);
-                await transaction.CommitAsync(cancellationToken);
-            }
-            else
-            {
-                await _context.Database.ExecuteSqlRawAsync(functionSql, cancellationToken);
-            }
-
-            _logger.LogInformation("fn_IsResourceAccessible TVF is ready.");
+            _logger.LogDebug("Creating or updating {FunctionName}...", name);
+            await _context.Database.ExecuteSqlRawAsync(functionSql, cancellationToken);
+            _logger.LogInformation("{FunctionName} is ready.", name);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to create or update fn_IsResourceAccessible TVF. Authorization queries may fail.");
+            _logger.LogError(ex, "Failed to create or update {FunctionName}. Authorization queries may fail.", name);
             throw;
         }
     }

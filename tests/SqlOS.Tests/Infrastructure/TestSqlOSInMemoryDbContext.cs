@@ -26,6 +26,9 @@ public sealed class TestSqlOSInMemoryDbContext : DbContext, ISqlOSAuthServerDbCo
         string permissionId)
         => throw new NotSupportedException("TVFs are not supported for the in-memory test context.");
 
+    public IQueryable<SqlOSFgaPageNode> PageNodes(string subjectIds, string permissionId)
+        => throw new NotSupportedException("TVFs are not supported for the in-memory test context.");
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);

@@ -19,6 +19,13 @@ public interface ISqlOSFgaDbContext
         string resourceId, string subjectIds, string permissionId);
 
     /// <summary>
+    /// TVF returning a caller's minimal granted resources for a permission. <c>ToPageAsync</c>
+    /// reads page-order entries under these nodes.
+    /// Implementation: =&gt; FromExpression(() =&gt; PageNodes(subjectIds, permissionId));
+    /// </summary>
+    IQueryable<SqlOSFgaPageNode> PageNodes(string subjectIds, string permissionId);
+
+    /// <summary>
     /// Access to entity sets. Already on DbContext — auto-implemented.
     /// </summary>
     DbSet<TEntity> Set<TEntity>() where TEntity : class;
