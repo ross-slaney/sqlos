@@ -107,6 +107,33 @@ public class SqlOSFgaPageOrderIntegrationTests
     }
 
     [TestMethod]
+    public async Task StaleEntryListingARowUnderTwoOfTheCallersNodes_ShowsTheRowOnce()
+    {
+        await using var context = PageOrderFixture.CreateContext();
+        var stale = await context.Documents.AsNoTracking().SingleAsync(document => document.ResourceId == "page_doc_001");
+        var entries = TestDatabase.Qualify(PageOrderTestDbContext.RankEntries);
+        string Column(string name) => TestDatabase.Quote(name);
+
+        // As a write that bypassed EF could leave it: page_doc_001 also under page_doc_000, another of the caller's nodes.
+        await PageOrderFixture.ExecuteAsync(
+            $"INSERT INTO {entries} ({Column("NodeId")}, {Column("Rank")}, {Column("RowKey")}) VALUES ('page_doc_000', {stale.Rank}, '{stale.Id}')");
+        try
+        {
+            var filter = await PageOrderFixture.AuthService(context).BuildFilterAsync<PagedDocument>(PageOrderFixture.DirectSubjectId, PageOrderFixture.ViewPermission);
+
+            var pages = await PageOrderFixture.WalkAsync(context.Documents.AsNoTracking().OrderBy(document => document.Rank), filter, 10);
+
+            pages.SelectMany(page => page.Data).Select(document => document.ResourceId)
+                .Should().Equal("page_doc_000", "page_doc_001", "page_doc_002");
+        }
+        finally
+        {
+            await PageOrderFixture.ExecuteAsync(
+                $"DELETE FROM {entries} WHERE {Column("NodeId")} = 'page_doc_000' AND {Column("RowKey")} = '{stale.Id}'");
+        }
+    }
+
+    [TestMethod]
     public async Task IncludeAndTracking_AreHonored()
     {
         await using var tracking = PageOrderFixture.CreateContext();

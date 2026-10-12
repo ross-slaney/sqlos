@@ -155,7 +155,8 @@ public static class PageQueryableExtensions
                 usable ? (budget, token) => Read2Async(declared!, budget, token) : null,
                 cancellationToken);
 
-            var keys = selection.Rows.Select(row => row[^1]).ToList();
+            // A stale entry can list a row under two of the caller's nodes; the page has it once.
+            var keys = selection.Rows.Select(row => row[^1]).Distinct().ToList();
             var loaded = keys.Count == 0 ? [] : await LoadAsync(keys, cancellationToken);
             var nextCursor = selection.HasMore && selection.Rows.Count > 0
                 ? SqlOSFgaPageCursor.Encode(ordering.EntityType, _columns, ordering.Descending, selection.Rows[^1])

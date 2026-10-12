@@ -1,6 +1,8 @@
 using System.Data.Common;
+using System.Transactions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
@@ -12,8 +14,8 @@ namespace SqlOS.Fga;
 
 /// <summary>
 /// Keeps page-order entries equal to what a rebuild would write. <c>SqlOSDbContext&lt;TContext&gt;</c>
-/// collects the rows and resources a save changes, saves, and then rewrites their entries in the
-/// same transaction, so rows and entries never disagree.
+/// sends a save that changes a resource, or a row of an entity with a page order, through here: the
+/// save, then the entries of the rows it changed, in one transaction, so rows and entries never disagree.
 /// </summary>
 /// <remarks>
 /// An entry <c>(NodeId = X, RowKey = r)</c> exists when X is the row's own resource or an ancestor
@@ -25,121 +27,123 @@ internal static class SqlOSFgaPageOrderMaintenance
 {
     private const string KeysParameter = "@keys";
     private const string ResourceIdsParameter = "@resourceIds";
+    private const string SavepointName = "SqlOSPageOrders";
     private static readonly TimeSpan RebuildLockTimeout = TimeSpan.FromMinutes(10);
 
-    /// <summary>The rows and resources one save changes.</summary>
-    internal sealed class Plan
+    /// <summary>The rows and resources one save changed.</summary>
+    private sealed class Plan
     {
-        public Dictionary<IEntityType, RowChanges> Rows { get; } = [];
+        /// <summary>The provider keys of the changed rows, by the root entity type that declares the orders.</summary>
+        public Dictionary<IEntityType, List<object>> Keys { get; } = [];
         public HashSet<string> ChangedResources { get; } = new(StringComparer.Ordinal);
     }
 
-    /// <summary>The changed rows of one entity hierarchy.</summary>
-    internal sealed class RowChanges(IReadOnlyList<SqlOSFgaPageOrder> orders)
-    {
-        public IReadOnlyList<SqlOSFgaPageOrder> Orders { get; } = orders;
-        public IProperty Key => Orders[0].Key;
-        public List<EntityEntry> Added { get; } = [];
-        public List<object> Modified { get; } = [];
-        public List<object> Deleted { get; } = [];
-    }
-
     /// <summary>
-    /// Collects, before the save, the rows whose entries the save changes: added rows; modified rows
-    /// whose <c>ResourceId</c> or an order column changed; deleted rows; and resources whose parent
-    /// or activity changed, or that are deleted. Returns <see langword="null"/> when there is nothing to do.
+    /// Whether a save can change entries: it adds, modifies or deletes a resource or a row of an
+    /// entity with a page order. Read before the save, so that the save and the entries can share a transaction.
     /// </summary>
-    public static Plan? Collect(DbContext context)
+    public static bool MayChange(DbContext context)
     {
         if (!context.Database.IsRelational() || SqlOSFgaPageOrders.All(context.Model).Count == 0)
         {
-            return null;
+            return false;
         }
 
-        Plan? plan = null;
-        foreach (var entry in context.ChangeTracker.Entries())
-        {
-            if (entry.State is not (EntityState.Added or EntityState.Modified or EntityState.Deleted))
-            {
-                continue;
-            }
-
-            if (entry.Entity is SqlOSFgaResource resource)
-            {
-                if (entry.State == EntityState.Deleted
-                    || (entry.State == EntityState.Modified
-                        && (entry.Property(nameof(SqlOSFgaResource.ParentId)).IsModified
-                            || entry.Property(nameof(SqlOSFgaResource.IsActive)).IsModified)))
-                {
-                    (plan ??= new Plan()).ChangedResources.Add(resource.Id);
-                }
-
-                continue;
-            }
-
-            var orders = SqlOSFgaPageOrders.For(entry.Metadata);
-            if (orders.Count == 0)
-            {
-                continue;
-            }
-
-            if (entry.State == EntityState.Modified && !ChangesEntries(entry, orders))
-            {
-                continue;
-            }
-
-            plan ??= new Plan();
-            var root = orders[0].EntityType;
-            if (!plan.Rows.TryGetValue(root, out var rows))
-            {
-                rows = new RowChanges(orders);
-                plan.Rows.Add(root, rows);
-            }
-
-            switch (entry.State)
-            {
-                case EntityState.Added:
-                    // Store-generated keys exist only after the save; read them then.
-                    rows.Added.Add(entry);
-                    break;
-                case EntityState.Modified:
-                    rows.Modified.Add(ProviderKey(entry, rows.Key));
-                    break;
-                default:
-                    rows.Deleted.Add(ProviderKey(entry, rows.Key));
-                    break;
-            }
-        }
-
-        return plan;
+        return context.ChangeTracker.Entries().Any(entry =>
+            entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted
+            && (entry.Entity is SqlOSFgaResource || SqlOSFgaPageOrders.For(entry.Metadata).Count > 0));
     }
 
     /// <summary>
-    /// Saves and rewrites the plan's entries in one transaction: the caller's, an ambient one, or one
-    /// owned here (inside the context's execution strategy, so retrying strategies keep working).
+    /// Collects, after the save and before its changes are accepted, the rows whose entries it
+    /// changed: added and deleted rows; modified rows whose <c>ResourceId</c> or an order column
+    /// changed, or that have an order column the database computes on update; and resources added,
+    /// deleted, or whose parent or activity changed. Reading after the save sees what the save wrote,
+    /// including changes made by <c>SaveChanges</c> interceptors and <c>SavingChanges</c> handlers,
+    /// cascade deletes and generated keys. Returns <see langword="null"/> when there is nothing to do.
     /// </summary>
-    public static int SaveChanges(
-        DbContext context,
-        Plan plan,
-        Func<bool, int> saveChanges,
-        bool acceptAllChangesOnSuccess)
+    private static Plan? Collect(DbContext context)
+    {
+        var tracker = context.ChangeTracker;
+        var detectChanges = tracker.AutoDetectChangesEnabled;
+
+        // The save has detected changes. Detecting again would pick up values set after it, which it did not write.
+        tracker.AutoDetectChangesEnabled = false;
+        try
+        {
+            Plan? plan = null;
+            foreach (var entry in tracker.Entries())
+            {
+                if (entry.State is not (EntityState.Added or EntityState.Modified or EntityState.Deleted))
+                {
+                    continue;
+                }
+
+                if (entry.Entity is SqlOSFgaResource resource)
+                {
+                    // An added resource can be the resource of rows saved before it, or of rows whose
+                    // resource was deleted and is added again.
+                    if (entry.State != EntityState.Modified
+                        || entry.Property(nameof(SqlOSFgaResource.ParentId)).IsModified
+                        || entry.Property(nameof(SqlOSFgaResource.IsActive)).IsModified)
+                    {
+                        (plan ??= new Plan()).ChangedResources.Add(resource.Id);
+                    }
+
+                    continue;
+                }
+
+                var orders = SqlOSFgaPageOrders.For(entry.Metadata);
+                if (orders.Count == 0 || (entry.State == EntityState.Modified && !ChangesEntries(entry, orders)))
+                {
+                    continue;
+                }
+
+                plan ??= new Plan();
+                var root = orders[0].EntityType;
+                if (!plan.Keys.TryGetValue(root, out var keys))
+                {
+                    keys = [];
+                    plan.Keys.Add(root, keys);
+                }
+
+                keys.Add(ProviderKey(entry, orders[0].Key));
+            }
+
+            return plan;
+        }
+        finally
+        {
+            tracker.AutoDetectChangesEnabled = detectChanges;
+        }
+    }
+
+    /// <summary>
+    /// Saves, then rewrites the entries of the rows the save changed, in one transaction: the
+    /// caller's, inside a savepoint so that a failure leaves it as it was before the save (as EF Core
+    /// does for the save alone); an ambient or enlisted one; or one owned here, inside the context's
+    /// execution strategy so that retrying strategies keep working.
+    /// </summary>
+    public static int SaveChanges(DbContext context, Func<bool, int> saveChanges, bool acceptAllChangesOnSuccess)
     {
         var database = context.Database;
         int saved;
-        if (database.CurrentTransaction != null || System.Transactions.Transaction.Current != null)
+        if (database.CurrentTransaction is { } transaction)
         {
-            saved = saveChanges(false);
-            Run(context, plan);
+            saved = InSavepoint(database, transaction, () => SaveAndRewrite(context, saveChanges));
+        }
+        else if (HasSystemTransaction(database))
+        {
+            saved = SaveAndRewrite(context, saveChanges);
         }
         else
         {
             saved = database.CreateExecutionStrategy().Execute(
-                (Context: context, Plan: plan, Save: saveChanges),
+                (Context: context, Save: saveChanges),
                 static (_, state) =>
                 {
                     using var transaction = state.Context.Database.BeginTransaction();
-                    var count = state.Save(false);
-                    Run(state.Context, state.Plan);
+                    var count = SaveAndRewrite(state.Context, state.Save);
                     transaction.Commit();
                     return count;
                 },
@@ -157,27 +161,32 @@ internal static class SqlOSFgaPageOrderMaintenance
     /// <inheritdoc cref="SaveChanges"/>
     public static async Task<int> SaveChangesAsync(
         DbContext context,
-        Plan plan,
         Func<bool, CancellationToken, Task<int>> saveChangesAsync,
         bool acceptAllChangesOnSuccess,
         CancellationToken cancellationToken)
     {
         var database = context.Database;
         int saved;
-        if (database.CurrentTransaction != null || System.Transactions.Transaction.Current != null)
+        if (database.CurrentTransaction is { } transaction)
         {
-            saved = await saveChangesAsync(false, cancellationToken);
-            await RunAsync(context, plan, cancellationToken);
+            saved = await InSavepointAsync(
+                database,
+                transaction,
+                token => SaveAndRewriteAsync(context, saveChangesAsync, token),
+                cancellationToken);
+        }
+        else if (HasSystemTransaction(database))
+        {
+            saved = await SaveAndRewriteAsync(context, saveChangesAsync, cancellationToken);
         }
         else
         {
             saved = await database.CreateExecutionStrategy().ExecuteAsync(
-                (Context: context, Plan: plan, Save: saveChangesAsync),
+                (Context: context, Save: saveChangesAsync),
                 static async (_, state, token) =>
                 {
                     await using var transaction = await state.Context.Database.BeginTransactionAsync(token);
-                    var count = await state.Save(false, token);
-                    await RunAsync(state.Context, state.Plan, token);
+                    var count = await SaveAndRewriteAsync(state.Context, state.Save, token);
                     await transaction.CommitAsync(token);
                     return count;
                 },
@@ -272,8 +281,13 @@ internal static class SqlOSFgaPageOrderMaintenance
     }
 
     private static bool ChangesEntries(EntityEntry entry, IReadOnlyList<SqlOSFgaPageOrder> orders)
-        => entry.Property(orders[0].ResourceId.Name).IsModified
-            || orders.Any(order => order.SortColumns.Any(column => entry.Property(column.Name).IsModified));
+        => Changed(entry.Property(orders[0].ResourceId.Name))
+            || orders.Any(order => order.SortColumns.Any(column => Changed(entry.Property(column.Name))));
+
+    // A column the database computes on update can have a new value whenever the row is updated.
+    private static bool Changed(PropertyEntry property)
+        => property.IsModified
+            || property.Metadata.ValueGenerated is ValueGenerated.OnUpdate or ValueGenerated.OnAddOrUpdate or ValueGenerated.OnUpdateSometimes;
 
     private static object ProviderKey(EntityEntry entry, IProperty key)
     {
@@ -283,71 +297,181 @@ internal static class SqlOSFgaPageOrderMaintenance
         return converter == null ? value : converter.ConvertToProvider(value)!;
     }
 
-    private static void Run(DbContext context, Plan plan)
+    // EF Core does not begin its own transaction under these either.
+    private static bool HasSystemTransaction(DatabaseFacade database)
+        => Transaction.Current != null || database.GetEnlistedTransaction() != null;
+
+    private static int SaveAndRewrite(DbContext context, Func<bool, int> saveChanges)
     {
-        foreach (var (sql, parameters) in Statements(context, plan))
+        var saved = saveChanges(false);
+        if (Command(context) is { } command)
         {
-            context.Database.ExecuteSqlRaw(sql, parameters);
+            context.Database.ExecuteSqlRaw(command.Sql, command.Parameters);
         }
+
+        return saved;
     }
 
-    private static async Task RunAsync(DbContext context, Plan plan, CancellationToken cancellationToken)
+    private static async Task<int> SaveAndRewriteAsync(
+        DbContext context,
+        Func<bool, CancellationToken, Task<int>> saveChangesAsync,
+        CancellationToken cancellationToken)
     {
-        foreach (var (sql, parameters) in Statements(context, plan))
+        var saved = await saveChangesAsync(false, cancellationToken);
+        if (Command(context) is { } command)
         {
-            await context.Database.ExecuteSqlRawAsync(sql, parameters, cancellationToken);
+            await context.Database.ExecuteSqlRawAsync(command.Sql, command.Parameters, cancellationToken);
         }
+
+        return saved;
+    }
+
+    private static int InSavepoint(DatabaseFacade database, IDbContextTransaction transaction, Func<int> save)
+    {
+        if (!database.AutoSavepointsEnabled || !transaction.SupportsSavepoints)
+        {
+            return save();
+        }
+
+        transaction.CreateSavepoint(SavepointName);
+        int saved;
+        try
+        {
+            saved = save();
+        }
+        catch
+        {
+            try
+            {
+                transaction.RollbackToSavepoint(SavepointName);
+            }
+            catch (Exception)
+            {
+                // The transaction cannot return to the savepoint (SQL Server dooms it under XACT_ABORT,
+                // or the connection broke); it can only roll back, and the save's own error says why.
+            }
+
+            throw;
+        }
+
+        transaction.ReleaseSavepoint(SavepointName);
+        return saved;
+    }
+
+    private static async Task<int> InSavepointAsync(
+        DatabaseFacade database,
+        IDbContextTransaction transaction,
+        Func<CancellationToken, Task<int>> save,
+        CancellationToken cancellationToken)
+    {
+        if (!database.AutoSavepointsEnabled || !transaction.SupportsSavepoints)
+        {
+            return await save(cancellationToken);
+        }
+
+        await transaction.CreateSavepointAsync(SavepointName, cancellationToken);
+        int saved;
+        try
+        {
+            saved = await save(cancellationToken);
+        }
+        catch
+        {
+            try
+            {
+                // Not the caller's token: a cancelled save still has to leave the transaction as it was.
+                await transaction.RollbackToSavepointAsync(SavepointName, CancellationToken.None);
+            }
+            catch (Exception)
+            {
+                // The transaction cannot return to the savepoint (SQL Server dooms it under XACT_ABORT,
+                // or the connection broke); it can only roll back, and the save's own error says why.
+            }
+
+            throw;
+        }
+
+        await transaction.ReleaseSavepointAsync(SavepointName, cancellationToken);
+        return saved;
     }
 
     /// <summary>
-    /// Subtree refreshes first, then rows by key: a row that is both under a changed resource and
-    /// changed itself is rewritten last by key, so it ends with exactly one set of entries.
+    /// The statements for what the save changed, as one command. For each order, the entries of the
+    /// rows under the changed resources and of the changed rows are deleted, then written from the
+    /// rows as they are now; the subtree insert skips the changed rows, which the key insert writes.
     /// An order whose entry table startup found missing is skipped: its rows are written, and the
     /// first start after the table exists fills it.
     /// </summary>
-    private static IEnumerable<(string Sql, DbParameter[] Parameters)> Statements(DbContext context, Plan plan)
+    private static (string Sql, DbParameter[] Parameters)? Command(DbContext context)
     {
+        if (Collect(context) is not { } plan)
+        {
+            return null;
+        }
+
         var provider = SqlOSDatabase.Resolve(context.Database);
         var maxDepth = SqlOSFgaHierarchyDepth.Resolve(context.Database, context);
+        var resourceIds = plan.ChangedResources.Count > 0 ? ResourceIdsParameter : null;
+        var keyParameters = new Dictionary<IEntityType, string>();
+        var parameters = new List<DbParameter>();
+        var statements = new List<string>();
 
-        if (plan.ChangedResources.Count > 0)
+        foreach (var order in SqlOSFgaPageOrders.All(context.Model))
         {
-            foreach (var order in SqlOSFgaPageOrders.All(context.Model).Where(order => !SqlOSFgaPageOrders.IsTableMissing(context.Model, order)))
+            if (SqlOSFgaPageOrders.IsTableMissing(context.Model, order))
             {
-                var store = order.Store(maxDepth);
-                yield return (
-                    provider.BuildDeletePageEntriesBySubtreeSql(store),
-                    [provider.CreatePageResourceIdsParameter(ResourceIdsParameter, plan.ChangedResources)]);
-                yield return (
-                    provider.BuildInsertPageEntriesBySubtreeSql(store),
-                    [provider.CreatePageResourceIdsParameter(ResourceIdsParameter, plan.ChangedResources)]);
+                continue;
+            }
+
+            string? keys = null;
+            if (plan.Keys.TryGetValue(order.EntityType, out var rowKeys)
+                && !keyParameters.TryGetValue(order.EntityType, out keys))
+            {
+                keys = $"{KeysParameter}{keyParameters.Count}";
+                keyParameters.Add(order.EntityType, keys);
+                parameters.Add(provider.CreatePageKeysParameter(keys, rowKeys));
+            }
+
+            if (resourceIds == null && keys == null)
+            {
+                continue;
+            }
+
+            var store = order.Store(maxDepth);
+            if (resourceIds != null)
+            {
+                statements.Add(provider.BuildDeletePageEntriesBySubtreeSql(store, resourceIds));
+            }
+
+            if (keys != null)
+            {
+                // Added rows too: a stale entry left by a write that bypassed EF must not make the
+                // insert of a reused key fail.
+                statements.Add(provider.BuildDeletePageEntriesByKeysSql(store, keys));
+            }
+
+            if (resourceIds != null)
+            {
+                statements.Add(provider.BuildInsertPageEntriesBySubtreeSql(store, resourceIds, keys));
+            }
+
+            if (keys != null)
+            {
+                statements.Add(provider.BuildInsertPageEntriesByKeysSql(store, keys));
             }
         }
 
-        foreach (var rows in plan.Rows.Values)
+        if (statements.Count == 0)
         {
-            // Added rows are deleted by key too: a stale entry left by a write that bypassed EF must
-            // not make the insert of a reused key fail.
-            var refresh = rows.Added.Select(entry => ProviderKey(entry, rows.Key)).Concat(rows.Modified).ToList();
-            var delete = refresh.Concat(rows.Deleted).ToList();
-            foreach (var order in rows.Orders.Where(order => !SqlOSFgaPageOrders.IsTableMissing(context.Model, order)))
-            {
-                var store = order.Store(maxDepth);
-                if (delete.Count > 0)
-                {
-                    yield return (
-                        provider.BuildDeletePageEntriesByKeysSql(store),
-                        [provider.CreatePageKeysParameter(KeysParameter, delete)]);
-                }
-
-                if (refresh.Count > 0)
-                {
-                    yield return (
-                        provider.BuildInsertPageEntriesByKeysSql(store),
-                        [provider.CreatePageKeysParameter(KeysParameter, refresh)]);
-                }
-            }
+            return null;
         }
+
+        if (resourceIds != null)
+        {
+            parameters.Add(provider.CreatePageResourceIdsParameter(resourceIds, plan.ChangedResources));
+        }
+
+        return (string.Join("\n", statements), parameters.ToArray());
     }
 
     private static async Task<int?> RebuildOrderAsync(
@@ -358,7 +482,7 @@ internal static class SqlOSFgaPageOrderMaintenance
     {
         var database = context.Database;
         var store = order.Store(SqlOSFgaHierarchyDepth.Resolve(database, context));
-        if (database.CurrentTransaction != null || System.Transactions.Transaction.Current != null)
+        if (database.CurrentTransaction != null || HasSystemTransaction(database))
         {
             return await RebuildStoreAsync(context, store, onlyIfEmpty, cancellationToken);
         }
@@ -382,23 +506,37 @@ internal static class SqlOSFgaPageOrderMaintenance
         bool onlyIfEmpty,
         CancellationToken cancellationToken)
     {
-        var provider = SqlOSDatabase.Resolve(context.Database);
-        await SqlOSDatabase.AcquireExclusiveTransactionLockAsync(
-            context.Database,
-            $"SqlOS:FgaPageOrder:{store.EntryTable}",
-            RebuildLockTimeout,
-            $"Could not acquire the SqlOS page order lock for {store.EntryTable}.",
-            cancellationToken);
+        var database = context.Database;
+        var provider = SqlOSDatabase.Resolve(database);
 
-        // Another instance may have filled the table while this one waited for the lock.
-        if (onlyIfEmpty
-            && await IsTrueAsync(context, provider.BuildTableHasRowsSql(store.EntrySchema, store.EntryTable), cancellationToken))
+        // A rebuild writes an entry per row per level and can take minutes on a large table, as can
+        // waiting for another instance's rebuild. It runs without a command timeout; the lock has its
+        // own, and the cancellation token stops it.
+        var commandTimeout = database.GetCommandTimeout();
+        database.SetCommandTimeout(0);
+        try
         {
-            return null;
-        }
+            await SqlOSDatabase.AcquireExclusiveTransactionLockAsync(
+                database,
+                $"SqlOS:FgaPageOrder:{store.EntryTable}",
+                RebuildLockTimeout,
+                $"Could not acquire the SqlOS page order lock for {store.EntryTable}.",
+                cancellationToken);
 
-        await context.Database.ExecuteSqlRawAsync(provider.BuildDeleteAllPageEntriesSql(store), cancellationToken);
-        return await context.Database.ExecuteSqlRawAsync(provider.BuildInsertAllPageEntriesSql(store), cancellationToken);
+            // Another instance may have filled the table while this one waited for the lock.
+            if (onlyIfEmpty
+                && await IsTrueAsync(context, provider.BuildTableHasRowsSql(store.EntrySchema, store.EntryTable), cancellationToken))
+            {
+                return null;
+            }
+
+            await database.ExecuteSqlRawAsync(provider.BuildDeleteAllPageEntriesSql(store), cancellationToken);
+            return await database.ExecuteSqlRawAsync(provider.BuildInsertAllPageEntriesSql(store), cancellationToken);
+        }
+        finally
+        {
+            database.SetCommandTimeout(commandTimeout);
+        }
     }
 
     private static async Task<bool> IsTrueAsync(DbContext context, string sql, CancellationToken cancellationToken)

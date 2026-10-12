@@ -67,14 +67,9 @@ public abstract class SqlOSDbContext<TContext> : DbContext, ISqlOSAuthServerDbCo
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         SqlOSResourceEntitySynchronizer.Sync(this);
-        var pageOrders = SqlOSFgaPageOrderMaintenance.Collect(this);
-        return pageOrders == null
-            ? base.SaveChanges(acceptAllChangesOnSuccess)
-            : SqlOSFgaPageOrderMaintenance.SaveChanges(
-                this,
-                pageOrders,
-                accept => base.SaveChanges(accept),
-                acceptAllChangesOnSuccess);
+        return SqlOSFgaPageOrderMaintenance.MayChange(this)
+            ? SqlOSFgaPageOrderMaintenance.SaveChanges(this, accept => base.SaveChanges(accept), acceptAllChangesOnSuccess)
+            : base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
@@ -85,14 +80,12 @@ public abstract class SqlOSDbContext<TContext> : DbContext, ISqlOSAuthServerDbCo
         CancellationToken cancellationToken = default)
     {
         await SqlOSResourceEntitySynchronizer.SyncAsync(this, cancellationToken);
-        var pageOrders = SqlOSFgaPageOrderMaintenance.Collect(this);
-        return pageOrders == null
-            ? await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken)
-            : await SqlOSFgaPageOrderMaintenance.SaveChangesAsync(
+        return SqlOSFgaPageOrderMaintenance.MayChange(this)
+            ? await SqlOSFgaPageOrderMaintenance.SaveChangesAsync(
                 this,
-                pageOrders,
                 (accept, token) => base.SaveChangesAsync(accept, token),
                 acceptAllChangesOnSuccess,
-                cancellationToken);
+                cancellationToken)
+            : await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 }

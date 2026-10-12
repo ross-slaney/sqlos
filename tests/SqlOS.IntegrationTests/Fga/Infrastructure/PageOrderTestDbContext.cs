@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
+using SqlOS.IntegrationTests.Infrastructure;
 
 namespace SqlOS.IntegrationTests.Fga.Infrastructure;
 
@@ -13,6 +14,7 @@ public sealed class PageOrderTestDbContext : SqlOSDbContext<PageOrderTestDbConte
     public const string TitleEntries = "SqlOSFgaPage_PagedDocuments_Title";
     public const string CounterEntries = "SqlOSFgaPage_PagedCounters_Rank";
     public const string WorkItemEntries = "SqlOSFgaPage_PagedWorkItems_Rank";
+    public const string ScoreEntries = "SqlOSFgaPage_PagedScores_Score";
 
     public PageOrderTestDbContext(DbContextOptions<PageOrderTestDbContext> options)
         : base(options)
@@ -23,6 +25,7 @@ public sealed class PageOrderTestDbContext : SqlOSDbContext<PageOrderTestDbConte
     public DbSet<PagedCategory> Categories => Set<PagedCategory>();
     public DbSet<PagedCounter> Counters => Set<PagedCounter>();
     public DbSet<PagedWorkItem> WorkItems => Set<PagedWorkItem>();
+    public DbSet<PagedScore> Scores => Set<PagedScore>();
 
     protected override void OnApplicationModelCreating(ModelBuilder modelBuilder)
     {
@@ -71,6 +74,17 @@ public sealed class PageOrderTestDbContext : SqlOSDbContext<PageOrderTestDbConte
             entity.HasIndex(item => new { item.Rank, item.Id });
             entity.HasPageOrder(item => item.Rank);
         });
+
+        modelBuilder.Entity<PagedScore>(entity =>
+        {
+            entity.ToTable("PagedScores");
+            entity.HasKey(score => score.Id);
+            entity.Property(score => score.ResourceId).HasMaxLength(450);
+            entity.HasIndex(score => score.ResourceId);
+            entity.Property(score => score.Score)
+                .HasComputedColumnSql(TestDatabase.IsPostgreSql ? "\"Points\" * 10" : "[Points] * 10", stored: true);
+            entity.HasPageOrder(score => score.Score);
+        });
     }
 }
 
@@ -109,6 +123,15 @@ public sealed class PagedCounter : IHasResourceId
     public int Id { get; set; }
     public string ResourceId { get; set; } = string.Empty;
     public int Rank { get; set; }
+}
+
+/// <summary>A row ordered by a column the database computes from another.</summary>
+public sealed class PagedScore : IHasResourceId
+{
+    public Guid Id { get; set; }
+    public string ResourceId { get; set; } = string.Empty;
+    public int Points { get; set; }
+    public int Score { get; set; }
 }
 
 /// <summary>Rows that share their folder's resource, for the work test.</summary>

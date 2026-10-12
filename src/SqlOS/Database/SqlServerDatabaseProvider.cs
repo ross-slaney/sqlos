@@ -243,21 +243,21 @@ internal sealed partial class SqlServerDatabaseProvider : ISqlOSDatabaseProvider
             """;
     }
 
-    public string BuildDeletePageEntriesByKeysSql(SqlOSFgaPageOrderStore order)
+    public string BuildDeletePageEntriesByKeysSql(SqlOSFgaPageOrderStore order, string keys)
         => $"""
             DELETE FROM {Entries(order)}
-            WHERE {QuoteIdentifier(order.EntryRowKeyColumn)} IN ({KeyList(order)});
+            WHERE {QuoteIdentifier(order.EntryRowKeyColumn)} IN ({KeyList(order, keys)});
             """;
 
-    public string BuildInsertPageEntriesByKeysSql(SqlOSFgaPageOrderStore order)
+    public string BuildInsertPageEntriesByKeysSql(SqlOSFgaPageOrderStore order, string keys)
         => $"""
             {InsertEntries(order)}
-            WHERE t.{QuoteIdentifier(order.AppKeyColumn)} IN ({KeyList(order)});
+            WHERE t.{QuoteIdentifier(order.AppKeyColumn)} IN ({KeyList(order, keys)});
             """;
 
-    public string BuildDeletePageEntriesBySubtreeSql(SqlOSFgaPageOrderStore order)
+    public string BuildDeletePageEntriesBySubtreeSql(SqlOSFgaPageOrderStore order, string resourceIds)
         => $"""
-            {SubtreeCte(order)}
+            {SubtreeCte(order, resourceIds)}
             DELETE FROM {Entries(order)}
             WHERE {QuoteIdentifier(order.EntryRowKeyColumn)} IN (
                 SELECT t.{QuoteIdentifier(order.AppKeyColumn)}
@@ -266,12 +266,17 @@ internal sealed partial class SqlServerDatabaseProvider : ISqlOSDatabaseProvider
             );
             """;
 
-    public string BuildInsertPageEntriesBySubtreeSql(SqlOSFgaPageOrderStore order)
-        => $"""
-            {SubtreeCte(order)}
+    public string BuildInsertPageEntriesBySubtreeSql(SqlOSFgaPageOrderStore order, string resourceIds, string? exceptKeys)
+    {
+        var except = exceptKeys == null
+            ? string.Empty
+            : $" AND t.{QuoteIdentifier(order.AppKeyColumn)} NOT IN ({KeyList(order, exceptKeys)})";
+        return $"""
+            {SubtreeCte(order, resourceIds)}
             {InsertEntries(order)}
-            WHERE t.{QuoteIdentifier(order.AppResourceIdColumn)} IN (SELECT subtree.Id FROM subtree);
+            WHERE t.{QuoteIdentifier(order.AppResourceIdColumn)} IN (SELECT subtree.Id FROM subtree){except};
             """;
+    }
 
     public string BuildDeleteAllPageEntriesSql(SqlOSFgaPageOrderStore order)
         => $"DELETE FROM {Entries(order)};";
@@ -379,8 +384,8 @@ internal sealed partial class SqlServerDatabaseProvider : ISqlOSDatabaseProvider
     private string AppTable(SqlOSFgaPageOrderStore order)
         => Table(order.AppSchema, order.AppTable);
 
-    private static string KeyList(SqlOSFgaPageOrderStore order)
-        => $"SELECT CAST(k.[value] AS {order.KeyStoreType}) FROM OPENJSON(@keys) AS k";
+    private static string KeyList(SqlOSFgaPageOrderStore order, string keys)
+        => $"SELECT CAST(k.[value] AS {order.KeyStoreType}) FROM OPENJSON({keys}) AS k";
 
     private string InsertEntries(SqlOSFgaPageOrderStore order)
     {
@@ -400,14 +405,15 @@ internal sealed partial class SqlServerDatabaseProvider : ISqlOSDatabaseProvider
     }
 
     /// <summary>
-    /// The resources in <c>@resourceIds</c> and their descendants, bounded by the hierarchy depth.
-    /// The ids themselves anchor the walk, so a deleted resource still names the rows that point at it.
+    /// The resources in the <paramref name="resourceIds"/> parameter and their descendants, bounded by
+    /// the hierarchy depth. The ids themselves anchor the walk, so a deleted resource still names the
+    /// rows that point at it.
     /// </summary>
-    private string SubtreeCte(SqlOSFgaPageOrderStore order)
+    private string SubtreeCte(SqlOSFgaPageOrderStore order, string resourceIds)
         => $"""
             WITH subtree AS (
                 SELECT CAST(r.[value] AS NVARCHAR(450)) AS Id, 0 AS Depth
-                FROM OPENJSON(@resourceIds) AS r
+                FROM OPENJSON({resourceIds}) AS r
                 UNION ALL
                 SELECT child.Id, subtree.Depth + 1
                 FROM {Qualify(order.FgaSchema, order.ResourcesTable)} AS child

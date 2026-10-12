@@ -34,12 +34,12 @@ internal interface ISqlOSDatabaseProvider
     string BuildPageNodesFunctionSql(SqlOSFgaOptions options);
     string BuildLockedSelectSql(string schema, string table, string whereSql, string? orderBySql = null);
 
-    // Page-order maintenance. Key lists go through one @keys parameter, resource lists through one
-    // @resourceIds parameter (CreatePageKeysParameter / CreatePageResourceIdsParameter).
-    string BuildDeletePageEntriesByKeysSql(SqlOSFgaPageOrderStore order);
-    string BuildInsertPageEntriesByKeysSql(SqlOSFgaPageOrderStore order);
-    string BuildDeletePageEntriesBySubtreeSql(SqlOSFgaPageOrderStore order);
-    string BuildInsertPageEntriesBySubtreeSql(SqlOSFgaPageOrderStore order);
+    // Page-order maintenance. A key list is one parameter from CreatePageKeysParameter and a resource
+    // list one from CreatePageResourceIdsParameter; the builders take the parameters' names.
+    string BuildDeletePageEntriesByKeysSql(SqlOSFgaPageOrderStore order, string keys);
+    string BuildInsertPageEntriesByKeysSql(SqlOSFgaPageOrderStore order, string keys);
+    string BuildDeletePageEntriesBySubtreeSql(SqlOSFgaPageOrderStore order, string resourceIds);
+    string BuildInsertPageEntriesBySubtreeSql(SqlOSFgaPageOrderStore order, string resourceIds, string? exceptKeys);
     string BuildDeleteAllPageEntriesSql(SqlOSFgaPageOrderStore order);
     string BuildInsertAllPageEntriesSql(SqlOSFgaPageOrderStore order);
     string BuildTableExistsSql(string? schema, string table);

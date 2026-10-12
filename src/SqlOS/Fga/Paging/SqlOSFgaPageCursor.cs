@@ -52,10 +52,18 @@ internal static class SqlOSFgaPageCursor
         IReadOnlyList<IProperty> columns,
         bool descending,
         IReadOnlyList<object> values)
-        => SqlOSCursorCodec.Encode(
+    {
+        var cursor = SqlOSCursorCodec.EncodePage(
             SortKey(entityType, columns, descending),
             Fingerprint(entityType, columns, descending),
             values.Select(Format).ToArray());
+
+        // Never issue a cursor Decode would refuse.
+        return cursor.Length <= SqlOSCursorCodec.MaxPageCursorLength
+            ? cursor
+            : throw new InvalidOperationException(
+                $"The next-page cursor for {entityType.ClrType.Name} ordered by {ColumnList(columns)} would be {cursor.Length} characters, over the {SqlOSCursorCodec.MaxPageCursorLength} a cursor may have, because this row's order values are that long. Order the list by shorter columns.");
+    }
 
     /// <summary>
     /// Reads the order values back. A cursor issued for another entity, order or direction is an
@@ -68,7 +76,7 @@ internal static class SqlOSFgaPageCursor
         IReadOnlyList<IProperty> columns,
         bool descending)
     {
-        if (!SqlOSCursorCodec.TryRead(cursor, out var sortKey, out var fingerprint, out var texts))
+        if (!SqlOSCursorCodec.TryReadPage(cursor, out var sortKey, out var fingerprint, out var texts))
         {
             throw new SqlOSCursorException(NotIssuedMessage);
         }

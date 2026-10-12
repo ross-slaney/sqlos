@@ -111,7 +111,7 @@ Rebuild the entries of every page order declared in the context's model from the
 await authService.RebuildPageOrdersAsync(cancellationToken);
 ```
 
-For each declared order: delete all entries, then insert them in one statement, inside one transaction per order. The cost is the table's rows times the tree depth. `SqlOSDbContext<TContext>` keeps entries current for every write that goes through `SaveChanges`; call this after writes that bypass EF Core (bulk loads, raw SQL, `ExecuteUpdate`/`ExecuteDelete`) and for recovery. Until then, rows those writes inserted are missing from pages and rows they changed page at their old position; a row the caller may not see is never returned. The context's command timeout applies to each statement.
+For each declared order: delete all entries, then insert them in one statement, inside one transaction per order. The cost is the table's rows times the tree depth. `SqlOSDbContext<TContext>` keeps entries current for every write that goes through `SaveChanges`; call this after writes that bypass EF Core (bulk loads, raw SQL, `ExecuteUpdate`/`ExecuteDelete`) and for recovery. Until then, rows those writes inserted are missing from pages and rows they changed page at their old position; a row the caller may not see is never returned. It runs without a command timeout; the cancellation token stops it. Run it while the application is not writing to those tables: a save during a rebuild waits for it, or makes it fail with a deadlock or duplicate key, and running it again fixes that.
 
 **Returns**
 

@@ -79,7 +79,10 @@ public interface ISqlOSFgaAuthService
     /// <remarks>
     /// <para>
     /// For each order: delete all entries, then insert them in one statement, inside one
-    /// transaction per order. The cost is the table's rows times the tree depth.
+    /// transaction per order. The cost is the table's rows times the tree depth. It runs without a
+    /// command timeout; <paramref name="cancellationToken"/> stops it. Run it while the application
+    /// is not writing to those tables: a save during a rebuild waits for it, or makes it fail with a
+    /// deadlock or duplicate key, and running it again fixes that.
     /// </para>
     /// <para>
     /// <c>SqlOSDbContext&lt;TContext&gt;</c> keeps entries current for every write that goes through

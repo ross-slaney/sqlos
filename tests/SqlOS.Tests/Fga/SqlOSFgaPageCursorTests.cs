@@ -86,6 +86,31 @@ public class SqlOSFgaPageCursorTests
     }
 
     [TestMethod]
+    public void LongNonAsciiOrderValues_RoundTrip()
+    {
+        // 2,000 CJK characters are 6,000 UTF-8 bytes. Escaped as \uXXXX they were 12,000 characters
+        // of JSON, a cursor past the admin cursors' 4,096-character limit that Decode refused.
+        var columns = Columns("Name", "Id");
+        object[] values = [new string('名', 2_000), Guid.NewGuid()];
+
+        var cursor = SqlOSFgaPageCursor.Encode(_products, columns, descending: false, values);
+
+        cursor.Length.Should().BeGreaterThan(SqlOSCursorCodec.MaxEncodedLength).And.BeLessThan(9_000);
+        SqlOSFgaPageCursor.Decode(cursor, _products, columns, descending: false).Should().Equal(values);
+    }
+
+    [TestMethod]
+    public void Encode_RefusesACursorDecodeWouldRefuse()
+    {
+        var columns = Columns("Name", "Id");
+
+        var act = () => SqlOSFgaPageCursor.Encode(_products, columns, descending: false, [new string('x', 50_000), Guid.NewGuid()]);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("The next-page cursor for PagedProduct ordered by Name,Id would be * characters, over the 65536 a cursor may have*");
+    }
+
+    [TestMethod]
     public void Decode_RejectsACursorForAnotherOrderDirectionOrEntity()
     {
         var cursor = SqlOSFgaPageCursor.Encode(_products, Columns("Price", "Id"), descending: false, [1.5m, Guid.NewGuid()]);

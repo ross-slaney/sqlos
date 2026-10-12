@@ -1,6 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.Extensions;
@@ -242,6 +243,111 @@ public class SqlOSFgaPageOrderMaintenanceIntegrationTests
     }
 
     [TestMethod]
+    public async Task ResourceAddedAfterRowsPointAtIt_GivesThemEntries()
+    {
+        await using var context = PageOrderFixture.CreateContext();
+        var resource = NewResourceId("page_late");
+        var counter = new PagedCounter { ResourceId = resource, Rank = 3 };
+        context.Counters.Add(counter);
+        await context.SaveChangesAsync();
+        (await NodesOf(context, PageOrderTestDbContext.CounterEntries, counter.Id)).Should().BeEmpty();
+
+        await context.CreateResourceWithIdAsync(resource, "team", "Created after its rows", FgaTestDataSeeder.TestProjectResourceId);
+        await context.SaveChangesAsync();
+
+        (await NodesOf(context, PageOrderTestDbContext.CounterEntries, counter.Id)).Should().BeEquivalentTo(
+            resource,
+            FgaTestDataSeeder.TestProjectResourceId,
+            FgaTestDataSeeder.TestAgencyResourceId,
+            "root");
+
+        await context.DeleteResourceAsync(resource);
+        await context.SaveChangesAsync();
+        (await NodesOf(context, PageOrderTestDbContext.CounterEntries, counter.Id)).Should().BeEmpty();
+
+        await context.CreateResourceWithIdAsync(resource, "team", "Created again", FgaTestDataSeeder.OtherAgencyResourceId);
+        await context.SaveChangesAsync();
+
+        (await NodesOf(context, PageOrderTestDbContext.CounterEntries, counter.Id)).Should().BeEquivalentTo(
+            resource,
+            FgaTestDataSeeder.OtherAgencyResourceId,
+            "root");
+        await AssertEntriesMatchRebuildAsync();
+
+        context.Counters.Remove(counter);
+        await context.DeleteResourceAsync(resource);
+        await context.SaveChangesAsync();
+    }
+
+    [TestMethod]
+    public async Task ChangesMadeBySaveChangesInterceptors_AreKept()
+    {
+        await using var context = PageOrderFixture.CreateContext(null, new RankOnUpdate(6));
+        var document = PageOrderFixture.NewDocument(NewResourceId(), FgaTestDataSeeder.TestTeamResourceId, 417);
+        context.Documents.Add(document);
+        await context.SaveChangesAsync();
+        document.Rank.Should().NotBe(6);
+
+        // The application changes a column no order uses; the interceptor changes the order column.
+        document.Body = "edited";
+        await context.SaveChangesAsync();
+
+        document.Rank.Should().Be(6);
+        (await context.Set<Dictionary<string, object>>(PageOrderTestDbContext.RankEntries)
+                .Where(entry => EF.Property<Guid>(entry, "RowKey") == document.Id)
+                .Select(entry => EF.Property<int>(entry, "Rank"))
+                .ToListAsync())
+            .Should().HaveCount(4).And.OnlyContain(rank => rank == 6);
+        await AssertEntriesMatchRebuildAsync();
+
+        context.Documents.Remove(document);
+        await context.SaveChangesAsync();
+    }
+
+    [TestMethod]
+    public async Task OrderColumnTheDatabaseComputes_FollowsItsSource()
+    {
+        await using var context = PageOrderFixture.CreateContext();
+        var score = new PagedScore { Id = Guid.NewGuid(), ResourceId = FgaTestDataSeeder.TestProjectResourceId, Points = 1 };
+        context.Scores.Add(score);
+        await context.SaveChangesAsync();
+        score.Score.Should().Be(10);
+        (await ScoresOf(context, score.Id)).Should().HaveCount(3).And.OnlyContain(value => value == 10);
+
+        // Only the source column changes; the database computes the order column.
+        score.Points = 2;
+        await context.SaveChangesAsync();
+
+        score.Score.Should().Be(20);
+        (await ScoresOf(context, score.Id)).Should().HaveCount(3).And.OnlyContain(value => value == 20);
+        var (actual, expected) = await PageOrderFixture.EntriesAndRebuildAsync(PageOrderTestDbContext.ScoreEntries, "PagedScores", "Score");
+        actual.Should().Equal(expected);
+
+        context.Scores.Remove(score);
+        await context.SaveChangesAsync();
+    }
+
+    [TestMethod]
+    public async Task SaveOfANewDocument_WritesItsEntriesInOneCommand()
+    {
+        var commands = new CommandCapture();
+        await using var context = PageOrderFixture.CreateContext(null, commands);
+        var document = PageOrderFixture.NewDocument(NewResourceId(), FgaTestDataSeeder.TestTeamResourceId, 418);
+        context.Documents.Add(document);
+
+        await context.SaveChangesAsync();
+
+        // The new resource and the new row, for every declared order.
+        commands.Commands.Where(command => command.Text.Contains("SqlOSFgaPage_", StringComparison.Ordinal))
+            .Should().ContainSingle();
+        (await NodesOf(context, PageOrderTestDbContext.RankEntries, document.Id)).Should().HaveCount(4);
+        await AssertEntriesMatchRebuildAsync();
+
+        context.Documents.Remove(document);
+        await context.SaveChangesAsync();
+    }
+
+    [TestMethod]
     public async Task FailingSave_LeavesNoEntries()
     {
         Guid existingId;
@@ -297,6 +403,59 @@ public class SqlOSFgaPageOrderMaintenanceIntegrationTests
         await AssertEntriesMatchRebuildAsync();
         verifier.Documents.Remove(await verifier.Documents.SingleAsync(document => document.Id == committed.Id));
         await verifier.SaveChangesAsync();
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task FailedEntryStatements_LeaveTheCallersTransactionAsBeforeTheSave(bool synchronous)
+    {
+        await using var context = PageOrderFixture.CreateContext(null, new FailingEntryStatements());
+        var document = PageOrderFixture.NewDocument(NewResourceId(), FgaTestDataSeeder.TestProjectResourceId, 419);
+        await using (var transaction = await context.Database.BeginTransactionAsync())
+        {
+            context.Documents.Add(document);
+
+            var save = synchronous
+                ? FluentActions.Invoking(() => context.SaveChanges()).Should().Throw<InvalidOperationException>()
+                : (await FluentActions.Awaiting(() => context.SaveChangesAsync()).Should().ThrowAsync<InvalidOperationException>());
+            save.WithMessage(FailingEntryStatements.Message);
+
+            // A caller that recovers and commits does not commit the failed save.
+            context.ChangeTracker.Clear();
+            await transaction.CommitAsync();
+        }
+
+        await using var verifier = PageOrderFixture.CreateContext();
+        (await verifier.Documents.AnyAsync(candidate => candidate.Id == document.Id)).Should().BeFalse();
+        (await verifier.Set<SqlOSFgaResource>().AnyAsync(resource => resource.Id == document.ResourceId)).Should().BeFalse();
+        await AssertEntriesMatchRebuildAsync();
+    }
+
+    [TestMethod]
+    public async Task EnlistedTransaction_IsUsed()
+    {
+        var document = PageOrderFixture.NewDocument(NewResourceId(), FgaTestDataSeeder.TestProjectResourceId, 420);
+        using (var transaction = new System.Transactions.CommittableTransaction())
+        {
+            await using (var context = PageOrderFixture.CreateContext())
+            {
+                await context.Database.OpenConnectionAsync();
+                System.Transactions.TransactionsDatabaseFacadeExtensions.EnlistTransaction(context.Database, transaction);
+                context.Documents.Add(document);
+
+                await context.SaveChangesAsync();
+
+                (await NodesOf(context, PageOrderTestDbContext.RankEntries, document.Id)).Should().HaveCount(4);
+                await context.Database.CloseConnectionAsync();
+            }
+
+            transaction.Rollback();
+        }
+
+        await using var verifier = PageOrderFixture.CreateContext();
+        (await verifier.Documents.AnyAsync(candidate => candidate.Id == document.Id)).Should().BeFalse();
+        (await NodesOf(verifier, PageOrderTestDbContext.RankEntries, document.Id)).Should().BeEmpty();
     }
 
     [TestMethod]
@@ -366,6 +525,21 @@ public class SqlOSFgaPageOrderMaintenanceIntegrationTests
 
         await PageOrderFixture.AuthService(context).RebuildPageOrdersAsync();
 
+        await AssertEntriesMatchRebuildAsync();
+    }
+
+    [TestMethod]
+    public async Task Rebuild_RunsWithoutACommandTimeout_AndRestoresTheContexts()
+    {
+        var commands = new CommandCapture();
+        await using var context = PageOrderFixture.CreateContext(null, commands);
+        context.Database.SetCommandTimeout(17);
+
+        await PageOrderFixture.AuthService(context).RebuildPageOrdersAsync();
+
+        commands.Commands.Should().Contain(command => command.Text.Contains("SqlOSFgaPage_", StringComparison.Ordinal))
+            .And.OnlyContain(command => command.Timeout == 0);
+        context.Database.GetCommandTimeout().Should().Be(17);
         await AssertEntriesMatchRebuildAsync();
     }
 
@@ -461,6 +635,12 @@ public class SqlOSFgaPageOrderMaintenanceIntegrationTests
             .Select(entry => EF.Property<string>(entry, "NodeId"))
             .ToListAsync();
 
+    private static Task<List<int>> ScoresOf(PageOrderTestDbContext context, Guid rowKey)
+        => context.Set<Dictionary<string, object>>(PageOrderTestDbContext.ScoreEntries)
+            .Where(entry => EF.Property<Guid>(entry, "RowKey") == rowKey)
+            .Select(entry => EF.Property<int>(entry, "Score"))
+            .ToListAsync();
+
     private static Task<List<string>> NodesFor(PageOrderTestDbContext context, params string[] subjectIds)
         => context.PageNodes(JsonSerializer.Serialize(subjectIds), FgaTestDataSeeder.ViewPermissionId)
             .Select(node => node.NodeId)
@@ -488,4 +668,31 @@ public class SqlOSFgaPageOrderMaintenanceIntegrationTests
 
     private static string NewResourceId(string prefix = "page_doc")
         => $"{prefix}_{Guid.NewGuid():N}";
+
+    /// <summary>Sets every updated document's rank during the save, as an audit interceptor sets UpdatedAt.</summary>
+    private sealed class RankOnUpdate(int rank) : SaveChangesInterceptor
+    {
+        public override InterceptionResult<int> SavingChanges(DbContextEventData eventData, InterceptionResult<int> result)
+        {
+            Apply(eventData.Context!);
+            return result;
+        }
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            Apply(eventData.Context!);
+            return ValueTask.FromResult(result);
+        }
+
+        private void Apply(DbContext context)
+        {
+            foreach (var entry in context.ChangeTracker.Entries<PagedDocument>().Where(entry => entry.State == EntityState.Modified))
+            {
+                entry.Property(document => document.Rank).CurrentValue = rank;
+            }
+        }
+    }
 }

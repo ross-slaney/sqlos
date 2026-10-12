@@ -180,7 +180,6 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
         ArgumentNullException.ThrowIfNull(options);
         var schema = QuoteIdentifier(options.Schema);
         var tables = options.TableNames;
-        var resources = Qualify(options.Schema, tables.Resources);
         var grants = Qualify(options.Schema, tables.Grants);
         var rolePermissions = Qualify(options.Schema, tables.RolePermissions);
         var subjects = Qualify(options.Schema, tables.Subjects);
@@ -191,6 +190,15 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
 
         // The grant conditions sit at the same indentation as in fn_IsResourceAccessible so the
         // shared subject-activity text is byte-identical in both functions.
+        //
+        // PostgreSQL planner notes, from the page-order benchmark. The minimal nodes are a set
+        // difference (EXCEPT, one hash): a correlated NOT EXISTS over the granted CTE scans the
+        // materialized CTE once per granted node, quadratic in the caller's grants. A granted node is
+        // active when fn_ResourceAncestors returns it at depth 0, so the grants are not joined to the
+        // resource table, which the planner can choose to scan whole. The SET clause keeps the function
+        // out of the page query (a function with SET is not inlined, and ROWS is its estimate) and its
+        // body out of JIT: otherwise the estimated cost crosses jit_above_cost, and compiling the page
+        // query takes far longer than running it.
         return $"""
             CREATE OR REPLACE FUNCTION {schema}."fn_PageNodes"(
                 p_subject_ids text,
@@ -199,51 +207,56 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
             RETURNS TABLE("NodeId" varchar(450))
             LANGUAGE sql
             STABLE
+            ROWS 10
+            SET jit = off
             AS $sqlos$
             WITH granted AS (
             SELECT DISTINCT g."ResourceId" AS "NodeId"
             FROM {grants} g
             INNER JOIN {rolePermissions} rp ON g."RoleId" = rp."RoleId"
             INNER JOIN {subjects} s ON g."SubjectId" = s."Id"
-            INNER JOIN {resources} node ON node."Id" = g."ResourceId"
             LEFT JOIN {users} u ON s."Id" = u."SubjectId"
             LEFT JOIN {serviceAccounts} sa ON s."Id" = sa."SubjectId"
             LEFT JOIN {userGroups} ug ON s."Id" = ug."SubjectId"
             LEFT JOIN {agents} ag ON s."Id" = ag."SubjectId"
             WHERE g."SubjectId" IN (SELECT jsonb_array_elements_text(p_subject_ids::jsonb))
               AND rp."PermissionId" = p_permission_id
-              AND node."IsActive" = TRUE
               {BuildSubjectActivityConditions(options)}
               AND (g."EffectiveFrom" IS NULL OR g."EffectiveFrom" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))
               AND (g."EffectiveTo" IS NULL OR g."EffectiveTo" >= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))
-            )
-            SELECT granted."NodeId"
+            ),
+            chain AS (
+            SELECT granted."NodeId", ancestor."NodeId" AS "AncestorId", ancestor."Depth"
             FROM granted
-            WHERE NOT EXISTS (
-                SELECT 1
-                FROM {schema}."fn_ResourceAncestors"(granted."NodeId") ancestor
-                INNER JOIN granted covering ON covering."NodeId" = ancestor."NodeId"
-                WHERE ancestor."Depth" >= 1
+            CROSS JOIN LATERAL {schema}."fn_ResourceAncestors"(granted."NodeId") ancestor
             )
+            SELECT chain."NodeId"
+            FROM chain
+            WHERE chain."Depth" = 0
+            EXCEPT
+            SELECT chain."NodeId"
+            FROM chain
+            INNER JOIN granted covering ON covering."NodeId" = chain."AncestorId"
+            WHERE chain."Depth" >= 1
             $sqlos$;
             """;
     }
 
-    public string BuildDeletePageEntriesByKeysSql(SqlOSFgaPageOrderStore order)
+    public string BuildDeletePageEntriesByKeysSql(SqlOSFgaPageOrderStore order, string keys)
         => $"""
             DELETE FROM {Entries(order)}
-            WHERE {QuoteIdentifier(order.EntryRowKeyColumn)} = ANY(@keys);
+            WHERE {QuoteIdentifier(order.EntryRowKeyColumn)} = ANY({keys});
             """;
 
-    public string BuildInsertPageEntriesByKeysSql(SqlOSFgaPageOrderStore order)
+    public string BuildInsertPageEntriesByKeysSql(SqlOSFgaPageOrderStore order, string keys)
         => $"""
             {InsertEntries(order)}
-            WHERE t.{QuoteIdentifier(order.AppKeyColumn)} = ANY(@keys);
+            WHERE t.{QuoteIdentifier(order.AppKeyColumn)} = ANY({keys});
             """;
 
-    public string BuildDeletePageEntriesBySubtreeSql(SqlOSFgaPageOrderStore order)
+    public string BuildDeletePageEntriesBySubtreeSql(SqlOSFgaPageOrderStore order, string resourceIds)
         => $"""
-            {SubtreeCte(order)}
+            {SubtreeCte(order, resourceIds)}
             DELETE FROM {Entries(order)}
             WHERE {QuoteIdentifier(order.EntryRowKeyColumn)} IN (
                 SELECT t.{QuoteIdentifier(order.AppKeyColumn)}
@@ -252,12 +265,17 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
             );
             """;
 
-    public string BuildInsertPageEntriesBySubtreeSql(SqlOSFgaPageOrderStore order)
-        => $"""
-            {SubtreeCte(order)}
+    public string BuildInsertPageEntriesBySubtreeSql(SqlOSFgaPageOrderStore order, string resourceIds, string? exceptKeys)
+    {
+        var except = exceptKeys == null
+            ? string.Empty
+            : $" AND t.{QuoteIdentifier(order.AppKeyColumn)} <> ALL({exceptKeys})";
+        return $"""
+            {SubtreeCte(order, resourceIds)}
             {InsertEntries(order)}
-            WHERE t.{QuoteIdentifier(order.AppResourceIdColumn)} IN (SELECT subtree."Id" FROM subtree);
+            WHERE t.{QuoteIdentifier(order.AppResourceIdColumn)} IN (SELECT subtree."Id" FROM subtree){except};
             """;
+    }
 
     public string BuildDeleteAllPageEntriesSql(SqlOSFgaPageOrderStore order)
         => $"DELETE FROM {Entries(order)};";
@@ -393,14 +411,15 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
     }
 
     /// <summary>
-    /// The resources in <c>@resourceIds</c> and their descendants, bounded by the hierarchy depth.
-    /// The ids themselves anchor the walk, so a deleted resource still names the rows that point at it.
+    /// The resources in the <paramref name="resourceIds"/> parameter and their descendants, bounded by
+    /// the hierarchy depth. The ids themselves anchor the walk, so a deleted resource still names the
+    /// rows that point at it.
     /// </summary>
-    private string SubtreeCte(SqlOSFgaPageOrderStore order)
+    private string SubtreeCte(SqlOSFgaPageOrderStore order, string resourceIds)
         => $"""
             WITH RECURSIVE subtree AS (
                 SELECT ids.id::varchar(450) AS "Id", 0 AS "Depth"
-                FROM unnest(@resourceIds) AS ids(id)
+                FROM unnest({resourceIds}) AS ids(id)
                 UNION ALL
                 SELECT child."Id", subtree."Depth" + 1
                 FROM {Qualify(order.FgaSchema, order.ResourcesTable)} AS child

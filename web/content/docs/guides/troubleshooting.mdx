@@ -81,7 +81,8 @@ The page was ordered by an order no `HasPageOrder` declares, so `ToPageAsync` re
 
 ## Pages are missing rows
 
-- Rows written outside EF Core (bulk loads, raw SQL, `ExecuteUpdate`/`ExecuteDelete`) have no page-order entries until you call `ISqlOSFgaAuthService.RebuildPageOrdersAsync()`.
+- Rows written outside EF Core (bulk loads, raw SQL, `ExecuteUpdate`/`ExecuteDelete`, triggers) have no page-order entries until you call `ISqlOSFgaAuthService.RebuildPageOrdersAsync()`.
+- After a rolling deployment that declared a new order, rows that instances on the previous version wrote have no entries. Call `RebuildPageOrdersAsync()` once every instance runs the new version.
 - A startup warning `Page order ...: table ... does not exist` means the migration that creates the entry table has not been applied. Pages for that order still return the right rows, by reading the table in order.
 - The context must derive from `SqlOSDbContext<TContext>`; a hand-rolled `ISqlOSFgaDbContext` does not keep page orders current.
 

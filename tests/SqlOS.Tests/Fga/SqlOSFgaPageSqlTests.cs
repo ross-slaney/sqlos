@@ -111,18 +111,28 @@ public class SqlOSFgaPageSqlTests
         postgreSql.Should().Contain("CREATE OR REPLACE FUNCTION \"dbo\".\"fn_PageNodes\"(")
             .And.Contain("jsonb_array_elements_text(p_subject_ids::jsonb)")
             .And.Contain("(p_subject_ids::jsonb ->> 0)")
-            .And.Contain("node.\"IsActive\" = TRUE")
-            .And.Contain("FROM \"dbo\".\"fn_ResourceAncestors\"(granted.\"NodeId\") ancestor")
-            .And.Contain("WHERE ancestor.\"Depth\" >= 1");
+            .And.Contain("g.\"EffectiveFrom\" IS NULL OR g.\"EffectiveFrom\" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')")
+            .And.Contain("CROSS JOIN LATERAL \"dbo\".\"fn_ResourceAncestors\"(granted.\"NodeId\") ancestor")
+            .And.Contain("WHERE chain.\"Depth\" = 0\nEXCEPT\n")
+            .And.Contain("WHERE chain.\"Depth\" >= 1");
+    }
+
+    // Measured on PostgreSQL: inlined into the page query, the function's cost estimate crosses
+    // jit_above_cost and JIT compilation takes longer than the query.
+    [TestMethod]
+    public void PageNodes_OnPostgreSql_IsNotInlined_AndRunsWithoutJit()
+    {
+        PostgreSqlDatabaseProvider.Instance.BuildPageNodesFunctionSql(new SqlOSFgaOptions())
+            .Should().Contain("LANGUAGE sql\nSTABLE\nROWS 10\nSET jit = off\nAS $sqlos$");
     }
 
     [TestMethod]
     public void KeyStatements_TakeTheKeysAsOneParameter()
     {
-        var sqlServerDelete = SqlServerDatabaseProvider.Instance.BuildDeletePageEntriesByKeysSql(Order);
-        var sqlServerInsert = SqlServerDatabaseProvider.Instance.BuildInsertPageEntriesByKeysSql(Order);
-        var postgreSqlDelete = PostgreSqlDatabaseProvider.Instance.BuildDeletePageEntriesByKeysSql(Order);
-        var postgreSqlInsert = PostgreSqlDatabaseProvider.Instance.BuildInsertPageEntriesByKeysSql(Order);
+        var sqlServerDelete = SqlServerDatabaseProvider.Instance.BuildDeletePageEntriesByKeysSql(Order, "@keys");
+        var sqlServerInsert = SqlServerDatabaseProvider.Instance.BuildInsertPageEntriesByKeysSql(Order, "@keys");
+        var postgreSqlDelete = PostgreSqlDatabaseProvider.Instance.BuildDeletePageEntriesByKeysSql(Order, "@keys");
+        var postgreSqlInsert = PostgreSqlDatabaseProvider.Instance.BuildInsertPageEntriesByKeysSql(Order, "@keys");
 
         sqlServerDelete.Should().Be("""
             DELETE FROM [dbo].[SqlOSFgaPage_Products_Price]
@@ -151,10 +161,10 @@ public class SqlOSFgaPageSqlTests
     [TestMethod]
     public void SubtreeStatements_WalkDescendantsOfTheChangedResources_BoundedByMaxDepth()
     {
-        var sqlServerDelete = SqlServerDatabaseProvider.Instance.BuildDeletePageEntriesBySubtreeSql(Order);
-        var sqlServerInsert = SqlServerDatabaseProvider.Instance.BuildInsertPageEntriesBySubtreeSql(Order);
-        var postgreSqlDelete = PostgreSqlDatabaseProvider.Instance.BuildDeletePageEntriesBySubtreeSql(Order);
-        var postgreSqlInsert = PostgreSqlDatabaseProvider.Instance.BuildInsertPageEntriesBySubtreeSql(Order);
+        var sqlServerDelete = SqlServerDatabaseProvider.Instance.BuildDeletePageEntriesBySubtreeSql(Order, "@resourceIds");
+        var sqlServerInsert = SqlServerDatabaseProvider.Instance.BuildInsertPageEntriesBySubtreeSql(Order, "@resourceIds", exceptKeys: null);
+        var postgreSqlDelete = PostgreSqlDatabaseProvider.Instance.BuildDeletePageEntriesBySubtreeSql(Order, "@resourceIds");
+        var postgreSqlInsert = PostgreSqlDatabaseProvider.Instance.BuildInsertPageEntriesBySubtreeSql(Order, "@resourceIds", exceptKeys: null);
 
         foreach (var sql in new[] { sqlServerDelete, sqlServerInsert })
         {
@@ -179,6 +189,15 @@ public class SqlOSFgaPageSqlTests
             .And.EndWith("WHERE t.[ResourceId] IN (SELECT subtree.Id FROM subtree);");
         postgreSqlInsert.Should().Contain("CROSS JOIN LATERAL \"dbo\".\"fn_ResourceAncestors\"(t.\"ResourceId\") AS a")
             .And.EndWith("WHERE t.\"ResourceId\" IN (SELECT subtree.\"Id\" FROM subtree);");
+    }
+
+    [TestMethod]
+    public void SubtreeInsert_SkipsTheRowsTheKeyInsertWrites()
+    {
+        SqlServerDatabaseProvider.Instance.BuildInsertPageEntriesBySubtreeSql(Order, "@resourceIds", "@keys0")
+            .Should().EndWith("WHERE t.[ResourceId] IN (SELECT subtree.Id FROM subtree) AND t.[Id] NOT IN (SELECT CAST(k.[value] AS uniqueidentifier) FROM OPENJSON(@keys0) AS k);");
+        PostgreSqlDatabaseProvider.Instance.BuildInsertPageEntriesBySubtreeSql(Order, "@resourceIds", "@keys0")
+            .Should().EndWith("WHERE t.\"ResourceId\" IN (SELECT subtree.\"Id\" FROM subtree) AND t.\"Id\" <> ALL(@keys0);");
     }
 
     [TestMethod]

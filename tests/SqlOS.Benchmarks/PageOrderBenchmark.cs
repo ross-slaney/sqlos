@@ -52,6 +52,13 @@ internal static class PageOrderBenchmark
     public static async Task RunAsync(string[] args)
     {
         var options = Options.Parse(args);
+        if (options.PostgreSql)
+        {
+            // SqlOS stores UTC times in timestamp columns. Npgsql reads this switch once, when it is
+            // first used, and the database is created over a plain connection before any SqlOSDbContext.
+            AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
+        }
+
         var productsPerStore = Math.Max(1, options.Products / Stores);
         var products = productsPerStore * Stores;
         var bench = new Bench(options.PostgreSql, options.ConnectionString);
@@ -174,10 +181,11 @@ internal static class PageOrderBenchmark
             var fga = Microsoft.Extensions.Options.Options.Create(new SqlOSFgaOptions());
             await new SqlOSFgaSchemaInitializer(context, fga, NullLogger<SqlOSFgaSchemaInitializer>.Instance).EnsureSchemaAsync();
             await new SqlOSFgaFunctionInitializer(context, fga, NullLogger<SqlOSFgaFunctionInitializer>.Instance).EnsureFunctionsExistAsync();
-            await new SqlOSFgaSeedService(context, fga, NullLogger<SqlOSFgaSeedService>.Instance).SeedCoreAsync();
 
-            // The application's tables and the entry table of the declared order, as a migration would create them.
+            // The application's tables and the entry table of the declared order, as a migration would
+            // create them before the application starts and seeds.
             await context.GetService<IRelationalDatabaseCreator>().CreateTablesAsync();
+            await new SqlOSFgaSeedService(context, fga, NullLogger<SqlOSFgaSeedService>.Instance).SeedCoreAsync();
 
             foreach (var type in new[] { "division", "chain", "region", "store", "product" })
             {
@@ -382,6 +390,7 @@ internal static class PageOrderBenchmark
                 await connection.OpenAsync();
                 await using var explain = connection.CreateCommand();
                 explain.CommandText = "EXPLAIN (ANALYZE, FORMAT JSON) " + captured.CommandText;
+                explain.CommandTimeout = 3600;
                 CopyParameters(captured, explain);
                 var plan = JsonDocument.Parse((string)(await explain.ExecuteScalarAsync())!);
                 return PostgreSqlRows(plan.RootElement[0].GetProperty("Plan"));
@@ -430,7 +439,12 @@ internal static class PageOrderBenchmark
             if (node.TryGetProperty("Relation Name", out var relation)
                 && relation.GetString() is "Products" or EntryTable)
             {
-                rows += (long)Math.Round(node.GetProperty("Actual Rows").GetDouble() * node.GetProperty("Actual Loops").GetDouble());
+                // A scan's "Actual Rows" are the rows that passed its filter; the authorization check
+                // is often that filter, so the rows it removed were read too.
+                var read = node.GetProperty("Actual Rows").GetDouble()
+                    + (node.TryGetProperty("Rows Removed by Filter", out var filtered) ? filtered.GetDouble() : 0)
+                    + (node.TryGetProperty("Rows Removed by Index Recheck", out var rechecked) ? rechecked.GetDouble() : 0);
+                rows += (long)Math.Round(read * node.GetProperty("Actual Loops").GetDouble());
             }
 
             if (node.TryGetProperty("Plans", out var children))

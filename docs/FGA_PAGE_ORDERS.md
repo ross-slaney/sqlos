@@ -72,6 +72,22 @@ Installed by `SqlOSFgaFunctionInitializer` next to `fn_IsResourceAccessible`, `C
 A unit test pins the SHA-256 of `fn_IsResourceAccessible`'s text on both engines, so sharing the
 helpers cannot change it.
 
+On PostgreSQL, `fn_PageNodes` is shaped for the planner; each point was measured with the benchmark:
+
+- Minimality is a set difference (`EXCEPT`): the caller's active granted nodes (`fn_ResourceAncestors`
+  returns the node at depth 0) minus those with a granted node among their ancestors. A correlated
+  `NOT EXISTS` against the granted CTE scans the materialized CTE once per granted node: 10,000 single-row
+  grants took 6.5 s, and take 0.3 s this way.
+- Grants are not joined to the resource table to check that the node is active (the depth-0 row does
+  that), because a misestimated grant count makes the planner scan the whole resource table.
+- The function is declared `ROWS 10` and `SET jit = off`. A function with a `SET` clause is not inlined,
+  so the page query plans with its row estimate, and its body runs without JIT. Inlined, the query's
+  estimated cost crossed `jit_above_cost` and JIT compilation added about half a second to every page
+  that read 2 answers, against about 20 ms of work.
+
+SQL Server plans the straightforward form (`NOT EXISTS`, a join to the resource table) well, so its
+function keeps it. Both return the same nodes; the integration tests run on both engines.
+
 ## The page
 
 `ToPageAsync` reads the filter (`SqlOSFgaFilterReader`: the context, the subject ids JSON and the
@@ -110,31 +126,55 @@ logged once per entity and order at Warning, with the declaration to add.
 All in `SqlOSFgaPageOrderMaintenance`, called from `SqlOSDbContext<TContext>.SaveChanges` /
 `SaveChangesAsync` after the resource synchronizer:
 
-1. Collect, before the save: added rows; modified rows whose `ResourceId` or an order column changed;
-   deleted rows; resources whose `ParentId` or `IsActive` changed, or that are deleted.
-2. Nothing collected: a plain `base.SaveChanges`.
-3. Otherwise, in the caller's transaction, an ambient one, or one owned here (inside the context's
-   execution strategy): save, then per order
-   - for changed resources, delete and re-insert the entries of the rows under the resources and their
-     descendants (a recursive CTE over `ParentId`, bounded by the depth; a deleted resource is its own
-     subtree);
-   - for changed rows, delete their entries by key and re-insert the added and modified ones.
+1. Before the save, a check: does the change tracker hold an added, modified or deleted resource, or row
+   of an entity with a page order? No: a plain `base.SaveChanges`.
+2. Otherwise, in a transaction: the caller's, inside a savepoint (as EF Core does for the save alone, so a
+   failure leaves it as it was before the save); an ambient or enlisted `System.Transactions` one; or one
+   owned here, inside the context's execution strategy. Save with `acceptAllChangesOnSuccess: false`, then
+   collect what the save wrote: added and deleted rows; modified rows whose `ResourceId` or an order column
+   changed, or with an order column the database computes on update; resources added, deleted, or whose
+   `ParentId` or `IsActive` changed. Collecting after the save sees values set by `SaveChanges`
+   interceptors and `SavingChanges` handlers, cascade deletes and generated keys.
+3. One command for everything collected. Per order:
+   - delete the entries of the rows under the changed resources and their descendants (a recursive CTE
+     over `ParentId`, bounded by the depth; the changed ids anchor it, so a deleted resource is its own
+     subtree and an added one finds the rows saved before it);
+   - delete the entries of the changed rows, by key (added rows too, so a stale entry left by a write that
+     bypassed EF cannot make the insert of a reused key fail);
+   - insert the entries of the rows under the changed resources, except the changed rows;
+   - insert the entries of the changed rows.
 
-   Subtrees go first and keys last, so a row in both sets ends with exactly one set of entries. Key
-   lists are one parameter: `OPENJSON(@keys)` on SQL Server, `= ANY(@keys)` on PostgreSQL. Any failure
-   rolls everything back.
+   Each row ends with exactly one set of entries. Key lists are one parameter per entity: `OPENJSON(@keysN)`
+   on SQL Server, `= ANY(@keysN)` on PostgreSQL. Any failure rolls everything back.
+4. Accept the changes.
 
 This covers every write that ends in `SaveChanges` on a `SqlOSDbContext`: application rows,
 `ISqlOSResourceEntity` synchronization, `SqlOSErgonomicsExtensions`, the dashboard's resource edits and
-the seed service. Writes that bypass EF Core are covered by `ISqlOSFgaAuthService.RebuildPageOrdersAsync`
-(delete all, insert all, one transaction and one application lock per order). Until it runs, rows those writes
-inserted are missing from pages and rows they changed page at their old position; a row the caller may not see is
-never returned (the final check).
+the seed service. `ISqlOSFgaAuthService.RebuildPageOrdersAsync` (delete all, insert all, one transaction
+and one application lock per order, no command timeout) covers the rest:
+
+- writes that bypass EF Core: bulk loads, raw SQL, `ExecuteUpdate`/`ExecuteDelete`, triggers;
+- an interceptor that changes paged rows in a save that changes no paged row or resource (step 1 sees
+  nothing to do);
+- two concurrent saves, one moving or deactivating a resource and one adding or changing rows under it.
+  With snapshot reads (PostgreSQL, SQL Server with `READ_COMMITTED_SNAPSHOT`) each reads the other's rows
+  as they were, so those rows can keep entries on the old path. With locking reads they wait for each other,
+  and one can fail with a deadlock. Either can fail with a duplicate key. Closing this takes a lock that
+  every save writing entries would contend on; it is left open because moves are rare, and a stale entry
+  never shows a row the caller may not see (the final check).
+
+Until a rebuild, rows those writes inserted are missing from pages and rows they changed page at their old
+position; a row the caller may not see is never returned. Saves during a rebuild wait for it, or make it
+fail with a deadlock or duplicate key; it is meant for quiet periods, and running it again fixes what they
+left.
 
 **Startup.** After the functions are installed, `SqlOSBootstrapper` fills the entry table of every
 order whose table exists and is empty while its application table has rows: the first start after a
-declaration needs no manual step. A missing entry table is logged at Warning and skipped; pages for
-that order run read 1 only until it exists.
+declaration needs no manual step. The fill is a rebuild of that order (application lock, no command
+timeout); other instances starting at the same time wait for it and then find the table filled. A missing
+entry table is logged at Warning and skipped; pages for that order run read 1 only until it exists. In a
+rolling deployment, instances still on the previous version write rows without entries, so the rollout
+ends with a rebuild.
 
 Contexts that implement `ISqlOSFgaDbContext` by hand get no maintenance, and `ToPageAsync` refuses them.
 
@@ -155,6 +195,7 @@ application's filters.
 | Application filter few rows pass, no scope | O(P / f) | entries read until P pass |
 | Rare filter and a caller whose rows barely overlap it | O(rows the caller sees) | read 2 reads the caller's entries until P pass the filter |
 | Insert, or update of an order column or `ResourceId` | O(D × declared orders) | entries written in the same transaction |
+| Add a resource | O(declared orders) lookups by `ResourceId` | rows saved before it get entries |
 | Move, deactivate or reactivate a resource | O(subtree × D × declared orders) | that subtree's entries rewritten |
 | `RebuildPageOrdersAsync` | O(N × D × declared orders) | once |
 
@@ -162,6 +203,9 @@ Nothing is linear in `N` except the rebuild.
 
 ## Limits and engine notes
 
+- The cursor carries the last row's order values, with non-ASCII text unescaped, up to 65,536 characters.
+  Values that need more throw when the cursor is issued; order columns that a page order indexes are far
+  below that, bounded by the engine's index key size.
 - Order columns are non-nullable mapped scalar properties; strings need a maximum length; one
   direction per order. The entity needs a single-column primary key, a mapped `ResourceId` and a table
   of its own (TPH is fine; owned types, views, TPT and TPC are not).

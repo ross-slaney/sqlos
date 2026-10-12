@@ -313,9 +313,32 @@ internal sealed class CommandCapture : DbCommandInterceptor
             command.CommandText,
             command.Parameters.Cast<DbParameter>()
                 .Select(parameter => new CapturedParameter(parameter.ParameterName, parameter.DbType, parameter.Size, parameter.Value, parameter))
-                .ToList()));
+                .ToList(),
+            command.CommandTimeout));
 }
 
-internal sealed record CapturedCommand(string Text, IReadOnlyList<CapturedParameter> Parameters);
+/// <summary>Fails every command that writes page-order entries, after the rows it follows were saved.</summary>
+internal sealed class FailingEntryStatements : DbCommandInterceptor
+{
+    public const string Message = "Entry statements failed for the test.";
+
+    public override InterceptionResult<int> NonQueryExecuting(
+        DbCommand command,
+        CommandEventData eventData,
+        InterceptionResult<int> result)
+        => Writes(command) ? throw new InvalidOperationException(Message) : result;
+
+    public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+        DbCommand command,
+        CommandEventData eventData,
+        InterceptionResult<int> result,
+        CancellationToken cancellationToken = default)
+        => Writes(command) ? throw new InvalidOperationException(Message) : ValueTask.FromResult(result);
+
+    private static bool Writes(DbCommand command)
+        => command.CommandText.Contains("SqlOSFgaPage_", StringComparison.Ordinal);
+}
+
+internal sealed record CapturedCommand(string Text, IReadOnlyList<CapturedParameter> Parameters, int Timeout);
 
 internal sealed record CapturedParameter(string Name, System.Data.DbType DbType, int Size, object? Value, DbParameter Original);
