@@ -60,15 +60,13 @@ public class SqlOSFgaPageOrderMissingTableIntegrationTests
 
         try
         {
-            var filter = await new SqlOSFgaAuthService(context, Options.Create(new SqlOSFgaOptions()), NullLogger<SqlOSFgaAuthService>.Instance)
-                .BuildFilterAsync<PagedNote>(FgaTestDataSeeder.AgencyMemberSubjectId, PageOrderFixture.ViewPermission);
             logs.Clear();
 
             var pages = new List<Guid>();
             string? cursor = null;
             do
             {
-                var page = await context.Notes.AsNoTracking().OrderBy(note => note.Rank).ToPageAsync(filter, 2, cursor);
+                var page = await context.Notes.AsNoTracking().OrderBy(note => note.Rank).ToPageAsync(FgaTestDataSeeder.AgencyMemberSubjectId, PageOrderFixture.ViewPermission, 2, cursor);
                 pages.AddRange(page.Data.Select(note => note.Id));
                 cursor = page.NextCursor;
             }

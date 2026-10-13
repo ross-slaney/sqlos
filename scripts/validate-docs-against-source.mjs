@@ -124,9 +124,9 @@ const requiredSourceContracts = [
     "HttpContext.GetSqlOSValidatedToken",
   ],
   [
-    "src/SqlOS/Fga/Interfaces/ISqlOSFgaAuthService.cs",
-    /Task<Expression<Func<T, bool>>> BuildFilterAsync<T>/,
-    "ISqlOSFgaAuthService.BuildFilterAsync<T>",
+    "src/SqlOS/Fga/Extensions/PageQueryableExtensions.cs",
+    /public static async Task<SqlOSCursorPage<T>> ToPageAsync<T>\(\s*this IQueryable<T> query,\s*string subjectId,\s*string permissionKey,\s*int pageSize,\s*string\? cursor = null,\s*CancellationToken cancellationToken = default\)/,
+    "IQueryable<T>.ToPageAsync(subjectId, permissionKey, pageSize, cursor, cancellationToken)",
   ],
   [
     "src/SqlOS/AuthServer/Configuration/SqlOSAuthServerOptions.cs",
@@ -230,6 +230,7 @@ const stalePatterns = [
   [/\bresult\.Items\b/, "stale pagination Items property"],
   [/\bresult\.HasMore\b/, "stale pagination HasMore property"],
   [/\bGetAuthorizationFilterAsync\b/, "stale FGA GetAuthorizationFilterAsync method"],
+  [/\bBuildFilterAsync</, "removed FGA BuildFilterAsync method (page with ToPageAsync)"],
   [/\bSqlOSSsoConnectionDraft\b/, "nonexistent SqlOSSsoConnectionDraft return type"],
   [/\bSqlOSOidcProviderInfo\b/, "nonexistent SqlOSOidcProviderInfo return type"],
   [/\bSqlOSHomeRealmDiscoveryResponse\b/, "nonexistent SqlOSHomeRealmDiscoveryResponse type"],

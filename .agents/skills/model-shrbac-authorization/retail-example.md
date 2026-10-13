@@ -84,12 +84,12 @@ Group: `grp_walmart_regional` / subject `subj_walmart_regional_group` — Alice 
 
 | Route | List/detail pattern | Permission |
 | --- | --- | --- |
-| `GET /api/chains` | `BuildFilterAsync<Chain>` + `.Where(filter)` in the EF query | CHAIN_VIEW |
+| `GET /api/chains` | `OrderBy(c => c.Name).ToPageAsync(subjectId, CHAIN_VIEW, pageSize, cursor)` (declared page order) | CHAIN_VIEW |
 | `GET /api/chains/{id}` | `AuthorizedDetailAsync` | CHAIN_VIEW |
 | `POST /api/chains` | `CheckAccessAsync(..., CHAIN_EDIT, "retail_root")` | CHAIN_EDIT on parent |
 | `PUT/DELETE /api/chains/{id}` | `CheckAccessAsync(..., CHAIN_EDIT, chain.ResourceId)` | CHAIN_EDIT |
-| `GET /api/chains/{chainId}/locations` | `GetLocationsSpecification` | LOCATION_VIEW |
-| `GET /api/locations`, inventory routes | Similar spec/detail/check patterns | LOCATION_* / INVENTORY_* |
+| `GET /api/chains/{chainId}/locations` | `OrderBy(l => l.Name).ToPageAsync(subjectId, LOCATION_VIEW, pageSize, cursor)` | LOCATION_VIEW |
+| `GET /api/locations`, inventory routes | The same page/detail/check patterns; inventory pages by `Name`, `Sku` or `Price` | LOCATION_* / INVENTORY_* |
 
 Create-chain uses manual `context.CreateResource("retail_root", ...)` — comment in code notes Todo-style `ISqlOSResourceEntity` as the recommended path for new apps.
 

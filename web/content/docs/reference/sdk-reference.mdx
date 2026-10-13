@@ -395,20 +395,19 @@ if (!decision.Allowed)
 }
 ```
 
-For collection queries, keep the generated expression inside the EF Core `IQueryable` so SQL Server applies the authorization TVF:
+For collections, read a page with `ToPageAsync` on the EF Core query. The context derives from `SqlOSDbContext<TContext>`, and the order is declared with `HasPageOrder(w => w.Name)`:
 
 ```csharp
-var filter = await fga.BuildFilterAsync<Workspace>(
-    subjectId,
-    permissionKey: "WORKSPACE_VIEW");
+using SqlOS.Fga.Extensions;
 
-var visible = await db.Workspaces
-    .Where(filter)
+var page = await db.Workspaces
     .OrderBy(workspace => workspace.Name)
-    .ToListAsync(ct);
+    .ToPageAsync(subjectId, "WORKSPACE_VIEW", pageSize: 20, cursor, ct);
+
+return Results.Ok(page.ToResponse(workspace => new { workspace.Id, workspace.Name }));
 ```
 
-Do not compile the expression and filter in memory. For provisioning, grants, entity synchronization, traces, and pagination, see [FGA API](/docs/reference/fga-api).
+Pass `page.NextCursor` back for the next page. SqlOS has no authorized count, join, or unpaged list. For provisioning, grants, entity synchronization, traces, and the page API, see [FGA API](/docs/reference/fga-api).
 
 ## ISqlOSAuditLogService
 

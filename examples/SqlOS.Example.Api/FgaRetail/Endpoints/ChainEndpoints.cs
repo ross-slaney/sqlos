@@ -19,7 +19,6 @@ public static class ChainEndpoints
 
         group.MapGet("/", async (
             ExampleAppDbContext context,
-            ISqlOSFgaAuthService fga,
             HttpContext http,
             int pageSize = 10,
             string? search = null,
@@ -27,7 +26,6 @@ public static class ChainEndpoints
             string? sortDir = null) =>
         {
             var subjectId = RetailSubjectResolver.ResolveSubjectId(http);
-            var canView = await fga.BuildFilterAsync<Chain>(subjectId, RetailPermissionKeys.ChainView);
 
             IQueryable<Chain> query = context.Chains.AsNoTracking();
             if (!string.IsNullOrWhiteSpace(search))
@@ -38,8 +36,8 @@ public static class ChainEndpoints
                     (c.Description != null && c.Description.ToLower().Contains(term)));
             }
 
-            // Name is a declared page order (ExampleAppDbContext); ToPageAsync applies the
-            // authorization filter and the cursor, and appends the Id tiebreaker.
+            // Name is a declared page order (ExampleAppDbContext); ToPageAsync checks each row against
+            // the caller's grants, applies the cursor, and appends the Id tiebreaker.
             var ordered = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase)
                 ? query.OrderByDescending(c => c.Name)
                 : query.OrderBy(c => c.Name);
@@ -47,7 +45,7 @@ public static class ChainEndpoints
             SqlOSCursorPage<Chain> page;
             try
             {
-                page = await ordered.ToPageAsync(canView, Math.Clamp(pageSize, 1, 100), cursor, http.RequestAborted);
+                page = await ordered.ToPageAsync(subjectId, RetailPermissionKeys.ChainView, Math.Clamp(pageSize, 1, 100), cursor, http.RequestAborted);
             }
             catch (Exception exception) when (exception is SqlOSCursorException or ArgumentException { ParamName: "cursor" })
             {

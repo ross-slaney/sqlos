@@ -150,7 +150,7 @@ public class SqlOSFgaPageOrderMaintenanceIntegrationTests
     }
 
     [TestMethod]
-    public async Task DeactivatedThenReactivatedFolder_PagesFollowTheFilterThroughout()
+    public async Task DeactivatedThenReactivatedFolder_PagesFollowThePointChecksThroughout()
     {
         await using var context = PageOrderFixture.CreateContext();
         var folder = NewResourceId("page_folder");
@@ -160,27 +160,25 @@ public class SqlOSFgaPageOrderMaintenanceIntegrationTests
             .ToList();
         context.Documents.AddRange(documents);
         await context.SaveChangesAsync();
-        var filter = await PageOrderFixture.AuthService(context).BuildFilterAsync<PagedDocument>(
-            FgaTestDataSeeder.AgencyAdminSubjectId,
-            PageOrderFixture.ViewPermission);
+        var caller = FgaTestDataSeeder.AgencyAdminSubjectId;
 
         try
         {
-            (await PagedIds(context, filter)).Should().Contain(documents.Select(document => document.Id));
-            await AssertPagesMatchFilterAsync(context, filter);
+            (await PagedIds(context, caller)).Should().Contain(documents.Select(document => document.Id));
+            await AssertPagesMatchThePointChecksAsync(context, caller);
 
             await context.ProvisionResourceWithIdAsync(folder, "team", "Switchable folder", isActive: false);
             await context.SaveChangesAsync();
 
-            (await PagedIds(context, filter)).Should().NotContain(documents.Select(document => document.Id));
-            await AssertPagesMatchFilterAsync(context, filter);
+            (await PagedIds(context, caller)).Should().NotContain(documents.Select(document => document.Id));
+            await AssertPagesMatchThePointChecksAsync(context, caller);
             await AssertEntriesMatchRebuildAsync();
 
             await context.ProvisionResourceWithIdAsync(folder, "team", "Switchable folder", isActive: true);
             await context.SaveChangesAsync();
 
-            (await PagedIds(context, filter)).Should().Contain(documents.Select(document => document.Id));
-            await AssertPagesMatchFilterAsync(context, filter);
+            (await PagedIds(context, caller)).Should().Contain(documents.Select(document => document.Id));
+            await AssertPagesMatchThePointChecksAsync(context, caller);
             await AssertEntriesMatchRebuildAsync();
         }
         finally
@@ -589,10 +587,8 @@ public class SqlOSFgaPageOrderMaintenanceIntegrationTests
 
         (await NodesFor(context, subject)).Should().BeEquivalentTo(FgaTestDataSeeder.TestAgencyResourceId);
 
-        var filter = await PageOrderFixture.AuthService(context).BuildFilterAsync<PagedDocument>(subject, PageOrderFixture.ViewPermission);
-        var expected = await context.Documents.Where(filter).OrderBy(document => document.Rank).ThenBy(document => document.Id)
-            .Select(document => document.Id).ToListAsync();
-        var paged = (await PageOrderFixture.WalkAsync(context.Documents.OrderBy(document => document.Rank), filter, 7))
+        var expected = await PageOrderFixture.ExpectedAsync(context.Documents, "Rank", false, subject);
+        var paged = (await PageOrderFixture.WalkAsync(context.Documents.OrderBy(document => document.Rank), subject, 7))
             .SelectMany(page => page.Data).Select(document => document.Id).ToList();
 
         paged.Should().OnlyHaveUniqueItems().And.Equal(expected);
@@ -612,15 +608,14 @@ public class SqlOSFgaPageOrderMaintenanceIntegrationTests
         }
     }
 
-    private static async Task AssertPagesMatchFilterAsync(PageOrderTestDbContext context, System.Linq.Expressions.Expression<Func<PagedDocument, bool>> filter)
+    private static async Task AssertPagesMatchThePointChecksAsync(PageOrderTestDbContext context, string caller)
     {
-        var expected = await context.Documents.AsNoTracking().Where(filter).OrderBy(document => document.Rank).ThenBy(document => document.Id)
-            .Select(document => document.Id).ToListAsync();
-        (await PagedIds(context, filter)).Should().Equal(expected);
+        var expected = await PageOrderFixture.ExpectedAsync(context.Documents, "Rank", false, caller);
+        (await PagedIds(context, caller)).Should().Equal(expected);
     }
 
-    private static async Task<List<Guid>> PagedIds(PageOrderTestDbContext context, System.Linq.Expressions.Expression<Func<PagedDocument, bool>> filter)
-        => (await PageOrderFixture.WalkAsync(context.Documents.AsNoTracking().OrderBy(document => document.Rank), filter, 6))
+    private static async Task<List<Guid>> PagedIds(PageOrderTestDbContext context, string caller)
+        => (await PageOrderFixture.WalkAsync(context.Documents.AsNoTracking().OrderBy(document => document.Rank), caller, 6))
             .SelectMany(page => page.Data).Select(document => document.Id).ToList();
 
     private static Task<List<string>> NodesOf(PageOrderTestDbContext context, string entryTable, Guid rowKey)

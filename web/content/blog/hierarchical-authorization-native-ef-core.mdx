@@ -1,6 +1,6 @@
 ---
 title: "Make Hierarchical Authorization Feel Native to EF Core"
-description: "Upgrade a simple EF Core application so organizations, workspaces, and projects become one authorization hierarchy synchronized through SaveChanges and filtered in SQL."
+description: "Upgrade a simple EF Core application so organizations, workspaces, and projects become one authorization hierarchy synchronized through SaveChanges and paged in SQL."
 date: "2026-07-13"
 author: "Ross Slaney"
 tags: ["EF Core", "Authorization", "FGA", "RBAC", "SQL Server", "SqlOS"]
@@ -18,9 +18,9 @@ SqlOS takes that approach:
 - parent IDs turn ordinary domain relationships into an authorization tree;
 - `SaveChanges` synchronizes entity and resource lifecycles;
 - grants stay explicit and can be placed at any level of the tree;
-- list authorization becomes a composable EF expression executed by SQL Server.
+- authorized lists are pages of an ordinary EF query, checked by SQL Server.
 
-This is query-level authorization, not a SQL Server Row-Level Security policy. An unfiltered EF query or raw SQL query is not automatically protected. The advantage is that application identity, hierarchical grants, business predicates, ordering, and pagination can participate in one EF query.
+This is query-level authorization, not a SQL Server Row-Level Security policy. An EF query that is not paged with `ToPageAsync`, or a raw SQL query, is not automatically protected. The advantage is that application identity, hierarchical grants, business predicates, ordering, and pagination meet in the EF query you already write.
 
 ## Start with the domain you already have
 
@@ -94,17 +94,19 @@ That is the strategic difference between hierarchical authorization and role-nam
 
 ## Keep authorized rows inside the EF query
 
-For list endpoints, SqlOS returns an `Expression<Func<TEntity, bool>>`. Applying it with `Where` keeps the query as `IQueryable`, so ordinary business filters still compose with authorization:
+For list endpoints, the application writes its query as usual and pages it with `ToPageAsync`, naming the subject and the permission. Business filters and the order stay ordinary LINQ:
 
 ```text
 Projects
   → optional workspace filter
-  → hierarchical authorization filter
-  → order and projection
-  → one SQL query
+  → order by name
+  → ToPageAsync(subject, "project.read", page size, cursor)
+  → one authorized page, projected, with a cursor for the next
 ```
 
-The database does not materialize every project and ask an authorization service about each row. SQL Server evaluates the authorization predicate together with the rest of the query. Pagination and counts can therefore operate on authorized rows rather than on a list trimmed in memory afterward.
+The database does not materialize every project and ask an authorization service about each row. SQL Server checks the rows of the page against the hierarchy as it reads them. Because `Project` declares that order with `HasPageOrder`, a subject who can see three projects in a table of a million reads about a page, not the table. Pagination therefore operates on authorized rows rather than on a list trimmed in memory afterward.
+
+A page is the only authorized list. SqlOS has no authorized count, `Any`, or join, because each would cost every row the caller can see. One resource is a point check with `CheckAccessAsync`.
 
 ## What changes in an existing EF application
 
@@ -115,13 +117,13 @@ The upgrade is smaller than the complete sample makes it look. Authentication an
 | `AppDbContext : DbContext` | Derive from `SqlOSDbContext<AppDbContext>` and keep application mappings in `OnApplicationModelCreating`. |
 | `Organization`, `Workspace`, and `Project` entities | Implement `ISqlOSResourceEntity`, persist a stable `ResourceId`, and return the parent resource ID from existing foreign keys. |
 | Workspace membership or role assignment | Provision the authenticated subject and place one explicit role grant on the appropriate workspace or project. |
-| `db.Projects.Where(...)` | Compose the expression from `BuildFilterAsync<Project>` before ordering, projection, and pagination. |
+| `db.Projects.Where(...).OrderBy(...)` | Declare the order with `HasPageOrder`, page the query with `ToPageAsync`, and project the page. |
 
-Keys, relationships, migrations, change tracking, and business predicates remain ordinary EF Core. SqlOS adds a synchronized resource representation and an authorization predicate; it does not replace the application's data model.
+Keys, relationships, migrations, change tracking, and business predicates remain ordinary EF Core. SqlOS adds a synchronized resource representation and declared page orders; it does not replace the application's data model.
 
 ## A complete runnable API host
 
-The following `Program.cs` is a complete .NET 10 minimal API host. It creates workspaces, grants the creator a role at the workspace, creates child projects after checking the parent permission, and lists only projects visible to the signed-in subject. SQL Server and an access token are explicit prerequisites; this is not a standalone browser client.
+The following `Program.cs` is a complete .NET 10 minimal API host. It creates workspaces, grants the creator a role at the workspace, creates child projects after checking the parent permission, and pages through only the projects visible to the signed-in subject. SQL Server and an access token are explicit prerequisites; this is not a standalone browser client.
 
 Create the host and install the same package version used to compile this article:
 
@@ -139,7 +141,9 @@ using SqlOS;
 using SqlOS.AuthServer.Extensions;
 using SqlOS.Configuration;
 using SqlOS.Extensions;
+using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
+using SqlOS.Pagination;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -287,18 +291,22 @@ api.MapPost("/workspaces/{workspaceId:guid}/projects", async (
         return Results.BadRequest(new { error = "name is required" });
     }
 
-    var workspaceFilter =
-        await authorization.BuildFilterAsync<Workspace>(
-            subjectId,
-            createProject);
-
     var workspace = await db.Workspaces
-        .Where(item => item.Id == workspaceId)
-        .Where(workspaceFilter)
-        .SingleOrDefaultAsync(cancellationToken);
+        .SingleOrDefaultAsync(item => item.Id == workspaceId, cancellationToken);
 
     if (workspace is null)
     {
+        return Results.NotFound();
+    }
+
+    var access = await authorization.CheckAccessAsync(
+        subjectId,
+        createProject,
+        workspace.ResourceId);
+
+    if (!access.Allowed)
+    {
+        // The same response as an unknown workspace.
         return Results.NotFound();
     }
 
@@ -326,9 +334,9 @@ api.MapPost("/workspaces/{workspaceId:guid}/projects", async (
 
 api.MapGet("/projects", async (
     Guid? workspaceId,
+    string? cursor,
     HttpContext http,
     AppDbContext db,
-    ISqlOSFgaAuthService authorization,
     CancellationToken cancellationToken) =>
 {
     var subjectId = http.GetSqlOSValidatedToken()?.UserId;
@@ -337,32 +345,42 @@ api.MapGet("/projects", async (
         return Results.Unauthorized();
     }
 
-    var projectFilter =
-        await authorization.BuildFilterAsync<Project>(
-            subjectId,
-            readProject);
-
-    var query = db.Projects
-        .AsNoTracking()
-        .Where(projectFilter);
+    var query = db.Projects.AsNoTracking();
 
     if (workspaceId.HasValue)
     {
         query = query.Where(project => project.WorkspaceId == workspaceId);
     }
 
-    var projects = await query
-        .OrderBy(project => project.Name)
-        .Select(project => new
+    SqlOSCursorPage<Project> page;
+    try
+    {
+        page = await query
+            .OrderBy(project => project.Name)
+            .ToPageAsync(
+                subjectId,
+                readProject,
+                pageSize: 20,
+                cursor,
+                cancellationToken);
+    }
+    catch (Exception exception) when (
+        exception is SqlOSCursorException or ArgumentException { ParamName: "cursor" })
+    {
+        return Results.BadRequest(new
         {
-            project.Id,
-            project.WorkspaceId,
-            project.Name,
-            project.CreatedAt
-        })
-        .ToListAsync(cancellationToken);
+            error = SqlOSCursorException.ErrorCode,
+            message = exception.Message
+        });
+    }
 
-    return Results.Ok(projects);
+    return Results.Ok(page.ToResponse(project => new
+    {
+        project.Id,
+        project.WorkspaceId,
+        project.Name,
+        project.CreatedAt
+    }));
 });
 
 await using (var scope = app.Services.CreateAsyncScope())
@@ -398,6 +416,17 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
             .WithMany()
             .HasForeignKey(project => project.WorkspaceId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Project>(entity =>
+        {
+            entity.Property(project => project.Name)
+                .HasMaxLength(200)
+                .IsRequired();
+            entity.HasIndex(project => new { project.Name, project.Id });
+
+            // GET /api/projects pages by name; SqlOS keeps this order under every node.
+            entity.HasPageOrder(project => project.Name);
+        });
     }
 
     private static void ConfigureResource<TEntity>(ModelBuilder modelBuilder)
@@ -469,11 +498,13 @@ public sealed record CreateWorkspaceRequest(
 public sealed record CreateProjectRequest(string Name);
 ```
 
-The generic `ConfigureResource` mapping is doing deliberate work. `ResourceId` remains a required, indexed application column because it is the bridge used in authorized list queries. The other interface properties are computed metadata, so the mapping ignores them instead of creating redundant columns. If your application stores any of those values directly, map the stored properties and return them through the interface rather than blindly copying this helper.
+The generic `ConfigureResource` mapping is doing deliberate work. `ResourceId` remains a required, indexed application column because it is the bridge used in authorized list pages. The other interface properties are computed metadata, so the mapping ignores them instead of creating redundant columns. If your application stores any of those values directly, map the stored properties and return them through the interface rather than blindly copying this helper.
+
+The `Project` mapping declares the order the list pages by. `HasPageOrder(project => project.Name)` adds a table to the EF model that `SqlOSDbContext<AppDbContext>` keeps current on every save, so `EnsureCreatedAsync` here, or your next migration, creates it. A subject who can see a few projects then pages from the resources it was granted instead of reading the table. The name needs a maximum length because it is part of that order; the `(Name, Id)` index serves subjects who can see most projects.
 
 The repository documentation check extracts this entire C# block and compiles it against the current SqlOS project. That catches stale types, method names, overloads, and expression shapes. The SQL Server startup and authenticated HTTP walkthrough remain runtime verification steps for the reader's configured environment.
 
-The create-project query applies the workspace permission before materialization. Returning `404` when that filtered query finds nothing deliberately gives the same response for a missing workspace and a workspace the caller cannot access, avoiding an existence leak.
+The create-project endpoint checks the workspace permission with `CheckAccessAsync` before it writes anything. Returning `404` both for a workspace that does not exist and for one the check denies deliberately gives the same response for a missing workspace and a workspace the caller cannot access, avoiding an existence leak.
 
 Configure a local development database and dashboard password without committing either value to `appsettings.json`:
 
@@ -493,7 +524,7 @@ Start the API:
 dotnet run --urls http://localhost:5050
 ```
 
-Open `http://localhost:5050/sqlos` to confirm the host and dashboard are running. After obtaining an access token for the configured `http://localhost:5050/api` audience, create a workspace, create a child project, and list the authorized projects:
+Open `http://localhost:5050/sqlos` to confirm the host and dashboard are running. After obtaining an access token for the configured `http://localhost:5050/api` audience, create a workspace, create a child project, and read the first page of authorized projects:
 
 ```bash
 curl -X POST http://localhost:5050/api/workspaces \
@@ -510,7 +541,9 @@ curl http://localhost:5050/api/projects \
   -H "Authorization: Bearer <access-token>"
 ```
 
-Repeat the list request with an access token for a second subject that has no grant. The response should be an empty array. Attempting to create a project beneath the first subject's workspace should return `404`, the same response used for an unknown workspace. Those negative checks prove both row isolation and the anti-enumeration behavior; a happy-path response alone does not prove authorization.
+The list returns `{ data, pageSize, nextCursor, hasNextPage }`. When `hasNextPage` is true, request `/api/projects?cursor=<nextCursor>` for the next page.
+
+Repeat the list request with an access token for a second subject that has no grant. The response's `data` should be an empty array. Attempting to create a project beneath the first subject's workspace should return `404`, the same response used for an unknown workspace. Those negative checks prove both row isolation and the anti-enumeration behavior; a happy-path response alone does not prove authorization.
 
 For a production application, replace `EnsureCreatedAsync` with normal EF migrations for the application tables. SqlOS continues to manage its own schema and authorization function during startup.
 
@@ -521,7 +554,7 @@ The original application still has ordinary EF entities, keys, relationships, in
 1. **The domain tree is the authorization tree.** `OrganizationId` and `WorkspaceId` determine each resource's parent.
 2. **The resource lifecycle follows the entity lifecycle.** The same save creates or updates both representations.
 3. **A role can start at any level.** A workspace grant covers descendant projects; a project grant can remain narrow.
-4. **Authorized lists remain database queries.** Search, sorting, projection, and pagination can compose after the authorization predicate.
+4. **Authorized lists remain database queries.** Search and sorting stay ordinary LINQ, `ToPageAsync` returns the authorized page, and projection happens on that page.
 
 The most important property is not that SqlOS adds more authorization APIs. It is that the authorization model fits into the EF Core habits the application already uses.
 
@@ -529,7 +562,7 @@ The most important property is not that SqlOS adds more authorization APIs. It i
 
 An integrated model still needs disciplined application code:
 
-- Apply the authorization filter to every protected list query. It is not an automatic global query filter.
+- Page every protected list query with `ToPageAsync`. It is not an automatic global query filter: `ToListAsync` on the same query returns rows the caller may not see.
 - Perform a point authorization check before updating or deleting an existing entity.
 - Take the subject from a validated session or access token, never from client-controlled input.
 - Provision subjects explicitly. Implementing `ISqlOSResourceEntity` provisions resources, not users or service accounts.
@@ -538,7 +571,7 @@ An integrated model still needs disciplined application code:
 - Use one `SqlOSDbContext` unit of work for entity-backed resources. Saving the entity through another context bypasses synchronization.
 - Integration-test both sides of the boundary: an allowed subject sees the row, and an ungranted subject does not.
 
-If an application needs database-enforced protection against every possible query—including unfiltered EF and raw SQL—use SQL Server security policies or another database-level control as well. SqlOS's EF integration solves a different problem: making rich, application-aware hierarchical authorization composable, inspectable, and natural inside a .NET application's data layer.
+If an application needs database-enforced protection against every possible query—including EF queries that skip `ToPageAsync` and raw SQL—use SQL Server security policies or another database-level control as well. SqlOS's EF integration solves a different problem: making rich, application-aware hierarchical authorization composable, inspectable, and natural inside a .NET application's data layer.
 
 ## The practical upgrade path
 
@@ -549,11 +582,11 @@ You do not need to remodel the whole application at once. Start with one aggrega
 3. Move the context to `SqlOSDbContext<TContext>`.
 4. Seed one resource type, permission, and role.
 5. Grant that role at the narrowest useful parent.
-6. Apply `BuildFilterAsync` to the protected list query.
+6. Declare the list's order with `HasPageOrder` and page the protected list query with `ToPageAsync`.
 7. Add integration tests for allowed and denied subjects.
 
 That is enough to turn a flat EF query into hierarchical authorization. Additional entities can join the same tree when the product needs them.
 
-The contract remains opt-in and visible: every protected list path must compose the authorization expression, and every protected mutation must perform its point check. This is more explicit than an invisible global query filter, and it remains application-aware in a way that a database-user policy usually is not. Centralize those calls in repositories or specifications when that makes omissions easier to prevent and test.
+The contract remains opt-in and visible: every protected list path must page through `ToPageAsync`, and every protected mutation must perform its point check. This is more explicit than an invisible global query filter, and it remains application-aware in a way that a database-user policy usually is not. Centralize those calls in repositories or specifications when that makes omissions easier to prevent and test.
 
-Continue with the [EF authorization quickstart](/docs/quickstarts/ef-authorization), [resource hierarchy guide](/docs/fga/resource-hierarchy), and [EF query-filter guide](/docs/fga/list-filter).
+Continue with the [EF authorization quickstart](/docs/quickstarts/ef-authorization), [resource hierarchy guide](/docs/fga/resource-hierarchy), and [authorized pages guide](/docs/guides/paginating-authorized-lists).

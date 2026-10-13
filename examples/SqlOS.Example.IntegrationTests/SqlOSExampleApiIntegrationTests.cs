@@ -77,12 +77,33 @@ public sealed class SqlOSExampleApiIntegrationTests
         var createResponse = await ExampleApiFixture.Client.SendAsync(createRequest);
         createResponse.EnsureSuccessStatusCode();
 
-        var listRequest = new HttpRequestMessage(HttpMethod.Get, "/api/workspaces");
-        listRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
-        var listResponse = await ExampleApiFixture.Client.SendAsync(listRequest);
-        listResponse.EnsureSuccessStatusCode();
-        var listContent = await listResponse.Content.ReadAsStringAsync();
-        listContent.Should().Contain("North America Workspace");
+        var secondRequest = new HttpRequestMessage(HttpMethod.Post, "/api/workspaces")
+        {
+            Content = JsonContent.Create(new { name = "Europe Workspace" })
+        };
+        secondRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+        (await ExampleApiFixture.Client.SendAsync(secondRequest)).EnsureSuccessStatusCode();
+
+        // A page of one, then the next page through nextCursor, in name order.
+        var firstPage = await GetWorkspacesPageAsync(accessToken!, "/api/workspaces?pageSize=1");
+        firstPage.GetProperty("pageSize").GetInt32().Should().Be(1);
+        firstPage.GetProperty("hasNextPage").GetBoolean().Should().BeTrue();
+        firstPage.GetProperty("data").EnumerateArray().Select(workspace => workspace.GetProperty("name").GetString())
+            .Should().Equal("Europe Workspace");
+
+        var nextCursor = firstPage.GetProperty("nextCursor").GetString();
+        var secondPage = await GetWorkspacesPageAsync(accessToken!, $"/api/workspaces?pageSize=1&cursor={Uri.EscapeDataString(nextCursor!)}");
+        secondPage.GetProperty("data").EnumerateArray().Select(workspace => workspace.GetProperty("name").GetString())
+            .Should().Equal("North America Workspace");
+    }
+
+    private static async Task<JsonElement> GetWorkspacesPageAsync(string accessToken, string path)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, path);
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+        var response = await ExampleApiFixture.Client.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        return JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
     }
 
     [TestMethod]

@@ -10,10 +10,12 @@ order: 6
   eyebrow="Guide"
   title="Authorized pages that cost a page"
   href="/docs/fga/list-filter"
-  actionLabel="List filtering"
+  actionLabel="Authorized pages"
 >
   Declare the orders a list is paged by, then page your query with ToPageAsync. A page costs about a page of work for any caller: one who sees everything, one who sees three rows of a million, one with ten thousand grants.
 </Banner>
+
+`ToPageAsync` is how SqlOS reads an authorized list, and the only way. One resource is a point check, [`CheckAccessAsync`](/docs/fga/checking-a-permission). There is no authorized count, `Any`, join, or unpaged list: each of those costs every row the caller can see. Page instead.
 
 ## Declare the order
 
@@ -40,17 +42,17 @@ protected override void OnApplicationModelCreating(ModelBuilder modelBuilder)
 ## Page
 
 ```csharp
-var canView = await fga.BuildFilterAsync<Product>(subjectId, "product.view");
-
 var page = await db.Products
     .AsNoTracking()
     .Include(p => p.Location)                 // optional
     .Where(p => p.Name.Contains(term))        // optional, any number
     .OrderBy(p => p.Price)                    // required: the order (ThenBy allowed)
-    .ToPageAsync(canView, pageSize: 20, cursor: request.Cursor, cancellationToken);
+    .ToPageAsync(subjectId, "product.view", pageSize: 20, cursor: request.Cursor, cancellationToken);
 
 return Results.Ok(page.ToResponse(p => new ProductDto(p)));
 ```
+
+`subjectId` is the caller; its active group memberships are included. `"product.view"` is the permission each row's resource must grant. Both are resolved each time the page runs.
 
 `ToPageAsync` returns `SqlOSCursorPage<T>`: `Data`, `PageSize`, `NextCursor`, and `HasNextPage`. `ToResponse(selector)` shapes it as `{ data, pageSize, nextCursor, hasNextPage }`. `NextCursor` is `null` on the last page; a page that ends exactly at the last row may be followed by an empty one.
 
@@ -58,15 +60,19 @@ Project after the page (`page.ToResponse(...)` or `page.Data.Select(...)`), not 
 
 ### How a page runs
 
-1. **Your query, checked.** The next rows of your query, in its order, each checked like `.Where(filter)` checks it. For a caller who sees most rows, this fills the page.
+1. **Your query, checked.** The next rows of your query, in its order, each checked with SqlOS's authorization function. For a caller who sees most rows, this fills the page.
 2. **The caller's nodes, in order.** When few of those rows are visible and the order is declared, SqlOS reads the order under each resource the caller is granted (the minimal set: a grant under another grant adds nothing) and merges them, applying your filters before the per-node limit. For a caller who sees little, this fills the page.
-3. **The page.** The page's rows are loaded through your query, so `Include`, tracking and your filters apply, and checked against the filter once more. The final check can drop a stale row, never add one.
+3. **The page.** The page's rows are loaded through your query, so `Include`, tracking and your filters apply, and checked once more. The final check can drop a stale row, never add one.
 
-Each step is an EF Core query, logged like any other. One Debug line per page under the `SqlOS.Fga` category records the rounds, the rows each step read, which step produced the page, and the rows the final check dropped.
+Before step 1, SqlOS resolves the caller's subjects and the permission. Each step is an EF Core query, logged like any other. One Debug line per page under the `SqlOS.Fga` category records the rounds, the rows each step read, which step produced the page, and the rows the final check dropped.
 
 ## The cursor
 
-The cursor is opaque. It carries the last row's order values, bound to the entity, the order and its direction, and you pass it back as it came. You no longer write keyset predicates: `ToPageAsync` applies the position to both reads.
+The cursor is opaque. It carries the last row's order values, bound to the entity, the order and its direction, and you pass it back as it came.
+
+**Don't write your own position filter.** No `.Where(x => x.CreatedAt < lastSeen)`, no keyset library, no `since=` version parameter: pass `NextCursor` back. `ToPageAsync` seeks under each of the caller's nodes from the cursor. A hand-written position is just another filter there, so every page walks the caller's rows from the start of the order.
+
+For a change feed, the cursor is the sync token the client stores. Keep the last `NextCursor` you received. `NextCursor` is `null` on the last page, so the next read from the stored cursor returns that last page again, followed by anything newer.
 
 - A cursor that is not one this list issued (edited, truncated, or not a cursor) throws `SqlOSCursorException`. Map it to `400` with `SqlOSCursorPagination.BadRequest(exception)` or your own response.
 - A cursor issued for another list (another entity, order, or direction) throws `ArgumentException` with `ParamName` `"cursor"`. A client that changes the sort and keeps the cursor gets this; map it to `400` too.
@@ -74,7 +80,7 @@ The cursor is opaque. It carries the last row's order values, bound to the entit
 ```csharp
 try
 {
-    page = await query.OrderBy(i => i.Price).ToPageAsync(canView, pageSize, cursor, ct);
+    page = await query.OrderBy(i => i.Price).ToPageAsync(subjectId, "product.view", pageSize, cursor, ct);
 }
 catch (Exception exception) when (exception is SqlOSCursorException or ArgumentException { ParamName: "cursor" })
 {
@@ -86,13 +92,13 @@ catch (Exception exception) when (exception is SqlOSCursorException or ArgumentE
 
 Before `ToPageAsync`: `Where`, `Include`/`ThenInclude`, `AsNoTracking`/`AsTracking`, `TagWith`, `IgnoreQueryFilters`, `AsSplitQuery`, and one `OrderBy`/`OrderByDescending` with any number of `ThenBy`/`ThenByDescending` in the same direction, each over a mapped scalar property. The ordering comes last.
 
-`ToPageAsync` throws `ArgumentException` for a filter that did not come from `BuildFilterAsync`; no `OrderBy`; mixed directions; an order over anything but a mapped, non-nullable scalar property; `Select`, `Skip`, `Take`, `Distinct`, `GroupBy`, `Join`, `SelectMany`, `Union` or `Concat` in the chain; a context that does not derive from `SqlOSDbContext<TContext>`; and a filter built on a different context instance than the query. `pageSize` is 1 to 1,000.
+`ToPageAsync` throws `ArgumentException` for a query that does not start from a `DbSet` of a context deriving from `SqlOSDbContext<TContext>`; no `OrderBy`; mixed directions; an order over anything but a mapped, non-nullable scalar property; and `Select`, `Skip`, `Take`, `Distinct`, `GroupBy`, `Join`, `SelectMany`, `Union` or `Concat` in the chain. `pageSize` is 1 to 1,000.
 
-For an unknown subject or permission, `BuildFilterAsync` returns a filter that matches nothing, and `ToPageAsync` returns an empty page without querying.
+For an unknown or inactive subject, or an unknown permission, `ToPageAsync` logs a warning and returns an empty page with no `NextCursor`, without running the page's queries.
 
 ## Orders that are not declared
 
-A query ordered by an order that is not declared still returns the right pages. It runs step 1 only, reading your query in growing batches until a page is visible, which is the old `.Where(filter)` cost: a caller who sees little of a large table reads most of it. The first time a page needs more than one batch, SqlOS logs a warning naming the declaration to add:
+A query ordered by an order that is not declared still returns the right pages. It runs step 1 only, reading your query in growing batches until a page is visible: a caller who sees little of a large table reads most of it. The first time a page needs more than one batch, SqlOS logs a warning naming the declaration to add:
 
 ```text
 ToPageAsync scanned 1240 rows of Product ordered by CreatedAt, Id asc to fill a page of 20. No page order is declared for it, so pages for callers who can see few rows read the table. Declare modelBuilder.Entity<Product>().HasPageOrder(e => e.CreatedAt) and add a migration.
@@ -105,11 +111,11 @@ ToPageAsync scanned 1240 rows of Product ordered by CreatedAt, Id asc to fill a 
 It uses your transaction when there is one, inside a savepoint so that a failed save leaves your transaction as it was before the save; an ambient or enlisted `System.Transactions` transaction; and otherwise its own, inside the context's execution strategy.
 
 - **Index `ResourceId`** on paged tables (`HasIndex(p => p.ResourceId)`): a save that adds, moves or deletes a resource finds the rows under it by `ResourceId`.
-- **Writes that bypass EF Core** (bulk loads, raw SQL, `ExecuteUpdate`/`ExecuteDelete`, triggers) do not update entries, and neither does an interceptor that changes paged rows during a save that changes no paged row or resource. Until you call `ISqlOSFgaAuthService.RebuildPageOrdersAsync()`, rows they insert are missing from pages and rows they change page at their old position. A row the caller may not see is never returned: every page row passes the filter once more. The rebuild rewrites every declared order, one transaction per order, without a command timeout; the cost is the table's rows times the tree depth. Run it while the application is not writing to those tables: a save during a rebuild waits for it, or makes it fail with a deadlock or duplicate key, and running it again fixes that.
+- **Writes that bypass EF Core** (bulk loads, raw SQL, `ExecuteUpdate`/`ExecuteDelete`, triggers) do not update entries, and neither does an interceptor that changes paged rows during a save that changes no paged row or resource. Until you call `ISqlOSFgaAuthService.RebuildPageOrdersAsync()`, rows they insert are missing from pages and rows they change page at their old position. A row the caller may not see is never returned: every page row is checked once more. The rebuild rewrites every declared order, one transaction per order, without a command timeout; the cost is the table's rows times the tree depth. Run it while the application is not writing to those tables: a save during a rebuild waits for it, or makes it fail with a deadlock or duplicate key, and running it again fixes that.
 - **A new declaration on a table that already has rows** is filled at startup: once the migration has created the empty entry table, the first start writes its entries and logs how many. The fill runs before the application serves requests and takes about as long as rebuilding that order. Until the migration runs, the entry table is missing; SqlOS logs a warning at startup and pages for that order run step 1 only. In a rolling deployment, instances still on the previous version write rows without entries: call `RebuildPageOrdersAsync()` once every instance runs the new version.
 - **Concurrent hierarchy changes.** If one save moves, deactivates or reactivates a resource while another adds or changes rows under it, those rows can, rarely, be missing from pages until a rebuild (PostgreSQL, and SQL Server with `READ_COMMITTED_SNAPSHOT`), or one of the saves fails with a deadlock or duplicate key; retry it.
 - **Schema tools.** Entry tables are ordinary tables in your EF model. Because they are derived, a change that a tool blocks for possible data loss on an entry table (a source column narrowed) is resolved by emptying the entry table and letting the next start refill it.
-- **Hand-rolled contexts** (a `DbContext` that implements `ISqlOSFgaDbContext` itself) get no maintenance, and `ToPageAsync` refuses them. Derive from `SqlOSDbContext<TContext>` to page, or keep `.Where(filter)`.
+- **Hand-rolled contexts** (a `DbContext` that implements `ISqlOSFgaDbContext` itself) get no maintenance and no pages: `ToPageAsync` refuses their queries. Derive from `SqlOSDbContext<TContext>` to page.
 
 ## What it costs
 
@@ -123,7 +129,7 @@ Grants on the nodes of your tree keep the caller's node set small; a caller with
 
 Each page checks grants when it runs. If grants change between pages, newly authorized rows appear and newly revoked rows disappear from the next page: the cursor is a position in the order, not a snapshot of the first page. A revoked subject stops seeing rows on the very next page.
 
-The *principal set* (the subject plus its group memberships) is captured when `BuildFilterAsync` is awaited. Build the filter once per request; do not cache it in statics or reuse it across requests.
+The *principal set* (the subject plus its active group memberships) is resolved each time `ToPageAsync` runs, and each page's queries check the caller's activity again when they run. Membership and lifecycle changes apply from the next page.
 
 ## Admin surfaces
 

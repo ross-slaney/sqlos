@@ -43,7 +43,7 @@ So the resource-server shape is: bind the audience on a declared surface, option
 api.MapGet("/projects", async (
     HttpContext http,
     AppDbContext db,
-    ISqlOSFgaAuthService authorization,
+    string? cursor,
     CancellationToken cancellationToken) =>
 {
     var subjectId = http.GetSqlOSValidatedToken()?.UserId;
@@ -52,20 +52,16 @@ api.MapGet("/projects", async (
         return Results.Unauthorized();
     }
 
-    var filter = await authorization.BuildFilterAsync<Project>(
-        subjectId,
-        "project.read");
-
-    var projects = await db.Projects
+    var page = await db.Projects
         .AsNoTracking()
-        .Where(filter)
-        .ToListAsync(cancellationToken);
+        .OrderBy(project => project.Name)
+        .ToPageAsync(subjectId, "project.read", pageSize: 20, cursor, cancellationToken);
 
-    return Results.Ok(projects);
+    return Results.Ok(page.ToResponse());
 });
 ```
 
-The audience check proves the token was minted for this API. A handler scope check (when you need one) proves the client's delegation covers the operation. The FGA filter decides which rows this user sees. Treat a scope check that stands in for the FGA decision as a bug: it authorizes the app while leaving the user unchecked.
+The audience check proves the token was minted for this API. A handler scope check (when you need one) proves the client's delegation covers the operation. The FGA permission on `ToPageAsync` decides which rows this user sees. Treat a scope check that stands in for the FGA decision as a bug: it authorizes the app while leaving the user unchecked.
 
 This example is the **user-token** flow: `UserId` is deliberately null on a validated client-credentials service token. An endpoint that also accepts service tokens should branch on the `token_kind` claim and resolve the service-account subject from the principal's `sub` claim instead.
 

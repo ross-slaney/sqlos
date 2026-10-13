@@ -44,12 +44,13 @@ Use `RESOURCETYPE_ACTION` in uppercase:
 
 ## Usage in code
 
-Permission keys are strings passed to authorization checks:
+Permission keys are strings passed to authorized pages and checks:
 
 ```csharp
-// List filtering
-var filter = await authService
-    .BuildFilterAsync<Chain>(subjectId, "CHAIN_VIEW");
+// Authorized page
+var page = await dbContext.Chains
+    .OrderBy(c => c.Name)
+    .ToPageAsync(subjectId, "CHAIN_VIEW", pageSize: 20, cursor);
 
 // Point check
 var access = await authService

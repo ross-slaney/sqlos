@@ -1,10 +1,10 @@
-using System.Linq.Expressions;
 using SqlOS.Fga.Models;
 
 namespace SqlOS.Fga.Interfaces;
 
 /// <summary>
-/// Checks hierarchical SqlOS FGA permissions and creates EF Core authorization filters.
+/// Checks hierarchical SqlOS FGA permissions on one resource. Authorized lists are pages:
+/// <c>ToPageAsync(subjectId, permissionKey, pageSize, cursor)</c> on an EF Core query.
 /// </summary>
 /// <remarks>
 /// Role grants on a parent resource are inherited by its descendants. A subject's group
@@ -41,34 +41,6 @@ public interface ISqlOSFgaAuthService
     /// <param name="permissionKey">The permission key to require.</param>
     /// <returns>The decision trace, including the resource path, subjects, grants, roles, and denial guidance.</returns>
     Task<SqlOSFgaResourceAccessTrace> TraceResourceAccessAsync(string subjectId, string resourceId, string permissionKey);
-
-    /// <summary>
-    /// Creates an EF Core-compatible expression that includes only entities whose resources
-    /// the subject can access with a permission.
-    /// </summary>
-    /// <typeparam name="T">The entity type exposing the FGA resource identifier.</typeparam>
-    /// <param name="subjectId">The subject whose accessible resources should be included.</param>
-    /// <param name="permissionKey">The permission key required for each resource.</param>
-    /// <returns>
-    /// An expression for use with <see cref="Queryable.Where{TSource}(IQueryable{TSource},Expression{Func{TSource,bool}})"/>.
-    /// The expression always evaluates to <see langword="false"/> when the subject or permission cannot be resolved.
-    /// </returns>
-    /// <remarks>
-    /// <para>
-    /// Keep the expression in the <see cref="IQueryable{T}"/> pipeline so EF Core can translate
-    /// it to the configured SqlOS authorization table-valued function.
-    /// </para>
-    /// <para>
-    /// Filter lifetime: the subject's principal set (the subject plus its active group
-    /// memberships) is resolved when this task is awaited. Build the filter once per request
-    /// and compose it into that request's queries; do not cache it in statics or reuse it
-    /// across requests, because grant and membership changes are not reflected in an
-    /// already-built filter's principal set.
-    /// </para>
-    /// </remarks>
-    Task<Expression<Func<T, bool>>> BuildFilterAsync<T>(
-        string subjectId,
-        string permissionKey) where T : IHasResourceId;
 
     /// <summary>
     /// Rebuilds the entries of every page order declared in the context's model from the

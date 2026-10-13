@@ -15,20 +15,20 @@ export default function StatementSection() {
         </h2>
         <p className="mx-auto mt-6 max-w-2xl text-pretty text-base leading-7 text-muted-foreground sm:text-lg">
           Other stacks fetch rows and then ask a policy service about each one. SqlOS
-          folds the access check into the query plan — filtering, sorting, pagination,
-          and permissions in one round-trip to your SQL Server or PostgreSQL.
+          checks access inside your query on SQL Server or PostgreSQL and reads only the
+          page the caller can see — about a page of work for any caller.
         </p>
 
         <div className="mx-auto mt-10 inline-block overflow-x-auto rounded-2xl border bg-zinc-950 px-6 py-4 text-left shadow-xl">
           <pre className="font-mono text-[13px] leading-7 text-zinc-300">
             <code>
-              <span className="text-sky-400">var</span> projects ={" "}
+              <span className="text-sky-400">var</span> page ={" "}
               <span className="text-sky-400">await</span> db.Projects{"\n"}
-              {"    "}.Where(<span className="text-violet-400">await</span>{" "}
-              fga.BuildFilterAsync&lt;Project&gt;(user.Id,{" "}
-              <span className="text-emerald-400">&quot;projects.read&quot;</span>)){"\n"}
-              {"    "}.OrderBy(p =&gt; p.Name).Take(<span className="text-amber-400">20</span>)
-              .ToListAsync(); <span className="text-zinc-500">{"// one query"}</span>
+              {"    "}.OrderBy(p =&gt; p.Name){"\n"}
+              {"    "}.ToPageAsync(user.Id,{" "}
+              <span className="text-emerald-400">&quot;projects.read&quot;</span>, pageSize:{" "}
+              <span className="text-amber-400">20</span>, cursor);{" "}
+              <span className="text-zinc-500">{"// about a page of work"}</span>
             </code>
           </pre>
         </div>

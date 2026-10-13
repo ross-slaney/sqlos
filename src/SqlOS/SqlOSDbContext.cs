@@ -30,6 +30,9 @@ public abstract class SqlOSDbContext<TContext> : DbContext, ISqlOSAuthServerDbCo
         {
             SqlOSDatabase.EnablePostgreSqlTimestampCompatibility();
         }
+
+        // ToPageAsync finds this context from the provider of its DbSets' queries.
+        SqlOSFgaQueryContexts.Register(this);
     }
 
     public IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessible(

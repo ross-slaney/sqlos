@@ -532,10 +532,6 @@ public sealed class SqlOSErgonomicsExtensionsTests
         public Task<SqlOSFgaResourceAccessTrace> TraceResourceAccessAsync(string subjectId, string resourceId, string permissionKey)
             => throw new NotImplementedException();
 
-        public Task<Expression<Func<T, bool>>> BuildFilterAsync<T>(string subjectId, string permissionKey)
-            where T : IHasResourceId
-            => throw new NotImplementedException();
-
         public Task RebuildPageOrdersAsync(CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
     }

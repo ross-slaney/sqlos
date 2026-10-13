@@ -47,7 +47,7 @@ export const fgaConcepts = [
   },
   {
     label: "Queries",
-    description: "Access checks fold into EF Core LINQ as a WHERE clause, not a service call.",
+    description: "Access checks run inside your EF Core query, a page at a time, not a service call.",
   },
 ] as const;
 
@@ -121,14 +121,12 @@ export const exampleApps = [
   },
 ] as const;
 
-export const fgaCode = `// Authorization is a WHERE clause, not a service call
-var filter = await fga.BuildFilterAsync<Project>(
-    subjectId: user.Id,
-    permissionKey: "projects.read");
-
-var projects = await db.Projects
-    .Where(filter)          // TVF folds into the query plan
+export const fgaCode = `// Authorization runs inside your query, one page at a time
+var page = await db.Projects
     .Where(p => p.IsActive)
     .OrderBy(p => p.Name)
-    .Take(20)
-    .ToListAsync();         // One query. One round-trip.`;
+    .ToPageAsync(
+        subjectId: user.Id,
+        permissionKey: "projects.read",
+        pageSize: 20,
+        cursor);             // About a page of work for any caller.`;

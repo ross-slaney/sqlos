@@ -23,8 +23,8 @@ if (!canCreateChains)
 | --- | --- |
 | "Can this user edit *this* chain?" | `CheckAccessAsync` with a resource ID |
 | "Does this user have our global create-chain capability?" | `HasCapabilityAsync`, with a role granted on root |
-| "Can this user edit at least one chain somewhere?" | Query/filter the relevant chain resources; `HasCapabilityAsync` does not answer this |
-| "Show me all chains this user can see" | `BuildFilterAsync` |
+| "Can this user edit at least one chain somewhere?" | SqlOS has no authorized `Any`, and `HasCapabilityAsync` does not answer this. Check the chain the action targets with `CheckAccessAsync` |
+| "Show me the chains this user can see" | `ToPageAsync`, one page at a time |
 
 `HasCapabilityAsync` is useful for:
 

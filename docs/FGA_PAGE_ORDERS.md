@@ -5,9 +5,12 @@ nothing of SqlOS's on application tables. Issue #515.
 
 ## The problem
 
-An authorized list is `.Where(filter)` over `fn_IsResourceAccessible`. The database reads the table
-in the page's order and checks each row until the page is full. A caller who can see a few rows of a
-large table makes it read most of the table.
+An authorized list used to be `.Where(filter)` over `fn_IsResourceAccessible` (`BuildFilterAsync`).
+The database reads the table in the page's order and checks each row until the page is full. A
+caller who can see a few rows of a large table makes it read most of the table, and nothing in the
+code says so: the query compiles, returns the right rows and passes every test. `BuildFilterAsync`
+is removed; `ToPageAsync` is the one way to read an authorized list, and `CheckAccessAsync` the one
+way to check one resource. There is no authorized count, `Any`, join or unpaged list.
 
 ## The idea
 
@@ -22,14 +25,13 @@ modelBuilder.Entity<Product>(entity =>
     entity.HasPageOrder(p => new { p.Status, p.CreatedAt }); // (Status, CreatedAt, Id)
 });
 
-var canView = await fga.BuildFilterAsync<Product>(subjectId, "product.view");
 var page = await db.Products
     .Where(p => p.Name.Contains(term))
     .OrderBy(p => p.Price)
-    .ToPageAsync(canView, pageSize: 20, cursor);
+    .ToPageAsync(subjectId, "product.view", pageSize: 20, cursor);
 ```
 
-`BuildFilterAsync`, `fn_IsResourceAccessible`, `CheckAccessAsync` and the FGA schema scripts are unchanged.
+`fn_IsResourceAccessible`, `CheckAccessAsync` and the FGA schema scripts are unchanged.
 
 ## Storage
 
@@ -90,13 +92,16 @@ function keeps it. Both return the same nodes; the integration tests run on both
 
 ## The page
 
-`ToPageAsync` reads the filter (`SqlOSFgaFilterReader`: the context, the subject ids JSON and the
-permission id of the `BuildFilterAsync` expression), splits the query into its ordering and the rest
-(`SqlOSFgaOrderReader`), decodes the cursor (`SqlOSFgaPageCursor`), and runs the loop in
+`ToPageAsync` finds the query's context (`SqlOSFgaQueryContexts`: each `SqlOSDbContext` registers
+itself under its query provider when it is constructed, which a pooled context keeps across
+leases), splits the query into its ordering and the rest (`SqlOSFgaOrderReader`), decodes the cursor
+(`SqlOSFgaPageCursor`), and resolves the caller (`SqlOSFgaPrincipals`: the subject and its active
+groups in one statement, then the permission; the same code the point checks use). An unknown
+subject or permission is an empty page with no page statements. Then it runs the loop in
 `SqlOSFgaPageQuery` with a budget `b` that starts at the page size `P`:
 
 1. **Read 1, "your query, checked."** The next `b` rows of the application's query in its order, each
-   with a visibility flag (the filter's `EXISTS` in the projection). If at least `P` are visible, they
+   with a visibility flag (`SqlOSFgaVisibility`: the `fn_IsResourceAccessible` `EXISTS` in the projection). If at least `P` are visible, they
    are the page. If fewer than `b` rows came back, the query is exhausted and the visible rows are the
    last page.
 2. **Read 2, "the caller's nodes, in order."** Only for a declared order. Under each node of
@@ -107,8 +112,12 @@ permission id of the `BuildFilterAsync` expression), splits the query into its o
 3. Otherwise `b` grows four times and read 1 runs again. Only undeclared orders get here.
 
 **Load.** The page's keys go back through the query with its includes and tracking and through the
-filter once more, then are ordered by key position in memory. The filter is the final check: a stale
-or wrong entry can only drop a row, never add one. The cursor is the last selected row's order values,
+visibility predicate once more, then are ordered by key position in memory. That is the final check: a
+stale or wrong entry can only drop a row, never add one.
+
+The predicate passes the context to `IsResourceAccessible` the way a C# closure does, so EF Core makes
+it a query parameter. As a constant (what `BuildFilterAsync` built), every context instance was a
+new compiled query; a test pins that a page on a second context compiles nothing. The cursor is the last selected row's order values,
 so a dropped row does not stall the list.
 
 Each statement is an EF Core query (`ToQueryString` can print it). Read 2 projects the node's id inside

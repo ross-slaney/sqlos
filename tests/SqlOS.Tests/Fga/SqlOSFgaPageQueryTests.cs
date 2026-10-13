@@ -1,4 +1,3 @@
-using System.Linq.Expressions;
 using FluentAssertions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.Fga.Extensions;
@@ -119,39 +118,35 @@ public class SqlOSFgaPageQueryTests
     }
 
     [TestMethod]
-    public async Task EmptyFilter_ReturnsAnEmptyPage_WithoutAnyRead()
+    public async Task PageSize_IsBetweenOneAndOneThousand_CheckedBeforeAnyRead()
     {
         // The context has no reachable database: any read would fail to connect.
-        using var context = PageOrderModelContext.CreateProducts(entity => entity.HasPageOrder(product => product.Price));
-        Expression<Func<PagedProduct, bool>> nothingVisible = product => false;
-
-        var page = await context.Products.OrderBy(product => product.Price).ToPageAsync(nothingVisible, pageSize: 20);
-
-        page.Data.Should().BeEmpty();
-        page.NextCursor.Should().BeNull();
-        page.PageSize.Should().Be(20);
-    }
-
-    [TestMethod]
-    public async Task PageSize_IsBetweenOneAndOneThousand()
-    {
         using var context = PageOrderModelContext.CreateProducts(_ => { });
-        Expression<Func<PagedProduct, bool>> nothingVisible = product => false;
         var query = context.Products.OrderBy(product => product.Price);
 
-        await FluentActions.Awaiting(() => query.ToPageAsync(nothingVisible, 0)).Should().ThrowAsync<ArgumentOutOfRangeException>();
-        await FluentActions.Awaiting(() => query.ToPageAsync(nothingVisible, 1001)).Should().ThrowAsync<ArgumentOutOfRangeException>();
-        (await query.ToPageAsync(nothingVisible, 1000)).PageSize.Should().Be(1000);
+        await FluentActions.Awaiting(() => query.ToPageAsync("subj_reader", "READ", 0)).Should().ThrowAsync<ArgumentOutOfRangeException>();
+        await FluentActions.Awaiting(() => query.ToPageAsync("subj_reader", "READ", 1001)).Should().ThrowAsync<ArgumentOutOfRangeException>();
     }
 
     [TestMethod]
-    public async Task ForeignFilter_IsRejected_BeforeAnyRead()
+    public async Task QueryNotFromASqlOSDbContext_IsRejected_BeforeAnyRead()
+    {
+        var query = new List<PagedProduct>().AsQueryable().OrderBy(product => product.Price);
+
+        var act = () => query.ToPageAsync("subj_reader", "READ", 10);
+
+        await act.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("ToPageAsync needs a query that starts from a DbSet of a context deriving from SqlOSDbContext<TContext>*");
+    }
+
+    [TestMethod]
+    public async Task InvalidOrdering_IsRejected_BeforeAnyRead()
     {
         using var context = PageOrderModelContext.CreateProducts(_ => { });
 
-        var act = () => context.Products.OrderBy(product => product.Price).ToPageAsync(product => product.Rank > 1, pageSize: 10);
+        var act = () => context.Products.ToPageAsync("subj_reader", "READ", 10);
 
-        await act.Should().ThrowAsync<ArgumentException>().WithMessage("The filter must come from ISqlOSFgaAuthService.BuildFilterAsync.*");
+        await act.Should().ThrowAsync<ArgumentException>().WithMessage("ToPageAsync needs an OrderBy*");
     }
 
     private static IEnumerable<int> Keys(SqlOSFgaPageQuery.Selection selection)

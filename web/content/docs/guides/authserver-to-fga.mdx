@@ -301,25 +301,22 @@ FGA complements the application's tenant predicate; it does not replace it.
 
 ### List endpoints
 
-Filter by the validated organization **and** the FGA expression:
+Page by the validated organization **and** the FGA permission:
 
 ```csharp
 var token = http.GetSqlOSValidatedToken()!;
 var organizationId = token.OrganizationId!;
 var subjectId = token.UserId!;
 
-var filter = await fgaAuth.BuildFilterAsync<Workspace>(
-    subjectId,
-    "WORKSPACE_VIEW");
-
-var rows = await db.Workspaces
+var page = await db.Workspaces
     .Where(x => x.OrganizationId == organizationId)
-    .Where(filter)
     .OrderBy(x => x.Name)
-    .ToListAsync(ct);
+    .ToPageAsync(subjectId, "WORKSPACE_VIEW", pageSize: 20, cursor, ct);
+
+return Results.Ok(page.ToResponse(x => new { x.Id, x.Name }));
 ```
 
-The tenant predicate prevents rows owned by another organization from entering the candidate set. The FGA filter then applies resource-level authorization inside that tenant.
+The tenant predicate prevents rows owned by another organization from entering the candidate set. `ToPageAsync` then applies resource-level authorization inside that tenant and returns one page; `cursor` is the previous page's `nextCursor`. Declare the order with `HasPageOrder(x => x.Name)`; see [Paginating authorized lists](/docs/guides/paginating-authorized-lists).
 
 ### Detail and mutation endpoints
 
@@ -367,7 +364,7 @@ Login-time reconciliation keeps the common path fresh, but it is not an offboard
 | Unexpected/custom role | Remove the mapped grants unless that exact role is deliberately added to the mapping allowlist |
 
 <Callout type="danger" title="Do not rely on FGA IsActive for revocation yet">
-  AuthServer rejects inactive users, organizations, and memberships at its session and token boundaries. FGA lifecycle enforcement is tracked separately in open [issue #132](https://github.com/ross-slaney/sqlos/issues/132): current FGA point checks and query filters can still honor an existing grant even when an FGA subject or resource has `IsActive = false`. Remove the mapped grants explicitly during offboarding.
+  AuthServer rejects inactive users, organizations, and memberships at its session and token boundaries. FGA lifecycle enforcement is tracked separately in open [issue #132](https://github.com/ross-slaney/sqlos/issues/132): current FGA point checks can still honor an existing grant even when an FGA subject or resource has `IsActive = false`. Remove the mapped grants explicitly during offboarding.
 </Callout>
 
 If one user belongs to several organizations, reconcile each `(subjectId, organizationId)` pair independently. Updating the FGA subject's `OrganizationId` metadata during an organization switch does not revoke, scope, or replace grants in another organization.
@@ -414,6 +411,6 @@ The runnable example uses this shape in:
 ## Next steps
 
 - [Syncing Auth to FGA reference](/docs/guides/authserver-to-fga)
-- [Filter EF queries](/docs/fga/list-filter)
+- [Authorized pages](/docs/fga/list-filter)
 - [Memberships](/docs/authserver/memberships)
 - [Test your integration](/docs/guides/test-your-integration)

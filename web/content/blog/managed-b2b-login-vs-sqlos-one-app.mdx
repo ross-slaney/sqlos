@@ -95,7 +95,7 @@ That mounts the SqlOS auth routes and dashboard inside your app. Users, organiza
 | Organizations and invites | Yes | Yes |
 | SSO later | Yes, usually paid or plan-gated | Yes, configured in your deployment |
 | Resource-level authorization | Vendor product or custom app logic | SqlOS FGA in the same package |
-| List filtering in EF | Usually custom | Built around `BuildFilterAsync` |
+| List filtering in EF | Usually custom | Authorized pages with `ToPageAsync` |
 | Operations | Vendor operates auth service | You operate the ASP.NET host and SQL Server |
 | Pricing shape | MAU, org, SSO, add-ons, or contracts | MIT plus infrastructure |
 
@@ -121,16 +121,13 @@ Who should see which projects? What if a user is a workspace admin in one worksp
 With SqlOS, that becomes:
 
 ```csharp
-var filter = await fgaAuthService.BuildFilterAsync<Project>(
-    subjectId,
-    "PROJECT_VIEW");
-
-var projects = await dbContext.Projects
+var page = await dbContext.Projects
     .Where(x => x.OrganizationId == orgId)
-    .Where(filter)
     .OrderBy(x => x.Name)
-    .ToListAsync(cancellationToken);
+    .ToPageAsync(subjectId, "PROJECT_VIEW", pageSize: 20, cursor, cancellationToken);
 ```
+
+The list comes back a page at a time, with `page.NextCursor` for the next one. When `Project` declares that order with `HasPageOrder(x => x.Name)`, a caller who can see a few projects does not read the whole table to fill a page. A single project is a `CheckAccessAsync` call.
 
 The login and authorization models are not separate vendors or separate services. They are one SqlOS runtime in your app.
 
@@ -149,7 +146,7 @@ Choose SqlOS when:
 - you are building a .NET app on SQL Server
 - customers care that auth data stays in your database or deployment
 - you need SSO plus row-level authorization in the same app stack
-- EF list filtering is a first-class requirement
+- authorized EF list pages are a first-class requirement
 - you do not want MAU pricing or per-org add-ons to shape your product model
 
 Stay where you are when:

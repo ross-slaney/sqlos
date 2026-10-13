@@ -158,7 +158,7 @@ new SqlOSOptions().UseSingleApplication("Acme", app => { ${snippet} });`,
     name: "FGA group list authorization",
     relativePath: "web/content/docs/guides/fga-groups.mdx",
     heading: "## 6. Prove inherited list access",
-    marker: "var filter = await fga.BuildFilterAsync<Workspace>",
+    marker: "var page = await db.Workspaces",
     wrap: asFgaGroupListProgram,
   },
   {
@@ -208,7 +208,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : SqlOS
     name: "authorized page",
     relativePath: "web/content/docs/fga/list-filter.mdx",
     heading: "## Pages",
-    marker: ".ToPageAsync(canView, pageSize: 20, cursor: request.Cursor);",
+    marker: ".ToPageAsync(subjectId, \"CHAIN_VIEW\", pageSize: 20, cursor: request.Cursor);",
     wrap: asChainPageProgram,
   },
   {
@@ -222,7 +222,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : SqlOS
     name: "authorized page with includes",
     relativePath: "web/content/docs/guides/paginating-authorized-lists.mdx",
     heading: "## Page",
-    marker: ".ToPageAsync(canView, pageSize: 20, cursor: request.Cursor, cancellationToken);",
+    marker: ".ToPageAsync(subjectId, \"product.view\", pageSize: 20, cursor: request.Cursor, cancellationToken);",
     wrap: asProductPageProgram,
   },
   {
@@ -460,18 +460,20 @@ public sealed class Workspace : IHasResourceId
 
 function asFgaGroupListProgram(snippet) {
   return `using Microsoft.EntityFrameworkCore;
+using SqlOS;
+using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
 
-ISqlOSFgaAuthService fga = null!;
 ReviewDbContext db = null!;
 var userSubjectId = "subj_user";
 var organizationId = "org_acme";
+string? cursor = null;
 var ct = CancellationToken.None;
 
 ${snippet}
 
-public sealed class ReviewDbContext(DbContextOptions<ReviewDbContext> options) : DbContext(options)
+public sealed class ReviewDbContext(DbContextOptions<ReviewDbContext> options) : SqlOSDbContext<ReviewDbContext>(options)
 {
     public DbSet<Workspace> Workspaces => Set<Workspace>();
 }
@@ -557,7 +559,6 @@ function asChainPageProgram(snippet) {
   return `${pageOrderUsings}
 static async Task<IResult> ListChainsAsync(
     AppDbContext db,
-    ISqlOSFgaAuthService authService,
     string subjectId,
     string search,
     PageRequest request)
@@ -565,7 +566,7 @@ static async Task<IResult> ListChainsAsync(
 ${snippet}
 }
 
-_ = (Func<AppDbContext, ISqlOSFgaAuthService, string, string, PageRequest, Task<IResult>>)ListChainsAsync;
+_ = (Func<AppDbContext, string, string, PageRequest, Task<IResult>>)ListChainsAsync;
 ${pageOrderChainTypes}`;
 }
 
@@ -584,7 +585,6 @@ function asProductPageProgram(snippet) {
   return `${pageOrderUsings}
 static async Task<IResult> ListProductsAsync(
     ProductsDbContext db,
-    ISqlOSFgaAuthService fga,
     string subjectId,
     string term,
     PageRequest request,
@@ -593,7 +593,7 @@ static async Task<IResult> ListProductsAsync(
 ${snippet}
 }
 
-_ = (Func<ProductsDbContext, ISqlOSFgaAuthService, string, string, PageRequest, CancellationToken, Task<IResult>>)ListProductsAsync;
+_ = (Func<ProductsDbContext, string, string, PageRequest, CancellationToken, Task<IResult>>)ListProductsAsync;
 ${pageOrderProductTypes}`;
 }
 
@@ -601,7 +601,7 @@ function asPageCursorErrorProgram(snippet) {
   return `${pageOrderUsings}
 static async Task<IResult> ListProductsAsync(
     IQueryable<Product> query,
-    System.Linq.Expressions.Expression<Func<Product, bool>> canView,
+    string subjectId,
     int pageSize,
     string? cursor,
     CancellationToken ct)
@@ -612,7 +612,7 @@ ${snippet}
     return Results.Ok(page.ToResponse());
 }
 
-_ = (Func<IQueryable<Product>, System.Linq.Expressions.Expression<Func<Product, bool>>, int, string?, CancellationToken, Task<IResult>>)ListProductsAsync;
+_ = (Func<IQueryable<Product>, string, int, string?, CancellationToken, Task<IResult>>)ListProductsAsync;
 ${pageOrderProductTypes}`;
 }
 

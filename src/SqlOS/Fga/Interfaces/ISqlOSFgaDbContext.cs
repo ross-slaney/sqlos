@@ -12,7 +12,8 @@ namespace SqlOS.Fga.Interfaces;
 public interface ISqlOSFgaDbContext
 {
     /// <summary>
-    /// TVF for authorization query composition.
+    /// The authorization function (<c>fn_IsResourceAccessible</c>). <c>ToPageAsync</c> checks the rows
+    /// of a page with it; it is not a list API.
     /// Implementation: =&gt; FromExpression(() =&gt; IsResourceAccessible(resourceId, subjectIds, permissionId));
     /// </summary>
     IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessible(

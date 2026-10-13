@@ -1,6 +1,7 @@
-using System.Linq.Expressions;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.Fga.Extensions;
@@ -11,8 +12,8 @@ using SqlOS.Pagination;
 namespace SqlOS.IntegrationTests.Fga;
 
 /// <summary>
-/// ToPageAsync returns, page by page, exactly what <c>.Where(filter)</c> returns in the same
-/// order, for every caller, order, direction, page size and application filter.
+/// ToPageAsync returns, page by page, exactly the rows <c>CheckAccessAsync</c> allows one by one, in
+/// the query's order, for every caller, order, direction, page size and application filter.
 /// </summary>
 [TestClass]
 public class SqlOSFgaPageOrderIntegrationTests
@@ -21,12 +22,13 @@ public class SqlOSFgaPageOrderIntegrationTests
     public Task Seed() => PageOrderFixture.EnsureSeededAsync();
 
     [TestMethod]
-    public async Task WalkingEveryPage_EqualsTheFilteredQuery_ForEveryCallerOrderDirectionAndPageSize()
+    public async Task WalkingEveryPage_EqualsThePointChecks_ForEveryCallerOrderDirectionAndPageSize()
     {
         foreach (var caller in PageOrderFixture.Callers)
         {
             await using var context = PageOrderFixture.CreateContext();
-            var filter = await PageOrderFixture.AuthService(context).BuildFilterAsync<PagedDocument>(caller, PageOrderFixture.ViewPermission);
+            var documents = await context.Documents.AsNoTracking().ToListAsync();
+            var allowed = await PageOrderFixture.AllowedResourcesAsync(caller, documents.Select(document => document.ResourceId));
             foreach (var order in new[] { "Rank", "Title" })
             {
                 foreach (var descending in new[] { false, true })
@@ -39,12 +41,10 @@ public class SqlOSFgaPageOrderIntegrationTests
                             query = query.Where(document => document.Title.Contains(PageOrderFixture.FilterTerm));
                         }
 
-                        var expected = await PageOrderFixture.OrderWithKey(query.Where(filter), order, descending)
-                            .Select(document => document.Id)
-                            .ToListAsync();
+                        var expected = await PageOrderFixture.ExpectedAsync(query, order, descending, caller, allowed);
                         foreach (var pageSize in new[] { 1, 7, 100 })
                         {
-                            var pages = await PageOrderFixture.WalkAsync(PageOrderFixture.Order(query, order, descending), filter, pageSize);
+                            var pages = await PageOrderFixture.WalkAsync(PageOrderFixture.Order(query, order, descending), caller, pageSize);
 
                             AssertPages(pages, expected, pageSize, $"{caller} {order} {(descending ? "desc" : "asc")} filter={withApplicationFilter} size={pageSize}");
                         }
@@ -55,18 +55,29 @@ public class SqlOSFgaPageOrderIntegrationTests
     }
 
     [TestMethod]
+    public async Task GroupMember_SeesTheGroupsRows_AsThePointChecksDo()
+    {
+        await using var context = PageOrderFixture.CreateContext();
+        var query = context.Documents.AsNoTracking();
+        var expected = await PageOrderFixture.ExpectedAsync(query, "Rank", false, FgaTestDataSeeder.GroupMemberSubjectId);
+
+        var pages = await PageOrderFixture.WalkAsync(query.OrderBy(document => document.Rank), FgaTestDataSeeder.GroupMemberSubjectId, 7);
+
+        expected.Should().NotBeEmpty("the member's group holds grants in the seeded tree");
+        AssertPages(pages, expected, 7, "group member");
+    }
+
+    [TestMethod]
     public async Task CursorFromTheMiddle_ContinuesWhereThePageEnded()
     {
         await using var context = PageOrderFixture.CreateContext();
-        var filter = await PageOrderFixture.AuthService(context).BuildFilterAsync<PagedDocument>(
-            FgaTestDataSeeder.AgencyAdminSubjectId,
-            PageOrderFixture.ViewPermission);
+        var caller = FgaTestDataSeeder.AgencyAdminSubjectId;
         var ordered = context.Documents.AsNoTracking().OrderByDescending(document => document.Title);
-        var expected = await ordered.ThenByDescending(document => document.Id).Where(filter).Select(document => document.Id).ToListAsync();
+        var expected = await PageOrderFixture.ExpectedAsync(context.Documents, "Title", true, caller);
 
-        var first = await ordered.ToPageAsync(filter, 10);
-        var second = await ordered.ToPageAsync(filter, 10, first.NextCursor);
-        var rest = await PageOrderFixture.WalkAsync(ordered, filter, 25, second.NextCursor);
+        var first = await ordered.ToPageAsync(caller, PageOrderFixture.ViewPermission, 10);
+        var second = await ordered.ToPageAsync(caller, PageOrderFixture.ViewPermission, 10, first.NextCursor);
+        var rest = await PageOrderFixture.WalkAsync(ordered, caller, 25, second.NextCursor);
 
         first.Data.Select(document => document.Id).Should().Equal(expected.Take(10));
         second.Data.Select(document => document.Id).Should().Equal(expected.Skip(10).Take(10));
@@ -77,28 +88,45 @@ public class SqlOSFgaPageOrderIntegrationTests
     public async Task CallerWhoSeesNothing_GetsAnEmptyPageWithoutCursor()
     {
         await using var context = PageOrderFixture.CreateContext();
-        var filter = await PageOrderFixture.AuthService(context).BuildFilterAsync<PagedDocument>(
-            FgaTestDataSeeder.UnauthorizedSubjectId,
-            PageOrderFixture.ViewPermission);
 
-        var page = await context.Documents.OrderBy(document => document.Rank).ToPageAsync(filter, 20);
+        var page = await context.Documents.OrderBy(document => document.Rank)
+            .ToPageAsync(FgaTestDataSeeder.UnauthorizedSubjectId, PageOrderFixture.ViewPermission, PageOrderFixture.MaxPageSize);
+
+        page.Data.Should().BeEmpty();
+        page.PageSize.Should().Be(PageOrderFixture.MaxPageSize);
+        page.NextCursor.Should().BeNull();
+        page.HasNextPage.Should().BeFalse();
+    }
+
+    [TestMethod]
+    [DataRow("subj_page_nobody", PageOrderFixture.ViewPermission, "No subjects found for subj_page_nobody")]
+    [DataRow(FgaTestDataSeeder.SystemAdminSubjectId, "NO_SUCH_PERMISSION", "Permission NO_SUCH_PERMISSION not found")]
+    public async Task UnknownSubjectOrPermission_GetsAnEmptyPage_WithoutAPageStatement(string subjectId, string permissionKey, string warning)
+    {
+        var logs = new CapturingLoggerFactory();
+        var capture = new CommandCapture();
+        await using var context = PageOrderFixture.CreateContext(logs, capture);
+
+        var page = await context.Documents.OrderBy(document => document.Rank).ToPageAsync(subjectId, permissionKey, 20);
 
         page.Data.Should().BeEmpty();
         page.NextCursor.Should().BeNull();
-        page.HasNextPage.Should().BeFalse();
+        capture.Commands.Should().NotBeEmpty("the subject and permission are looked up")
+            .And.OnlyContain(command => !command.Text.Contains("PagedDocuments", StringComparison.Ordinal)
+                && !command.Text.Contains("fn_", StringComparison.Ordinal)
+                && !command.Text.Contains("SqlOSFgaPage_", StringComparison.Ordinal));
+        logs.Entries.Where(entry => entry.Category == "SqlOS.Fga" && entry.Level == LogLevel.Warning)
+            .Should().ContainSingle().Which.Message.Should().Be(warning);
     }
 
     [TestMethod]
     public async Task ExactlyAPageOfRows_HasACursor_ThenAnEmptyLastPage()
     {
         await using var context = PageOrderFixture.CreateContext();
-        var filter = await PageOrderFixture.AuthService(context).BuildFilterAsync<PagedDocument>(
-            PageOrderFixture.DirectSubjectId,
-            PageOrderFixture.ViewPermission);
         var ordered = context.Documents.OrderBy(document => document.Rank);
 
-        var first = await ordered.ToPageAsync(filter, 3);
-        var second = await ordered.ToPageAsync(filter, 3, first.NextCursor);
+        var first = await ordered.ToPageAsync(PageOrderFixture.DirectSubjectId, PageOrderFixture.ViewPermission, 3);
+        var second = await ordered.ToPageAsync(PageOrderFixture.DirectSubjectId, PageOrderFixture.ViewPermission, 3, first.NextCursor);
 
         first.Data.Should().HaveCount(3);
         first.NextCursor.Should().NotBeNull();
@@ -119,9 +147,7 @@ public class SqlOSFgaPageOrderIntegrationTests
             $"INSERT INTO {entries} ({Column("NodeId")}, {Column("Rank")}, {Column("RowKey")}) VALUES ('page_doc_000', {stale.Rank}, '{stale.Id}')");
         try
         {
-            var filter = await PageOrderFixture.AuthService(context).BuildFilterAsync<PagedDocument>(PageOrderFixture.DirectSubjectId, PageOrderFixture.ViewPermission);
-
-            var pages = await PageOrderFixture.WalkAsync(context.Documents.AsNoTracking().OrderBy(document => document.Rank), filter, 10);
+            var pages = await PageOrderFixture.WalkAsync(context.Documents.AsNoTracking().OrderBy(document => document.Rank), PageOrderFixture.DirectSubjectId, 10);
 
             pages.SelectMany(page => page.Data).Select(document => document.ResourceId)
                 .Should().Equal("page_doc_000", "page_doc_001", "page_doc_002");
@@ -137,22 +163,17 @@ public class SqlOSFgaPageOrderIntegrationTests
     public async Task IncludeAndTracking_AreHonored()
     {
         await using var tracking = PageOrderFixture.CreateContext();
-        var filter = await PageOrderFixture.AuthService(tracking).BuildFilterAsync<PagedDocument>(
-            PageOrderFixture.DirectSubjectId,
-            PageOrderFixture.ViewPermission);
 
         var tracked = await tracking.Documents.AsTracking().Include(document => document.Category)
             .OrderBy(document => document.Title)
-            .ToPageAsync(filter, 10);
+            .ToPageAsync(PageOrderFixture.DirectSubjectId, PageOrderFixture.ViewPermission, 10);
 
         tracked.Data.Should().HaveCount(3).And.OnlyContain(document => document.Category != null);
         tracking.ChangeTracker.Entries<PagedDocument>().Should().HaveCount(3);
 
         await using var untracked = PageOrderFixture.CreateContext();
-        var untrackedFilter = await PageOrderFixture.AuthService(untracked).BuildFilterAsync<PagedDocument>(
-            PageOrderFixture.DirectSubjectId,
-            PageOrderFixture.ViewPermission);
-        var page = await untracked.Documents.AsNoTracking().OrderBy(document => document.Title).ToPageAsync(untrackedFilter, 10);
+        var page = await untracked.Documents.AsNoTracking().OrderBy(document => document.Title)
+            .ToPageAsync(PageOrderFixture.DirectSubjectId, PageOrderFixture.ViewPermission, 10);
 
         page.Data.Should().HaveCount(3).And.OnlyContain(document => document.Category == null);
         untracked.ChangeTracker.Entries<PagedDocument>().Should().BeEmpty();
@@ -162,34 +183,101 @@ public class SqlOSFgaPageOrderIntegrationTests
     public async Task UnsupportedQueries_AreRejectedBeforeAnyRead()
     {
         await using var context = PageOrderFixture.CreateContext();
-        var filter = await PageOrderFixture.AuthService(context).BuildFilterAsync<PagedDocument>(
-            FgaTestDataSeeder.SystemAdminSubjectId,
-            PageOrderFixture.ViewPermission);
+        var admin = FgaTestDataSeeder.SystemAdminSubjectId;
 
-        await FluentActions.Awaiting(() => context.Documents.Select(document => document).OrderBy(document => document.Rank).ToPageAsync(filter, 10))
+        await FluentActions.Awaiting(() => context.Documents.Select(document => document).OrderBy(document => document.Rank).ToPageAsync(admin, PageOrderFixture.ViewPermission, 10))
             .Should().ThrowAsync<ArgumentException>().WithMessage("Select is not supported before ToPageAsync*");
-        await FluentActions.Awaiting(() => context.Documents.OrderBy(document => document.Rank).ThenByDescending(document => document.Title).ToPageAsync(filter, 10))
+        await FluentActions.Awaiting(() => context.Documents.OrderBy(document => document.Rank).ThenByDescending(document => document.Title).ToPageAsync(admin, PageOrderFixture.ViewPermission, 10))
             .Should().ThrowAsync<ArgumentException>().WithMessage("*one direction*");
-
-        await using var other = PageOrderFixture.CreateContext();
-        await FluentActions.Awaiting(() => other.Documents.OrderBy(document => document.Rank).ToPageAsync(filter, 10))
-            .Should().ThrowAsync<ArgumentException>().WithMessage("Build the filter and run the page on the same DbContext instance.*");
     }
 
     [TestMethod]
-    public async Task HandRolledContext_IsRejected()
+    public async Task QueryNotFromASqlOSDbContext_IsRejected()
     {
-        var authService = new SqlOS.Fga.Services.SqlOSFgaAuthService(
-            AspireFixture.SharedContext,
-            Microsoft.Extensions.Options.Options.Create(new SqlOS.Fga.Configuration.SqlOSFgaOptions()),
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<SqlOS.Fga.Services.SqlOSFgaAuthService>.Instance);
-        var filter = await authService.BuildFilterAsync<LifecycleProtectedEntity>(
-            FgaTestDataSeeder.SystemAdminSubjectId,
-            PageOrderFixture.ViewPermission);
+        const string message = "ToPageAsync needs a query that starts from a DbSet of a context deriving from SqlOSDbContext<TContext>*";
+        var admin = FgaTestDataSeeder.SystemAdminSubjectId;
 
-        var act = () => AspireFixture.SharedContext.Set<LifecycleProtectedEntity>().OrderBy(entity => entity.Id).ToPageAsync(filter, 10);
+        await FluentActions.Awaiting(() => AspireFixture.SharedContext.Set<LifecycleProtectedEntity>().OrderBy(entity => entity.Id).ToPageAsync(admin, PageOrderFixture.ViewPermission, 10))
+            .Should().ThrowAsync<ArgumentException>().WithMessage(message);
+        await FluentActions.Awaiting(() => new List<PagedDocument>().AsQueryable().OrderBy(document => document.Rank).ToPageAsync(admin, PageOrderFixture.ViewPermission, 10))
+            .Should().ThrowAsync<ArgumentException>().WithMessage(message);
+    }
 
-        await act.Should().ThrowAsync<ArgumentException>().WithMessage("ToPageAsync needs a context that derives from SqlOSDbContext<TContext>*");
+    [TestMethod]
+    public async Task PooledContext_IsFound_AcrossLeases()
+    {
+        var services = new ServiceCollection();
+        services.AddDbContextPool<PageOrderTestDbContext>(options => options.UseTestProvider(AspireFixture.SqlConnectionString), poolSize: 1);
+        await using var provider = services.BuildServiceProvider();
+        await using var reference = PageOrderFixture.CreateContext();
+        var expected = await PageOrderFixture.ExpectedAsync(reference.Documents, "Rank", false, FgaTestDataSeeder.AgencyMemberSubjectId);
+
+        var leased = new List<PageOrderTestDbContext>();
+        for (var lease = 0; lease < 3; lease++)
+        {
+            await using var scope = provider.CreateAsyncScope();
+            var context = scope.ServiceProvider.GetRequiredService<PageOrderTestDbContext>();
+            leased.Add(context);
+
+            var pages = await PageOrderFixture.WalkAsync(context.Documents.AsNoTracking().OrderBy(document => document.Rank), FgaTestDataSeeder.AgencyMemberSubjectId, 20);
+
+            pages.SelectMany(page => page.Data).Select(document => document.Id).Should().Equal(expected, $"lease {lease}");
+        }
+
+        leased.Distinct().Should().ContainSingle("the pool hands out the same context on every lease");
+    }
+
+    [TestMethod]
+    public async Task TwoContextsOfOneType_AndOneFromDI_EachRunsItsOwnPage()
+    {
+        var services = new ServiceCollection();
+        services.AddDbContext<PageOrderTestDbContext>(options => options.UseTestProvider(AspireFixture.SqlConnectionString));
+        await using var provider = services.BuildServiceProvider();
+        await using var scope = provider.CreateAsyncScope();
+        var resolved = scope.ServiceProvider.GetRequiredService<PageOrderTestDbContext>();
+        var firstCapture = new CommandCapture();
+        var secondCapture = new CommandCapture();
+        await using var first = PageOrderFixture.CreateContext(null, firstCapture);
+        await using var second = PageOrderFixture.CreateContext(null, secondCapture);
+        var firstQuery = first.Documents.AsTracking().OrderBy(document => document.Rank);
+        var secondQuery = second.Documents.AsTracking().OrderBy(document => document.Rank);
+
+        var secondPage = await secondQuery.ToPageAsync(PageOrderFixture.DirectSubjectId, PageOrderFixture.ViewPermission, 10);
+        var resolvedPage = await resolved.Documents.AsTracking().OrderBy(document => document.Rank)
+            .ToPageAsync(PageOrderFixture.DirectSubjectId, PageOrderFixture.ViewPermission, 10);
+
+        secondPage.Data.Should().HaveCount(3);
+        resolvedPage.Data.Select(document => document.Id).Should().Equal(secondPage.Data.Select(document => document.Id));
+        secondCapture.Commands.Should().Contain(command => command.Text.Contains("SqlOSFgaSubjects", StringComparison.Ordinal),
+            "the caller is resolved on the context the query came from");
+        firstCapture.Commands.Should().BeEmpty("the other context of the same type ran nothing");
+        second.ChangeTracker.Entries<PagedDocument>().Should().HaveCount(3);
+        first.ChangeTracker.Entries<PagedDocument>().Should().BeEmpty();
+        resolved.ChangeTracker.Entries<PagedDocument>().Should().HaveCount(3);
+
+        (await firstQuery.ToPageAsync(PageOrderFixture.DirectSubjectId, PageOrderFixture.ViewPermission, 10)).Data.Should().HaveCount(3);
+        firstCapture.Commands.Should().NotBeEmpty();
+    }
+
+    [TestMethod]
+    public async Task PageOnAnotherContext_ReusesTheCompiledQueries()
+    {
+        // The same options, so both contexts share EF Core's internal services and its query cache.
+        var logs = new CapturingLoggerFactory();
+        await using (var warm = PageOrderFixture.CreateContext(logs))
+        {
+            await warm.Documents.AsNoTracking().OrderBy(document => document.Rank)
+                .ToPageAsync(FgaTestDataSeeder.AgencyMemberSubjectId, PageOrderFixture.ViewPermission, 5);
+        }
+
+        logs.Clear();
+        await using var context = PageOrderFixture.CreateContext(logs);
+
+        await context.Documents.AsNoTracking().OrderBy(document => document.Rank)
+            .ToPageAsync(FgaTestDataSeeder.AgencyMemberSubjectId, PageOrderFixture.ViewPermission, 5);
+
+        logs.Entries.Where(entry => entry.EventId.Id == CoreEventId.QueryCompilationStarting.Id)
+            .Should().BeEmpty("the page's queries are cached across context instances");
     }
 
     [TestMethod]
@@ -197,14 +285,11 @@ public class SqlOSFgaPageOrderIntegrationTests
     {
         var logs = new CapturingLoggerFactory();
         await using var context = PageOrderFixture.CreateContext(logs);
-        var filter = await PageOrderFixture.AuthService(context).BuildFilterAsync<PagedDocument>(
-            PageOrderFixture.DirectSubjectId,
-            PageOrderFixture.ViewPermission);
         var ordered = context.Documents.AsNoTracking().OrderBy(document => document.CreatedAt);
-        var expected = await ordered.ThenBy(document => document.Id).Where(filter).Select(document => document.Id).ToListAsync();
+        var expected = await PageOrderFixture.ExpectedAsync(context.Documents, "CreatedAt", false, PageOrderFixture.DirectSubjectId);
 
-        var firstWalk = await PageOrderFixture.WalkAsync(ordered, filter, 2);
-        var secondWalk = await PageOrderFixture.WalkAsync(ordered, filter, 2);
+        var firstWalk = await PageOrderFixture.WalkAsync(ordered, PageOrderFixture.DirectSubjectId, 2);
+        var secondWalk = await PageOrderFixture.WalkAsync(ordered, PageOrderFixture.DirectSubjectId, 2);
 
         AssertPages(firstWalk, expected, 2, "undeclared CreatedAt");
         AssertPages(secondWalk, expected, 2, "undeclared CreatedAt, again");
@@ -220,11 +305,8 @@ public class SqlOSFgaPageOrderIntegrationTests
     {
         var logs = new CapturingLoggerFactory();
         await using var context = PageOrderFixture.CreateContext(logs);
-        var filter = await PageOrderFixture.AuthService(context).BuildFilterAsync<PagedDocument>(
-            FgaTestDataSeeder.AgencyMemberSubjectId,
-            PageOrderFixture.ViewPermission);
-
-        await context.Documents.OrderBy(document => document.Rank).ToPageAsync(filter, 5);
+        await context.Documents.OrderBy(document => document.Rank)
+            .ToPageAsync(FgaTestDataSeeder.AgencyMemberSubjectId, PageOrderFixture.ViewPermission, 5);
 
         logs.Entries.Where(entry => entry.Level == LogLevel.Debug && entry.Category == "SqlOS.Fga")
             .Should().ContainSingle()

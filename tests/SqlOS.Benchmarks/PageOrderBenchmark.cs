@@ -13,17 +13,19 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Npgsql;
 using SqlOS;
+using SqlOS.Fga;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
+using SqlOS.Fga.Paging;
 using SqlOS.Fga.Services;
 
 namespace SqlOS.Benchmarks;
 
 /// <summary>
-/// Page orders at scale, on SQL Server or PostgreSQL: <c>ToPageAsync</c> against
-/// <c>.Where(filter).OrderBy(Price).Take(20)</c> over a retail tree
+/// Page orders at scale, on SQL Server or PostgreSQL: <c>ToPageAsync</c> against the removed
+/// <c>.Where(filter).OrderBy(Price).Take(20)</c> path over a retail tree
 /// (root → 5 divisions → 50 chains → 500 regions → 10,000 stores → products, one resource per product).
 /// </summary>
 /// <remarks>
@@ -91,11 +93,11 @@ internal static class PageOrderBenchmark
             var result = await bench.MeasureAsync(scenario, options);
             results.Add(result);
             Console.WriteLine(
-                $"  {scenario.Name,-26} visible {result.Visible,9:N0}  ToPageAsync {result.Page.MedianMs,9:F1} ms {result.Page.RowsRead,9:N0} rows ({result.Page.Statements} statements)  .Where(filter).Take(20) {result.Plain.MedianMs,9:F1} ms {result.Plain.RowsRead,9:N0} rows");
+                $"  {scenario.Name,-26} visible {result.Visible,9:N0}  ToPageAsync {result.Page.MedianMs,9:F1} ms {result.Page.RowsRead,9:N0} rows ({result.Page.Statements} statements)  removed .Where(filter).Take(20) {result.Plain.MedianMs,9:F1} ms {result.Plain.RowsRead,9:N0} rows");
         }
 
         Console.WriteLine();
-        Console.WriteLine($"| {(options.PostgreSql ? "PostgreSQL" : "SQL Server")}, {products:N0} products | Visible rows | `ToPageAsync` ms | rows read | `.Where(filter).OrderBy(Price).Take(20)` ms | rows read |");
+        Console.WriteLine($"| {(options.PostgreSql ? "PostgreSQL" : "SQL Server")}, {products:N0} products | Visible rows | `ToPageAsync` ms | rows read | removed `.Where(filter).OrderBy(Price).Take(20)` ms | rows read |");
         Console.WriteLine("| --- | ---: | ---: | ---: | ---: | ---: |");
         foreach (var result in results)
         {
@@ -303,17 +305,21 @@ internal static class PageOrderBenchmark
         public async Task<Result> MeasureAsync(Scenario scenario, Options options)
         {
             await using var context = CreateContext();
-            var filter = await AuthService(context).BuildFilterAsync<BenchProduct>(scenario.SubjectId, Permission);
-            var visible = await Query(context, scenario).Where(filter).LongCountAsync();
+            var removedFilter = await RemovedFilterAsync(context, scenario.SubjectId);
+            var visible = await Query(context, scenario).Where(removedFilter).LongCountAsync();
 
             // The plan pass runs each method once first; it doubles as the warmup.
-            var (pageRows, pageStatements, pageFirstRun) = await RowsReadAsync(scenario, (ctx, f) => Query(ctx, scenario).OrderBy(product => product.Price).ToPageAsync(f, PageSize));
+            var (pageRows, pageStatements, pageFirstRun) = await RowsReadAsync(ctx => Query(ctx, scenario).OrderBy(product => product.Price).ToPageAsync(scenario.SubjectId, Permission, PageSize));
             var page = await TimeAsync(async () =>
-                (await Query(context, scenario).OrderBy(product => product.Price).ToPageAsync(filter, PageSize)).Data.Count, options, pageFirstRun);
+                (await Query(context, scenario).OrderBy(product => product.Price).ToPageAsync(scenario.SubjectId, Permission, PageSize)).Data.Count, options, pageFirstRun);
 
-            var (plainRows, plainStatements, plainFirstRun) = await RowsReadAsync(scenario, (ctx, f) => Query(ctx, scenario).Where(f).OrderBy(product => product.Price).ThenBy(product => product.Id).Take(PageSize).ToListAsync());
+            var (plainRows, plainStatements, plainFirstRun) = await RowsReadAsync(async ctx =>
+            {
+                var filter = await RemovedFilterAsync(ctx, scenario.SubjectId);
+                await Query(ctx, scenario).Where(filter).OrderBy(product => product.Price).ThenBy(product => product.Id).Take(PageSize).ToListAsync();
+            }, skipStatements: 2);
             var plain = await TimeAsync(async () =>
-                (await Query(context, scenario).Where(filter).OrderBy(product => product.Price).ThenBy(product => product.Id).Take(PageSize).ToListAsync()).Count, options, plainFirstRun);
+                (await Query(context, scenario).Where(removedFilter).OrderBy(product => product.Price).ThenBy(product => product.Id).Take(PageSize).ToListAsync()).Count, options, plainFirstRun);
 
             return new Result(
                 scenario,
@@ -360,26 +366,38 @@ internal static class PageOrderBenchmark
             return new Measurement(median, times.Count, 0, 0);
         }
 
-        /// <summary>Runs once, capturing every statement, and re-runs each with the engine's actual plan.</summary>
-        private async Task<(long Rows, int Statements, TimeSpan FirstRun)> RowsReadAsync(
-            Scenario scenario,
-            Func<BenchDbContext, System.Linq.Expressions.Expression<Func<BenchProduct, bool>>, Task> run)
+        /// <summary>
+        /// The removed <c>.Where(filter)</c> path: the predicate the removed <c>BuildFilterAsync</c> returned,
+        /// built by the internal helper <c>ToPageAsync</c> checks rows with. The caller is resolved once,
+        /// outside the timing, as the old filter was.
+        /// </summary>
+        private static async Task<System.Linq.Expressions.Expression<Func<BenchProduct, bool>>> RemovedFilterAsync(BenchDbContext context, string subjectId)
+        {
+            var caller = await SqlOSFgaPrincipals.ResolveCallerAsync(context, subjectId, Permission, NullLogger.Instance)
+                ?? throw new InvalidOperationException($"{subjectId} has no {Permission} permission.");
+            return SqlOSFgaVisibility.Predicate<BenchProduct>(context, caller.SubjectIds, caller.PermissionId);
+        }
+
+        /// <summary>
+        /// Runs once, capturing every statement, and re-runs each with the engine's actual plan. The first
+        /// <paramref name="skipStatements"/> statements (resolving the caller outside the timing) are left out.
+        /// </summary>
+        private async Task<(long Rows, int Statements, TimeSpan FirstRun)> RowsReadAsync(Func<BenchDbContext, Task> run, int skipStatements = 0)
         {
             var capture = new StatementCapture();
             await using var context = CreateContext(capture);
-            var filter = await AuthService(context).BuildFilterAsync<BenchProduct>(scenario.SubjectId, Permission);
-            capture.Clear();
             var firstRun = Stopwatch.StartNew();
-            await run(context, filter);
+            await run(context);
             firstRun.Stop();
 
+            var statements = capture.Statements.Skip(skipStatements).ToList();
             var rows = 0L;
-            foreach (var statement in capture.Statements)
+            foreach (var statement in statements)
             {
                 rows += await PlanRowsAsync(statement);
             }
 
-            return (rows, capture.Statements.Count, firstRun.Elapsed);
+            return (rows, statements.Count, firstRun.Elapsed);
         }
 
         private async Task<long> PlanRowsAsync(DbCommand captured)

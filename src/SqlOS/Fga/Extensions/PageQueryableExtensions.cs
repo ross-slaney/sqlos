@@ -7,7 +7,6 @@ using System.Runtime.CompilerServices;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
-using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.Extensions.Logging;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
@@ -17,8 +16,7 @@ using SqlOS.Pagination;
 namespace SqlOS.Fga.Extensions;
 
 /// <summary>
-/// Runs an authorized page: the application's query, a <c>BuildFilterAsync</c> filter, a page size
-/// and a cursor.
+/// Reads an authorized list: the page of an application's query that a subject may see.
 /// </summary>
 public static class PageQueryableExtensions
 {
@@ -30,116 +28,110 @@ public static class PageQueryableExtensions
     private static readonly ConditionalWeakTable<IModel, ConcurrentDictionary<string, bool>> UndeclaredWarnings = new();
 
     /// <summary>
-    /// Returns the page of <paramref name="query"/> the subject behind <paramref name="filter"/> may
-    /// see, after <paramref name="cursor"/>, in the query's order.
+    /// Returns the page of <paramref name="query"/> that <paramref name="subjectId"/> may see with
+    /// <paramref name="permissionKey"/>, after <paramref name="cursor"/>, in the query's order.
     /// </summary>
     /// <typeparam name="T">The entity type exposing the FGA resource identifier.</typeparam>
     /// <param name="query">
-    /// A DbSet query with optional <c>Where</c>, <c>Include</c>/<c>ThenInclude</c>, tracking,
-    /// <c>TagWith</c>, <c>IgnoreQueryFilters</c> and <c>AsSplitQuery</c>, ending with one
+    /// A query that starts from a DbSet of a context deriving from <c>SqlOSDbContext&lt;TContext&gt;</c>,
+    /// with optional <c>Where</c>, <c>Include</c>/<c>ThenInclude</c>, tracking, <c>TagWith</c>,
+    /// <c>IgnoreQueryFilters</c> and <c>AsSplitQuery</c>, ending with one
     /// <c>OrderBy</c>/<c>OrderByDescending</c> and any number of <c>ThenBy</c>/<c>ThenByDescending</c>
     /// in the same direction over mapped scalar properties. The primary key is appended to the order.
     /// </param>
-    /// <param name="filter">The filter <c>ISqlOSFgaAuthService.BuildFilterAsync</c> returned.</param>
+    /// <param name="subjectId">The caller. Its active group memberships are included.</param>
+    /// <param name="permissionKey">The permission the caller needs on each row's resource.</param>
     /// <param name="pageSize">The page size, 1 to 1,000.</param>
-    /// <param name="cursor">The <c>NextCursor</c> of the previous page, or <see langword="null"/> for the first page.</param>
+    /// <param name="cursor">
+    /// The <c>NextCursor</c> of the previous page, or <see langword="null"/> for the first page. Pass
+    /// it back as it came; do not filter on the order's columns to continue a list yourself.
+    /// </param>
     /// <param name="cancellationToken">A token that cancels the page.</param>
     /// <returns>
     /// The page. <c>NextCursor</c> is <see langword="null"/> when the page is the last; a full page
-    /// may also be followed by an empty one.
+    /// may also be followed by an empty one. An unknown subject or permission gets an empty page.
     /// </returns>
     /// <remarks>
     /// <para>
-    /// The page reads the application's query in its order and checks each row, the way
-    /// <c>.Where(filter)</c> does, for as many rows as a page needs. When few of those rows are
-    /// visible and the order is declared with <c>HasPageOrder</c>, it reads the order under each
-    /// of the caller's granted nodes instead, so a caller who can see few rows of a large table
-    /// costs about a page. The rows of the page are then loaded with the query's includes and
-    /// tracking and checked once more with <paramref name="filter"/>.
+    /// The page reads the application's query in its order and checks each row with
+    /// <c>fn_IsResourceAccessible</c>, for as many rows as a page needs. When few of those rows are
+    /// visible and the order is declared with <c>HasPageOrder</c>, it reads the order under each of
+    /// the caller's granted nodes instead, so a caller who can see few rows of a large table costs
+    /// about a page. The rows of the page are then loaded with the query's includes and tracking and
+    /// checked once more.
     /// </para>
     /// <para>
-    /// The context must derive from <c>SqlOSDbContext&lt;TContext&gt;</c>, which keeps page orders
-    /// current, and must be the instance the filter was built on.
+    /// The caller's subjects and the permission are resolved each time the page runs, so grant,
+    /// membership and lifecycle changes apply from the next page.
     /// </para>
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="pageSize"/> is outside 1 to 1,000.</exception>
     /// <exception cref="ArgumentException">
-    /// The filter does not come from <c>BuildFilterAsync</c>; the query has no ordering, mixed
-    /// directions, an ordering over anything but a mapped scalar property, or an operator such as
-    /// <c>Select</c>, <c>Skip</c> or <c>Take</c>; the context does not derive from
-    /// <c>SqlOSDbContext&lt;TContext&gt;</c> or is not the filter's; or the cursor belongs to another list.
+    /// The query does not start from a DbSet of a context deriving from
+    /// <c>SqlOSDbContext&lt;TContext&gt;</c>; it has no ordering, mixed directions, an ordering over
+    /// anything but a mapped scalar property, or an operator such as <c>Select</c>, <c>Skip</c> or
+    /// <c>Take</c>; or the cursor belongs to another list.
     /// </exception>
     /// <exception cref="SqlOSCursorException">The cursor is not one this list issued.</exception>
     public static async Task<SqlOSCursorPage<T>> ToPageAsync<T>(
         this IQueryable<T> query,
-        Expression<Func<T, bool>> filter,
+        string subjectId,
+        string permissionKey,
         int pageSize,
         string? cursor = null,
         CancellationToken cancellationToken = default)
         where T : class, IHasResourceId
     {
         ArgumentNullException.ThrowIfNull(query);
-        ArgumentNullException.ThrowIfNull(filter);
+        ArgumentNullException.ThrowIfNull(subjectId);
+        ArgumentNullException.ThrowIfNull(permissionKey);
         if (pageSize is < 1 or > MaxPageSize)
         {
             throw new ArgumentOutOfRangeException(nameof(pageSize), pageSize, $"The page size must be between 1 and {MaxPageSize}.");
         }
 
-        var authorization = SqlOSFgaFilterReader.Read(filter);
+        var context = SqlOSFgaQueryContexts.Find(query.Provider)
+            ?? throw new ArgumentException(
+                "ToPageAsync needs a query that starts from a DbSet of a context deriving from SqlOSDbContext<TContext>, which keeps page orders current.",
+                nameof(query));
+
         var ordering = SqlOSFgaOrderReader.Read(query.Expression);
         var position = string.IsNullOrWhiteSpace(cursor)
             ? null
             : SqlOSFgaPageCursor.Decode(cursor, ordering.EntityType, ordering.Columns, ordering.Descending);
 
-        if (authorization.IsEmpty)
+        var caller = await SqlOSFgaPrincipals.ResolveCallerAsync(
+            context,
+            subjectId,
+            permissionKey,
+            Logger(context),
+            cancellationToken);
+        if (caller == null)
         {
-            // An unknown subject or permission: nothing is visible, and nothing is read.
+            // An unknown subject or permission: nothing is visible, and no page statement runs.
             return SqlOSCursorPage<T>.Create([], pageSize, null);
         }
 
-        if (authorization.Context is not DbContext context || !DerivesFromSqlOSDbContext(context.GetType()))
-        {
-            throw new ArgumentException(
-                "ToPageAsync needs a context that derives from SqlOSDbContext<TContext>, which keeps page orders current.",
-                nameof(query));
-        }
-
-        if (!ReferenceEquals(query.Provider, context.GetService<IAsyncQueryProvider>()))
-        {
-            throw new ArgumentException(
-                "Build the filter and run the page on the same DbContext instance.",
-                nameof(query));
-        }
-
-        var page = new SqlOSFgaPage<T>(context, query.Provider, ordering, authorization, position, pageSize);
+        var page = new SqlOSFgaPage<T>(context, query.Provider, ordering, caller, position, pageSize);
         return await page.RunAsync(cancellationToken);
     }
 
-    private static bool DerivesFromSqlOSDbContext(Type? type)
-    {
-        for (; type != null; type = type.BaseType)
-        {
-            if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(SqlOSDbContext<>))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+    private static ILogger Logger(DbContext context)
+        => context.GetService<ILoggerFactory>().CreateLogger("SqlOS.Fga");
 
     /// <summary>One page: the two reads, the load, the cursor and the log line.</summary>
     private sealed class SqlOSFgaPage<T>(
         DbContext context,
         IQueryProvider provider,
         SqlOSFgaPageOrdering ordering,
-        SqlOSFgaFilter authorization,
+        SqlOSFgaCaller caller,
         object[]? position,
         int pageSize)
         where T : class, IHasResourceId
     {
         private readonly IReadOnlyList<IProperty> _columns = ordering.Columns;
         private readonly IProperty _key = ordering.Columns[^1];
+        private readonly Expression<Func<T, bool>> _visible = SqlOSFgaVisibility.Predicate<T>(context, caller.SubjectIds, caller.PermissionId);
         private Func<T, object>? _keyOf;
 
         public async Task<SqlOSCursorPage<T>> RunAsync(CancellationToken cancellationToken)
@@ -181,7 +173,7 @@ public static class PageQueryableExtensions
             source = Order(source, typeof(T), parameter => EntityColumns(parameter), ordering.Descending);
             source = Take(source, typeof(T), budget);
 
-            var visible = new ParameterReplacer(authorization.Lambda.Parameters[0], entity).Visit(authorization.Lambda.Body);
+            var visible = new ParameterReplacer(_visible.Parameters[0], entity).Visit(_visible.Body);
             var projection = Expression.Lambda(
                 Expression.NewArrayInit(
                     typeof(object),
@@ -204,7 +196,7 @@ public static class PageQueryableExtensions
             int budget,
             CancellationToken cancellationToken)
         {
-            var nodes = ((ISqlOSFgaDbContext)context).PageNodes(authorization.SubjectIds, authorization.PermissionId);
+            var nodes = ((ISqlOSFgaDbContext)context).PageNodes(caller.SubjectIds, caller.PermissionId);
             IQueryable<Dictionary<string, object>> entries = context.Set<Dictionary<string, object>>(order.EntryType.Name);
             var node = Expression.Parameter(typeof(SqlOSFgaPageNode), "n");
             var nodeId = Expression.Property(node, nameof(SqlOSFgaPageNode.NodeId));
@@ -287,7 +279,7 @@ public static class PageQueryableExtensions
                 SqlOSFgaPageCursor.QueryParameter(keyList, keyList.GetType()),
                 Member(entity, _key));
             var source = Where(ordering.Inner, typeof(T), Expression.Lambda(contains, entity));
-            source = Where(source, typeof(T), authorization.Lambda);
+            source = Where(source, typeof(T), _visible);
 
             var rows = await provider.CreateQuery<T>(source).ToListAsync(cancellationToken);
             var positions = keys.Select((key, index) => (key, index)).ToDictionary(item => item.key, item => item.index);
@@ -305,8 +297,7 @@ public static class PageQueryableExtensions
             IReadOnlyList<T> loaded,
             TimeSpan elapsed)
         {
-            var loggerFactory = context.GetService<ILoggerFactory>();
-            var logger = loggerFactory.CreateLogger("SqlOS.Fga");
+            var logger = Logger(context);
             var orderText = $"{string.Join(", ", _columns.Select(column => column.Name))} {(ordering.Descending ? "desc" : "asc")}";
 
             if (logger.IsEnabled(LogLevel.Debug))

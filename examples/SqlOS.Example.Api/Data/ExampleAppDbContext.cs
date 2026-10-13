@@ -20,6 +20,8 @@ public sealed class ExampleAppDbContext : SqlOSDbContext<ExampleAppDbContext>
 
     protected override void OnApplicationModelCreating(ModelBuilder modelBuilder)
     {
+        // Lists page with ToPageAsync; each order they page by is declared, so a page costs about a
+        // page for any caller.
         modelBuilder.Entity<Workspace>(entity =>
         {
             entity.HasKey(x => x.Id);
@@ -28,6 +30,7 @@ public sealed class ExampleAppDbContext : SqlOSDbContext<ExampleAppDbContext>
             entity.Property(x => x.ResourceId).HasMaxLength(100).IsRequired();
             entity.HasIndex(x => x.OrganizationId);
             entity.HasIndex(x => x.ResourceId);
+            entity.HasPageOrder(x => x.Name);
             entity.Ignore(x => x.ResourceTypeId);
             entity.Ignore(x => x.ResourceName);
             entity.Ignore(x => x.ParentResourceId);
@@ -35,8 +38,6 @@ public sealed class ExampleAppDbContext : SqlOSDbContext<ExampleAppDbContext>
             entity.Ignore(x => x.ResourceIsActive);
         });
 
-        // The retail lists page with ToPageAsync; each order they page by is declared, so a page
-        // costs about a page for any caller.
         modelBuilder.Entity<Chain>(entity =>
         {
             entity.HasKey(x => x.Id);

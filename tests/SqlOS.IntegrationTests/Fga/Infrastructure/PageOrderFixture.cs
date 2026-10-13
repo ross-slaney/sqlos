@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Data.Common;
+using System.Data.SqlTypes;
 using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -27,6 +28,7 @@ internal static class PageOrderFixture
     public const string DirectSubjectId = "subj_page_direct";
     public const int DocumentsPerNode = 30;
     public const string FilterTerm = "an";
+    public const int MaxPageSize = PageQueryableExtensions.MaxPageSize;
 
     public static readonly string[] Folders =
     [
@@ -154,23 +156,76 @@ internal static class PageOrderFixture
             _ => throw new ArgumentOutOfRangeException(nameof(order))
         };
 
-    /// <summary>The same order with the key, as ToPageAsync pages it: the ground truth.</summary>
-    public static IOrderedQueryable<PagedDocument> OrderWithKey(IQueryable<PagedDocument> query, string order, bool descending)
-        => descending
-            ? Order(query, order, descending).ThenByDescending(document => document.Id)
-            : Order(query, order, descending).ThenBy(document => document.Id);
+    /// <summary>How the engine orders a <see cref="Guid"/> key: SQL Server's uniqueidentifier order, PostgreSQL's uuid byte order.</summary>
+    public static IComparer<Guid> KeyOrder { get; } = Comparer<Guid>.Create((left, right) => TestDatabase.IsPostgreSql
+        ? string.CompareOrdinal(left.ToString("N"), right.ToString("N"))
+        : new SqlGuid(left).CompareTo(new SqlGuid(right)));
+
+    /// <summary>
+    /// The resources among <paramref name="resourceIds"/> that <c>CheckAccessAsync</c> lets the subject
+    /// view, each checked on its own on a fresh context: an oracle independent of the page's SQL.
+    /// </summary>
+    public static async Task<HashSet<string>> AllowedResourcesAsync(string subjectId, IEnumerable<string> resourceIds)
+    {
+        await using var context = CreateContext();
+        var authService = AuthService(context);
+        var allowed = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var resourceId in resourceIds.Distinct(StringComparer.Ordinal))
+        {
+            if ((await authService.CheckAccessAsync(subjectId, ViewPermission, resourceId)).Allowed)
+            {
+                allowed.Add(resourceId);
+            }
+        }
+
+        return allowed;
+    }
+
+    /// <summary>
+    /// The ground truth for a walk: the rows of <paramref name="query"/> on an allowed resource, sorted in
+    /// memory by the order and then the key, as the database sorts them.
+    /// </summary>
+    public static async Task<List<Guid>> ExpectedAsync(
+        IQueryable<PagedDocument> query,
+        string order,
+        bool descending,
+        string subjectId,
+        IReadOnlySet<string>? allowed = null)
+    {
+        var rows = await query.AsNoTracking().ToListAsync();
+        allowed ??= await AllowedResourcesAsync(subjectId, rows.Select(row => row.ResourceId));
+        return Sort(rows.Where(row => allowed.Contains(row.ResourceId)), order, descending);
+    }
+
+    public static List<Guid> Sort(IEnumerable<PagedDocument> rows, string order, bool descending)
+    {
+        var sorted = (order, descending) switch
+        {
+            ("Rank", false) => rows.OrderBy(document => document.Rank),
+            ("Rank", true) => rows.OrderByDescending(document => document.Rank),
+            ("Title", false) => rows.OrderBy(document => document.Title, StringComparer.Ordinal),
+            ("Title", true) => rows.OrderByDescending(document => document.Title, StringComparer.Ordinal),
+            ("CreatedAt", false) => rows.OrderBy(document => document.CreatedAt),
+            ("CreatedAt", true) => rows.OrderByDescending(document => document.CreatedAt),
+            _ => throw new ArgumentOutOfRangeException(nameof(order))
+        };
+
+        return (descending ? sorted.ThenByDescending(document => document.Id, KeyOrder) : sorted.ThenBy(document => document.Id, KeyOrder))
+            .Select(document => document.Id)
+            .ToList();
+    }
 
     /// <summary>Walks ToPageAsync from <paramref name="cursor"/> to the last page.</summary>
     public static async Task<List<SqlOSCursorPage<PagedDocument>>> WalkAsync(
         IQueryable<PagedDocument> ordered,
-        Expression<Func<PagedDocument, bool>> filter,
+        string subjectId,
         int pageSize,
         string? cursor = null)
     {
         var pages = new List<SqlOSCursorPage<PagedDocument>>();
         do
         {
-            var page = await ordered.ToPageAsync(filter, pageSize, cursor);
+            var page = await ordered.ToPageAsync(subjectId, ViewPermission, pageSize, cursor);
             pages.Add(page);
             cursor = page.NextCursor;
             if (pages.Count > 2_000)

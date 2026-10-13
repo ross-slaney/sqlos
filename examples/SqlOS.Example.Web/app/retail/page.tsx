@@ -6,7 +6,7 @@ import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import { apiGet, apiUrl } from "@/lib/api";
 
-type PagedResponse<T> = { data: T[]; totalCount: number; hasMore: boolean };
+type PagedResponse<T> = { data: T[]; pageSize: number; nextCursor: string | null; hasNextPage: boolean };
 type StoreSummary = { id: string; chainId: string; chainName?: string; name: string; storeNumber?: string; city?: string; state?: string };
 type InventoryItemDto = { id: string; sku: string; name: string; price: number; quantityOnHand: number; locationId: string };
 type ChainDto = { id: string; name: string; description?: string; locationCount: number };
@@ -80,7 +80,7 @@ export default function RetailDashboard() {
             const inv = await apiGet<PagedResponse<InventoryItemDto>>(
               `/api/locations/${store.id}/inventory?pageSize=250`,
               session.accessToken!
-            ).catch(() => ({ data: [] as InventoryItemDto[], totalCount: 0, hasMore: false }));
+            ).catch((): PagedResponse<InventoryItemDto> => ({ data: [], pageSize: 0, nextCursor: null, hasNextPage: false }));
             return { store, items: inv.data };
           })
         );

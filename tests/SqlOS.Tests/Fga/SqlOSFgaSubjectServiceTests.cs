@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -7,6 +8,7 @@ using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
+using SqlOS.Fga.Paging;
 using SqlOS.Fga.Services;
 
 namespace SqlOS.Tests.Fga;
@@ -84,25 +86,17 @@ public class SqlOSFgaSubjectServiceTests
     }
 
     [TestMethod]
-    public async Task BuildFilterAsync_UsesCapturedParametersInsteadOfLiteralConstants()
+    public void VisibilityPredicate_PassesSubjectsAndPermissionAsParameters()
     {
-        _context.Set<SqlOSFgaPermission>().Add(new SqlOSFgaPermission
-        {
-            Id = "perm_read",
-            Key = "READ",
-            Name = "Read"
-        });
-        _context.SaveChanges();
-        var authService = new SqlOSFgaAuthService(
-            _context,
-            Options.Create(new SqlOSFgaOptions()),
-            NullLogger<SqlOSFgaAuthService>.Instance);
+        var predicate = SqlOSFgaVisibility.Predicate<TestProtectedEntity>(_context, "[\"subj_user\"]", "perm_read");
+        var constants = ConstantCollector.Collect(predicate);
 
-        var filter = await authService.BuildFilterAsync<TestProtectedEntity>("subj_user", "READ");
-        var constants = ConstantCollector.Collect(filter);
-
-        Assert.IsFalse(constants.Contains("subj_user"));
+        // Literal constants would become SQL literals; values held in captured boxes become parameters.
+        Assert.IsFalse(constants.Contains("[\"subj_user\"]"));
         Assert.IsFalse(constants.Contains("perm_read"));
+        CollectionAssert.IsSubsetOf(
+            new[] { "[\"subj_user\"]", "perm_read" },
+            constants.OfType<StrongBox<string>>().Select(box => box.Value).ToList());
     }
 
     [TestMethod]

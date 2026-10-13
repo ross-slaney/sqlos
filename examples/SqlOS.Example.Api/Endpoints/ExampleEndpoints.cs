@@ -5,7 +5,9 @@ using SqlOS.AuthServer.Services;
 using SqlOS.Example.Api.Data;
 using SqlOS.Example.Api.Models;
 using SqlOS.Example.Api.Services;
+using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
+using SqlOS.Pagination;
 
 namespace SqlOS.Example.Api.Endpoints;
 
@@ -147,7 +149,13 @@ public static class ExampleEndpoints
             return Results.Ok(await authService.VerifyTotpEnrollmentAsync(request, httpContext, cancellationToken));
         });
 
-        example.MapGet("/workspaces", async (ExampleAppDbContext context, ExampleFgaService fgaService, ISqlOSFgaAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
+        example.MapGet("/workspaces", async (
+            ExampleAppDbContext context,
+            ExampleFgaService fgaService,
+            HttpContext httpContext,
+            string? cursor,
+            int? pageSize,
+            CancellationToken cancellationToken) =>
         {
             var organizationId = httpContext.User.FindFirst("org_id")?.Value;
             var subjectId = httpContext.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
@@ -158,18 +166,27 @@ public static class ExampleEndpoints
 
             await fgaService.EnsureUserAccessAsync(subjectId, organizationId, cancellationToken);
 
-            var filter = await authService.BuildFilterAsync<Workspace>(
-                subjectId,
-                ExampleFgaService.WorkspaceViewPermission);
+            // Name is a declared page order (ExampleAppDbContext).
+            SqlOSCursorPage<Workspace> page;
+            try
+            {
+                page = await context.Workspaces
+                    .AsNoTracking()
+                    .Where(x => x.OrganizationId == organizationId)
+                    .OrderBy(x => x.Name)
+                    .ToPageAsync(
+                        subjectId,
+                        ExampleFgaService.WorkspaceViewPermission,
+                        Math.Clamp(pageSize ?? 20, 1, 100),
+                        cursor,
+                        cancellationToken);
+            }
+            catch (Exception exception) when (exception is SqlOSCursorException or ArgumentException { ParamName: "cursor" })
+            {
+                return Results.BadRequest(new { error = SqlOSCursorException.ErrorCode, message = exception.Message });
+            }
 
-            var results = await context.Workspaces
-                .Where(x => x.OrganizationId == organizationId)
-                .Where(filter)
-                .OrderBy(x => x.Name)
-                .Select(x => new { x.Id, x.ResourceId, x.Name, x.OrganizationId, x.CreatedAt })
-                .ToListAsync(cancellationToken);
-
-            return Results.Ok(results);
+            return Results.Ok(page.ToResponse(x => new { x.Id, x.ResourceId, x.Name, x.OrganizationId, x.CreatedAt }));
         });
 
         example.MapPost("/workspaces", async (SqlOSCreateWorkspaceRequest request, ExampleAppDbContext context, ExampleFgaService fgaService, ISqlOSFgaAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>

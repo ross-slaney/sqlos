@@ -17,12 +17,11 @@ public static class InventoryEndpoints
     {
         var group = app.MapGroup("/api").WithTags("Inventory");
 
-        // Name, Sku and Price are declared page orders (ExampleAppDbContext). ToPageAsync applies the
-        // authorization filter and the cursor, and appends the Id tiebreaker.
+        // Name, Sku and Price are declared page orders (ExampleAppDbContext). ToPageAsync checks each
+        // row against the caller's grants, applies the cursor, and appends the Id tiebreaker.
         group.MapGet("/locations/{locationId}/inventory", async (
             string locationId,
             ExampleAppDbContext context,
-            ISqlOSFgaAuthService fga,
             HttpContext http,
             int pageSize = 10,
             string? search = null,
@@ -31,7 +30,6 @@ public static class InventoryEndpoints
             string? sortDir = null) =>
         {
             var subjectId = RetailSubjectResolver.ResolveSubjectId(http);
-            var canView = await fga.BuildFilterAsync<InventoryItem>(subjectId, RetailPermissionKeys.InventoryView);
             var descending = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase);
 
             IQueryable<InventoryItem> query = context.InventoryItems
@@ -60,7 +58,7 @@ public static class InventoryEndpoints
             SqlOSCursorPage<InventoryItem> page;
             try
             {
-                page = await ordered.ToPageAsync(canView, Math.Clamp(pageSize, 1, 100), cursor, http.RequestAborted);
+                page = await ordered.ToPageAsync(subjectId, RetailPermissionKeys.InventoryView, Math.Clamp(pageSize, 1, 100), cursor, http.RequestAborted);
             }
             catch (Exception exception) when (exception is SqlOSCursorException or ArgumentException { ParamName: "cursor" })
             {

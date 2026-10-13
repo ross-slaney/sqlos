@@ -406,7 +406,6 @@ app.MapGet("/api/todos", async (
     HttpContext httpContext,
     SqlOSAuthService authService,
     TodoFgaService todoFgaService,
-    ISqlOSFgaAuthService fgaAuthService,
     IOptions<TodoSampleOptions> sampleOptions,
     TodoSampleDbContext dbContext,
     string? cursor,
@@ -420,9 +419,6 @@ app.MapGet("/api/todos", async (
     }
 
     var todoContext = authResult.Context!;
-    var filter = await fgaAuthService.BuildFilterAsync<TodoItem>(
-        todoContext.SubjectId,
-        TodoFgaService.TodoReadPermission);
 
     SqlOSCursorPage<TodoItem> page;
     try
@@ -430,7 +426,12 @@ app.MapGet("/api/todos", async (
         page = await dbContext.TodoItems
             .AsNoTracking()
             .OrderByDescending(x => x.CreatedAt)
-            .ToPageAsync(filter, Math.Clamp(pageSize ?? 20, 1, 100), cursor, cancellationToken);
+            .ToPageAsync(
+                todoContext.SubjectId,
+                TodoFgaService.TodoReadPermission,
+                Math.Clamp(pageSize ?? 20, 1, 100),
+                cursor,
+                cancellationToken);
     }
     catch (SqlOSCursorException exception)
     {

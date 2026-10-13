@@ -49,7 +49,7 @@ export default function TrioSection() {
             </div>
             <CanvasCopy
               title="Permissions that cascade"
-              body="Model your real hierarchy, grant a role at any node, and access inherits downward. Checks fold into EF Core queries as a WHERE clause."
+              body="Model your real hierarchy, grant a role at any node, and access inherits downward. Lists are pages of your EF Core query, checked in SQL."
               href="/docs/fga/overview"
               cta="Explore FGA"
             />

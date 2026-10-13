@@ -69,12 +69,9 @@ public class SqlOSFgaPageWorkIntegrationTests
     {
         var capture = new CommandCapture();
         await using var context = PageOrderFixture.CreateContext(null, capture);
-        var filter = await PageOrderFixture.AuthService(context).BuildFilterAsync<PagedWorkItem>(
-            FgaTestDataSeeder.AgencyMemberSubjectId,
-            PageOrderFixture.ViewPermission);
-        capture.Clear();
 
-        var page = await context.WorkItems.AsNoTracking().OrderBy(item => item.Rank).ToPageAsync(filter, PageSize);
+        var page = await context.WorkItems.AsNoTracking().OrderBy(item => item.Rank)
+            .ToPageAsync(FgaTestDataSeeder.AgencyMemberSubjectId, PageOrderFixture.ViewPermission, PageSize);
 
         page.Data.Select(item => item.Rank).Should().Equal(5_000, 5_001, 5_002);
         page.NextCursor.Should().BeNull();
@@ -83,7 +80,7 @@ public class SqlOSFgaPageWorkIntegrationTests
         TakeOf(commands.Read1[0]).Should().Be(PageSize);
         commands.Read2.Should().ContainSingle();
         commands.Load.Should().ContainSingle();
-        capture.Commands.Should().HaveCount(3);
+        capture.Commands.Should().HaveCount(5, "two statements resolve the caller and the permission, then the page runs three");
 
         (await EntryRowsReadAsync(commands.Read2[0], PageOrderTestDbContext.WorkItemEntries))
             .Should().BeLessThanOrEqualTo(PageSize);
@@ -94,12 +91,9 @@ public class SqlOSFgaPageWorkIntegrationTests
     {
         var capture = new CommandCapture();
         await using var context = PageOrderFixture.CreateContext(null, capture);
-        var filter = await PageOrderFixture.AuthService(context).BuildFilterAsync<PagedWorkItem>(
-            FgaTestDataSeeder.SystemAdminSubjectId,
-            PageOrderFixture.ViewPermission);
-        capture.Clear();
 
-        var page = await context.WorkItems.AsNoTracking().OrderBy(item => item.Rank).ToPageAsync(filter, PageSize);
+        var page = await context.WorkItems.AsNoTracking().OrderBy(item => item.Rank)
+            .ToPageAsync(FgaTestDataSeeder.SystemAdminSubjectId, PageOrderFixture.ViewPermission, PageSize);
 
         page.Data.Select(item => item.Rank).Should().Equal(Enumerable.Range(0, PageSize));
         var commands = Classify(capture.Commands);
@@ -115,16 +109,11 @@ public class SqlOSFgaPageWorkIntegrationTests
         var capture = new CommandCapture();
         var logs = new CapturingLoggerFactory();
         await using var context = PageOrderFixture.CreateContext(logs, capture);
-        var filter = await PageOrderFixture.AuthService(context).BuildFilterAsync<PagedWorkItem>(
-            FgaTestDataSeeder.SystemAdminSubjectId,
-            PageOrderFixture.ViewPermission);
-        capture.Clear();
-        logs.Clear();
 
         var page = await context.WorkItems.AsNoTracking()
             .Where(item => item.FolderResourceId == FgaTestDataSeeder.TestProjectResourceId)
             .OrderBy(item => item.Rank)
-            .ToPageAsync(filter, 3);
+            .ToPageAsync(FgaTestDataSeeder.SystemAdminSubjectId, PageOrderFixture.ViewPermission, 3);
 
         page.Data.Select(item => item.Rank).Should().Equal(5_000, 5_001, 5_002);
         var commands = Classify(capture.Commands);

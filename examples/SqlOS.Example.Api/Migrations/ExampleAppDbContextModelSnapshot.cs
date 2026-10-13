@@ -3836,6 +3836,8 @@ namespace SqlOS.Example.Api.Migrations
                     b.HasIndex("ResourceId");
 
                     b.ToTable("Workspaces");
+
+                    b.HasAnnotation("SqlOS:PageOrders", "[{\"table\":\"SqlOSFgaPage_Workspaces_Name\",\"columns\":[\"Name\",\"Id\"]}]");
                 });
 
             modelBuilder.Entity("SqlOS.Fga.Models.SqlOSFgaAccessibleResource", b =>
@@ -4395,6 +4397,26 @@ namespace SqlOS.Example.Api.Migrations
                     b.HasIndex("RowKey");
 
                     b.ToTable("SqlOSFgaPage_Locations_Name", "dbo");
+                });
+
+            modelBuilder.Entity("SqlOSFgaPage_Workspaces_Name", b =>
+                {
+                    b.Property<string>("NodeId")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("Name")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("RowKey")
+                        .HasColumnType("nvarchar(450)");
+
+                    b.HasKey("NodeId", "Name", "RowKey");
+
+                    b.HasIndex("RowKey");
+
+                    b.ToTable("SqlOSFgaPage_Workspaces_Name", "dbo");
                 });
 
             modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSApplicationAssignment", b =>

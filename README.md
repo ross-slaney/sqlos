@@ -12,20 +12,19 @@ Working copies of the one-app host, MCP + authorization, branding, and identity-
 
 ## Build one screen for every role
 
-A company administrator, a team member, and an outside collaborator can use the same endpoint and see different records. SqlOS's **scoped hierarchical role-based access control (SHRBAC)** models resources as a tree and gives `BuildFilterAsync` the job of finding the rows each caller may access.
+A company administrator, a team member, and an outside collaborator can use the same endpoint and see different records. SqlOS's **scoped hierarchical role-based access control (SHRBAC)** models resources as a tree, and `ToPageAsync` reads the page of rows each caller may access.
 
 ![An application root contains Workspace A and Workspace B. A team grant on A reaches its two documents. The same query shows all four documents to a root administrator, A and B to the team, and only D to a guest granted that document.](web/public/docs/fga-resource-tree.png)
 
 For a document editor, create a workspace when someone signs up and grant them a role containing `document.read` on it. Place their documents underneath. New documents inherit access automatically; you do not create another grant for every document. Grant a team access through a group, or share an individual document with a guest. Users, groups, service accounts, and agents use the same model.
 
 ```csharp
-var canRead = await authorization.BuildFilterAsync<Document>(subjectId, "document.read");
 var page = await db.Documents
     .OrderBy(d => d.Name)
-    .ToPageAsync(canRead, pageSize: 20, cursor);
+    .ToPageAsync(subjectId, "document.read", pageSize: 20, cursor);
 ```
 
-The endpoint needs no `where tenantId` or `where userId` to discover authorized records across the caller's grants. Add those conditions when the screen itself is scoped to a tenant or owner. Declare the order the screen pages by (`HasPageOrder(d => d.Name)`) and index it on your table (`HasIndex(d => new { d.Name, d.Id })`). Use `.Where(canRead)` for counts, joins, and other queries that are not pages. Point checks protect individual actions and writes.
+The endpoint needs no `where tenantId` or `where userId` to discover authorized records across the caller's grants. Add those conditions when the screen itself is scoped to a tenant or owner. Declare the order the screen pages by (`HasPageOrder(d => d.Name)`) and index it on your table (`HasIndex(d => new { d.Name, d.Id })`). Pass `NextCursor` back for the next page. Point checks (`CheckAccessAsync`) protect one record, individual actions, and writes.
 
 ### Design the hierarchy around access
 
@@ -34,7 +33,7 @@ The endpoint needs no `where tenantId` or `where userId` to discover authorized 
 - **Declare the orders your lists page by.** `HasPageOrder(d => d.Name)` makes SqlOS keep a copy of that order under every node of the resource tree, in its own table. `ToPageAsync` then costs about a page for any caller: one who sees everything, one who sees three rows of a million, one whose rows sit at the far end of the order. An order you have not declared still pages correctly but reads the table for a caller who sees little of it, and SqlOS logs the declaration to add.
 - **Keep application indexes deliberate.** Index the filters and orders your screens use. SqlOS adds nothing to your tables; a page order is a table in SqlOS's own schema, kept current in the same transaction as each save.
 - **Treat hierarchy changes as permission changes.** Moving or deactivating a branch changes which ancestor grants apply to its descendants, and rewrites that branch's page-order entries.
-- **Pages are not every query.** Counts, joins, and reports compose the SQL authorization predicate with `.Where(filter)` and check rows one by one; a caller who sees little of a large table makes them read most of it.
+- **Pages and point checks are the whole read API.** SqlOS has no authorized count, join, or unpaged list: each of those costs every row the caller can see. Show a page and whether there is a next one.
 
 Application tables connect to SqlOS resources through `ResourceId`. SQL Server or PostgreSQL evaluates the recursive authorization function in the query; there is no preliminary visibility count or external policy service.
 

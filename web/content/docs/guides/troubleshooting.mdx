@@ -65,11 +65,11 @@ Open **Auth Server > Security > OTP communications readiness** first. The status
 
 Use **Send test delivery** only with an operator-controlled destination. A test is limited to three sends per destination per hour and creates no SqlOS login challenge. Recent rows distinguish a local configuration problem, provider rejection, and administrative test throttling while retaining only a masked destination. Runtime user-facing OTP errors remain generic.
 
-## FGA filters return empty lists
+## Authorized pages are empty
 
 - Confirm resources were created for domain rows and grants exist for the subject.
-- Permission key in code must match seeded permission keys exactly.
-- Use the access tester in `/sqlos/admin/fga/` to reproduce the check.
+- Permission key in code must match seeded permission keys exactly. An unknown subject or permission returns an empty page and logs a warning under `SqlOS.Fga`.
+- Use the access tester in `/sqlos/admin/fga/` to reproduce the check for one row.
 
 ## ToPageAsync logs "No page order is declared"
 
@@ -77,7 +77,7 @@ Use **Send test delivery** only with an operator-controlled destination. A test 
 ToPageAsync scanned 1240 rows of Product ordered by CreatedAt, Id asc to fill a page of 20. No page order is declared for it, ...
 ```
 
-The page was ordered by an order no `HasPageOrder` declares, so `ToPageAsync` read the table in that order and checked each row, the way `.Where(filter)` does. It logs this once per entity and order. Declare the order the message names, `modelBuilder.Entity<Product>().HasPageOrder(e => e.CreatedAt)`, and add a migration; the next start fills the new table.
+The page was ordered by an order no `HasPageOrder` declares, so `ToPageAsync` read the table in that order and checked each row. It logs this once per entity and order. Declare the order the message names, `modelBuilder.Entity<Product>().HasPageOrder(e => e.CreatedAt)`, and add a migration; the next start fills the new table.
 
 ## Pages are missing rows
 

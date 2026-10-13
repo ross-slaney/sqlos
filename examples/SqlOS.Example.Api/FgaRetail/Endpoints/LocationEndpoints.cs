@@ -19,27 +19,25 @@ public static class LocationEndpoints
 
         group.MapGet("/locations", async (
             ExampleAppDbContext context,
-            ISqlOSFgaAuthService fga,
             HttpContext http,
             int pageSize = 10,
             string? search = null,
             string? cursor = null) =>
         {
             var subjectId = RetailSubjectResolver.ResolveSubjectId(http);
-            return await ListLocationsAsync(context, fga, subjectId, chainId: null, pageSize, search, cursor);
+            return await ListLocationsAsync(context, subjectId, chainId: null, pageSize, search, cursor);
         }).WithName("GetAllLocations");
 
         group.MapGet("/chains/{chainId}/locations", async (
             string chainId,
             ExampleAppDbContext context,
-            ISqlOSFgaAuthService fga,
             HttpContext http,
             int pageSize = 10,
             string? search = null,
             string? cursor = null) =>
         {
             var subjectId = RetailSubjectResolver.ResolveSubjectId(http);
-            return await ListLocationsAsync(context, fga, subjectId, chainId, pageSize, search, cursor);
+            return await ListLocationsAsync(context, subjectId, chainId, pageSize, search, cursor);
         }).WithName("GetLocations");
 
         group.MapGet("/locations/{id}", async (
@@ -247,15 +245,12 @@ public static class LocationEndpoints
 
     private static async Task<IResult> ListLocationsAsync(
         ExampleAppDbContext context,
-        ISqlOSFgaAuthService fga,
         string subjectId,
         string? chainId,
         int pageSize,
         string? search,
         string? cursor)
     {
-        var canView = await fga.BuildFilterAsync<Location>(subjectId, RetailPermissionKeys.LocationView);
-
         IQueryable<Location> query = context.Locations.AsNoTracking().Include(l => l.Chain);
 
         if (chainId != null)
@@ -275,7 +270,7 @@ public static class LocationEndpoints
         SqlOSCursorPage<Location> page;
         try
         {
-            page = await query.OrderBy(l => l.Name).ToPageAsync(canView, Math.Clamp(pageSize, 1, 100), cursor);
+            page = await query.OrderBy(l => l.Name).ToPageAsync(subjectId, RetailPermissionKeys.LocationView, Math.Clamp(pageSize, 1, 100), cursor);
         }
         catch (Exception exception) when (exception is SqlOSCursorException or ArgumentException { ParamName: "cursor" })
         {
