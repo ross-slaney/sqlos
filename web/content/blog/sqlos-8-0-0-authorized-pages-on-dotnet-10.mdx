@@ -6,7 +6,7 @@ author: "Ross Slaney"
 tags: ["FGA", "EF Core", "AuthServer", "SCIM", "Security", "SqlOS"]
 ---
 
-> **Historical release note.** [SqlOS 9.0.0](/blog/sqlos-9-0-0-authorized-lists-are-a-predicate) withdraws the page executor, scope columns, and associated FGA maintenance described below, together with the later visibility-count strategy. 9.0.0 evaluated `BuildFilterAsync` with the original recursive TVF; sparse queries could examine many denied rows. A later release removed `BuildFilterAsync` and `.Where(filter)` as well: authorized lists are read a page at a time with `ToPageAsync` on the EF query, and one resource is checked with `CheckAccessAsync`. The .NET 10 target and the auth fixes remain. See [authorized pages](/docs/fga/list-filter) and [pagination guidance](/docs/guides/paginating-authorized-lists). Start from a fresh database; 9.0.0 leaves an 8.0.0 schema in place.
+> **Historical release note.** [SqlOS 9.0.0](/blog/sqlos-9-0-0-authorized-lists-are-a-predicate) withdraws the page executor, scope columns, and associated FGA maintenance described below, together with the later visibility-count strategy. 9.0.0 evaluated `BuildFilterAsync` with the original recursive TVF; sparse queries could examine many denied rows. [SqlOS 10.0.0](/blog/sqlos-10-0-0-authorized-pages-cost-a-page) removed `BuildFilterAsync` and `.Where(filter)` as well: authorized lists are read a page at a time with `ToPageAsync` on the EF query, and one resource is checked with `CheckAccessAsync`. The .NET 10 target and the auth fixes remain. See [authorized pages](/docs/fga/list-filter) and [pagination guidance](/docs/guides/paginating-authorized-lists). Start from a fresh database; 9.0.0 leaves an 8.0.0 schema in place.
 
 SqlOS 8.0.0 is a major release:
 

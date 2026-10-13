@@ -6,7 +6,7 @@ author: "Ross Slaney"
 tags: ["FGA", "EF Core", "SqlOS"]
 ---
 
-> **Historical release note.** A later release removed `BuildFilterAsync` and the `.Where(filter)` predicate described below. `.Where(canView).OrderBy(...).Take(...)` returned the right rows and passed tests, but could scan the whole table for a caller who sees little of it. Authorized lists are now read a page at a time with `ToPageAsync` on the EF query, and one resource is checked with `CheckAccessAsync`. See [Paginating authorized lists](/docs/guides/paginating-authorized-lists).
+> **Historical release note.** [SqlOS 10.0.0](/blog/sqlos-10-0-0-authorized-pages-cost-a-page) removed `BuildFilterAsync` and the `.Where(filter)` predicate described below. `.Where(canView).OrderBy(...).Take(...)` returned the right rows and passed tests, but could scan the whole table for a caller who sees little of it. Authorized lists are now read a page at a time with `ToPageAsync` on the EF query, and one resource is checked with `CheckAccessAsync`. See [Paginating authorized lists](/docs/guides/paginating-authorized-lists).
 
 SqlOS 9.0.0 puts authorized lists back inside the query you write. `BuildFilterAsync` returns a predicate. EF Core composes it with your `Where`, `OrderBy`, and `Take`, and SQL Server or PostgreSQL evaluates the authorization TVF in that statement.
 

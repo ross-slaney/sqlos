@@ -1,0 +1,66 @@
+---
+title: "SqlOS 10.0.0: Authorized pages that cost a page"
+description: "ToPageAsync reads the page of an EF Core query a caller may see for about a page of work, whoever the caller is. BuildFilterAsync is removed."
+date: "2026-10-12"
+author: "Ross Slaney"
+tags: ["FGA", "EF Core", "Performance", "SqlOS"]
+---
+
+SqlOS 10.0.0 makes an authorized list cost about a page, for every caller. A caller who sees everything, a store manager who sees 100 products of a million, and a caller whose rows sit at the far end of the order all get their page from a few index seeks. Your application tables still have nothing of SqlOS's on them but `ResourceId`.
+
+It is a major release: `BuildFilterAsync` is removed, and `ToPageAsync` is the one way to read an authorized list.
+
+## One call
+
+```csharp
+// Once, in OnApplicationModelCreating, then add a migration:
+entity.HasPageOrder(p => p.Price);
+
+var page = await db.Products
+    .Where(p => p.Name.Contains(term))
+    .OrderBy(p => p.Price)
+    .ToPageAsync(subjectId, "product.view", pageSize: 20, cursor, ct);
+
+return Results.Ok(page.ToResponse(p => new ProductDto(p)));
+```
+
+`ToPageAsync` resolves the caller's subjects (the subject plus its active groups) and the permission, then reads your query in its order and checks each row. When few rows are visible, it reads the declared order under each node the caller is granted instead. For each order you declare with `HasPageOrder`, SqlOS keeps a copy of the order under every node of the resource tree, in a table of its own, and keeps it current in the same transaction as every save. The page's rows are then loaded through your query, with your `Include` and tracking, and checked once more.
+
+The response is `{ data, pageSize, nextCursor, hasNextPage }`. Pass `nextCursor` back for the next page.
+
+## What it costs
+
+One million products under 5 divisions, 50 chains, 500 regions and 10,000 stores, page size 20, on a laptop. PostgreSQL 16 runs natively; SQL Server 2022 runs as the x64 image under emulation, which adds tens of milliseconds to every statement. The old column is the removed `.Where(filter).OrderBy(Price).Take(20)` path.
+
+| Caller | PostgreSQL | before | SQL Server | before |
+| --- | ---: | ---: | ---: | ---: |
+| Admin (sees everything) | 14 ms | 6 ms | 52 ms | 24 ms |
+| Region manager (0.2%) | 19 ms | 417 ms | 88 ms | 9.0 s |
+| Store manager (0.01%) | 23 ms | 8.4 s | 89 ms | 3.0 min |
+| Far end (one chain, last in price) | 16 ms | 44 s | 90 ms | 15.7 min |
+
+A caller who sees most of the table pays about twice the old time: a page is the query, the load through your query, and two small statements resolving the caller. Ten thousand single-row grants are the slow case, one seek per granted node: 390 ms on PostgreSQL.
+
+## Why `BuildFilterAsync` is gone
+
+It returned a predicate, so `.Where(canView).OrderBy(...).Take(20)` compiled, returned the right rows, passed every test, and read the table for a caller who sees little of it. With two ways to page, nobody moves to the fast one. Now code written the old way stops compiling.
+
+Reading authorized data is two things: a page with `ToPageAsync`, and one resource with `CheckAccessAsync` (or `AuthorizedDetailAsync`, built on it). SqlOS has no authorized count, `Any`, join or unpaged list. Each of those costs every row the caller can see. Show a page and `hasNextPage` instead of a total.
+
+Don't write your own position filter (`.Where(x => x.CreatedAt < lastSeen)`, keyset libraries, `since=` versions). Pass the cursor back. `ToPageAsync` seeks under each of the caller's nodes from the cursor; a hand-written position is just another filter there.
+
+## Upgrade
+
+```bash
+dotnet add package SqlOS --version 10.0.0
+```
+
+1. Replace each `BuildFilterAsync` + `.Where(filter)` list with `.OrderBy(...).ToPageAsync(subjectId, permissionKey, pageSize, cursor)`, and return `page.ToResponse(...)`.
+2. Declare the orders your lists page by with `HasPageOrder`, give string order columns a maximum length, and index `ResourceId`. Add a migration; the first start after it fills the new tables from the rows already there.
+3. Rewrite counts, `Any` checks and unpaged lists over authorized rows as a page or a `CheckAccessAsync` on the one resource an action targets.
+4. The query must start from a `DbSet` of a context deriving from `SqlOSDbContext<TContext>`. A context that implements `ISqlOSFgaDbContext` by hand keeps point checks but has no list API, and now also implements `PageNodes` (the same one-liner as `IsResourceAccessible`).
+5. After bulk loads or raw SQL that bypass EF Core, call `ISqlOSFgaAuthService.RebuildPageOrdersAsync()`.
+
+This release also stops recompiling authorized queries for every context instance: the old filter put the context into the expression as a constant, which EF Core's query cache keys on.
+
+Read [Authorized pages](/docs/fga/list-filter), [Paginating authorized lists](/docs/guides/paginating-authorized-lists) for the cursor, maintenance and costs, and the [FGA API reference](/docs/reference/fga-api#topageasync).
