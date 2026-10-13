@@ -1,9 +1,11 @@
-using System.Text.RegularExpressions;
+using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.Fga.Configuration;
+using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Models;
 using SqlOS.IntegrationTests.Fga.Infrastructure;
 using SqlOS.Fga.Services;
@@ -15,30 +17,29 @@ namespace SqlOS.IntegrationTests.Fga;
 public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
 {
     private SqlOSFgaAuthService _authService = null!;
+    private readonly List<int> _counters = [];
 
     [TestInitialize]
-    public void TestInit()
+    public async Task TestInit()
     {
         var loggerFactory = LoggerFactory.Create(b => b.AddConsole());
         _authService = new SqlOSFgaAuthService(
             Context,
             Options.Create(new SqlOSFgaOptions()),
             loggerFactory.CreateLogger<SqlOSFgaAuthService>());
+
+        // The list half of each rule pages over rows of a SqlOSDbContext that point at the test's resources.
+        await PageOrderFixture.EnsureSeededAsync();
     }
 
-    [TestMethod]
-    public async Task BuildFilterAsync_ComposesIntoASingleSqlQuery()
+    [TestCleanup]
+    public async Task RemoveCounters()
     {
-        var filter = await _authService.BuildFilterAsync<LifecycleProtectedEntity>(
-            FgaTestDataSeeder.SystemAdminSubjectId,
-            "TEST_VIEW");
-        var sql = Context.Set<LifecycleProtectedEntity>().Where(filter).ToQueryString();
-
-        StringAssert.Contains(sql, "fn_IsResourceAccessible");
-        Assert.AreEqual(
-            1,
-            Regex.Matches(sql, "fn_IsResourceAccessible", RegexOptions.IgnoreCase).Count,
-            $"Authorization filter must compose to one SQL query. SQL:{Environment.NewLine}{sql}");
+        // Resource edits made through the hand-rolled context leave these rows' page-order entries
+        // stale; deleting the rows deletes their entries.
+        await using var context = PageOrderFixture.CreateContext();
+        context.Counters.RemoveRange(await context.Counters.Where(counter => _counters.Contains(counter.Id)).ToListAsync());
+        await context.SaveChangesAsync();
     }
 
     [TestMethod]
@@ -117,7 +118,7 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
     }
 
     [TestMethod]
-    public async Task TypeScopedPermission_DeniesDifferentTargetType_InPointTraceAndEfFilter()
+    public async Task TypeScopedPermission_DeniesDifferentTargetType_InPointTraceAndPage()
     {
         var suffix = Guid.NewGuid().ToString("N");
         var permission = new SqlOSFgaPermission
@@ -143,24 +144,13 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
             FgaTestDataSeeder.SystemAdminSubjectId,
             FgaTestDataSeeder.TestProjectResourceId,
             permission.Key);
-        Context.Set<LifecycleProtectedEntity>().Add(new LifecycleProtectedEntity
-        {
-            Id = $"typed_{Guid.NewGuid():N}",
-            ResourceId = FgaTestDataSeeder.TestProjectResourceId
-        });
-        await Context.SaveChangesAsync();
-        var filter = await _authService.BuildFilterAsync<LifecycleProtectedEntity>(
-            FgaTestDataSeeder.SystemAdminSubjectId,
-            permission.Key);
+        await AddCounterAsync(FgaTestDataSeeder.TestProjectResourceId);
 
         Assert.IsFalse(point.Allowed);
         Assert.IsTrue(point.Error?.Contains("does not apply to resource type project", StringComparison.Ordinal));
         Assert.IsFalse(trace.AccessGranted);
         Assert.IsTrue(trace.DenialReason?.Contains("applies to resource type 'team'", StringComparison.Ordinal));
-        Assert.IsFalse(await Context.Set<LifecycleProtectedEntity>()
-            .Where(x => x.ResourceId == FgaTestDataSeeder.TestProjectResourceId)
-            .Where(filter)
-            .AnyAsync());
+        await AssertPointAndPageAsync(FgaTestDataSeeder.SystemAdminSubjectId, FgaTestDataSeeder.TestProjectResourceId, expected: false, permission.Key);
     }
 
     [TestMethod]
@@ -191,22 +181,22 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
     }
 
     [TestMethod]
-    public async Task InactiveUser_IsDeniedByPointCheckAndEfFilterDespiteExistingGrant()
+    public async Task InactiveUser_IsDeniedByPointCheckAndPageDespiteExistingGrant()
     {
         var subjectService = CreateSubjectService();
         var user = await subjectService.CreateUserAsync("Lifecycle User", $"lifecycle-{Guid.NewGuid():N}@example.com");
         var resourceId = await CreateProtectedResourceWithGrantAsync(user.SubjectId);
 
-        await AssertPointAndFilterAsync(user.SubjectId, resourceId, expected: true);
+        await AssertPointAndPageAsync(user.SubjectId, resourceId, expected: true);
 
         user.IsActive = false;
         await Context.SaveChangesAsync();
 
-        await AssertPointAndFilterAsync(user.SubjectId, resourceId, expected: false);
+        await AssertPointAndPageAsync(user.SubjectId, resourceId, expected: false);
     }
 
     [TestMethod]
-    public async Task InactiveResourceOrAncestor_IsDeniedByPointCheckAndEfFilter()
+    public async Task InactiveResourceOrAncestor_IsDeniedByPointCheckAndPage()
     {
         var subjectService = CreateSubjectService();
         var user = await subjectService.CreateUserAsync("Resource Lifecycle User", $"resource-lifecycle-{Guid.NewGuid():N}@example.com");
@@ -233,23 +223,23 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
             ResourceId = parent.Id,
             RoleId = FgaTestDataSeeder.AgencyMemberRoleId
         });
-        Context.Set<LifecycleProtectedEntity>().Add(new LifecycleProtectedEntity { Id = suffix, ResourceId = child.Id });
         await Context.SaveChangesAsync();
+        await AddCounterAsync(child.Id);
 
-        await AssertPointAndFilterAsync(user.SubjectId, child.Id, expected: true);
+        await AssertPointAndPageAsync(user.SubjectId, child.Id, expected: true);
 
         parent.IsActive = false;
         await Context.SaveChangesAsync();
-        await AssertPointAndFilterAsync(user.SubjectId, child.Id, expected: false);
+        await AssertPointAndPageAsync(user.SubjectId, child.Id, expected: false);
 
         parent.IsActive = true;
         child.IsActive = false;
         await Context.SaveChangesAsync();
-        await AssertPointAndFilterAsync(user.SubjectId, child.Id, expected: false);
+        await AssertPointAndPageAsync(user.SubjectId, child.Id, expected: false);
     }
 
     [TestMethod]
-    public async Task ExpiredServiceAccount_IsDeniedByPointCheckAndEfFilter()
+    public async Task ExpiredServiceAccount_IsDeniedByPointCheckAndPage()
     {
         var subjectService = CreateSubjectService();
         var serviceAccount = await subjectService.CreateServiceAccountAsync(
@@ -259,16 +249,16 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
             expiresAt: DateTime.UtcNow.AddMinutes(5));
         var resourceId = await CreateProtectedResourceWithGrantAsync(serviceAccount.SubjectId);
 
-        await AssertPointAndFilterAsync(serviceAccount.SubjectId, resourceId, expected: true);
+        await AssertPointAndPageAsync(serviceAccount.SubjectId, resourceId, expected: true);
 
         serviceAccount.ExpiresAt = DateTime.UtcNow.AddSeconds(-1);
         await Context.SaveChangesAsync();
 
-        await AssertPointAndFilterAsync(serviceAccount.SubjectId, resourceId, expected: false);
+        await AssertPointAndPageAsync(serviceAccount.SubjectId, resourceId, expected: false);
     }
 
     [TestMethod]
-    public async Task InactiveGroupGrant_IsDeniedByPointCheckAndEfFilter()
+    public async Task InactiveGroupGrant_IsDeniedByPointCheckAndPage()
     {
         var subjectService = CreateSubjectService();
         var user = await subjectService.CreateUserAsync("Group Lifecycle User", $"group-lifecycle-{Guid.NewGuid():N}@example.com");
@@ -276,36 +266,36 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
         await subjectService.AddToGroupAsync(user.SubjectId, group.Id);
         var resourceId = await CreateProtectedResourceWithGrantAsync(group.SubjectId);
 
-        await AssertPointAndFilterAsync(user.SubjectId, resourceId, expected: true);
+        await AssertPointAndPageAsync(user.SubjectId, resourceId, expected: true);
 
         group.IsActive = false;
         await Context.SaveChangesAsync();
 
-        await AssertPointAndFilterAsync(user.SubjectId, resourceId, expected: false);
+        await AssertPointAndPageAsync(user.SubjectId, resourceId, expected: false);
     }
 
     [TestMethod]
-    public async Task EfFilter_RechecksDirectGroupMemberLifecycleWhenQueryExecutes()
+    public async Task Page_RechecksTheCallersLifecycle_WhenItsStatementsRun()
     {
         var subjectService = CreateSubjectService();
         var user = await subjectService.CreateUserAsync("Racing Lifecycle User", $"racing-lifecycle-{Guid.NewGuid():N}@example.com");
         var group = await subjectService.CreateGroupAsync("Racing Lifecycle Group");
         await subjectService.AddToGroupAsync(user.SubjectId, group.Id);
         var resourceId = await CreateProtectedResourceWithGrantAsync(group.SubjectId);
-        var filter = await _authService.BuildFilterAsync<LifecycleProtectedEntity>(user.SubjectId, "TEST_VIEW");
+        await AssertPointAndPageAsync(user.SubjectId, resourceId, expected: true);
 
-        user.IsActive = false;
-        await Context.SaveChangesAsync();
+        // ToPageAsync resolves the user as active; the user is deactivated before the page's first statement.
+        var deactivate = new DeactivateBeforeFirstPageStatement(user.SubjectId);
+        await using var pages = PageOrderFixture.CreateContext(null, deactivate);
+        var page = await pages.Counters.Where(counter => counter.ResourceId == resourceId).OrderBy(counter => counter.Rank)
+            .ToPageAsync(user.SubjectId, "TEST_VIEW", 10);
 
-        var listed = await Context.Set<LifecycleProtectedEntity>()
-            .Where(item => item.ResourceId == resourceId)
-            .Where(filter)
-            .AnyAsync();
-        Assert.IsFalse(listed, "The SQL query must recheck the direct member after the filter has been constructed.");
+        Assert.IsTrue(deactivate.Fired, "The user must be deactivated between resolution and the page's statements.");
+        Assert.AreEqual(0, page.Data.Count, "The page's SQL must recheck the caller when it runs.");
     }
 
     [TestMethod]
-    public async Task CraftedSubjectIdentifier_CannotInjectAnotherGrantSubjectIntoEfFilter()
+    public async Task CraftedSubjectIdentifier_CannotInjectAnotherGrantSubjectIntoAPage()
     {
         var suffix = Guid.NewGuid().ToString("N");
         var victimSubjectId = $"subj_victim_{suffix}";
@@ -319,7 +309,7 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
         await Context.SaveChangesAsync();
         var resourceId = await CreateProtectedResourceWithGrantAsync(victimSubjectId);
 
-        await AssertPointAndFilterAsync(attackerSubjectId, resourceId, expected: false);
+        await AssertPointAndPageAsync(attackerSubjectId, resourceId, expected: false);
     }
 
     private SqlOSFgaSubjectService CreateSubjectService()
@@ -348,21 +338,66 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
             ResourceId = resourceId,
             RoleId = FgaTestDataSeeder.AgencyMemberRoleId
         });
-        Context.Set<LifecycleProtectedEntity>().Add(new LifecycleProtectedEntity { Id = suffix, ResourceId = resourceId });
         await Context.SaveChangesAsync();
+        await AddCounterAsync(resourceId);
         return resourceId;
     }
 
-    private async Task AssertPointAndFilterAsync(string subjectId, string resourceId, bool expected)
+    private async Task AddCounterAsync(string resourceId)
     {
-        var pointCheck = await _authService.CheckAccessAsync(subjectId, "TEST_VIEW", resourceId);
+        await using var context = PageOrderFixture.CreateContext();
+        var counter = new PagedCounter { ResourceId = resourceId, Rank = 1 };
+        context.Counters.Add(counter);
+        await context.SaveChangesAsync();
+        _counters.Add(counter.Id);
+    }
+
+    // The point check, a page scoped to the resource (read 1 decides), and a walk over every row
+    // (read 2 under the caller's nodes, then the final check) agree.
+    private async Task AssertPointAndPageAsync(string subjectId, string resourceId, bool expected, string permissionKey = "TEST_VIEW")
+    {
+        var pointCheck = await _authService.CheckAccessAsync(subjectId, permissionKey, resourceId);
         Assert.AreEqual(expected, pointCheck.Allowed, "Point authorization result did not match lifecycle policy.");
 
-        var filter = await _authService.BuildFilterAsync<LifecycleProtectedEntity>(subjectId, "TEST_VIEW");
-        var listed = await Context.Set<LifecycleProtectedEntity>()
-            .Where(item => item.ResourceId == resourceId)
-            .Where(filter)
-            .AnyAsync();
-        Assert.AreEqual(expected, listed, "EF authorization filter did not match the point authorization result.");
+        await using var pages = PageOrderFixture.CreateContext();
+        var scoped = await pages.Counters.AsNoTracking()
+            .Where(counter => counter.ResourceId == resourceId)
+            .OrderBy(counter => counter.Rank)
+            .ToPageAsync(subjectId, permissionKey, 10);
+        Assert.AreEqual(expected, scoped.Data.Count > 0, "A page scoped to the resource did not match the point authorization result.");
+
+        var listed = new List<PagedCounter>();
+        string? cursor = null;
+        do
+        {
+            var page = await pages.Counters.AsNoTracking().OrderBy(counter => counter.Rank).ToPageAsync(subjectId, permissionKey, 50, cursor);
+            listed.AddRange(page.Data);
+            cursor = page.NextCursor;
+        }
+        while (cursor != null);
+
+        Assert.AreEqual(expected, listed.Any(counter => counter.ResourceId == resourceId), "A walk over every row did not match the point authorization result.");
+    }
+
+    /// <summary>Deactivates a user, on its own connection, just before the first statement that reads the page's rows.</summary>
+    private sealed class DeactivateBeforeFirstPageStatement(string subjectId) : DbCommandInterceptor
+    {
+        public bool Fired { get; private set; }
+
+        public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (!Fired && command.CommandText.Contains("PagedCounters", StringComparison.Ordinal))
+            {
+                Fired = true;
+                await PageOrderFixture.ExecuteAsync(
+                    $"UPDATE {TestDatabase.Qualify("SqlOSFgaUsers")} SET {TestDatabase.Quote("IsActive")} = {(TestDatabase.IsPostgreSql ? "FALSE" : "0")} WHERE {TestDatabase.Quote("SubjectId")} = '{subjectId}'");
+            }
+
+            return result;
+        }
     }
 }

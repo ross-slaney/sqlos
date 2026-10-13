@@ -12,11 +12,19 @@ namespace SqlOS.Fga.Interfaces;
 public interface ISqlOSFgaDbContext
 {
     /// <summary>
-    /// TVF for authorization query composition.
+    /// The authorization function (<c>fn_IsResourceAccessible</c>). <c>ToPageAsync</c> checks the rows
+    /// of a page with it; it is not a list API.
     /// Implementation: =&gt; FromExpression(() =&gt; IsResourceAccessible(resourceId, subjectIds, permissionId));
     /// </summary>
     IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessible(
         string resourceId, string subjectIds, string permissionId);
+
+    /// <summary>
+    /// TVF returning a caller's minimal granted resources for a permission. <c>ToPageAsync</c>
+    /// reads page-order entries under these nodes.
+    /// Implementation: =&gt; FromExpression(() =&gt; PageNodes(subjectIds, permissionId));
+    /// </summary>
+    IQueryable<SqlOSFgaPageNode> PageNodes(string subjectIds, string permissionId);
 
     /// <summary>
     /// Access to entity sets. Already on DbContext — auto-implemented.

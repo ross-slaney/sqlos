@@ -1,6 +1,6 @@
 ---
 title: "Authorize EF Core queries"
-description: "Model one protected entity and filter accessible rows in SQL."
+description: "Model one protected entity and page accessible rows in SQL."
 section: "start"
 order: 5
 ---
@@ -11,7 +11,7 @@ order: 5
   href="#complete-program"
   actionLabel="View the code"
 >
-  Implement `ISqlOSResourceEntity`, seed one permission and role, grant that role at creation time, and use `BuildFilterAsync` on list queries.
+  Implement `ISqlOSResourceEntity`, seed one permission and role, grant that role at creation time, and page list queries with `ToPageAsync`.
 </Banner>
 
 ## Goal
@@ -35,6 +35,7 @@ using SqlOS;
 using SqlOS.AuthServer.Extensions;
 using SqlOS.Configuration;
 using SqlOS.Extensions;
+using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -136,7 +137,7 @@ api.MapPost("/projects", async (
 api.MapGet("/projects", async (
     HttpContext http,
     AppDbContext db,
-    ISqlOSFgaAuthService authorization,
+    string? cursor,
     CancellationToken cancellationToken) =>
 {
     var subjectId = http.GetSqlOSValidatedToken()?.UserId;
@@ -145,24 +146,18 @@ api.MapGet("/projects", async (
         return Results.Unauthorized();
     }
 
-    var filter = await authorization.BuildFilterAsync<Project>(
-        subjectId,
-        projectRead);
-
-    var projects = await db.Projects
+    var page = await db.Projects
         .AsNoTracking()
-        .Where(filter)
         .OrderBy(project => project.Name)
-        .Select(project => new
-        {
-            project.Id,
-            project.ResourceId,
-            project.Name,
-            project.CreatedAt
-        })
-        .ToListAsync(cancellationToken);
+        .ToPageAsync(subjectId, projectRead, pageSize: 20, cursor, cancellationToken);
 
-    return Results.Ok(projects);
+    return Results.Ok(page.ToResponse(project => new
+    {
+        project.Id,
+        project.ResourceId,
+        project.Name,
+        project.CreatedAt
+    }));
 });
 
 app.Run();
@@ -179,7 +174,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
             entity.ToTable("Projects");
             entity.HasKey(project => project.Id);
             entity.Property(project => project.ResourceId).HasMaxLength(200);
+            entity.Property(project => project.Name).HasMaxLength(200);
             entity.HasIndex(project => project.ResourceId).IsUnique();
+            entity.HasIndex(project => new { project.Name, project.Id });
+            entity.HasPageOrder(project => project.Name);   // (Name, Id)
         });
     }
 }
@@ -201,7 +199,7 @@ public sealed class Project : ISqlOSResourceEntity
 public sealed record CreateProjectRequest(string Name);
 ```
 
-Create the `Projects` table with your normal EF migration workflow. SqlOS owns its own tables; your application migration owns `Projects`.
+Create the `Projects` table with your normal EF migration workflow. SqlOS owns its own tables; your application migration owns `Projects`. `HasPageOrder` also adds `SqlOSFgaPage_Projects_Name` to your EF model, in SqlOS's schema, so the same migration creates it.
 
 ## How the write works
 
@@ -212,6 +210,15 @@ Create the `Projects` table with your normal EF migration workflow. SqlOS owns i
 5. `SqlOSDbContext.SaveChangesAsync` synchronizes the backing resource before EF commits.
 
 The grant remains explicit. Implementing `ISqlOSResourceEntity` does not grant access by itself.
+
+## How the read works
+
+1. The API takes the subject from the validated access token.
+2. `ToPageAsync` resolves that subject, its active groups, and the `project.read` permission.
+3. It reads `Projects` in `Name` order and returns the first 20 rows the subject may read, after `cursor`.
+4. `HasPageOrder(project => project.Name)` keeps that page about a page of work for a caller who can read few of many projects.
+
+There is no authorized count or unpaged list. Return the page and its `nextCursor`; see [Paginating authorized lists](/docs/guides/paginating-authorized-lists).
 
 ## Verify
 
@@ -230,6 +237,8 @@ List accessible rows:
 curl http://localhost:5050/api/projects \
   -H "Authorization: Bearer <access-token>"
 ```
+
+The response is one page: `{ data, pageSize, nextCursor, hasNextPage }`. Pass `nextCursor` back as the `cursor` query parameter for the next page.
 
 Open `/sqlos/admin/fga/resources` and confirm the project resource exists. Open Grants and confirm the signed-in subject has `project_owner` on that resource.
 
@@ -255,18 +264,22 @@ The context must derive from `SqlOSDbContext<TContext>`, and the tracked entity 
 
 ### The list is empty
 
-Confirm the subject ID comes from the validated token, the role grant targets the entity's exact `ResourceId`, and the permission key matches the seeded key exactly.
+Confirm the subject ID comes from the validated token, the role grant targets the entity's exact `ResourceId`, and the permission key matches the seeded key exactly. An unknown subject or permission key returns an empty page, not an error.
 
-### EF cannot translate the filter
+### `ToPageAsync` throws `ArgumentException`
 
-Keep `ResourceId` as a mapped string property. Call `Where(filter)` while the query is still `IQueryable`; do not compile the expression or switch to in-memory enumeration first.
+Start the query from a `DbSet` of a context deriving from `SqlOSDbContext<TContext>` and end it with `OrderBy` or `OrderByDescending`. Keep `Select`, `Skip`, and `Take` out of the query; project after the page with `page.ToResponse(...)`. Keep `ResourceId` as a mapped string property.
+
+### A bad cursor returns 500
+
+A cursor the list did not issue throws `SqlOSCursorException`; a cursor from another list throws `ArgumentException` with `ParamName` `"cursor"`. Map both to `400` as shown in [Paginating authorized lists](/docs/guides/paginating-authorized-lists#the-cursor).
 
 ## Production notes
 
 - Never accept the acting subject ID from the request body or query string.
 - Use stable, unique resource IDs and index the mapped `ResourceId` property.
 - Model tenant or organization roots when roles should inherit to many child rows.
-- Check write permissions before modifying existing resources; list filtering only protects reads.
+- Check write permissions before modifying existing resources; authorized pages only protect reads.
 - Keep resource creation, subject provisioning, and the initial grant in one application transaction where possible.
 - Add integration tests proving that ungranted subjects cannot read or mutate protected rows.
 
@@ -274,6 +287,7 @@ Keep `ResourceId` as a mapped string property. Call `Where(filter)` while the qu
 
 - [Turn AuthServer memberships into FGA access](/docs/guides/authserver-to-fga)
 - [Model an FGA hierarchy](/docs/fga/overview)
-- [Filter EF Core queries](/docs/fga/list-filter)
+- [Authorized pages](/docs/fga/list-filter)
+- [Paginating authorized lists](/docs/guides/paginating-authorized-lists)
 - [Check a permission](/docs/fga/checking-a-permission)
 - [Create protected resources](/docs/fga/creating-resources)

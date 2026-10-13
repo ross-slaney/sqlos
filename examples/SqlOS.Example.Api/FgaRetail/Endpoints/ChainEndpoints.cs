@@ -7,6 +7,7 @@ using SqlOS.Example.Api.FgaRetail.Seeding;
 using SqlOS.Example.Api.FgaRetail.Services;
 using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
+using SqlOS.Pagination;
 
 namespace SqlOS.Example.Api.FgaRetail.Endpoints;
 
@@ -18,24 +19,15 @@ public static class ChainEndpoints
 
         group.MapGet("/", async (
             ExampleAppDbContext context,
-            ISqlOSFgaAuthService fga,
             HttpContext http,
             int pageSize = 10,
             string? search = null,
             string? cursor = null,
-            string? sortBy = null,
             string? sortDir = null) =>
         {
             var subjectId = RetailSubjectResolver.ResolveSubjectId(http);
-            var canView = await fga.BuildFilterAsync<Chain>(subjectId, RetailPermissionKeys.ChainView);
-            var size = Math.Clamp(pageSize, 1, 100);
-            var descending = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase);
-            var sortKey = string.Equals(sortBy, "description", StringComparison.OrdinalIgnoreCase)
-                ? "description"
-                : "name";
 
-            var query = context.Chains.Where(canView);
-
+            IQueryable<Chain> query = context.Chains.AsNoTracking();
             if (!string.IsNullOrWhiteSpace(search))
             {
                 var term = search.ToLower();
@@ -44,62 +36,39 @@ public static class ChainEndpoints
                     (c.Description != null && c.Description.ToLower().Contains(term)));
             }
 
-            // Keyset cursor: skip everything at or before the last row of the previous page.
-            if (cursor != null)
+            // Name is a declared page order (ExampleAppDbContext); ToPageAsync checks each row against
+            // the caller's grants, applies the cursor, and appends the Id tiebreaker.
+            var ordered = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase)
+                ? query.OrderByDescending(c => c.Name)
+                : query.OrderBy(c => c.Name);
+
+            SqlOSCursorPage<Chain> page;
+            try
             {
-                var (after, afterId) = RetailCursor.Decode(cursor);
-                query = (sortKey, descending) switch
-                {
-                    ("description", false) => query.Where(c =>
-                        (c.Description ?? "").CompareTo(after) > 0 ||
-                        ((c.Description ?? "") == after && c.Id.CompareTo(afterId) > 0)),
-                    ("description", true) => query.Where(c =>
-                        (c.Description ?? "").CompareTo(after) < 0 ||
-                        ((c.Description ?? "") == after && c.Id.CompareTo(afterId) < 0)),
-                    (_, false) => query.Where(c =>
-                        c.Name.CompareTo(after) > 0 ||
-                        (c.Name == after && c.Id.CompareTo(afterId) > 0)),
-                    (_, true) => query.Where(c =>
-                        c.Name.CompareTo(after) < 0 ||
-                        (c.Name == after && c.Id.CompareTo(afterId) < 0)),
-                };
+                page = await ordered.ToPageAsync(subjectId, RetailPermissionKeys.ChainView, Math.Clamp(pageSize, 1, 100), cursor, http.RequestAborted);
+            }
+            catch (Exception exception) when (exception is SqlOSCursorException or ArgumentException { ParamName: "cursor" })
+            {
+                return Results.BadRequest(new { error = SqlOSCursorException.ErrorCode, message = exception.Message });
             }
 
-            // Always end the ordering with the unique Id tiebreaker so pages are deterministic.
-            query = (sortKey, descending) switch
+            // One query for the page's location counts.
+            var chainIds = page.Data.Select(c => c.Id).ToList();
+            var locationCounts = await context.Locations
+                .Where(l => chainIds.Contains(l.ChainId))
+                .GroupBy(l => l.ChainId)
+                .Select(g => new { ChainId = g.Key, Count = g.Count() })
+                .ToDictionaryAsync(x => x.ChainId, x => x.Count, http.RequestAborted);
+
+            return Results.Ok(page.ToResponse(c => new ChainDto
             {
-                ("description", false) => query.OrderBy(c => c.Description ?? "").ThenBy(c => c.Id),
-                ("description", true) => query.OrderByDescending(c => c.Description ?? "").ThenByDescending(c => c.Id),
-                (_, false) => query.OrderBy(c => c.Name).ThenBy(c => c.Id),
-                (_, true) => query.OrderByDescending(c => c.Name).ThenByDescending(c => c.Id),
-            };
-
-            var rows = await query
-                .Select(c => new ChainDto
-                {
-                    Id = c.Id,
-                    ResourceId = c.ResourceId,
-                    Name = c.Name,
-                    Description = c.Description,
-                    LocationCount = c.Locations.Count,
-                    CreatedAt = c.CreatedAt
-                })
-                .Take(size + 1)
-                .ToListAsync();
-
-            var hasNextPage = rows.Count > size;
-            if (hasNextPage) rows.RemoveAt(size);
-
-            string? nextCursor = null;
-            if (hasNextPage)
-            {
-                var last = rows[^1];
-                nextCursor = RetailCursor.Encode(
-                    sortKey == "description" ? last.Description ?? "" : last.Name,
-                    last.Id);
-            }
-
-            return Results.Ok(new { data = rows, pageSize = size, nextCursor, hasNextPage });
+                Id = c.Id,
+                ResourceId = c.ResourceId,
+                Name = c.Name,
+                Description = c.Description,
+                LocationCount = locationCounts.GetValueOrDefault(c.Id),
+                CreatedAt = c.CreatedAt
+            }));
         }).WithName("GetChains");
 
         group.MapGet("/{id}", async (

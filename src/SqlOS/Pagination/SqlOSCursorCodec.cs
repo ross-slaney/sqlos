@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -15,13 +16,37 @@ public static class SqlOSCursorCodec
     public const int CurrentVersion = 1;
     public const int MaxEncodedLength = 4096;
 
+    /// <summary>
+    /// The longest <c>ToPageAsync</c> cursor. Its values are a row's order values, and text can be
+    /// long; order columns that page orders index are bounded by the engine's index key size.
+    /// </summary>
+    internal const int MaxPageCursorLength = 65536;
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
+    // Page cursors keep non-ASCII text unescaped (one to four bytes a character instead of six). The
+    // JSON is base64url-encoded, so it is never read as HTML or script.
+    private static readonly JsonSerializerOptions PageJsonOptions = new(JsonOptions)
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
+
     public static string Encode(string sortKey, string filterFingerprint, IReadOnlyList<string> keyValues)
+        => Encode(sortKey, filterFingerprint, keyValues, JsonOptions);
+
+    /// <summary>Encodes a <c>ToPageAsync</c> cursor, which <see cref="TryReadPage"/> reads.</summary>
+    internal static string EncodePage(string sortKey, string filterFingerprint, IReadOnlyList<string> keyValues)
+        => Encode(sortKey, filterFingerprint, keyValues, PageJsonOptions);
+
+    private static string Encode(
+        string sortKey,
+        string filterFingerprint,
+        IReadOnlyList<string> keyValues,
+        JsonSerializerOptions options)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sortKey);
         ArgumentNullException.ThrowIfNull(filterFingerprint);
@@ -38,7 +63,7 @@ public static class SqlOSCursorCodec
             F = filterFingerprint,
             K = keyValues.ToArray()
         };
-        var json = JsonSerializer.Serialize(payload, JsonOptions);
+        var json = JsonSerializer.Serialize(payload, options);
         return Base64UrlEncode(Encoding.UTF8.GetBytes(json));
     }
 
@@ -50,40 +75,8 @@ public static class SqlOSCursorCodec
         ArgumentException.ThrowIfNullOrWhiteSpace(expectedSortKey);
         ArgumentNullException.ThrowIfNull(expectedFilterFingerprint);
 
-        if (string.IsNullOrWhiteSpace(cursor))
-        {
-            throw new SqlOSCursorException("The cursor is missing.");
-        }
-
-        if (cursor.Length > MaxEncodedLength)
-        {
-            throw new SqlOSCursorException("The cursor is invalid.");
-        }
-
-        byte[] bytes;
-        try
-        {
-            bytes = Base64UrlDecode(cursor);
-        }
-        catch (FormatException)
-        {
-            throw new SqlOSCursorException("The cursor is invalid.");
-        }
-
-        CursorPayload? payload;
-        try
-        {
-            payload = JsonSerializer.Deserialize<CursorPayload>(bytes, JsonOptions);
-        }
-        catch (JsonException)
-        {
-            throw new SqlOSCursorException("The cursor is invalid.");
-        }
-
-        if (payload == null || payload.V != CurrentVersion)
-        {
-            throw new SqlOSCursorException("The cursor is not supported.");
-        }
+        var payload = ReadPayload(cursor, MaxEncodedLength, out var error)
+            ?? throw new SqlOSCursorException(error!);
 
         if (!string.Equals(payload.S, expectedSortKey, StringComparison.Ordinal))
         {
@@ -101,6 +94,69 @@ public static class SqlOSCursorCodec
         }
 
         return payload.K;
+    }
+
+    /// <summary>
+    /// Reads a <c>ToPageAsync</c> cursor without checking which list it belongs to, so a caller can
+    /// tell a cursor from another list apart from one that is not a cursor at all.
+    /// </summary>
+    internal static bool TryReadPage(
+        string cursor,
+        out string sortKey,
+        out string filterFingerprint,
+        out IReadOnlyList<string> keyValues)
+    {
+        var payload = ReadPayload(cursor, MaxPageCursorLength, out _);
+        sortKey = payload?.S ?? string.Empty;
+        filterFingerprint = payload?.F ?? string.Empty;
+        keyValues = payload?.K ?? [];
+        return payload is { K.Length: > 0 };
+    }
+
+    private static CursorPayload? ReadPayload(string cursor, int maxEncodedLength, out string? error)
+    {
+        if (string.IsNullOrWhiteSpace(cursor))
+        {
+            error = "The cursor is missing.";
+            return null;
+        }
+
+        if (cursor.Length > maxEncodedLength)
+        {
+            error = "The cursor is invalid.";
+            return null;
+        }
+
+        byte[] bytes;
+        try
+        {
+            bytes = Base64UrlDecode(cursor);
+        }
+        catch (FormatException)
+        {
+            error = "The cursor is invalid.";
+            return null;
+        }
+
+        CursorPayload? payload;
+        try
+        {
+            payload = JsonSerializer.Deserialize<CursorPayload>(bytes, JsonOptions);
+        }
+        catch (JsonException)
+        {
+            error = "The cursor is invalid.";
+            return null;
+        }
+
+        if (payload == null || payload.V != CurrentVersion)
+        {
+            error = "The cursor is not supported.";
+            return null;
+        }
+
+        error = null;
+        return payload;
     }
 
     public static string Fingerprint(params string?[] parts)

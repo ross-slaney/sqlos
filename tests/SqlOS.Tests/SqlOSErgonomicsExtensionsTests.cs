@@ -532,8 +532,7 @@ public sealed class SqlOSErgonomicsExtensionsTests
         public Task<SqlOSFgaResourceAccessTrace> TraceResourceAccessAsync(string subjectId, string resourceId, string permissionKey)
             => throw new NotImplementedException();
 
-        public Task<Expression<Func<T, bool>>> BuildFilterAsync<T>(string subjectId, string permissionKey)
-            where T : IHasResourceId
+        public Task RebuildPageOrdersAsync(CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
     }
 
@@ -544,6 +543,9 @@ public sealed class SqlOSErgonomicsExtensionsTests
             string resourceId,
             string subjectIds,
             string permissionId)
+            => throw new NotSupportedException();
+
+        public IQueryable<SqlOSFgaPageNode> PageNodes(string subjectIds, string permissionId)
             => throw new NotSupportedException();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)

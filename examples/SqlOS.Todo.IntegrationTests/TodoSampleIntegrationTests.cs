@@ -74,8 +74,8 @@ public sealed class TodoSampleIntegrationTests
         listResponse.EnsureSuccessStatusCode();
 
         var listJson = JsonDocument.Parse(await listResponse.Content.ReadAsStringAsync());
-        listJson.RootElement.GetProperty("resource").GetString().Should().Be(TodoResource);
-        listJson.RootElement.GetProperty("items").EnumerateArray()
+        listJson.RootElement.GetProperty("nextCursor").ValueKind.Should().Be(JsonValueKind.Null);
+        listJson.RootElement.GetProperty("data").EnumerateArray()
             .Should().Contain(item =>
                 item.GetProperty("title").GetString() == "Ship hosted-first login"
                 && item.GetProperty("resourceId").GetString()!.StartsWith("todo::", StringComparison.Ordinal));
@@ -541,10 +541,10 @@ public sealed class TodoSampleIntegrationTests
         var listA = await ListTodosAsync(clientA, tokensA.AccessToken);
         var listB = await ListTodosAsync(clientB, tokensB.AccessToken);
 
-        listA.RootElement.GetProperty("items").EnumerateArray()
+        listA.RootElement.GetProperty("data").EnumerateArray()
             .Select(item => item.GetProperty("title").GetString())
             .Should().BeEquivalentTo(["User A todo"]);
-        listB.RootElement.GetProperty("items").EnumerateArray()
+        listB.RootElement.GetProperty("data").EnumerateArray()
             .Select(item => item.GetProperty("title").GetString())
             .Should().BeEquivalentTo(["User B todo"]);
 
@@ -562,6 +562,40 @@ public sealed class TodoSampleIntegrationTests
         toggleAllowed.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokensB.AccessToken);
         var toggleAllowedResponse = await clientB.SendAsync(toggleAllowed);
         toggleAllowedResponse.EnsureSuccessStatusCode();
+    }
+
+    [TestMethod]
+    public async Task TodoList_PagesNewestFirst_ThroughNextCursor()
+    {
+        await using var factory = TodoApiFixture.CreateFactory();
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+        var signup = await ExecuteHostedSignupAsync(client, HostedClientId, HostedRedirectUri);
+        var tokens = await ExchangeAuthorizationCodeAsync(client, signup.Code, HostedClientId, HostedRedirectUri, signup.CodeVerifier);
+        foreach (var title in new[] { "First todo", "Second todo", "Third todo" })
+        {
+            await CreateTodoAsync(client, tokens.AccessToken, title);
+        }
+
+        var first = await ListTodosAsync(client, tokens.AccessToken, "?pageSize=2");
+        var cursor = first.RootElement.GetProperty("nextCursor").GetString();
+        var second = await ListTodosAsync(client, tokens.AccessToken, $"?pageSize=2&cursor={Uri.EscapeDataString(cursor!)}");
+
+        first.RootElement.GetProperty("data").EnumerateArray().Select(item => item.GetProperty("title").GetString())
+            .Should().Equal("Third todo", "Second todo");
+        first.RootElement.GetProperty("hasNextPage").GetBoolean().Should().BeTrue();
+        second.RootElement.GetProperty("data").EnumerateArray().Select(item => item.GetProperty("title").GetString())
+            .Should().Equal("First todo");
+        second.RootElement.GetProperty("nextCursor").ValueKind.Should().Be(JsonValueKind.Null);
+
+        var invalid = new HttpRequestMessage(HttpMethod.Get, "/api/todos?cursor=not-a-cursor");
+        invalid.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
+        var invalidResponse = await client.SendAsync(invalid);
+        invalidResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        JsonDocument.Parse(await invalidResponse.Content.ReadAsStringAsync())
+            .RootElement.GetProperty("error").GetString().Should().Be("invalid_cursor");
     }
 
     [TestMethod]
@@ -886,9 +920,9 @@ public sealed class TodoSampleIntegrationTests
         return response;
     }
 
-    private static async Task<JsonDocument> ListTodosAsync(HttpClient client, string accessToken)
+    private static async Task<JsonDocument> ListTodosAsync(HttpClient client, string accessToken, string query = "")
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, "/api/todos");
+        var request = new HttpRequestMessage(HttpMethod.Get, $"/api/todos{query}");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         var response = await client.SendAsync(request);
         response.EnsureSuccessStatusCode();

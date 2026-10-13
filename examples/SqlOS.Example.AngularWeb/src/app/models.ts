@@ -1,8 +1,9 @@
+// The page the API's list endpoints return (SqlOSCursorPage.ToResponse).
 export interface PagedResponse<T> {
   data: T[];
-  totalCount: number;
-  hasMore: boolean;
-  cursor?: string;
+  pageSize: number;
+  nextCursor: string | null;
+  hasNextPage: boolean;
 }
 
 export interface ChainDto {

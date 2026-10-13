@@ -184,6 +184,13 @@ public static class SqlOSFgaModelConfiguration
             entity.ToView(null); // Not mapped to any table
         });
 
+        // PageNode (keyless - fn_PageNodes result)
+        modelBuilder.Entity<SqlOSFgaPageNode>(entity =>
+        {
+            entity.HasNoKey();
+            entity.ToView(null); // Not mapped to any table
+        });
+
         // Register TVF using the concrete DbContext type's MethodInfo.
         // EF Core requires the method to be on a DbContext subclass, not an interface.
         // When contextType is null (e.g., InMemory tests), TVF registration is skipped.
@@ -197,6 +204,17 @@ public static class SqlOSFgaModelConfiguration
             {
                 modelBuilder.HasDbFunction(tvfMethod)
                     .HasName("fn_IsResourceAccessible")
+                    .HasSchema(schema);
+            }
+
+            var pageNodesMethod = contextType.GetMethod(
+                nameof(ISqlOSFgaDbContext.PageNodes),
+                new[] { typeof(string), typeof(string) });
+
+            if (pageNodesMethod != null)
+            {
+                modelBuilder.HasDbFunction(pageNodesMethod)
+                    .HasName("fn_PageNodes")
                     .HasSchema(schema);
             }
         }

@@ -1,6 +1,6 @@
 ---
 title: "FGA API Reference"
-description: "Application-facing access checks, entity-backed resources, grants, and FGA query helpers."
+description: "Application-facing access checks, authorized pages, entity-backed resources, and grants."
 section: "reference"
 order: 5
 ---
@@ -66,40 +66,31 @@ if (!canEdit)
 
 ---
 
-### BuildFilterAsync
+### Reading authorized data
 
-Produce a LINQ expression that filters an `IQueryable<T>` to only entities the subject can access. The expression translates to a SQL Server table-valued function call at query time. This is the entire query-side API: pagination, sorting, search, and projection are plain EF Core composed on the same query (see [Paginating authorized lists](/docs/guides/paginating-authorized-lists)).
-
-```csharp
-var filter = await authService
-    .BuildFilterAsync<Chain>(subjectId, "CHAIN_VIEW");
-
-var chains = await dbContext.Chains
-    .Where(filter)
-    .OrderBy(c => c.Name)
-    .ToListAsync();
-```
-
-**Parameters**
-
-| Name | Type | Description |
-|------|------|-------------|
-| `subjectId` | `string` | The subject to filter for. |
-| `permissionKey` | `string` | The permission key that determines which resources are visible. |
-
-**Type constraint**: `T : IHasResourceId` — the entity must expose a `ResourceId` property. Protected domain entities should usually implement `ISqlOSResourceEntity`, which extends `IHasResourceId` and lets `SqlOSDbContext<TContext>` sync backing resource rows during EF saves.
-
-**Returns**
-
-`Task<Expression<Func<T, bool>>>` — an EF Core-compatible expression you pass to `.Where()`.
-
-**Filter lifetime**: the subject's principal set (the subject plus its active group memberships) is resolved when the task is awaited. Build the filter once per request and compose it into that request's queries; do not cache it in statics or reuse it across requests.
+There are two ways, and only two: a page of a query with [`ToPageAsync`](#topageasync), and one resource with [`CheckAccessAsync`](#checkaccessasync) (or [`AuthorizedDetailAsync`](#authorizeddetailasync), built on it). SqlOS has no authorized count, `Any`, join, or unpaged list: each of those costs every row the caller can see. `BuildFilterAsync` was removed for that reason: a filter kept `.Where(filter).OrderBy(...).Take(20)` compiling and correct while it read the table for a caller who sees little of it.
 
 ### Lifecycle enforcement
 
-Point checks, traces, and EF authorization filters apply the same lifecycle rules automatically. Inactive users and groups, expired service accounts, inactive target resources, and resources below an inactive ancestor are denied even when a matching grant remains stored. Applications do not need to revoke every grant when deactivating one of these records, and should not add a separate display-only lifecycle filter around authorization queries.
+Point checks, traces, and pages apply the same lifecycle rules automatically. Inactive users and groups, expired service accounts, inactive target resources, and resources below an inactive ancestor are denied even when a matching grant remains stored. Applications do not need to revoke every grant when deactivating one of these records, and should not add a separate display-only lifecycle filter around authorization queries.
 
 Provision typed subjects with the SDK helpers rather than inserting only a bare `SqlOSFgaSubject`: authorization fails closed when a `user`, `group`, `agent`, or `service_account` subject is missing its corresponding typed lifecycle row.
+
+---
+
+### RebuildPageOrdersAsync
+
+Rebuild the entries of every page order declared in the context's model from the application tables and the resource graph.
+
+```csharp
+await authService.RebuildPageOrdersAsync(cancellationToken);
+```
+
+For each declared order: delete all entries, then insert them in one statement, inside one transaction per order. The cost is the table's rows times the tree depth. `SqlOSDbContext<TContext>` keeps entries current for every write that goes through `SaveChanges`; call this after writes that bypass EF Core (bulk loads, raw SQL, `ExecuteUpdate`/`ExecuteDelete`) and for recovery. Until then, rows those writes inserted are missing from pages and rows they changed page at their old position; a row the caller may not see is never returned. It runs without a command timeout; the cancellation token stops it. Run it while the application is not writing to those tables: a save during a rebuild waits for it, or makes it fail with a deadlock or duplicate key, and running it again fixes that.
+
+**Returns**
+
+`Task` — completes when every page order has been rebuilt.
 
 ---
 
@@ -193,6 +184,103 @@ var resourceId = context.CreateResource("retail_root", request.Name, "chain");
 
 ---
 
+### HasPageOrder
+
+Declare an order an entity is paged by with `ToPageAsync`. SqlOS keeps a copy of the order under every node of the resource tree in a table of its own, so a page costs about a page for any caller.
+
+```csharp
+modelBuilder.Entity<Product>(entity =>
+{
+    entity.HasPageOrder(p => p.Price);                       // (Price, Id)
+    entity.HasPageOrder(p => new { p.Status, p.CreatedAt }); // (Status, CreatedAt, Id)
+});
+```
+
+```csharp
+public static EntityTypeBuilder<T> HasPageOrder<T>(
+    this EntityTypeBuilder<T> entity,
+    Expression<Func<T, object>> columns)
+    where T : class, IHasResourceId
+```
+
+| Name | Type | Description |
+|------|------|-------------|
+| `entity` | `EntityTypeBuilder<T>` | The entity type builder, inside `OnApplicationModelCreating`. |
+| `columns` | `Expression<Func<T, object>>` | One property, or an anonymous type of properties. The primary key is appended when it is not last. |
+
+**Returns** the same `EntityTypeBuilder<T>`.
+
+The declaration adds the table `SqlOSFgaPage_{Table}_{Columns}` (in SqlOS's FGA schema) to the EF model, so the next migration creates it. One declaration serves both directions; declaring the same order twice is a no-op. Model build fails, with the fix in the message, for a nullable order column, an order column that is not a mapped scalar property, a string order column without a maximum length, a composite primary key, an entity without a mapped `ResourceId`, and an owned, view-mapped, TPT or TPC entity. Page orders are kept current by `SqlOSDbContext<TContext>`.
+
+---
+
+### ToPageAsync
+
+Read the page of a query that a subject may see (`SqlOS.Fga.Extensions`).
+
+```csharp
+var page = await db.Products
+    .AsNoTracking()
+    .Where(p => p.Name.Contains(term))
+    .OrderBy(p => p.Price)
+    .ToPageAsync(subjectId, "product.view", pageSize: 20, cursor: request.Cursor, cancellationToken);
+
+return Results.Ok(page.ToResponse(p => new ProductDto(p)));
+```
+
+```csharp
+public static Task<SqlOSCursorPage<T>> ToPageAsync<T>(
+    this IQueryable<T> query,
+    string subjectId,
+    string permissionKey,
+    int pageSize,
+    string? cursor = null,
+    CancellationToken cancellationToken = default)
+    where T : class, IHasResourceId
+```
+
+| Name | Type | Description |
+|------|------|-------------|
+| `query` | `IQueryable<T>` | A query that starts from a `DbSet` of a context deriving from `SqlOSDbContext<TContext>`, with optional `Where`, `Include`/`ThenInclude`, tracking, `TagWith`, `IgnoreQueryFilters` and `AsSplitQuery`, ending with one `OrderBy`/`OrderByDescending` and any number of `ThenBy`/`ThenByDescending` in the same direction over mapped scalar properties. The primary key is appended to the order. |
+| `subjectId` | `string` | The caller. Its active group memberships are included. |
+| `permissionKey` | `string` | The permission each row's resource must grant. |
+| `pageSize` | `int` | 1 to 1,000. |
+| `cursor` | `string?` | The previous page's `NextCursor`, or `null` for the first page. |
+
+**Returns** `Task<SqlOSCursorPage<T>>`, the visible rows after `cursor` in the query's order. A declared order (see [`HasPageOrder`](#haspageorder)) costs about a page for any caller; an undeclared one reads the query in order and checks each row, and logs a warning with the declaration to add.
+
+**Behavior**
+
+- The subject's principals (the subject plus its active groups) and the permission are resolved each time the page runs. An unknown or inactive subject, or an unknown permission, gets an empty page with no `NextCursor`, a logged warning, and no page queries.
+- The page reads the query in its order and checks each row; when few are visible and the order is declared, it reads the order under each node the caller is granted. The page's rows are loaded through the query (includes, tracking) and checked once more.
+- One Debug line per page is logged under the `SqlOS.Fga` category.
+
+**The cursor rule.** Pass `NextCursor` back as it came. Don't write your own position filter (`.Where(x => x.CreatedAt < lastSeen)`, keyset libraries, `since=` versions): `ToPageAsync` seeks under each of the caller's nodes from the cursor, and a hand-written position is just another filter there, so every page walks the caller's rows from the start of the order. For a change feed, the cursor is the sync token the client stores.
+
+**Exceptions**
+
+| Exception | When |
+|-----------|------|
+| `ArgumentOutOfRangeException` | `pageSize` is outside 1 to 1,000. |
+| `ArgumentException` | The query does not start from a `DbSet` of a context deriving from `SqlOSDbContext<TContext>`; no `OrderBy`; mixed directions; an order over anything but a mapped non-nullable scalar property; `Select`, `Skip`, `Take`, `Distinct`, `GroupBy`, `Join`, `SelectMany`, `Union` or `Concat` in the chain; a cursor issued for another list (`ParamName` is `"cursor"`). |
+| `SqlOSCursorException` | The cursor is not one this list issued. |
+
+---
+
+### SqlOSCursorPage&lt;T&gt;
+
+The page `ToPageAsync` returns (`SqlOS.Pagination`).
+
+| Member | Type | Description |
+|--------|------|-------------|
+| `Data` | `IReadOnlyList<T>` | The page's rows, in the query's order. |
+| `PageSize` | `int` | The requested page size. |
+| `NextCursor` | `string?` | The cursor of the next page; `null` on the last page. |
+| `HasNextPage` | `bool` | `NextCursor != null`. |
+| `ToResponse(selector)` | `object` | `{ data, pageSize, nextCursor, hasNextPage }` with each row projected. |
+
+---
+
 ### AuthorizedDetailAsync
 
 Fetch a single entity by predicate, check authorization, and return the appropriate HTTP result in one call. Replaces the pattern of fetch → check → map → return.
@@ -255,7 +343,7 @@ public interface ISqlOSResourceEntity : IHasResourceId
 
 ## IHasResourceId
 
-Lower-level filter contract that exposes an entity's FGA resource ID. Required for `BuildFilterAsync` and `AuthorizedDetailAsync`. `ISqlOSResourceEntity` extends this interface and is the recommended contract for normal protected domain rows.
+Lower-level contract that exposes an entity's FGA resource ID. Required for `ToPageAsync`, `HasPageOrder` and `AuthorizedDetailAsync`. `ISqlOSResourceEntity` extends this interface and is the recommended contract for normal protected domain rows.
 
 ```csharp
 public interface IHasResourceId

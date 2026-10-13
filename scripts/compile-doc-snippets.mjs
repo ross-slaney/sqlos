@@ -158,7 +158,7 @@ new SqlOSOptions().UseSingleApplication("Acme", app => { ${snippet} });`,
     name: "FGA group list authorization",
     relativePath: "web/content/docs/guides/fga-groups.mdx",
     heading: "## 6. Prove inherited list access",
-    marker: "var filter = await fga.BuildFilterAsync<Workspace>",
+    marker: "var page = await db.Workspaces",
     wrap: asFgaGroupListProgram,
   },
   {
@@ -196,6 +196,41 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : SqlOS
     heading: "## Recommended: declare one machine client",
     marker: "SeedMachineClient(",
     wrap: asMachineClientSeedProgram,
+  },
+  {
+    name: "page order declaration",
+    relativePath: "web/content/docs/fga/list-filter.mdx",
+    heading: "## Pages",
+    marker: "entity.HasPageOrder(c => c.Name);",
+    wrap: asPageOrderChainModelProgram,
+  },
+  {
+    name: "authorized page",
+    relativePath: "web/content/docs/fga/list-filter.mdx",
+    heading: "## Pages",
+    marker: ".ToPageAsync(subjectId, \"CHAIN_VIEW\", pageSize: 20, cursor: request.Cursor);",
+    wrap: asChainPageProgram,
+  },
+  {
+    name: "page order declarations",
+    relativePath: "web/content/docs/guides/paginating-authorized-lists.mdx",
+    heading: "## Declare the order",
+    marker: "entity.HasPageOrder(p => p.Price);",
+    wrap: asPageOrderProductModelProgram,
+  },
+  {
+    name: "authorized page with includes",
+    relativePath: "web/content/docs/guides/paginating-authorized-lists.mdx",
+    heading: "## Page",
+    marker: ".ToPageAsync(subjectId, \"product.view\", pageSize: 20, cursor: request.Cursor, cancellationToken);",
+    wrap: asProductPageProgram,
+  },
+  {
+    name: "page cursor errors",
+    relativePath: "web/content/docs/guides/paginating-authorized-lists.mdx",
+    heading: "## The cursor",
+    marker: "catch (Exception exception) when (exception is SqlOSCursorException",
+    wrap: asPageCursorErrorProgram,
   },
   {
     name: "3.24 machine-client release example",
@@ -425,18 +460,20 @@ public sealed class Workspace : IHasResourceId
 
 function asFgaGroupListProgram(snippet) {
   return `using Microsoft.EntityFrameworkCore;
+using SqlOS;
+using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
 
-ISqlOSFgaAuthService fga = null!;
 ReviewDbContext db = null!;
 var userSubjectId = "subj_user";
 var organizationId = "org_acme";
+string? cursor = null;
 var ct = CancellationToken.None;
 
 ${snippet}
 
-public sealed class ReviewDbContext(DbContextOptions<ReviewDbContext> options) : DbContext(options)
+public sealed class ReviewDbContext(DbContextOptions<ReviewDbContext> options) : SqlOSDbContext<ReviewDbContext>(options)
 {
     public DbSet<Workspace> Workspaces => Set<Workspace>();
 }
@@ -449,6 +486,134 @@ public sealed class Workspace : IHasResourceId
     public string Name { get; set; } = string.Empty;
 }
 `;
+}
+
+const pageOrderUsings = `using Microsoft.EntityFrameworkCore;
+using SqlOS;
+using SqlOS.Fga.Extensions;
+using SqlOS.Fga.Interfaces;
+using SqlOS.Pagination;
+`;
+
+const pageOrderChainTypes = `
+public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : SqlOSDbContext<AppDbContext>(options)
+{
+    public DbSet<Chain> Chains => Set<Chain>();
+}
+
+public sealed class Chain : IHasResourceId
+{
+    public string Id { get; set; } = string.Empty;
+    public string ResourceId { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+}
+
+public sealed record ChainDto(string Id, string Name);
+public sealed record PageRequest(string? Cursor);
+`;
+
+const pageOrderProductTypes = `
+public sealed class ProductsDbContext(DbContextOptions<ProductsDbContext> options) : SqlOSDbContext<ProductsDbContext>(options)
+{
+    public DbSet<Product> Products => Set<Product>();
+}
+
+public sealed class Product : IHasResourceId
+{
+    public Guid Id { get; set; }
+    public string ResourceId { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public decimal Price { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; }
+    public Guid LocationId { get; set; }
+    public Location? Location { get; set; }
+}
+
+public sealed class Location
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+}
+
+public sealed record ProductDto(Guid Id, string Name)
+{
+    public ProductDto(Product product) : this(product.Id, product.Name) { }
+}
+
+public sealed record PageRequest(string? Cursor);
+`;
+
+function asPageOrderChainModelProgram(snippet) {
+  return `${pageOrderUsings}
+_ = typeof(ChainModelContext);
+
+public sealed class ChainModelContext(DbContextOptions<ChainModelContext> options) : SqlOSDbContext<ChainModelContext>(options)
+{
+${snippet}
+}
+${pageOrderChainTypes}`;
+}
+
+function asChainPageProgram(snippet) {
+  return `${pageOrderUsings}
+static async Task<IResult> ListChainsAsync(
+    AppDbContext db,
+    string subjectId,
+    string search,
+    PageRequest request)
+{
+${snippet}
+}
+
+_ = (Func<AppDbContext, string, string, PageRequest, Task<IResult>>)ListChainsAsync;
+${pageOrderChainTypes}`;
+}
+
+function asPageOrderProductModelProgram(snippet) {
+  return `${pageOrderUsings}
+_ = typeof(ProductModelContext);
+
+public sealed class ProductModelContext(DbContextOptions<ProductModelContext> options) : SqlOSDbContext<ProductModelContext>(options)
+{
+${snippet}
+}
+${pageOrderProductTypes}`;
+}
+
+function asProductPageProgram(snippet) {
+  return `${pageOrderUsings}
+static async Task<IResult> ListProductsAsync(
+    ProductsDbContext db,
+    string subjectId,
+    string term,
+    PageRequest request,
+    CancellationToken cancellationToken)
+{
+${snippet}
+}
+
+_ = (Func<ProductsDbContext, string, string, PageRequest, CancellationToken, Task<IResult>>)ListProductsAsync;
+${pageOrderProductTypes}`;
+}
+
+function asPageCursorErrorProgram(snippet) {
+  return `${pageOrderUsings}
+static async Task<IResult> ListProductsAsync(
+    IQueryable<Product> query,
+    string subjectId,
+    int pageSize,
+    string? cursor,
+    CancellationToken ct)
+{
+    SqlOSCursorPage<Product> page;
+${snippet}
+
+    return Results.Ok(page.ToResponse());
+}
+
+_ = (Func<IQueryable<Product>, string, int, string?, CancellationToken, Task<IResult>>)ListProductsAsync;
+${pageOrderProductTypes}`;
 }
 
 // Keep project references on the same canonical filesystem tree. macOS temp-directory

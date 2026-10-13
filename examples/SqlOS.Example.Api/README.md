@@ -154,8 +154,8 @@ The host deliberately leaves `application.Api` unset: the retail demo accepts be
 | `/sqlos/auth/*` | OAuth authorization server metadata/endpoints, social OIDC relying-party callbacks, and hosted AuthPage |
 | `/api/v1/auth/*` | Example-specific discovery, headless login/OTP, SSO/OIDC handoff, refresh, logout, and session facade |
 | `/api/hello`, `/api/me`, `/api/profile` | Small protected identity examples |
-| `/api/workspaces` | Organization-scoped workspace creation/listing with FGA |
-| `/api/chains*`, `/api/locations*`, `/api/inventory*` | Retail domain APIs with FGA-filtered reads and permission-checked writes |
+| `/api/workspaces` | Organization-scoped workspace creation, and the caller's workspaces as a page (`?pageSize=&cursor=`, returning `{ data, pageSize, nextCursor, hasNextPage }`) |
+| `/api/chains*`, `/api/locations*`, `/api/inventory*` | Retail domain APIs: authorized pages (`ToPageAsync`), point-checked details, and permission-checked writes |
 | `/api/calendar/*` | Calendar connection, event, sync, and token examples |
 | `/api/demo/*` | Demo identities and identity switching for the sample UIs |
 

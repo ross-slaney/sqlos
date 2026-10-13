@@ -1,12 +1,12 @@
 ---
 title: "IHasResourceId"
-description: "The lower-level resource ID contract used by FGA filters."
+description: "The lower-level resource ID contract used by FGA pages and checks."
 section: "authorization"
 group: "model"
 order: 6
 ---
 
-`IHasResourceId` is the lower-level contract used by authorization filters. It exposes the FGA resource ID on a domain entity so query filters can join app rows to accessible resources.
+`IHasResourceId` is the lower-level contract authorized pages read. It exposes the FGA resource ID on a domain entity so `ToPageAsync` can check each app row against the resources the subject can access.
 
 ```csharp
 public interface IHasResourceId
@@ -33,16 +33,29 @@ public sealed class Workspace : ISqlOSResourceEntity
 }
 ```
 
-When you call `BuildFilterAsync<T>`, the filter uses `ResourceId` to restrict the query to resources the subject can access:
+`ToPageAsync` uses `ResourceId` to return only the rows whose resource the subject can access, one page at a time:
 
 ```csharp
-var filter = await authService
-    .BuildFilterAsync<Workspace>(subjectId, "WORKSPACE_VIEW");
-
-var workspaces = await db.Workspaces
-    .Where(filter)
+var page = await db.Workspaces
     .OrderBy(x => x.Name)
-    .ToListAsync(ct);
+    .ToPageAsync(subjectId, "WORKSPACE_VIEW", pageSize: 20, cursor, ct);
 ```
 
+`T` must implement `IHasResourceId`, and the query must start from a `DbSet` of a context deriving from `SqlOSDbContext<TContext>`. For one row, pass its `ResourceId` to `CheckAccessAsync`.
+
 Use plain `IHasResourceId` directly for lower-level/manual resources where your application owns the FGA resource lifecycle. Use `ISqlOSResourceEntity` for the normal SDK path.
+
+## Declare the orders a list is paged by
+
+Declare each order a list pages by next to the entity's mapping, and SqlOS keeps a copy of that order under every node of the resource tree, so a page costs about a page for any caller:
+
+```csharp
+modelBuilder.Entity<Workspace>(entity =>
+{
+    entity.HasKey(x => x.Id);
+    entity.Property(x => x.Name).HasMaxLength(200);
+    entity.HasPageOrder(x => x.Name);   // (Name, Id)
+});
+```
+
+`ResourceId` stays the only connection between your table and SqlOS: the declared order lives in a table of SqlOS's own (`SqlOSFgaPage_Workspaces_Name`) that your next migration creates. Order columns are non-nullable, strings need a maximum length, and the entity needs a single-column primary key. See [Paginating authorized lists](/docs/guides/paginating-authorized-lists).

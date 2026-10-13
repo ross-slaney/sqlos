@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { apiGet, apiPost } from "@/lib/api";
 
-type PagedResponse<T> = { data: T[]; totalCount: number; hasMore: boolean; cursor?: string };
+type PagedResponse<T> = { data: T[]; pageSize: number; nextCursor: string | null; hasNextPage: boolean };
 type ChainDto = { id: string; resourceId: string; name: string; description?: string; locationCount: number; createdAt: string };
 
 export default function ChainsPage() {

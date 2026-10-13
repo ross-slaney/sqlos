@@ -1,114 +1,98 @@
 ---
-title: "List Filtering"
-description: "Filter EF Core queries by authorization at query time."
+title: "Authorized pages"
+description: "Read the page of an EF Core query a subject may see, with ToPageAsync."
 section: "authorization"
 group: "checks"
 order: 1
 ---
 
-`BuildFilterAsync` returns a filter for `Where(...)`. Lists only rows the subject may see. Use this on list endpoints.
-
-This is a read-side helper. Lifecycle-managed domain rows normally implement `ISqlOSResourceEntity`; the filter only needs the inherited `ResourceId` contract to join application rows to accessible FGA resources.
+A list endpoint reads authorized data one page at a time: `ToPageAsync` on your EF Core query, with the subject and the permission each row needs. It returns only rows the subject may see, in your query's order. For one resource, use [`CheckAccessAsync`](/docs/fga/checking-a-permission) or [`AuthorizedDetailAsync`](/docs/fga/detail-endpoint). Those are the two ways to read authorized data.
 
 <Callout type="warning" title="Authentication comes first">
-  The filter authorizes a subject ID; it does not authenticate the request. Validate a bearer token for the API's exact audience before the endpoint runs, then use the validated token's user ID as the FGA subject.
+  `ToPageAsync` authorizes a subject ID; it does not authenticate the request. Validate a bearer token for the API's exact audience before the endpoint runs, then use the validated token's user ID as the FGA subject.
 </Callout>
 
-## Basic usage
+## Pages
+
+Declare the order the list is paged by once, in the model:
 
 ```csharp
-var filter = await authService
-    .BuildFilterAsync<Chain>(subjectId, "CHAIN_VIEW");
-
-var chains = await dbContext.Chains
-    .Where(filter)
-    .OrderBy(c => c.Name)
-    .ToListAsync();
-```
-
-The subject only sees chains they have access to. The filter translates to a SQL query -- no in-memory filtering.
-
-## Filter lifetime
-
-The subject's principal set (the subject plus its active group memberships) is resolved when the returned task is awaited. Build the filter once per request and compose it into that request's queries. Do not cache the filter in statics or reuse it across requests -- group membership is captured when the filter is built; grants are checked by the TVF when the SQL query executes.
-
-## Sparse-access limitation
-
-The TVF walks the ancestors of each candidate resource to check grants. It can examine many denied rows before finding a page, or the entire remaining table when fewer than a page are accessible. This path does not provide table-size-independent pagination. See [Paginating authorized lists](/docs/guides/paginating-authorized-lists).
-
-## Composing with plain EF
-
-SqlOS does authorization filters only. Pagination, sorting, search, and projection are ordinary EF Core on the same query:
-
-```csharp
-var canView = await authService
-    .BuildFilterAsync<InventoryItem>(subjectId, "INVENTORY_VIEW");
-
-var items = await db.InventoryItems
-    .Where(canView)
-    .Where(i => i.LocationId == locationId)
-    .Select(i => new InventoryItemDto
+protected override void OnApplicationModelCreating(ModelBuilder modelBuilder)
+{
+    modelBuilder.Entity<Chain>(entity =>
     {
-        Id = i.Id,
-        Name = i.Name,
-        LocationName = i.Location!.Name
-    })
-    .OrderBy(d => d.Name).ThenBy(d => d.Id)
-    .Skip(page * pageSize).Take(pageSize)
-    .ToListAsync();
+        entity.HasKey(c => c.Id);
+        entity.Property(c => c.Name).HasMaxLength(200);
+        entity.HasPageOrder(c => c.Name);   // (Name, Id)
+    });
+}
 ```
 
-Everything composes into one SQL statement: the authorization TVF join, your business predicates, the projection, the ordering, and the paging.
+Then page the query with the subject, the permission, a page size, and the previous page's cursor:
 
-For cursor/keyset pagination over authorized lists, see [Paginating authorized lists](/docs/guides/paginating-authorized-lists).
+```csharp
+var page = await db.Chains
+    .AsNoTracking()
+    .Where(c => c.Name.Contains(search))   // your filters, any number
+    .OrderBy(c => c.Name)                  // the order; the key is appended
+    .ToPageAsync(subjectId, "CHAIN_VIEW", pageSize: 20, cursor: request.Cursor);
+
+return Results.Ok(page.ToResponse(c => new ChainDto(c.Id, c.Name)));
+```
+
+`ToPageAsync` resolves the subject's principals (the subject plus its active groups) and the permission, then reads your query in its order and checks each row, for about a page of rows. When few of them are visible, it reads the declared order under each node the caller is granted instead (SqlOS keeps a copy of the order under every node of the resource tree, in its own tables), so a caller who can see 3 rows of a million costs about a page, not the table. The page's rows are then loaded through your query (`Include`, tracking) and checked once more.
+
+The query must start from a `DbSet` of a context that derives from `SqlOSDbContext<TContext>`. The declaration adds a table to your EF model (`SqlOSFgaPage_Chains_Name`), so your next migration creates it. `SqlOSDbContext` keeps it current in the same transaction as every save, and fills it on the first start after you declare the order. See [Paginating authorized lists](/docs/guides/paginating-authorized-lists) for the cursor, the response, and what the query may contain.
+
+Pass `NextCursor` back as the next request's cursor. Do not write your own position filter (`.Where(c => c.Name.CompareTo(lastSeen) > 0)`, keyset libraries, `since=` parameters): `ToPageAsync` seeks under each of the caller's nodes from the cursor, and a hand-written position is just another filter there, so every page walks the caller's rows from the start of the order.
+
+### What pages cost
+
+- **About a page** for callers who see little of a large table, for callers with many grants, for rows that sit at the far end of the order, and for application filters that pass few rows.
+- **An order that is not declared** still returns the right pages, but reads the table for a caller who sees little of it. `ToPageAsync` logs a warning naming the declaration to add.
+- **One case stays proportional to the caller's rows:** an application filter that few rows pass combined with a caller whose rows barely overlap it. SqlOS reads the caller's entries until a page passes your filter.
+
+## No counts or joins
+
+SqlOS has no authorized count, `Any`, join, or unpaged list. Each of those costs every row the caller can see, which is what pages exist to avoid. Show a page and its `HasNextPage` instead of a total, and check one resource with `CheckAccessAsync` instead of asking whether any row is visible. Sorting, search, and projection are ordinary EF Core on the query you page; project after the page with `page.ToResponse(...)`.
 
 ## Full endpoint example
 
-From the retail example app:
+From the retail example app (`examples/SqlOS.Example.Api/FgaRetail/Endpoints/ChainEndpoints.cs`):
 
 ```csharp
-using SqlOS.AuthServer.Extensions;
-using SqlOS.Extensions;
-
-var api = app.MapGroup("/api");
-
-api.MapGet("/chains", async (
+group.MapGet("/", async (
     ExampleAppDbContext context,
-    ISqlOSFgaAuthService authService,
     HttpContext http,
-    string? search, int? page, int? pageSize) =>
+    int pageSize = 10,
+    string? search = null,
+    string? cursor = null) =>
 {
-    var subjectId = http.GetSqlOSValidatedToken()?.UserId;
-    if (string.IsNullOrWhiteSpace(subjectId))
-        return Results.Unauthorized();
+    var subjectId = RetailSubjectResolver.ResolveSubjectId(http);
 
-    var canView = await authService
-        .BuildFilterAsync<Chain>(subjectId, RetailPermissionKeys.ChainView);
-
-    var query = context.Chains.Where(canView);
-
+    IQueryable<Chain> query = context.Chains.AsNoTracking();
     if (!string.IsNullOrWhiteSpace(search))
-        query = query.Where(c => c.Name.Contains(search));
+        query = query.Where(c => c.Name.ToLower().Contains(search.ToLower()));
 
-    var chains = await query
-        .Select(c => new ChainListDto
-        {
-            Id = c.Id,
-            Name = c.Name,
-            LocationCount = c.Locations.Count
-        })
-        .OrderBy(d => d.Name).ThenBy(d => d.Id)
-        .Skip((page ?? 0) * (pageSize ?? 20)).Take(pageSize ?? 20)
-        .ToListAsync();
+    SqlOSCursorPage<Chain> page;
+    try
+    {
+        page = await query.OrderBy(c => c.Name)
+            .ToPageAsync(subjectId, RetailPermissionKeys.ChainView, Math.Clamp(pageSize, 1, 100), cursor, http.RequestAborted);
+    }
+    catch (Exception exception) when (exception is SqlOSCursorException or ArgumentException { ParamName: "cursor" })
+    {
+        return Results.BadRequest(new { error = SqlOSCursorException.ErrorCode, message = exception.Message });
+    }
 
-    return Results.Ok(chains);
+    return Results.Ok(page.ToResponse(c => new ChainDto { Id = c.Id, Name = c.Name }));
 });
 ```
 
 ## When to use
 
-- **List endpoints** -- filter results by what the user can see
-- **Search** -- combine authorization with text search and sorting
-- **Dashboards** -- aggregate only accessible data
+- **List endpoints** -- page what the user can see with `ToPageAsync`
+- **Search** -- combine authorization with text search and sorting in the query you page
+- **Feeds and sync** -- the cursor is the sync token the client stores; see [The cursor](/docs/guides/paginating-authorized-lists#the-cursor)
 
 For single-resource access, use [AuthorizedDetailAsync](/docs/fga/detail-endpoint). For mutations, use [CheckAccessAsync](/docs/fga/checking-a-permission).

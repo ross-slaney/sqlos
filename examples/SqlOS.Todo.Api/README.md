@@ -79,6 +79,8 @@ Role and permission matrix:
 
 Each authenticated user gets one tenant root resource under `root`. Every todo is created as a child resource beneath that tenant node, so the dashboard shows the hierarchy directly and list queries can use the SqlOS FGA filter instead of hand-written owner predicates.
 
+`GET /api/todos` returns one page, newest first: `{ data, pageSize, nextCursor, hasNextPage }`. Pass `pageSize` (1 to 100, default 20) and the previous page's `nextCursor` as `cursor`. The endpoint pages with `ToPageAsync`, and `TodoItem` declares `HasPageOrder(x => x.CreatedAt)`, so a page costs about a page however many todos other users have. The sample creates its schema with `EnsureCreated`, so a database created before this order existed has no `SqlOSFgaPage_TodoItems_CreatedAt` table; delete the local database (or apply the table) to use it. Until then, pages still return the right rows.
+
 ## What to try
 
 1. For the email OTP demo, run the AppHost with `TodoSample__EnableEmailOtp=true` and ACS email settings.

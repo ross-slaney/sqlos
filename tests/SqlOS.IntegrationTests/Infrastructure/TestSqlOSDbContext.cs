@@ -23,6 +23,9 @@ public sealed class TestSqlOSDbContext : DbContext, ISqlOSAuthServerDbContext, I
         string permissionId)
         => FromExpression(() => IsResourceAccessible(resourceId, subjectIds, permissionId));
 
+    public IQueryable<SqlOSFgaPageNode> PageNodes(string subjectIds, string permissionId)
+        => FromExpression(() => PageNodes(subjectIds, permissionId));
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);

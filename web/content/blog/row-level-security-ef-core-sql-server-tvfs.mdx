@@ -1,6 +1,6 @@
 ---
 title: "Authorized EF Core Queries with SQL Server Table-Valued Functions"
-description: "How SqlOS composes hierarchical authorization into EF Core queries with a SQL Server TVF — no post-load filtering or per-row service calls."
+description: "How SqlOS pages EF Core queries through a hierarchical authorization TVF in SQL Server — no post-load filtering or per-row service calls."
 date: "2026-03-15"
 author: "Ross Slaney"
 tags: ["Row-Level Security", "EF Core", "SQL Server", "TVF", "FGA", "RBAC", "Authorization"]
@@ -10,9 +10,9 @@ You need certain users to see certain rows. That's the whole problem.
 
 The typical solution is application-level filtering — `.Where(x => x.TenantId == currentTenant)` — scattered across every query in your codebase. It works until someone forgets the filter, adds a new endpoint without it, or builds a report that bypasses the service layer entirely. At that point, unauthorized data leaks.
 
-SqlOS addresses this by composing an authorization predicate into the EF Core query itself. The database does not return unauthorized rows for queries that apply that predicate.
+SqlOS addresses this by authorizing the EF Core query itself: you page it with `ToPageAsync`, and SQL Server checks its rows against the caller's grants. A page never contains a row the caller may not see.
 
-This guide covers the SQL Server table-valued function (TVF) approach used by SqlOS FGA. It is query-level authorization, not a SQL Server security policy: raw SQL or an EF query that omits the authorization filter is not protected automatically.
+This guide covers the SQL Server table-valued function (TVF) approach used by SqlOS FGA. It is query-level authorization, not a SQL Server security policy: raw SQL or an EF query that is not paged with `ToPageAsync` is not protected automatically.
 
 ## The Problem with Application-Level Filtering
 
@@ -37,7 +37,7 @@ SQL Server has a built-in RLS feature using security policies and predicate func
 
 A Table-Valued Function (TVF) is a SQL function that returns a table. When it's an *inline* TVF, SQL Server's optimizer doesn't treat it as a black box — it folds the function body directly into the calling query's execution plan.
 
-This means you can write an authorization check as a TVF and use it as a `WHERE EXISTS` predicate. The database handles authorization, filtering, sorting, and pagination in a single query. No post-load filtering, no N+1 permission checks, no external service calls.
+This means you can write an authorization check as a TVF and evaluate it in the SQL that reads your rows. The database handles authorization, filtering, sorting, and pagination. No post-load filtering, no N+1 permission checks, no external service calls.
 
 Here's the core idea:
 
@@ -87,29 +87,41 @@ Because it is an inline TVF, SQL Server can compose the function into the callin
 
 ## Mapping It to EF Core
 
-The TVF needs to be callable from LINQ. The recommended `SqlOSDbContext<TContext>` base class registers it for relational contexts:
+The TVF needs to be callable from EF Core. The recommended `SqlOSDbContext<TContext>` base class registers it for relational contexts and keeps declared page orders current on save:
 
 ```csharp
 public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
-    : SqlOSDbContext<AppDbContext>(options);
+    : SqlOSDbContext<AppDbContext>(options)
+{
+    public DbSet<Document> Documents => Set<Document>();
+
+    protected override void OnApplicationModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Document>(entity =>
+        {
+            entity.HasIndex(d => d.ResourceId).IsUnique();
+            entity.HasIndex(d => new { d.CreatedAt, d.Id });
+            entity.HasPageOrder(d => d.CreatedAt);   // the order lists page by
+        });
+    }
+}
 ```
 
-Then you build an authorization filter as an `Expression<Func<T, bool>>` that calls the TVF:
+Then you write the query as usual and page it with `ToPageAsync`, naming the caller and the permission:
 
 ```csharp
-var filter = await fga.BuildFilterAsync<Document>(
-    subjectId: currentUserId,
-    permissionKey: "documents.read");
-
-var results = await db.Documents
+var page = await db.Documents
     .Where(d => d.ProjectId == projectId)   // your business filter
-    .Where(filter)                           // ← authorization
     .OrderBy(d => d.CreatedAt)
-    .Take(20)
-    .ToListAsync();
+    .ToPageAsync(                            // ← authorization and pagination
+        subjectId: currentUserId,
+        permissionKey: "documents.read",
+        pageSize: 20,
+        cursor: cursor,
+        cancellationToken: ct);
 ```
 
-EF Core translates this to a single SQL statement. The TVF call becomes a `WHERE EXISTS (...)` subquery that the optimizer inlines. One database round-trip. No post-load filtering.
+`ToPageAsync` reads your query in its order and checks each row with the TVF in SQL, for as many rows as the page needs. When few of those rows are visible, it reads the declared order under each resource the caller is granted instead. The page's rows are then loaded through your query and checked once more. Unauthorized rows never reach the application, and `page.NextCursor` continues the list.
 
 ## Why a Resource Tree, Not a Flat Tenant ID
 
@@ -152,6 +164,8 @@ The TVF approach has a bounded hierarchy walk. A useful conceptual model is:
 
 **Per-page cost:** O(k · D) where k is the page size. Under cursor pagination, the database evaluates rows sequentially until it finds k authorized ones.
 
+That holds when authorized rows are common in the order. For a caller who sees a few rows of a large table, reading forward until k are found can read most of the table. That is why the order is declared with `HasPageOrder`: `ToPageAsync` then reads from the caller's granted resources, and the page still costs about a page.
+
 The benchmark below found stable page-level behavior at the tested scales because cursor pagination examines rows forward from the cursor and the TVF walks a bounded ancestor chain. Treat those measurements as benchmark results, not a universal latency guarantee: indexes, selectivity, grant density, plan quality, and application predicates still matter.
 
 Benchmarked results from the [SHRBAC paper](https://github.com/ross-slaney/sqlos/blob/main/paper/shrbac-compsac-2026.pdf):
@@ -186,7 +200,7 @@ Same three roles. Different scope depending on where in the tree the grant lives
 
 ## Mutations Use the Same Model
 
-The TVF handles reads. For writes, you use point checks against the same resource tree:
+`ToPageAsync` and the TVF handle list reads. For writes, you use point checks against the same resource tree:
 
 ```csharp
 var access = await fga.CheckAccessAsync(
@@ -242,4 +256,4 @@ var app = builder.Build();
 
 The [getting started guide](/docs/getting-started) walks through the full setup. The [SHRBAC paper](https://github.com/ross-slaney/sqlos/blob/main/paper/shrbac-compsac-2026.pdf) covers the formal model and benchmark methodology.
 
-Authorized row filtering is a property of how the authorization model composes with a data query. With SqlOS, the filter becomes part of the SQL query instead of running after materialization. Apply it directly on every protected list path; it does not turn unfiltered EF or raw SQL into an automatically protected query.
+Authorized row filtering is a property of how the authorization model composes with a data query. With SqlOS, the check runs in SQL as the page is read instead of after materialization. Page every protected list path with `ToPageAsync`; it does not turn an unpaged EF query or raw SQL into an automatically protected query. There is no authorized count or join: those cost every row the caller can see, so lists are read a page at a time.

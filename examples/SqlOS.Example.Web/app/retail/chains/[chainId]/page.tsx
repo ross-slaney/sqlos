@@ -8,7 +8,7 @@ import { apiGet, apiPost, apiPut, apiDelete } from "@/lib/api";
 
 type ChainDetail = { id: string; resourceId: string; name: string; description?: string; headquartersAddress?: string; locationCount: number; createdAt: string; updatedAt: string };
 type LocationDto = { id: string; resourceId: string; chainId: string; name: string; storeNumber?: string; city?: string; state?: string; createdAt: string };
-type PagedResponse<T> = { data: T[]; totalCount: number; hasMore: boolean };
+type PagedResponse<T> = { data: T[]; pageSize: number; nextCursor: string | null; hasNextPage: boolean };
 
 export default function ChainDetailPage() {
   const { chainId } = useParams<{ chainId: string }>();

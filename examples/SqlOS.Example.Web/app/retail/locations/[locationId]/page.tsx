@@ -8,7 +8,7 @@ import { apiGet, apiPost, apiPut, apiDelete } from "@/lib/api";
 
 type LocationDetail = { id: string; resourceId: string; chainId: string; chainName?: string; name: string; storeNumber?: string; address?: string; city?: string; state?: string; zipCode?: string; inventoryItemCount: number; createdAt: string; updatedAt: string };
 type InventoryItemDto = { id: string; resourceId: string; locationId: string; sku: string; name: string; price: number; quantityOnHand: number; createdAt: string };
-type PagedResponse<T> = { data: T[]; totalCount: number; hasMore: boolean };
+type PagedResponse<T> = { data: T[]; pageSize: number; nextCursor: string | null; hasNextPage: boolean };
 
 function stockLevel(qty: number) {
   if (qty === 0) return "out";

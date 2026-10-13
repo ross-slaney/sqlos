@@ -7,7 +7,12 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.2" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- SqlOS brings EF Core for SQL Server (Microsoft.Data.SqlClient) and PostgreSQL (Npgsql). -->
+    <ProjectReference Include="..\..\src\SqlOS\SqlOS.csproj" />
   </ItemGroup>
 
 </Project>

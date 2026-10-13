@@ -6,6 +6,8 @@ author: "Ross Slaney"
 tags: ["FGA", "Authorization", "EF Core", "SqlOS"]
 ---
 
+> **Historical release note.** A later release removed `BuildFilterAsync` and the `.Where(filter)` pattern described below. A filtered query with `OrderBy` and `Take` returned the right rows but could scan the whole table for a caller who sees little of it. Authorized lists are now read a page at a time with `ToPageAsync` on the EF query, and one resource is checked with `CheckAccessAsync`. See [Paginating authorized lists](/docs/guides/paginating-authorized-lists).
+
 SqlOS 4.0 removes the parallel query framework that had grown around authorized lists. The query-side FGA surface is now one method: `BuildFilterAsync`. You compose that filter with the EF Core you already use — `Where`, `Select`, `OrderBy`, `Skip`/`Take`, or an external keyset library — and the authorization TVF still runs in SQL.
 
 This is a breaking release. Call sites that used `GetAuthorizationFilterAsync`, `PagedSpec`, `ISpecificationExecutor`, or `PaginatedResult` need a rename and, where they used the specification types, a short rewrite onto plain EF.

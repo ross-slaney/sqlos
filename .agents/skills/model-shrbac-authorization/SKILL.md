@@ -161,7 +161,7 @@ Before coding endpoints, fill this table for **your routes**:
 
 Enforcement patterns in SqlOS:
 
-- **Lists**: `fga.BuildFilterAsync<T>(subjectId, permission)` composed into the EF query with `.Where(filter)`; pagination, sorting, search, and projection are plain EF in the endpoint
+- **Lists**: `query.OrderBy(...).ToPageAsync(subjectId, permission, pageSize, cursor)` on a `SqlOSDbContext` query, with the order declared by `HasPageOrder` in the model; search and filters are plain EF `Where` before it, projection is `page.ToResponse(...)` after it, and the client passes `NextCursor` back (no hand-written position filters). SqlOS has no authorized count, join, or unpaged list
 - **Detail**: `authService.AuthorizedDetailAsync(query, predicate, subjectId, permission, mapper)`
 - **Mutations**: `authService.CheckAccessAsync(subjectId, permission, resourceId)` before `SaveChanges`
 

@@ -1,17 +1,17 @@
-using System.Linq.Expressions;
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
+using SqlOS.Fga.Paging;
 
 namespace SqlOS.Fga.Services;
 
 public class SqlOSFgaAuthService : ISqlOSFgaAuthService
 {
     private readonly ISqlOSFgaDbContext _context;
+    private readonly DbContext _dbContext;
     private readonly SqlOSFgaOptions _options;
     private readonly ILogger<SqlOSFgaAuthService> _logger;
 
@@ -21,6 +21,8 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
         ILogger<SqlOSFgaAuthService> logger)
     {
         _context = context;
+        _dbContext = context as DbContext
+            ?? throw new ArgumentException("The FGA context must be an EF Core DbContext.", nameof(context));
         _options = options.Value;
         _logger = logger;
     }
@@ -55,7 +57,7 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
             ResourceName = resource.Name,
         });
 
-        var permission = await _context.Set<SqlOSFgaPermission>().FirstOrDefaultAsync(p => p.Key == permissionKey);
+        var permission = await SqlOSFgaPrincipals.FindPermissionAsync(_dbContext, permissionKey);
         if (permission == null)
         {
             return new SqlOSFgaAccessCheckResult { Allowed = false, Trace = trace, Error = $"Permission {permissionKey} not found" };
@@ -196,7 +198,7 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
 
         trace.SubjectDisplayName = subject.DisplayName;
 
-        var permission = await _context.Set<SqlOSFgaPermission>().FirstOrDefaultAsync(p => p.Key == permissionKey);
+        var permission = await SqlOSFgaPrincipals.FindPermissionAsync(_dbContext, permissionKey);
         if (permission == null)
         {
             trace.AccessGranted = false;
@@ -394,66 +396,14 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
         return trace;
     }
 
-    public async Task<Expression<Func<T, bool>>> BuildFilterAsync<T>(
-        string subjectId,
-        string permissionKey) where T : IHasResourceId
-    {
-        var subjectIds = await ResolveSubjectIdsAsync(subjectId);
-        if (subjectIds.Count == 0)
-        {
-            _logger.LogWarning("No subjects found for {SubjectId}", subjectId);
-            return entity => false;
-        }
-
-        var permission = await _context.Set<SqlOSFgaPermission>()
-            .AsNoTracking()
-            .FirstOrDefaultAsync(p => p.Key == permissionKey);
-
-        if (permission == null)
-        {
-            _logger.LogWarning("Permission {PermissionKey} not found", permissionKey);
-            return entity => false;
-        }
-
-        var subjectIdsJson = JsonSerializer.Serialize(subjectIds);
-        var permissionId = permission.Id;
-
-        // Build the expression using the concrete DbContext type's method
-        // so EF Core can match it to the registered DbFunction (TVF).
-        // Using the interface method directly would fail because EF Core only
-        // registers DbFunctions on DbContext subclasses, not interfaces.
-        var contextType = _context.GetType();
-        var tvfMethod = contextType.GetMethod(
-            nameof(ISqlOSFgaDbContext.IsResourceAccessible),
-            new[] { typeof(string), typeof(string), typeof(string) });
-
-        if (tvfMethod == null)
-        {
-            _logger.LogWarning("IsResourceAccessible method not found on {ContextType}", contextType.Name);
-            return entity => false;
-        }
-
-        var entityParam = Expression.Parameter(typeof(T), "entity");
-        var resourceIdProp = Expression.Property(entityParam, nameof(IHasResourceId.ResourceId));
-        var contextExpr = Expression.Constant(_context, contextType);
-        var filterParameters = new AuthorizationFilterParameters(subjectIdsJson, permissionId);
-        var filterParametersExpr = Expression.Constant(filterParameters);
-        var tvfCall = Expression.Call(contextExpr, tvfMethod,
-            resourceIdProp,
-            Expression.Field(filterParametersExpr, nameof(AuthorizationFilterParameters.SubjectIds)),
-            Expression.Field(filterParametersExpr, nameof(AuthorizationFilterParameters.PermissionId)));
-
-        var anyMethod = typeof(Queryable).GetMethods()
-            .First(m => m.Name == "Any" && m.GetParameters().Length == 1)
-            .MakeGenericMethod(typeof(SqlOSFgaAccessibleResource));
-        var anyCall = Expression.Call(anyMethod, tvfCall);
-
-        return Expression.Lambda<Func<T, bool>>(anyCall, entityParam);
-    }
+    public Task RebuildPageOrdersAsync(CancellationToken cancellationToken = default)
+        => _context is DbContext dbContext
+            ? SqlOSFgaPageOrderMaintenance.RebuildAsync(dbContext, _logger, cancellationToken)
+            : Task.CompletedTask;
 
     private async Task<List<string>> ResolveSubjectsAsync(string subjectId, List<SqlOSFgaAccessTrace> trace)
     {
-        var subjects = await ResolveSubjectIdsAsync(subjectId);
+        var subjects = await SqlOSFgaPrincipals.ResolveSubjectIdsAsync(_dbContext, subjectId);
 
         var subjectData = await _context.Set<SqlOSFgaSubject>().FirstOrDefaultAsync(s => s.Id == subjectId);
         var groupCount = subjects.Count - 1;
@@ -467,34 +417,11 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
         return subjects;
     }
 
-    private async Task<List<string>> ResolveSubjectIdsAsync(string subjectId)
-    {
-        if (!await IsSubjectActiveAsync(subjectId))
-        {
-            return [];
-        }
-
-        var subjects = new List<string> { subjectId };
-
-        var groupSubjectIds = await _context.Set<SqlOSFgaUserGroupMembership>()
-            .Where(m => m.SubjectId == subjectId)
-            .Join(_context.Set<SqlOSFgaUserGroup>(),
-                m => m.UserGroupId,
-                g => g.Id,
-                (m, g) => g)
-            .Where(g => g.IsActive)
-            .Select(g => g.SubjectId)
-            .ToListAsync();
-
-        subjects.AddRange(groupSubjectIds);
-        return subjects;
-    }
-
     private async Task<List<SqlOSFgaSubjectInfo>> ResolveSubjectsWithInfoAsync(string subjectId)
     {
         var result = new List<SqlOSFgaSubjectInfo>();
 
-        if (!await IsSubjectActiveAsync(subjectId))
+        if (!await SqlOSFgaPrincipals.IsSubjectActiveAsync(_dbContext, subjectId))
         {
             return result;
         }
@@ -561,33 +488,6 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
         return ancestors;
     }
 
-    private async Task<bool> IsSubjectActiveAsync(string subjectId)
-    {
-        var subjectType = await _context.Set<SqlOSFgaSubject>()
-            .AsNoTracking()
-            .Where(subject => subject.Id == subjectId)
-            .Select(subject => subject.SubjectTypeId)
-            .FirstOrDefaultAsync();
-
-        return subjectType switch
-        {
-            "user" => await _context.Set<SqlOSFgaUser>()
-                .AsNoTracking()
-                .AnyAsync(user => user.SubjectId == subjectId && user.IsActive),
-            "service_account" => await _context.Set<SqlOSFgaServiceAccount>()
-                .AsNoTracking()
-                .AnyAsync(account => account.SubjectId == subjectId
-                    && (account.ExpiresAt == null || account.ExpiresAt > DateTime.UtcNow)),
-            "group" => await _context.Set<SqlOSFgaUserGroup>()
-                .AsNoTracking()
-                .AnyAsync(group => group.SubjectId == subjectId && group.IsActive),
-            "agent" => await _context.Set<SqlOSFgaAgent>()
-                .AsNoTracking()
-                .AnyAsync(agent => agent.SubjectId == subjectId),
-            _ => false
-        };
-    }
-
     private async Task<List<SqlOSFgaGrant>> GetActiveGrantsAsync(string subjectId, string resourceId)
     {
         var now = DateTime.UtcNow;
@@ -600,15 +500,4 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
             .ToListAsync();
     }
 
-    private sealed class AuthorizationFilterParameters
-    {
-        public AuthorizationFilterParameters(string subjectIds, string permissionId)
-        {
-            SubjectIds = subjectIds;
-            PermissionId = permissionId;
-        }
-
-        public readonly string SubjectIds;
-        public readonly string PermissionId;
-    }
 }

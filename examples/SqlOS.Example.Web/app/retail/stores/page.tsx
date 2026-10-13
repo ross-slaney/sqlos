@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { apiGet } from "@/lib/api";
 
-type PagedResponse<T> = { data: T[]; totalCount: number; hasMore: boolean };
+type PagedResponse<T> = { data: T[]; pageSize: number; nextCursor: string | null; hasNextPage: boolean };
 type LocationDto = { id: string; resourceId: string; chainId: string; chainName?: string; name: string; storeNumber?: string; city?: string; state?: string; createdAt: string };
 
 export default function StoresPage() {

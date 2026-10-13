@@ -1,6 +1,6 @@
 ---
 title: "List Endpoints That Only Return Authorized Rows"
-description: "How SqlOS FGA turns EF Core list queries into authorized SQL Server queries, using the Todo sample resource tree and BuildFilterAsync."
+description: "How SqlOS FGA turns EF Core list queries into authorized SQL Server pages, using the Todo sample resource tree and ToPageAsync."
 date: "2026-06-04"
 author: "Ross Slaney"
 tags: ["FGA", "EF Core", "Authorization", "SQL Server", "SqlOS"]
@@ -36,13 +36,13 @@ A point check answers one question:
 
 > Can this user edit this one todo?
 
-A list filter answers a different question:
+An authorized list answers a different question:
 
 > Which todos can this user read, sorted and paged like any other query?
 
-Those are not interchangeable. If you load 500 rows and then call a permission service 500 times, you have already over-fetched data and broken pagination. Page 1 might shrink to three visible rows. Page 2 might include records that should have been on page 1. Search counts become misleading.
+Those are not interchangeable. If you load 500 rows and then call a permission service 500 times, you have already over-fetched data and broken pagination. Page 1 might shrink to three visible rows. Page 2 might include records that should have been on page 1.
 
-The authorization predicate has to be inside the query.
+The authorization check has to run in the database, as part of reading the page.
 
 ## Why owner_id breaks
 
@@ -76,7 +76,7 @@ Every child todo inherits access from the tenant resource. The sample could add 
 
 ## The Todo item describes its FGA resource
 
-Every protected entity implements `ISqlOSResourceEntity`. The stored `ResourceId` remains the bridge for SQL query filtering, while the other properties tell SqlOS how to maintain the backing FGA resource:
+Every protected entity implements `ISqlOSResourceEntity`. The stored `ResourceId` remains the bridge between the row and its authorization check, while the other properties tell SqlOS how to maintain the backing FGA resource:
 
 ```csharp
 using SqlOS.Fga.Interfaces;
@@ -100,11 +100,11 @@ public sealed class TodoItem : ISqlOSResourceEntity
 }
 ```
 
-The todo row can still have app-specific columns, indexes, and constraints. SqlOS uses `ResourceId` to compose the authorization predicate and uses the entity-backed resource contract to sync the FGA resource row during `SaveChangesAsync`.
+The todo row can still have app-specific columns, indexes, and constraints. SqlOS uses `ResourceId` to check the rows of a page and uses the entity-backed resource contract to sync the FGA resource row during `SaveChangesAsync`.
 
 ## The DbContext maps the SQL function
 
-The Todo sample context derives from `SqlOSDbContext<TContext>`, which registers the SqlOS EF model and TVF mapping:
+The Todo sample context derives from `SqlOSDbContext<TContext>`, which registers the SqlOS EF model and TVF mapping and keeps declared page orders current on save:
 
 ```csharp
 public sealed class TodoSampleDbContext(DbContextOptions<TodoSampleDbContext> options)
@@ -119,12 +119,15 @@ public sealed class TodoSampleDbContext(DbContextOptions<TodoSampleDbContext> op
             entity.HasKey(x => x.Id);
             entity.Property(x => x.ResourceId).HasMaxLength(450).IsRequired();
             entity.HasIndex(x => x.ResourceId).IsUnique();
+            entity.HasIndex(x => new { x.CreatedAt, x.Id });
+            // The list pages newest first; SqlOS keeps this order under every node.
+            entity.HasPageOrder(x => x.CreatedAt);
         });
     }
 }
 ```
 
-SqlOS creates the backing SQL Server function during host startup. EF Core can then translate a normal LINQ expression into SQL that calls the inline table-valued function.
+SqlOS creates the backing SQL Server function during host startup, and `ToPageAsync` calls it to check the rows of a page. `HasPageOrder` adds a table for the newest-first order to the EF model, so the next migration creates it. Without the declaration, pages still return the right rows, but a user who can see a few todos reads the table to fill one.
 
 ## Before and after
 
@@ -134,36 +137,37 @@ The fragile version asks the app table to carry all authorization meaning:
 var items = await dbContext.TodoItems
     .AsNoTracking()
     .Where(x => x.OwnerSubjectId == currentSubjectId)
-    .OrderBy(x => x.IsCompleted)
-    .ThenBy(x => x.CreatedAt)
+    .OrderByDescending(x => x.CreatedAt)
     .ToListAsync();
 ```
 
-That is okay only while each todo has one owner and no sharing. The SqlOS version asks FGA for a query predicate:
+That is okay only while each todo has one owner and no sharing. The SqlOS version pages the same query for a subject and a permission:
 
 ```csharp
-var filter = await fgaAuthService.BuildFilterAsync<TodoItem>(
-    subjectId,
-    TodoFgaService.TodoReadPermission);
-
-var items = await dbContext.TodoItems
+var page = await dbContext.TodoItems
     .AsNoTracking()
-    .Where(filter)
-    .OrderBy(x => x.IsCompleted)
-    .ThenBy(x => x.CreatedAt)
-    .Select(x => new
-    {
-        x.Id,
-        x.ResourceId,
-        x.Title,
-        x.IsCompleted,
-        x.CreatedAt,
-        x.CompletedAt
-    })
-    .ToListAsync(cancellationToken);
+    .OrderByDescending(x => x.CreatedAt)
+    .ToPageAsync(
+        subjectId,
+        TodoFgaService.TodoReadPermission,
+        pageSize: 20,
+        cursor,
+        cancellationToken);
+
+return Results.Ok(page.ToResponse(x => new
+{
+    x.Id,
+    x.ResourceId,
+    x.Title,
+    x.IsCompleted,
+    x.CreatedAt,
+    x.CompletedAt
+}));
 ```
 
-That filter composes with search, sort, projection, and pagination. It does not load unauthorized rows into memory first.
+`ToPageAsync` takes the `Where`, `OrderBy`, includes, and tracking you already write; project the page afterwards with `ToResponse`. It does not load unauthorized rows into memory first. The response is `{ data, pageSize, nextCursor, hasNextPage }`, and the client passes `nextCursor` back as `cursor` for the next page.
+
+The page is the only way to read an authorized list. SqlOS has no authorized count and no unpaged list, because both cost every row the caller can see.
 
 ## Creating rows and resources together
 
@@ -207,7 +211,7 @@ That is the practical advantage of keeping app data and authorization data in th
 
 ## Mutations use point checks
 
-List endpoints use filters. Mutations still use explicit checks against one resource:
+List endpoints use pages. Mutations still use explicit checks against one resource:
 
 ```csharp
 var access = await fgaAuthService.CheckAccessAsync(
@@ -251,7 +255,7 @@ This is useful during development and support. If a customer says, "I should see
 SqlOS FGA is not just a more expressive `CanEdit` helper. It solves the list problem:
 
 - list only authorized rows
-- keep authorization inside the SQL query
+- keep the authorization check in SQL Server, with the page
 - combine auth with search, sorting, and pagination
 - support inherited access through a resource tree
 - avoid per-row HTTP checks
@@ -262,6 +266,6 @@ If you are evaluating Auth0 FGA or WorkOS FGA, the next posts compare the archit
 Next reading:
 
 - [Todo Sample](/docs/authserver/todo-sample)
-- [List Filtering](/docs/fga/list-filter)
+- [Paginating authorized lists](/docs/guides/paginating-authorized-lists)
 - [FGA Overview](/docs/fga/overview)
 - [Row-Level Security with EF Core, SQL Server, and TVFs](/blog/row-level-security-ef-core-sql-server-tvfs)

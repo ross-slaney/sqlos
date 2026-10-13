@@ -1,24 +1,24 @@
 ---
 title: "FGA Overview"
-description: "Hierarchical authorization for .NET apps with query-time filtering."
+description: "Hierarchical authorization for .NET apps, evaluated in SQL."
 section: "authorization"
 order: 0
 ---
 
 <Banner
   eyebrow="Hierarchical authorization"
-  title="Model access as a tree and push the filtering work into SQL"
+  title="Model access as a tree and push the authorization work into SQL"
   href="../getting-started"
   actionLabel="Start building"
 >
-  FGA is the authorization half of SqlOS. Roles and grants live on resources, child resources inherit access, and EF queries get translated into SQL-backed authorization filters instead of post-processing rows in memory.
+  FGA is the authorization half of SqlOS. Roles and grants live on resources, child resources inherit access, and list endpoints read one authorized page in SQL instead of post-processing rows in memory.
 </Banner>
 
-FGA models resources as a tree. You grant roles on a node. Child nodes inherit access. EF sends filters to SQL Server or PostgreSQL. You do not load everything and filter in memory.
+FGA models resources as a tree. You grant roles on a node. Child nodes inherit access. A list endpoint reads one authorized page from SQL Server or PostgreSQL; a detail endpoint checks one resource. You do not load everything and filter in memory.
 
 ![A root administrator sees both workspaces, a team grant reaches one workspace's documents, and a guest grant reaches only its shared document.](/docs/fga-resource-tree.png)
 
-[Designing your resource tree](/docs/fga/designing-your-resource-tree) explains grant placement, groups, and query performance, including the cost of sparse access.
+[Designing your resource tree](/docs/fga/designing-your-resource-tree) explains grant placement, groups, and query performance, including what a page costs. [Paginating authorized lists](/docs/guides/paginating-authorized-lists) covers `HasPageOrder` and `ToPageAsync`.
 
 ## How it works
 
@@ -42,31 +42,29 @@ Define resources (projects, chains, stores), roles (admin, viewer), and permissi
 <CardGrid cols={3}>
   <Card title="Resources" description="Organizations, projects, chains, stores, or any hierarchy you define." />
   <Card title="Roles and permissions" description="Attach reusable permission bundles to a resource and inherit them downward." />
-  <Card title="Query filters" description="Push auth checks into SQL instead of loading data and trimming it in memory." />
+  <Card title="Authorized pages" description="Read the page a caller may see in SQL instead of loading data and trimming it in memory." />
 </CardGrid>
 
-## Query-time filtering
+## Reading authorized data
 
-<Tabs defaultValue="filters">
+<Tabs defaultValue="pages">
   <TabsList>
-    <TabsTrigger value="filters">Query filters</TabsTrigger>
+    <TabsTrigger value="pages">Pages</TabsTrigger>
     <TabsTrigger value="checks">Point checks</TabsTrigger>
   </TabsList>
 
-  <TabsContent value="filters">
-    The core feature. Instead of loading all records and filtering in memory, FGA pushes authorization into the SQL query:
+  <TabsContent value="pages">
+    The core feature. Instead of loading all records and filtering in memory, a list endpoint reads one authorized page of its EF Core query:
 
     ```csharp
-    var filter = await authService
-        .BuildFilterAsync<Chain>(subjectId, "CHAIN_VIEW");
-
-    var chains = await dbContext.Chains
-        .Where(filter)
+    var page = await dbContext.Chains
         .OrderBy(c => c.Name)
-        .ToListAsync();
+        .ToPageAsync(subjectId, "CHAIN_VIEW", pageSize: 20, cursor, ct);
+
+    return Results.Ok(page.ToResponse(c => new ChainDto(c.Id, c.Name)));
     ```
 
-    Users only see rows they may access. Under the hood that becomes a call to the recursive authorization function on SQL Server or PostgreSQL.
+    Users only see rows they may access. SqlOS checks rows with the recursive authorization function on SQL Server or PostgreSQL. Declare the order with `HasPageOrder(c => c.Name)` and a page costs about a page for any caller. SqlOS has no authorized count or join, because those cost every row the caller can see; page instead. See [Authorized pages](/docs/fga/list-filter).
   </TabsContent>
 
   <TabsContent value="checks">
@@ -104,7 +102,7 @@ var app = builder.Build();
 ![FGA Resources](/docs/dashboard-fga-resources.png)
 
 <Callout type="info" title="FGA stays close to your data">
-  The value proposition is not just expressive permissions. It is that the same authorization model can drive list filtering, detail checks, dashboard inspection, and SQL-native enforcement from one runtime.
+  The value proposition is not just expressive permissions. It is that the same authorization model can drive authorized pages, detail checks, dashboard inspection, and SQL-native enforcement from one runtime.
 </Callout>
 
 ## Key concepts
@@ -121,5 +119,5 @@ var app = builder.Build();
 
 - [Model FGA for multi-tenant apps](/docs/fga/overview)
 - [Turn AuthServer memberships into FGA access](/docs/guides/authserver-to-fga)
-- [Filter EF queries with FGA](/docs/fga/list-filter)
+- [Authorized pages](/docs/fga/list-filter)
 - [The Developer's Guide to Hierarchical RBAC](/blog/developers-guide-to-hierarchical-rbac)

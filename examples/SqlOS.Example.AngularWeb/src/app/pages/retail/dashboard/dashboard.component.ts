@@ -293,7 +293,7 @@ export class DashboardComponent implements OnInit {
         locRes.data.map(async (store) => {
           const inv = await this.api.get<PagedResponse<InventoryItemDto>>(
             `/api/locations/${store.id}/inventory?pageSize=250`
-          ).catch(() => ({ data: [] as InventoryItemDto[], totalCount: 0, hasMore: false }));
+          ).catch((): PagedResponse<InventoryItemDto> => ({ data: [], pageSize: 0, nextCursor: null, hasNextPage: false }));
           return { store, items: inv.data };
         })
       );

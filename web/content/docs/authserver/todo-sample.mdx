@@ -14,7 +14,7 @@ It keeps the model intentionally small:
 - a Razor Pages client using ASP.NET Core OAuth, PKCE, and cookies;
 - one user = one tenant boundary;
 - one tenant resource with child Todo resources;
-- SQL-backed FGA list filtering and permission checks in minimal APIs;
+- SQL-backed FGA authorized pages and permission checks in minimal APIs;
 - exact-audience access-token validation;
 - protected-resource metadata for MCP clients;
 - preregistered browser, local development, and CLI clients;
@@ -38,7 +38,7 @@ Use the authenticated Aspire dashboard URL printed in the terminal (its configur
 | URL | Experience |
 | --- | --- |
 | `http://localhost:5090` | ASP.NET Core OpenID Connect + PKCE, secure application cookie, `/api/me`, and revoking logout |
-| `http://localhost:5080` | Hosted-login Todo CRUD client and FGA-filtered data |
+| `http://localhost:5080` | Hosted-login Todo CRUD client and FGA-authorized data |
 | `http://localhost:5080/sqlos` | Auth, FGA, client, session, and audit administration |
 
 Create a password account and organization through the hosted AuthPage. No provider secrets are needed.
@@ -86,7 +86,7 @@ Role and permission matrix:
 
 The app grants `tenant_owner` on the user tenant node. Child Todo resources inherit access from that node, so the sample can:
 
-- list Todos with `BuildFilterAsync<TodoItem>(...)`;
+- page Todos, newest first, with `ToPageAsync(subjectId, "TODO_READ", ...)` over the declared order `HasPageOrder(x => x.CreatedAt)`;
 - authorize create against the tenant node;
 - authorize toggle and delete against each Todo resource.
 
