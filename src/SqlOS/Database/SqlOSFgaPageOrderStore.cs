@@ -33,3 +33,13 @@ internal sealed record SqlOSFgaPageOrderStore(
     string AppKeyColumn,
     string AppResourceIdColumn,
     string KeyStoreType);
+
+/// <summary>
+/// The resources one save changed, as the names of their parameters (one resource-id list each). The
+/// rows under a moved, deactivated or reactivated resource are found by walking its descendants. An
+/// added or deleted resource stands alone: <c>ParentId</c> is a foreign key, so the only resources under
+/// it are ones the same save adds or deletes, which are in this list themselves.
+/// </summary>
+/// <param name="Moved">Resources whose parent or activity changed, or <see langword="null"/> for none.</param>
+/// <param name="AddedOrDeleted">Resources added or deleted, or <see langword="null"/> for none.</param>
+internal sealed record SqlOSFgaChangedResources(string? Moved, string? AddedOrDeleted);

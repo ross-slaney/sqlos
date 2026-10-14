@@ -127,7 +127,7 @@ var page = await dbContext.Projects
     .ToPageAsync(subjectId, "PROJECT_VIEW", pageSize: 20, cursor, cancellationToken);
 ```
 
-The list comes back a page at a time, with `page.NextCursor` for the next one. When `Project` declares that order with `HasPageOrder(x => x.Name)`, a caller who can see a few projects does not read the whole table to fill a page. A single project is a `CheckAccessAsync` call.
+The list comes back a page at a time, with `page.NextCursor` for the next one. A caller who can see a few projects does not read the whole table to fill a page: SqlOS reads their rows through the node index it keeps for `Project`, and `HasPageOrder(x => x.Name)` makes that sort about a page. A single project is a `CheckAccessAsync` call.
 
 The login and authorization models are not separate vendors or separate services. They are one SqlOS runtime in your app.
 

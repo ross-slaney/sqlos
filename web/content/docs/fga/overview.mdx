@@ -18,7 +18,7 @@ FGA models resources as a tree. You grant roles on a node. Child nodes inherit a
 
 ![A root administrator sees both workspaces, a team grant reaches one workspace's documents, and a guest grant reaches only its shared document.](/docs/fga-resource-tree.png)
 
-[Designing your resource tree](/docs/fga/designing-your-resource-tree) explains grant placement, groups, and query performance, including what a page costs. [Paginating authorized lists](/docs/guides/paginating-authorized-lists) covers `HasPageOrder` and `ToPageAsync`.
+[Designing your resource tree](/docs/fga/designing-your-resource-tree) explains grant placement, groups, and query performance, including what a page costs. [Paginating authorized lists](/docs/guides/paginating-authorized-lists) covers `ToPageAsync`, and [Optimizing page performance](/docs/guides/optimizing-page-orders) covers `HasPageOrder`.
 
 ## How it works
 
@@ -64,7 +64,7 @@ Define resources (projects, chains, stores), roles (admin, viewer), and permissi
     return Results.Ok(page.ToResponse(c => new ChainDto(c.Id, c.Name)));
     ```
 
-    Users only see rows they may access. SqlOS checks rows with the recursive authorization function on SQL Server or PostgreSQL. Declare the order with `HasPageOrder(c => c.Name)` and a page costs about a page for any caller. SqlOS has no authorized count or join, because those cost every row the caller can see; page instead. See [Authorized pages](/docs/fga/list-filter).
+    Users only see rows they may access. SqlOS checks rows with the recursive authorization function on SQL Server or PostgreSQL. Any sort pages, at a cost bounded by the rows the caller can see; declare a hot sort with `HasPageOrder(c => c.Name)` and a page by it costs about a page for any caller. SqlOS has no authorized count or join, because those cost every row the caller can see; page instead. See [Authorized pages](/docs/fga/list-filter).
   </TabsContent>
 
   <TabsContent value="checks">

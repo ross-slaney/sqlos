@@ -86,7 +86,7 @@ Role and permission matrix:
 
 The app grants `tenant_owner` on the user tenant node. Child Todo resources inherit access from that node, so the sample can:
 
-- page Todos, newest first, with `ToPageAsync(subjectId, "TODO_READ", ...)` over the declared order `HasPageOrder(x => x.CreatedAt)`;
+- page Todos, newest first, with `ToPageAsync(subjectId, "TODO_READ", ...)`, with no page order declared: SqlOS reads the caller's todos through the node index it keeps for `TodoItem`;
 - authorize create against the tenant node;
 - authorize toggle and delete against each Todo resource.
 

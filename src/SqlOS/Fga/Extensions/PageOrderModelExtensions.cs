@@ -6,14 +6,16 @@ using SqlOS.Fga.Paging;
 namespace SqlOS.Fga.Extensions;
 
 /// <summary>
-/// Declares the orders an authorized list is paged by with <c>ToPageAsync</c>.
+/// Optimizes the orders an authorized list is paged by with <c>ToPageAsync</c>.
 /// </summary>
 public static class PageOrderModelExtensions
 {
     /// <summary>
-    /// Declares an order this entity is paged by. SqlOS keeps a copy of the order under every node
-    /// of the resource tree in a table of its own (<c>SqlOSFgaPage_{Table}_{Columns}</c>), so a page
-    /// costs about a page for any caller.
+    /// Declares an order this entity is paged by, as an optimization: SqlOS keeps a copy of the order
+    /// under every node of the resource tree in a table of its own
+    /// (<c>SqlOSFgaPage_{Table}_{Columns}</c>), so a page by exactly this order costs about a page for
+    /// any caller. Every order pages without a declaration, at a cost bounded by the rows the caller
+    /// can see; declare the hot ones.
     /// </summary>
     /// <typeparam name="T">The entity type exposing the FGA resource identifier.</typeparam>
     /// <param name="entity">The entity type builder.</param>
@@ -26,7 +28,9 @@ public static class PageOrderModelExtensions
     /// <remarks>
     /// <para>
     /// The declaration adds a table to the EF model, so the application's next migration (or a
-    /// model-driven schema tool) creates it. Declaring the same order twice is a no-op.
+    /// model-driven schema tool) creates it. Declaring the same order twice is a no-op, and so is
+    /// declaring the key alone: that is the node index SqlOS keeps for every protected entity. A page
+    /// uses the declaration when its order has exactly these columns, in either direction.
     /// </para>
     /// <para>
     /// Order columns must be non-nullable mapped scalar properties; strings need a maximum length.

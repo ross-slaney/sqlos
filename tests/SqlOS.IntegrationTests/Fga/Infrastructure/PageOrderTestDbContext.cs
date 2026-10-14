@@ -6,7 +6,8 @@ using SqlOS.IntegrationTests.Infrastructure;
 namespace SqlOS.IntegrationTests.Fga.Infrastructure;
 
 /// <summary>
-/// A <c>SqlOSDbContext</c> over the shared test database with page-ordered application tables.
+/// A <c>SqlOSDbContext</c> over the shared test database with protected application tables: some
+/// orders declared with <c>HasPageOrder</c>, the rest plain (served through each entity's node index).
 /// </summary>
 public sealed class PageOrderTestDbContext : SqlOSDbContext<PageOrderTestDbContext>
 {
@@ -15,6 +16,13 @@ public sealed class PageOrderTestDbContext : SqlOSDbContext<PageOrderTestDbConte
     public const string CounterEntries = "SqlOSFgaPage_PagedCounters_Rank";
     public const string WorkItemEntries = "SqlOSFgaPage_PagedWorkItems_Rank";
     public const string ScoreEntries = "SqlOSFgaPage_PagedScores_Score";
+
+    // The node index SqlOS adds for every protected entity.
+    public const string DocumentNodeIndex = "SqlOSFgaPage_PagedDocuments_Id";
+    public const string CounterNodeIndex = "SqlOSFgaPage_PagedCounters_Id";
+    public const string WorkItemNodeIndex = "SqlOSFgaPage_PagedWorkItems_Id";
+    public const string ScoreNodeIndex = "SqlOSFgaPage_PagedScores_Id";
+    public const string EventNodeIndex = "SqlOSFgaPage_PagedEvents_Id";
 
     public PageOrderTestDbContext(DbContextOptions<PageOrderTestDbContext> options)
         : base(options)
@@ -26,6 +34,7 @@ public sealed class PageOrderTestDbContext : SqlOSDbContext<PageOrderTestDbConte
     public DbSet<PagedCounter> Counters => Set<PagedCounter>();
     public DbSet<PagedWorkItem> WorkItems => Set<PagedWorkItem>();
     public DbSet<PagedScore> Scores => Set<PagedScore>();
+    public DbSet<PagedEvent> Events => Set<PagedEvent>();
 
     protected override void OnApplicationModelCreating(ModelBuilder modelBuilder)
     {
@@ -85,6 +94,17 @@ public sealed class PageOrderTestDbContext : SqlOSDbContext<PageOrderTestDbConte
                 .HasComputedColumnSql(TestDatabase.IsPostgreSql ? "\"Points\" * 10" : "[Points] * 10", stored: true);
             entity.HasPageOrder(score => score.Score);
         });
+
+        modelBuilder.Entity<PagedEvent>(entity =>
+        {
+            entity.ToTable("PagedEvents");
+            entity.HasKey(item => item.Id);
+            entity.Property(item => item.ResourceId).HasMaxLength(450);
+            entity.HasIndex(item => item.ResourceId);
+            // The application's index for its order. It carries ResourceId so that read 1 reads one
+            // index row per row on both engines, which keeps the plan counts of the work tests exact.
+            entity.HasIndex(item => new { item.Sequence, item.Id, item.ResourceId });
+        });
     }
 }
 
@@ -132,6 +152,14 @@ public sealed class PagedScore : IHasResourceId
     public string ResourceId { get; set; } = string.Empty;
     public int Points { get; set; }
     public int Score { get; set; }
+}
+
+/// <summary>Rows paged by an order no page order declares, for the plain work tests.</summary>
+public sealed class PagedEvent : IHasResourceId
+{
+    public Guid Id { get; set; }
+    public string ResourceId { get; set; } = string.Empty;
+    public int Sequence { get; set; }
 }
 
 /// <summary>Rows that share their folder's resource, for the work test.</summary>

@@ -45,17 +45,19 @@ var page = await db.Workspaces
 
 Use plain `IHasResourceId` directly for lower-level/manual resources where your application owns the FGA resource lifecycle. Use `ISqlOSResourceEntity` for the normal SDK path.
 
-## Declare the orders a list is paged by
+## The node index, and optional page orders
 
-Declare each order a list pages by next to the entity's mapping, and SqlOS keeps a copy of that order under every node of the resource tree, so a page costs about a page for any caller:
+Every entity that implements `IHasResourceId` in a `SqlOSDbContext<TContext>` gets a node index: a table of SqlOS's own (`SqlOSFgaPage_Workspaces_Id`) listing which rows sit under which node of the resource tree. Your next migration creates it, and SqlOS keeps it current on every save. `ToPageAsync` reads it to page any order at a cost bounded by the rows the caller can see.
+
+To make one sort about a page for any caller, declare it next to the entity's mapping, and SqlOS also keeps a copy of that order under every node:
 
 ```csharp
 modelBuilder.Entity<Workspace>(entity =>
 {
     entity.HasKey(x => x.Id);
     entity.Property(x => x.Name).HasMaxLength(200);
-    entity.HasPageOrder(x => x.Name);   // (Name, Id)
+    entity.HasPageOrder(x => x.Name);   // optional: (Name, Id)
 });
 ```
 
-`ResourceId` stays the only connection between your table and SqlOS: the declared order lives in a table of SqlOS's own (`SqlOSFgaPage_Workspaces_Name`) that your next migration creates. Order columns are non-nullable, strings need a maximum length, and the entity needs a single-column primary key. See [Paginating authorized lists](/docs/guides/paginating-authorized-lists).
+`ResourceId` stays the only connection between your table and SqlOS: the node index and the declared order live in tables of SqlOS's own (`SqlOSFgaPage_Workspaces_Id`, `SqlOSFgaPage_Workspaces_Name`). Order columns are non-nullable, strings need a maximum length, and the entity needs a single-column primary key. See [Optimizing page performance](/docs/guides/optimizing-page-orders).

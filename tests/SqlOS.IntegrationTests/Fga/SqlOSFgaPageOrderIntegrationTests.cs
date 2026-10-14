@@ -13,7 +13,8 @@ namespace SqlOS.IntegrationTests.Fga;
 
 /// <summary>
 /// ToPageAsync returns, page by page, exactly the rows <c>CheckAccessAsync</c> allows one by one, in
-/// the query's order, for every caller, order, direction, page size and application filter.
+/// the query's order, for every caller, order (declared or plain), direction, page size and
+/// application filter.
 /// </summary>
 [TestClass]
 public class SqlOSFgaPageOrderIntegrationTests
@@ -29,7 +30,7 @@ public class SqlOSFgaPageOrderIntegrationTests
             await using var context = PageOrderFixture.CreateContext();
             var documents = await context.Documents.AsNoTracking().ToListAsync();
             var allowed = await PageOrderFixture.AllowedResourcesAsync(caller, documents.Select(document => document.ResourceId));
-            foreach (var order in new[] { "Rank", "Title" })
+            foreach (var order in PageOrderFixture.Orders)
             {
                 foreach (var descending in new[] { false, true })
                 {
@@ -281,23 +282,37 @@ public class SqlOSFgaPageOrderIntegrationTests
     }
 
     [TestMethod]
-    public async Task UndeclaredOrder_ReturnsTheRightPages_AndWarnsOnce()
+    public async Task PlainOrder_ReturnsTheRightPages_WithoutAWarning_AndTheDebugLineNamesTheRead()
     {
         var logs = new CapturingLoggerFactory();
         await using var context = PageOrderFixture.CreateContext(logs);
         var ordered = context.Documents.AsNoTracking().OrderBy(document => document.CreatedAt);
         var expected = await PageOrderFixture.ExpectedAsync(context.Documents, "CreatedAt", false, PageOrderFixture.DirectSubjectId);
 
-        var firstWalk = await PageOrderFixture.WalkAsync(ordered, PageOrderFixture.DirectSubjectId, 2);
-        var secondWalk = await PageOrderFixture.WalkAsync(ordered, PageOrderFixture.DirectSubjectId, 2);
+        var pages = await PageOrderFixture.WalkAsync(ordered, PageOrderFixture.DirectSubjectId, 2);
 
-        AssertPages(firstWalk, expected, 2, "undeclared CreatedAt");
-        AssertPages(secondWalk, expected, 2, "undeclared CreatedAt, again");
-        logs.Entries.Where(entry => entry.Level == LogLevel.Warning && entry.Category == "SqlOS.Fga")
+        AssertPages(pages, expected, 2, "plain CreatedAt");
+        logs.Entries.Where(entry => entry.Category == "SqlOS.Fga" && entry.Level >= LogLevel.Warning).Should().BeEmpty();
+        logs.Entries.Where(entry => entry.Category == "SqlOS.Fga" && entry.Level == LogLevel.Debug)
+            .Should().HaveCount(pages.Count)
+            .And.OnlyContain(entry => entry.Message.StartsWith("ToPageAsync PagedDocument by CreatedAt, Id asc (page order not declared): ", StringComparison.Ordinal)
+                && entry.Message.Contains("page from read 3;", StringComparison.Ordinal),
+                "the caller sees 3 of 150 documents, so its rows, sorted, are the pages");
+    }
+
+    [TestMethod]
+    public async Task OrderThatExtendsADeclaredOne_IsPlain()
+    {
+        var logs = new CapturingLoggerFactory();
+        await using var context = PageOrderFixture.CreateContext(logs);
+
+        // Title is declared; Title then Rank is not: a declaration serves exactly its columns.
+        await context.Documents.OrderBy(document => document.Title).ThenBy(document => document.Rank)
+            .ToPageAsync(PageOrderFixture.DirectSubjectId, PageOrderFixture.ViewPermission, 5);
+
+        logs.Entries.Where(entry => entry.Category == "SqlOS.Fga" && entry.Level == LogLevel.Debug)
             .Should().ContainSingle()
-            .Which.Message.Should().StartWith("ToPageAsync scanned ")
-            .And.Contain("of PagedDocument ordered by CreatedAt, Id asc to fill a page of 2")
-            .And.Contain("Declare modelBuilder.Entity<PagedDocument>().HasPageOrder(e => e.CreatedAt) and add a migration.");
+            .Which.Message.Should().StartWith("ToPageAsync PagedDocument by Title, Rank, Id asc (page order not declared): ");
     }
 
     [TestMethod]

@@ -13,9 +13,10 @@ using SqlOS.Fga.Paging;
 namespace SqlOS.Fga;
 
 /// <summary>
-/// Keeps page-order entries equal to what a rebuild would write. <c>SqlOSDbContext&lt;TContext&gt;</c>
-/// sends a save that changes a resource, or a row of an entity with a page order, through here: the
-/// save, then the entries of the rows it changed, in one transaction, so rows and entries never disagree.
+/// Keeps page-order entries equal to what a rebuild would write: the node index of every protected
+/// entity and every declared order. <c>SqlOSDbContext&lt;TContext&gt;</c> sends a save that changes a
+/// resource, or a row of an entity with a page order, through here: the save, then the entries of the
+/// rows it changed, in one transaction, so rows and entries never disagree.
 /// </summary>
 /// <remarks>
 /// An entry <c>(NodeId = X, RowKey = r)</c> exists when X is the row's own resource or an ancestor
@@ -26,7 +27,8 @@ namespace SqlOS.Fga;
 internal static class SqlOSFgaPageOrderMaintenance
 {
     private const string KeysParameter = "@keys";
-    private const string ResourceIdsParameter = "@resourceIds";
+    private const string MovedResourcesParameter = "@movedResources";
+    private const string AddedOrDeletedResourcesParameter = "@addedOrDeletedResources";
     private const string SavepointName = "SqlOSPageOrders";
     private static readonly TimeSpan RebuildLockTimeout = TimeSpan.FromMinutes(10);
 
@@ -35,12 +37,21 @@ internal static class SqlOSFgaPageOrderMaintenance
     {
         /// <summary>The provider keys of the changed rows, by the root entity type that declares the orders.</summary>
         public Dictionary<IEntityType, List<object>> Keys { get; } = [];
-        public HashSet<string> ChangedResources { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>Resources whose parent or activity changed: the rows under them move with them.</summary>
+        public HashSet<string> MovedResources { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Resources added or deleted. <c>ParentId</c> is a foreign key, so the only resources under one
+        /// are resources this save adds or deletes too: no walk below them is needed.
+        /// </summary>
+        public HashSet<string> AddedOrDeletedResources { get; } = new(StringComparer.Ordinal);
     }
 
     /// <summary>
     /// Whether a save can change entries: it adds, modifies or deletes a resource or a row of an
-    /// entity with a page order. Read before the save, so that the save and the entries can share a transaction.
+    /// entity with a page order, which every protected entity has (its node index). Read before the
+    /// save, so that the save and the entries can share a transaction.
     /// </summary>
     public static bool MayChange(DbContext context)
     {
@@ -83,11 +94,14 @@ internal static class SqlOSFgaPageOrderMaintenance
                 {
                     // An added resource can be the resource of rows saved before it, or of rows whose
                     // resource was deleted and is added again.
-                    if (entry.State != EntityState.Modified
-                        || entry.Property(nameof(SqlOSFgaResource.ParentId)).IsModified
+                    if (entry.State != EntityState.Modified)
+                    {
+                        (plan ??= new Plan()).AddedOrDeletedResources.Add(resource.Id);
+                    }
+                    else if (entry.Property(nameof(SqlOSFgaResource.ParentId)).IsModified
                         || entry.Property(nameof(SqlOSFgaResource.IsActive)).IsModified)
                     {
-                        (plan ??= new Plan()).ChangedResources.Add(resource.Id);
+                        (plan ??= new Plan()).MovedResources.Add(resource.Id);
                     }
 
                     continue;
@@ -203,8 +217,8 @@ internal static class SqlOSFgaPageOrderMaintenance
     }
 
     /// <summary>
-    /// Rewrites every declared order: all entries deleted, then inserted from the application table
-    /// and the resource graph in one statement, one transaction per order.
+    /// Rewrites every page order, node indexes included: all entries deleted, then inserted from the
+    /// application table and the resource graph in one statement, one transaction per order.
     /// </summary>
     public static async Task RebuildAsync(DbContext context, ILogger logger, CancellationToken cancellationToken)
     {
@@ -218,7 +232,8 @@ internal static class SqlOSFgaPageOrderMaintenance
             var written = await RebuildOrderAsync(context, order, onlyIfEmpty: false, cancellationToken);
             SqlOSFgaPageOrders.SetTableMissing(context.Model, order, missing: false);
             logger.LogInformation(
-                "Rebuilt page order {PageOrder}: {Entries} entries in {Table}.",
+                "Rebuilt {Kind} {PageOrder}: {Entries} entries in {Table}.",
+                order.Kind.ToLowerInvariant(),
                 order.Description,
                 written,
                 order.Table);
@@ -226,16 +241,25 @@ internal static class SqlOSFgaPageOrderMaintenance
     }
 
     /// <summary>
-    /// Startup step after the FGA functions are installed: fills the entry table of an order whose
-    /// table exists and is empty while its application table has rows (the first start after the
-    /// order was declared). A missing entry table is logged and skipped; pages for that order run
-    /// without it until it exists.
+    /// Startup step after the FGA functions are installed: logs each protected entity that has no
+    /// node index, and fills the entry table of an order whose table exists and is empty while its
+    /// application table has rows (the first start after the order was declared, or after the node
+    /// index was added). A missing entry table is logged and skipped; pages run without it until it exists.
     /// </summary>
     public static async Task ReconcileAsync(DbContext context, ILogger logger, CancellationToken cancellationToken)
     {
         if (!context.Database.IsRelational())
         {
             return;
+        }
+
+        foreach (var (entityType, reason) in SqlOSFgaPageOrders.Unindexed(context.Model))
+        {
+            logger.LogWarning(
+                "{Entity} implements IHasResourceId but has no node index: {Reason} Without one, ToPageAsync pages {Entity} by reading the table in the page's order and checking each row.",
+                entityType.ClrType.Name,
+                reason,
+                entityType.ClrType.Name);
         }
 
         var orders = SqlOSFgaPageOrders.All(context.Model);
@@ -252,11 +276,23 @@ internal static class SqlOSFgaPageOrderMaintenance
             if (!await IsTrueAsync(context, provider.BuildTableExistsSql(store.EntrySchema, store.EntryTable), cancellationToken))
             {
                 SqlOSFgaPageOrders.SetTableMissing(context.Model, order, missing: true);
-                logger.LogWarning(
-                    "Page order {PageOrder}: table {Table} does not exist. Apply the migration that creates it. Until it exists, ToPageAsync pages {Entity} by this order without it, reading the table in order and checking each row.",
-                    order.Description,
-                    order.Table,
-                    order.EntityType.ClrType.Name);
+                if (order.IsNodeIndex)
+                {
+                    logger.LogWarning(
+                        "Node index {PageOrder}: table {Table} does not exist. Apply the migration that creates it. Until it exists, ToPageAsync pages {Entity} by an order no page order declares by reading the table in that order and checking each row.",
+                        order.Description,
+                        order.Table,
+                        order.EntityType.ClrType.Name);
+                }
+                else
+                {
+                    logger.LogWarning(
+                        "Page order {PageOrder}: table {Table} does not exist. Apply the migration that creates it. Until it exists, ToPageAsync pages {Entity} by this order as by an order no page order declares.",
+                        order.Description,
+                        order.Table,
+                        order.EntityType.ClrType.Name);
+                }
+
                 continue;
             }
 
@@ -271,7 +307,8 @@ internal static class SqlOSFgaPageOrderMaintenance
             if (written is { } entries)
             {
                 logger.LogInformation(
-                    "Page order {PageOrder}: filled {Table} with {Entries} entries for the rows already in {AppTable}.",
+                    "{Kind} {PageOrder}: filled {Table} with {Entries} entries for the rows already in {AppTable}.",
+                    order.Kind,
                     order.Description,
                     order.Table,
                     entries,
@@ -411,7 +448,9 @@ internal static class SqlOSFgaPageOrderMaintenance
 
         var provider = SqlOSDatabase.Resolve(context.Database);
         var maxDepth = SqlOSFgaHierarchyDepth.Resolve(context.Database, context);
-        var resourceIds = plan.ChangedResources.Count > 0 ? ResourceIdsParameter : null;
+        var moved = plan.MovedResources.Count > 0 ? MovedResourcesParameter : null;
+        var addedOrDeleted = plan.AddedOrDeletedResources.Count > 0 ? AddedOrDeletedResourcesParameter : null;
+        var resources = moved == null && addedOrDeleted == null ? null : new SqlOSFgaChangedResources(moved, addedOrDeleted);
         var keyParameters = new Dictionary<IEntityType, string>();
         var parameters = new List<DbParameter>();
         var statements = new List<string>();
@@ -432,15 +471,15 @@ internal static class SqlOSFgaPageOrderMaintenance
                 parameters.Add(provider.CreatePageKeysParameter(keys, rowKeys));
             }
 
-            if (resourceIds == null && keys == null)
+            if (resources == null && keys == null)
             {
                 continue;
             }
 
             var store = order.Store(maxDepth);
-            if (resourceIds != null)
+            if (resources != null)
             {
-                statements.Add(provider.BuildDeletePageEntriesBySubtreeSql(store, resourceIds));
+                statements.Add(provider.BuildDeletePageEntriesBySubtreeSql(store, resources));
             }
 
             if (keys != null)
@@ -450,9 +489,9 @@ internal static class SqlOSFgaPageOrderMaintenance
                 statements.Add(provider.BuildDeletePageEntriesByKeysSql(store, keys));
             }
 
-            if (resourceIds != null)
+            if (resources != null)
             {
-                statements.Add(provider.BuildInsertPageEntriesBySubtreeSql(store, resourceIds, keys));
+                statements.Add(provider.BuildInsertPageEntriesBySubtreeSql(store, resources, keys));
             }
 
             if (keys != null)
@@ -466,12 +505,17 @@ internal static class SqlOSFgaPageOrderMaintenance
             return null;
         }
 
-        if (resourceIds != null)
+        if (moved != null)
         {
-            parameters.Add(provider.CreatePageResourceIdsParameter(resourceIds, plan.ChangedResources));
+            parameters.Add(provider.CreatePageResourceIdsParameter(moved, plan.MovedResources));
         }
 
-        return (string.Join("\n", statements), parameters.ToArray());
+        if (addedOrDeleted != null)
+        {
+            parameters.Add(provider.CreatePageResourceIdsParameter(addedOrDeleted, plan.AddedOrDeletedResources));
+        }
+
+        return (provider.WrapPageMaintenanceSql(string.Join("\n", statements)), parameters.ToArray());
     }
 
     private static async Task<int?> RebuildOrderAsync(

@@ -1,0 +1,125 @@
+---
+title: "Optimizing page performance"
+description: "What an authorized page costs, and when to declare a sort with HasPageOrder."
+section: "authorization"
+group: "checks"
+order: 7
+---
+
+<Banner
+  eyebrow="Guide"
+  title="Declare the hot sorts"
+  href="/docs/guides/paginating-authorized-lists"
+  actionLabel="Paginating authorized lists"
+>
+  Every sort pages without a declaration, at a cost bounded by the rows the caller can see. HasPageOrder brings one sort down to about a page for every caller, for the price of a table SqlOS keeps current on every write.
+</Banner>
+
+`ToPageAsync` pages any order. [Paginating authorized lists](/docs/guides/paginating-authorized-lists) explains how a page runs; this guide is about what a page costs, and when a declaration is worth its storage and writes.
+
+## What a plain page costs
+
+A page by an order nobody declared reads your query in its order, checking each row, and in the same rounds reads the caller's own rows from the node index SqlOS keeps for the entity. Whichever settles first is the page. Call `R1` the rows of your query up to the page's last visible row, and `V` the rows the caller can see: a plain page reads at most about nine times the smaller of the two, plus a page.
+
+- **Callers who see most rows** get a page from about a page of work, as with a declared order.
+- **Callers who see few rows** read about their own rows plus a page.
+- **Callers whose rows are spread through the order** are the worst case: the smaller of the two is then at most about √(rows × page size), 4,472 for a million rows and a page of 20.
+- **Callers whose rows bunch at the far end of the order** read about their own rows: the query finds none of them until the end, so the node index settles the page.
+
+The benchmark below measures every case at a million rows.
+
+### On PostgreSQL
+
+Two planner choices show in the PostgreSQL numbers below.
+
+- **The far-end page reads the whole table, by the planner's choice.** Once the budget holds the far-end caller's 20,000 rows, the page fetches them by key. With that many keys, a fiftieth of the table, PostgreSQL costs one parallel sequential scan of the table and 20,000 key lookups about the same, and it cannot tell keys that sit together from keys spread through the table. It chose the scan, which took 40 to 80 ms where the lookups took 18 ms. For 20,000 keys spread through the table, the scan took 41 ms and the lookups 83 ms. With parallel query off, the same page reads 74,145 rows (3.7 times the caller's rows) in about the same time. Most of the page's time is its first step, checking rows in order.
+- **JIT.** The first step checks each row with SqlOS's authorization function inlined into the query, so at large budgets its estimated cost crosses PostgreSQL's JIT thresholds and the statement is compiled before it runs. Pages that need several rounds pay that compilation. Deployments that serve OLTP traffic often turn `jit` off.
+
+## When to declare a sort
+
+Declare a sort when the bound is too much for a list you care about:
+
+- **A hot, large list whose callers often see a small part of it**: a store manager's view of every product, a member's view of an organization's documents. A plain page costs them their own rows; a declared one costs about a page.
+- **A list whose callers' rows bunch at one end of the order**: a role that only sees old rows, sorted newest first; an archive view sorted by a date the caller's rows all share. A plain page reads all of the caller's rows to find the first page.
+
+Leave a sort plain when its callers mostly see most of the list, when the caller's rows are few anyway, or when the list is small. Declaring every sort of every entity multiplies the storage and the write cost below for little gain.
+
+## Declare the order
+
+```csharp
+protected override void OnApplicationModelCreating(ModelBuilder modelBuilder)
+{
+    modelBuilder.Entity<Product>(entity =>
+    {
+        entity.HasKey(p => p.Id);
+        entity.HasIndex(p => p.ResourceId).IsUnique();
+        entity.HasIndex(p => new { p.Price, p.Id });             // your index for the order
+        entity.HasPageOrder(p => p.Price);                       // (Price, Id)
+        entity.HasPageOrder(p => new { p.Status, p.CreatedAt }); // (Status, CreatedAt, Id)
+    });
+}
+```
+
+- The primary key is appended when it is not already last, so `(Price)` means `(Price, Id)`. Declaring the same order twice is a no-op, and so is declaring the key alone: that is the node index SqlOS keeps anyway.
+- Order columns are non-nullable mapped properties; strings need `HasMaxLength` (or an explicit column type). The entity needs a single-column primary key, a mapped `ResourceId`, and a table of its own: no owned types, views, or TPT/TPC inheritance (TPH is fine; declare the order on the root type). These rules are checked when the model is built, with the fix in the message.
+- Each declaration adds a table to your EF model, `SqlOSFgaPage_{Table}_{Columns}` in SqlOS's schema, so your next migration (or a model-driven tool such as EFCore.SchemaSync) creates it. Nothing is added to your own tables.
+- The first start after the migration fills the table from the rows already there, before the application serves requests, in about the time of a rebuild. Until the migration runs, pages by that order run as if it were not declared, and startup logs that the table is missing.
+- `SqlOSDbContext<TContext>` keeps it current on every save, and `ISqlOSFgaAuthService.RebuildPageOrdersAsync()` rewrites it after writes that bypass EF Core, as for the node index. See [Keeping page orders current](/docs/guides/paginating-authorized-lists#keeping-page-orders-current).
+
+### A declaration serves exactly its columns
+
+A page uses a declaration when its order has exactly the declared columns, in the declared sequence, in either direction. `OrderBy(p => p.Price)` and `OrderByDescending(p => p.Price)` both use `HasPageOrder(p => p.Price)`. `OrderBy(p => p.Price).ThenBy(p => p.Name)` does not: it is another order, plain unless you declare `HasPageOrder(p => new { p.Price, p.Name })`. Ordering by the key alone always uses the node index, so it costs about a page without a declaration.
+
+## Find the sorts worth declaring
+
+Turn on Debug logging for the `SqlOS.Fga` category. Each page logs one line:
+
+```text
+ToPageAsync Product by Price, Id asc (page order not declared): 5 round(s); read 1 rows per round [20, 80, 320, 1280, 5120]; read 2 entries per node per round []; read 3 keys per round [21, 81, 321, 1281, 2200]; page from read 3; 0 row(s) dropped by the final check; 83 ms.
+```
+
+- `page order not declared` and several rounds: the sort paid more than a page. Read 1 is your query, read 3 the caller's rows from the node index; their rows per round are what the page read.
+- `page from read 3` with large read 3 counts: the caller sees few rows of the list but many in all, or its rows sit at the far end of the order. A declaration makes this page about a page.
+- `page from read 1` in the first round: the caller sees most of the list. A declaration changes nothing for it.
+
+Count the lines per entity and order over a day of traffic, weighted by their rounds or their time: the sorts at the top are the candidates.
+
+## Plain versus declared, measured
+
+`tests/SqlOS.Benchmarks`, mode `page-orders-compare`: a million products under 5 divisions, 50 chains, 500 regions and 10,000 stores (each product has its own resource, so 6 entries per product per table), paged by `Price` with a page of 20, once with no declaration and once with `HasPageOrder(p => p.Price)`. The products table has its own indexes on `(Price, Id)` and `(StoreId, Price, Id)`. Rows read are the rows of the products table and of its page-order tables in the actual plans of every statement the page ran.
+
+| PostgreSQL, 1,000,000 products | Visible | min(R1, V) | plain ms | statements | rows read | `HasPageOrder(p => p.Price)` ms | statements | rows read |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Admin (root) | 1,000,000 | 20 | 13.1 | 4 | 40 | 14.6 | 4 | 40 |
+| Region manager (0.2%) | 2,000 | 2,000 | 842.4 | 14 | 12,544 | 15.8 | 5 | 80 |
+| Store manager (0.01%) | 100 | 100 | 53.8 | 10 | 742 | 16.0 | 5 | 80 |
+| 100 stores (1%) | 10,000 | 2,233 | 865.9 | 12 | 8,549 | 20.9 | 5 | 4,040 |
+| 10,000 single products | 10,000 | 1,452 | 2289.2 | 12 | 8,544 | 470.9 | 5 | 20,040 |
+| Far end (one chain, last in price) | 20,000 | 20,000 | 2629.0 | 16 | 1,054,147 | 16.5 | 5 | 80 |
+| Scoped (store manager, StoreId) | 100 | 20 | 14.5 | 4 | 40 | 13.3 | 4 | 40 |
+| Spread 0.01% | 100 | 100 | 53.6 | 10 | 742 | 15.5 | 5 | 80 |
+| Spread 0.1% | 1,000 | 1,000 | 169.8 | 12 | 4,142 | 16.3 | 5 | 440 |
+| Spread 0.45% | 4,500 | 3,825 | 873.8 | 12 | 8,549 | 17.8 | 5 | 1,840 |
+| Spread 1% | 10,000 | 1,928 | 839.5 | 12 | 8,549 | 20.2 | 5 | 4,040 |
+| Spread 5% | 50,000 | 367 | 190.6 | 10 | 2,142 | 38.9 | 5 | 20,040 |
+
+SQL Server: pending.
+
+## What a declaration costs
+
+- **Storage:** one entry per row per level of its resource path, with the order's columns, on top of the node index.
+- **Writes:** inserting a row, or changing its `ResourceId` or an order column, writes that many entries in the save's transaction, on top of the node index. Moving or deactivating a resource rewrites the entries of every row under it, in every table.
+- **A migration**, and a fill at the first start after it on a table that already has rows.
+
+| PostgreSQL, storage | Entries | Size |
+| --- | ---: | ---: |
+| `SqlOSFgaPage_Products_Id` | 6,000,000 | 550 MB |
+| `SqlOSFgaPage_Products_Price` | 6,000,000 | 706 MB |
+
+| PostgreSQL, writes (median ms) | no protected entity | plain (node index) | declared (node index + Price) |
+| --- | ---: | ---: | ---: |
+| Insert one product with its resource (median of 25 saves) | 1.3 | 3.8 | 4.5 |
+| Insert 1,000 products with their resources (one save) | 241.2 | 230.6 | 284.4 |
+| Move a region (2,000 products) to another chain (one save) | 5.2 | 137.0 | 379.9 |
+
+SQL Server: pending.

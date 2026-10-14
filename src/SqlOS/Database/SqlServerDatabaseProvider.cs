@@ -255,26 +255,24 @@ internal sealed partial class SqlServerDatabaseProvider : ISqlOSDatabaseProvider
             WHERE t.{QuoteIdentifier(order.AppKeyColumn)} IN ({KeyList(order, keys)});
             """;
 
-    public string BuildDeletePageEntriesBySubtreeSql(SqlOSFgaPageOrderStore order, string resourceIds)
+    public string BuildDeletePageEntriesBySubtreeSql(SqlOSFgaPageOrderStore order, SqlOSFgaChangedResources resources)
         => $"""
-            {SubtreeCte(order, resourceIds)}
-            DELETE FROM {Entries(order)}
+            {SubtreeCte(order, resources)}DELETE FROM {Entries(order)}
             WHERE {QuoteIdentifier(order.EntryRowKeyColumn)} IN (
                 SELECT t.{QuoteIdentifier(order.AppKeyColumn)}
                 FROM {AppTable(order)} AS t
-                WHERE t.{QuoteIdentifier(order.AppResourceIdColumn)} IN (SELECT subtree.Id FROM subtree)
+                WHERE t.{QuoteIdentifier(order.AppResourceIdColumn)} IN ({ChangedResourceIds(resources)})
             );
             """;
 
-    public string BuildInsertPageEntriesBySubtreeSql(SqlOSFgaPageOrderStore order, string resourceIds, string? exceptKeys)
+    public string BuildInsertPageEntriesBySubtreeSql(SqlOSFgaPageOrderStore order, SqlOSFgaChangedResources resources, string? exceptKeys)
     {
         var except = exceptKeys == null
             ? string.Empty
             : $" AND t.{QuoteIdentifier(order.AppKeyColumn)} NOT IN ({KeyList(order, exceptKeys)})";
         return $"""
-            {SubtreeCte(order, resourceIds)}
-            {InsertEntries(order)}
-            WHERE t.{QuoteIdentifier(order.AppResourceIdColumn)} IN (SELECT subtree.Id FROM subtree){except};
+            {SubtreeCte(order, resources)}{InsertEntries(order)}
+            WHERE t.{QuoteIdentifier(order.AppResourceIdColumn)} IN ({ChangedResourceIds(resources)}){except};
             """;
     }
 
@@ -283,6 +281,9 @@ internal sealed partial class SqlServerDatabaseProvider : ISqlOSDatabaseProvider
 
     public string BuildInsertAllPageEntriesSql(SqlOSFgaPageOrderStore order)
         => $"{InsertEntries(order)};";
+
+    public string WrapPageMaintenanceSql(string statements)
+        => statements;
 
     public string BuildTableExistsSql(string? schema, string table)
     {
@@ -405,22 +406,38 @@ internal sealed partial class SqlServerDatabaseProvider : ISqlOSDatabaseProvider
     }
 
     /// <summary>
-    /// The resources in the <paramref name="resourceIds"/> parameter and their descendants, bounded by
-    /// the hierarchy depth. The ids themselves anchor the walk, so a deleted resource still names the
-    /// rows that point at it.
+    /// The moved resources and their descendants, bounded by the hierarchy depth, followed by a line
+    /// break; empty when no resource moved. Only moved resources are walked: estimating a walk from
+    /// many anchors (a save that adds a thousand resources) makes the engines read the whole entry table.
     /// </summary>
-    private string SubtreeCte(SqlOSFgaPageOrderStore order, string resourceIds)
-        => $"""
-            WITH subtree AS (
-                SELECT CAST(r.[value] AS NVARCHAR(450)) AS Id, 0 AS Depth
-                FROM OPENJSON({resourceIds}) AS r
-                UNION ALL
-                SELECT child.Id, subtree.Depth + 1
-                FROM {Qualify(order.FgaSchema, order.ResourcesTable)} AS child
-                INNER JOIN subtree ON child.ParentId = subtree.Id
-                WHERE subtree.Depth < {order.MaxDepth.ToString(CultureInfo.InvariantCulture)}
-            )
-            """;
+    private string SubtreeCte(SqlOSFgaPageOrderStore order, SqlOSFgaChangedResources resources)
+        => resources.Moved == null
+            ? string.Empty
+            : $"""
+              WITH subtree AS (
+                  SELECT CAST(r.[value] AS NVARCHAR(450)) AS Id, 0 AS Depth
+                  FROM OPENJSON({resources.Moved}) AS r
+                  UNION ALL
+                  SELECT child.Id, subtree.Depth + 1
+                  FROM {Qualify(order.FgaSchema, order.ResourcesTable)} AS child
+                  INNER JOIN subtree ON child.ParentId = subtree.Id
+                  WHERE subtree.Depth < {order.MaxDepth.ToString(CultureInfo.InvariantCulture)}
+              )
+
+              """;
+
+    /// <summary>
+    /// The ids of the resources whose rows a save rewrites: the moved subtree, and the added or deleted
+    /// resources themselves. The ids anchor it, so a deleted resource still names the rows that point at it.
+    /// </summary>
+    private static string ChangedResourceIds(SqlOSFgaChangedResources resources)
+        => string.Join(
+            " UNION ALL ",
+            new[]
+            {
+                resources.Moved == null ? null : "SELECT subtree.Id FROM subtree",
+                resources.AddedOrDeleted == null ? null : $"SELECT CAST(changed.[value] AS NVARCHAR(450)) FROM OPENJSON({resources.AddedOrDeleted}) AS changed",
+            }.OfType<string>());
 
     private static string MaxDepth(SqlOSFgaOptions options)
         => Math.Max(1, options.MaxResourceHierarchyDepth).ToString(CultureInfo.InvariantCulture);

@@ -14,8 +14,9 @@ using SqlOS.IntegrationTests.Infrastructure;
 namespace SqlOS.IntegrationTests.Fga;
 
 /// <summary>
-/// Every write path that ends in SqlOSDbContext.SaveChanges leaves the page-order entries equal to
-/// what a rebuild from the application tables and the resource graph would write.
+/// Every write path that ends in SqlOSDbContext.SaveChanges leaves the page-order entries, node
+/// indexes included, equal to what a rebuild from the application tables and the resource graph
+/// would write.
 /// </summary>
 [TestClass]
 public class SqlOSFgaPageOrderMaintenanceIntegrationTests
@@ -37,6 +38,9 @@ public class SqlOSFgaPageOrderMaintenanceIntegrationTests
             FgaTestDataSeeder.TestTeamResourceId,
             FgaTestDataSeeder.TestAgencyResourceId,
             "root");
+        (await NodesOf(context, PageOrderTestDbContext.DocumentNodeIndex, document.Id)).Should().BeEquivalentTo(
+            await NodesOf(context, PageOrderTestDbContext.RankEntries, document.Id),
+            "the node index lists the row under the same nodes as every order");
 
         document.Rank = 99;
         await context.SaveChangesAsync();
@@ -50,6 +54,7 @@ public class SqlOSFgaPageOrderMaintenanceIntegrationTests
         await context.SaveChangesAsync();
         await AssertEntriesMatchRebuildAsync();
         (await NodesOf(context, PageOrderTestDbContext.RankEntries, document.Id)).Should().BeEmpty();
+        (await NodesOf(context, PageOrderTestDbContext.DocumentNodeIndex, document.Id)).Should().BeEmpty();
     }
 
     [TestMethod]
@@ -404,6 +409,34 @@ public class SqlOSFgaPageOrderMaintenanceIntegrationTests
     }
 
     [TestMethod]
+    [DataRow("on")]
+    [DataRow("off")]
+    public async Task SaveInTheCallersTransaction_RunsItsEntryStatementsWithoutJit_AndLeavesTheCallersSettingAsItWas(string callersJit)
+    {
+        await using var context = PageOrderFixture.CreateContext();
+        var document = PageOrderFixture.NewDocument(NewResourceId(), FgaTestDataSeeder.TestProjectResourceId, 421);
+        await using var transaction = await context.Database.BeginTransactionAsync();
+        if (TestDatabase.IsPostgreSql)
+        {
+            await context.Database.ExecuteSqlRawAsync($"SET LOCAL jit = {callersJit}");
+        }
+
+        context.Documents.Add(document);
+        await context.SaveChangesAsync();
+
+        (await NodesOf(context, PageOrderTestDbContext.DocumentNodeIndex, document.Id)).Should().HaveCount(4);
+        if (TestDatabase.IsPostgreSql)
+        {
+            // The entry statements turn JIT off for themselves (PostgreSqlDatabaseProvider.WrapPageMaintenanceSql)
+            // and put the caller's setting back.
+            (await context.Database.SqlQueryRaw<string>("SELECT current_setting('jit') AS \"Value\"").ToListAsync())
+                .Should().Equal(callersJit);
+        }
+
+        await transaction.RollbackAsync();
+    }
+
+    [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
     public async Task FailedEntryStatements_LeaveTheCallersTransactionAsBeforeTheSave(bool synchronous)
@@ -516,14 +549,41 @@ public class SqlOSFgaPageOrderMaintenanceIntegrationTests
     }
 
     [TestMethod]
+    public async Task Reconcile_FillsAnEmptyNodeIndex()
+    {
+        await PageOrderFixture.ExecuteAsync($"DELETE FROM {TestDatabase.Qualify(PageOrderTestDbContext.DocumentNodeIndex)}");
+        var logs = new CapturingLoggerFactory();
+        await using var context = PageOrderFixture.CreateContext();
+
+        await SqlOSFgaPageOrderMaintenance.ReconcileAsync(context, logs.CreateLogger("reconcile"), CancellationToken.None);
+
+        var (actual, expected) = await PageOrderFixture.EntriesAndRebuildAsync(PageOrderTestDbContext.DocumentNodeIndex, "PagedDocuments", sortColumn: null);
+        actual.Should().Equal(expected).And.NotBeEmpty();
+        logs.Entries.Where(entry => entry.Level == LogLevel.Information)
+            .Should().ContainSingle()
+            .Which.Message.Should().Be($"Node index PagedDocument(Id): filled {PageOrderTestDbContext.DocumentNodeIndex} with {expected.Count} entries for the rows already in PagedDocuments.");
+        await AssertEntriesMatchRebuildAsync();
+    }
+
+    [TestMethod]
     public async Task RebuildPageOrdersAsync_RewritesEveryOrder()
     {
         await PageOrderFixture.ExecuteAsync($"DELETE FROM {TestDatabase.Qualify(PageOrderTestDbContext.RankEntries)}");
+        await PageOrderFixture.ExecuteAsync($"DELETE FROM {TestDatabase.Qualify(PageOrderTestDbContext.CounterNodeIndex)}");
+        var logs = new CapturingLoggerFactory();
         await using var context = PageOrderFixture.CreateContext();
 
-        await PageOrderFixture.AuthService(context).RebuildPageOrdersAsync();
+        await new SqlOS.Fga.Services.SqlOSFgaAuthService(
+                context,
+                Microsoft.Extensions.Options.Options.Create(new SqlOS.Fga.Configuration.SqlOSFgaOptions()),
+                logs.CreateLogger<SqlOS.Fga.Services.SqlOSFgaAuthService>())
+            .RebuildPageOrdersAsync();
 
         await AssertEntriesMatchRebuildAsync();
+        logs.Entries.Where(entry => entry.Level == LogLevel.Information).Select(entry => entry.Message)
+            .Should().Contain(message => message.StartsWith($"Rebuilt page order PagedDocument(Rank, Id): ", StringComparison.Ordinal))
+            .And.Contain(message => message.StartsWith($"Rebuilt node index PagedCounter(Id): ", StringComparison.Ordinal)
+                && message.EndsWith($" entries in {PageOrderTestDbContext.CounterNodeIndex}.", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -596,11 +656,13 @@ public class SqlOSFgaPageOrderMaintenanceIntegrationTests
 
     private static async Task AssertEntriesMatchRebuildAsync()
     {
-        foreach (var (table, app, column) in new[]
+        foreach (var (table, app, column) in new (string, string, string?)[]
                  {
                      (PageOrderTestDbContext.RankEntries, "PagedDocuments", "Rank"),
                      (PageOrderTestDbContext.TitleEntries, "PagedDocuments", "Title"),
                      (PageOrderTestDbContext.CounterEntries, "PagedCounters", "Rank"),
+                     (PageOrderTestDbContext.DocumentNodeIndex, "PagedDocuments", null),
+                     (PageOrderTestDbContext.CounterNodeIndex, "PagedCounters", null),
                  })
         {
             var (actual, expected) = await PageOrderFixture.EntriesAndRebuildAsync(table, app, column);

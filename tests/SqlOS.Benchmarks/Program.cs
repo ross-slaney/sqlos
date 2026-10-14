@@ -29,14 +29,20 @@ using Microsoft.Data.SqlClient;
 // Benchmarks 8-10 share a D=5 seed; 11-13 share a D=10 seed.
 // Real domain tables (Products, Stores, Regions, Chains) replace TestEntities.
 //
-// `page-orders` (PageOrderBenchmark.cs) runs ToPageAsync against the real SqlOS schema
-// on SQL Server or PostgreSQL instead.
+// `page-orders` and `page-orders-compare` (PageOrderBenchmark.cs) run ToPageAsync against the
+// real SqlOS schema on SQL Server or PostgreSQL instead.
 // =============================================================================
 
 // Page orders (ToPageAsync) on SQL Server or PostgreSQL: see PageOrderBenchmark.cs.
 if (args.Length > 0 && args[0] == "page-orders")
 {
     await SqlOS.Benchmarks.PageOrderBenchmark.RunAsync(args[1..]);
+    return;
+}
+
+if (args.Length > 0 && args[0] == "page-orders-compare")
+{
+    await SqlOS.Benchmarks.PageOrderBenchmark.CompareAsync(args[1..]);
     return;
 }
 

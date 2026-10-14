@@ -13,8 +13,9 @@ using SqlOS.Fga.Models;
 namespace SqlOS.Fga.Paging;
 
 /// <summary>
-/// One declared page order of an entity: its order columns, ending with the primary key, and the
-/// entry table that keeps a copy of that order under every node a row sits under.
+/// One page order of an entity: its order columns, ending with the primary key, and the entry table
+/// that keeps a copy of that order under every node a row sits under. The order by the key alone is
+/// the entity's node index, which SqlOS keeps for every protected entity: which rows sit under which node.
 /// </summary>
 internal sealed class SqlOSFgaPageOrder
 {
@@ -50,6 +51,12 @@ internal sealed class SqlOSFgaPageOrder
     public IProperty ResourceId { get; }
 
     public string Table => EntryType.GetTableName()!;
+
+    /// <summary>Whether this is the entity's node index: the order by the key alone, <c>(NodeId, RowKey)</c>.</summary>
+    public bool IsNodeIndex => SortColumns.Count == 0;
+
+    /// <summary>"Node index" or "Page order", to start a log line.</summary>
+    public string Kind => IsNodeIndex ? "Node index" : "Page order";
 
     public string Description
         => $"{EntityType.ClrType.Name}({string.Join(", ", Columns.Select(column => column.Name))})";
@@ -98,9 +105,9 @@ internal sealed class SqlOSFgaPageOrder
 
 /// <summary>
 /// Declares, builds and reads page orders. <c>HasPageOrder</c> records a declaration on the
-/// entity type; <see cref="ApplyModel"/> validates it and adds the entry entity type once the
-/// application has configured its model; the runtime reads the result from the
-/// <c>SqlOS:PageOrders</c> annotation.
+/// entity type; <see cref="ApplyModel"/> validates it, adds the node index of every protected entity,
+/// and adds the entry entity types once the application has configured its model; the runtime reads
+/// the result from the <c>SqlOS:PageOrders</c> annotation.
 /// </summary>
 internal static class SqlOSFgaPageOrders
 {
@@ -130,9 +137,15 @@ internal static class SqlOSFgaPageOrders
     }
 
     /// <summary>
-    /// Validates every declaration and adds its entry entity type. Runs after the application's
+    /// Validates every declaration and adds its entry entity type, then adds the node index (the order
+    /// by the key alone) of every protected entity that can have one. Runs after the application's
     /// model configuration, so the columns' facets, the table name and the key are final.
     /// </summary>
+    /// <remarks>
+    /// A declaration on an entity that cannot have page orders fails the model build. An entity that
+    /// only implements <see cref="IHasResourceId"/> gets no node index instead, and startup logs why
+    /// (<see cref="Unindexed"/>).
+    /// </remarks>
     internal static void ApplyModel(IMutableModel model, string? providerName)
     {
         var identifierLimit = SqlOSDatabase.IsPostgreSql(providerName)
@@ -143,12 +156,18 @@ internal static class SqlOSFgaPageOrders
         foreach (var entityType in model.GetEntityTypes().ToList())
         {
             var declarations = ReadAnnotation(entityType);
-            if (declarations.Count == 0)
+            var nodeIndex = IsProtectedRoot(entityType) && Unsupported(entityType) == null;
+            if (declarations.Count == 0 && !nodeIndex)
             {
                 continue;
             }
 
-            var key = ValidateEntity(entityType);
+            if (Unsupported(entityType) is { } reason)
+            {
+                throw ModelError(entityType.DisplayName(), reason);
+            }
+
+            var key = entityType.FindPrimaryKey()!.Properties[0];
             var resolved = new List<Declaration>();
             foreach (var declaration in declarations)
             {
@@ -164,13 +183,69 @@ internal static class SqlOSFgaPageOrders
                 resolved.Add(new Declaration(table, names));
             }
 
+            // The node index, unless the application declared the key order itself. Another entity
+            // type already using its table name (two protected entities split from one table) leaves
+            // this one without it rather than failing the model.
+            if (nodeIndex && !resolved.Any(existing => existing.Columns is [var only] && only == key.Name))
+            {
+                var table = EntryTableName(entityType.GetTableName()!, [key], identifierLimit);
+                if (model.FindEntityType(table) == null)
+                {
+                    AddEntryType(model, entityType, table, fgaSchema, [key]);
+                    resolved.Add(new Declaration(table, [key.Name]));
+                }
+            }
+
             WriteAnnotation(entityType, resolved);
         }
     }
 
-    /// <summary>The page orders declared on an entity type or the root of its hierarchy.</summary>
+    /// <summary>
+    /// The page orders of an entity type or the root of its hierarchy: the declared ones and the
+    /// node index.
+    /// </summary>
     public static IReadOnlyList<SqlOSFgaPageOrder> For(IEntityType entityType)
         => OrdersByEntity.GetValue(entityType.GetRootType(), static root => Read((IEntityType)root));
+
+    /// <summary>
+    /// The node index of an entity type or the root of its hierarchy, <see langword="null"/> when the
+    /// entity cannot have one.
+    /// </summary>
+    public static SqlOSFgaPageOrder? NodeIndex(IEntityType entityType)
+        => For(entityType).FirstOrDefault(order => order.IsNodeIndex);
+
+    /// <summary>
+    /// The protected entities that have no node index, and why. Pages of them read the table in
+    /// order and check each row. Startup logs each one.
+    /// </summary>
+    public static IReadOnlyList<(IEntityType EntityType, string Reason)> Unindexed(IModel model)
+    {
+        var unindexed = new List<(IEntityType EntityType, string Reason)>();
+        foreach (var entityType in model.GetEntityTypes())
+        {
+            if (!typeof(IHasResourceId).IsAssignableFrom(entityType.ClrType) || NodeIndex(entityType) != null)
+            {
+                continue;
+            }
+
+            var root = entityType.GetRootType();
+            if (root != entityType)
+            {
+                // A derived type is covered by its root's node index, if the root is protected.
+                if (!IsProtectedRoot(root))
+                {
+                    unindexed.Add((entityType, $"it derives from {root.DisplayName()}, which does not implement {nameof(IHasResourceId)}. SqlOS keeps the node index of a hierarchy on its root."));
+                }
+
+                continue;
+            }
+
+            unindexed.Add((entityType, Unsupported(entityType)
+                ?? $"its node index table name '{NodeIndexTableName(entityType)}' is already used by another entity type."));
+        }
+
+        return unindexed;
+    }
 
     /// <summary>Every page order in a model.</summary>
     public static IReadOnlyList<SqlOSFgaPageOrder> All(IModel model)
@@ -204,51 +279,58 @@ internal static class SqlOSFgaPageOrders
         return $"{name[..(identifierLimit - 9)]}_{hash}";
     }
 
-    private static IMutableProperty ValidateEntity(IMutableEntityType entityType)
+    /// <summary>A root entity type whose CLR type implements <see cref="IHasResourceId"/>: one that gets a node index.</summary>
+    private static bool IsProtectedRoot(IReadOnlyEntityType entityType)
+        => entityType.BaseType == null && typeof(IHasResourceId).IsAssignableFrom(entityType.ClrType);
+
+    /// <summary>Why the entity cannot have page orders, or <see langword="null"/> when it can.</summary>
+    private static string? Unsupported(IReadOnlyEntityType entityType)
     {
-        var name = entityType.DisplayName();
         if (entityType.BaseType != null)
         {
-            throw ModelError(name, $"it derives from {entityType.BaseType.DisplayName()}. Declare the page order on {entityType.GetRootType().DisplayName()}, the root of the hierarchy.");
+            return $"it derives from {entityType.BaseType.DisplayName()}. Declare the page order on {entityType.GetRootType().DisplayName()}, the root of the hierarchy.";
         }
 
         if (entityType.IsOwned())
         {
-            throw ModelError(name, "it is an owned type. Page orders need an entity mapped to its own table.");
+            return "it is an owned type. Page orders need an entity mapped to its own table.";
         }
 
         if (entityType.GetTableName() == null)
         {
-            throw ModelError(name, entityType.GetViewName() != null
+            return entityType.GetViewName() != null
                 ? "it is mapped to a view. Page orders need an entity mapped to a table."
-                : "it is not mapped to a table. Page orders need an entity mapped to a table.");
+                : "it is not mapped to a table. Page orders need an entity mapped to a table.";
         }
 
         var strategy = entityType.GetMappingStrategy();
         if (strategy is RelationalAnnotationNames.TptMappingStrategy or RelationalAnnotationNames.TpcMappingStrategy
             || entityType.GetDerivedTypes().Any(derived => derived.GetTableName() != entityType.GetTableName()))
         {
-            throw ModelError(name, "it uses TPT or TPC inheritance. Page orders need the hierarchy in one table (TPH, the default).");
+            return "it uses TPT or TPC inheritance. Page orders need the hierarchy in one table (TPH, the default).";
         }
 
         var primaryKey = entityType.FindPrimaryKey();
         if (primaryKey == null)
         {
-            throw ModelError(name, "it has no primary key. Page orders need a single-column primary key.");
+            return "it has no primary key. Page orders need a single-column primary key.";
         }
 
         if (primaryKey.Properties.Count != 1)
         {
-            throw ModelError(name, "its primary key is composite. Page orders need a single-column primary key.");
+            return "its primary key is composite. Page orders need a single-column primary key.";
         }
 
         if (entityType.FindProperty(nameof(IHasResourceId.ResourceId)) == null)
         {
-            throw ModelError(name, $"it has no mapped {nameof(IHasResourceId.ResourceId)} property. Map {nameof(IHasResourceId.ResourceId)} to a column of its table.");
+            return $"it has no mapped {nameof(IHasResourceId.ResourceId)} property. Map {nameof(IHasResourceId.ResourceId)} to a column of its table.";
         }
 
-        return primaryKey.Properties[0];
+        return null;
     }
+
+    private static string NodeIndexTableName(IReadOnlyEntityType entityType)
+        => $"{EntryTablePrefix}{entityType.GetTableName()}_{entityType.FindPrimaryKey()!.Properties[0].Name}";
 
     private static IReadOnlyList<IMutableProperty> NormalizeColumns(
         IMutableEntityType entityType,

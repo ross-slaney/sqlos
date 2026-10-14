@@ -266,7 +266,7 @@ public static class LocationEndpoints
                 (l.StoreNumber != null && l.StoreNumber.ToLower().Contains(term)));
         }
 
-        // StoreNumber is nullable, so the page order is Name (declared in ExampleAppDbContext).
+        // StoreNumber is nullable, so the page order is Name.
         SqlOSCursorPage<Location> page;
         try
         {

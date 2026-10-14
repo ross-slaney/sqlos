@@ -36,8 +36,9 @@ public static class ChainEndpoints
                     (c.Description != null && c.Description.ToLower().Contains(term)));
             }
 
-            // Name is a declared page order (ExampleAppDbContext); ToPageAsync checks each row against
-            // the caller's grants, applies the cursor, and appends the Id tiebreaker.
+            // ToPageAsync checks each row against the caller's grants, applies the cursor, and appends
+            // the Id tiebreaker. No page order is declared for Name: the page is bounded by the rows
+            // the caller can see.
             var ordered = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase)
                 ? query.OrderByDescending(c => c.Name)
                 : query.OrderBy(c => c.Name);

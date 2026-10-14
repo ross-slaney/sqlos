@@ -395,7 +395,7 @@ if (!decision.Allowed)
 }
 ```
 
-For collections, read a page with `ToPageAsync` on the EF Core query. The context derives from `SqlOSDbContext<TContext>`, and the order is declared with `HasPageOrder(w => w.Name)`:
+For collections, read a page with `ToPageAsync` on the EF Core query, by any order. The context derives from `SqlOSDbContext<TContext>`; a hot sort can be declared with `HasPageOrder(w => w.Name)` to make it about a page:
 
 ```csharp
 using SqlOS.Fga.Extensions;

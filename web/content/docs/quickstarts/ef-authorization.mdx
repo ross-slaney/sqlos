@@ -177,7 +177,6 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
             entity.Property(project => project.Name).HasMaxLength(200);
             entity.HasIndex(project => project.ResourceId).IsUnique();
             entity.HasIndex(project => new { project.Name, project.Id });
-            entity.HasPageOrder(project => project.Name);   // (Name, Id)
         });
     }
 }
@@ -199,7 +198,7 @@ public sealed class Project : ISqlOSResourceEntity
 public sealed record CreateProjectRequest(string Name);
 ```
 
-Create the `Projects` table with your normal EF migration workflow. SqlOS owns its own tables; your application migration owns `Projects`. `HasPageOrder` also adds `SqlOSFgaPage_Projects_Name` to your EF model, in SqlOS's schema, so the same migration creates it.
+Create the `Projects` table with your normal EF migration workflow. SqlOS owns its own tables; your application migration owns `Projects`. Because `Project` is a protected entity, SqlOS also adds its node index, `SqlOSFgaPage_Projects_Id`, to your EF model, in SqlOS's schema, so the same migration creates it.
 
 ## How the write works
 
@@ -216,7 +215,7 @@ The grant remains explicit. Implementing `ISqlOSResourceEntity` does not grant a
 1. The API takes the subject from the validated access token.
 2. `ToPageAsync` resolves that subject, its active groups, and the `project.read` permission.
 3. It reads `Projects` in `Name` order and returns the first 20 rows the subject may read, after `cursor`.
-4. `HasPageOrder(project => project.Name)` keeps that page about a page of work for a caller who can read few of many projects.
+4. No order is declared, so the page reads at most about nine times the smaller of "projects up to the page" and "projects the caller can read": a caller who can read few of many projects reads about those few, through the node index. Declaring `HasPageOrder(project => project.Name)` makes it about a page for any caller; see [Optimizing page performance](/docs/guides/optimizing-page-orders).
 
 There is no authorized count or unpaged list. Return the page and its `nextCursor`; see [Paginating authorized lists](/docs/guides/paginating-authorized-lists).
 

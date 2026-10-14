@@ -1,9 +1,7 @@
 using System.Collections;
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Linq.Expressions;
 using System.Reflection;
-using System.Runtime.CompilerServices;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
@@ -22,10 +20,6 @@ public static class PageQueryableExtensions
 {
     /// <summary>The largest page <see cref="ToPageAsync{T}"/> accepts.</summary>
     public const int MaxPageSize = 1000;
-
-    // Shapes already warned about, per model: EF Core's logger factory is scoped to a context,
-    // the model lives as long as the application's context type.
-    private static readonly ConditionalWeakTable<IModel, ConcurrentDictionary<string, bool>> UndeclaredWarnings = new();
 
     /// <summary>
     /// Returns the page of <paramref name="query"/> that <paramref name="subjectId"/> may see with
@@ -54,10 +48,13 @@ public static class PageQueryableExtensions
     /// <remarks>
     /// <para>
     /// The page reads the application's query in its order and checks each row with
-    /// <c>fn_IsResourceAccessible</c>, for as many rows as a page needs. When few of those rows are
-    /// visible and the order is declared with <c>HasPageOrder</c>, it reads the order under each of
-    /// the caller's granted nodes instead, so a caller who can see few rows of a large table costs
-    /// about a page. The rows of the page are then loaded with the query's includes and tracking and
+    /// <c>fn_IsResourceAccessible</c>, in growing batches. In the same rounds it reads the caller's own
+    /// rows from the node index SqlOS keeps for the entity (which rows sit under which of the caller's
+    /// granted nodes) and, once they fit the batch, sorts them through the query. Whichever finishes
+    /// first is the page, so any order costs at most a small multiple of the smaller of "rows the
+    /// query must read to find a page" and "rows the caller can see". An order declared with
+    /// <c>HasPageOrder</c> reads that order under each of the caller's nodes instead, about a page for
+    /// any caller. The rows of the page are then loaded with the query's includes and tracking and
     /// checked once more.
     /// </para>
     /// <para>
@@ -119,7 +116,7 @@ public static class PageQueryableExtensions
     private static ILogger Logger(DbContext context)
         => context.GetService<ILoggerFactory>().CreateLogger("SqlOS.Fga");
 
-    /// <summary>One page: the two reads, the load, the cursor and the log line.</summary>
+    /// <summary>One page: the reads, the load, the cursor and the log line.</summary>
     private sealed class SqlOSFgaPage<T>(
         DbContext context,
         IQueryProvider provider,
@@ -137,14 +134,20 @@ public static class PageQueryableExtensions
         public async Task<SqlOSCursorPage<T>> RunAsync(CancellationToken cancellationToken)
         {
             var stopwatch = Stopwatch.StartNew();
+            var model = context.Model;
             var declared = SqlOSFgaPageOrders.For(ordering.EntityType)
                 .FirstOrDefault(order => order.Matches(_columns));
-            var usable = declared != null && !SqlOSFgaPageOrders.IsTableMissing(context.Model, declared);
+            var usable = declared != null && !SqlOSFgaPageOrders.IsTableMissing(model, declared);
+
+            // Every other order reads the caller's rows through the entity's node index.
+            var nodeIndex = usable ? null : SqlOSFgaPageOrders.NodeIndex(ordering.EntityType);
+            var nodeIndexUsable = nodeIndex != null && !SqlOSFgaPageOrders.IsTableMissing(model, nodeIndex);
 
             var selection = await SqlOSFgaPageQuery.SelectAsync(
                 pageSize,
                 Read1Async,
                 usable ? (budget, token) => Read2Async(declared!, budget, token) : null,
+                nodeIndexUsable ? (budget, token) => Read3Async(nodeIndex!, budget, token) : null,
                 cancellationToken);
 
             // A stale entry can list a row under two of the caller's nodes; the page has it once.
@@ -154,8 +157,22 @@ public static class PageQueryableExtensions
                 ? SqlOSFgaPageCursor.Encode(ordering.EntityType, _columns, ordering.Descending, selection.Rows[^1])
                 : null;
 
-            Log(selection, declared, usable, keys, loaded, stopwatch.Elapsed);
+            Log(selection, OrderState(declared, usable, nodeIndex, nodeIndexUsable), keys, loaded, stopwatch.Elapsed);
             return SqlOSCursorPage<T>.Create(loaded, pageSize, nextCursor);
+        }
+
+        /// <summary>How the order is served, for the log line: "declared", or why it is not and whether its node index is there.</summary>
+        private static string OrderState(SqlOSFgaPageOrder? declared, bool usable, SqlOSFgaPageOrder? nodeIndex, bool nodeIndexUsable)
+        {
+            if (usable)
+            {
+                return "declared";
+            }
+
+            var order = declared == null ? "not declared" : "declared, table missing";
+            return nodeIndex == null
+                ? $"{order}, no node index"
+                : nodeIndexUsable ? order : $"{order}, node index missing";
         }
 
         /// <summary>
@@ -262,17 +279,153 @@ public static class PageQueryableExtensions
         }
 
         /// <summary>
+        /// Read 3: the caller's row keys from the node index (3a), at most <c>b + 1</c>. More than
+        /// <c>b</c> is not this round. Otherwise those rows through the application's query (3b).
+        /// </summary>
+        private async Task<SqlOSFgaPageQuery.Read3Result> Read3Async(
+            SqlOSFgaPageOrder nodeIndex,
+            int budget,
+            CancellationToken cancellationToken)
+        {
+            var keys = await CallerKeysAsync(nodeIndex, budget == int.MaxValue ? budget : budget + 1, cancellationToken);
+            if (keys.Count > budget)
+            {
+                return new SqlOSFgaPageQuery.Read3Result(keys.Count, null);
+            }
+
+            // Minimal nodes are disjoint; a stale entry can still list a row under two of them.
+            var distinct = keys.Distinct().ToList();
+            var rows = distinct.Count == 0 ? [] : await CallerRowsAsync(distinct, cancellationToken);
+            return new SqlOSFgaPageQuery.Read3Result(keys.Count, rows);
+        }
+
+        /// <summary>
+        /// Read 3a: under each of the caller's nodes (<c>fn_PageNodes</c>), the keys of the rows the
+        /// node index lists, at most <paramref name="cap"/> of them in all.
+        /// </summary>
+        /// <remarks>
+        /// The nodes are sorted by the length of their id first, an order no index provides, so the
+        /// engine produces all of them before the cap applies. Without that sort, SQL Server lets the
+        /// cap's row goal into <c>fn_PageNodes</c>, whose minimality check then rescans the caller's
+        /// grants for every ancestor of every node it reads: in the page-order benchmark a caller with
+        /// 10,000 single-row grants took seconds per round, growing with the cap.
+        /// </remarks>
+        private async Task<IReadOnlyList<object>> CallerKeysAsync(
+            SqlOSFgaPageOrder nodeIndex,
+            int cap,
+            CancellationToken cancellationToken)
+        {
+            var nodes = (Expression)((ISqlOSFgaDbContext)context).PageNodes(caller.SubjectIds, caller.PermissionId).Expression;
+            nodes = Order(
+                nodes,
+                typeof(SqlOSFgaPageNode),
+                parameter => [Expression.Property(Expression.Property(parameter, nameof(SqlOSFgaPageNode.NodeId)), nameof(string.Length))],
+                descending: false);
+            nodes = Take(nodes, typeof(SqlOSFgaPageNode), int.MaxValue);
+
+            IQueryable<Dictionary<string, object>> entries = context.Set<Dictionary<string, object>>(nodeIndex.EntryType.Name);
+            var node = Expression.Parameter(typeof(SqlOSFgaPageNode), "n");
+            var nodeId = Expression.Property(node, nameof(SqlOSFgaPageNode.NodeId));
+            var entryType = typeof(Dictionary<string, object>);
+
+            // entries.Where(x => x.NodeId == n.NodeId).OrderBy(x => x.RowKey).Take(cap): a range of the node
+            // index's primary key, in its own order, so the plan that reads the range and stops at the
+            // cap is the one the engines choose. Without the order, PostgreSQL can scan the whole node
+            // index for the first matches of a node it expects to be large.
+            var entry = Expression.Parameter(entryType, "x");
+            var perNode = Where(
+                entries.Expression,
+                entryType,
+                Expression.Lambda(Expression.Equal(EntryProperty(entry, SqlOSFgaPageOrders.NodeIdProperty, typeof(string)), nodeId), entry));
+            perNode = Order(perNode, entryType, parameter => [EntryProperty(parameter, SqlOSFgaPageOrders.RowKeyProperty, _key.ClrType)], descending: false);
+            perNode = Take(perNode, entryType, cap);
+
+            // As in read 2, projecting the node keeps the subquery correlated, so each node is a seek
+            // that stops at the cap (CROSS APPLY / JOIN LATERAL).
+            var row = Expression.MemberInit(
+                Expression.New(typeof(SqlOSFgaPageEntryRow)),
+                Expression.Bind(typeof(SqlOSFgaPageEntryRow).GetProperty(nameof(SqlOSFgaPageEntryRow.NodeId))!, nodeId),
+                Expression.Bind(typeof(SqlOSFgaPageEntryRow).GetProperty(nameof(SqlOSFgaPageEntryRow.Entry))!, entry));
+            perNode = Select(perNode, entryType, typeof(SqlOSFgaPageEntryRow), Expression.Lambda(row, entry));
+
+            var merged = (Expression)Expression.Call(
+                SelectManyMethod.MakeGenericMethod(typeof(SqlOSFgaPageNode), typeof(SqlOSFgaPageEntryRow)),
+                nodes,
+                Expression.Quote(Expression.Lambda(
+                    typeof(Func<,>).MakeGenericType(typeof(SqlOSFgaPageNode), typeof(IEnumerable<SqlOSFgaPageEntryRow>)),
+                    perNode,
+                    node)));
+
+            // Any cap keys will do, so the merge is not sorted: ordering by a constant (ORDER BY (SELECT 1),
+            // which neither engine sorts by) tells EF Core the limit is meant, without its warning
+            // about a limit with no order.
+            merged = Order(merged, typeof(SqlOSFgaPageEntryRow), _ => [Expression.Constant(1)], descending: false);
+            merged = Take(merged, typeof(SqlOSFgaPageEntryRow), cap);
+
+            var result = Expression.Parameter(typeof(SqlOSFgaPageEntryRow), "r");
+            var projection = Expression.Lambda(
+                Expression.NewArrayInit(
+                    typeof(object),
+                    Expression.Convert(EntryProperty(EntryOf(result), SqlOSFgaPageOrders.RowKeyProperty, _key.ClrType), typeof(object))),
+                result);
+            merged = Select(merged, typeof(SqlOSFgaPageEntryRow), typeof(object[]), projection);
+
+            var rows = await provider.CreateQuery<object[]>(merged).ToListAsync(cancellationToken);
+            return rows.Select(values => values[0]).ToList();
+        }
+
+        /// <summary>
+        /// Read 3b: <c>inner.Where(e =&gt; EF.Parameter(keys).Contains(e.Key)).OrderBy(e =&gt; 1).Skip(0)</c>, then
+        /// <c>.Where(keyset).OrderBy(order).Take(P + 1)</c>, projected to the order values. The keys go as one
+        /// parameter (<c>OPENJSON</c> on SQL Server, an array on PostgreSQL) whatever their number, past
+        /// the 2,100 parameters SQL Server allows.
+        /// </summary>
+        /// <remarks>
+        /// The <c>Skip(0)</c> keeps the caller's rows in a subquery of their own (ordered by a constant
+        /// so that EF Core sees the offset is meant), which is looked up by key and then sorted. Without
+        /// it, PostgreSQL can walk the order's index and test each row against the keys, expecting to
+        /// find a page early; when the caller's rows sit at the far end of the order, that reads every
+        /// row before them, and EXPLAIN does not show it.
+        /// </remarks>
+        private async Task<IReadOnlyList<IReadOnlyList<object>>> CallerRowsAsync(
+            IReadOnlyList<object> keys,
+            CancellationToken cancellationToken)
+        {
+            var keyList = KeyList(keys);
+            var entity = Expression.Parameter(typeof(T), "e");
+            var contains = Expression.Call(
+                ContainsMethod.MakeGenericMethod(_key.ClrType),
+                Expression.Call(
+                    ParameterMethod.MakeGenericMethod(keyList.GetType()),
+                    SqlOSFgaPageCursor.QueryParameter(keyList, keyList.GetType())),
+                Member(entity, _key));
+            var source = Where(ordering.Inner, typeof(T), Expression.Lambda(contains, entity));
+            source = Order(source, typeof(T), _ => [Expression.Constant(1)], descending: false);
+            source = Expression.Call(SkipMethod.MakeGenericMethod(typeof(T)), source, SqlOSFgaPageCursor.QueryParameter(0, typeof(int)));
+            if (position != null)
+            {
+                source = Where(source, typeof(T), Expression.Lambda(SqlOSFgaPageCursor.Keyset(EntityColumns(entity).ToList(), position, ordering.Descending), entity));
+            }
+
+            source = Order(source, typeof(T), parameter => EntityColumns(parameter), ordering.Descending);
+            source = Take(source, typeof(T), pageSize + 1);
+            var projection = Expression.Lambda(
+                Expression.NewArrayInit(
+                    typeof(object),
+                    EntityColumns(entity).Select(value => Expression.Convert(value, typeof(object)))),
+                entity);
+            source = Select(source, typeof(T), typeof(object[]), projection);
+
+            return await provider.CreateQuery<object[]>(source).ToListAsync(cancellationToken);
+        }
+
+        /// <summary>
         /// Load: <c>inner.Where(e =&gt; keys.Contains(e.Key)).Where(filter)</c>, ordered by the keys'
         /// position. The filter is the final check: a stale entry can only drop a row, never add one.
         /// </summary>
         private async Task<List<T>> LoadAsync(IReadOnlyList<object> keys, CancellationToken cancellationToken)
         {
-            var keyList = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(_key.ClrType), keys.Count)!;
-            foreach (var key in keys)
-            {
-                keyList.Add(key);
-            }
-
+            var keyList = KeyList(keys);
             var entity = Expression.Parameter(typeof(T), "e");
             var contains = Expression.Call(
                 ContainsMethod.MakeGenericMethod(_key.ClrType),
@@ -289,58 +442,49 @@ public static class PageQueryableExtensions
                 .ToList();
         }
 
+        /// <summary>
+        /// One Debug line per page: the order and how it is served, the rows each read touched per
+        /// round, which read produced the page, the rows the final check dropped, and the time.
+        /// </summary>
         private void Log(
             SqlOSFgaPageQuery.Selection selection,
-            SqlOSFgaPageOrder? declared,
-            bool usable,
+            string orderState,
             IReadOnlyList<object> keys,
             IReadOnlyList<T> loaded,
             TimeSpan elapsed)
         {
             var logger = Logger(context);
-            var orderText = $"{string.Join(", ", _columns.Select(column => column.Name))} {(ordering.Descending ? "desc" : "asc")}";
-
-            if (logger.IsEnabled(LogLevel.Debug))
+            if (!logger.IsEnabled(LogLevel.Debug))
             {
-                var loadedKeys = new HashSet<object>(loaded.Select(KeyOf));
-                var droppedKeys = keys.Where(key => !loadedKeys.Contains(key)).ToList();
-                logger.LogDebug(
-                    "ToPageAsync {Entity} by {Order} (page order {Declared}): {Rounds} round(s); read 1 rows per round [{Read1}]; read 2 entries per node per round [{Read2}]; page from {Source}; {Dropped} row(s) dropped by the final check{DroppedKeys}; {ElapsedMs} ms.",
-                    ordering.EntityType.ClrType.Name,
-                    orderText,
-                    declared == null ? "not declared" : usable ? "declared" : "declared, table missing",
-                    selection.Rounds,
-                    string.Join(", ", selection.Read1RowsPerRound),
-                    string.Join("; ", selection.Read2EntriesPerRound.Select(round => string.Join(", ", round.Select(node => $"{node.Key}: {node.Value}")))),
-                    selection.Source,
-                    droppedKeys.Count,
-                    droppedKeys.Count == 0 ? string.Empty : $" ({string.Join(", ", droppedKeys)})",
-                    (long)elapsed.TotalMilliseconds);
+                return;
             }
 
-            if (declared == null && selection.Rounds > 1)
+            var loadedKeys = new HashSet<object>(loaded.Select(KeyOf));
+            var droppedKeys = keys.Where(key => !loadedKeys.Contains(key)).ToList();
+            logger.LogDebug(
+                "ToPageAsync {Entity} by {Order} (page order {PageOrder}): {Rounds} round(s); read 1 rows per round [{Read1}]; read 2 entries per node per round [{Read2}]; read 3 keys per round [{Read3}]; page from {Source}; {Dropped} row(s) dropped by the final check{DroppedKeys}; {ElapsedMs} ms.",
+                ordering.EntityType.ClrType.Name,
+                $"{string.Join(", ", _columns.Select(column => column.Name))} {(ordering.Descending ? "desc" : "asc")}",
+                orderState,
+                selection.Rounds,
+                string.Join(", ", selection.Read1RowsPerRound),
+                string.Join("; ", selection.Read2EntriesPerRound.Select(round => string.Join(", ", round.Select(node => $"{node.Key}: {node.Value}")))),
+                string.Join(", ", selection.Read3KeysPerRound),
+                selection.Source,
+                droppedKeys.Count,
+                droppedKeys.Count == 0 ? string.Empty : $" ({string.Join(", ", droppedKeys)})",
+                (long)elapsed.TotalMilliseconds);
+        }
+
+        private IList KeyList(IReadOnlyList<object> keys)
+        {
+            var keyList = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(_key.ClrType), keys.Count)!;
+            foreach (var key in keys)
             {
-                var warned = UndeclaredWarnings.GetValue(context.Model, static _ => new ConcurrentDictionary<string, bool>(StringComparer.Ordinal));
-                if (warned.TryAdd($"{ordering.EntityType.Name}|{orderText}", true))
-                {
-                    var entityName = ordering.EntityType.ClrType.Name;
-                    var sortColumns = _columns.Take(_columns.Count - 1).Select(column => $"e.{column.Name}").ToList();
-                    var declaration = sortColumns.Count switch
-                    {
-                        0 => $"e => e.{_key.Name}",
-                        1 => $"e => {sortColumns[0]}",
-                        _ => $"e => new {{ {string.Join(", ", sortColumns)} }}",
-                    };
-                    logger.LogWarning(
-                        "ToPageAsync scanned {Rows} rows of {Entity} ordered by {Order} to fill a page of {PageSize}. No page order is declared for it, so pages for callers who can see few rows read the table. Declare modelBuilder.Entity<{Entity}>().HasPageOrder({Declaration}) and add a migration.",
-                        selection.Read1RowsPerRound.Sum(),
-                        entityName,
-                        orderText,
-                        pageSize,
-                        entityName,
-                        declaration);
-                }
+                keyList.Add(key);
             }
+
+            return keyList;
         }
 
         private object KeyOf(T row)
@@ -379,6 +523,10 @@ public static class PageQueryableExtensions
         .Single(method => method.Name == nameof(Queryable.Take)
             && method.GetParameters() is [_, { ParameterType: var count }]
             && count == typeof(int));
+    private static readonly MethodInfo SkipMethod = typeof(Queryable).GetMethods()
+        .Single(method => method.Name == nameof(Queryable.Skip)
+            && method.GetParameters() is [_, { ParameterType: var count }]
+            && count == typeof(int));
     private static readonly MethodInfo SelectMethod = QueryableMethod(nameof(Queryable.Select), 2, 2);
     private static readonly MethodInfo SelectManyMethod = typeof(Queryable).GetMethods()
         .Single(method => method.Name == nameof(Queryable.SelectMany)
@@ -387,6 +535,8 @@ public static class PageQueryableExtensions
     private static readonly MethodInfo AnyWithPredicate = QueryableMethod(nameof(Queryable.Any), 2, 2);
     private static readonly MethodInfo ContainsMethod = typeof(Enumerable).GetMethods()
         .Single(method => method.Name == nameof(Enumerable.Contains) && method.GetParameters().Length == 2);
+    private static readonly MethodInfo ParameterMethod = typeof(EF).GetMethods()
+        .Single(method => method.Name == nameof(EF.Parameter) && method.IsGenericMethodDefinition && method.GetParameters().Length == 1);
 
     private static MethodInfo QueryableMethod(string name, int parameters, int funcArity)
         => typeof(Queryable).GetMethods().Single(method =>

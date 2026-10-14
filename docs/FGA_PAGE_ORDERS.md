@@ -1,7 +1,8 @@
 # FGA page orders
 
-How `ToPageAsync` returns an authorized page for about a page of work, whoever the caller is, with
-nothing of SqlOS's on application tables. Issue #515.
+How `ToPageAsync` returns an authorized page by any order for a cost bounded by the rows the caller
+can see, and for about a page of work when the order is declared, whoever the caller is, with nothing
+of SqlOS's on application tables. Issues #515 and #521.
 
 ## The problem
 
@@ -14,20 +15,25 @@ way to check one resource. There is no authorized count, `Any`, join or unpaged 
 
 ## The idea
 
-For each order an entity is paged by, SqlOS keeps, in its own schema, a copy of that order **under
-every node of the resource tree**. A page for anyone is then "the first rows under each of my
-nodes, merged": one index seek per node.
+For every protected entity, SqlOS keeps, in its own schema, a **node index**: which rows sit under which
+node of the resource tree. A page by any order races two reads with growing budgets: the application's
+query in its order, each row checked, and the caller's own rows from the node index, sorted through the
+query. Whichever settles first is the page, so a page costs a small multiple of the smaller of "rows the
+query needs" and "rows the caller can see".
+
+For an order declared with `HasPageOrder`, SqlOS also keeps a copy of that order **under every node of
+the resource tree**. A page for anyone is then "the first rows under each of my nodes, merged": one
+index seek per node, about a page.
 
 ```csharp
 modelBuilder.Entity<Product>(entity =>
 {
-    entity.HasPageOrder(p => p.Price);                       // (Price, Id)
-    entity.HasPageOrder(p => new { p.Status, p.CreatedAt }); // (Status, CreatedAt, Id)
+    entity.HasPageOrder(p => p.Price);                       // optional: (Price, Id)
 });
 
 var page = await db.Products
     .Where(p => p.Name.Contains(term))
-    .OrderBy(p => p.Price)
+    .OrderBy(p => p.Price)                                   // any order
     .ToPageAsync(subjectId, "product.view", pageSize: 20, cursor);
 ```
 
@@ -35,8 +41,15 @@ var page = await db.Products
 
 ## Storage
 
-One table per declared order, in the FGA schema, added to the application's EF model as a
-shared-type entity (`Dictionary<string, object>`), so the application's migration creates it:
+One table per page order, in the FGA schema, added to the application's EF model as a shared-type
+entity (`Dictionary<string, object>`), so the application's migration creates it. Every root entity type
+of a `SqlOSDbContext<TContext>` model that implements `IHasResourceId` gets one for its key alone, the
+node index (`SqlOSFgaPage_{Table}_{Key}`, columns `NodeId` and `RowKey`); each `HasPageOrder` adds one
+more. A TPH hierarchy has one node index, on its root. An entity that cannot have page orders (owned,
+view-mapped, TPT/TPC, no or a composite primary key, no mapped `ResourceId`) gets no node index and does
+not fail the model: startup logs one warning per entity naming the reason, and its pages run read 1 only.
+A declaration on such an entity still fails the model build. Declaring the key alone is the node index,
+a no-op duplicate. SqlOS's own entities implement none of this.
 
 | Column | Meaning |
 | --- | --- |
@@ -55,7 +68,8 @@ within `MaxResourceHierarchyDepth` with no cycle. That is exactly the set of nod
 and reach r under `fn_IsResourceAccessible`. A row whose own resource is inactive, or whose
 `ResourceId` names no resource, has no entries.
 
-Size: depth-of-the-row entries per row per order (a product four levels under the root has five).
+Size: depth-of-the-row entries per row per table (a product four levels under the root has five in the
+node index and five in each declared order).
 
 ## Functions
 
@@ -104,12 +118,39 @@ subject or permission is an empty page with no page statements. Then it runs the
    with a visibility flag (`SqlOSFgaVisibility`: the `fn_IsResourceAccessible` `EXISTS` in the projection). If at least `P` are visible, they
    are the page. If fewer than `b` rows came back, the query is exhausted and the visible rows are the
    last page.
-2. **Read 2, "the caller's nodes, in order."** Only for a declared order. Under each node of
-   `fn_PageNodes`, the next `b` entries after the cursor that pass the application's filters (an
+2. **Read 2, "the caller's nodes, in order."** Only for a declared order whose table exists. Under each
+   node of `fn_PageNodes`, the next `b` entries after the cursor that pass the application's filters (an
    `EXISTS` on the row's key against the query without its ordering), merged in order, at most `P`.
    `P` entries are the page; fewer means every node ran out, and they are the last page. Because `b`
    is never below `P`, read 2 settles the page in the round it runs.
-3. Otherwise `b` grows four times and read 1 runs again. Only undeclared orders get here.
+3. **Read 3, "the caller's rows, sorted."** For every other order, when the entity's node index exists.
+   Two statements, so that neither plan depends on the other's parameters:
+   - **3a.** Under each node of `fn_PageNodes`, the node index's `RowKey`s, at most `b + 1` in all (per
+     node `ORDER BY RowKey` with `TOP(b + 1)`, so each node is a range of the primary key that stops at
+     the cap; the merge `ORDER BY (SELECT 1)` with `TOP(b + 1)`, which neither engine sorts by and
+     which keeps EF Core from warning about a limit without an order). More than `b` keys: not this
+     round. The node index has no order columns, so 3a reads the caller's rows whatever the cursor.
+     The nodes are first sorted by the length of their id (`ORDER BY LEN(NodeId)` in a `TOP` subquery),
+     an order no index provides, meant to make the engine produce all of them before the cap applies:
+     otherwise SQL Server gives the cap's row goal to `fn_PageNodes`, whose minimality check then
+     rescans the caller's grants for every ancestor of every node it reads (1.55 million spool rows at a
+     cap of 21 for a caller with 10,000 single-row grants). The sort held in the 100,000-row tests, but not
+     in the page-order benchmark at a million rows: SQL Server moved it below the check, and one round at
+     a cap of 1,281 read 69 million spool rows in 25 s for that caller. The caller's grants and nodes stay
+     in the database, so 3a stays one statement, `fn_PageNodes` joined to the node index, run in every
+     round.
+   - **3b.** With at most `b` keys, they are all of the caller's rows: the query without its ordering,
+     `Where(e => EF.Parameter(keys).Contains(e.Key))`, then the keyset after the cursor, the order and
+     `Take(P + 1)`, projected to the order values. The keys go as one parameter (`OPENJSON` on SQL
+     Server, an array on PostgreSQL), past SQL Server's 2,100 parameters. The key filter sits in a
+     subquery of its own (`OrderBy(constant).Skip(0)`), so it is looked up by key, then sorted: otherwise
+     PostgreSQL can walk the order's index and test every row against the keys, which reads every row
+     before a far-end caller's (and EXPLAIN does not show it). More than `P` rows: the page and a
+     cursor; otherwise the last page.
+4. Otherwise `b` grows four times and the round runs again. Read 1 runs first in every round, so a
+   caller who sees most rows settles the page in round 0 with no read 3 statement. A declared order
+   never runs read 3; an entity with no node index, or whose node index table startup found missing,
+   runs read 1 only.
 
 **Load.** The page's keys go back through the query with its includes and tracking and through the
 visibility predicate once more, then are ordered by key position in memory. That is the final check: a
@@ -120,15 +161,26 @@ it a query parameter. As a constant (what `BuildFilterAsync` built), every conte
 new compiled query; a test pins that a page on a second context compiles nothing. The cursor is the last selected row's order values,
 so a dropped row does not stall the list.
 
-Each statement is an EF Core query (`ToQueryString` can print it). Read 2 projects the node's id inside
-the per-node subquery; that keeps the subquery correlated, so EF Core emits `CROSS APPLY (SELECT TOP(@b)
-…)` on SQL Server and `JOIN LATERAL (… LIMIT @b)` on PostgreSQL. Without it EF Core rewrites the
+Each statement is an EF Core query (`ToQueryString` can print it). Reads 2 and 3a project the node's id
+inside the per-node subquery; that keeps the subquery correlated, so EF Core emits `CROSS APPLY (SELECT
+TOP(@b) …)` on SQL Server and `JOIN LATERAL (… LIMIT @b)` on PostgreSQL. Without it EF Core rewrites the
 subquery into a `ROW_NUMBER() OVER (PARTITION BY NodeId)` join over every entry.
 
-One line per page is logged at Debug under `SqlOS.Fga`: entity, order, whether it is declared, the
-rounds, rows per round of read 1, entries per node of read 2, which read produced the page, rows the
-final check dropped, elapsed time. An undeclared order that needs more than one round of read 1 is
-logged once per entity and order at Warning, with the declaration to add.
+**The bound.** `R1` is the rows read 1 needs (the query's rows from the cursor up to the page's last
+visible row, or all of them), `V` the rows under the caller's nodes. The rounds stop at the first budget
+`b_k ≥ min(R1, V)`, and `b_k < 4·min(R1, V)` unless `k = 0`. Read 1 reads `Σ b_j < 4/3·b_k`, 3a reads
+`Σ_{j<k} (b_j + 1) < b_k/3 + k` plus `V` in the round it settles, 3b `V` keys and the load at most `P`, so a
+page touches fewer than `26/3·min(R1, V) + k + P` rows and entries: about nine times the smaller, plus a
+page. For rows spread through the order with density `V/N`, `R1 ≈ P·N/V`, and the smaller is largest at
+`V = √(P·N)`: 4,472 for a million rows and `P = 20`. Bunched at the far end, `R1 ≈ N` and the page costs
+about `V`. When the index read 1 walks does not include `ResourceId`, SQL Server reads each row it checks
+twice, once in that index and once by the key lookup for `ResourceId`. Counted that way, read 1's term
+doubles and the bound is `14·min(R1, V) + k + P`.
+
+One line per page is logged at Debug under `SqlOS.Fga`: entity, order, whether it is declared (and
+whether its node index is there), the rounds, rows per round of read 1, entries per node of read 2, keys
+per round of read 3, which read produced the page, rows the final check dropped, elapsed time. Nothing is
+logged above Debug: a plain order is the normal path.
 
 ## Maintenance
 
@@ -145,16 +197,25 @@ All in `SqlOSFgaPageOrderMaintenance`, called from `SqlOSDbContext<TContext>.Sav
    `ParentId` or `IsActive` changed. Collecting after the save sees values set by `SaveChanges`
    interceptors and `SavingChanges` handlers, cascade deletes and generated keys.
 3. One command for everything collected. Per order:
-   - delete the entries of the rows under the changed resources and their descendants (a recursive CTE
-     over `ParentId`, bounded by the depth; the changed ids anchor it, so a deleted resource is its own
-     subtree and an added one finds the rows saved before it);
+   - delete the entries of the rows under the changed resources: under the moved, deactivated or
+     reactivated ones and their descendants (a recursive CTE over `ParentId`, bounded by the depth), and
+     under the added or deleted ones themselves, without a walk. `ParentId` is a foreign key, so the only
+     resources under an added or deleted one are added or deleted in the same save, and are anchors too.
+     The ids anchor the lookup, so a deleted resource still names the rows that point at it and an added
+     one finds the rows saved before it. Walking from every changed resource made a save that adds a
+     thousand resources take seconds on PostgreSQL: it estimated the walk from a thousand anchors at
+     millions of rows and hashed the whole entry table instead of looking the rows' entries up;
    - delete the entries of the changed rows, by key (added rows too, so a stale entry left by a write that
      bypassed EF cannot make the insert of a reused key fail);
    - insert the entries of the rows under the changed resources, except the changed rows;
    - insert the entries of the changed rows.
 
    Each row ends with exactly one set of entries. Key lists are one parameter per entity: `OPENJSON(@keysN)`
-   on SQL Server, `= ANY(@keysN)` on PostgreSQL. Any failure rolls everything back.
+   on SQL Server, `= ANY(@keysN)` on PostgreSQL. Any failure rolls everything back. On PostgreSQL the
+   command turns JIT off for itself and puts the transaction's setting back after it
+   (`set_config('jit', 'off', true)`): the subtree statements' estimated cost (a recursive walk times the
+   inlined `fn_ResourceAncestors`) crosses `jit_optimize_above_cost`, and in the benchmark compiling them
+   took over half a second, against well under a millisecond of work, on every save that adds a resource.
 4. Accept the changes.
 
 This covers every write that ends in `SaveChanges` on a `SqlOSDbContext`: application rows,
@@ -177,13 +238,18 @@ position; a row the caller may not see is never returned. Saves during a rebuild
 fail with a deadlock or duplicate key; it is meant for quiet periods, and running it again fixes what they
 left.
 
-**Startup.** After the functions are installed, `SqlOSBootstrapper` fills the entry table of every
-order whose table exists and is empty while its application table has rows: the first start after a
-declaration needs no manual step. The fill is a rebuild of that order (application lock, no command
+**Startup.** After the functions are installed, `SqlOSBootstrapper` logs, at Warning, each protected entity
+that has no node index and why. It then fills the entry table of every page order (node index or declared)
+whose table exists and is empty while its application table has rows: the first start after an upgrade
+or a declaration needs no manual step. The fill is a rebuild of that table (application lock, no command
 timeout); other instances starting at the same time wait for it and then find the table filled. A missing
-entry table is logged at Warning and skipped; pages for that order run read 1 only until it exists. In a
-rolling deployment, instances still on the previous version write rows without entries, so the rollout
-ends with a rebuild.
+table is logged at Warning and skipped; a missing declared table makes its order plain, and a missing
+node index makes that entity's plain orders run read 1 only, until it exists. In a rolling deployment,
+instances still on the previous version write rows without entries, so the rollout ends with a rebuild.
+
+Because every protected entity has a node index, `MayChange` is true for any save that touches a resource
+or a protected row, even in an application that declares nothing: those saves run in a transaction with
+their entry statements.
 
 Contexts that implement `ISqlOSFgaDbContext` by hand get no maintenance, and `ToPageAsync` refuses them.
 
@@ -193,9 +259,21 @@ Contexts that implement `ISqlOSFgaDbContext` by hand get no maintenance, and `To
 their groups), `N` rows in the table, `f` the fraction of rows under the caller's nodes that pass the
 application's filters.
 
+`R1` and `V` as above. A plain order (no declaration) costs:
+
 | Case | Cost | Why |
 | --- | --- | --- |
-| Dense list, scoped or not (admin; plants in my garden) | O(P·D·M) | read 1 fills the page |
+| Dense list, scoped or not (admin; plants in my garden) | O(P·D·M) | read 1 fills the page in round 0; no read 3 |
+| Sees few rows (`V ≤ P`) | O(P·D·M + V) | round 0: read 1 misses, 3a finds `V` keys, 3b sorts them |
+| Rows spread through the order | O(min(R1, V)), at most O(√(P·N)) | the rounds stop when the budget holds either |
+| Rows all at the far end of the order | O(V) | read 1 finds nothing; read 3 settles once the budget holds `V` |
+| `k` granted nodes | `k` node resolutions per round of read 3 | `fn_PageNodes` runs in every 3a statement |
+
+A declared order costs:
+
+| Case | Cost | Why |
+| --- | --- | --- |
+| Dense list, scoped or not | O(P·D·M) | read 1 fills the page |
 | Sees 1 in 100, no filter | O(P·D·M + P) | read 1 misses, read 2 takes P entries under one node |
 | 3 single-row grants under root, millions of rows | O((P + k)·D·M) | read 1 misses; 3 seeks, 3 entries |
 | 100 scattered stores | O(k·P) worst, O(k + P) typical | one seek per node, at most P entries each |
@@ -203,10 +281,16 @@ application's filters.
 | Sees half the table, rows all at the far end of the order | O(P) | P entries under their node |
 | Application filter few rows pass, no scope | O(P / f) | entries read until P pass |
 | Rare filter and a caller whose rows barely overlap it | O(rows the caller sees) | read 2 reads the caller's entries until P pass the filter |
-| Insert, or update of an order column or `ResourceId` | O(D × declared orders) | entries written in the same transaction |
-| Add a resource | O(declared orders) lookups by `ResourceId` | rows saved before it get entries |
-| Move, deactivate or reactivate a resource | O(subtree × D × declared orders) | that subtree's entries rewritten |
-| `RebuildPageOrdersAsync` | O(N × D × declared orders) | once |
+
+Writes, with `T` the page-order tables of the entity (its node index plus its declared orders):
+
+| Case | Cost | Why |
+| --- | --- | --- |
+| Insert, or update of `ResourceId` | O(D × T) | entries written in the same transaction |
+| Update of an order column | O(D × declared orders using it) | the node index has no order columns |
+| Add a resource | O(T) lookups by `ResourceId` | rows saved before it get entries |
+| Move, deactivate or reactivate a resource | O(subtree × D × T) | that subtree's entries rewritten |
+| `RebuildPageOrdersAsync` | O(N × D × T) | once |
 
 Nothing is linear in `N` except the rebuild.
 
@@ -225,5 +309,16 @@ Nothing is linear in `N` except the rebuild.
   the entry key. The entry column copies the source column's precision and scale, so values are never
   truncated; the warning can be ignored or suppressed with
   `ConfigureWarnings(w => w.Ignore(SqlServerEventId.DecimalTypeKeyWarning))`.
-- The permission's resource-type restriction is not applied by read 2; the final check applies it. A
-  type-restricted permission over rows of another type therefore produces short pages, never wrong rows.
+- The permission's resource-type restriction is not applied by reads 2 and 3; the final check applies it.
+  A type-restricted permission over rows of another type therefore produces short pages, never wrong rows.
+- Ordering by the key alone matches the node index, so it is served by read 2 over the node index: about a
+  page, with no declaration.
+- PostgreSQL: when the caller's rows are a percent or more of the table, the planner can read 3b's keys
+  with one parallel sequential scan of the table instead of key lookups, which it estimates cheaper; the
+  page then reads the table once, without the per-row check. In the benchmark (20,000 keys of a million
+  rows) that scan took about 40 ms; with parallel query off the same statement looks the keys up.
+- PostgreSQL: read 1 inlines `fn_IsResourceAccessible` for each row, so its estimated cost grows with the
+  budget and crosses the JIT thresholds. In the benchmark, read 1 was compiled from a budget of 1,280 rows
+  (about 90 ms of compilation) and optimized and inlined from 5,120 (about 1.3 s, against about 0.8 s of
+  work). `fn_PageNodes` and the save statements run without JIT; read 1 cannot, short of changing the
+  access check. Deployments that serve OLTP traffic often turn `jit` off.

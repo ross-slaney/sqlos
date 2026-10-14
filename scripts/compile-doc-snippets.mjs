@@ -198,9 +198,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : SqlOS
     wrap: asMachineClientSeedProgram,
   },
   {
-    name: "page order declaration",
+    name: "optional page order declaration",
     relativePath: "web/content/docs/fga/list-filter.mdx",
-    heading: "## Pages",
+    heading: "### What pages cost",
     marker: "entity.HasPageOrder(c => c.Name);",
     wrap: asPageOrderChainModelProgram,
   },
@@ -212,8 +212,15 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : SqlOS
     wrap: asChainPageProgram,
   },
   {
-    name: "page order declarations",
+    name: "plain page order model",
     relativePath: "web/content/docs/guides/paginating-authorized-lists.mdx",
+    heading: "## Page",
+    marker: "entity.HasIndex(p => new { p.Price, p.Id });",
+    wrap: asPageOrderProductModelProgram,
+  },
+  {
+    name: "page order declarations",
+    relativePath: "web/content/docs/guides/optimizing-page-orders.mdx",
     heading: "## Declare the order",
     marker: "entity.HasPageOrder(p => p.Price);",
     wrap: asPageOrderProductModelProgram,

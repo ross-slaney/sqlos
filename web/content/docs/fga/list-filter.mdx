@@ -14,21 +14,7 @@ A list endpoint reads authorized data one page at a time: `ToPageAsync` on your 
 
 ## Pages
 
-Declare the order the list is paged by once, in the model:
-
-```csharp
-protected override void OnApplicationModelCreating(ModelBuilder modelBuilder)
-{
-    modelBuilder.Entity<Chain>(entity =>
-    {
-        entity.HasKey(c => c.Id);
-        entity.Property(c => c.Name).HasMaxLength(200);
-        entity.HasPageOrder(c => c.Name);   // (Name, Id)
-    });
-}
-```
-
-Then page the query with the subject, the permission, a page size, and the previous page's cursor:
+Page the query with the subject, the permission, a page size, and the previous page's cursor, sorted however the screen sorts:
 
 ```csharp
 var page = await db.Chains
@@ -40,17 +26,28 @@ var page = await db.Chains
 return Results.Ok(page.ToResponse(c => new ChainDto(c.Id, c.Name)));
 ```
 
-`ToPageAsync` resolves the subject's principals (the subject plus its active groups) and the permission, then reads your query in its order and checks each row, for about a page of rows. When few of them are visible, it reads the declared order under each node the caller is granted instead (SqlOS keeps a copy of the order under every node of the resource tree, in its own tables), so a caller who can see 3 rows of a million costs about a page, not the table. The page's rows are then loaded through your query (`Include`, tracking) and checked once more.
+`ToPageAsync` resolves the subject's principals (the subject plus its active groups) and the permission, then reads your query in its order and checks each row, in growing batches. In the same rounds it reads the caller's own rows from the node index SqlOS keeps for the entity (which rows sit under which of the caller's granted nodes, in SqlOS's own tables) and, once they fit the batch, sorts them through your query. Whichever finishes first is the page, so a caller who sees everything costs about a page and a caller who can see 3 rows of a million costs about those 3 rows, not the table. The page's rows are then loaded through your query (`Include`, tracking) and checked once more.
 
-The query must start from a `DbSet` of a context that derives from `SqlOSDbContext<TContext>`. The declaration adds a table to your EF model (`SqlOSFgaPage_Chains_Name`), so your next migration creates it. `SqlOSDbContext` keeps it current in the same transaction as every save, and fills it on the first start after you declare the order. See [Paginating authorized lists](/docs/guides/paginating-authorized-lists) for the cursor, the response, and what the query may contain.
+The query must start from a `DbSet` of a context that derives from `SqlOSDbContext<TContext>`. The node index is a table in your EF model (`SqlOSFgaPage_Chains_Id`), so your next migration creates it; `SqlOSDbContext` keeps it current in the same transaction as every save. See [Paginating authorized lists](/docs/guides/paginating-authorized-lists) for the cursor, the response, and what the query may contain.
 
-Pass `NextCursor` back as the next request's cursor. Do not write your own position filter (`.Where(c => c.Name.CompareTo(lastSeen) > 0)`, keyset libraries, `since=` parameters): `ToPageAsync` seeks under each of the caller's nodes from the cursor, and a hand-written position is just another filter there, so every page walks the caller's rows from the start of the order.
+Pass `NextCursor` back as the next request's cursor. Do not write your own position filter (`.Where(c => c.Name.CompareTo(lastSeen) > 0)`, keyset libraries, `since=` parameters): `ToPageAsync` reads from the cursor, and a hand-written position is just another filter there, so every page reads the caller's rows from the start of the order.
 
 ### What pages cost
 
-- **About a page** for callers who see little of a large table, for callers with many grants, for rows that sit at the far end of the order, and for application filters that pass few rows.
-- **An order that is not declared** still returns the right pages, but reads the table for a caller who sees little of it. `ToPageAsync` logs a warning naming the declaration to add.
-- **One case stays proportional to the caller's rows:** an application filter that few rows pass combined with a caller whose rows barely overlap it. SqlOS reads the caller's entries until a page passes your filter.
+- **Any order** costs at most about nine times the smaller of the query's rows up to the page and the rows the caller can see, plus a page: about a page for a caller who sees most rows, about its own rows for a caller who sees few, and at worst about √(rows × page size) for a caller whose rows are spread through the order (4,472 for a million rows and a page of 20).
+- **A sort declared with `HasPageOrder`** costs about a page for every caller, including one whose rows sit at the far end of the order. Declare the hot sorts of large lists: see [Optimizing page performance](/docs/guides/optimizing-page-orders).
+
+```csharp
+protected override void OnApplicationModelCreating(ModelBuilder modelBuilder)
+{
+    modelBuilder.Entity<Chain>(entity =>
+    {
+        entity.HasKey(c => c.Id);
+        entity.Property(c => c.Name).HasMaxLength(200);
+        entity.HasPageOrder(c => c.Name);   // optional: (Name, Id) costs about a page
+    });
+}
+```
 
 ## No counts or joins
 

@@ -80,17 +80,17 @@ Provision typed subjects with the SDK helpers rather than inserting only a bare 
 
 ### RebuildPageOrdersAsync
 
-Rebuild the entries of every page order declared in the context's model from the application tables and the resource graph.
+Rebuild the entries of every page-order table in the context's model, the node index of every protected entity and every order declared with `HasPageOrder`, from the application tables and the resource graph.
 
 ```csharp
 await authService.RebuildPageOrdersAsync(cancellationToken);
 ```
 
-For each declared order: delete all entries, then insert them in one statement, inside one transaction per order. The cost is the table's rows times the tree depth. `SqlOSDbContext<TContext>` keeps entries current for every write that goes through `SaveChanges`; call this after writes that bypass EF Core (bulk loads, raw SQL, `ExecuteUpdate`/`ExecuteDelete`) and for recovery. Until then, rows those writes inserted are missing from pages and rows they changed page at their old position; a row the caller may not see is never returned. It runs without a command timeout; the cancellation token stops it. Run it while the application is not writing to those tables: a save during a rebuild waits for it, or makes it fail with a deadlock or duplicate key, and running it again fixes that.
+For each table: delete all entries, then insert them in one statement, inside one transaction per table. The cost is the table's rows times the tree depth. `SqlOSDbContext<TContext>` keeps entries current for every write that goes through `SaveChanges`; call this after writes that bypass EF Core (bulk loads, raw SQL, `ExecuteUpdate`/`ExecuteDelete`) and for recovery. Until then, rows those writes inserted are missing from pages read through the node index or a declared order, and rows they changed page at their old position; a row the caller may not see is never returned. It runs without a command timeout; the cancellation token stops it. Run it while the application is not writing to those tables: a save during a rebuild waits for it, or makes it fail with a deadlock or duplicate key, and running it again fixes that.
 
 **Returns**
 
-`Task` — completes when every page order has been rebuilt.
+`Task` — completes when every page-order table has been rebuilt.
 
 ---
 
@@ -186,7 +186,7 @@ var resourceId = context.CreateResource("retail_root", request.Name, "chain");
 
 ### HasPageOrder
 
-Declare an order an entity is paged by with `ToPageAsync`. SqlOS keeps a copy of the order under every node of the resource tree in a table of its own, so a page costs about a page for any caller.
+Optional. Declare an order an entity is paged by with `ToPageAsync`, as an optimization: SqlOS keeps a copy of the order under every node of the resource tree in a table of its own, so a page by exactly that order costs about a page for any caller. Every order pages without a declaration; see [Optimizing page performance](/docs/guides/optimizing-page-orders) for when one is worth it.
 
 ```csharp
 modelBuilder.Entity<Product>(entity =>
@@ -210,7 +210,7 @@ public static EntityTypeBuilder<T> HasPageOrder<T>(
 
 **Returns** the same `EntityTypeBuilder<T>`.
 
-The declaration adds the table `SqlOSFgaPage_{Table}_{Columns}` (in SqlOS's FGA schema) to the EF model, so the next migration creates it. One declaration serves both directions; declaring the same order twice is a no-op. Model build fails, with the fix in the message, for a nullable order column, an order column that is not a mapped scalar property, a string order column without a maximum length, a composite primary key, an entity without a mapped `ResourceId`, and an owned, view-mapped, TPT or TPC entity. Page orders are kept current by `SqlOSDbContext<TContext>`.
+The declaration adds the table `SqlOSFgaPage_{Table}_{Columns}` (in SqlOS's FGA schema) to the EF model, so the next migration creates it. A page uses it when its order has exactly these columns, in this sequence, in either direction: `OrderBy(p => p.Price).ThenBy(p => p.Name)` does not use `HasPageOrder(p => p.Price)`. Declaring the same order twice is a no-op, and so is declaring the key alone, which is the node index SqlOS keeps for every protected entity (`SqlOSFgaPage_{Table}_{Key}`). Model build fails, with the fix in the message, for a nullable order column, an order column that is not a mapped scalar property, a string order column without a maximum length, a composite primary key, an entity without a mapped `ResourceId`, and an owned, view-mapped, TPT or TPC entity. Page orders are kept current by `SqlOSDbContext<TContext>`.
 
 ---
 
@@ -247,15 +247,16 @@ public static Task<SqlOSCursorPage<T>> ToPageAsync<T>(
 | `pageSize` | `int` | 1 to 1,000. |
 | `cursor` | `string?` | The previous page's `NextCursor`, or `null` for the first page. |
 
-**Returns** `Task<SqlOSCursorPage<T>>`, the visible rows after `cursor` in the query's order. A declared order (see [`HasPageOrder`](#haspageorder)) costs about a page for any caller; an undeclared one reads the query in order and checks each row, and logs a warning with the declaration to add.
+**Returns** `Task<SqlOSCursorPage<T>>`, the visible rows after `cursor` in the query's order. Any order costs at most about nine times the smaller of "the query's rows up to the page" and "the rows the caller can see", plus a page; an order declared with [`HasPageOrder`](#haspageorder) costs about a page for any caller.
 
 **Behavior**
 
 - The subject's principals (the subject plus its active groups) and the permission are resolved each time the page runs. An unknown or inactive subject, or an unknown permission, gets an empty page with no `NextCursor`, a logged warning, and no page queries.
-- The page reads the query in its order and checks each row; when few are visible and the order is declared, it reads the order under each node the caller is granted. The page's rows are loaded through the query (includes, tracking) and checked once more.
-- One Debug line per page is logged under the `SqlOS.Fga` category.
+- The page reads the query in its order and checks each row, in batches that grow four times per round. In the same rounds it reads up to a batch of the caller's row keys from the entity's node index and, once they fit, reads those rows through the query in its order. For a declared order it reads the order under each node the caller is granted instead. The page's rows are loaded through the query (includes, tracking) and checked once more.
+- An entity with no node index (an owned type, a view, TPT or TPC inheritance, no single-column primary key, or no mapped `ResourceId`), or whose node index table is missing, is paged by reading the query and checking each row.
+- One Debug line per page is logged under the `SqlOS.Fga` category: the order and whether it is declared, the rows each read touched per round, and which read served the page.
 
-**The cursor rule.** Pass `NextCursor` back as it came. Don't write your own position filter (`.Where(x => x.CreatedAt < lastSeen)`, keyset libraries, `since=` versions): `ToPageAsync` seeks under each of the caller's nodes from the cursor, and a hand-written position is just another filter there, so every page walks the caller's rows from the start of the order. For a change feed, the cursor is the sync token the client stores.
+**The cursor rule.** Pass `NextCursor` back as it came. Don't write your own position filter (`.Where(x => x.CreatedAt < lastSeen)`, keyset libraries, `since=` versions): `ToPageAsync` reads from the cursor, and a hand-written position is just another filter there, so every page reads the caller's rows from the start of the order. For a change feed, the cursor is the sync token the client stores.
 
 **Exceptions**
 
@@ -343,7 +344,7 @@ public interface ISqlOSResourceEntity : IHasResourceId
 
 ## IHasResourceId
 
-Lower-level contract that exposes an entity's FGA resource ID. Required for `ToPageAsync`, `HasPageOrder` and `AuthorizedDetailAsync`. `ISqlOSResourceEntity` extends this interface and is the recommended contract for normal protected domain rows.
+Lower-level contract that exposes an entity's FGA resource ID. Required for `ToPageAsync`, `HasPageOrder` and `AuthorizedDetailAsync`. In a context deriving from `SqlOSDbContext<TContext>`, every entity that implements it gets a node index (`SqlOSFgaPage_{Table}_{Key}`), which `ToPageAsync` reads for any order. `ISqlOSResourceEntity` extends this interface and is the recommended contract for normal protected domain rows.
 
 ```csharp
 public interface IHasResourceId

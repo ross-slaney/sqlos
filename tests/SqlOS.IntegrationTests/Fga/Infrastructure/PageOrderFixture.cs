@@ -144,6 +144,9 @@ internal static class PageOrderFixture
             CategoryId = categoryId
         };
 
+    /// <summary>The orders documents are paged by: Rank and Title are declared, the others plain.</summary>
+    public static readonly string[] Orders = ["Rank", "Title", "CreatedAt", "Title,Rank"];
+
     public static IOrderedQueryable<PagedDocument> Order(IQueryable<PagedDocument> query, string order, bool descending)
         => (order, descending) switch
         {
@@ -153,6 +156,9 @@ internal static class PageOrderFixture
             ("Title", true) => query.OrderByDescending(document => document.Title),
             ("CreatedAt", false) => query.OrderBy(document => document.CreatedAt),
             ("CreatedAt", true) => query.OrderByDescending(document => document.CreatedAt),
+            // Title is declared alone; Title then Rank is another order, and plain.
+            ("Title,Rank", false) => query.OrderBy(document => document.Title).ThenBy(document => document.Rank),
+            ("Title,Rank", true) => query.OrderByDescending(document => document.Title).ThenByDescending(document => document.Rank),
             _ => throw new ArgumentOutOfRangeException(nameof(order))
         };
 
@@ -207,6 +213,8 @@ internal static class PageOrderFixture
             ("Title", true) => rows.OrderByDescending(document => document.Title, StringComparer.Ordinal),
             ("CreatedAt", false) => rows.OrderBy(document => document.CreatedAt),
             ("CreatedAt", true) => rows.OrderByDescending(document => document.CreatedAt),
+            ("Title,Rank", false) => rows.OrderBy(document => document.Title, StringComparer.Ordinal).ThenBy(document => document.Rank),
+            ("Title,Rank", true) => rows.OrderByDescending(document => document.Title, StringComparer.Ordinal).ThenByDescending(document => document.Rank),
             _ => throw new ArgumentOutOfRangeException(nameof(order))
         };
 
@@ -238,22 +246,27 @@ internal static class PageOrderFixture
         return pages;
     }
 
-    /// <summary>The entries of an entry table, and what a rebuild would write, as comparable rows.</summary>
+    /// <summary>
+    /// The entries of an entry table, and what a rebuild would write, as comparable rows. A node
+    /// index has no sort column.
+    /// </summary>
     public static async Task<(List<string> Actual, List<string> Expected)> EntriesAndRebuildAsync(
         string entryTable,
         string appTable,
-        string sortColumn)
+        string? sortColumn)
     {
         var entries = TestDatabase.Qualify(entryTable);
         var app = TestDatabase.Quote(appTable);
         var ancestors = TestDatabase.IsPostgreSql
             ? $"CROSS JOIN LATERAL {TestDatabase.Qualify("fn_ResourceAncestors")}(t.{TestDatabase.Quote("ResourceId")}) AS a"
             : $"CROSS APPLY {TestDatabase.Qualify("fn_ResourceAncestors")}(t.{TestDatabase.Quote("ResourceId")}) AS a";
+        var entrySort = sortColumn == null ? string.Empty : $"{TestDatabase.Quote(sortColumn)}, ";
+        var appSort = sortColumn == null ? string.Empty : $"t.{TestDatabase.Quote(sortColumn)}, ";
 
         var actual = await ReadRowsAsync(
-            $"SELECT {TestDatabase.Quote("NodeId")}, {TestDatabase.Quote(sortColumn)}, {TestDatabase.Quote("RowKey")} FROM {entries}");
+            $"SELECT {TestDatabase.Quote("NodeId")}, {entrySort}{TestDatabase.Quote("RowKey")} FROM {entries}");
         var expected = await ReadRowsAsync(
-            $"SELECT a.{TestDatabase.Quote("NodeId")}, t.{TestDatabase.Quote(sortColumn)}, t.{TestDatabase.Quote("Id")} FROM {app} AS t {ancestors}");
+            $"SELECT a.{TestDatabase.Quote("NodeId")}, {appSort}t.{TestDatabase.Quote("Id")} FROM {app} AS t {ancestors}");
         actual.Sort(StringComparer.Ordinal);
         expected.Sort(StringComparer.Ordinal);
         return (actual, expected);

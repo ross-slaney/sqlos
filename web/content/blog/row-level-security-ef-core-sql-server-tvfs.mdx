@@ -87,7 +87,7 @@ Because it is an inline TVF, SQL Server can compose the function into the callin
 
 ## Mapping It to EF Core
 
-The TVF needs to be callable from EF Core. The recommended `SqlOSDbContext<TContext>` base class registers it for relational contexts and keeps declared page orders current on save:
+The TVF needs to be callable from EF Core. The recommended `SqlOSDbContext<TContext>` base class registers it for relational contexts and keeps its node indexes and any declared page orders current on save:
 
 ```csharp
 public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
@@ -100,8 +100,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
         modelBuilder.Entity<Document>(entity =>
         {
             entity.HasIndex(d => d.ResourceId).IsUnique();
-            entity.HasIndex(d => new { d.CreatedAt, d.Id });
-            entity.HasPageOrder(d => d.CreatedAt);   // the order lists page by
+            entity.HasIndex(d => new { d.CreatedAt, d.Id });   // the order lists page by
         });
     }
 }
@@ -121,7 +120,7 @@ var page = await db.Documents
         cancellationToken: ct);
 ```
 
-`ToPageAsync` reads your query in its order and checks each row with the TVF in SQL, for as many rows as the page needs. When few of those rows are visible, it reads the declared order under each resource the caller is granted instead. The page's rows are then loaded through your query and checked once more. Unauthorized rows never reach the application, and `page.NextCursor` continues the list.
+`ToPageAsync` reads your query in its order and checks each row with the TVF in SQL, for as many rows as the page needs. In the same rounds it reads the caller's own rows under each resource the caller is granted, from the node index SqlOS keeps, and sorts them through your query once they fit. The page's rows are then loaded through your query and checked once more. Unauthorized rows never reach the application, and `page.NextCursor` continues the list.
 
 ## Why a Resource Tree, Not a Flat Tenant ID
 
@@ -164,7 +163,7 @@ The TVF approach has a bounded hierarchy walk. A useful conceptual model is:
 
 **Per-page cost:** O(k · D) where k is the page size. Under cursor pagination, the database evaluates rows sequentially until it finds k authorized ones.
 
-That holds when authorized rows are common in the order. For a caller who sees a few rows of a large table, reading forward until k are found can read most of the table. That is why the order is declared with `HasPageOrder`: `ToPageAsync` then reads from the caller's granted resources, and the page still costs about a page.
+That holds when authorized rows are common in the order. For a caller who sees a few rows of a large table, reading forward until k are found can read most of the table. That is why `ToPageAsync` also reads the caller's own rows from its granted resources: the page then costs about the caller's rows, not the table, and declaring the order with `HasPageOrder` makes it about a page.
 
 The benchmark below found stable page-level behavior at the tested scales because cursor pagination examines rows forward from the cursor and the TVF walks a bounded ancestor chain. Treat those measurements as benchmark results, not a universal latency guarantee: indexes, selectivity, grant density, plan quality, and application predicates still matter.
 

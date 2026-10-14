@@ -15,9 +15,10 @@ namespace SqlOS;
 /// <typeparam name="TContext">The concrete application context type.</typeparam>
 /// <remarks>
 /// SqlOS registers its auth, email, calendar, and FGA entities before invoking
-/// <see cref="OnApplicationModelCreating"/>. Save operations synchronize tracked
-/// <see cref="ISqlOSResourceEntity"/> instances with their backing FGA resources and keep the
-/// entries of declared page orders (<c>HasPageOrder</c>) current in the same transaction.
+/// <see cref="OnApplicationModelCreating"/>, then adds a node index table for every
+/// <see cref="IHasResourceId"/> entity and a table for every order declared with <c>HasPageOrder</c>.
+/// Save operations synchronize tracked <see cref="ISqlOSResourceEntity"/> instances with their
+/// backing FGA resources and keep those tables current in the same transaction.
 /// </remarks>
 public abstract class SqlOSDbContext<TContext> : DbContext, ISqlOSAuthServerDbContext, ISqlOSFgaDbContext
     where TContext : SqlOSDbContext<TContext>

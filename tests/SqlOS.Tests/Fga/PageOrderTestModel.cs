@@ -48,6 +48,24 @@ public sealed class PagedDetails : IHasResourceId
     public int Rank { get; set; }
 }
 
+/// <summary>A protected entity split from the products table.</summary>
+public sealed class PagedProductSummary : IHasResourceId
+{
+    public Guid Id { get; set; }
+    public string ResourceId { get; set; } = string.Empty;
+}
+
+/// <summary>The root of a hierarchy that only its derived type protects.</summary>
+public class PagedEntry
+{
+    public Guid Id { get; set; }
+}
+
+public sealed class PagedProtectedEntry : PagedEntry, IHasResourceId
+{
+    public string ResourceId { get; set; } = string.Empty;
+}
+
 /// <summary>
 /// A SqlOS context whose application model each test supplies. The model is built without a
 /// database connection; every instance gets its own model.

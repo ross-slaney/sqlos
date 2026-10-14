@@ -91,6 +91,7 @@
   "fga/has-capability": { "section": "authorization", "group": "checks", "order": 4 },
   "fga/creating-resources": { "section": "authorization", "group": "checks", "order": 5 },
   "guides/paginating-authorized-lists": { "section": "authorization", "group": "checks", "order": 6 },
+  "guides/optimizing-page-orders": { "section": "authorization", "group": "checks", "order": 7 },
   "guides/fga-groups": { "section": "authorization", "group": "tenancy", "order": 0 },
   "guides/authserver-to-fga": { "section": "authorization", "group": "tenancy", "order": 1 },
   "fga/resources-dashboard": { "section": "authorization", "group": "tenancy", "order": 2 },
