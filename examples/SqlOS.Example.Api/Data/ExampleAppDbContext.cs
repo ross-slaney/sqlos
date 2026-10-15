@@ -2,7 +2,6 @@ using Microsoft.EntityFrameworkCore;
 using SqlOS;
 using SqlOS.Example.Api.FgaRetail.Models;
 using SqlOS.Example.Api.Models;
-using SqlOS.Fga.Extensions;
 
 namespace SqlOS.Example.Api.Data;
 
@@ -20,8 +19,10 @@ public sealed class ExampleAppDbContext : SqlOSDbContext<ExampleAppDbContext>
 
     protected override void OnApplicationModelCreating(ModelBuilder modelBuilder)
     {
-        // Lists page with ToPageAsync; each order they page by is declared, so a page costs about a
-        // page for any caller.
+        // Lists page with ToPageAsync. The rule is the one every database has: index the columns you
+        // sort by. SqlOS keeps a copy of every index of a protected table under every node of the
+        // resource tree, so a page by an indexed order costs about a page for any caller. Indexes on
+        // ResourceId and on foreign keys are lookups and get no copy.
         modelBuilder.Entity<Workspace>(entity =>
         {
             entity.HasKey(x => x.Id);
@@ -30,7 +31,7 @@ public sealed class ExampleAppDbContext : SqlOSDbContext<ExampleAppDbContext>
             entity.Property(x => x.ResourceId).HasMaxLength(100).IsRequired();
             entity.HasIndex(x => x.OrganizationId);
             entity.HasIndex(x => x.ResourceId);
-            entity.HasPageOrder(x => x.Name);
+            entity.HasIndex(x => new { x.Name, x.Id });
             entity.Ignore(x => x.ResourceTypeId);
             entity.Ignore(x => x.ResourceName);
             entity.Ignore(x => x.ParentResourceId);
@@ -44,7 +45,7 @@ public sealed class ExampleAppDbContext : SqlOSDbContext<ExampleAppDbContext>
             entity.HasIndex(x => x.ResourceId);
             entity.Property(x => x.Name).HasMaxLength(200).IsRequired();
             entity.Property(x => x.ResourceId).HasMaxLength(100).IsRequired();
-            entity.HasPageOrder(x => x.Name);
+            entity.HasIndex(x => new { x.Name, x.Id });
         });
 
         modelBuilder.Entity<Location>(entity =>
@@ -58,7 +59,7 @@ public sealed class ExampleAppDbContext : SqlOSDbContext<ExampleAppDbContext>
                 .WithMany(x => x.Locations)
                 .HasForeignKey(x => x.ChainId)
                 .OnDelete(DeleteBehavior.Restrict);
-            entity.HasPageOrder(x => x.Name);
+            entity.HasIndex(x => new { x.Name, x.Id });
         });
 
         modelBuilder.Entity<InventoryItem>(entity =>
@@ -74,9 +75,9 @@ public sealed class ExampleAppDbContext : SqlOSDbContext<ExampleAppDbContext>
                 .WithMany(x => x.InventoryItems)
                 .HasForeignKey(x => x.LocationId)
                 .OnDelete(DeleteBehavior.Restrict);
-            entity.HasPageOrder(x => x.Name);
-            entity.HasPageOrder(x => x.Sku);
-            entity.HasPageOrder(x => x.Price);
+            entity.HasIndex(x => new { x.Name, x.Id });
+            entity.HasIndex(x => new { x.Sku, x.Id });
+            entity.HasIndex(x => new { x.Price, x.Id });
         });
 
         modelBuilder.Entity<ExampleUserProfile>(entity =>

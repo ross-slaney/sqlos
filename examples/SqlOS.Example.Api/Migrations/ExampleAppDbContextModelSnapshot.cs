@@ -3651,9 +3651,11 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.HasIndex("ResourceId");
 
+                    b.HasIndex("Name", "Id");
+
                     b.ToTable("Chains");
 
-                    b.HasAnnotation("SqlOS:PageOrders", "[{\"table\":\"SqlOSFgaPage_Chains_Name\",\"columns\":[\"Name\",\"Id\"]}]");
+                    b.HasAnnotation("SqlOS:PageOrders", "[{\"table\":\"SqlOSFgaPage_Chains_Id\",\"columns\":[\"Id\"]},{\"table\":\"SqlOSFgaPage_Chains_Name\",\"columns\":[\"Name\",\"Id\"]}]");
                 });
 
             modelBuilder.Entity("SqlOS.Example.Api.FgaRetail.Models.InventoryItem", b =>
@@ -3701,9 +3703,15 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.HasIndex("ResourceId");
 
+                    b.HasIndex("Name", "Id");
+
+                    b.HasIndex("Price", "Id");
+
+                    b.HasIndex("Sku", "Id");
+
                     b.ToTable("InventoryItems");
 
-                    b.HasAnnotation("SqlOS:PageOrders", "[{\"table\":\"SqlOSFgaPage_InventoryItems_Name\",\"columns\":[\"Name\",\"Id\"]},{\"table\":\"SqlOSFgaPage_InventoryItems_Sku\",\"columns\":[\"Sku\",\"Id\"]},{\"table\":\"SqlOSFgaPage_InventoryItems_Price\",\"columns\":[\"Price\",\"Id\"]}]");
+                    b.HasAnnotation("SqlOS:PageOrders", "[{\"table\":\"SqlOSFgaPage_InventoryItems_Id\",\"columns\":[\"Id\"]},{\"table\":\"SqlOSFgaPage_InventoryItems_Name\",\"columns\":[\"Name\",\"Id\"]},{\"table\":\"SqlOSFgaPage_InventoryItems_Price\",\"columns\":[\"Price\",\"Id\"]},{\"table\":\"SqlOSFgaPage_InventoryItems_Sku\",\"columns\":[\"Sku\",\"Id\"]}]");
                 });
 
             modelBuilder.Entity("SqlOS.Example.Api.FgaRetail.Models.Location", b =>
@@ -3752,9 +3760,11 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.HasIndex("ResourceId");
 
+                    b.HasIndex("Name", "Id");
+
                     b.ToTable("Locations");
 
-                    b.HasAnnotation("SqlOS:PageOrders", "[{\"table\":\"SqlOSFgaPage_Locations_Name\",\"columns\":[\"Name\",\"Id\"]}]");
+                    b.HasAnnotation("SqlOS:PageOrders", "[{\"table\":\"SqlOSFgaPage_Locations_Id\",\"columns\":[\"Id\"]},{\"table\":\"SqlOSFgaPage_Locations_Name\",\"columns\":[\"Name\",\"Id\"]}]");
                 });
 
             modelBuilder.Entity("SqlOS.Example.Api.Models.ExampleUserProfile", b =>
@@ -3835,9 +3845,11 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.HasIndex("ResourceId");
 
+                    b.HasIndex("Name", "Id");
+
                     b.ToTable("Workspaces");
 
-                    b.HasAnnotation("SqlOS:PageOrders", "[{\"table\":\"SqlOSFgaPage_Workspaces_Name\",\"columns\":[\"Name\",\"Id\"]}]");
+                    b.HasAnnotation("SqlOS:PageOrders", "[{\"table\":\"SqlOSFgaPage_Workspaces_Id\",\"columns\":[\"Id\"]},{\"table\":\"SqlOSFgaPage_Workspaces_OrganizationId\",\"columns\":[\"OrganizationId\",\"Id\"]},{\"table\":\"SqlOSFgaPage_Workspaces_Name\",\"columns\":[\"Name\",\"Id\"]}]");
                 });
 
             modelBuilder.Entity("SqlOS.Fga.Models.SqlOSFgaAccessibleResource", b =>
@@ -4300,6 +4312,22 @@ namespace SqlOS.Example.Api.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SqlOSFgaPage_Chains_Id", b =>
+                {
+                    b.Property<string>("NodeId")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("RowKey")
+                        .HasColumnType("nvarchar(450)");
+
+                    b.HasKey("NodeId", "RowKey");
+
+                    b.HasIndex("RowKey");
+
+                    b.ToTable("SqlOSFgaPage_Chains_Id", "dbo");
+                });
+
             modelBuilder.Entity("SqlOSFgaPage_Chains_Name", b =>
                 {
                     b.Property<string>("NodeId")
@@ -4318,6 +4346,22 @@ namespace SqlOS.Example.Api.Migrations
                     b.HasIndex("RowKey");
 
                     b.ToTable("SqlOSFgaPage_Chains_Name", "dbo");
+                });
+
+            modelBuilder.Entity("SqlOSFgaPage_InventoryItems_Id", b =>
+                {
+                    b.Property<string>("NodeId")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("RowKey")
+                        .HasColumnType("nvarchar(450)");
+
+                    b.HasKey("NodeId", "RowKey");
+
+                    b.HasIndex("RowKey");
+
+                    b.ToTable("SqlOSFgaPage_InventoryItems_Id", "dbo");
                 });
 
             modelBuilder.Entity("SqlOSFgaPage_InventoryItems_Name", b =>
@@ -4379,6 +4423,22 @@ namespace SqlOS.Example.Api.Migrations
                     b.ToTable("SqlOSFgaPage_InventoryItems_Sku", "dbo");
                 });
 
+            modelBuilder.Entity("SqlOSFgaPage_Locations_Id", b =>
+                {
+                    b.Property<string>("NodeId")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("RowKey")
+                        .HasColumnType("nvarchar(450)");
+
+                    b.HasKey("NodeId", "RowKey");
+
+                    b.HasIndex("RowKey");
+
+                    b.ToTable("SqlOSFgaPage_Locations_Id", "dbo");
+                });
+
             modelBuilder.Entity("SqlOSFgaPage_Locations_Name", b =>
                 {
                     b.Property<string>("NodeId")
@@ -4399,6 +4459,22 @@ namespace SqlOS.Example.Api.Migrations
                     b.ToTable("SqlOSFgaPage_Locations_Name", "dbo");
                 });
 
+            modelBuilder.Entity("SqlOSFgaPage_Workspaces_Id", b =>
+                {
+                    b.Property<string>("NodeId")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("RowKey")
+                        .HasColumnType("nvarchar(450)");
+
+                    b.HasKey("NodeId", "RowKey");
+
+                    b.HasIndex("RowKey");
+
+                    b.ToTable("SqlOSFgaPage_Workspaces_Id", "dbo");
+                });
+
             modelBuilder.Entity("SqlOSFgaPage_Workspaces_Name", b =>
                 {
                     b.Property<string>("NodeId")
@@ -4417,6 +4493,26 @@ namespace SqlOS.Example.Api.Migrations
                     b.HasIndex("RowKey");
 
                     b.ToTable("SqlOSFgaPage_Workspaces_Name", "dbo");
+                });
+
+            modelBuilder.Entity("SqlOSFgaPage_Workspaces_OrganizationId", b =>
+                {
+                    b.Property<string>("NodeId")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("OrganizationId")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("RowKey")
+                        .HasColumnType("nvarchar(450)");
+
+                    b.HasKey("NodeId", "OrganizationId", "RowKey");
+
+                    b.HasIndex("RowKey");
+
+                    b.ToTable("SqlOSFgaPage_Workspaces_OrganizationId", "dbo");
                 });
 
             modelBuilder.Entity("SqlOS.AuthServer.Models.SqlOSApplicationAssignment", b =>

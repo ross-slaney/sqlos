@@ -198,10 +198,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : SqlOS
     wrap: asMachineClientSeedProgram,
   },
   {
-    name: "page order declaration",
+    name: "page order index",
     relativePath: "web/content/docs/fga/list-filter.mdx",
     heading: "## Pages",
-    marker: "entity.HasPageOrder(c => c.Name);",
+    marker: "entity.HasIndex(c => new { c.Name, c.Id });",
     wrap: asPageOrderChainModelProgram,
   },
   {
@@ -212,10 +212,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : SqlOS
     wrap: asChainPageProgram,
   },
   {
-    name: "page order declarations",
+    name: "page order indexes",
     relativePath: "web/content/docs/guides/paginating-authorized-lists.mdx",
-    heading: "## Declare the order",
-    marker: "entity.HasPageOrder(p => p.Price);",
+    heading: "## Index the order",
+    marker: "entity.HasIndex(p => new { p.Price, p.Id });",
     wrap: asPageOrderProductModelProgram,
   },
   {

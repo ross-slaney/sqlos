@@ -13,8 +13,8 @@ using SqlOS.Fga.Models;
 namespace SqlOS.Fga.Paging;
 
 /// <summary>
-/// One declared page order of an entity: its order columns, ending with the primary key, and the
-/// entry table that keeps a copy of that order under every node a row sits under.
+/// One page order of an entity: its order columns, ending with the primary key, and the entry
+/// table that keeps a copy of that order under every node a row sits under.
 /// </summary>
 internal sealed class SqlOSFgaPageOrder
 {
@@ -33,7 +33,7 @@ internal sealed class SqlOSFgaPageOrder
         ResourceId = resourceId;
     }
 
-    /// <summary>The entity the order is declared on (the root of its hierarchy).</summary>
+    /// <summary>The entity the order belongs to (the root of its hierarchy).</summary>
     public IEntityType EntityType { get; }
 
     /// <summary>The shared-type entry entity; its name is the entry table name.</summary>
@@ -97,14 +97,23 @@ internal sealed class SqlOSFgaPageOrder
 }
 
 /// <summary>
-/// Declares, builds and reads page orders. <c>HasPageOrder</c> records a declaration on the
-/// entity type; <see cref="ApplyModel"/> validates it and adds the entry entity type once the
-/// application has configured its model; the runtime reads the result from the
-/// <c>SqlOS:PageOrders</c> annotation.
+/// An index, or an entity, that got no page order, and why. Logged once at startup.
+/// </summary>
+/// <param name="EntityType">The protected entity.</param>
+/// <param name="Columns">The index's columns, or <see langword="null"/> when the whole entity got no orders.</param>
+/// <param name="Reason">Why, ending with the fix.</param>
+internal sealed record SqlOSFgaPageOrderSkip(IEntityType EntityType, IReadOnlyList<string>? Columns, string Reason);
+
+/// <summary>
+/// Builds and reads page orders. <see cref="ApplyModel"/> gives every root entity type that
+/// implements <see cref="IHasResourceId"/> one page order for its primary key and one for each of
+/// its indexes, and adds their entry entity types once the application has configured its model;
+/// the runtime reads the result from the <c>SqlOS:PageOrders</c> annotation.
 /// </summary>
 internal static class SqlOSFgaPageOrders
 {
     public const string AnnotationName = "SqlOS:PageOrders";
+    public const string SkipsAnnotationName = "SqlOS:PageOrderSkips";
     public const string NodeIdProperty = "NodeId";
     public const string RowKeyProperty = "RowKey";
     public const string EntryTablePrefix = "SqlOSFgaPage_";
@@ -116,23 +125,21 @@ internal static class SqlOSFgaPageOrders
 
     private static readonly ConditionalWeakTable<IReadOnlyEntityType, IReadOnlyList<SqlOSFgaPageOrder>> OrdersByEntity = new();
     private static readonly ConditionalWeakTable<IReadOnlyModel, IReadOnlyList<SqlOSFgaPageOrder>> OrdersByModel = new();
+    private static readonly ConditionalWeakTable<IReadOnlyModel, IReadOnlyList<SqlOSFgaPageOrderSkip>> SkipsByModel = new();
     private static readonly ConditionalWeakTable<IReadOnlyModel, ConcurrentDictionary<string, bool>> MissingTables = new();
 
-    /// <summary>Records <c>HasPageOrder</c>; a repeated declaration is a no-op.</summary>
-    internal static void Declare(IMutableEntityType entityType, IReadOnlyList<string> columns)
-    {
-        var declarations = ReadAnnotation(entityType);
-        if (!declarations.Any(declaration => declaration.Columns.SequenceEqual(columns, StringComparer.Ordinal)))
-        {
-            declarations.Add(new Declaration(null, columns.ToArray()));
-            WriteAnnotation(entityType, declarations);
-        }
-    }
-
     /// <summary>
-    /// Validates every declaration and adds its entry entity type. Runs after the application's
-    /// model configuration, so the columns' facets, the table name and the key are final.
+    /// Gives every root entity type whose CLR type implements <see cref="IHasResourceId"/> a page
+    /// order for its primary key and one per index, and adds their entry entity types. Runs after
+    /// the application's model configuration, so the columns' facets, the table name, the key and
+    /// the indexes are final. Nothing here throws: an entity or an index that cannot have an order
+    /// is recorded as a skip, and startup logs it.
     /// </summary>
+    /// <remarks>
+    /// Two kinds of index are lookups, not sorts, and get no order: one that contains the entity's
+    /// <c>ResourceId</c>, and one whose columns are exactly the columns of one of the entity's foreign
+    /// keys. An index that ends with the key gives the same order as the index without it.
+    /// </remarks>
     internal static void ApplyModel(IMutableModel model, string? providerName)
     {
         var identifierLimit = SqlOSDatabase.IsPostgreSql(providerName)
@@ -142,17 +149,42 @@ internal static class SqlOSFgaPageOrders
 
         foreach (var entityType in model.GetEntityTypes().ToList())
         {
-            var declarations = ReadAnnotation(entityType);
-            if (declarations.Count == 0)
+            if (!typeof(IHasResourceId).IsAssignableFrom(entityType.ClrType))
             {
                 continue;
             }
 
-            var key = ValidateEntity(entityType);
+            var skips = new List<Skip>();
             var resolved = new List<Declaration>();
-            foreach (var declaration in declarations)
+            if (entityType.BaseType != null)
             {
-                var columns = NormalizeColumns(entityType, key, declaration.Columns);
+                // Orders live on the root of a hierarchy; the root's visit makes them.
+                var root = entityType.GetRootType();
+                if (!typeof(IHasResourceId).IsAssignableFrom(root.ClrType))
+                {
+                    skips.Add(new Skip(null, $"it derives from {root.DisplayName()}, which does not implement {nameof(IHasResourceId)}. Page orders live on the root of a hierarchy: implement {nameof(IHasResourceId)} on {root.DisplayName()}."));
+                }
+
+                WriteAnnotations(entityType, resolved, skips);
+                continue;
+            }
+
+            if (ValidateEntity(entityType, out var key) is { } entityReason)
+            {
+                skips.Add(new Skip(null, entityReason));
+                WriteAnnotations(entityType, resolved, skips);
+                continue;
+            }
+
+            foreach (var candidate in Candidates(entityType, key))
+            {
+                var columns = NormalizeColumns(entityType, key, candidate, out var columnReason);
+                if (columns == null)
+                {
+                    skips.Add(new Skip(candidate.ToArray(), columnReason!));
+                    continue;
+                }
+
                 var names = columns.Select(column => column.Name).ToArray();
                 if (resolved.Any(existing => existing.Columns.SequenceEqual(names, StringComparer.Ordinal)))
                 {
@@ -160,15 +192,21 @@ internal static class SqlOSFgaPageOrders
                 }
 
                 var table = EntryTableName(entityType.GetTableName()!, columns, identifierLimit);
-                AddEntryType(model, entityType, table, fgaSchema, columns);
+                if (model.FindEntityType(table) != null)
+                {
+                    skips.Add(new Skip(candidate.ToArray(), $"its entry table name '{table}' is already used by another entity type. Map {entityType.DisplayName()} to a table of its own."));
+                    continue;
+                }
+
+                AddEntryType(model, table, fgaSchema, columns);
                 resolved.Add(new Declaration(table, names));
             }
 
-            WriteAnnotation(entityType, resolved);
+            WriteAnnotations(entityType, resolved, skips);
         }
     }
 
-    /// <summary>The page orders declared on an entity type or the root of its hierarchy.</summary>
+    /// <summary>The page orders of an entity type or the root of its hierarchy.</summary>
     public static IReadOnlyList<SqlOSFgaPageOrder> For(IEntityType entityType)
         => OrdersByEntity.GetValue(entityType.GetRootType(), static root => Read((IEntityType)root));
 
@@ -179,6 +217,15 @@ internal static class SqlOSFgaPageOrders
             static readOnlyModel => ((IModel)readOnlyModel).GetEntityTypes()
                 .Where(entityType => entityType.BaseType == null)
                 .SelectMany(For)
+                .ToArray());
+
+    /// <summary>Every index, and every entity, that got no page order, with the reason.</summary>
+    public static IReadOnlyList<SqlOSFgaPageOrderSkip> Skips(IModel model)
+        => SkipsByModel.GetValue(
+            model,
+            static readOnlyModel => ((IModel)readOnlyModel).GetEntityTypes()
+                .SelectMany(entityType => ReadSkips(entityType)
+                    .Select(skip => new SqlOSFgaPageOrderSkip(entityType, skip.Columns, skip.Reason)))
                 .ToArray());
 
     /// <summary>Records whether startup found an order's entry table; a missing table is not read.</summary>
@@ -204,107 +251,137 @@ internal static class SqlOSFgaPageOrders
         return $"{name[..(identifierLimit - 9)]}_{hash}";
     }
 
-    private static IMutableProperty ValidateEntity(IMutableEntityType entityType)
+    /// <summary>
+    /// The key alone, then each index that is a sort: not one that contains <c>ResourceId</c>, and
+    /// not one whose columns are exactly a foreign key's.
+    /// </summary>
+    private static IEnumerable<IReadOnlyList<string>> Candidates(IMutableEntityType entityType, IMutableProperty key)
     {
-        var name = entityType.DisplayName();
-        if (entityType.BaseType != null)
-        {
-            throw ModelError(name, $"it derives from {entityType.BaseType.DisplayName()}. Declare the page order on {entityType.GetRootType().DisplayName()}, the root of the hierarchy.");
-        }
+        yield return [key.Name];
 
+        var foreignKeys = entityType.GetForeignKeys()
+            .Select(foreignKey => foreignKey.Properties.Select(property => property.Name).ToArray())
+            .ToList();
+        foreach (var index in entityType.GetIndexes())
+        {
+            var names = index.Properties.Select(property => property.Name).ToArray();
+            if (names.Contains(nameof(IHasResourceId.ResourceId), StringComparer.Ordinal)
+                || foreignKeys.Any(foreignKey => foreignKey.SequenceEqual(names, StringComparer.Ordinal)))
+            {
+                continue;
+            }
+
+            yield return names;
+        }
+    }
+
+    private static string? ValidateEntity(IMutableEntityType entityType, out IMutableProperty key)
+    {
+        key = null!;
         if (entityType.IsOwned())
         {
-            throw ModelError(name, "it is an owned type. Page orders need an entity mapped to its own table.");
+            return "it is an owned type. Page orders need an entity mapped to its own table.";
         }
 
         if (entityType.GetTableName() == null)
         {
-            throw ModelError(name, entityType.GetViewName() != null
+            return entityType.GetViewName() != null
                 ? "it is mapped to a view. Page orders need an entity mapped to a table."
-                : "it is not mapped to a table. Page orders need an entity mapped to a table.");
+                : "it is not mapped to a table. Page orders need an entity mapped to a table.";
         }
 
         var strategy = entityType.GetMappingStrategy();
         if (strategy is RelationalAnnotationNames.TptMappingStrategy or RelationalAnnotationNames.TpcMappingStrategy
             || entityType.GetDerivedTypes().Any(derived => derived.GetTableName() != entityType.GetTableName()))
         {
-            throw ModelError(name, "it uses TPT or TPC inheritance. Page orders need the hierarchy in one table (TPH, the default).");
+            return "it uses TPT or TPC inheritance. Page orders need the hierarchy in one table (TPH, the default).";
         }
 
         var primaryKey = entityType.FindPrimaryKey();
         if (primaryKey == null)
         {
-            throw ModelError(name, "it has no primary key. Page orders need a single-column primary key.");
+            return "it has no primary key. Page orders need a single-column primary key.";
         }
 
         if (primaryKey.Properties.Count != 1)
         {
-            throw ModelError(name, "its primary key is composite. Page orders need a single-column primary key.");
+            return "its primary key is composite. Page orders need a single-column primary key.";
         }
 
         if (entityType.FindProperty(nameof(IHasResourceId.ResourceId)) == null)
         {
-            throw ModelError(name, $"it has no mapped {nameof(IHasResourceId.ResourceId)} property. Map {nameof(IHasResourceId.ResourceId)} to a column of its table.");
+            return $"it has no mapped {nameof(IHasResourceId.ResourceId)} property. Map {nameof(IHasResourceId.ResourceId)} to a column of its table.";
         }
 
-        return primaryKey.Properties[0];
+        key = primaryKey.Properties[0];
+        if (!SqlOSFgaPageCursor.IsSupported(key.ClrType))
+        {
+            return $"its primary key is a {key.ClrType.Name}. Page orders support strings, numbers, Guid, bool, enums and date/time values.";
+        }
+
+        return null;
     }
 
-    private static IReadOnlyList<IMutableProperty> NormalizeColumns(
+    /// <summary>
+    /// The order's columns with the key appended, or <see langword="null"/> and the reason when a
+    /// column cannot be an order column. The key passed <see cref="ValidateEntity"/>: it is never
+    /// nullable, and a string key without a maximum length is what the engine's key convention bounds.
+    /// </summary>
+    private static IReadOnlyList<IMutableProperty>? NormalizeColumns(
         IMutableEntityType entityType,
         IMutableProperty key,
-        IReadOnlyList<string> declared)
+        IReadOnlyList<string> candidate,
+        out string? reason)
     {
         var name = entityType.DisplayName();
         var columns = new List<IMutableProperty>();
-        foreach (var columnName in declared)
+        foreach (var columnName in candidate)
         {
             var property = entityType.FindProperty(columnName);
             if (property == null || property.IsShadowProperty())
             {
-                throw ModelError(name, $"'{columnName}' is not a mapped scalar property of {name}. Order by properties that map to a column of {entityType.GetTableName()}.");
+                reason = $"'{columnName}' is not a mapped scalar property of {name}. Order by properties that map to a column of {entityType.GetTableName()}.";
+                return null;
+            }
+
+            if (property == key)
+            {
+                // The key is unique: nothing after it changes the order.
+                columns.Add(property);
+                break;
             }
 
             if (property.IsNullable)
             {
-                throw ModelError(name, $"'{columnName}' is nullable. Page orders need non-nullable columns: make '{columnName}' required, or order by a non-nullable column.");
+                reason = $"'{columnName}' is nullable. Page orders need non-nullable columns: make '{columnName}' required, or order by a non-nullable column.";
+                return null;
             }
 
             if (!SqlOSFgaPageCursor.IsSupported(property.ClrType))
             {
-                throw ModelError(name, $"'{columnName}' is a {property.ClrType.Name}. Page orders support strings, numbers, Guid, bool, enums and date/time values.");
+                reason = $"'{columnName}' is a {property.ClrType.Name}. Page orders support strings, numbers, Guid, bool, enums and date/time values.";
+                return null;
             }
 
             if (property.ClrType == typeof(string)
                 && property.GetMaxLength() == null
                 && property.FindAnnotation(RelationalAnnotationNames.ColumnType)?.Value is not string)
             {
-                throw ModelError(name, $"'{columnName}' is a string without a maximum length. Page orders copy it into an index key: set HasMaxLength on '{columnName}', or an explicit column type.");
+                reason = $"'{columnName}' is a string without a maximum length. Page orders copy it into an index key: set HasMaxLength on '{columnName}', or an explicit column type.";
+                return null;
             }
 
-            if (property != key
-                && (string.Equals(columnName, NodeIdProperty, StringComparison.Ordinal)
-                    || string.Equals(columnName, RowKeyProperty, StringComparison.Ordinal)))
+            if (string.Equals(columnName, NodeIdProperty, StringComparison.Ordinal)
+                || string.Equals(columnName, RowKeyProperty, StringComparison.Ordinal))
             {
-                throw ModelError(name, $"'{columnName}' is a name the entry table uses for itself. Rename the property or order by another column.");
+                reason = $"'{columnName}' is a name the entry table uses for itself. Rename the property or order by another column.";
+                return null;
             }
 
-            if (columns.Contains(property))
+            if (!columns.Contains(property))
             {
-                continue;
+                columns.Add(property);
             }
-
-            columns.Add(property);
-            if (property == key)
-            {
-                // The key is unique: nothing after it changes the order.
-                break;
-            }
-        }
-
-        if (columns.Count == 0)
-        {
-            throw ModelError(name, "the declaration names no column. Pass one property or an anonymous type of properties.");
         }
 
         if (columns[^1] != key)
@@ -312,21 +389,16 @@ internal static class SqlOSFgaPageOrders
             columns.Add(key);
         }
 
+        reason = null;
         return columns;
     }
 
     private static void AddEntryType(
         IMutableModel model,
-        IMutableEntityType entityType,
         string table,
         string schema,
         IReadOnlyList<IMutableProperty> columns)
     {
-        if (model.FindEntityType(table) != null)
-        {
-            throw ModelError(entityType.DisplayName(), $"its entry table name '{table}' is already used by another entity type.");
-        }
-
         var entry = model.AddEntityType(table, typeof(Dictionary<string, object>));
         entry.SetTableName(table);
         entry.SetSchema(schema);
@@ -414,11 +486,31 @@ internal static class SqlOSFgaPageOrders
             ? JsonSerializer.Deserialize<List<Declaration>>(json, JsonOptions) ?? []
             : [];
 
-    private static void WriteAnnotation(IMutableEntityType entityType, IReadOnlyList<Declaration> declarations)
-        => entityType.SetAnnotation(AnnotationName, JsonSerializer.Serialize(declarations, JsonOptions));
+    private static List<Skip> ReadSkips(IReadOnlyAnnotatable annotatable)
+        => annotatable.FindAnnotation(SkipsAnnotationName)?.Value is string json
+            ? JsonSerializer.Deserialize<List<Skip>>(json, JsonOptions) ?? []
+            : [];
 
-    private static InvalidOperationException ModelError(string entity, string reason)
-        => new($"HasPageOrder on {entity}: {reason}");
+    private static void WriteAnnotations(IMutableEntityType entityType, IReadOnlyList<Declaration> declarations, IReadOnlyList<Skip> skips)
+    {
+        if (declarations.Count == 0)
+        {
+            entityType.RemoveAnnotation(AnnotationName);
+        }
+        else
+        {
+            entityType.SetAnnotation(AnnotationName, JsonSerializer.Serialize(declarations, JsonOptions));
+        }
+
+        if (skips.Count == 0)
+        {
+            entityType.RemoveAnnotation(SkipsAnnotationName);
+        }
+        else
+        {
+            entityType.SetAnnotation(SkipsAnnotationName, JsonSerializer.Serialize(skips, JsonOptions));
+        }
+    }
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -427,4 +519,6 @@ internal static class SqlOSFgaPageOrders
     };
 
     private sealed record Declaration(string? Table, string[] Columns);
+
+    private sealed record Skip(string[]? Columns, string Reason);
 }

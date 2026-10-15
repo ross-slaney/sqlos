@@ -38,10 +38,13 @@ internal interface ISqlOSDatabaseProvider
     // list one from CreatePageResourceIdsParameter; the builders take the parameters' names.
     string BuildDeletePageEntriesByKeysSql(SqlOSFgaPageOrderStore order, string keys);
     string BuildInsertPageEntriesByKeysSql(SqlOSFgaPageOrderStore order, string keys);
-    string BuildDeletePageEntriesBySubtreeSql(SqlOSFgaPageOrderStore order, string resourceIds);
-    string BuildInsertPageEntriesBySubtreeSql(SqlOSFgaPageOrderStore order, string resourceIds, string? exceptKeys);
+    string BuildDeletePageEntriesBySubtreeSql(SqlOSFgaPageOrderStore order, SqlOSFgaChangedResources resources);
+    string BuildInsertPageEntriesBySubtreeSql(SqlOSFgaPageOrderStore order, SqlOSFgaChangedResources resources, string? exceptKeys);
     string BuildDeleteAllPageEntriesSql(SqlOSFgaPageOrderStore order);
     string BuildInsertAllPageEntriesSql(SqlOSFgaPageOrderStore order);
+
+    // One save's page-order statements, run in the save's transaction, wrapped for the engine.
+    string WrapPageMaintenanceSql(string statements);
     string BuildTableExistsSql(string? schema, string table);
     string BuildTableHasRowsSql(string? schema, string table);
     DbParameter CreatePageKeysParameter(string name, IReadOnlyList<object> keys);

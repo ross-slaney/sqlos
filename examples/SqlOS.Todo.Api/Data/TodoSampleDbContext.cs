@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using SqlOS;
-using SqlOS.Fga.Extensions;
 using SqlOS.Todo.Api.Models;
 
 namespace SqlOS.Todo.Api.Data;
@@ -21,9 +20,9 @@ public sealed class TodoSampleDbContext(DbContextOptions<TodoSampleDbContext> op
             entity.HasIndex(x => x.ResourceId).IsUnique();
             entity.HasIndex(x => x.OwnerSubjectId);
             entity.HasIndex(x => new { x.OwnerSubjectId, x.IsCompleted });
+            // GET /api/todos pages newest first. SqlOS keeps a copy of every index under every node of
+            // the resource tree, so this index is what makes that page cost about a page for any caller.
             entity.HasIndex(x => new { x.CreatedAt, x.Id });
-            // GET /api/todos pages newest first; SqlOS keeps this order under every node.
-            entity.HasPageOrder(x => x.CreatedAt);
             entity.Ignore(x => x.ResourceTypeId);
             entity.Ignore(x => x.ResourceName);
             entity.Ignore(x => x.ParentResourceId);

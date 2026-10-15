@@ -316,7 +316,7 @@ var page = await db.Workspaces
 return Results.Ok(page.ToResponse(x => new { x.Id, x.Name }));
 ```
 
-The tenant predicate prevents rows owned by another organization from entering the candidate set. `ToPageAsync` then applies resource-level authorization inside that tenant and returns one page; `cursor` is the previous page's `nextCursor`. Declare the order with `HasPageOrder(x => x.Name)`; see [Paginating authorized lists](/docs/guides/paginating-authorized-lists).
+The tenant predicate prevents rows owned by another organization from entering the candidate set. `ToPageAsync` then applies resource-level authorization inside that tenant and returns one page; `cursor` is the previous page's `nextCursor`. Index the order, `HasIndex(x => new { x.Name, x.Id })`; see [Paginating authorized lists](/docs/guides/paginating-authorized-lists).
 
 ### Detail and mutation endpoints
 

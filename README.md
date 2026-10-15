@@ -24,14 +24,14 @@ var page = await db.Documents
     .ToPageAsync(subjectId, "document.read", pageSize: 20, cursor);
 ```
 
-The endpoint needs no `where tenantId` or `where userId` to discover authorized records across the caller's grants. Add those conditions when the screen itself is scoped to a tenant or owner. Declare the order the screen pages by (`HasPageOrder(d => d.Name)`) and index it on your table (`HasIndex(d => new { d.Name, d.Id })`). Pass `NextCursor` back for the next page. Point checks (`CheckAccessAsync`) protect one record, individual actions, and writes.
+The endpoint needs no `where tenantId` or `where userId` to discover authorized records across the caller's grants. Add those conditions when the screen itself is scoped to a tenant or owner. Index the order the screen pages by (`HasIndex(d => new { d.Name, d.Id })`), as for any database; SqlOS keeps a copy of every index under every node of the resource tree. Pass `NextCursor` back for the next page. Point checks (`CheckAccessAsync`) protect one record, individual actions, and writes.
 
 ### Design the hierarchy around access
 
 - **Grant where access belongs.** Workspace → document, team → inspection → item, or department → case → record. Choose the highest node that matches the intended access. A grant covers the relevant descendants, including new ones; do not broaden access just to make queries faster.
 - **Use groups for shared responsibilities.** One group grant replaces duplicate grants for its members. Use direct grants for individual shares. Membership or ownership alone does not grant access.
-- **Declare the orders your lists page by.** `HasPageOrder(d => d.Name)` makes SqlOS keep a copy of that order under every node of the resource tree, in its own table. `ToPageAsync` then costs about a page for any caller: one who sees everything, one who sees three rows of a million, one whose rows sit at the far end of the order. An order you have not declared still pages correctly but reads the table for a caller who sees little of it, and SqlOS logs the declaration to add.
-- **Keep application indexes deliberate.** Index the filters and orders your screens use. SqlOS adds nothing to your tables; a page order is a table in SqlOS's own schema, kept current in the same transaction as each save.
+- **Index the columns your lists sort by.** SqlOS keeps a copy of every index of a protected table under every node of the resource tree, in its own tables. `ToPageAsync` then costs about a page for any caller: one who sees everything, one who sees three rows of a million, one whose rows sit at the far end of the order. A sort with no index still pages correctly but reads the table in that order for every caller, as in any database, and SqlOS logs the index to add.
+- **Keep application indexes deliberate.** Index the filters and orders your screens use, and no more: every index is copied under every node and written on every save. SqlOS adds nothing to your tables; a page order is a table in SqlOS's own schema, kept current in the same transaction as each save.
 - **Treat hierarchy changes as permission changes.** Moving or deactivating a branch changes which ancestor grants apply to its descendants, and rewrites that branch's page-order entries.
 - **Pages and point checks are the whole read API.** SqlOS has no authorized count, join, or unpaged list: each of those costs every row the caller can see. Show a page and whether there is a next one.
 

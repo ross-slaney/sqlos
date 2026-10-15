@@ -15,9 +15,10 @@ namespace SqlOS;
 /// <typeparam name="TContext">The concrete application context type.</typeparam>
 /// <remarks>
 /// SqlOS registers its auth, email, calendar, and FGA entities before invoking
-/// <see cref="OnApplicationModelCreating"/>. Save operations synchronize tracked
-/// <see cref="ISqlOSResourceEntity"/> instances with their backing FGA resources and keep the
-/// entries of declared page orders (<c>HasPageOrder</c>) current in the same transaction.
+/// <see cref="OnApplicationModelCreating"/>, then adds a page-order table for the primary key and
+/// for every index of each <see cref="IHasResourceId"/> entity. Save operations synchronize tracked
+/// <see cref="ISqlOSResourceEntity"/> instances with their backing FGA resources and keep those
+/// tables current in the same transaction.
 /// </remarks>
 public abstract class SqlOSDbContext<TContext> : DbContext, ISqlOSAuthServerDbContext, ISqlOSFgaDbContext
     where TContext : SqlOSDbContext<TContext>
@@ -52,7 +53,7 @@ public abstract class SqlOSDbContext<TContext> : DbContext, ISqlOSAuthServerDbCo
         modelBuilder.UseSqlOS(Database.IsRelational() ? typeof(TContext) : null, Database.ProviderName);
         OnApplicationModelCreating(modelBuilder);
 
-        // After the application's configuration, so page orders see final columns, keys and tables.
+        // After the application's configuration, so page orders see final columns, keys, tables and indexes.
         SqlOSFgaPageOrders.ApplyModel(modelBuilder.Model, Database.ProviderName);
     }
 

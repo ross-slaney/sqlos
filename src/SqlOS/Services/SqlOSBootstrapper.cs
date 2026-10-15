@@ -78,7 +78,7 @@ public sealed class SqlOSBootstrapper
             await _fgaFunctionInitializer.EnsureFunctionsExistAsync(cancellationToken);
         }
 
-        // Fill the entry table of a newly declared page order whose application table has rows.
+        // Log indexes that got no page order, and fill the entry table of a new page order whose application table has rows.
         if (_fgaContext is DbContext fgaDbContext)
         {
             await SqlOSFgaPageOrderMaintenance.ReconcileAsync(fgaDbContext, _logger, cancellationToken);

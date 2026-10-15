@@ -153,6 +153,8 @@ internal static class PageOrderFixture
             ("Title", true) => query.OrderByDescending(document => document.Title),
             ("CreatedAt", false) => query.OrderBy(document => document.CreatedAt),
             ("CreatedAt", true) => query.OrderByDescending(document => document.CreatedAt),
+            ("Id", false) => query.OrderBy(document => document.Id),
+            ("Id", true) => query.OrderByDescending(document => document.Id),
             _ => throw new ArgumentOutOfRangeException(nameof(order))
         };
 
@@ -207,6 +209,8 @@ internal static class PageOrderFixture
             ("Title", true) => rows.OrderByDescending(document => document.Title, StringComparer.Ordinal),
             ("CreatedAt", false) => rows.OrderBy(document => document.CreatedAt),
             ("CreatedAt", true) => rows.OrderByDescending(document => document.CreatedAt),
+            ("Id", false) => rows.OrderBy(document => document.Id, KeyOrder),
+            ("Id", true) => rows.OrderByDescending(document => document.Id, KeyOrder),
             _ => throw new ArgumentOutOfRangeException(nameof(order))
         };
 
@@ -238,22 +242,27 @@ internal static class PageOrderFixture
         return pages;
     }
 
-    /// <summary>The entries of an entry table, and what a rebuild would write, as comparable rows.</summary>
+    /// <summary>
+    /// The entries of an entry table, and what a rebuild would write, as comparable rows. The key
+    /// order has no sort column.
+    /// </summary>
     public static async Task<(List<string> Actual, List<string> Expected)> EntriesAndRebuildAsync(
         string entryTable,
         string appTable,
-        string sortColumn)
+        string? sortColumn)
     {
         var entries = TestDatabase.Qualify(entryTable);
         var app = TestDatabase.Quote(appTable);
         var ancestors = TestDatabase.IsPostgreSql
             ? $"CROSS JOIN LATERAL {TestDatabase.Qualify("fn_ResourceAncestors")}(t.{TestDatabase.Quote("ResourceId")}) AS a"
             : $"CROSS APPLY {TestDatabase.Qualify("fn_ResourceAncestors")}(t.{TestDatabase.Quote("ResourceId")}) AS a";
+        var entrySort = sortColumn == null ? string.Empty : $"{TestDatabase.Quote(sortColumn)}, ";
+        var appSort = sortColumn == null ? string.Empty : $"t.{TestDatabase.Quote(sortColumn)}, ";
 
         var actual = await ReadRowsAsync(
-            $"SELECT {TestDatabase.Quote("NodeId")}, {TestDatabase.Quote(sortColumn)}, {TestDatabase.Quote("RowKey")} FROM {entries}");
+            $"SELECT {TestDatabase.Quote("NodeId")}, {entrySort}{TestDatabase.Quote("RowKey")} FROM {entries}");
         var expected = await ReadRowsAsync(
-            $"SELECT a.{TestDatabase.Quote("NodeId")}, t.{TestDatabase.Quote(sortColumn)}, t.{TestDatabase.Quote("Id")} FROM {app} AS t {ancestors}");
+            $"SELECT a.{TestDatabase.Quote("NodeId")}, {appSort}t.{TestDatabase.Quote("Id")} FROM {app} AS t {ancestors}");
         actual.Sort(StringComparer.Ordinal);
         expected.Sort(StringComparer.Ordinal);
         return (actual, expected);

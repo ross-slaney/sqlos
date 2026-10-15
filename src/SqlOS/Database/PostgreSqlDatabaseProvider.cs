@@ -254,26 +254,24 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
             WHERE t.{QuoteIdentifier(order.AppKeyColumn)} = ANY({keys});
             """;
 
-    public string BuildDeletePageEntriesBySubtreeSql(SqlOSFgaPageOrderStore order, string resourceIds)
+    public string BuildDeletePageEntriesBySubtreeSql(SqlOSFgaPageOrderStore order, SqlOSFgaChangedResources resources)
         => $"""
-            {SubtreeCte(order, resourceIds)}
-            DELETE FROM {Entries(order)}
+            {SubtreeCte(order, resources)}DELETE FROM {Entries(order)}
             WHERE {QuoteIdentifier(order.EntryRowKeyColumn)} IN (
                 SELECT t.{QuoteIdentifier(order.AppKeyColumn)}
                 FROM {AppTable(order)} AS t
-                WHERE t.{QuoteIdentifier(order.AppResourceIdColumn)} IN (SELECT subtree."Id" FROM subtree)
+                WHERE t.{QuoteIdentifier(order.AppResourceIdColumn)} IN ({ChangedResourceIds(resources)})
             );
             """;
 
-    public string BuildInsertPageEntriesBySubtreeSql(SqlOSFgaPageOrderStore order, string resourceIds, string? exceptKeys)
+    public string BuildInsertPageEntriesBySubtreeSql(SqlOSFgaPageOrderStore order, SqlOSFgaChangedResources resources, string? exceptKeys)
     {
         var except = exceptKeys == null
             ? string.Empty
             : $" AND t.{QuoteIdentifier(order.AppKeyColumn)} <> ALL({exceptKeys})";
         return $"""
-            {SubtreeCte(order, resourceIds)}
-            {InsertEntries(order)}
-            WHERE t.{QuoteIdentifier(order.AppResourceIdColumn)} IN (SELECT subtree."Id" FROM subtree){except};
+            {SubtreeCte(order, resources)}{InsertEntries(order)}
+            WHERE t.{QuoteIdentifier(order.AppResourceIdColumn)} IN ({ChangedResourceIds(resources)}){except};
             """;
     }
 
@@ -282,6 +280,20 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
 
     public string BuildInsertAllPageEntriesSql(SqlOSFgaPageOrderStore order)
         => $"{InsertEntries(order)};";
+
+    /// <summary>
+    /// A save's statements with JIT off, and the transaction's JIT setting restored after them. The
+    /// subtree statements' estimated cost (a recursive walk times the inlined ancestors function)
+    /// crosses <c>jit_optimize_above_cost</c>: in the page-order benchmark, compiling them took over
+    /// half a second, against well under a millisecond of work, on every save that adds a resource.
+    /// <c>set_config(..., true)</c> is <c>SET LOCAL</c>, so a failure rolls it back with the save.
+    /// </summary>
+    public string WrapPageMaintenanceSql(string statements)
+        => $"""
+            SELECT set_config('sqlos.jit', current_setting('jit'), true), set_config('jit', 'off', true);
+            {statements}
+            SELECT set_config('jit', current_setting('sqlos.jit'), true);
+            """;
 
     public string BuildTableExistsSql(string? schema, string table)
     {
@@ -411,22 +423,39 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
     }
 
     /// <summary>
-    /// The resources in the <paramref name="resourceIds"/> parameter and their descendants, bounded by
-    /// the hierarchy depth. The ids themselves anchor the walk, so a deleted resource still names the
-    /// rows that point at it.
+    /// The moved resources and their descendants, bounded by the hierarchy depth, followed by a line
+    /// break; empty when no resource moved. Only moved resources are walked: PostgreSQL estimates a
+    /// walk from a thousand anchors (a save that adds a thousand resources) at millions of rows, and then
+    /// hashes the whole entry table instead of looking the rows' entries up.
     /// </summary>
-    private string SubtreeCte(SqlOSFgaPageOrderStore order, string resourceIds)
-        => $"""
-            WITH RECURSIVE subtree AS (
-                SELECT ids.id::varchar(450) AS "Id", 0 AS "Depth"
-                FROM unnest({resourceIds}) AS ids(id)
-                UNION ALL
-                SELECT child."Id", subtree."Depth" + 1
-                FROM {Qualify(order.FgaSchema, order.ResourcesTable)} AS child
-                INNER JOIN subtree ON child."ParentId" = subtree."Id"
-                WHERE subtree."Depth" < {order.MaxDepth.ToString(CultureInfo.InvariantCulture)}
-            )
-            """;
+    private string SubtreeCte(SqlOSFgaPageOrderStore order, SqlOSFgaChangedResources resources)
+        => resources.Moved == null
+            ? string.Empty
+            : $"""
+              WITH RECURSIVE subtree AS (
+                  SELECT ids.id::varchar(450) AS "Id", 0 AS "Depth"
+                  FROM unnest({resources.Moved}) AS ids(id)
+                  UNION ALL
+                  SELECT child."Id", subtree."Depth" + 1
+                  FROM {Qualify(order.FgaSchema, order.ResourcesTable)} AS child
+                  INNER JOIN subtree ON child."ParentId" = subtree."Id"
+                  WHERE subtree."Depth" < {order.MaxDepth.ToString(CultureInfo.InvariantCulture)}
+              )
+
+              """;
+
+    /// <summary>
+    /// The ids of the resources whose rows a save rewrites: the moved subtree, and the added or deleted
+    /// resources themselves. The ids anchor it, so a deleted resource still names the rows that point at it.
+    /// </summary>
+    private static string ChangedResourceIds(SqlOSFgaChangedResources resources)
+        => string.Join(
+            " UNION ALL ",
+            new[]
+            {
+                resources.Moved == null ? null : "SELECT subtree.\"Id\" FROM subtree",
+                resources.AddedOrDeleted == null ? null : $"SELECT changed.id::varchar(450) FROM unnest({resources.AddedOrDeleted}) AS changed(id)",
+            }.OfType<string>());
 
     private static string MaxDepth(SqlOSFgaOptions options)
         => Math.Max(1, options.MaxResourceHierarchyDepth).ToString(CultureInfo.InvariantCulture);

@@ -49,11 +49,11 @@ var page = await db.Documents
 
 The same query serves the three callers in the diagram. It needs no `OwnerId == subjectId` or `TenantId == tenantId` condition to discover their authorized documents. Add a workspace or tenant condition when the **screen itself** is scoped there; it is a product filter, not a replacement for authorization. Authentication still happens at the request boundary, and writes still need the appropriate permission check.
 
-Declare the order the screen pages by, `HasPageOrder(d => d.Name)`, and index it on your table, `HasIndex(d => new { d.Name, d.Id })`. [Paginating authorized lists](/docs/guides/paginating-authorized-lists) covers the declaration, the cursor, and what a page costs.
+Index the order the screen pages by, `HasIndex(d => new { d.Name, d.Id })`; SqlOS keeps a copy of every index under every node of the resource tree. [Paginating authorized lists](/docs/guides/paginating-authorized-lists) covers the rule, the cursor, and what a page costs.
 
 ## Query performance
 
-`ToPageAsync` resolves the caller's principals (the subject plus its active groups) and the permission each time it runs. It first reads the screen's query in order and checks each row, which fills the page for a caller who can see most of it. For a caller who can see little, it reads the declared order under each node the caller is granted and merges them: one index seek per node. So a page costs about a page whether the caller sees everything, one branch, or three rows of a million.
+`ToPageAsync` resolves the caller's principals (the subject plus its active groups) and the permission each time it runs. It first reads the screen's query in order and checks each row, which fills the page for a caller who can see most of it. For a caller who can see little, it reads its copy of the order's index under each node the caller is granted and merges them: one index seek per node. So a page costs about a page whether the caller sees everything, one branch, or three rows of a million.
 
 **Grants on nodes keep that cheap.** The second read seeks once per granted node (grants under another of the caller's grants add nothing). A workspace grant is one seek; a group with grants on 100 independent branches is 100 seeks; ten thousand single-document grants are ten thousand seeks. Grant where the access belongs, and use groups and higher boundaries rather than many individual shares when that is the access you mean.
 
@@ -63,7 +63,7 @@ SqlOS has no authorized count or join, because those cost every row the caller c
 
 Your application keeps ordinary tables and relationships, connected to FGA through `ResourceId`. Entities implementing `ISqlOSResourceEntity` describe their resource and parent; `SqlOSDbContext<TContext>` synchronizes those resource rows during saves. Grants remain explicit.
 
-SqlOS owns its resource, principal, group, role, permission, and grant tables and the authorization functions. For each order you declare with `HasPageOrder`, it also keeps one table in its own schema with a copy of the order under every node, rewritten in the same transaction as the saves that change it. It adds nothing to your tables: no scope columns, triggers, or indexes.
+SqlOS owns its resource, principal, group, role, permission, and grant tables and the authorization functions. For every index of a protected table, and for its primary key, it also keeps one table in its own schema with a copy of that order under every node, rewritten in the same transaction as the saves that change it. It adds nothing to your tables: no scope columns, triggers, or indexes.
 
 Changing a resource's parent changes which ancestor grants can apply on subsequent queries. Keep hierarchy changes deliberate because they change access, and check the appropriate permissions before making them. Pages and checks resolve the caller's principals and groups each time they run, so a grant or membership change applies from the next page or check.
 

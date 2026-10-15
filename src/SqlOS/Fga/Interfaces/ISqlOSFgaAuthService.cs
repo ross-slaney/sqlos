@@ -43,8 +43,8 @@ public interface ISqlOSFgaAuthService
     Task<SqlOSFgaResourceAccessTrace> TraceResourceAccessAsync(string subjectId, string resourceId, string permissionKey);
 
     /// <summary>
-    /// Rebuilds the entries of every page order declared in the context's model from the
-    /// application tables and the resource graph.
+    /// Rebuilds the entries of every page order in the context's model (the primary key and every
+    /// index of each protected entity) from the application tables and the resource graph.
     /// </summary>
     /// <param name="cancellationToken">A token that can cancel the rebuild.</param>
     /// <returns>A task that completes when every page order has been rebuilt.</returns>

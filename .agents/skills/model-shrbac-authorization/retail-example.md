@@ -84,7 +84,7 @@ Group: `grp_walmart_regional` / subject `subj_walmart_regional_group` — Alice 
 
 | Route | List/detail pattern | Permission |
 | --- | --- | --- |
-| `GET /api/chains` | `OrderBy(c => c.Name).ToPageAsync(subjectId, CHAIN_VIEW, pageSize, cursor)` (declared page order) | CHAIN_VIEW |
+| `GET /api/chains` | `OrderBy(c => c.Name).ToPageAsync(subjectId, CHAIN_VIEW, pageSize, cursor)` (indexed order) | CHAIN_VIEW |
 | `GET /api/chains/{id}` | `AuthorizedDetailAsync` | CHAIN_VIEW |
 | `POST /api/chains` | `CheckAccessAsync(..., CHAIN_EDIT, "retail_root")` | CHAIN_EDIT on parent |
 | `PUT/DELETE /api/chains/{id}` | `CheckAccessAsync(..., CHAIN_EDIT, chain.ResourceId)` | CHAIN_EDIT |

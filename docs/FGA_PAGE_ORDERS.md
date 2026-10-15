@@ -1,7 +1,8 @@
 # FGA page orders
 
 How `ToPageAsync` returns an authorized page for about a page of work, whoever the caller is, with
-nothing of SqlOS's on application tables. Issue #515.
+nothing of SqlOS's on application tables. Issues #515 (the mechanism) and #523 (where the orders
+come from: every index of a protected table).
 
 ## The problem
 
@@ -18,11 +19,14 @@ For each order an entity is paged by, SqlOS keeps, in its own schema, a copy of 
 every node of the resource tree**. A page for anyone is then "the first rows under each of my
 nodes, merged": one index seek per node.
 
+Which orders? The ones the application already indexes. The rule is the one every database has:
+index the columns you sort by. Developers declare nothing to SqlOS.
+
 ```csharp
 modelBuilder.Entity<Product>(entity =>
 {
-    entity.HasPageOrder(p => p.Price);                       // (Price, Id)
-    entity.HasPageOrder(p => new { p.Status, p.CreatedAt }); // (Status, CreatedAt, Id)
+    entity.HasIndex(p => new { p.Price, p.Id });             // (Price, Id)
+    entity.HasIndex(p => new { p.Status, p.CreatedAt });     // (Status, CreatedAt, Id)
 });
 
 var page = await db.Products
@@ -31,12 +35,37 @@ var page = await db.Products
     .ToPageAsync(subjectId, "product.view", pageSize: 20, cursor);
 ```
 
+**The rule** (`SqlOSFgaPageOrders.ApplyModel`, run at the end of `SqlOSDbContext.OnModelCreating`).
+For every root entity type whose CLR type implements `IHasResourceId`:
+
+1. Its primary key is a page order (`SqlOSFgaPage_{Table}_{Key}`), so `OrderBy(e => e.Id)` pages.
+2. Every index on it is a page order over the index's columns, key appended. An index that ends with
+   the key gives the same order as the index without it. Unique, filtered, descending and included
+   columns make no difference.
+3. Two kinds of index are lookups, not sorts, and get nothing: an index that contains `ResourceId`,
+   and an index whose columns are exactly a foreign key's (EF Core adds one per foreign key by
+   convention).
+4. Nothing throws because of an automatic order. An entity that fails the entity rules (owned, view,
+   TPT/TPC, no or composite key, no mapped `ResourceId`, a key of an unsupported type, a protected
+   type under an unprotected root) gets no orders; an index with a column that fails the column rules
+   (nullable, unsupported type, string without a maximum length, named `NodeId` or `RowKey`) gets
+   none. Each skip is recorded on the entity (`SqlOS:PageOrderSkips`) and startup logs one Warning
+   naming the entity, the index and the fix. The key itself is exempt from the column rules: it is
+   never nullable, and a string key without a maximum length is bounded by the engine's key convention.
+5. There is no other way to get a page order, and no opt-out.
+
+Matching is exact: the query's order columns, key appended, must equal an order's columns name by
+name, in sequence; direction is free. `OrderBy(Name).ThenBy(City)` needs an index `(Name, City)` or
+`(Name, City, Id)`; an index on `Name` alone does not serve it. The 10.0.0 `HasPageOrder` declaration
+is gone; the entry tables of orders whose index exists keep their names.
+
 `fn_IsResourceAccessible`, `CheckAccessAsync` and the FGA schema scripts are unchanged.
 
 ## Storage
 
-One table per declared order, in the FGA schema, added to the application's EF model as a
-shared-type entity (`Dictionary<string, object>`), so the application's migration creates it:
+One table per page order (the key, and each index minus the lookups), in the FGA schema, added to
+the application's EF model as a shared-type entity (`Dictionary<string, object>`), so the
+application's migration creates it:
 
 | Column | Meaning |
 | --- | --- |
@@ -55,7 +84,10 @@ within `MaxResourceHierarchyDepth` with no cycle. That is exactly the set of nod
 and reach r under `fn_IsResourceAccessible`. A row whose own resource is inactive, or whose
 `ResourceId` names no resource, has no entries.
 
-Size: depth-of-the-row entries per row per order (a product four levels under the root has five).
+Size: rows × levels × (indexes + 1): depth-of-the-row entries per row per order (a product four levels
+under the root has five per order). 10.0.0 measured 6,000,000 entries, about 706 MB, per order on
+PostgreSQL for 1,000,000 products under 5 levels. Every index costs on every write too, so the docs
+say to index what you sort by, not every column.
 
 ## Functions
 
@@ -104,12 +136,12 @@ subject or permission is an empty page with no page statements. Then it runs the
    with a visibility flag (`SqlOSFgaVisibility`: the `fn_IsResourceAccessible` `EXISTS` in the projection). If at least `P` are visible, they
    are the page. If fewer than `b` rows came back, the query is exhausted and the visible rows are the
    last page.
-2. **Read 2, "the caller's nodes, in order."** Only for a declared order. Under each node of
+2. **Read 2, "the caller's nodes, in order."** Only for an order an index covers. Under each node of
    `fn_PageNodes`, the next `b` entries after the cursor that pass the application's filters (an
    `EXISTS` on the row's key against the query without its ordering), merged in order, at most `P`.
    `P` entries are the page; fewer means every node ran out, and they are the last page. Because `b`
    is never below `P`, read 2 settles the page in the round it runs.
-3. Otherwise `b` grows four times and read 1 runs again. Only undeclared orders get here.
+3. Otherwise `b` grows four times and read 1 runs again. Only orders with no index get here.
 
 **Load.** The page's keys go back through the query with its includes and tracking and through the
 visibility predicate once more, then are ordered by key position in memory. That is the final check: a
@@ -125,10 +157,10 @@ the per-node subquery; that keeps the subquery correlated, so EF Core emits `CRO
 …)` on SQL Server and `JOIN LATERAL (… LIMIT @b)` on PostgreSQL. Without it EF Core rewrites the
 subquery into a `ROW_NUMBER() OVER (PARTITION BY NodeId)` join over every entry.
 
-One line per page is logged at Debug under `SqlOS.Fga`: entity, order, whether it is declared, the
+One line per page is logged at Debug under `SqlOS.Fga`: entity, order, whether an index covers it, the
 rounds, rows per round of read 1, entries per node of read 2, which read produced the page, rows the
-final check dropped, elapsed time. An undeclared order that needs more than one round of read 1 is
-logged once per entity and order at Warning, with the declaration to add.
+final check dropped, elapsed time. An order with no index that needs more than one round of read 1 is
+logged once per entity and order at Warning, with the `HasIndex` to add.
 
 ## Maintenance
 
@@ -136,7 +168,8 @@ All in `SqlOSFgaPageOrderMaintenance`, called from `SqlOSDbContext<TContext>.Sav
 `SaveChangesAsync` after the resource synchronizer:
 
 1. Before the save, a check: does the change tracker hold an added, modified or deleted resource, or row
-   of an entity with a page order? No: a plain `base.SaveChanges`.
+   of an entity with a page order (every protected entity has one)? No: a plain `base.SaveChanges`. A
+   model with no protected entity never enters maintenance.
 2. Otherwise, in a transaction: the caller's, inside a savepoint (as EF Core does for the save alone, so a
    failure leaves it as it was before the save); an ambient or enlisted `System.Transactions` one; or one
    owned here, inside the context's execution strategy. Save with `acceptAllChangesOnSuccess: false`, then
@@ -144,17 +177,26 @@ All in `SqlOSFgaPageOrderMaintenance`, called from `SqlOSDbContext<TContext>.Sav
    changed, or with an order column the database computes on update; resources added, deleted, or whose
    `ParentId` or `IsActive` changed. Collecting after the save sees values set by `SaveChanges`
    interceptors and `SavingChanges` handlers, cascade deletes and generated keys.
-3. One command for everything collected. Per order:
-   - delete the entries of the rows under the changed resources and their descendants (a recursive CTE
-     over `ParentId`, bounded by the depth; the changed ids anchor it, so a deleted resource is its own
-     subtree and an added one finds the rows saved before it);
+3. One command for everything collected. The changed resources are two lists
+   (`SqlOSFgaChangedResources(Moved, AddedOrDeleted)`): resources whose `ParentId` or `IsActive` changed,
+   and resources added or deleted. Per order:
+   - delete the entries of the rows under the changed resources: the moved resources and their
+     descendants (a recursive CTE over `ParentId`, bounded by the depth), plus the added or deleted
+     resources themselves. `ParentId` is a foreign key, so nothing exists below an added or deleted
+     resource outside the same save, and they are not walked. Walking from every changed resource made
+     PostgreSQL estimate a save that adds a thousand resources at millions of rows and hash the whole
+     entry table: 2.4–3.1 s per statement, 66–111 ms after the split;
    - delete the entries of the changed rows, by key (added rows too, so a stale entry left by a write that
      bypassed EF cannot make the insert of a reused key fail);
    - insert the entries of the rows under the changed resources, except the changed rows;
    - insert the entries of the changed rows.
 
    Each row ends with exactly one set of entries. Key lists are one parameter per entity: `OPENJSON(@keysN)`
-   on SQL Server, `= ANY(@keysN)` on PostgreSQL. Any failure rolls everything back.
+   on SQL Server, `= ANY(@keysN)` on PostgreSQL. Any failure rolls everything back. On PostgreSQL the command
+   is wrapped (`ISqlOSDatabaseProvider.WrapPageMaintenanceSql`) in `set_config('jit', 'off', true)` with the
+   transaction's value restored after it: the subtree insert's estimated cost crosses
+   `jit_optimize_above_cost`, and JIT compiled it on every save that adds a resource (one product insert
+   1.6 ms → 165 ms at a million rows). SQL Server returns the statements unchanged.
 4. Accept the changes.
 
 This covers every write that ends in `SaveChanges` on a `SqlOSDbContext`: application rows,
@@ -177,9 +219,11 @@ position; a row the caller may not see is never returned. Saves during a rebuild
 fail with a deadlock or duplicate key; it is meant for quiet periods, and running it again fixes what they
 left.
 
-**Startup.** After the functions are installed, `SqlOSBootstrapper` fills the entry table of every
-order whose table exists and is empty while its application table has rows: the first start after a
-declaration needs no manual step. The fill is a rebuild of that order (application lock, no command
+**Startup.** After the functions are installed, `SqlOSBootstrapper` logs one Warning per recorded skip
+(an index, or an entity, that got no order, with the reason and the fix), then fills the entry table of
+every order whose table exists and is empty while its application table has rows: the first start after
+an index was added needs no manual step, and the first start after the upgrade from 10.0.0 fills every new
+table (about the time of a rebuild per table). The fill is a rebuild of that order (application lock, no command
 timeout); other instances starting at the same time wait for it and then find the table filled. A missing
 entry table is logged at Warning and skipped; pages for that order run read 1 only until it exists. In a
 rolling deployment, instances still on the previous version write rows without entries, so the rollout
@@ -203,10 +247,10 @@ application's filters.
 | Sees half the table, rows all at the far end of the order | O(P) | P entries under their node |
 | Application filter few rows pass, no scope | O(P / f) | entries read until P pass |
 | Rare filter and a caller whose rows barely overlap it | O(rows the caller sees) | read 2 reads the caller's entries until P pass the filter |
-| Insert, or update of an order column or `ResourceId` | O(D × declared orders) | entries written in the same transaction |
-| Add a resource | O(declared orders) lookups by `ResourceId` | rows saved before it get entries |
-| Move, deactivate or reactivate a resource | O(subtree × D × declared orders) | that subtree's entries rewritten |
-| `RebuildPageOrdersAsync` | O(N × D × declared orders) | once |
+| Insert, or update of an order column or `ResourceId` | O(D × orders) | entries written in the same transaction; orders = indexes + 1 |
+| Add a resource | O(orders) lookups by `ResourceId` | rows saved before it get entries |
+| Move, deactivate or reactivate a resource | O(subtree × D × orders) | that subtree's entries rewritten |
+| `RebuildPageOrdersAsync` | O(N × D × orders) | once |
 
 Nothing is linear in `N` except the rebuild.
 
@@ -217,7 +261,8 @@ Nothing is linear in `N` except the rebuild.
   below that, bounded by the engine's index key size.
 - Order columns are non-nullable mapped scalar properties; strings need a maximum length; one
   direction per order. The entity needs a single-column primary key, a mapped `ResourceId` and a table
-  of its own (TPH is fine; owned types, views, TPT and TPC are not).
+  of its own (TPH is fine; owned types, views, TPT and TPC are not). An index or entity that breaks a
+  rule gets no order and one startup Warning; the model never fails to build because of an automatic order.
 - SQL Server: the entry primary key is clustered, so `NodeId` (900 bytes at most) plus the order
   columns plus the key should fit in SQL Server's 900-byte clustered key. Table creation warns when the
   declared lengths could exceed it; resource ids and order values far below their maximum length are fine.

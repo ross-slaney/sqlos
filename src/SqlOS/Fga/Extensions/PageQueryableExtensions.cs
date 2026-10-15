@@ -25,7 +25,7 @@ public static class PageQueryableExtensions
 
     // Shapes already warned about, per model: EF Core's logger factory is scoped to a context,
     // the model lives as long as the application's context type.
-    private static readonly ConditionalWeakTable<IModel, ConcurrentDictionary<string, bool>> UndeclaredWarnings = new();
+    private static readonly ConditionalWeakTable<IModel, ConcurrentDictionary<string, bool>> NoIndexWarnings = new();
 
     /// <summary>
     /// Returns the page of <paramref name="query"/> that <paramref name="subjectId"/> may see with
@@ -55,10 +55,10 @@ public static class PageQueryableExtensions
     /// <para>
     /// The page reads the application's query in its order and checks each row with
     /// <c>fn_IsResourceAccessible</c>, for as many rows as a page needs. When few of those rows are
-    /// visible and the order is declared with <c>HasPageOrder</c>, it reads the order under each of
-    /// the caller's granted nodes instead, so a caller who can see few rows of a large table costs
-    /// about a page. The rows of the page are then loaded with the query's includes and tracking and
-    /// checked once more.
+    /// visible and an index of the table covers the order, it reads the order under each of the
+    /// caller's granted nodes instead (SqlOS keeps a copy of every index under every node of the
+    /// resource tree), so a caller who can see few rows of a large table costs about a page. The rows
+    /// of the page are then loaded with the query's includes and tracking and checked once more.
     /// </para>
     /// <para>
     /// The caller's subjects and the permission are resolved each time the page runs, so grant,
@@ -308,7 +308,7 @@ public static class PageQueryableExtensions
                     "ToPageAsync {Entity} by {Order} (page order {Declared}): {Rounds} round(s); read 1 rows per round [{Read1}]; read 2 entries per node per round [{Read2}]; page from {Source}; {Dropped} row(s) dropped by the final check{DroppedKeys}; {ElapsedMs} ms.",
                     ordering.EntityType.ClrType.Name,
                     orderText,
-                    declared == null ? "not declared" : usable ? "declared" : "declared, table missing",
+                    declared == null ? "no index" : usable ? "declared" : "declared, table missing",
                     selection.Rounds,
                     string.Join(", ", selection.Read1RowsPerRound),
                     string.Join("; ", selection.Read2EntriesPerRound.Select(round => string.Join(", ", round.Select(node => $"{node.Key}: {node.Value}")))),
@@ -320,25 +320,26 @@ public static class PageQueryableExtensions
 
             if (declared == null && selection.Rounds > 1)
             {
-                var warned = UndeclaredWarnings.GetValue(context.Model, static _ => new ConcurrentDictionary<string, bool>(StringComparer.Ordinal));
+                var warned = NoIndexWarnings.GetValue(context.Model, static _ => new ConcurrentDictionary<string, bool>(StringComparer.Ordinal));
                 if (warned.TryAdd($"{ordering.EntityType.Name}|{orderText}", true))
                 {
                     var entityName = ordering.EntityType.ClrType.Name;
                     var sortColumns = _columns.Take(_columns.Count - 1).Select(column => $"e.{column.Name}").ToList();
-                    var declaration = sortColumns.Count switch
+                    var index = sortColumns.Count switch
                     {
                         0 => $"e => e.{_key.Name}",
                         1 => $"e => {sortColumns[0]}",
                         _ => $"e => new {{ {string.Join(", ", sortColumns)} }}",
                     };
                     logger.LogWarning(
-                        "ToPageAsync scanned {Rows} rows of {Entity} ordered by {Order} to fill a page of {PageSize}. No page order is declared for it, so pages for callers who can see few rows read the table. Declare modelBuilder.Entity<{Entity}>().HasPageOrder({Declaration}) and add a migration.",
+                        "ToPageAsync scanned {Rows} rows of {Entity} ordered by {Order} to fill a page of {PageSize}. No index of {Table} covers that order, so every caller's page reads the table in it. Add modelBuilder.Entity<{Entity}>().HasIndex({Index}) and a migration; SqlOS keeps a copy of every index under each node of the resource tree.",
                         selection.Read1RowsPerRound.Sum(),
                         entityName,
                         orderText,
                         pageSize,
+                        ordering.EntityType.GetTableName(),
                         entityName,
-                        declaration);
+                        index);
                 }
             }
         }

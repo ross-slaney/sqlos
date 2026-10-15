@@ -1,6 +1,6 @@
 ---
 title: "Paginating authorized lists"
-description: "Page authorized EF Core queries with ToPageAsync and a declared page order."
+description: "Page authorized EF Core queries with ToPageAsync. Index the columns you sort by; SqlOS keeps every index under every node."
 section: "authorization"
 group: "checks"
 order: 6
@@ -12,12 +12,14 @@ order: 6
   href="/docs/fga/list-filter"
   actionLabel="Authorized pages"
 >
-  Declare the orders a list is paged by, then page your query with ToPageAsync. A page costs about a page of work for any caller: one who sees everything, one who sees three rows of a million, one with ten thousand grants.
+  Index the columns a list sorts by, as for any database, then page your query with ToPageAsync. A page costs about a page of work for any caller: one who sees everything, one who sees three rows of a million, one with ten thousand grants.
 </Banner>
 
 `ToPageAsync` is how SqlOS reads an authorized list, and the only way. One resource is a point check, [`CheckAccessAsync`](/docs/fga/checking-a-permission). There is no authorized count, `Any`, join, or unpaged list: each of those costs every row the caller can see. Page instead.
 
-## Declare the order
+## Index the order
+
+The rule is the one every database already has: **index the columns you sort by.** SqlOS keeps a copy of every index of a protected table (an entity that implements `IHasResourceId`) under every node of the resource tree, and one of its primary key, so `OrderBy(p => p.Id)` pages too. You declare nothing to SqlOS.
 
 ```csharp
 protected override void OnApplicationModelCreating(ModelBuilder modelBuilder)
@@ -26,18 +28,17 @@ protected override void OnApplicationModelCreating(ModelBuilder modelBuilder)
     {
         entity.HasKey(p => p.Id);
         entity.HasIndex(p => p.ResourceId).IsUnique();
-        entity.HasIndex(p => new { p.Price, p.Id });             // your index for the order
-        entity.HasPageOrder(p => p.Price);                       // (Price, Id)
-        entity.HasPageOrder(p => new { p.Status, p.CreatedAt }); // (Status, CreatedAt, Id)
+        entity.HasIndex(p => new { p.Price, p.Id });             // (Price, Id)
+        entity.HasIndex(p => new { p.Status, p.CreatedAt });     // (Status, CreatedAt, Id)
     });
 }
 ```
 
-- The primary key is appended when it is not already last, so `(Price)` means `(Price, Id)`. Declaring the same order twice is a no-op.
-- One declaration serves ascending and descending pages. Every column of an order runs in one direction.
-- Order columns are non-nullable mapped properties; strings need `HasMaxLength` (or an explicit column type). The entity needs a single-column primary key, a mapped `ResourceId`, and a table of its own: no owned types, views, or TPT/TPC inheritance (TPH is fine; declare the order on the root type). These rules are checked when the model is built, with the fix in the message.
-- Each declaration adds a table to your EF model, `SqlOSFgaPage_{Table}_{Columns}` in SqlOS's schema, so your next migration (or a model-driven tool such as EFCore.SchemaSync) creates it. Nothing is added to your own tables.
-- Index the order on your own table too (`HasIndex(p => new { p.Price, p.Id })`): callers who see most of the table page from it.
+- The primary key is appended when it is not already last: an index on `(Price)` and one on `(Price, Id)` are the same order, `(Price, Id)`. Unique, filtered, descending and included columns make no difference, and one index serves ascending and descending pages. Every column of an order runs in one direction.
+- A sort over several columns needs an index over exactly those columns: `OrderBy(p => p.Name).ThenBy(p => p.City)` needs `(Name, City)` or `(Name, City, Id)`. An index on `Name` alone does not serve it.
+- Two kinds of index are lookups, not sorts, and get no copy: an index that contains `ResourceId`, and an index whose columns are exactly a foreign key's (the one EF Core adds for each foreign key by convention).
+- Order columns are non-nullable mapped properties; strings need `HasMaxLength` (or an explicit column type). The entity needs a single-column primary key, a mapped `ResourceId`, and a table of its own: no owned types, views, or TPT/TPC inheritance (TPH is fine; the orders live on the root type). An index or an entity that breaks a rule gets no copy; the model still builds, and startup logs one warning naming it and the fix.
+- Each copy is a table in your EF model, `SqlOSFgaPage_{Table}_{Columns}` in SqlOS's schema (`SqlOSFgaPage_Products_Price`, `SqlOSFgaPage_Products_Id`), so your next migration (or a model-driven tool such as EFCore.SchemaSync) creates it. Nothing is added to your own tables.
 
 ## Page
 
@@ -61,7 +62,7 @@ Project after the page (`page.ToResponse(...)` or `page.Data.Select(...)`), not 
 ### How a page runs
 
 1. **Your query, checked.** The next rows of your query, in its order, each checked with SqlOS's authorization function. For a caller who sees most rows, this fills the page.
-2. **The caller's nodes, in order.** When few of those rows are visible and the order is declared, SqlOS reads the order under each resource the caller is granted (the minimal set: a grant under another grant adds nothing) and merges them, applying your filters before the per-node limit. For a caller who sees little, this fills the page.
+2. **The caller's nodes, in order.** When few of those rows are visible and an index covers the order, SqlOS reads its copy of the index under each resource the caller is granted (the minimal set: a grant under another grant adds nothing) and merges them, applying your filters before the per-node limit. For a caller who sees little, this fills the page.
 3. **The page.** The page's rows are loaded through your query, so `Include`, tracking and your filters apply, and checked once more. The final check can drop a stale row, never add one.
 
 Before step 1, SqlOS resolves the caller's subjects and the permission. Each step is an EF Core query, logged like any other. One Debug line per page under the `SqlOS.Fga` category records the rounds, the rows each step read, which step produced the page, and the rows the final check dropped.
@@ -96,31 +97,31 @@ Before `ToPageAsync`: `Where`, `Include`/`ThenInclude`, `AsNoTracking`/`AsTracki
 
 For an unknown or inactive subject, or an unknown permission, `ToPageAsync` logs a warning and returns an empty page with no `NextCursor`, without running the page's queries.
 
-## Orders that are not declared
+## Orders with no index
 
-A query ordered by an order that is not declared still returns the right pages. It runs step 1 only, reading your query in growing batches until a page is visible: a caller who sees little of a large table reads most of it. The first time a page needs more than one batch, SqlOS logs a warning naming the declaration to add:
+A query ordered by columns no index covers still returns the right pages. It runs step 1 only, reading your query in that order and checking each row until a page is visible, for every caller: one who sees little of a large table reads most of it, as in any database that sorts without an index. The first time a page needs more than one batch, SqlOS logs a warning naming the index to add:
 
 ```text
-ToPageAsync scanned 1240 rows of Product ordered by CreatedAt, Id asc to fill a page of 20. No page order is declared for it, so pages for callers who can see few rows read the table. Declare modelBuilder.Entity<Product>().HasPageOrder(e => e.CreatedAt) and add a migration.
+ToPageAsync scanned 1240 rows of Product ordered by CreatedAt, Id asc to fill a page of 20. No index of Products covers that order, so every caller's page reads the table in it. Add modelBuilder.Entity<Product>().HasIndex(e => e.CreatedAt) and a migration; SqlOS keeps a copy of every index under each node of the resource tree.
 ```
 
 ## Keeping page orders current
 
-`SqlOSDbContext<TContext>` keeps every page order current in the same transaction as each save: rows inserted, deleted, or updated in an order column or `ResourceId`, and resources added, moved, deactivated, reactivated or deleted, whether through your entities, `ISqlOSResourceEntity`, the resource helpers in `SqlOS.Extensions`, the dashboard, or the seed service. It reads what the save wrote, so values set by `SaveChanges` interceptors and `SavingChanges` handlers, cascade deletes, and order columns the database computes are included. A save's entry statements go to the database as one command.
+`SqlOSDbContext<TContext>` keeps every page order current in the same transaction as each save: rows inserted, deleted, or updated in an order column or `ResourceId`, and resources added, moved, deactivated, reactivated or deleted, whether through your entities, `ISqlOSResourceEntity`, the resource helpers in `SqlOS.Extensions`, the dashboard, or the seed service. It reads what the save wrote, so values set by `SaveChanges` interceptors and `SavingChanges` handlers, cascade deletes, and order columns the database computes are included. A save's entry statements go to the database as one command; on PostgreSQL they run with JIT off and put the transaction's setting back.
 
 It uses your transaction when there is one, inside a savepoint so that a failed save leaves your transaction as it was before the save; an ambient or enlisted `System.Transactions` transaction; and otherwise its own, inside the context's execution strategy.
 
 - **Index `ResourceId`** on paged tables (`HasIndex(p => p.ResourceId)`): a save that adds, moves or deletes a resource finds the rows under it by `ResourceId`.
-- **Writes that bypass EF Core** (bulk loads, raw SQL, `ExecuteUpdate`/`ExecuteDelete`, triggers) do not update entries, and neither does an interceptor that changes paged rows during a save that changes no paged row or resource. Until you call `ISqlOSFgaAuthService.RebuildPageOrdersAsync()`, rows they insert are missing from pages and rows they change page at their old position. A row the caller may not see is never returned: every page row is checked once more. The rebuild rewrites every declared order, one transaction per order, without a command timeout; the cost is the table's rows times the tree depth. Run it while the application is not writing to those tables: a save during a rebuild waits for it, or makes it fail with a deadlock or duplicate key, and running it again fixes that.
-- **A new declaration on a table that already has rows** is filled at startup: once the migration has created the empty entry table, the first start writes its entries and logs how many. The fill runs before the application serves requests and takes about as long as rebuilding that order. Until the migration runs, the entry table is missing; SqlOS logs a warning at startup and pages for that order run step 1 only. In a rolling deployment, instances still on the previous version write rows without entries: call `RebuildPageOrdersAsync()` once every instance runs the new version.
+- **Writes that bypass EF Core** (bulk loads, raw SQL, `ExecuteUpdate`/`ExecuteDelete`, triggers) do not update entries, and neither does an interceptor that changes paged rows during a save that changes no paged row or resource. Until you call `ISqlOSFgaAuthService.RebuildPageOrdersAsync()`, rows they insert are missing from pages and rows they change page at their old position. A row the caller may not see is never returned: every page row is checked once more. The rebuild rewrites every page order, one transaction per order, without a command timeout; the cost is the table's rows times the tree depth. Run it while the application is not writing to those tables: a save during a rebuild waits for it, or makes it fail with a deadlock or duplicate key, and running it again fixes that.
+- **A new index on a table that already has rows** is filled at startup: once the migration has created the empty entry table, the first start writes its entries and logs how many. The fill runs before the application serves requests and takes about as long as rebuilding that order. Until the migration runs, the entry table is missing; SqlOS logs a warning at startup and pages for that order run step 1 only. In a rolling deployment, instances still on the previous version write rows without entries: call `RebuildPageOrdersAsync()` once every instance runs the new version.
 - **Concurrent hierarchy changes.** If one save moves, deactivates or reactivates a resource while another adds or changes rows under it, those rows can, rarely, be missing from pages until a rebuild (PostgreSQL, and SQL Server with `READ_COMMITTED_SNAPSHOT`), or one of the saves fails with a deadlock or duplicate key; retry it.
 - **Schema tools.** Entry tables are ordinary tables in your EF model. Because they are derived, a change that a tool blocks for possible data loss on an entry table (a source column narrowed) is resolved by emptying the entry table and letting the next start refill it.
 - **Hand-rolled contexts** (a `DbContext` that implements `ISqlOSFgaDbContext` itself) get no maintenance and no pages: `ToPageAsync` refuses their queries. Derive from `SqlOSDbContext<TContext>` to page.
 
 ## What it costs
 
-- **Storage:** one entry per row per level of its resource path, per declared order. A product four levels under the root has five entries per order.
-- **Writes:** inserting a row, or changing an order column or its `ResourceId`, writes that many entries in the save's transaction. Adding, moving, deactivating or reactivating a resource rewrites the entries of the rows under it; for a new resource that is one `ResourceId` lookup per declared order.
+- **Storage:** rows × levels × (indexes + 1), where the levels are the row's own resource and its active ancestors, and the +1 is the key. A product four levels under the root with two indexes has five entries in each of three tables. One million products under five levels measured 6,000,000 entries and about 706 MB per table on PostgreSQL.
+- **Writes:** inserting a row, or changing an order column or its `ResourceId`, writes one entry per order per level in the save's transaction. Adding, moving, deactivating or reactivating a resource rewrites the entries of the rows under it, for every order; for a new resource that is one `ResourceId` lookup per order. Every index costs on every write, so index what you sort by, not every column.
 - **Reads:** about a page for every caller and every page position. The exception is an application filter that few rows pass combined with a caller whose rows barely overlap it: step 2 reads the caller's entries until a page passes your filter.
 
 Grants on the nodes of your tree keep the caller's node set small; a caller with ten thousand single-row grants costs ten thousand seeks per page in step 2. See [Designing your resource tree](/docs/fga/designing-your-resource-tree).

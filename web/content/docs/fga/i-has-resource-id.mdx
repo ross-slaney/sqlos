@@ -45,17 +45,17 @@ var page = await db.Workspaces
 
 Use plain `IHasResourceId` directly for lower-level/manual resources where your application owns the FGA resource lifecycle. Use `ISqlOSResourceEntity` for the normal SDK path.
 
-## Declare the orders a list is paged by
+## Index the orders a list is paged by
 
-Declare each order a list pages by next to the entity's mapping, and SqlOS keeps a copy of that order under every node of the resource tree, so a page costs about a page for any caller:
+Index the columns a list sorts by, as for any database. SqlOS keeps a copy of every index of an `IHasResourceId` entity, and of its primary key, under every node of the resource tree, so a page costs about a page for any caller:
 
 ```csharp
 modelBuilder.Entity<Workspace>(entity =>
 {
     entity.HasKey(x => x.Id);
     entity.Property(x => x.Name).HasMaxLength(200);
-    entity.HasPageOrder(x => x.Name);   // (Name, Id)
+    entity.HasIndex(x => new { x.Name, x.Id });   // (Name, Id)
 });
 ```
 
-`ResourceId` stays the only connection between your table and SqlOS: the declared order lives in a table of SqlOS's own (`SqlOSFgaPage_Workspaces_Name`) that your next migration creates. Order columns are non-nullable, strings need a maximum length, and the entity needs a single-column primary key. See [Paginating authorized lists](/docs/guides/paginating-authorized-lists).
+`ResourceId` stays the only connection between your table and SqlOS: the copies live in tables of SqlOS's own (`SqlOSFgaPage_Workspaces_Name`, `SqlOSFgaPage_Workspaces_Id`) that your next migration creates. Indexes on `ResourceId` or on a foreign key are lookups and get no copy. Order columns are non-nullable, strings need a maximum length, and the entity needs a single-column primary key; an index that breaks a rule gets no copy and one startup warning. See [Paginating authorized lists](/docs/guides/paginating-authorized-lists).
