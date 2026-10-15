@@ -6,7 +6,7 @@ author: "Ross Slaney"
 tags: ["FGA", "EF Core", "Performance", "SqlOS"]
 ---
 
-> **Historical release note.** The `HasPageOrder` declaration this post shows was removed in the release after 10.0.0. Every index of a protected table is now a page order: index the columns you sort by, as for any database, and SqlOS keeps a copy of each index under every node of the resource tree. The mechanism, the numbers and the rest of this post stand. See [Paginating authorized lists](/docs/guides/paginating-authorized-lists).
+> **Historical release note.** The `HasPageOrder` declaration this post shows was removed in [SqlOS 11.0.0](/blog/sqlos-11-0-0-index-what-you-sort-by). Every index of a protected table is now a page order: index the columns you sort by, as for any database, and SqlOS keeps a copy of each index under every node of the resource tree. The mechanism, the numbers and the rest of this post stand. See [Paginating authorized lists](/docs/guides/paginating-authorized-lists).
 
 SqlOS 10.0.0 makes an authorized list cost about a page, for every caller. A caller who sees everything, a store manager who sees 100 products of a million, and a caller whose rows sit at the far end of the order all get their page from a few index seeks. Your application tables still have nothing of SqlOS's on them but `ResourceId`.
 

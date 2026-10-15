@@ -1,0 +1,65 @@
+---
+title: "SqlOS 11.0.0: Index what you sort by"
+description: "Every index on a protected table is now a page order. Authorized lists page any indexed sort for about a page of work per caller, and HasPageOrder is removed."
+date: "2026-10-15"
+author: "Ross Slaney"
+tags: ["FGA", "EF Core", "Performance", "SqlOS"]
+---
+
+SqlOS 10.0.0 made an authorized page cost about a page for every caller, as long as you declared the order with `HasPageOrder`. SqlOS 11.0.0 drops the declaration. The rule is the one every database already has: **index the columns you sort by.**
+
+It is a major release because `HasPageOrder` is removed. `ToPageAsync`, the cursor and the response do not change.
+
+## Indexes are the page orders
+
+```csharp
+modelBuilder.Entity<Product>(entity =>
+{
+    entity.HasIndex(p => new { p.Price, p.Id });
+    entity.HasIndex(p => new { p.Status, p.CreatedAt });
+});
+
+var page = await db.Products
+    .Where(p => p.Name.Contains(term))
+    .OrderBy(p => p.Price)
+    .ToPageAsync(subjectId, "product.view", pageSize: 20, cursor, ct);
+```
+
+For every entity that implements `IHasResourceId`, SqlOS keeps a copy of each of its indexes, and one of its primary key, under every node of the resource tree, in tables of its own. A sort an index covers costs about a page for any caller, including a caller whose rows sit at the far end of the order. A sort with no index still works: it reads the table in that order and checks each row, as in any database, and SqlOS logs one warning naming the `HasIndex` to add.
+
+A few details:
+
+- The primary key is always a page order, so `OrderBy(e => e.Id)` pages.
+- A multi-column sort needs an index over exactly those columns. `OrderBy(Name).ThenBy(City)` needs `(Name, City)` or `(Name, City, Id)`; an index on `Name` alone does not serve it.
+- Indexes that contain `ResourceId`, and indexes whose columns are exactly a foreign key's, are lookups, not sorts. They get no copy.
+- Nothing throws because of an automatic order. An index SqlOS cannot copy (a nullable column, a string with no maximum length, an unsupported type) is skipped and logged once at startup, with the fix.
+
+## What it costs
+
+The page statements are the same as 10.0.0's, so reads cost what they did. On PostgreSQL 16 with 1,000,000 products, page size 20:
+
+| Caller | 11.0.0 | 10.0.0 | rows read (both) |
+| --- | ---: | ---: | ---: |
+| Admin (sees everything) | 14 ms | 14 ms | 40 |
+| Region manager (0.2%) | 18 ms | 19 ms | 80 |
+| Store manager (0.01%) | 19 ms | 23 ms | 80 |
+| Far end (one chain, last in price) | 16 ms | 16 ms | 80 |
+
+Every index is a table now, so index what you sort by, not every column. Storage is rows × levels × (indexes + 1); one order over a million products five levels deep is about 706 MB on PostgreSQL. Writes keep every copy current in the same transaction as the save.
+
+This release also carries two write-path fixes. A save that adds many resources no longer walks the tree from each of them: a thousand-product insert's maintenance statements went from 2.4–3.1 s each to 66–111 ms. On PostgreSQL, JIT is turned off for those statements only; it was compiling the subtree insert on every save that adds a resource, taking one product insert from 1.6 ms to 165 ms.
+
+## Upgrade
+
+```bash
+dotnet add package SqlOS --version 11.0.0
+```
+
+1. Remove your `HasPageOrder` calls.
+2. Make sure every sort a list pages by has an index. `entity.HasPageOrder(p => p.Price)` becomes `entity.HasIndex(p => new { p.Price, p.Id })` (or `(Price)`; both give the order `(Price, Id)`).
+3. Add one migration. It creates a table for each protected entity's key and one for each index that had no declaration. Orders you declared in 10.0.0 whose index exists keep their tables and names.
+4. Start the application. The first start fills every new table from the rows already there, about the time of a rebuild per table, and logs one warning for any index it could not copy.
+
+In a rolling deployment, instances still on 10.0.0 write rows without entries in the new tables, so end the rollout with `ISqlOSFgaAuthService.RebuildPageOrdersAsync()`.
+
+Read [Paginating authorized lists](/docs/guides/paginating-authorized-lists#index-the-order), [Authorized pages](/docs/fga/list-filter), and the [FGA API reference](/docs/reference/fga-api#topageasync).
